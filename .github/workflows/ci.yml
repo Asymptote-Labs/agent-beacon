@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  go-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Test CLI
+        working-directory: cli/beacon
+        run: go test ./...
+      - name: Test CLI race-sensitive packages
+        working-directory: cli/beacon
+        run: go test -race ./internal/endpoint/...
+      - name: Test hooks
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Public CLI command tree smoke test
+        working-directory: cli/beacon
+        run: |
+          go build -o beacon .
+          ./beacon --help > /tmp/beacon-help.txt
+          ./beacon endpoint --help > /tmp/beacon-endpoint-help.txt
+          ./beacon endpoint hooks --help > /tmp/beacon-hooks-help.txt
+          ./beacon endpoint integrations claude-cowork --help > /tmp/beacon-cowork-help.txt
+          ./beacon endpoint wazuh --help > /tmp/beacon-wazuh-help.txt
+          for forbidden in login init update claude cursor dep-scan config whoami; do
+            if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
+              echo "forbidden command exposed: $forbidden"
+              exit 1
+            fi
+          done
+
+  package-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate packaging scripts
+        run: |
+          test -x packaging/macos/install-endpoint.sh
+          test -x packaging/macos/uninstall-endpoint.sh
+          test -f collector-builder/builder.yaml
+          sh packaging/macos/test-endpoint-scripts.sh
+

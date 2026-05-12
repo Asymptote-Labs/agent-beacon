@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# Editor and local environment
+.idea/
+.vscode/
+*.swp
+*.swo
+.env
+.env.*
+
+# Go build outputs
+*.test
+coverage.out
+coverage.html
+.gocache/
+.tmp/
+
+# Beacon CLI binaries and release output
+cli/beacon/beacon
+cli/beacon/beacon-*
+cli/beacon/dist/
+cli/beacon/internal/embedded/hooks.bin
+
+# Hook helper binaries
+cli/beacon-hooks/beacon-hooks
+cli/beacon-hooks/beacon-hooks-*
+cli/beacon-hooks/*.exe
+
+# Local endpoint logs/config generated during development
+.beacon/
+*.jsonl
+*.log
+
+# Collector builder outputs
+collector-builder/dist/
+

@@ -1,0 +1,124 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: beacon
+
+before:
+  hooks:
+    - go mod tidy
+    - bash -c 'cd ../beacon-hooks && go mod tidy'
+
+builds:
+  - id: beacon
+    main: .
+    binary: beacon
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -a
+    ldflags:
+      - -s -w
+      - -X github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version.Version={{.Version}}
+      - -X github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version.GitCommit={{.ShortCommit}}
+      - -X github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version.BuildDate={{.Date}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    hooks:
+      pre:
+        # Build the hooks binary for this target platform and embed it.
+        # IMPORTANT: This writes to a shared hooks.bin file. The -a flag above
+        # forces a full rebuild for each target so Go re-reads the freshly-built
+        # hooks.bin instead of serving a stale copy from the build cache.
+        - cmd: bash -c 'cd ../beacon-hooks && GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
+          output: true
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+brews:
+  - name: beacon
+    repository:
+      owner: asymptote-labs
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://asymptotelabs.ai
+    description: "Open-source endpoint agent for local AI runtime telemetry"
+    license: "MIT"
+    commit_author:
+      name: asymptote-bot
+      email: bot@asymptotelabs.ai
+    commit_msg_template: "Homebrew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    install: |
+      bin.install "beacon"
+    caveats: |
+      To configure local endpoint telemetry, run:
+        beacon endpoint install --user
+    test: |
+      system "#{bin}/beacon", "version"
+
+release:
+  github:
+    owner: asymptote-labs
+    name: beacon
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  footer: |
+    ## Installation
+
+    ### Homebrew (macOS/Linux)
+    ```bash
+    brew tap asymptote-labs/tap
+    brew install beacon
+    ```
+
+    ### Manual Download
+    Download the appropriate archive for your platform from the assets below, extract it, and add the binary to your PATH.
+
+    ## Quick Start
+    ```bash
+    beacon endpoint install --user
+    beacon endpoint status
+    beacon endpoint wazuh print-config
+    ```

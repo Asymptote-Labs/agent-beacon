@@ -1,0 +1,19 @@
+dist:
+  name: beacon-otelcol
+  description: Beacon Endpoint Agent OpenTelemetry Collector
+  output_path: ./dist/beacon-otelcol
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.121.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.121.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.121.0
+
+exporters:
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
+    path: ./exporter/beaconjsonexporter
+
+extensions:
+  - gomod: go.opentelemetry.io/collector/extension/healthcheckextension v0.121.0
+

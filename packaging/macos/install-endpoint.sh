@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+BEACON_BIN="${BEACON_BIN:-beacon}"
+BEACON_ENDPOINT_HARNESSES="${BEACON_ENDPOINT_HARNESSES:-claude,codex}"
+BEACON_OTLP_GRPC_PORT="${BEACON_OTLP_GRPC_PORT:-4317}"
+BEACON_OTLP_HTTP_PORT="${BEACON_OTLP_HTTP_PORT:-4318}"
+
+exec "$BEACON_BIN" endpoint install \
+  --harness "$BEACON_ENDPOINT_HARNESSES" \
+  --otlp-grpc-port "$BEACON_OTLP_GRPC_PORT" \
+  --otlp-http-port "$BEACON_OTLP_HTTP_PORT"
+

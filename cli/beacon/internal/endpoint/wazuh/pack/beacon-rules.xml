@@ -1,0 +1,33 @@
+<group name="beacon,agent_runtime,">
+  <rule id="100500" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="vendor">beacon</field>
+    <field name="product">endpoint-agent</field>
+    <field name="event.kind">agent_runtime</field>
+    <description>Beacon endpoint agent runtime event</description>
+  </rule>
+
+  <rule id="100510" level="5">
+    <if_sid>100500</if_sid>
+    <field name="event.action">telemetry.disabled|telemetry.misconfigured</field>
+    <description>Beacon endpoint telemetry disabled or misconfigured</description>
+  </rule>
+
+  <rule id="100520" level="7">
+    <if_sid>100500</if_sid>
+    <field name="event.action">runtime.mode_disallowed</field>
+    <description>AI agent runtime launched in a disallowed mode</description>
+  </rule>
+
+  <rule id="100530" level="10">
+    <if_sid>100500</if_sid>
+    <field name="policy.decision">block</field>
+    <description>AI agent runtime policy block</description>
+  </rule>
+
+  <rule id="100540" level="12">
+    <if_sid>100500</if_sid>
+    <field name="event.action">endpoint.tamper_detected|endpoint.health_failed</field>
+    <description>Beacon endpoint tamper or health failure detected</description>
+  </rule>
+</group>

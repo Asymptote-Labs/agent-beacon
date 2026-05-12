@@ -1,0 +1,112 @@
+package cmd
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// readStdinJSON decodes JSON from stdin into a map.
+func readStdinJSON() (map[string]interface{}, error) {
+	var input map[string]interface{}
+	err := json.NewDecoder(os.Stdin).Decode(&input)
+	return input, err
+}
+
+// outputJSON writes a JSON object to stdout.
+func outputJSON(data map[string]interface{}) {
+	json.NewEncoder(os.Stdout).Encode(data)
+}
+
+// outputJSONAndExit writes a JSON object to stdout and exits.
+func outputJSONAndExit(data map[string]interface{}) {
+	json.NewEncoder(os.Stdout).Encode(data)
+	os.Exit(0)
+}
+
+// emptyResponse is a reusable empty JSON response.
+var emptyResponse = map[string]interface{}{}
+
+// getFirstStr returns the first non-empty string value from input for the given keys.
+func getFirstStr(input map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if v, ok := input[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// resolveSessionID extracts the session ID from input based on the platform.
+// For Copilot, it prefers the transcript filename UUID over the VS Code sessionId.
+// For Claude, it reads session_id directly.
+func resolveSessionID(input map[string]interface{}, platform string) string {
+	switch platform {
+	case "copilot":
+		transcriptPath := getFirstStr(input, "transcriptPath", "transcript_path")
+		if id := sessionIDFromTranscriptPath(transcriptPath); id != "" {
+			return id
+		}
+		return getFirstStr(input, "sessionId", "session_id")
+	case "cursor":
+		return getFirstStr(input, "conversation_id")
+	default:
+		id, _ := input["session_id"].(string)
+		return id
+	}
+}
+
+// resolveSessionIDWithTranscript extracts both session ID and transcript path.
+// Used by commands that need the transcript path for upload.
+func resolveSessionIDWithTranscript(input map[string]interface{}, platform string) (sessionID, transcriptPath string) {
+	switch platform {
+	case "copilot":
+		transcriptPath = getFirstStr(input, "transcriptPath", "transcript_path")
+		sessionID = sessionIDFromTranscriptPath(transcriptPath)
+		if sessionID == "" {
+			sessionID = getFirstStr(input, "sessionId", "session_id")
+		}
+		return
+	case "cursor":
+		sessionID = getFirstStr(input, "conversation_id")
+		transcriptPath = getFirstStr(input, "transcript_path")
+		return
+	default:
+		sessionID, _ = input["session_id"].(string)
+		transcriptPath, _ = input["transcript_path"].(string)
+		return
+	}
+}
+
+// sessionIDFromTranscriptPath extracts the UUID from a transcript filename.
+// Example: ".../transcripts/ff2d7803-5799-4f18-83f0-3633b2c11809.jsonl" -> "ff2d7803-..."
+func sessionIDFromTranscriptPath(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+	base := filepath.Base(transcriptPath)
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// resolveCwd extracts the working directory from hook input based on platform.
+// For Cursor: tries input["cwd"], then workspace_roots[0], then CURSOR_PROJECT_DIR env var.
+// For other platforms: reads input["cwd"] directly.
+func resolveCwd(input map[string]interface{}, platform string) string {
+	if platform == "cursor" {
+		if cwd := getFirstStr(input, "cwd"); cwd != "" {
+			return cwd
+		}
+		if roots, ok := input["workspace_roots"].([]interface{}); ok && len(roots) > 0 {
+			if cwd, ok := roots[0].(string); ok && cwd != "" {
+				return cwd
+			}
+		}
+		if cwd := os.Getenv("CURSOR_PROJECT_DIR"); cwd != "" {
+			return cwd
+		}
+		return ""
+	}
+	cwd, _ := input["cwd"].(string)
+	return cwd
+}

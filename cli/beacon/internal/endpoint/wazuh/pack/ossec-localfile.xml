@@ -1,0 +1,4 @@
+<localfile>
+  <location>{{LOG_PATH}}</location>
+  <log_format>json</log_format>
+</localfile>
