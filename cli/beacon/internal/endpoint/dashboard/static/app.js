@@ -349,6 +349,10 @@ function applyPreset(name) {
 }
 
 function applyInsight(kind, value) {
+  for (const field of formFields) {
+    const input = $(`[name="${field}"]`);
+    if (input) input.value = field === "limit" ? "500" : "";
+  }
   const key = kind === "Top Actions" ? "action" : kind === "Top Repositories" ? "repository" : "mcp";
   const input = $(`[name="${key}"]`);
   if (input) input.value = value;
