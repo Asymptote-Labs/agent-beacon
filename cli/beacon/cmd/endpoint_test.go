@@ -30,3 +30,21 @@ func TestEndpointDashboardCommandRegistered(t *testing.T) {
 		t.Fatal("dashboard command missing --open flag")
 	}
 }
+
+func TestEndpointHarnessDefaultsDoNotClobberInstall(t *testing.T) {
+	installFlag := endpointInstallCmd.Flags().Lookup("harness")
+	if installFlag == nil {
+		t.Fatal("install command missing --harness flag")
+	}
+	if got, want := installFlag.DefValue, "claude,codex"; got != want {
+		t.Fatalf("install --harness default = %q, want %q", got, want)
+	}
+
+	hooksFlag := endpointHooksInstallCmd.Flags().Lookup("harness")
+	if hooksFlag == nil {
+		t.Fatal("hooks install command missing --harness flag")
+	}
+	if got, want := hooksFlag.DefValue, "cursor"; got != want {
+		t.Fatalf("hooks install --harness default = %q, want %q", got, want)
+	}
+}

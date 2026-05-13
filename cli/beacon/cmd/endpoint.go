@@ -24,6 +24,7 @@ var endpointOpts struct {
 	userMode         bool
 	logPath          string
 	harnesses        string
+	hookHarnesses    string
 	outputDir        string
 	jsonOutput       bool
 	grpcPort         int
@@ -273,7 +274,7 @@ func init() {
 	for _, c := range []*cobra.Command{endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointHooksStatusCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
-		c.Flags().StringVar(&endpointOpts.harnesses, "harness", "cursor", "Comma-separated hook harnesses")
+		c.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "cursor", "Comma-separated hook harnesses")
 		c.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
 	}
 	endpointHooksStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
@@ -283,7 +284,7 @@ func init() {
 
 func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
-	for _, name := range splitCSV(endpointOpts.harnesses) {
+	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
 		switch strings.TrimSpace(name) {
 		case "cursor":
 			status, err := endpointhooks.InstallCursor(endpointhooks.CursorOptions{
@@ -305,7 +306,7 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 
 func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
-	for _, name := range splitCSV(endpointOpts.harnesses) {
+	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
 		switch strings.TrimSpace(name) {
 		case "cursor":
 			status, err := endpointhooks.UninstallCursor(endpointhooks.CursorOptions{

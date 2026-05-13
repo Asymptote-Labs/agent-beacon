@@ -14,6 +14,18 @@ beacon endpoint status
 beacon endpoint wazuh print-config
 ```
 
+## Smoke Test
+
+Run the non-root endpoint smoke test on a macOS host or VM:
+
+```bash
+sh packaging/macos/smoke-endpoint.sh
+```
+
+The smoke test builds a temporary Beacon binary, uses a temporary `HOME`, runs a
+user-mode install with `--no-start`, validates status/Wazuh output, installs
+Cursor hooks, and uninstalls while preserving the runtime log for assertions.
+
 ## MDM Install Script
 
 Use `install-endpoint.sh` from Jamf, Kandji, or a generic macOS MDM command

@@ -43,10 +43,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
       - name: Validate packaging scripts
         run: |
           test -x packaging/macos/install-endpoint.sh
           test -x packaging/macos/uninstall-endpoint.sh
+          test -x packaging/macos/smoke-endpoint.sh
           test -f collector-builder/builder.yaml
           sh packaging/macos/test-endpoint-scripts.sh
+      - name: Endpoint install smoke test
+        run: sh packaging/macos/smoke-endpoint.sh
 
