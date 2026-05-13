@@ -119,14 +119,12 @@ Uninstall:
 
 ## Release Readiness
 
-Production pilots should use versioned artifacts rather than asking users to
-build Beacon from source. A release should include the `beacon` CLI with a
-platform-matched embedded hook adapter, the `beacon-otelcol` collector
-distribution, Wazuh content, SHA-256 checksums, and concise notes covering
-supported runtimes, content-retention defaults, log paths, and uninstall
-behavior.
+Release builds should include the `beacon` CLI with a platform-matched embedded
+hook adapter, the `beacon-otelcol` collector distribution, Wazuh content,
+SHA-256 checksums, and concise notes covering supported runtimes,
+content-retention defaults, log paths, and uninstall behavior.
 
-For macOS pilots, ship a signed and notarized package or Homebrew formula that
+For macOS, publish a signed and notarized package or Homebrew formula that
 installs the CLI, collector, Wazuh content pack, and deployment scripts. The
 package should apply explicit endpoint settings, for example:
 
@@ -134,8 +132,8 @@ package should apply explicit endpoint settings, for example:
 beacon endpoint install --harness claude,codex --content-retention metadata
 ```
 
-Before handing a build to a security team, verify the release from a clean
-checkout and clean macOS host or VM:
+Before publishing a release, verify the build from a clean checkout and clean
+macOS host or VM:
 
 - `beacon version` reports the expected version, commit, and build date.
 - `beacon endpoint install --user --no-start` succeeds without developer
@@ -143,7 +141,9 @@ checkout and clean macOS host or VM:
 - `beacon endpoint status --user` reports config, collector, service, harness,
   diagnostic, and runtime log paths.
 - `beacon endpoint wazuh validate --user` writes a valid Beacon JSONL event.
-- `beacon endpoint dashboard --user` starts on `127.0.0.1`.
+- `beacon endpoint dashboard --user` starts on `127.0.0.1`, serves a read-only
+  dashboard, and can search local telemetry without external network
+  dependencies.
 - `beacon endpoint uninstall --user` removes managed service and config files.
 - macOS package signature and notarization are valid when distributing a `.pkg`.
 

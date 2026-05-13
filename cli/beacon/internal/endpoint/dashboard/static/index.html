@@ -26,35 +26,94 @@
 
       <section class="cards" id="cards"></section>
 
+      <section class="insights" id="insights"></section>
+
       <section class="panel">
         <div class="section-head">
           <div>
-            <h2>Activity Timeline</h2>
-            <p class="muted">Prompt, tool, command, MCP, approval, and file events from the local JSONL log.</p>
+            <h2>Investigation Search</h2>
+            <p class="muted">Search actions, commands, files, MCP tools, approvals, sessions, repositories, and event messages.</p>
           </div>
+          <div id="result-meta" class="muted"></div>
         </div>
-        <form id="filters" class="filters">
-          <input name="harness" placeholder="Harness" />
-          <input name="action" placeholder="Action" />
-          <input name="repository" placeholder="Repository" />
-          <input name="session" placeholder="Session" />
-          <input name="file" placeholder="File path" />
-          <input name="command" placeholder="Command or tool" />
-          <select name="limit">
-            <option value="100">100 events</option>
-            <option value="500" selected>500 events</option>
-            <option value="1000">1000 events</option>
-          </select>
-          <button type="submit">Apply</button>
+        <form id="filters" class="search-form">
+          <div class="search-row">
+            <input class="search-input" name="q" placeholder="Search session, command, file path, MCP tool, approval reason, repository, or action" autocomplete="off" />
+            <button type="submit">Search</button>
+            <button type="button" id="clear-search">Clear</button>
+          </div>
+          <div class="quick-filters" aria-label="Quick filters">
+            <button type="button" data-preset="review">Needs Review</button>
+            <button type="button" data-preset="commands">Commands</button>
+            <button type="button" data-preset="files">File Changes</button>
+            <button type="button" data-preset="mcp">MCP</button>
+            <button type="button" data-preset="approvals">Approvals</button>
+            <button type="button" data-preset="failures">Failures</button>
+            <button type="button" data-preset="high">High Severity</button>
+          </div>
+          <details class="advanced-filters">
+            <summary>Advanced filters</summary>
+            <div class="filters">
+              <input name="harness" placeholder="Harness" />
+              <input name="action" placeholder="Action" />
+              <select name="severity">
+                <option value="">Any severity</option>
+                <option value="info">Info</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+              <select name="category">
+                <option value="">Any category</option>
+                <option value="prompt">Prompt</option>
+                <option value="tool">Tool</option>
+                <option value="command">Command</option>
+                <option value="file">File</option>
+                <option value="mcp">MCP</option>
+                <option value="approval">Approval</option>
+                <option value="session">Session</option>
+                <option value="inventory">Inventory</option>
+                <option value="validation">Validation</option>
+              </select>
+              <input name="repository" placeholder="Repository" />
+              <input name="session" placeholder="Session" />
+              <input name="file" placeholder="File path" />
+              <input name="command" placeholder="Command or tool" />
+              <input name="mcp" placeholder="MCP server or tool" />
+              <input name="approval" placeholder="Approval decision or reason" />
+              <input name="decision" placeholder="Approval/policy decision" />
+              <input name="policy" placeholder="Policy id, name, or reason" />
+              <select name="wazuh_level">
+                <option value="">Any Wazuh level</option>
+                <option value="5">Level 5 workflow</option>
+                <option value="7">Level 7 command/MCP</option>
+                <option value="9">Level 9 failure</option>
+                <option value="10">Level 10 block/denial</option>
+                <option value="12">Level 12 health/tamper</option>
+              </select>
+              <input name="since" placeholder="Since RFC3339, e.g. 2026-05-13T12:00:00Z" />
+              <select name="limit">
+                <option value="100">100 events</option>
+                <option value="500" selected>500 events</option>
+                <option value="1000">1000 events</option>
+                <option value="2000">2000 events</option>
+              </select>
+            </div>
+          </details>
+          <input type="hidden" name="review" />
         </form>
+        <div id="active-filters" class="chips"></div>
+        <div id="notice" class="notice" hidden></div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Time</th>
-                <th>Harness</th>
-                <th>Action</th>
+                <th>Signal</th>
+                <th>Artifact</th>
                 <th>Severity</th>
+                <th>Review</th>
                 <th>Session</th>
                 <th>Repository</th>
                 <th>Message</th>
@@ -76,6 +135,7 @@
         <h2>Event Detail</h2>
         <button id="close-drawer">Close</button>
       </div>
+      <div id="event-summary" class="event-summary"></div>
       <pre id="event-json"></pre>
     </aside>
 

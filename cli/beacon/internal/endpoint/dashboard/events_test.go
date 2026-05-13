@@ -36,7 +36,7 @@ func TestReadEventsSkipsMalformedLinesAndFilters(t *testing.T) {
 
 func TestBuildSummaryAggregatesSignals(t *testing.T) {
 	result := EventResult{
-		TotalMatched: 2,
+		TotalMatched: 4,
 		Events: []EventRecord{
 			{Event: schema.Event{
 				Timestamp: "2026-05-13T01:00:00Z",
@@ -53,19 +53,159 @@ func TestBuildSummaryAggregatesSignals(t *testing.T) {
 				Harness:   schema.HarnessInfo{Name: "cursor"},
 				Session:   &schema.SessionInfo{ID: "s2"},
 				MCP:       &schema.MCPInfo{Server: "github", Tool: "get_issue"},
+			}, WazuhLevel: WazuhLevel("mcp.tool_invoked")},
+			{Event: schema.Event{
+				Timestamp: "2026-05-13T01:02:00Z",
+				Event:     schema.EventInfo{Action: "approval.denied", Category: "approval"},
+				Severity:  schema.SeverityMedium,
+				Harness:   schema.HarnessInfo{Name: "cursor"},
+				Session:   &schema.SessionInfo{ID: "s3"},
+				Approval:  &schema.ApprovalInfo{Decision: "denied"},
+			}, WazuhLevel: WazuhLevel("approval.denied")},
+			{Event: schema.Event{
+				Timestamp:  "2026-05-13T01:03:00Z",
+				Event:      schema.EventInfo{Action: "policy.blocked", Category: "approval"},
+				Severity:   schema.SeverityCritical,
+				Harness:    schema.HarnessInfo{Name: "cursor"},
+				Repository: "repo-a",
+				Policy:     &schema.PolicyInfo{Decision: "blocked", Name: "dangerous command"},
 			}},
 		},
 	}
 
 	summary := BuildSummary(result)
-	if summary.TotalEvents != 2 || summary.ActiveSessions != 2 {
-		t.Fatalf("summary totals = events %d sessions %d, want 2/2", summary.TotalEvents, summary.ActiveSessions)
+	if summary.TotalEvents != 4 || summary.ActiveSessions != 3 {
+		t.Fatalf("summary totals = events %d sessions %d, want 4/3", summary.TotalEvents, summary.ActiveSessions)
 	}
 	if summary.CommandEvents != 1 || summary.MCPEvents != 1 {
 		t.Fatalf("signal counts = command %d mcp %d, want 1/1", summary.CommandEvents, summary.MCPEvents)
 	}
-	if summary.CountsByHarness["cursor"] != 2 {
-		t.Fatalf("cursor harness count = %d, want 2", summary.CountsByHarness["cursor"])
+	if summary.CountsByHarness["cursor"] != 4 {
+		t.Fatalf("cursor harness count = %d, want 4", summary.CountsByHarness["cursor"])
+	}
+	if summary.NeedsReviewEvents != 3 || summary.DeniedApprovalEvents != 1 || summary.PolicyBlockedEvents != 1 {
+		t.Fatalf("review counts = needs %d denied %d blocked %d, want 3/1/1", summary.NeedsReviewEvents, summary.DeniedApprovalEvents, summary.PolicyBlockedEvents)
+	}
+}
+
+func TestReadEventsFreeTextSearchMatchesStructuredFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "command.executed", "command", "repo-a"),
+		testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "file.modified", "file", "repo-b"),
+		testSchemaEvent("2026-05-13T01:02:00Z", "cursor", "mcp.tool_invoked", "mcp", "repo-c"),
+		testSchemaEvent("2026-05-13T01:03:00Z", "cursor", "approval.denied", "approval", "repo-d"),
+	}
+	events[0].Command = &schema.CommandInfo{Command: "go test ./internal/endpoint/dashboard"}
+	events[0].Session = &schema.SessionInfo{ID: "session-command"}
+	events[1].File = &schema.FileInfo{Path: "cmd/server.go", Operation: "write", Language: "go"}
+	events[2].MCP = &schema.MCPInfo{Server: "github", Tool: "get_issue"}
+	events[3].Approval = &schema.ApprovalInfo{Decision: "denied", Reason: "dangerous shell"}
+	events[3].Message = "approval blocked for review"
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	for _, query := range []string{"dashboard", "cmd/server.go", "github get_issue", "dangerous shell", "session-command", "repo-c", "blocked review"} {
+		result, err := ReadEvents(path, EventQuery{Q: query, Limit: 10})
+		if err != nil {
+			t.Fatalf("ReadEvents(%q) returned error: %v", query, err)
+		}
+		if result.TotalMatched != 1 {
+			t.Fatalf("ReadEvents(%q) matched %d events, want 1", query, result.TotalMatched)
+		}
+	}
+}
+
+func TestReadEventsSecurityFilters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "command.executed", "command", "repo-a"),
+		testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "mcp.tool_invoked", "mcp", "repo-b"),
+		testSchemaEvent("2026-05-13T01:02:00Z", "cursor", "approval.denied", "approval", "repo-c"),
+		testSchemaEvent("2026-05-13T01:03:00Z", "cursor", "policy.blocked", "approval", "repo-d"),
+	}
+	events[0].Severity = schema.SeverityHigh
+	events[1].MCP = &schema.MCPInfo{Server: "github", Tool: "get_issue"}
+	events[2].Approval = &schema.ApprovalInfo{Decision: "denied", Reason: "blocked command"}
+	events[3].Policy = &schema.PolicyInfo{Name: "shell guard", Decision: "blocked", Reason: "unsafe"}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	cases := []struct {
+		name  string
+		query EventQuery
+		want  string
+	}{
+		{name: "severity", query: EventQuery{Severity: "high", Limit: 10}, want: "command.executed"},
+		{name: "category", query: EventQuery{Category: "mcp", Limit: 10}, want: "mcp.tool_invoked"},
+		{name: "mcp", query: EventQuery{MCP: "github", Limit: 10}, want: "mcp.tool_invoked"},
+		{name: "decision", query: EventQuery{Decision: "denied", Limit: 10}, want: "approval.denied"},
+		{name: "policy", query: EventQuery{Policy: "shell guard", Limit: 10}, want: "policy.blocked"},
+		{name: "wazuh", query: EventQuery{WazuhLevel: "10", Policy: "shell guard", Limit: 10}, want: "policy.blocked"},
+		{name: "review", query: EventQuery{Review: "true", Action: "tool.failed", Limit: 10}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ReadEvents(path, tc.query)
+			if err != nil {
+				t.Fatalf("ReadEvents returned error: %v", err)
+			}
+			if tc.want == "" {
+				if result.TotalMatched != 0 {
+					t.Fatalf("matched %d events, want 0", result.TotalMatched)
+				}
+				return
+			}
+			if result.TotalMatched != 1 || result.Events[0].Event.Event.Action != tc.want {
+				t.Fatalf("matched %d action %q, want 1 %q", result.TotalMatched, result.Events[0].Event.Event.Action, tc.want)
+			}
+		})
+	}
+}
+
+func TestFindEventCanReadOutsideTailWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	lines := make([][]byte, 0, maxEventLimit+1)
+	lines = append(lines, testEvent("2026-05-13T01:00:00Z", "cursor", "command.executed", "command", "repo-a"))
+	for i := 0; i < maxEventLimit; i++ {
+		lines = append(lines, testEvent("2026-05-13T01:01:00Z", "cursor", "file.modified", "file", "repo-b"))
+	}
+	writeTestLog(t, path, lines...)
+
+	record, ok, err := FindEvent(path, "line-1")
+	if err != nil {
+		t.Fatalf("FindEvent returned error: %v", err)
+	}
+	if !ok || record.Event.Event.Action != "command.executed" {
+		t.Fatalf("FindEvent returned ok=%t action=%q, want line-1 command.executed", ok, record.Event.Event.Action)
+	}
+}
+
+func TestHandlerEventEndpointOmitsRawAndSetsSecurityHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestLog(t, path, testEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a"))
+
+	handler, err := Handler(Options{LogPath: path, UserMode: true})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/event?id=line-1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("Content-Security-Policy header missing")
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := response["raw"]; ok {
+		t.Fatal("event response unexpectedly included raw JSONL bytes")
 	}
 }
 
@@ -115,7 +255,13 @@ func writeTestLog(t *testing.T, path string, lines ...[]byte) {
 }
 
 func testEvent(ts, harness, action, category, repo string) []byte {
-	event := schema.Event{
+	event := testSchemaEvent(ts, harness, action, category, repo)
+	data, _ := json.Marshal(event)
+	return data
+}
+
+func testSchemaEvent(ts, harness, action, category, repo string) schema.Event {
+	return schema.Event{
 		Timestamp:     ts,
 		Vendor:        schema.Vendor,
 		Product:       schema.Product,
@@ -127,6 +273,17 @@ func testEvent(ts, harness, action, category, repo string) []byte {
 		Repository:    repo,
 		Message:       action,
 	}
-	data, _ := json.Marshal(event)
-	return data
+}
+
+func marshalEvents(t *testing.T, events ...schema.Event) [][]byte {
+	t.Helper()
+	lines := make([][]byte, 0, len(events))
+	for _, event := range events {
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("marshal event: %v", err)
+		}
+		lines = append(lines, data)
+	}
+	return lines
 }

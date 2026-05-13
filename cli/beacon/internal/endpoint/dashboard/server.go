@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -114,7 +115,7 @@ func Handler(opts Options) (http.Handler, error) {
 		writeJSON(w, record)
 	})
 	mux.Handle("/", http.FileServer(http.FS(staticRoot)))
-	return mux, nil
+	return securityHeaders(mux), nil
 }
 
 func ListenAndServe(opts Options) error {
@@ -176,12 +177,21 @@ func parseQuery(r *http.Request, fallbackLimit int) EventQuery {
 	}
 	query := EventQuery{
 		Limit:      limit,
+		Q:          q.Get("q"),
 		Harness:    q.Get("harness"),
 		Action:     q.Get("action"),
+		Severity:   q.Get("severity"),
+		Category:   q.Get("category"),
 		Repository: q.Get("repository"),
 		Session:    q.Get("session"),
 		File:       q.Get("file"),
 		Command:    q.Get("command"),
+		MCP:        q.Get("mcp"),
+		Approval:   q.Get("approval"),
+		Decision:   q.Get("decision"),
+		Policy:     q.Get("policy"),
+		Review:     q.Get("review"),
+		WazuhLevel: q.Get("wazuh_level"),
 	}
 	if since := q.Get("since"); since != "" {
 		if parsed, err := time.Parse(time.RFC3339, since); err == nil {
@@ -204,4 +214,17 @@ func writeError(w http.ResponseWriter, status int, err error) {
 
 func methodNotAllowed(w http.ResponseWriter) {
 	writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
