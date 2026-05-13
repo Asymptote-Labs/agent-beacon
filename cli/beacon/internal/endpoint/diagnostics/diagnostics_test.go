@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 )
 
 func TestCheckFileRequiredOptionalAndDirectory(t *testing.T) {
@@ -97,5 +98,22 @@ func TestRunAndHasFailures(t *testing.T) {
 	}
 	if !HasFailures([]Check{{Name: "x", Status: "fail"}}) {
 		t.Fatal("expected HasFailures to report failed check")
+	}
+}
+
+func TestLaunchPlistPathMatchesServiceManager(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	userPath := launchPlistPath(true)
+	wantUserPath := filepath.Join(home, "Library", "LaunchAgents", service.UserLabel+".plist")
+	if userPath != wantUserPath {
+		t.Fatalf("user launchPlistPath = %q, want %q", userPath, wantUserPath)
+	}
+
+	systemPath := launchPlistPath(false)
+	wantSystemPath := filepath.Join("/Library/LaunchDaemons", service.SystemLabel+".plist")
+	if systemPath != wantSystemPath {
+		t.Fatalf("system launchPlistPath = %q, want %q", systemPath, wantSystemPath)
 	}
 }

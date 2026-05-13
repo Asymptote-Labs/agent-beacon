@@ -18,5 +18,6 @@ Release gates:
 - package signature verified with `pkgutil --check-signature`
 - notarization accepted by Apple
 - install/uninstall tested on a clean macOS runner or VM
+- `sh packaging/macos/smoke-endpoint.sh` passes on a clean macOS runner or VM
 - Wazuh validation event successfully written after install
 

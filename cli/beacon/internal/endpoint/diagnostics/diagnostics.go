@@ -3,9 +3,11 @@ package diagnostics
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 )
 
 type Check struct {
@@ -70,9 +72,9 @@ func launchPlistPath(userMode bool) string {
 	if userMode {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "Library/LaunchAgents/com.beacon.endpoint.collector.plist"
+			return filepath.Join("Library", "LaunchAgents", service.UserLabel+".plist")
 		}
-		return home + "/Library/LaunchAgents/com.beacon.endpoint.collector.plist"
+		return filepath.Join(home, "Library", "LaunchAgents", service.UserLabel+".plist")
 	}
-	return "/Library/LaunchDaemons/com.beacon.endpoint.collector.plist"
+	return filepath.Join("/Library/LaunchDaemons", service.SystemLabel+".plist")
 }

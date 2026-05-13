@@ -61,6 +61,12 @@ Run packaging wrapper checks:
 sh packaging/macos/test-endpoint-scripts.sh
 ```
 
+Run the macOS endpoint smoke test:
+
+```bash
+sh packaging/macos/smoke-endpoint.sh
+```
+
 Build the CLI:
 
 ```bash
@@ -91,6 +97,7 @@ go run . endpoint dashboard --user
 - Preserve optional event fields for agent-native metadata (`session`, `tool`, `file`, `command`, `mcp`, `approval`, `content`, `model`, `repository`, and `branch`) without changing existing required field semantics.
 - Prefer metadata-first telemetry. If adding a new signal, include stable identifiers/counts/hashes before considering raw content.
 - Keep the dashboard read-only. It should inspect local status and JSONL events but must not mutate endpoint configuration or telemetry.
+- Keep the release readiness guidance in `README.md` up to date when install, packaging, collector, or dashboard behavior changes.
 
 ## CI Expectations
 
@@ -102,3 +109,4 @@ CI runs:
 - `go test ./...` in `collector-builder/exporter/beaconjsonexporter`.
 - CLI help smoke checks for the public command tree.
 - macOS packaging script validation via `packaging/macos/test-endpoint-scripts.sh`.
+- macOS endpoint smoke validation via `packaging/macos/smoke-endpoint.sh`.
