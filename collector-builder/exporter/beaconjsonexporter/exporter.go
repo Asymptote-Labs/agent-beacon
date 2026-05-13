@@ -117,8 +117,9 @@ func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, reco
 	if action == "" {
 		action = inferAction(attrs, record.Body().AsString())
 	}
-	event := newBeaconEvent(action, firstString(attrs, "beacon.event.category", "event.category", "category"), severity(record.SeverityText(), record.SeverityNumber().String()), harnessName(attrs), ts)
-	event.Message = firstNonEmpty(record.Body().AsString(), firstString(attrs, "message", "log.message"))
+	message := firstNonEmpty(record.Body().AsString(), firstString(attrs, "message", "log.message"))
+	event := newBeaconEvent(action, firstString(attrs, "beacon.event.category", "event.category", "category"), severity(record.SeverityText(), record.SeverityNumber().String()), harnessName(attrs, message), ts)
+	event.Message = message
 	e.populateCommon(&event, attrs)
 	event.Raw = e.rawPayload(attrs, map[string]interface{}{
 		"otel_signal": "logs",
@@ -133,8 +134,9 @@ func (e *beaconExporter) eventFromSpan(resourceAttrs map[string]interface{}, spa
 	if action == "" {
 		action = inferAction(attrs, span.Name())
 	}
-	event := newBeaconEvent(action, firstString(attrs, "beacon.event.category", "event.category", "tool"), spanSeverity(span.Status().Code().String()), harnessName(attrs), timestamp(span.StartTimestamp().AsTime()))
-	event.Message = firstNonEmpty(firstString(attrs, "message", "gen_ai.prompt", "gen_ai.response"), span.Name())
+	message := firstNonEmpty(firstString(attrs, "message", "gen_ai.prompt", "gen_ai.response"), span.Name())
+	event := newBeaconEvent(action, firstString(attrs, "beacon.event.category", "event.category", "tool"), spanSeverity(span.Status().Code().String()), harnessName(attrs, message, span.Name()), timestamp(span.StartTimestamp().AsTime()))
+	event.Message = message
 	e.populateCommon(&event, attrs)
 	event.Raw = e.rawPayload(attrs, map[string]interface{}{
 		"otel_signal": "traces",
@@ -147,7 +149,7 @@ func (e *beaconExporter) eventFromSpan(resourceAttrs map[string]interface{}, spa
 
 func (e *beaconExporter) eventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) beaconEvent {
 	attrs := mergeMaps(resourceAttrs, map[string]interface{}{})
-	event := newBeaconEvent(firstString(attrs, "beacon.event.action", "event.action", "metric.observed"), "metric", "info", harnessName(attrs), time.Now().UTC())
+	event := newBeaconEvent(firstString(attrs, "beacon.event.action", "event.action", "metric.observed"), "metric", "info", harnessName(attrs, metric.Name()), time.Now().UTC())
 	event.Message = metric.Name()
 	e.populateCommon(&event, attrs)
 	event.Raw = e.rawPayload(attrs, map[string]interface{}{
@@ -308,17 +310,40 @@ func spanSeverity(status string) string {
 	return "info"
 }
 
-func harnessName(attrs map[string]interface{}) string {
+func harnessName(attrs map[string]interface{}, hints ...string) string {
 	name := firstString(attrs, "beacon.harness.name", "harness.name", "service.name", "telemetry.sdk.name")
+	if explicit := firstString(attrs, "beacon.harness.name", "harness.name"); explicit != "" {
+		return normalizeHarnessName(explicit)
+	}
+	candidates := append([]string{name}, hints...)
+	for _, candidate := range candidates {
+		if normalized := normalizeHarnessName(candidate); normalized != "" {
+			return normalized
+		}
+	}
+	if name != "" {
+		return name
+	}
+	return "otel"
+}
+
+func normalizeHarnessName(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
 	switch {
-	case strings.Contains(strings.ToLower(name), "claude"):
+	case lower == "":
+		return ""
+	case strings.Contains(lower, "cowork") || strings.Contains(lower, "co-work"):
 		return "claude_cowork"
-	case strings.Contains(strings.ToLower(name), "codex"):
+	case strings.Contains(lower, "claude_code") || strings.Contains(lower, "claude-code") || strings.Contains(lower, "claude code") || strings.HasPrefix(lower, "claude_code."):
+		return "claude_code"
+	case lower == "claude" || strings.Contains(lower, "claude"):
+		return "claude_code"
+	case strings.Contains(lower, "codex"):
 		return "codex_cli"
 	case name != "":
 		return name
 	default:
-		return "otel"
+		return ""
 	}
 }
 

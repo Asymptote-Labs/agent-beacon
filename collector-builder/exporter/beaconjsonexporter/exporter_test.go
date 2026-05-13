@@ -92,3 +92,43 @@ func TestMetadataRetentionDropsRawAttributes(t *testing.T) {
 		t.Fatalf("attribute count missing: %#v", raw)
 	}
 }
+
+func TestHarnessNameSeparatesClaudeCodeAndCowork(t *testing.T) {
+	tests := []struct {
+		name  string
+		attrs map[string]interface{}
+		hints []string
+		want  string
+	}{
+		{
+			name:  "claude code log body",
+			attrs: map[string]interface{}{"service.name": "claude"},
+			hints: []string{"claude_code.api_request"},
+			want:  "claude_code",
+		},
+		{
+			name:  "claude code metric",
+			attrs: map[string]interface{}{"service.name": "claude-code"},
+			hints: []string{"claude_code.token.usage"},
+			want:  "claude_code",
+		},
+		{
+			name:  "claude cowork service",
+			attrs: map[string]interface{}{"service.name": "claude-cowork"},
+			want:  "claude_cowork",
+		},
+		{
+			name:  "codex service",
+			attrs: map[string]interface{}{"service.name": "codex-cli"},
+			want:  "codex_cli",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := harnessName(tt.attrs, tt.hints...); got != tt.want {
+				t.Fatalf("harnessName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
