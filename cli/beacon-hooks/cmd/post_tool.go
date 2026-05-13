@@ -3,22 +3,19 @@ package cmd
 import (
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/depscan"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
 )
 
 var postToolCmd = &cobra.Command{
 	Use:   "post-tool",
-	Short: "Record file-edit telemetry and dependency scan findings",
+	Short: "Record file-edit telemetry",
 	Long: `PostToolUse hook - triggered after Write, Edit, or MultiEdit operations.
-The public Beacon build records local metadata and dependency scan findings only.`,
+The public Beacon build records local metadata only.`,
 	Run: runPostTool,
 }
 
@@ -52,8 +49,7 @@ func runPostTool(cmd *cobra.Command, args []string) {
 
 	var params *evaluationParams
 
-	// Check if dep-scan is enabled before parsing, so parsers can allow dep files through
-	depScanEnabled := config.IsDepScanEnabled()
+	emitPostToolObserved(logger, input)
 
 	if platformFlag == "cursor" {
 		// Cursor fires two hook types through post-tool:
@@ -62,30 +58,17 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		// We use hook_event_name (present in all Cursor hook inputs) to distinguish them.
 		hookEvent, _ := input["hook_event_name"].(string)
 		if hookEvent != "afterFileEdit" {
-			// postToolUse — used for dep scan only (result stored in state, delivered via stop hook)
-			params = parseCursorPostToolInput(input, logger, depScanEnabled)
-			if params != nil && depscan.IsDependencyFile(params.filePath) && depScanEnabled {
-				runDepScan(params, logger)
-				return
-			}
 			outputJSON(emptyResponse)
 			return
 		}
-		// afterFileEdit — used for async evaluation only (no output supported).
-		// Dep scan is handled by postToolUse above, so don't allow dep files through here.
-		params = parseCursorInput(input, logger, false)
+		// afterFileEdit — records file-edit metadata only (no output supported).
+		params = parseCursorInput(input, logger)
 	} else {
-		params = parseClaudeCopilotInput(input, logger, depScanEnabled)
+		params = parseClaudeCopilotInput(input, logger)
 	}
 
 	if params == nil {
 		outputJSON(emptyResponse)
-		return
-	}
-
-	// Dep scan: if this is a dependency file and dep-scan is enabled, check for CVEs.
-	if depscan.IsDependencyFile(params.filePath) && depScanEnabled {
-		runDepScan(params, logger)
 		return
 	}
 
@@ -94,14 +77,14 @@ func runPostTool(cmd *cobra.Command, args []string) {
 }
 
 // parseCursorInput extracts evaluation params from Cursor's afterFileEdit format.
-func parseCursorInput(input map[string]interface{}, logger *logging.Logger, depScanEnabled bool) *evaluationParams {
+func parseCursorInput(input map[string]interface{}, logger *logging.Logger) *evaluationParams {
 	sessionID := resolveSessionID(input, "cursor")
 	filePath, _ := input["file_path"].(string)
 	if sessionID == "" || filePath == "" {
 		return nil
 	}
 
-	if !config.IsScannableFile(filePath) && !(depScanEnabled && depscan.IsDependencyFile(filePath)) {
+	if !config.IsScannableFile(filePath) {
 		logger.Debug("Skipping non-scannable file: " + filePath)
 		return nil
 	}
@@ -130,7 +113,7 @@ func parseCursorInput(input map[string]interface{}, logger *logging.Logger, depS
 }
 
 // parseClaudeCopilotInput extracts evaluation params from Claude/Copilot PostToolUse format.
-func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logger, depScanEnabled bool) *evaluationParams {
+func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logger) *evaluationParams {
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
@@ -159,7 +142,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		return nil
 	}
 
-	if !config.IsScannableFile(filePath) && !(depScanEnabled && depscan.IsDependencyFile(filePath)) {
+	if !config.IsScannableFile(filePath) {
 		logger.Debug("Skipping non-scannable file: " + filePath)
 		return nil
 	}
@@ -184,6 +167,13 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 // recordLocalEdit logs file-edit metadata without sending code or diffs to a hosted service.
 func recordLocalEdit(params *evaluationParams, logger *logging.Logger) {
 	logger.Info("File edit observed", "file_path", params.filePath, "tool_name", params.toolName)
+	fields := map[string]interface{}{}
+	for key, value := range diffFields(params.filePath, params.diffStr) {
+		fields[key] = value
+	}
+	fields["tool"] = map[string]interface{}{"name": params.toolName, "path": params.filePath}
+	fields["session"] = map[string]interface{}{"id": params.sessionID}
+	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 
 // resolveToolInput extracts tool input from Copilot's various formats.
@@ -219,112 +209,38 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 	return nil
 }
 
-// runDepScan handles the dep-scan path: parse diff for packages, query OSV, return CVE report.
-func runDepScan(params *evaluationParams, logger *logging.Logger) {
-	start := time.Now()
-
-	logger.Debug("Dep file detected", "file_path", params.filePath)
-
-	packages := depscan.ParseDiffForPackages(params.diffStr, params.filePath)
-	if len(packages) == 0 {
-		logger.Debug("No packages found in diff", "file_path", params.filePath)
-		outputJSON(emptyResponse)
+func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) {
+	toolName := getFirstStr(input, "tool_name", "toolName")
+	hookEvent := getFirstStr(input, "hook_event_name")
+	toolInput := resolveToolInput(input)
+	if toolInput == nil {
+		if nested, ok := input["tool_input"].(map[string]interface{}); ok {
+			toolInput = nested
+		}
+	}
+	sessionID := resolveSessionID(input, platformFlag)
+	fields := sessionFields(sessionID, input)
+	for key, value := range toolFields(toolName, toolInput) {
+		fields[key] = value
+	}
+	if hookEvent == "postToolUseFailure" {
+		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
-
-	pkgNames := make([]string, len(packages))
-	for i, p := range packages {
-		pkgNames[i] = p.Name + "@" + p.Version
+	action := actionForTool(hookEvent, toolName)
+	category := "tool"
+	if strings.HasPrefix(action, "file.") {
+		category = "file"
+	} else if strings.HasPrefix(action, "command.") {
+		category = "command"
+	} else if strings.HasPrefix(action, "mcp.") {
+		category = "mcp"
 	}
-	logger.Info("Packages parsed from diff", "file_path", params.filePath, "package_count", len(packages), "packages", strings.Join(pkgNames, ", "))
-
-	// Query OSV.dev for vulnerabilities
-	findings := depscan.QueryPackages(packages, logger)
-
-	elapsed := time.Since(start)
-
-	if len(findings) == 0 {
-		logger.Info("No vulnerabilities found", "package_count", len(packages), "duration_ms", elapsed.Milliseconds())
-		outputJSON(emptyResponse)
-		return
+	message := "Tool execution observed"
+	if action == "command.executed" {
+		message = "Shell command executed"
 	}
-
-	// Deduplicate and format
-	deduplicated := depscan.DeduplicateFindings(packages, findings)
-	report := depscan.FormatCVEReport(deduplicated)
-
-	totalCVEs := 0
-	for _, f := range deduplicated {
-		totalCVEs += len(f.CVEs)
-	}
-
-	logger.Info("Vulnerabilities found",
-		"total_vulns", totalCVEs,
-		"affected_packages", len(deduplicated),
-		"duration_ms", elapsed.Milliseconds())
-
-	// Return platform-appropriate response
-	if platformFlag == "cursor" {
-		// Cursor's postToolUse additional_context is unreliable — store report
-		// in session state for delivery via the stop hook's followup_message.
-		st := state.NewSessionState(params.sessionID, platformFlag)
-		st.SetDepScanReport(report)
-		logger.Info("CVE report stored for stop hook", "platform", "cursor", "affected_packages", len(deduplicated), "cve_count", totalCVEs, "duration_ms", elapsed.Milliseconds())
-		outputJSON(emptyResponse)
-	} else {
-		logger.Info("CVE report injected", "platform", platformFlag, "affected_packages", len(deduplicated), "cve_count", totalCVEs, "duration_ms", elapsed.Milliseconds())
-		outputJSON(map[string]interface{}{
-			"decision": "block",
-			"reason":   report,
-			"hookSpecificOutput": map[string]interface{}{
-				"hookEventName":     "PostToolUse",
-				"additionalContext": report,
-			},
-		})
-	}
-}
-
-// parseCursorPostToolInput extracts evaluation params from Cursor's postToolUse format.
-// Cursor postToolUse has: conversation_id, tool_name, tool_input (map), tool_output (JSON string),
-// workspace_roots (array), model, generation_id.
-func parseCursorPostToolInput(input map[string]interface{}, logger *logging.Logger, depScanEnabled bool) *evaluationParams {
-	sessionID := getFirstStr(input, "conversation_id")
-	toolName := getFirstStr(input, "tool_name")
-	toolInput, _ := input["tool_input"].(map[string]interface{})
-
-	if !isFileEditTool(platformFlag, toolName) {
-		return nil
-	}
-
-	filePath := diff.GetStringFromMaps("file_path", toolInput)
-	if filePath == "" {
-		return nil
-	}
-
-	if sessionID == "" || toolName == "" {
-		return nil
-	}
-
-	if !config.IsScannableFile(filePath) && !(depScanEnabled && depscan.IsDependencyFile(filePath)) {
-		return nil
-	}
-
-	// Build diff from content (Write/Create tool)
-	content := diff.GetStringFromMaps("content", toolInput)
-	if content == "" {
-		return nil
-	}
-	diffStr := diff.FromToolResponse(toolName, toolInput, nil)
-	if diffStr == "" {
-		return nil
-	}
-
-	return &evaluationParams{
-		sessionID: sessionID,
-		toolName:  toolName,
-		filePath:  filePath,
-		diffStr:   diffStr,
-	}
+	emitHookEvent(logger, action, category, "info", message, input, fields)
 }
 
 // isFileEditTool returns true if the tool name represents a file edit operation.

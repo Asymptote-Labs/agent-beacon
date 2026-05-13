@@ -68,6 +68,7 @@ exporters:
     max_event_bytes: 65536
     rotate_bytes: 10485760
     redact_secrets: true
+    content_retention: %q
 
 extensions:
   health_check:
@@ -88,7 +89,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [beaconjson]
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath)
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention)
 }
 
 func CheckStatus(cfg endpointconfig.Config) Status {

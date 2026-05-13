@@ -21,6 +21,14 @@ const (
 	LogMaxSizeBytes = 10 * 1024 * 1024 // 10 MB
 )
 
+type ContentRetention string
+
+const (
+	ContentRetentionMetadata ContentRetention = "metadata"
+	ContentRetentionRedacted ContentRetention = "redacted"
+	ContentRetentionFull     ContentRetention = "full"
+)
+
 // Scannable extensions
 var scannableExtensions = map[string]bool{
 	// JavaScript/TypeScript
@@ -125,22 +133,6 @@ func EnsureStateDir(platform string) error {
 	return os.MkdirAll(GetStateDir(platform), 0755)
 }
 
-// IsDepScanEnabled checks if dependency scanning is enabled.
-// Reads from the global config at ~/.beacon/config.json (not per-platform).
-func IsDepScanEnabled() bool {
-	globalPath := filepath.Join(BeaconDir, "config.json")
-	data, err := os.ReadFile(globalPath)
-	if err != nil {
-		return false
-	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return false
-	}
-	enabled, ok := cfg["dep_scan"].(bool)
-	return ok && enabled
-}
-
 // IsSecureByDesignEnabled checks if Secure by Design is enabled for the given platform.
 // Reads from platform-specific config at ~/.beacon/{platform}/config.json.
 func IsSecureByDesignEnabled(platform string) bool {
@@ -155,4 +147,25 @@ func IsSecureByDesignEnabled(platform string) bool {
 	}
 	enabled, ok := cfg["secure_by_design"].(bool)
 	return ok && enabled
+}
+
+func ContentRetentionMode() ContentRetention {
+	endpointPath := filepath.Join(BeaconDir, "endpoint", "config.json")
+	data, err := os.ReadFile(endpointPath)
+	if err != nil {
+		return ContentRetentionMetadata
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ContentRetentionMetadata
+	}
+	mode, _ := cfg["content_retention"].(string)
+	switch ContentRetention(mode) {
+	case ContentRetentionRedacted:
+		return ContentRetentionRedacted
+	case ContentRetentionFull:
+		return ContentRetentionFull
+	default:
+		return ContentRetentionMetadata
+	}
 }

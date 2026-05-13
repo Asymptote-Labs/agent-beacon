@@ -58,12 +58,44 @@ type ToolInfo struct {
 	Path    string `json:"path,omitempty"`
 }
 
+type FileInfo struct {
+	Path      string `json:"path,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	Language  string `json:"language,omitempty"`
+	DiffHash  string `json:"diff_hash,omitempty"`
+	DiffBytes int    `json:"diff_bytes,omitempty"`
+}
+
+type CommandInfo struct {
+	Command    string `json:"command,omitempty"`
+	ExitCode   *int   `json:"exit_code,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+}
+
+type MCPInfo struct {
+	Server string `json:"server,omitempty"`
+	Tool   string `json:"tool,omitempty"`
+}
+
+type ApprovalInfo struct {
+	Required bool   `json:"required,omitempty"`
+	Decision string `json:"decision,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type PolicyInfo struct {
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name,omitempty"`
 	Decision    string `json:"decision,omitempty"`
 	Enforcement string `json:"enforcement,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+}
+
+type ContentInfo struct {
+	Retention string `json:"retention"`
+	Included  bool   `json:"included"`
+	Redacted  bool   `json:"redacted,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type DestinationInfo struct {
@@ -90,9 +122,17 @@ type Event struct {
 	Harness       HarnessInfo            `json:"harness"`
 	Session       *SessionInfo           `json:"session,omitempty"`
 	Tool          *ToolInfo              `json:"tool,omitempty"`
+	File          *FileInfo              `json:"file,omitempty"`
+	Command       *CommandInfo           `json:"command,omitempty"`
+	MCP           *MCPInfo               `json:"mcp,omitempty"`
+	Approval      *ApprovalInfo          `json:"approval,omitempty"`
 	Policy        *PolicyInfo            `json:"policy,omitempty"`
+	Content       *ContentInfo           `json:"content,omitempty"`
 	Destination   *DestinationInfo       `json:"destination,omitempty"`
 	Health        *HealthInfo            `json:"health,omitempty"`
+	Model         string                 `json:"model,omitempty"`
+	Repository    string                 `json:"repository,omitempty"`
+	Branch        string                 `json:"branch,omitempty"`
 	Message       string                 `json:"message,omitempty"`
 	Raw           map[string]interface{} `json:"raw,omitempty"`
 	Truncated     bool                   `json:"field_truncated,omitempty"`

@@ -121,6 +121,12 @@ func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 		event.Tool.Command = redact(truncate(event.Tool.Command, 4096))
 		event.Tool.Path = truncate(event.Tool.Path, 2048)
 	}
+	if event.Command != nil {
+		event.Command.Command = redact(truncate(event.Command.Command, 4096))
+	}
+	if event.Approval != nil {
+		event.Approval.Reason = redact(truncate(event.Approval.Reason, 4096))
+	}
 	if event.Policy != nil {
 		event.Policy.Reason = redact(truncate(event.Policy.Reason, 4096))
 	}

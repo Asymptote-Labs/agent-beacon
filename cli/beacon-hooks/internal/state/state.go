@@ -34,9 +34,6 @@ type SessionData struct {
 	SbdPolicies     string `json:"sbd_policies,omitempty"`
 	SbdGenerationID string `json:"sbd_generation_id,omitempty"`
 	SbdInjected     bool   `json:"sbd_injected,omitempty"`
-
-	// Dep scan: CVE report pending delivery via stop hook
-	DepScanReport string `json:"dep_scan_report,omitempty"`
 }
 
 // SessionState manages session state
@@ -246,38 +243,6 @@ func (s *SessionState) MarkSbdInjected() {
 	s.ensureSession(state)
 	state[s.sessionID].SbdInjected = true
 	s.saveStateFile(state)
-}
-
-// SetDepScanReport appends a CVE report for delivery via the stop hook.
-// Multiple reports (from editing multiple dep files in one turn) are joined.
-func (s *SessionState) SetDepScanReport(report string) {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
-
-	state := s.loadStateFile()
-	s.ensureSession(state)
-	existing := state[s.sessionID].DepScanReport
-	if existing != "" {
-		state[s.sessionID].DepScanReport = existing + "\n\n" + report
-	} else {
-		state[s.sessionID].DepScanReport = report
-	}
-	s.saveStateFile(state)
-}
-
-// GetAndClearDepScanReport retrieves and clears any pending dep scan report.
-func (s *SessionState) GetAndClearDepScanReport() string {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
-
-	state := s.loadStateFile()
-	s.ensureSession(state)
-	report := state[s.sessionID].DepScanReport
-	if report != "" {
-		state[s.sessionID].DepScanReport = ""
-		s.saveStateFile(state)
-	}
-	return report
 }
 
 // CleanupStaleForPlatform removes stale evaluations for the given platform

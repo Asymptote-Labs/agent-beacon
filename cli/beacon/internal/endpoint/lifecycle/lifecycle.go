@@ -19,13 +19,14 @@ import (
 )
 
 type InstallOptions struct {
-	UserMode      bool
-	LogPath       string
-	Harnesses     []string
-	GRPCPort      int
-	HTTPPort      int
-	CollectorPath string
-	StartService  bool
+	UserMode         bool
+	LogPath          string
+	Harnesses        []string
+	GRPCPort         int
+	HTTPPort         int
+	CollectorPath    string
+	StartService     bool
+	ContentRetention endpointconfig.ContentRetention
 }
 
 type UninstallOptions struct {
@@ -202,6 +203,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		cfg.Collector.HTTPPort = opts.HTTPPort
 	}
 	cfg.Collector.BinaryPath = opts.CollectorPath
+	if opts.ContentRetention != "" {
+		cfg.ContentRetention = opts.ContentRetention
+	}
 	return cfg
 }
 
@@ -219,6 +223,9 @@ func loadOrDefault(userMode bool, logPath string) endpointconfig.Config {
 }
 
 func preflight(cfg endpointconfig.Config) error {
+	if err := endpointconfig.ValidateContentRetention(cfg.ContentRetention); err != nil {
+		return err
+	}
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("production endpoint install is currently supported only on macOS")
 	}

@@ -157,6 +157,97 @@ func (l *Logger) writeEndpointEvent(entry map[string]interface{}) {
 	_, _ = f.Write(append(data, '\n'))
 }
 
+func (l *Logger) EndpointEvent(action, category, severity, message string, fields map[string]interface{}) {
+	path := endpointLogPath()
+	if path == "" {
+		return
+	}
+	if severity == "" {
+		severity = "info"
+	}
+	event := l.baseEndpointEvent(action, category, severity, message)
+	for key, value := range fields {
+		if value == nil {
+			continue
+		}
+		event[key] = value
+	}
+	retention := string(config.ContentRetentionMode())
+	if retention == "" {
+		retention = "metadata"
+	}
+	event["content"] = map[string]interface{}{
+		"retention": retention,
+		"included":  retention != "metadata",
+		"redacted":  retention == "redacted",
+	}
+	if raw, ok := event["raw"].(map[string]interface{}); ok {
+		event["raw"] = retentionAwareRaw(raw, retention)
+	}
+	writeEndpointJSON(path, event)
+}
+
+func (l *Logger) baseEndpointEvent(action, category, severity, message string) map[string]interface{} {
+	hostname, _ := os.Hostname()
+	event := map[string]interface{}{
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		"vendor":         "beacon",
+		"product":        "endpoint-agent",
+		"schema_version": "1.0",
+		"event": map[string]interface{}{
+			"kind":     "agent_runtime",
+			"action":   action,
+			"category": category,
+		},
+		"severity": severity,
+		"endpoint": map[string]interface{}{
+			"hostname": hostname,
+			"os":       runtime.GOOS,
+		},
+		"user": map[string]interface{}{
+			"name": os.Getenv("USER"),
+		},
+		"harness": map[string]interface{}{
+			"name": l.platform,
+		},
+		"message": redactEndpointString(truncateEndpoint(message, 4096)),
+	}
+	if l.sessionID != "" {
+		event["session"] = map[string]interface{}{"id": l.sessionID}
+	}
+	return event
+}
+
+func writeEndpointJSON(path string, event map[string]interface{}) {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return
+	}
+	data, err := json.Marshal(sanitizeEndpointMap(event))
+	if err != nil {
+		return
+	}
+	if len(data) > 64*1024 {
+		event["field_truncated"] = true
+		event["raw"] = nil
+		event["message"] = truncateEndpoint(fmt.Sprint(event["message"]), 1024)
+		data, err = json.Marshal(sanitizeEndpointMap(event))
+		if err != nil {
+			return
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	defer f.Close()
+	_, _ = f.Write(append(data, '\n'))
+}
+
 func endpointAction(hookName string, entry map[string]interface{}) (action, severity string) {
 	message := strings.ToLower(fmt.Sprint(entry["message"]))
 	switch hookName {
@@ -209,6 +300,47 @@ func redactEndpointString(value string) string {
 		})
 	}
 	return value
+}
+
+func retentionAwareRaw(raw map[string]interface{}, retention string) map[string]interface{} {
+	if retention != "metadata" {
+		return raw
+	}
+	return map[string]interface{}{"field_count": len(raw)}
+}
+
+func sanitizeEndpointMap(input map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		switch typed := value.(type) {
+		case string:
+			out[key] = redactEndpointString(truncateEndpoint(typed, 4096))
+		case map[string]interface{}:
+			out[key] = sanitizeEndpointMap(typed)
+		case []interface{}:
+			out[key] = sanitizeEndpointSlice(typed)
+		default:
+			out[key] = typed
+		}
+	}
+	return out
+}
+
+func sanitizeEndpointSlice(input []interface{}) []interface{} {
+	out := make([]interface{}, len(input))
+	for i, value := range input {
+		switch typed := value.(type) {
+		case string:
+			out[i] = redactEndpointString(truncateEndpoint(typed, 4096))
+		case map[string]interface{}:
+			out[i] = sanitizeEndpointMap(typed)
+		case []interface{}:
+			out[i] = sanitizeEndpointSlice(typed)
+		default:
+			out[i] = typed
+		}
+	}
+	return out
 }
 
 func truncateEndpoint(value string, limit int) string {

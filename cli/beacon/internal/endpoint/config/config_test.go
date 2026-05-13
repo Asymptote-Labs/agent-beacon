@@ -27,6 +27,9 @@ func TestDefaultUserConfigUsesHomeScopedPaths(t *testing.T) {
 	if len(cfg.Harnesses) != 2 || cfg.Harnesses[0] != "claude" || cfg.Harnesses[1] != "codex" {
 		t.Fatalf("unexpected default harnesses: %#v", cfg.Harnesses)
 	}
+	if cfg.ContentRetention != ContentRetentionMetadata {
+		t.Fatalf("ContentRetention = %q, want %q", cfg.ContentRetention, ContentRetentionMetadata)
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
@@ -37,6 +40,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg := Default(true, logPath)
 	cfg.Collector.BinaryPath = filepath.Join(home, "bin", "otelcol")
 	cfg.EventCategories = []string{"tool", "session"}
+	cfg.ContentRetention = ContentRetentionRedacted
 
 	path, err := Save(cfg)
 	if err != nil {
@@ -58,6 +62,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if len(loaded.EventCategories) != 2 || loaded.EventCategories[1] != "session" {
 		t.Fatalf("EventCategories did not round-trip: %#v", loaded.EventCategories)
+	}
+	if loaded.ContentRetention != ContentRetentionRedacted {
+		t.Fatalf("ContentRetention = %q, want %q", loaded.ContentRetention, ContentRetentionRedacted)
 	}
 }
 

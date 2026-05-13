@@ -28,3 +28,16 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestRulesCoverAgentWorkflowActions(t *testing.T) {
+	rules := mustRead("pack/beacon-rules.xml")
+	for _, action := range []string{"command.executed", "mcp.tool_invoked", "tool.failed"} {
+		if !strings.Contains(rules, action) {
+			t.Fatalf("rules missing action %s", action)
+		}
+	}
+	sample := mustRead("pack/sample-event.jsonl")
+	if !strings.Contains(sample, `"content":{"retention":"metadata","included":false}`) {
+		t.Fatalf("sample event missing metadata retention: %s", sample)
+	}
+}

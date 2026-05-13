@@ -15,13 +15,13 @@
 
   <rule id="100520" level="7">
     <if_sid>100500</if_sid>
-    <field name="event.action">runtime.mode_disallowed</field>
-    <description>AI agent runtime launched in a disallowed mode</description>
+    <field name="event.action">command.executed|mcp.tool_invoked</field>
+    <description>AI agent runtime performed command or MCP tool action</description>
   </rule>
 
   <rule id="100530" level="10">
     <if_sid>100500</if_sid>
-    <field name="policy.decision">block</field>
+    <field name="event.action">approval.denied|policy.blocked</field>
     <description>AI agent runtime policy block</description>
   </rule>
 
@@ -29,5 +29,17 @@
     <if_sid>100500</if_sid>
     <field name="event.action">endpoint.tamper_detected|endpoint.health_failed</field>
     <description>Beacon endpoint tamper or health failure detected</description>
+  </rule>
+
+  <rule id="100550" level="5">
+    <if_sid>100500</if_sid>
+    <field name="event.action">prompt.submitted|tool.invoked|tool.completed|file.read|file.modified</field>
+    <description>AI agent runtime workflow telemetry</description>
+  </rule>
+
+  <rule id="100560" level="9">
+    <if_sid>100500</if_sid>
+    <field name="event.action">tool.failed</field>
+    <description>AI agent runtime tool failure</description>
   </rule>
 </group>

@@ -1,0 +1,94 @@
+package beaconjsonexporter
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/pdata/plog"
+)
+
+func TestConfigValidateRequiresPath(t *testing.T) {
+	cfg := createDefaultConfig()
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected missing path error")
+	}
+	cfg.Path = filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
+func TestConsumeLogsWritesBeaconJSONL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "redacted",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "claude-cowork")
+	sl := rl.ScopeLogs().AppendEmpty()
+	rec := sl.LogRecords().AppendEmpty()
+	rec.Body().SetStr("tool call token=super-secret")
+	rec.Attributes().PutStr("beacon.event.action", "tool.invoked")
+	rec.Attributes().PutStr("session.id", "session-1")
+	rec.Attributes().PutStr("tool.name", "Shell")
+	rec.Attributes().PutStr("command", "kubectl get pods")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if strings.Contains(string(data), "super-secret") {
+		t.Fatalf("expected secret to be redacted: %s", string(data))
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Vendor != vendor || event.Event.Action != "tool.invoked" || event.Harness.Name != "claude_cowork" {
+		t.Fatalf("unexpected event: %#v", event)
+	}
+	if event.Session == nil || event.Session.ID != "session-1" {
+		t.Fatalf("session missing from event: %#v", event.Session)
+	}
+	if event.Command == nil || event.Command.Command != "kubectl get pods" {
+		t.Fatalf("command missing from event: %#v", event.Command)
+	}
+}
+
+func TestMetadataRetentionDropsRawAttributes(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	raw := exp.rawPayload(map[string]interface{}{"prompt": "do a thing"}, map[string]interface{}{"otel_signal": "logs"})
+	if _, ok := raw["attributes"]; ok {
+		t.Fatalf("metadata retention should not include raw attributes: %#v", raw)
+	}
+	if raw["attribute_count"] != 1 {
+		t.Fatalf("attribute count missing: %#v", raw)
+	}
+}

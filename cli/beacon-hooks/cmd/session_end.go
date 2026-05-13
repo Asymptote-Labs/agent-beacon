@@ -35,6 +35,7 @@ func runSessionEnd(cmd *cobra.Command, args []string) {
 	if sessionID != "" {
 		logger := logging.NewSessionLogger("session-end", platformFlag, sessionID)
 		logger.Info("Session ended", "session_id", sessionID, "platform", platformFlag)
+		emitHookEvent(logger, "session.ended", "session", "info", "Agent session ended", input, sessionFields(sessionID, input))
 
 		logFile := config.GetSessionLogFile(platformFlag, sessionID)
 		if err := os.Remove(logFile); err != nil && !os.IsNotExist(err) {

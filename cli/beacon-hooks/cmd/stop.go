@@ -17,9 +17,9 @@ import (
 
 var stopCmd = &cobra.Command{
 	Use:   "stop",
-	Short: "Deliver local dependency scan findings",
+	Short: "Record agent response completion",
 	Long: `Stop hook - triggered when the coding agent finishes responding.
-The public Beacon build does not poll hosted evaluations; it only delivers local dependency scan findings.`,
+The public Beacon build does not poll hosted evaluations.`,
 	Run: runStop,
 }
 
@@ -53,7 +53,6 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	config.RotateLogIfNeededForPlatform(platformFlag)
 	st := state.NewSessionState(sessionID, platformFlag)
-	depScanReport := st.GetAndClearDepScanReport()
 
 	// The public Beacon build is local-only. Clear any pending remote evaluations
 	// left over from older hook versions instead of polling a hosted service.
@@ -63,20 +62,10 @@ func runStop(cmd *cobra.Command, args []string) {
 		logger.Warn("Cleared stale remote evaluations in local-only build", "count", len(pendingEvals))
 	}
 
-	if depScanReport == "" {
-		elapsed := time.Since(start)
-		logger.Info("stop completed", "duration_ms", elapsed.Milliseconds())
-		outputJSONAndExit(emptyResponse)
-		return
-	}
-
 	elapsed := time.Since(start)
-	logger.Info("Delivering dep scan report via stop hook", "duration_ms", elapsed.Milliseconds())
-	if platformFlag == "cursor" {
-		outputJSONAndExit(map[string]interface{}{"followup_message": depScanReport})
-	} else {
-		outputJSONAndExit(map[string]interface{}{"decision": "block", "reason": depScanReport})
-	}
+	logger.Info("stop completed", "duration_ms", elapsed.Milliseconds())
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+	outputJSONAndExit(emptyResponse)
 }
 
 // platformToTranscriptName maps the platform flag to the transcript platform identifier.

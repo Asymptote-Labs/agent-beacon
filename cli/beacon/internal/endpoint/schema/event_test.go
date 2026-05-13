@@ -34,6 +34,13 @@ func TestNewEventSetsRequiredInvariants(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, event.Timestamp); err != nil {
 		t.Fatalf("timestamp is not RFC3339: %q", event.Timestamp)
 	}
+	event.File = &FileInfo{Path: "main.go", Operation: "modify"}
+	event.Command = &CommandInfo{Command: "go test ./..."}
+	event.MCP = &MCPInfo{Server: "github", Tool: "get_issue"}
+	event.Content = &ContentInfo{Retention: "metadata", Included: false}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("Validate rejected optional telemetry fields: %v", err)
+	}
 }
 
 func TestValidateRejectsMissingOrInvalidRequiredFields(t *testing.T) {

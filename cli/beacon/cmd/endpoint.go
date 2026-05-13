@@ -20,19 +20,20 @@ import (
 )
 
 var endpointOpts struct {
-	userMode      bool
-	logPath       string
-	harnesses     string
-	outputDir     string
-	jsonOutput    bool
-	grpcPort      int
-	httpPort      int
-	collectorPath string
-	keepLogs      bool
-	keepConfig    bool
-	noStart       bool
-	coworkHeaders string
-	hookLevel     string
+	userMode         bool
+	logPath          string
+	harnesses        string
+	outputDir        string
+	jsonOutput       bool
+	grpcPort         int
+	httpPort         int
+	collectorPath    string
+	keepLogs         bool
+	keepConfig       bool
+	noStart          bool
+	coworkHeaders    string
+	hookLevel        string
+	contentRetention string
 }
 
 var endpointCmd = &cobra.Command{
@@ -231,10 +232,12 @@ func init() {
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to an otelcol or otelcol-contrib binary")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
+	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "metadata", "Content retention mode: metadata, redacted, or full")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
+	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "metadata", "Content retention mode: metadata, redacted, or full")
 
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print discovery as JSON")
 	endpointStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
@@ -338,13 +341,14 @@ func runEndpointWazuhValidate(cmd *cobra.Command, args []string) error {
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
-		UserMode:      endpointOpts.userMode,
-		LogPath:       endpointOpts.logPath,
-		Harnesses:     splitCSV(endpointOpts.harnesses),
-		GRPCPort:      endpointOpts.grpcPort,
-		HTTPPort:      endpointOpts.httpPort,
-		CollectorPath: endpointOpts.collectorPath,
-		StartService:  !endpointOpts.noStart,
+		UserMode:         endpointOpts.userMode,
+		LogPath:          endpointOpts.logPath,
+		Harnesses:        splitCSV(endpointOpts.harnesses),
+		GRPCPort:         endpointOpts.grpcPort,
+		HTTPPort:         endpointOpts.httpPort,
+		CollectorPath:    endpointOpts.collectorPath,
+		StartService:     !endpointOpts.noStart,
+		ContentRetention: endpointconfig.ContentRetention(endpointOpts.contentRetention),
 	})
 	if err != nil {
 		return err
@@ -454,13 +458,14 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 
 func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
-		UserMode:      endpointOpts.userMode,
-		LogPath:       endpointOpts.logPath,
-		Harnesses:     splitCSV(endpointOpts.harnesses),
-		GRPCPort:      endpointOpts.grpcPort,
-		HTTPPort:      endpointOpts.httpPort,
-		CollectorPath: endpointOpts.collectorPath,
-		StartService:  !endpointOpts.noStart,
+		UserMode:         endpointOpts.userMode,
+		LogPath:          endpointOpts.logPath,
+		Harnesses:        splitCSV(endpointOpts.harnesses),
+		GRPCPort:         endpointOpts.grpcPort,
+		HTTPPort:         endpointOpts.httpPort,
+		CollectorPath:    endpointOpts.collectorPath,
+		StartService:     !endpointOpts.noStart,
+		ContentRetention: endpointconfig.ContentRetention(endpointOpts.contentRetention),
 	})
 	if err != nil {
 		return err

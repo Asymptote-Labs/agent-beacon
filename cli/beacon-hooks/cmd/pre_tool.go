@@ -46,12 +46,14 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	// Short-circuit: SbD disabled → no-op
 	if !config.IsSecureByDesignEnabled(platformFlag) {
 		logger.Debug("Secure by design is disabled, allowing")
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Secure by Design disabled")
 		outputJSON(allowResponse)
 		return
 	}
 
 	if sessionID == "" {
 		logger.Debug("No session ID, allowing")
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "No session ID")
 		outputJSON(allowResponse)
 		return
 	}
@@ -66,6 +68,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	// No policies cached → no-op
 	if policies == "" {
 		logger.Debug("No policies cached, allowing")
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "No cached policies")
 		outputJSON(allowResponse)
 		return
 	}
@@ -75,6 +78,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		logger.Debug("Generation ID mismatch, allowing Write (stale state)",
 			"input_generation_id", inputGenerationID,
 			"stored_generation_id", storedGenerationID)
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Generation ID mismatch")
 		outputJSON(allowResponse)
 		return
 	}
@@ -83,6 +87,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	if injected {
 		logger.Debug("Policy already injected, allowing Write",
 			"generation_id", storedGenerationID)
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Policy already injected")
 		outputJSON(allowResponse)
 		return
 	}
@@ -97,10 +102,26 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		"generation_id", storedGenerationID,
 		"policy_length", len(policies),
 		"duration_ms", elapsed.Milliseconds())
+	emitPreToolDecision(logger, input, sessionID, "approval.denied", "deny", "Policy context injection")
 
 	outputJSON(map[string]interface{}{
 		"permission":    "deny",
 		"user_message":  message,
 		"agent_message": message,
 	})
+}
+
+func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, sessionID, action, decision, reason string) {
+	toolName := getFirstStr(input, "tool_name", "toolName")
+	toolInput := resolveToolInput(input)
+	fields := sessionFields(sessionID, input)
+	for key, value := range toolFields(toolName, toolInput) {
+		fields[key] = value
+	}
+	fields["approval"] = map[string]interface{}{
+		"required": true,
+		"decision": decision,
+		"reason":   reason,
+	}
+	emitHookEvent(logger, action, "approval", "info", reason, input, fields)
 }

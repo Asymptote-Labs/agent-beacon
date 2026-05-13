@@ -56,5 +56,6 @@ func runSessionStart(cmd *cobra.Command, args []string) {
 	}
 
 	logger.Info("Session initialized", "session_id", sessionID, "platform", platformFlag)
+	emitHookEvent(logger, "session.started", "session", "info", "Agent session started", input, sessionFields(sessionID, input))
 	outputJSON(emptyResponse)
 }
