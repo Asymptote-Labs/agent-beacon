@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beacon Endpoint Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-only</p>
+        <h1>Beacon Endpoint Dashboard</h1>
+      </div>
+      <button id="refresh">Refresh</button>
+    </header>
+
+    <main>
+      <section class="panel status-panel">
+        <div>
+          <h2>Endpoint</h2>
+          <p id="log-path" class="muted">Loading runtime log...</p>
+        </div>
+        <div id="retention" class="pill">metadata</div>
+      </section>
+
+      <section class="cards" id="cards"></section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Activity Timeline</h2>
+            <p class="muted">Prompt, tool, command, MCP, approval, and file events from the local JSONL log.</p>
+          </div>
+        </div>
+        <form id="filters" class="filters">
+          <input name="harness" placeholder="Harness" />
+          <input name="action" placeholder="Action" />
+          <input name="repository" placeholder="Repository" />
+          <input name="session" placeholder="Session" />
+          <input name="file" placeholder="File path" />
+          <input name="command" placeholder="Command or tool" />
+          <select name="limit">
+            <option value="100">100 events</option>
+            <option value="500" selected>500 events</option>
+            <option value="1000">1000 events</option>
+          </select>
+          <button type="submit">Apply</button>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Harness</th>
+                <th>Action</th>
+                <th>Severity</th>
+                <th>Session</th>
+                <th>Repository</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="events"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Runtime Inventory</h2>
+        <div id="harnesses" class="harnesses"></div>
+      </section>
+    </main>
+
+    <aside id="drawer" class="drawer" aria-hidden="true">
+      <div class="drawer-head">
+        <h2>Event Detail</h2>
+        <button id="close-drawer">Close</button>
+      </div>
+      <pre id="event-json"></pre>
+    </aside>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

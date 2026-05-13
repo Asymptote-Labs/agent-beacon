@@ -14,3 +14,19 @@ func TestSplitCSV(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointDashboardCommandRegistered(t *testing.T) {
+	cmd, _, err := endpointCmd.Find([]string{"dashboard"})
+	if err != nil {
+		t.Fatalf("Find dashboard returned error: %v", err)
+	}
+	if cmd == nil || cmd.Use != "dashboard" {
+		t.Fatalf("dashboard command not registered: %#v", cmd)
+	}
+	if cmd.Flags().Lookup("addr") == nil {
+		t.Fatal("dashboard command missing --addr flag")
+	}
+	if cmd.Flags().Lookup("open") == nil {
+		t.Fatal("dashboard command missing --open flag")
+	}
+}

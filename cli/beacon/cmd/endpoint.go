@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
@@ -34,6 +35,8 @@ var endpointOpts struct {
 	coworkHeaders    string
 	hookLevel        string
 	contentRetention string
+	dashboardAddr    string
+	dashboardOpen    bool
 }
 
 var endpointCmd = &cobra.Command{
@@ -76,6 +79,13 @@ var endpointRepairCmd = &cobra.Command{
 	Short:        "Repair local endpoint service and telemetry configuration",
 	SilenceUsage: true,
 	RunE:         runEndpointRepair,
+}
+
+var endpointDashboardCmd = &cobra.Command{
+	Use:          "dashboard",
+	Short:        "Run the local Beacon endpoint dashboard",
+	SilenceUsage: true,
+	RunE:         runEndpointDashboard,
 }
 
 var endpointWazuhCmd = &cobra.Command{
@@ -208,6 +218,7 @@ func init() {
 	endpointCmd.AddCommand(endpointDiscoverCmd)
 	endpointCmd.AddCommand(endpointUninstallCmd)
 	endpointCmd.AddCommand(endpointRepairCmd)
+	endpointCmd.AddCommand(endpointDashboardCmd)
 	endpointCmd.AddCommand(endpointWazuhCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
@@ -238,6 +249,10 @@ func init() {
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "metadata", "Content retention mode: metadata, redacted, or full")
+	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	endpointDashboardCmd.Flags().StringVar(&endpointOpts.dashboardAddr, "addr", dashboard.DefaultAddr, "Local dashboard listen address")
+	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.dashboardOpen, "open", false, "Open the dashboard in a browser")
 
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print discovery as JSON")
 	endpointStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
@@ -337,6 +352,29 @@ func runEndpointWazuhValidate(cmd *cobra.Command, args []string) error {
 	fmt.Print(wazuh.LocalfileSnippet(cfg.LogPath))
 	fmt.Println("Expected base rule: 100500")
 	return nil
+}
+
+func runEndpointDashboard(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	if endpointOpts.dashboardAddr == "" {
+		endpointOpts.dashboardAddr = dashboard.DefaultAddr
+	}
+	if err := dashboard.ValidateLoopbackAddr(endpointOpts.dashboardAddr); err != nil {
+		return err
+	}
+	url := dashboard.URL(endpointOpts.dashboardAddr)
+	fmt.Printf("Beacon endpoint dashboard: %s\n", url)
+	fmt.Printf("Runtime log: %s\n", cfg.LogPath)
+	if endpointOpts.dashboardOpen {
+		if err := dashboard.OpenBrowser(url); err != nil {
+			return err
+		}
+	}
+	return dashboard.ListenAndServe(dashboard.Options{
+		Addr:     endpointOpts.dashboardAddr,
+		LogPath:  cfg.LogPath,
+		UserMode: cfg.UserMode,
+	})
 }
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {

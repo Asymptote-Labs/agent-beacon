@@ -15,8 +15,20 @@ make build
 ./beacon endpoint status --json
 ./beacon endpoint discover --json
 ./beacon endpoint repair --user
+./beacon endpoint dashboard --user
 ./beacon endpoint uninstall --user --keep-logs
 ```
+
+## Dashboard
+
+```bash
+./beacon endpoint dashboard --user
+./beacon endpoint dashboard --user --addr 127.0.0.1:8765
+./beacon endpoint dashboard --user --open
+```
+
+The dashboard is local-only, binds to loopback, and reads the configured
+runtime JSONL log.
 
 ## Wazuh
 
