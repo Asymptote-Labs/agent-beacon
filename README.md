@@ -6,6 +6,9 @@ Beacon Endpoint Agent configures local telemetry for tools like Claude Code,
 Codex CLI, Claude Cowork, and Cursor, then writes Wazuh-compatible JSONL logs.
 It runs local-only and does not require a Beacon account.
 
+Read the [Beacon CLI documentation](https://docs.asymptotelabs.ai/cli) for setup
+guides and command details.
+
 Beacon is visibility-first. The current public build focuses on observing local
 agent runtime activity, normalizing it into endpoint events, and leaving
 forwarding to existing localfile/Wazuh or customer-managed pipelines.
@@ -15,6 +18,7 @@ forwarding to existing localfile/Wazuh or customer-managed pipelines.
 - [What Beacon Does](#what-beacon-does)
 - [Privacy And Retention](#privacy-and-retention)
 - [What Beacon Does Not Do](#what-beacon-does-not-do)
+- [Documentation](#documentation)
 - [Quick Start](#quick-start)
 - [Install With Homebrew](#install-with-homebrew)
 - [Optional Integrations](#optional-integrations)
@@ -63,6 +67,11 @@ Beacon does not currently provide kernel/process monitoring, shell history
 collection, cloud audit ingestion, browser/SaaS telemetry, credential-use
 attribution, MCP configuration inventory, or direct Datadog/Splunk/Elastic/etc.
 exporters.
+
+## Documentation
+
+See the [Beacon CLI documentation](https://docs.asymptotelabs.ai/cli) for setup
+guides and command details.
 
 ## Quick Start
 
