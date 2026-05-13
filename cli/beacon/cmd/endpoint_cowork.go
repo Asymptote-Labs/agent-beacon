@@ -91,7 +91,6 @@ func runEndpointCoworkSetup(cmdCtx context.Context) error {
 
 func runEndpointCoworkValidate() error {
 	cfg := loadOrDefaultConfig()
-	status := cowork.GetStatus(cfg.LogPath)
 	if endpointOpts.coworkSince != "" {
 		duration, err := time.ParseDuration(endpointOpts.coworkSince)
 		if err != nil {
@@ -110,6 +109,7 @@ func runEndpointCoworkValidate() error {
 		fmt.Printf("Claude Cowork events observed in endpoint runtime log since %s.\n", since.UTC().Format(time.RFC3339))
 		return nil
 	}
+	status := cowork.GetStatus(cfg.LogPath)
 	if !status.LastEventObserved {
 		fmt.Print(cowork.PrintConfig(cowork.Config{
 			Endpoint:           endpointOpts.coworkEndpoint,
@@ -221,7 +221,7 @@ func (t *ngrokTunnel) Wait() error {
 		}
 		err := <-wait
 		if err != nil {
-			return nil
+			return err
 		}
 		return nil
 	case err := <-wait:
