@@ -340,8 +340,6 @@ func normalizeHarnessName(name string) string {
 		return "claude_code"
 	case strings.Contains(lower, "codex"):
 		return "codex_cli"
-	case name != "":
-		return name
 	default:
 		return ""
 	}
