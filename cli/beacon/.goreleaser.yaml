@@ -92,7 +92,7 @@ brews:
 release:
   github:
     owner: asymptote-labs
-    name: beacon
+    name: agent-beacon
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
