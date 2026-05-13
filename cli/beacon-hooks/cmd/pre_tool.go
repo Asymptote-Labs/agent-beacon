@@ -1,21 +1,16 @@
 package cmd
 
 import (
-	"time"
-
 	"github.com/spf13/cobra"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
 )
 
 var preToolCmd = &cobra.Command{
 	Use:   "pre-tool",
-	Short: "Gate file writes to inject security policy context",
+	Short: "Observe pre-tool events for local endpoint telemetry",
 	Long: `PreToolUse hook - triggered before a Write tool execution in Cursor.
-On the first Write of a prompt cycle, denies the operation to inject cached
-security policies into the agent's context. Subsequent writes are allowed.`,
+Records local telemetry for the tool request and allows the runtime to continue.`,
 	Run: runPreTool,
 }
 
@@ -27,8 +22,6 @@ func init() {
 var allowResponse = map[string]interface{}{"permission": "allow"}
 
 func runPreTool(cmd *cobra.Command, args []string) {
-	start := time.Now()
-
 	input, err := readStdinJSON()
 	if err != nil {
 		outputJSON(allowResponse)
@@ -43,72 +36,9 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		logger = logging.NewLoggerForPlatform("pre-tool", platformFlag)
 	}
 
-	// Short-circuit: SbD disabled → no-op
-	if !config.IsSecureByDesignEnabled(platformFlag) {
-		logger.Debug("Secure by design is disabled, allowing")
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Secure by Design disabled")
-		outputJSON(allowResponse)
-		return
-	}
-
-	if sessionID == "" {
-		logger.Debug("No session ID, allowing")
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "No session ID")
-		outputJSON(allowResponse)
-		return
-	}
-
-	// Read generation_id from input to validate against stored state
-	inputGenerationID, _ := input["generation_id"].(string)
-
-	// Check SbD state for this conversation
-	st := state.NewSessionState(sessionID, platformFlag)
-	policies, storedGenerationID, injected := st.GetSbdState()
-
-	// No policies cached → no-op
-	if policies == "" {
-		logger.Debug("No policies cached, allowing")
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "No cached policies")
-		outputJSON(allowResponse)
-		return
-	}
-
-	// Generation mismatch → stale state, allow through
-	if inputGenerationID != "" && storedGenerationID != "" && inputGenerationID != storedGenerationID {
-		logger.Debug("Generation ID mismatch, allowing Write (stale state)",
-			"input_generation_id", inputGenerationID,
-			"stored_generation_id", storedGenerationID)
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Generation ID mismatch")
-		outputJSON(allowResponse)
-		return
-	}
-
-	// Already injected for this generation → allow
-	if injected {
-		logger.Debug("Policy already injected, allowing Write",
-			"generation_id", storedGenerationID)
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Policy already injected")
-		outputJSON(allowResponse)
-		return
-	}
-
-	// First Write of this generation: deny once to inject policy context
-	st.MarkSbdInjected()
-
-	message := policies + "You must comply with these policies. Retry your file write with policy-compliant code, or inform the user if the requested change would violate a policy."
-
-	elapsed := time.Since(start)
-	logger.Info("Policy gate: denying Write for context injection",
-		"generation_id", storedGenerationID,
-		"policy_length", len(policies),
-		"duration_ms", elapsed.Milliseconds())
-	emitPreToolDecision(logger, input, sessionID, "approval.denied", "deny", "Policy context injection")
-
-	outputJSON(map[string]interface{}{
-		"permission":    "deny",
-		"user_message":  message,
-		"agent_message": message,
-	})
+	logger.Debug("Pre-tool observed, allowing")
+	emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
+	outputJSON(allowResponse)
 }
 
 func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, sessionID, action, decision, reason string) {

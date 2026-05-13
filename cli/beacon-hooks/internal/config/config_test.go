@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -103,96 +102,5 @@ func TestCursorDirPath(t *testing.T) {
 	}
 	if filepath.Base(filepath.Dir(CursorDir)) != ".beacon" {
 		t.Errorf("CursorDir parent should be '.beacon', got %q", filepath.Dir(CursorDir))
-	}
-}
-
-func TestIsSecureByDesignEnabled_PlatformSpecific(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	origCursorDir := CursorDir
-	origBeaconDir := BeaconDir
-	CursorDir = filepath.Join(tmpDir, "cursor")
-	BeaconDir = tmpDir
-	defer func() {
-		CursorDir = origCursorDir
-		BeaconDir = origBeaconDir
-	}()
-
-	os.MkdirAll(filepath.Join(tmpDir, "cursor"), 0755)
-
-	// No config file → false
-	if IsSecureByDesignEnabled("cursor") {
-		t.Error("should be false when no config exists")
-	}
-
-	// Platform config enabled
-	os.WriteFile(filepath.Join(tmpDir, "cursor", "config.json"), []byte(`{"secure_by_design": true}`), 0644)
-	if !IsSecureByDesignEnabled("cursor") {
-		t.Error("should be true when platform config has secure_by_design: true")
-	}
-
-	// Platform-specific false overrides global true
-	os.WriteFile(filepath.Join(tmpDir, "cursor", "config.json"), []byte(`{"secure_by_design": false}`), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "config.json"), []byte(`{"secure_by_design": true}`), 0644)
-	if IsSecureByDesignEnabled("cursor") {
-		t.Error("platform-specific false should take precedence over global true")
-	}
-}
-
-func TestIsSecureByDesignEnabled_GlobalIgnored(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	origClaudeDir := ClaudeDir
-	origBeaconDir := BeaconDir
-	ClaudeDir = filepath.Join(tmpDir, "claude")
-	BeaconDir = tmpDir
-	defer func() {
-		ClaudeDir = origClaudeDir
-		BeaconDir = origBeaconDir
-	}()
-
-	// No platform config, global has SbD enabled → should NOT fall back (global deprecated)
-	os.WriteFile(filepath.Join(tmpDir, "config.json"), []byte(`{"secure_by_design": true}`), 0644)
-	if IsSecureByDesignEnabled("claude") {
-		t.Error("should ignore global config, only platform-specific config matters")
-	}
-}
-
-func TestIsSecureByDesignEnabled_NoConfigFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	origClaudeDir := ClaudeDir
-	origBeaconDir := BeaconDir
-	ClaudeDir = filepath.Join(tmpDir, "claude")
-	BeaconDir = tmpDir
-	defer func() {
-		ClaudeDir = origClaudeDir
-		BeaconDir = origBeaconDir
-	}()
-
-	// No config files at all → false
-	if IsSecureByDesignEnabled("claude") {
-		t.Error("should be false when no config files exist")
-	}
-}
-
-func TestIsSecureByDesignEnabled_InvalidJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	origCursorDir := CursorDir
-	origBeaconDir := BeaconDir
-	CursorDir = filepath.Join(tmpDir, "cursor")
-	BeaconDir = tmpDir
-	defer func() {
-		CursorDir = origCursorDir
-		BeaconDir = origBeaconDir
-	}()
-
-	os.MkdirAll(filepath.Join(tmpDir, "cursor"), 0755)
-
-	// Invalid JSON in platform config → false (no fallback)
-	os.WriteFile(filepath.Join(tmpDir, "cursor", "config.json"), []byte(`not json`), 0644)
-	if IsSecureByDesignEnabled("cursor") {
-		t.Error("should be false when platform config has invalid JSON")
 	}
 }

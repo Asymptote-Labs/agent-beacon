@@ -133,22 +133,6 @@ func EnsureStateDir(platform string) error {
 	return os.MkdirAll(GetStateDir(platform), 0755)
 }
 
-// IsSecureByDesignEnabled checks if Secure by Design is enabled for the given platform.
-// Reads from platform-specific config at ~/.beacon/{platform}/config.json.
-func IsSecureByDesignEnabled(platform string) bool {
-	platformPath := filepath.Join(GetStateDir(platform), "config.json")
-	data, err := os.ReadFile(platformPath)
-	if err != nil {
-		return false
-	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return false
-	}
-	enabled, ok := cfg["secure_by_design"].(bool)
-	return ok && enabled
-}
-
 func ContentRetentionMode() ContentRetention {
 	endpointPath := filepath.Join(BeaconDir, "endpoint", "config.json")
 	data, err := os.ReadFile(endpointPath)

@@ -29,11 +29,6 @@ type SessionData struct {
 	RepromptCount int          `json:"reprompt_count"`
 	Model         string       `json:"model,omitempty"`
 	CreatedAt     string       `json:"created_at,omitempty"`
-
-	// Secure-by-Design fields (used by Cursor's pre-tool gate)
-	SbdPolicies     string `json:"sbd_policies,omitempty"`
-	SbdGenerationID string `json:"sbd_generation_id,omitempty"`
-	SbdInjected     bool   `json:"sbd_injected,omitempty"`
 }
 
 // SessionState manages session state
@@ -189,59 +184,6 @@ func (s *SessionState) ResetRepromptCount() {
 	state := s.loadStateFile()
 	s.ensureSession(state)
 	state[s.sessionID].RepromptCount = 0
-	s.saveStateFile(state)
-}
-
-// SetSbdPolicies stores local policy context and resets the injection flag for a new generation.
-func (s *SessionState) SetSbdPolicies(policies, generationID string) {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
-
-	state := s.loadStateFile()
-	s.ensureSession(state)
-	state[s.sessionID].SbdPolicies = policies
-	state[s.sessionID].SbdGenerationID = generationID
-	state[s.sessionID].SbdInjected = false
-	s.saveStateFile(state)
-}
-
-// GetSbdState returns the current Secure-by-Design state for this session.
-func (s *SessionState) GetSbdState() (policies, generationID string, injected bool) {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
-
-	state := s.loadStateFile()
-	if sessionData, ok := state[s.sessionID]; ok {
-		return sessionData.SbdPolicies, sessionData.SbdGenerationID, sessionData.SbdInjected
-	}
-	return "", "", false
-}
-
-// ClearSbdPolicies removes cached SbD policies for this session.
-// Called on Cursor early-return paths in prompt-submit to prevent stale policies
-// from being injected in later generations.
-func (s *SessionState) ClearSbdPolicies() {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
-
-	state := s.loadStateFile()
-	if sessionData, ok := state[s.sessionID]; ok {
-		sessionData.SbdPolicies = ""
-		sessionData.SbdGenerationID = ""
-		sessionData.SbdInjected = false
-		s.saveStateFile(state)
-	}
-}
-
-// MarkSbdInjected sets the injection flag to true, indicating policies have been
-// delivered to the agent for the current generation.
-func (s *SessionState) MarkSbdInjected() {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
-
-	state := s.loadStateFile()
-	s.ensureSession(state)
-	state[s.sessionID].SbdInjected = true
 	s.saveStateFile(state)
 }
 

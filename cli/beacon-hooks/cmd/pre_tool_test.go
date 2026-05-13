@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -13,63 +12,17 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
 )
 
-func TestRunPreToolSecureByDesignGateBranches(t *testing.T) {
+func TestRunPreToolAllowsAndEmitsTelemetry(t *testing.T) {
 	tests := []struct {
-		name       string
-		enableSBD  bool
-		sessionID  string
-		inputGen   string
-		storedGen  string
-		policies   string
-		injected   bool
-		wantPerm   string
-		wantInject bool
+		name      string
+		sessionID string
 	}{
 		{
-			name:      "disabled allows",
-			sessionID: "conv-disabled",
-			policies:  "policy\n",
-			wantPerm:  "allow",
+			name: "missing session allows",
 		},
 		{
-			name:      "missing session allows",
-			enableSBD: true,
-			wantPerm:  "allow",
-		},
-		{
-			name:      "no policies allows",
-			enableSBD: true,
-			sessionID: "conv-no-policies",
-			wantPerm:  "allow",
-		},
-		{
-			name:      "generation mismatch allows",
-			enableSBD: true,
-			sessionID: "conv-stale",
-			inputGen:  "gen-2",
-			storedGen: "gen-1",
-			policies:  "policy\n",
-			wantPerm:  "allow",
-		},
-		{
-			name:      "already injected allows",
-			enableSBD: true,
-			sessionID: "conv-injected",
-			inputGen:  "gen-1",
-			storedGen: "gen-1",
-			policies:  "policy\n",
-			injected:  true,
-			wantPerm:  "allow",
-		},
-		{
-			name:       "first write denies and marks injected",
-			enableSBD:  true,
-			sessionID:  "conv-deny",
-			inputGen:   "gen-1",
-			storedGen:  "gen-1",
-			policies:   "policy\n",
-			wantPerm:   "deny",
-			wantInject: true,
+			name:      "session allows",
+			sessionID: "conv-observe",
 		},
 	}
 
@@ -77,58 +30,27 @@ func TestRunPreToolSecureByDesignGateBranches(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			setupHookConfigDirs(t)
 			platformFlag = "cursor"
-			if tt.enableSBD {
-				writePlatformConfig(t, "cursor", `{"secure_by_design":true}`)
-			}
-			if tt.sessionID != "" && tt.policies != "" {
-				st := state.NewSessionState(tt.sessionID, "cursor")
-				st.SetSbdPolicies(tt.policies, tt.storedGen)
-				if tt.injected {
-					st.MarkSbdInjected()
-				}
-			}
 
 			input := map[string]interface{}{}
 			if tt.sessionID != "" {
 				input["conversation_id"] = tt.sessionID
 			}
-			if tt.inputGen != "" {
-				input["generation_id"] = tt.inputGen
-			}
 			out := runHookWithInput(t, runPreTool, input)
 
-			if out["permission"] != tt.wantPerm {
-				t.Fatalf("permission = %v, want %s; output=%#v", out["permission"], tt.wantPerm, out)
-			}
-			if tt.wantPerm == "deny" {
-				message, _ := out["agent_message"].(string)
-				if !strings.Contains(message, tt.policies) || !strings.Contains(message, "Retry your file write") {
-					t.Fatalf("deny message missing policy context: %#v", out)
-				}
-			}
-			if tt.sessionID != "" {
-				_, _, injected := state.NewSessionState(tt.sessionID, "cursor").GetSbdState()
-				if injected != (tt.injected || tt.wantInject) {
-					t.Fatalf("injected = %v, want %v", injected, tt.injected || tt.wantInject)
-				}
+			if out["permission"] != "allow" {
+				t.Fatalf("permission = %v, want allow; output=%#v", out["permission"], out)
 			}
 		})
 	}
 }
 
-func TestRunPromptSubmitClearsSbdPoliciesAndUsesCursorResponse(t *testing.T) {
+func TestRunPromptSubmitUsesCursorResponse(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
-	st := state.NewSessionState("conv-clear", "cursor")
-	st.SetSbdPolicies("policy", "gen-1")
 
-	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{"conversation_id": "conv-clear"})
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{"conversation_id": "conv-submit"})
 	if out["continue"] != true {
 		t.Fatalf("cursor prompt response = %#v, want continue=true", out)
-	}
-	policies, generationID, injected := st.GetSbdState()
-	if policies != "" || generationID != "" || injected {
-		t.Fatalf("SbD state was not cleared: policies=%q generation=%q injected=%v", policies, generationID, injected)
 	}
 }
 
@@ -190,17 +112,6 @@ func setupHookConfigDirs(t *testing.T) {
 		hookconfig.FactoryDir = origFactoryDir
 		platformFlag = origPlatform
 	})
-}
-
-func writePlatformConfig(t *testing.T, platform, body string) {
-	t.Helper()
-	path := filepath.Join(hookconfig.GetStateDir(platform), "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatalf("mkdir platform config dir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
-		t.Fatalf("write platform config: %v", err)
-	}
 }
 
 func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string), input map[string]interface{}) map[string]interface{} {
