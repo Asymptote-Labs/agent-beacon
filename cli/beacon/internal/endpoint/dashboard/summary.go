@@ -43,6 +43,7 @@ func BuildSummary(result EventResult) Summary {
 			sessions[event.Session.ID] = true
 		}
 		promptEvent := event.Event.Category == "prompt"
+		toolEvent := event.Event.Category == "tool" || event.Tool != nil
 		commandEvent := event.Event.Category == "command" || event.Command != nil
 		fileEvent := event.Event.Category == "file" || event.File != nil
 		mcpEvent := event.Event.Category == "mcp" || event.MCP != nil
@@ -50,11 +51,12 @@ func BuildSummary(result EventResult) Summary {
 		switch event.Event.Category {
 		case "prompt":
 			summary.PromptEvents++
-		case "tool":
-			summary.ToolEvents++
 		}
 		if !promptEvent && event.Event.Action == "prompt.submitted" {
 			summary.PromptEvents++
+		}
+		if toolEvent {
+			summary.ToolEvents++
 		}
 		if commandEvent {
 			summary.CommandEvents++

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,14 +101,54 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 }
 
 func FindEvent(path, id string) (EventRecord, bool, error) {
-	result, err := ReadEvents(path, EventQuery{Limit: maxEventLimit})
+	targetLine := 0
+	if strings.HasPrefix(id, "line-") {
+		n, err := strconv.Atoi(strings.TrimPrefix(id, "line-"))
+		if err == nil && n > 0 {
+			targetLine = n
+		}
+	}
+	if targetLine == 0 {
+		return EventRecord{}, false, nil
+	}
+
+	file, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return EventRecord{}, false, nil
+		}
 		return EventRecord{}, false, err
 	}
-	for _, record := range result.Events {
-		if record.ID == id {
-			return record, true, nil
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		if lineNo != targetLine {
+			continue
 		}
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			return EventRecord{}, false, nil
+		}
+		var event schema.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			return EventRecord{}, false, nil
+		}
+		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
+		record := EventRecord{
+			ID:     id,
+			Line:   lineNo,
+			Event:  event,
+			Raw:    append(json.RawMessage(nil), line...),
+			Parsed: parsed,
+		}
+		return record, true, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return EventRecord{}, false, err
 	}
 	return EventRecord{}, false, nil
 }

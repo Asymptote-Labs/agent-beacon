@@ -367,7 +367,7 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Runtime log: %s\n", cfg.LogPath)
 	if endpointOpts.dashboardOpen {
 		if err := dashboard.OpenBrowser(url); err != nil {
-			return err
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not open browser: %v\n", err)
 		}
 	}
 	return dashboard.ListenAndServe(dashboard.Options{
