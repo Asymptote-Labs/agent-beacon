@@ -7,7 +7,12 @@ before:
   hooks:
     - go mod tidy
     - bash -c 'cd ../beacon-hooks && go mod tidy'
-    - cp ../../collector-builder/dist/beacon-otelcol/beacon-otelcol ./beacon-otelcol
+    - rm -rf ./release-collectors
+    - mkdir -p ./release-collectors/darwin_amd64 ./release-collectors/darwin_arm64 ./release-collectors/linux_amd64 ./release-collectors/linux_arm64
+    - cp ../../collector-builder/dist/beacon-otelcol/darwin_amd64/beacon-otelcol ./release-collectors/darwin_amd64/beacon-otelcol
+    - cp ../../collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol ./release-collectors/darwin_arm64/beacon-otelcol
+    - cp ../../collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol ./release-collectors/linux_amd64/beacon-otelcol
+    - cp ../../collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol ./release-collectors/linux_arm64/beacon-otelcol
 
 builds:
   - id: beacon
@@ -43,7 +48,7 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README*
-      - src: beacon-otelcol
+      - src: release-collectors/{{ .Os }}_{{ .Arch }}/beacon-otelcol
         dst: beacon-otelcol
 
 checksum:

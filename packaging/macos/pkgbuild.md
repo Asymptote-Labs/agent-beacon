@@ -36,15 +36,16 @@ The package builder expects:
 
 ```text
 cli/beacon/beacon
-collector-builder/dist/beacon-otelcol/beacon-otelcol
+collector-builder/dist/beacon-otelcol/<goos>_<goarch>/beacon-otelcol
 ```
 
-Override those paths with `BEACON_BIN` and `BEACON_COLLECTOR` if release
-automation builds into a different directory.
+Override those paths with `BEACON_BIN`, `BEACON_COLLECTOR_TARGET`, and
+`BEACON_COLLECTOR` if release automation builds into a different directory.
 
 The Homebrew release archive also includes `beacon-otelcol` from
-`collector-builder/dist/beacon-otelcol/beacon-otelcol` and installs it beside
-`beacon`, so `beacon endpoint install` works without extra flags.
+the matching `collector-builder/dist/beacon-otelcol/<goos>_<goarch>` directory
+and installs it beside `beacon`, so `beacon endpoint install` works without
+extra flags.
 
 ## Package Build
 
