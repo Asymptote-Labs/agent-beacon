@@ -15,5 +15,5 @@ exporters:
     path: ./exporter/beaconjsonexporter
 
 extensions:
-  - gomod: go.opentelemetry.io/collector/extension/healthcheckextension v0.121.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.121.0
 

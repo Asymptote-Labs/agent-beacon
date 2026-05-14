@@ -68,7 +68,7 @@ type Manifest struct {
 
 func Install(opts InstallOptions) (InstallResult, error) {
 	cfg := buildConfig(opts)
-	if err := preflight(cfg); err != nil {
+	if err := preflight(cfg, opts.StartService); err != nil {
 		return InstallResult{}, err
 	}
 	manager := service.Manager{UserMode: cfg.UserMode}
@@ -222,7 +222,7 @@ func loadOrDefault(userMode bool, logPath string) endpointconfig.Config {
 	return endpointconfig.Default(userMode, logPath)
 }
 
-func preflight(cfg endpointconfig.Config) error {
+func preflight(cfg endpointconfig.Config, startService bool) error {
 	if err := endpointconfig.ValidateContentRetention(cfg.ContentRetention); err != nil {
 		return err
 	}
@@ -231,6 +231,9 @@ func preflight(cfg endpointconfig.Config) error {
 	}
 	if !cfg.UserMode && os.Geteuid() != 0 {
 		return fmt.Errorf("system install requires root; rerun with sudo or use --user")
+	}
+	if !startService {
+		return nil
 	}
 	if !endpointcollector.PortAvailable(cfg.Collector.GRPCPort) {
 		return fmt.Errorf("OTLP gRPC port %d is already in use", cfg.Collector.GRPCPort)

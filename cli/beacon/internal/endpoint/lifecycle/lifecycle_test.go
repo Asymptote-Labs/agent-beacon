@@ -155,9 +155,29 @@ func TestPreflightRejectsPortInUse(t *testing.T) {
 	cfg.Collector.GRPCPort = port
 	cfg.Collector.HTTPPort = freePort(t)
 
-	err = preflight(cfg)
+	err = preflight(cfg, true)
 	if err == nil || !strings.Contains(err.Error(), "OTLP gRPC port") {
 		t.Fatalf("preflight error = %v, want gRPC port in use", err)
+	}
+}
+
+func TestPreflightAllowsPortInUseWhenServiceWillNotStart(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("preflight is macOS-only")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	cfg := endpointconfig.Default(true, filepath.Join(t.TempDir(), "runtime.jsonl"))
+	cfg.Collector.GRPCPort = port
+	cfg.Collector.HTTPPort = freePort(t)
+
+	if err := preflight(cfg, false); err != nil {
+		t.Fatalf("preflight returned error for no-start install: %v", err)
 	}
 }
 

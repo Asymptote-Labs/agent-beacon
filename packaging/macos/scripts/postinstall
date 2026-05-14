@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+BEACON_BIN="${BEACON_BIN:-/opt/beacon/bin/beacon}" \
+BEACON_COLLECTOR="${BEACON_COLLECTOR:-/opt/beacon/bin/beacon-otelcol}" \
+BEACON_ENDPOINT_HARNESSES="${BEACON_ENDPOINT_HARNESSES:-claude,codex}" \
+BEACON_CONTENT_RETENTION="${BEACON_CONTENT_RETENTION:-metadata}" \
+BEACON_OTLP_GRPC_PORT="${BEACON_OTLP_GRPC_PORT:-4317}" \
+BEACON_OTLP_HTTP_PORT="${BEACON_OTLP_HTTP_PORT:-4318}" \
+BEACON_NO_START=1 \
+  /opt/beacon/scripts/install-endpoint.sh
+
+if command -v launchctl >/dev/null 2>&1; then
+  launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.collector.plist >/dev/null 2>&1 || true
+fi
+
+exit 0
