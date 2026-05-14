@@ -61,7 +61,7 @@ func InstallCursor(opts CursorOptions) (CursorStatus, error) {
 		return CursorStatus{}, err
 	}
 	hooksPath := filepath.Join(targetDir, "hooks.json")
-	if err := installCursorHooksJSON(hooksPath, binaryPath, opts.LogPath); err != nil {
+	if err := installCursorHooksJSON(hooksPath, binaryPath, opts.LogPath, endpointconfig.ConfigPath(opts.UserMode)); err != nil {
 		return CursorStatus{}, err
 	}
 	return CursorStatus{Installed: true, BinaryPath: binaryPath, HooksJSONPath: hooksPath, Message: "Cursor endpoint hooks installed"}, nil
@@ -116,12 +116,12 @@ func IsCursorInstalled(opts CursorOptions) bool {
 	return strings.Contains(string(data), "BEACON_ENDPOINT_MODE=1") && strings.Contains(string(data), "beacon-hooks")
 }
 
-func installCursorHooksJSON(path, binaryPath, logPath string) error {
+func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error {
 	hooksJSON, err := readHooksJSON(path)
 	if err != nil {
 		return err
 	}
-	commandPrefix := fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s %s --platform cursor", shellQuote(logPath), shellQuote(binaryPath))
+	commandPrefix := fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s %s --platform cursor", shellQuote(logPath), shellQuote(configPath), shellQuote(binaryPath))
 	endpointHooks := map[string]HookRef{
 		"sessionStart":       {Command: commandPrefix + " session-start"},
 		"beforeSubmitPrompt": {Command: commandPrefix + " prompt-submit", Timeout: 30},

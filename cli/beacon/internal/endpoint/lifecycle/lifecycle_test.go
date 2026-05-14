@@ -273,7 +273,7 @@ func TestInstallUserModeWithoutStartingService(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	collectorPath := filepath.Join(home, "bin", "otelcol")
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
 	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
 		t.Fatalf("mkdir fake collector dir: %v", err)
 	}
@@ -308,6 +308,34 @@ func TestInstallUserModeWithoutStartingService(t *testing.T) {
 	}
 	if len(result.HarnessConfigPaths) != 0 {
 		t.Fatalf("unexpected harness config paths: %#v", result.HarnessConfigPaths)
+	}
+}
+
+func TestInstallFailsBeforeWritingArtifactsWhenCollectorMissing(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	missingCollector := filepath.Join(home, "bin", "beacon-otelcol")
+
+	_, err := Install(InstallOptions{
+		UserMode:      true,
+		LogPath:       logPath,
+		Harnesses:     []string{""},
+		GRPCPort:      freePort(t),
+		HTTPPort:      freePort(t),
+		CollectorPath: missingCollector,
+		StartService:  false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "collector binary") || !strings.Contains(err.Error(), "not usable") {
+		t.Fatalf("Install error = %v, want missing collector error", err)
+	}
+	for _, path := range []string{endpointconfig.ConfigPath(true), logPath} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("%s exists or unexpected error after failed install: %v", path, statErr)
+		}
 	}
 }
 

@@ -25,6 +25,12 @@ type Status struct {
 	Message string `json:"message,omitempty"`
 }
 
+var runLaunchctlCommand = func(args ...string) (string, error) {
+	cmd := exec.Command("launchctl", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func (m Manager) Label() string {
 	if m.UserMode {
 		return UserLabel
@@ -66,20 +72,16 @@ func (m Manager) Load() error {
 	if err != nil {
 		return err
 	}
-	if m.UserMode {
-		return runLaunchctl("bootstrap", "gui/"+fmt.Sprint(os.Getuid()), path)
-	}
-	return runLaunchctl("bootstrap", "system", path)
+	domain := serviceDomain(m.UserMode)
+	return runLaunchctlWithContext(domain, m.Label(), path, "bootstrap", domain, path)
 }
 
 func (m Manager) Unload() error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	if m.UserMode {
-		return runLaunchctl("bootout", "gui/"+fmt.Sprint(os.Getuid())+"/"+m.Label())
-	}
-	return runLaunchctl("bootout", "system/"+m.Label())
+	target := serviceDomain(m.UserMode) + "/" + m.Label()
+	return runLaunchctlWithContext(serviceDomain(m.UserMode), m.Label(), "", "bootout", target)
 }
 
 func (m Manager) Status() Status {
@@ -100,16 +102,55 @@ func (m Manager) Status() Status {
 }
 
 func runLaunchctl(args ...string) error {
-	cmd := exec.Command("launchctl", args...)
-	out, err := cmd.CombinedOutput()
+	return runLaunchctlWithContext("", "", "", args...)
+}
+
+func runLaunchctlWithContext(domain, label, plistPath string, args ...string) error {
+	out, err := runLaunchctlCommand(args...)
 	if err == nil {
 		return nil
 	}
-	text := strings.TrimSpace(string(out))
+	text := strings.TrimSpace(out)
 	if strings.Contains(text, "already bootstrapped") || strings.Contains(text, "No such process") {
 		return nil
 	}
-	return fmt.Errorf("launchctl %s failed: %s: %w", strings.Join(args, " "), text, err)
+	context := launchctlContext(domain, label, plistPath)
+	guidance := launchctlGuidance(text, domain, label)
+	if guidance != "" {
+		return fmt.Errorf("launchctl %s failed%s: %s: %w\n%s", strings.Join(args, " "), context, text, err, guidance)
+	}
+	return fmt.Errorf("launchctl %s failed%s: %s: %w", strings.Join(args, " "), context, text, err)
+}
+
+func launchctlContext(domain, label, plistPath string) string {
+	var fields []string
+	if label != "" {
+		fields = append(fields, "label "+label)
+	}
+	if domain != "" {
+		fields = append(fields, "domain "+domain)
+	}
+	if plistPath != "" {
+		fields = append(fields, "plist "+plistPath)
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(fields, ", ") + ")"
+}
+
+func launchctlGuidance(output, domain, label string) string {
+	if !strings.Contains(output, "Bootstrap failed: 5") && !strings.Contains(output, "Input/output error") {
+		return ""
+	}
+	target := label
+	if domain != "" && label != "" {
+		target = domain + "/" + label
+	}
+	if target == "" {
+		target = "the Beacon launchd job"
+	}
+	return fmt.Sprintf("Bootstrap failed: 5 usually means launchd could not read or execute the job. Verify the collector binary referenced by the plist exists and is executable, clear stale state with `launchctl bootout %s`, then inspect launchd logs with `log show --predicate 'process == \"launchd\"' --last 5m`.", target)
 }
 
 func serviceDomain(userMode bool) string {

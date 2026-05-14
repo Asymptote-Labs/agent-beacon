@@ -13,7 +13,7 @@ func TestInstallCursorHooksJSONPreservesNonBeaconHooks(t *testing.T) {
 	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installCursorHooksJSON(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl"); err != nil {
+	if err := installCursorHooksJSON(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -29,6 +29,9 @@ func TestInstallCursorHooksJSONPreservesNonBeaconHooks(t *testing.T) {
 	}
 	if !strings.Contains(text, "BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'") {
 		t.Fatalf("endpoint log env was not added: %s", text)
+	}
+	if !strings.Contains(text, "BEACON_ENDPOINT_CONFIG='/tmp/config.json'") {
+		t.Fatalf("endpoint config env was not added: %s", text)
 	}
 }
 
@@ -115,7 +118,7 @@ func TestInstallCursorHooksJSONReplacesExistingBeaconHook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installCursorHooksJSON(path, "/tmp/new beacon-hooks", "/tmp/runtime's.jsonl"); err != nil {
+	if err := installCursorHooksJSON(path, "/tmp/new beacon-hooks", "/tmp/runtime's.jsonl", "/tmp/config path.json"); err != nil {
 		t.Fatalf("installCursorHooksJSON returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -130,6 +133,9 @@ func TestInstallCursorHooksJSONReplacesExistingBeaconHook(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "'/tmp/new beacon-hooks'") || !strings.Contains(string(data), "BEACON_ENDPOINT_LOG=") || !strings.Contains(string(data), "runtime") {
 		t.Fatalf("command values were not shell-quoted: %s", string(data))
+	}
+	if !strings.Contains(string(data), "BEACON_ENDPOINT_CONFIG='/tmp/config path.json'") {
+		t.Fatalf("endpoint config path was not shell-quoted: %s", string(data))
 	}
 }
 

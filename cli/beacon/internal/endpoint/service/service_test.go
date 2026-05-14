@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -96,5 +97,33 @@ func TestStatusNonDarwinDocumentsUnsupportedMessage(t *testing.T) {
 	}
 	if !strings.Contains(status.Message, "available only on macOS") {
 		t.Fatalf("unexpected status message: %q", status.Message)
+	}
+}
+
+func TestRunLaunchctlWithContextExplainsBootstrapIOError(t *testing.T) {
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	err := runLaunchctlWithContext("gui/501", UserLabel, "/Users/test/Library/LaunchAgents/"+UserLabel+".plist", "bootstrap", "gui/501", "/Users/test/Library/LaunchAgents/"+UserLabel+".plist")
+	if err == nil {
+		t.Fatal("runLaunchctlWithContext returned nil, want error")
+	}
+	text := err.Error()
+	for _, want := range []string{
+		"label " + UserLabel,
+		"domain gui/501",
+		"plist /Users/test/Library/LaunchAgents/" + UserLabel + ".plist",
+		"Verify the collector binary",
+		"launchctl bootout gui/501/" + UserLabel,
+		"log show --predicate",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("error missing %q:\n%s", want, text)
+		}
 	}
 }

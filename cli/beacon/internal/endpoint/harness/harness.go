@@ -101,9 +101,6 @@ func DiscoverCodex() Harness {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Codex config file was not found"
 	}
-	if !h.Detected && dirExists(filepath.Join(home, ".codex")) {
-		h.Detected = true
-	}
 	return h
 }
 

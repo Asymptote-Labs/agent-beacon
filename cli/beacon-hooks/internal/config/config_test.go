@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -102,5 +103,59 @@ func TestCursorDirPath(t *testing.T) {
 	}
 	if filepath.Base(filepath.Dir(CursorDir)) != ".beacon" {
 		t.Errorf("CursorDir parent should be '.beacon', got %q", filepath.Dir(CursorDir))
+	}
+}
+
+func TestContentRetentionModeReadsExplicitEndpointConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"content_retention":"full"}`), 0644); err != nil {
+		t.Fatalf("write endpoint config: %v", err)
+	}
+	t.Setenv("BEACON_ENDPOINT_CONFIG", path)
+
+	if got := ContentRetentionMode(); got != ContentRetentionFull {
+		t.Fatalf("ContentRetentionMode() = %q, want %q", got, ContentRetentionFull)
+	}
+}
+
+func TestContentRetentionModePrefersSystemConfigForSystemLog(t *testing.T) {
+	home := t.TempDir()
+	oldBeaconDir := BeaconDir
+	oldSystemPath := SystemEndpointConfigPath
+	BeaconDir = filepath.Join(home, ".beacon")
+	SystemEndpointConfigPath = filepath.Join(t.TempDir(), "system-config.json")
+	t.Cleanup(func() {
+		BeaconDir = oldBeaconDir
+		SystemEndpointConfigPath = oldSystemPath
+	})
+	userPath := filepath.Join(BeaconDir, "endpoint", "config.json")
+	if err := os.MkdirAll(filepath.Dir(userPath), 0755); err != nil {
+		t.Fatalf("mkdir user endpoint config dir: %v", err)
+	}
+	if err := os.WriteFile(userPath, []byte(`{"content_retention":"metadata"}`), 0644); err != nil {
+		t.Fatalf("write user endpoint config: %v", err)
+	}
+	if err := os.WriteFile(SystemEndpointConfigPath, []byte(`{"content_retention":"full"}`), 0644); err != nil {
+		t.Fatalf("write system endpoint config: %v", err)
+	}
+	t.Setenv("BEACON_ENDPOINT_LOG", "/var/log/beacon-agent/runtime.jsonl")
+
+	if got := ContentRetentionMode(); got != ContentRetentionFull {
+		t.Fatalf("ContentRetentionMode() = %q, want %q", got, ContentRetentionFull)
+	}
+}
+
+func TestContentRetentionModeDefaultsToMetadata(t *testing.T) {
+	oldBeaconDir := BeaconDir
+	oldSystemPath := SystemEndpointConfigPath
+	BeaconDir = filepath.Join(t.TempDir(), ".beacon")
+	SystemEndpointConfigPath = filepath.Join(t.TempDir(), "missing-config.json")
+	t.Cleanup(func() {
+		BeaconDir = oldBeaconDir
+		SystemEndpointConfigPath = oldSystemPath
+	})
+
+	if got := ContentRetentionMode(); got != ContentRetentionMetadata {
+		t.Fatalf("ContentRetentionMode() = %q, want %q", got, ContentRetentionMetadata)
 	}
 }

@@ -82,12 +82,9 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	manager := service.Manager{UserMode: cfg.UserMode}
-	collectorBinary := endpointcollector.DiscoverBinary(cfg.Collector.BinaryPath)
-	if collectorBinary == "" {
-		collectorBinary = cfg.Collector.BinaryPath
-	}
-	if collectorBinary == "" {
-		collectorBinary = filepath.Join(endpointconfig.BaseDir(cfg.UserMode), "bin", "beacon-otelcol")
+	collectorBinary, err := endpointcollector.ResolveBinary(cfg.Collector.BinaryPath)
+	if err != nil {
+		return InstallResult{}, err
 	}
 
 	manifest := Manifest{

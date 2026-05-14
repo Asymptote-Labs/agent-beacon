@@ -156,6 +156,49 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 	}
 }
 
+func TestDiscoverCodexDoesNotDetectConfigDirectoryOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0755); err != nil {
+		t.Fatalf("mkdir codex config dir: %v", err)
+	}
+
+	h := DiscoverCodex()
+	if h.Detected {
+		t.Fatalf("DiscoverCodex detected Codex from config directory only: %#v", h)
+	}
+	if h.ConfigPath != filepath.Join(home, ".codex", "config.toml") {
+		t.Fatalf("ConfigPath = %q, want home config path", h.ConfigPath)
+	}
+	if h.TelemetryStatus != TelemetryMissing {
+		t.Fatalf("TelemetryStatus = %q, want %q", h.TelemetryStatus, TelemetryMissing)
+	}
+}
+
+func TestDiscoverCodexDetectsExecutableOnPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\necho codex 1.2.3\n"), 0755); err != nil {
+		t.Fatalf("write fake codex executable: %v", err)
+	}
+
+	h := DiscoverCodex()
+	if !h.Detected {
+		t.Fatalf("DiscoverCodex did not detect executable on PATH: %#v", h)
+	}
+	if h.ExecutablePath != codexPath {
+		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, codexPath)
+	}
+	if h.Version != "codex 1.2.3" {
+		t.Fatalf("Version = %q, want fake executable version", h.Version)
+	}
+}
+
 func TestCodexStatusVariants(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {

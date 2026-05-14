@@ -1,8 +1,10 @@
 package collector
 
 import (
+	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -64,13 +66,71 @@ func TestWriteConfigCreatesConfigAndSpoolDirectory(t *testing.T) {
 }
 
 func TestDiscoverBinaryPrefersConfiguredExistingPath(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "collector")
+	bin := filepath.Join(t.TempDir(), BinaryName)
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatalf("write fake collector: %v", err)
 	}
 
 	if got := DiscoverBinary(bin); got != bin {
 		t.Fatalf("DiscoverBinary = %q, want configured path %q", got, bin)
+	}
+}
+
+func TestResolveBinaryRejectsMissingConfiguredPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), BinaryName)
+
+	_, err := ResolveBinary(missing)
+	if err == nil || !strings.Contains(err.Error(), "not usable") || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("ResolveBinary error = %v, want configured path error", err)
+	}
+}
+
+func TestDiscoverBinaryFindsBeaconOtelcolOnPath(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, BinaryName)
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write fake collector: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	withCollectorDiscovery(t, nil, nil)
+
+	if got := DiscoverBinary(""); got != bin {
+		t.Fatalf("DiscoverBinary = %q, want PATH binary %q", got, bin)
+	}
+}
+
+func TestDiscoverBinaryIgnoresGenericOtelcol(t *testing.T) {
+	dir := t.TempDir()
+	generic := filepath.Join(dir, "otelcol-contrib")
+	if err := os.WriteFile(generic, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write generic collector: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	withCollectorDiscovery(t, nil, nil)
+
+	if got := DiscoverBinary(""); got != "" {
+		t.Fatalf("DiscoverBinary = %q, want empty for generic collector", got)
+	}
+}
+
+func TestDiscoverBinaryFindsAdjacentBeaconOtelcol(t *testing.T) {
+	dir := t.TempDir()
+	beacon := filepath.Join(dir, "beacon")
+	collector := filepath.Join(dir, BinaryName)
+	if err := os.WriteFile(collector, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write adjacent collector: %v", err)
+	}
+	withCollectorDiscovery(t, func(file string) (string, error) {
+		if file == BinaryName {
+			return "", errors.New("not found")
+		}
+		return "", errors.New("unexpected lookup")
+	}, func() []string {
+		return []string{filepath.Join(filepath.Dir(beacon), BinaryName)}
+	})
+
+	if got := DiscoverBinary(""); got != collector {
+		t.Fatalf("DiscoverBinary = %q, want adjacent collector %q", got, collector)
 	}
 }
 
@@ -94,12 +154,15 @@ func TestLaunchAgentPlistUsesFallbackBinaryAndUserLabel(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.UserMode = true
 	cfg.Collector.BinaryPath = filepath.Join(t.TempDir(), "missing-otelcol")
+	withCollectorDiscovery(t, func(file string) (string, error) {
+		return "", errors.New("not found")
+	}, nil)
 
 	plist := LaunchAgentPlist(cfg)
 
 	for _, want := range []string{
 		"<string>com.beacon.endpoint.collector.user</string>",
-		"<string>otelcol</string>",
+		"<string>beacon-otelcol</string>",
 		"<string>--config</string>",
 		"<string>" + cfg.Collector.ConfigPath + "</string>",
 	} {
@@ -125,4 +188,26 @@ func TestWriteLaunchPlistUserMode(t *testing.T) {
 	if got, want := path, filepath.Join(home, "Library", "LaunchAgents", "com.beacon.endpoint.collector.plist"); got != want {
 		t.Fatalf("plist path = %q, want %q", got, want)
 	}
+}
+
+func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), candidates func() []string) {
+	t.Helper()
+	oldLookPath := lookPath
+	oldCandidates := discoverDefaultBinaryCandidates
+	if lookup == nil {
+		lookup = execLookPath
+	}
+	if candidates == nil {
+		candidates = func() []string { return nil }
+	}
+	lookPath = lookup
+	discoverDefaultBinaryCandidates = candidates
+	t.Cleanup(func() {
+		lookPath = oldLookPath
+		discoverDefaultBinaryCandidates = oldCandidates
+	})
+}
+
+func execLookPath(file string) (string, error) {
+	return exec.LookPath(file)
 }

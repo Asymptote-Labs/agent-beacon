@@ -10,6 +10,17 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
+const (
+	BinaryName         = "beacon-otelcol"
+	PackagedBinaryPath = "/opt/beacon/bin/beacon-otelcol"
+)
+
+var (
+	lookPath                        = exec.LookPath
+	currentExecutable               = os.Executable
+	discoverDefaultBinaryCandidates = defaultBinaryCandidates
+)
+
 type Status struct {
 	BinaryPath string `json:"binary_path,omitempty"`
 	ConfigPath string `json:"config_path,omitempty"`
@@ -20,19 +31,56 @@ type Status struct {
 	Message    string `json:"message,omitempty"`
 }
 
+func ResolveBinary(configured string) (string, error) {
+	if configured != "" {
+		if err := validateExecutable(configured); err != nil {
+			return "", fmt.Errorf("collector binary %q is not usable: %w", configured, err)
+		}
+		return configured, nil
+	}
+	if path := DiscoverBinary(""); path != "" {
+		return path, nil
+	}
+	return "", fmt.Errorf("Beacon installation is missing the endpoint collector (%s); reinstall Beacon so %s is installed beside the beacon CLI, or pass --collector /path/to/%s for development and custom deployments", BinaryName, BinaryName, BinaryName)
+}
+
 func DiscoverBinary(configured string) string {
 	if configured != "" {
-		if _, err := os.Stat(configured); err == nil {
+		if err := validateExecutable(configured); err == nil {
 			return configured
 		}
 	}
-	if path, err := exec.LookPath("otelcol-contrib"); err == nil {
+	if path, err := lookPath(BinaryName); err == nil && validateExecutable(path) == nil {
 		return path
 	}
-	if path, err := exec.LookPath("otelcol"); err == nil {
-		return path
+	for _, path := range discoverDefaultBinaryCandidates() {
+		if err := validateExecutable(path); err == nil {
+			return path
+		}
 	}
 	return ""
+}
+
+func defaultBinaryCandidates() []string {
+	paths := []string{PackagedBinaryPath}
+	if executable, err := currentExecutable(); err == nil {
+		paths = append([]string{filepath.Join(filepath.Dir(executable), BinaryName)}, paths...)
+	}
+	return paths
+}
+
+func validateExecutable(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("is a directory")
+	}
+	if info.Mode().Perm()&0111 == 0 {
+		return fmt.Errorf("is not executable")
+	}
+	return nil
 }
 
 func WriteConfig(cfg endpointconfig.Config) error {
@@ -134,7 +182,7 @@ func portOpen(port int) bool {
 func LaunchAgentPlist(cfg endpointconfig.Config) string {
 	binary := DiscoverBinary(cfg.Collector.BinaryPath)
 	if binary == "" {
-		binary = "otelcol"
+		binary = BinaryName
 	}
 	label := "com.beacon.endpoint.collector"
 	if cfg.UserMode {

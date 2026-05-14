@@ -255,7 +255,7 @@ func init() {
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
-	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to an otelcol or otelcol-contrib binary")
+	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "metadata", "Content retention mode: metadata, redacted, or full")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")

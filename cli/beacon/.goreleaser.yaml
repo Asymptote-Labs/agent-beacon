@@ -42,6 +42,8 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README*
+      - src: ../../collector-builder/dist/beacon-otelcol/beacon-otelcol
+        dst: beacon-otelcol
 
 checksum:
   name_template: "checksums.txt"
@@ -83,6 +85,7 @@ brews:
     commit_msg_template: "Homebrew formula update for {{ .ProjectName }} version {{ .Tag }}"
     install: |
       bin.install "beacon"
+      bin.install "beacon-otelcol"
     caveats: |
       To configure local endpoint telemetry, run:
         beacon endpoint install

@@ -29,6 +29,8 @@ const (
 	ContentRetentionFull     ContentRetention = "full"
 )
 
+var SystemEndpointConfigPath = "/Library/Application Support/Beacon/Endpoint/config.json"
+
 // Scannable extensions
 var scannableExtensions = map[string]bool{
 	// JavaScript/TypeScript
@@ -134,22 +136,48 @@ func EnsureStateDir(platform string) error {
 }
 
 func ContentRetentionMode() ContentRetention {
-	endpointPath := filepath.Join(BeaconDir, "endpoint", "config.json")
-	data, err := os.ReadFile(endpointPath)
-	if err != nil {
-		return ContentRetentionMetadata
+	if mode, ok := parseContentRetention(os.Getenv("BEACON_CONTENT_RETENTION")); ok {
+		return mode
 	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return ContentRetentionMetadata
+	for _, endpointPath := range endpointConfigPaths() {
+		data, err := os.ReadFile(endpointPath)
+		if err != nil {
+			continue
+		}
+		var cfg map[string]interface{}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			continue
+		}
+		if mode, ok := parseContentRetention(cfg["content_retention"]); ok {
+			return mode
+		}
 	}
-	mode, _ := cfg["content_retention"].(string)
+	return ContentRetentionMetadata
+}
+
+func endpointConfigPaths() []string {
+	if endpointPath := os.Getenv("BEACON_ENDPOINT_CONFIG"); endpointPath != "" {
+		return []string{endpointPath}
+	}
+	userPath := filepath.Join(BeaconDir, "endpoint", "config.json")
+	if usesSystemEndpointLog(os.Getenv("BEACON_ENDPOINT_LOG")) {
+		return []string{SystemEndpointConfigPath, userPath}
+	}
+	return []string{userPath, SystemEndpointConfigPath}
+}
+
+func usesSystemEndpointLog(path string) bool {
+	return strings.HasPrefix(path, "/var/log/") || strings.HasPrefix(path, "/Library/")
+}
+
+func parseContentRetention(value interface{}) (ContentRetention, bool) {
+	mode, _ := value.(string)
 	switch ContentRetention(mode) {
 	case ContentRetentionRedacted:
-		return ContentRetentionRedacted
+		return ContentRetentionRedacted, true
 	case ContentRetentionFull:
-		return ContentRetentionFull
+		return ContentRetentionFull, true
 	default:
-		return ContentRetentionMetadata
+		return ContentRetentionMetadata, false
 	}
 }
