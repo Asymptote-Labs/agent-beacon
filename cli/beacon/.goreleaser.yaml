@@ -7,6 +7,11 @@ before:
   hooks:
     - go mod tidy
     - bash -c 'cd ../beacon-hooks && go mod tidy'
+    - cp ../../collector-builder/dist/beacon-otelcol/beacon-otelcol ./beacon-otelcol
+
+after:
+  hooks:
+    - rm -f ./beacon-otelcol
 
 builds:
   - id: beacon
@@ -42,7 +47,7 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README*
-      - src: ../../collector-builder/dist/beacon-otelcol/beacon-otelcol
+      - src: beacon-otelcol
         dst: beacon-otelcol
 
 checksum:
