@@ -75,6 +75,9 @@ extensions:
     endpoint: 127.0.0.1:13133
 
 service:
+  telemetry:
+    metrics:
+      level: none
   extensions: [health_check]
   pipelines:
     logs:

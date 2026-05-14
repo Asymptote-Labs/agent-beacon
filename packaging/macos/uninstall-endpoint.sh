@@ -1,12 +1,30 @@
 #!/bin/sh
 set -eu
 
-BEACON_BIN="${BEACON_BIN:-beacon}"
-KEEP_LOGS_FLAG=""
-
-if [ "${BEACON_KEEP_LOGS:-0}" = "1" ]; then
-  KEEP_LOGS_FLAG="--keep-logs"
+if [ -z "${BEACON_BIN:-}" ]; then
+  if [ -x "/opt/beacon/bin/beacon" ]; then
+    BEACON_BIN="/opt/beacon/bin/beacon"
+  else
+    BEACON_BIN="beacon"
+  fi
 fi
 
-exec "$BEACON_BIN" endpoint uninstall $KEEP_LOGS_FLAG
+BEACON_KEEP_LOGS="${BEACON_KEEP_LOGS:-${4:-0}}"
+BEACON_KEEP_CONFIG="${BEACON_KEEP_CONFIG:-${5:-0}}"
+
+set -- endpoint uninstall
+
+case "$BEACON_KEEP_LOGS" in
+  1|true|TRUE|yes|YES)
+    set -- "$@" --keep-logs
+    ;;
+esac
+
+case "$BEACON_KEEP_CONFIG" in
+  1|true|TRUE|yes|YES)
+    set -- "$@" --keep-config
+    ;;
+esac
+
+exec "$BEACON_BIN" "$@"
 

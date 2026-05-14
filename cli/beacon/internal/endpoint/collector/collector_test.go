@@ -39,6 +39,7 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"max_event_bytes: 65536",
 		"rotate_bytes: 10485760",
 		"redact_secrets: true",
+		"level: none",
 		"receivers: [otlp]",
 		"exporters: [beaconjson]",
 	} {
