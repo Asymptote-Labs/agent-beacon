@@ -43,7 +43,7 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 	fields := sessionFields(sessionID, input)
 	if config.ContentRetentionMode() != config.ContentRetentionMetadata {
 		if prompt := getFirstStr(input, "prompt", "user_prompt", "text"); prompt != "" {
-			fields["raw"] = map[string]interface{}{"prompt": prompt}
+			fields["prompt"] = map[string]interface{}{"text": prompt}
 		}
 	}
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)

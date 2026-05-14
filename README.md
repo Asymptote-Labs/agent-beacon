@@ -70,14 +70,13 @@ Beacon can currently:
 
 ## Privacy And Retention
 
-Beacon records metadata by default. Content retention is configurable with:
+Beacon records configured content fields by default. Content retention is configurable with:
 
-- `metadata`: default; no prompt text, raw attributes, command output, or raw
-  diffs.
+- `metadata`: no prompt text, raw attributes, command output, or raw diffs.
 - `redacted`: include configured content fields after local redaction and size
   limits.
-- `full`: include configured content fields in local/customer-controlled logs,
-  still subject to event size limits.
+- `full`: default; include configured content fields in local/customer-controlled
+  logs, still subject to event size limits.
 
 ## What Beacon Does Not Do
 
@@ -127,6 +126,8 @@ package or MDM deployments.
 ```bash
 beacon endpoint install --content-retention metadata
 ```
+
+Omit the flag to use the default `full` retention mode.
 
 ### Configure Wazuh Output
 
@@ -265,7 +266,7 @@ installs the CLI, collector, Wazuh content pack, and deployment scripts. The
 package should apply explicit system endpoint settings, for example:
 
 ```bash
-beacon endpoint install --system --harness claude,codex --content-retention metadata
+beacon endpoint install --system --harness claude,codex --content-retention full
 ```
 
 Before publishing a release, verify the build from a clean checkout and clean

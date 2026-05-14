@@ -70,6 +70,10 @@ type approvalInfo struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+type promptInfo struct {
+	Text string `json:"text,omitempty"`
+}
+
 type contentInfo struct {
 	Retention string `json:"retention"`
 	Included  bool   `json:"included"`
@@ -93,6 +97,7 @@ type beaconEvent struct {
 	Command       *commandInfo           `json:"command,omitempty"`
 	MCP           *mcpInfo               `json:"mcp,omitempty"`
 	Approval      *approvalInfo          `json:"approval,omitempty"`
+	Prompt        *promptInfo            `json:"prompt,omitempty"`
 	Content       *contentInfo           `json:"content,omitempty"`
 	Model         string                 `json:"model,omitempty"`
 	Repository    string                 `json:"repository,omitempty"`

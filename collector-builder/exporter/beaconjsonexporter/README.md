@@ -14,8 +14,9 @@ Required behavior:
   `schema_version=1.0` event contract.
 - Identify Claude Cowork OTLP resources and map prompts, tool/MCP calls, file
   access, approval decisions, API usage, token counts, costs, and errors into
-  metadata-first endpoint events.
-- Drop or summarize prompt/content fields by default.
+  Beacon endpoint events.
+- Include configured content fields by default, with `metadata` and `redacted`
+  modes available for stricter deployments.
 - Redact common secrets and cap event size before writing.
 - Emit health failure events when write failures occur.
 

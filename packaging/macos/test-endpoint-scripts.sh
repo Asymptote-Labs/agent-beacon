@@ -5,6 +5,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 INSTALL_SCRIPT="$ROOT_DIR/packaging/macos/install-endpoint.sh"
 UNINSTALL_SCRIPT="$ROOT_DIR/packaging/macos/uninstall-endpoint.sh"
 PKG_BUILD_SCRIPT="$ROOT_DIR/packaging/macos/build-pkg.sh"
+REPAIR_SCRIPT="$ROOT_DIR/packaging/macos/jamf/scripts/repair.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
@@ -25,7 +26,6 @@ chmod +x "$STUB_BIN"
 
 BEACON_BIN="$STUB_BIN" \
 BEACON_ENDPOINT_HARNESSES="claude,codex,cursor" \
-BEACON_CONTENT_RETENTION="redacted" \
 BEACON_OTLP_GRPC_PORT="5317" \
 BEACON_OTLP_HTTP_PORT="5318" \
 BEACON_COLLECTOR="/tmp/beacon-otelcol" \
@@ -34,9 +34,23 @@ STUB_LOG="$STUB_LOG" \
 
 INSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$INSTALL_ARGS" in
-  "endpoint install --system --harness claude,codex,cursor --content-retention redacted --otlp-grpc-port 5317 --otlp-http-port 5318 --collector /tmp/beacon-otelcol") ;;
+  "endpoint install --system --harness claude,codex,cursor --content-retention full --otlp-grpc-port 5317 --otlp-http-port 5318 --collector /tmp/beacon-otelcol") ;;
   *)
     echo "unexpected install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+STUB_LOG="$STUB_LOG" \
+"$REPAIR_SCRIPT"
+
+REPAIR_ARGS="$(cat "$STUB_LOG")"
+case "$REPAIR_ARGS" in
+  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,codex --content-retention full --otlp-grpc-port 4317 --otlp-http-port 4318") ;;
+  *)
+    echo "unexpected repair args: $REPAIR_ARGS" >&2
     exit 1
     ;;
 esac
@@ -89,13 +103,13 @@ cat >"$CONFIG_PATH" <<'JSON'
     "claude",
     "codex"
   ],
-  "content_retention": "metadata"
+  "content_retention": "full"
 }
 JSON
 
 RETENTION="$(BEACON_ENDPOINT_CONFIG="$CONFIG_PATH" "$ROOT_DIR/packaging/macos/jamf/extension-attributes/content-retention.sh")"
 case "$RETENTION" in
-  "<result>metadata</result>") ;;
+  "<result>full</result>") ;;
   *)
     echo "unexpected retention extension attribute result: $RETENTION" >&2
     exit 1

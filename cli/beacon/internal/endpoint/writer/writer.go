@@ -130,6 +130,9 @@ func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 	if event.Policy != nil {
 		event.Policy.Reason = redact(truncate(event.Policy.Reason, 4096))
 	}
+	if event.Prompt != nil {
+		event.Prompt.Text = redact(truncate(event.Prompt.Text, 4096))
+	}
 	if event.Raw != nil {
 		event.Raw = sanitizeMap(event.Raw)
 	}

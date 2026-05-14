@@ -152,7 +152,7 @@ func ContentRetentionMode() ContentRetention {
 			return mode
 		}
 	}
-	return ContentRetentionMetadata
+	return ContentRetentionFull
 }
 
 func endpointConfigPaths() []string {
@@ -173,11 +173,13 @@ func usesSystemEndpointLog(path string) bool {
 func parseContentRetention(value interface{}) (ContentRetention, bool) {
 	mode, _ := value.(string)
 	switch ContentRetention(mode) {
+	case ContentRetentionMetadata:
+		return ContentRetentionMetadata, true
 	case ContentRetentionRedacted:
 		return ContentRetentionRedacted, true
 	case ContentRetentionFull:
 		return ContentRetentionFull, true
 	default:
-		return ContentRetentionMetadata, false
+		return ContentRetentionFull, false
 	}
 }

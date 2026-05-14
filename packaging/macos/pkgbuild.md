@@ -84,7 +84,7 @@ Use these optional Jamf policy parameters when calling
 
 ```text
 Parameter 4: harnesses, default claude,codex
-Parameter 5: content retention, default metadata
+Parameter 5: content retention, default full
 Parameter 6: OTLP gRPC port, default 4317
 Parameter 7: OTLP HTTP port, default 4318
 Parameter 8: collector path, default /opt/beacon/bin/beacon-otelcol

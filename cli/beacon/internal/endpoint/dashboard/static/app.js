@@ -265,12 +265,14 @@ function signalCell(record) {
 }
 
 function primaryArtifact(event) {
+  if (event.prompt?.text) return event.prompt.text;
   if (event.command?.command) return event.command.command;
   if (event.file?.path) return `${event.file.operation || "file"} ${event.file.path}`;
   if (event.mcp?.server || event.mcp?.tool) return [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
   if (event.tool?.name || event.tool?.command) return [event.tool.name, event.tool.command].filter(Boolean).join(" ");
   if (event.approval?.decision || event.approval?.reason) return [event.approval.decision, event.approval.reason].filter(Boolean).join(": ");
   if (event.policy?.decision || event.policy?.name) return [event.policy.decision, event.policy.name].filter(Boolean).join(": ");
+  if (event.raw?.metric_name) return event.raw.metric_name;
   return event.model || event.branch || "";
 }
 
@@ -297,7 +299,8 @@ function detailSummary(record) {
     ["Wazuh level", record.wazuh_level || ""],
     ["Session", event.session?.id],
     ["Repository", repositoryLabel(event)],
-    ["Artifact", primaryArtifact(event)],
+    ["Prompt", event.prompt?.text],
+    ["Artifact", event.prompt?.text ? "" : primaryArtifact(event)],
     ["Approval", event.approval ? [event.approval.decision, event.approval.reason].filter(Boolean).join(": ") : ""],
     ["Policy", event.policy ? [event.policy.decision, event.policy.name, event.policy.reason].filter(Boolean).join(": ") : ""],
     ["Content", event.content ? `${event.content.retention}${event.content.redacted ? ", redacted" : ""}${event.content.truncated ? ", truncated" : ""}` : ""],

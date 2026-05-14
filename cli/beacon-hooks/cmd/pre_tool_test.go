@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -51,6 +52,58 @@ func TestRunPromptSubmitUsesCursorResponse(t *testing.T) {
 	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{"conversation_id": "conv-submit"})
 	if out["continue"] != true {
 		t.Fatalf("cursor prompt response = %#v, want continue=true", out)
+	}
+}
+
+func TestRunPromptSubmitEmitsTypedPromptForFullRetention(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ENDPOINT_CONFIG", filepath.Join(t.TempDir(), "missing-config.json"))
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversation_id": "conv-submit",
+		"prompt":          "summarize token=prompt-secret",
+	})
+	if out["continue"] != true {
+		t.Fatalf("cursor prompt response = %#v, want continue=true", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	prompt, ok := event["prompt"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("prompt field missing: %#v", event)
+	}
+	if got := prompt["text"]; got != "summarize token=[REDACTED]" {
+		t.Fatalf("prompt.text = %q, want redacted prompt", got)
+	}
+	if _, ok := event["raw"]; ok {
+		t.Fatalf("raw should not carry prompt payload: %#v", event["raw"])
+	}
+	if events := endpointEvents(t, logPath); len(events) != 1 {
+		t.Fatalf("endpoint event count = %d, want 1; events=%#v", len(events), events)
+	}
+}
+
+func TestRunPromptSubmitOmitsPromptForMetadataRetention(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversation_id": "conv-submit",
+		"prompt":          "summarize this file",
+	})
+	if out["continue"] != true {
+		t.Fatalf("cursor prompt response = %#v, want continue=true", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if _, ok := event["prompt"]; ok {
+		t.Fatalf("metadata retention should omit prompt field: %#v", event["prompt"])
 	}
 }
 
@@ -154,4 +207,39 @@ func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string),
 		t.Fatalf("decode hook output: %v", err)
 	}
 	return out
+}
+
+func lastEndpointEvent(t *testing.T, path string) map[string]interface{} {
+	t.Helper()
+	events := endpointEvents(t, path)
+	if len(events) == 0 {
+		t.Fatal("endpoint log was empty")
+	}
+	return events[len(events)-1]
+}
+
+func endpointEvents(t *testing.T, path string) []map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read endpoint log: %v", err)
+	}
+	lines := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		t.Fatal("endpoint log was empty")
+	}
+	events := make([]map[string]interface{}, 0, len(lines))
+	for _, line := range lines {
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode endpoint event: %v", err)
+		}
+		events = append(events, event)
+	}
+	return events
 }

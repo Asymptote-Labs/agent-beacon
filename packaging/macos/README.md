@@ -82,7 +82,7 @@ Environment variables take precedence, followed by Jamf script parameters:
 
 ```text
 Parameter 4: harnesses, default claude,codex
-Parameter 5: content retention, default metadata
+Parameter 5: content retention, default full
 Parameter 6: OTLP gRPC port, default 4317
 Parameter 7: OTLP HTTP port, default 4318
 Parameter 8: collector path, default /opt/beacon/bin/beacon-otelcol when present
@@ -122,7 +122,7 @@ Suggested Smart Groups:
 - Beacon version is `not_installed`
 - Collector service health is not `running`
 - Last runtime event age is greater than `86400`
-- Content retention is not `metadata`
+- Content retention is not `full`
 - Runtime log writability is not `writable` or `creatable`
 
 ## Jamf Validation

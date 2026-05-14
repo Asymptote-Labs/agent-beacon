@@ -20,7 +20,7 @@ Do not recreate or depend on removed `asymptote` mirror trees. Keep new work foc
 - Do not add dependency vulnerability scanning, OSV/GHSA lookups, package remediation, or other vulnerability-enforcement flows to the public hook path.
 - Do not add broad runtime enforcement unless explicitly requested. Current control behavior is limited to hook-native approvals/denials exposed by supported agent runtimes.
 - Keep direct destination support scoped to local JSONL/Wazuh unless explicitly requested. Other SIEM/observability systems should consume the local output through customer-managed forwarding.
-- Default content retention should remain metadata-only. Prompt text, command output, raw tool inputs, raw OTLP attributes, and raw diffs must be opt-in via explicit retention configuration and must pass through local redaction/size limits where supported.
+- Default content retention is `full`: configured prompt text, command output, raw tool inputs, raw OTLP attributes, and raw diffs may be written to local or customer-controlled logs, still subject to local redaction and size limits where supported. Keep `metadata` and `redacted` modes available for stricter deployments.
 
 ## Telemetry Scope
 
@@ -95,7 +95,7 @@ go run . endpoint dashboard
 - For macOS-only behavior, gate tests with `runtime.GOOS == "darwin"` or assert the non-Darwin contract explicitly.
 - Keep endpoint event schema fields stable: `vendor`, `product`, `schema_version`, required event fields, and Wazuh-compatible JSONL output are release contracts.
 - Preserve optional event fields for agent-native metadata (`session`, `tool`, `file`, `command`, `mcp`, `approval`, `content`, `model`, `repository`, and `branch`) without changing existing required field semantics.
-- Prefer metadata-first telemetry. If adding a new signal, include stable identifiers/counts/hashes before considering raw content.
+- When adding a new signal, include stable identifiers/counts/hashes alongside any retained raw content, and route raw fields through the configured content retention mode.
 - Keep the dashboard read-only. It should inspect local status and JSONL events but must not mutate endpoint configuration or telemetry.
 - Keep the release readiness guidance in `README.md` up to date when install, packaging, collector, or dashboard behavior changes.
 

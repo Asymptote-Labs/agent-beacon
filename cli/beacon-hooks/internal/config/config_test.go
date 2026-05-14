@@ -145,7 +145,7 @@ func TestContentRetentionModePrefersSystemConfigForSystemLog(t *testing.T) {
 	}
 }
 
-func TestContentRetentionModeDefaultsToMetadata(t *testing.T) {
+func TestContentRetentionModeDefaultsToFull(t *testing.T) {
 	oldBeaconDir := BeaconDir
 	oldSystemPath := SystemEndpointConfigPath
 	BeaconDir = filepath.Join(t.TempDir(), ".beacon")
@@ -154,6 +154,18 @@ func TestContentRetentionModeDefaultsToMetadata(t *testing.T) {
 		BeaconDir = oldBeaconDir
 		SystemEndpointConfigPath = oldSystemPath
 	})
+
+	if got := ContentRetentionMode(); got != ContentRetentionFull {
+		t.Fatalf("ContentRetentionMode() = %q, want %q", got, ContentRetentionFull)
+	}
+}
+
+func TestContentRetentionModePreservesExplicitMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"content_retention":"metadata"}`), 0644); err != nil {
+		t.Fatalf("write endpoint config: %v", err)
+	}
+	t.Setenv("BEACON_ENDPOINT_CONFIG", path)
 
 	if got := ContentRetentionMode(); got != ContentRetentionMetadata {
 		t.Fatalf("ContentRetentionMode() = %q, want %q", got, ContentRetentionMetadata)

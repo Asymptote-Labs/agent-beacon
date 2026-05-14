@@ -27,8 +27,8 @@ func TestDefaultUserConfigUsesHomeScopedPaths(t *testing.T) {
 	if len(cfg.Harnesses) != 2 || cfg.Harnesses[0] != "claude" || cfg.Harnesses[1] != "codex" {
 		t.Fatalf("unexpected default harnesses: %#v", cfg.Harnesses)
 	}
-	if cfg.ContentRetention != ContentRetentionMetadata {
-		t.Fatalf("ContentRetention = %q, want %q", cfg.ContentRetention, ContentRetentionMetadata)
+	if cfg.ContentRetention != ContentRetentionFull {
+		t.Fatalf("ContentRetention = %q, want %q", cfg.ContentRetention, ContentRetentionFull)
 	}
 }
 
@@ -65,6 +65,26 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.ContentRetention != ContentRetentionRedacted {
 		t.Fatalf("ContentRetention = %q, want %q", loaded.ContentRetention, ContentRetentionRedacted)
+	}
+}
+
+func TestLoadDefaultsMissingContentRetentionToFull(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, UserConfigPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"user_mode":true}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.ContentRetention != ContentRetentionFull {
+		t.Fatalf("ContentRetention = %q, want %q", loaded.ContentRetention, ContentRetentionFull)
 	}
 }
 

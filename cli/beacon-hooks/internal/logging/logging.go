@@ -93,7 +93,6 @@ func (l *Logger) write(entry map[string]interface{}) {
 		fmt.Fprintf(os.Stderr, "logging: failed to write newline to %s: %v\n", l.logFile, err)
 		return
 	}
-	l.writeEndpointEvent(entry)
 }
 
 func (l *Logger) writeEndpointEvent(entry map[string]interface{}) {
@@ -174,7 +173,7 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 	}
 	retention := string(config.ContentRetentionMode())
 	if retention == "" {
-		retention = "metadata"
+		retention = "full"
 	}
 	event["content"] = map[string]interface{}{
 		"retention": retention,

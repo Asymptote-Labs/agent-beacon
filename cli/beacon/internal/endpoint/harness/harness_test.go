@@ -137,7 +137,7 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 		"model = \"gpt-5\"",
 		"[otel]",
 		"environment = \"dev\"",
-		"log_user_prompt = false",
+		"log_user_prompt = true",
 		"[otel.exporter.\"otlp-grpc\"]",
 		"[otel.trace_exporter.\"otlp-grpc\"]",
 		"[otel.metrics_exporter.\"otlp-grpc\"]",
@@ -153,6 +153,27 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 	}
 	if len(backups) != 1 {
 		t.Fatalf("expected one backup, got %#v", backups)
+	}
+}
+
+func TestConfigureCodexDisablesPromptLoggingForMetadataRetention(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := ConfigureCodex(ConfigureOptions{
+		Endpoint:         "http://127.0.0.1:4317",
+		UserMode:         true,
+		ContentRetention: "metadata",
+	})
+	if err != nil {
+		t.Fatalf("ConfigureCodex returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read codex config: %v", err)
+	}
+	if !strings.Contains(string(data), "log_user_prompt = false") {
+		t.Fatalf("metadata retention should disable Codex prompt logging:\n%s", string(data))
 	}
 }
 

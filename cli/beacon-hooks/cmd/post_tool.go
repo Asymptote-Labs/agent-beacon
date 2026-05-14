@@ -15,7 +15,7 @@ var postToolCmd = &cobra.Command{
 	Use:   "post-tool",
 	Short: "Record file-edit telemetry",
 	Long: `PostToolUse hook - triggered after Write, Edit, or MultiEdit operations.
-The public Beacon build records local metadata only.`,
+The public Beacon build writes local endpoint telemetry using the configured content retention mode.`,
 	Run: runPostTool,
 }
 
@@ -61,7 +61,7 @@ func runPostTool(cmd *cobra.Command, args []string) {
 			outputJSON(emptyResponse)
 			return
 		}
-		// afterFileEdit — records file-edit metadata only (no output supported).
+		// afterFileEdit exposes file-edit metadata and diffs; retention controls raw diff inclusion.
 		params = parseCursorInput(input, logger)
 	} else {
 		params = parseClaudeCopilotInput(input, logger)
