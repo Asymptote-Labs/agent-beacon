@@ -113,21 +113,19 @@ make build
 ### Install Locally
 
 ```bash
-beacon endpoint install --collector /path/to/beacon-otelcol
+beacon endpoint install
 beacon endpoint status
 ```
 
 The normal CLI flow uses per-user endpoint paths by default. Cursor hooks,
 Claude Code OTLP, and Codex OTLP all write to the same user runtime log:
 `~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` only for root-managed
-package or MDM deployments. The endpoint collector config requires Beacon's
-custom `beacon-otelcol` binary, which is provided by the macOS package; CLI-only
-installs must put `beacon-otelcol` on `PATH` or pass `--collector`.
+package or MDM deployments.
 
 ### Set Content Retention
 
 ```bash
-beacon endpoint install --collector /path/to/beacon-otelcol --content-retention metadata
+beacon endpoint install --content-retention metadata
 ```
 
 ### Configure Wazuh Output
@@ -219,7 +217,7 @@ Common commands:
 
 ```bash
 beacon version
-beacon endpoint install --collector /path/to/beacon-otelcol
+beacon endpoint install
 beacon endpoint status
 beacon endpoint discover
 beacon endpoint dashboard --open
@@ -267,15 +265,15 @@ installs the CLI, collector, Wazuh content pack, and deployment scripts. The
 package should apply explicit system endpoint settings, for example:
 
 ```bash
-beacon endpoint install --system --collector /opt/beacon/bin/beacon-otelcol --harness claude,codex --content-retention metadata
+beacon endpoint install --system --harness claude,codex --content-retention metadata
 ```
 
 Before publishing a release, verify the build from a clean checkout and clean
 macOS host or VM:
 
 - `beacon version` reports the expected version, commit, and build date.
-- `beacon endpoint install --collector /path/to/beacon-otelcol --no-start`
-  succeeds without developer tooling.
+- `beacon endpoint install --no-start` succeeds without developer
+  tooling.
 - `beacon endpoint status` reports config, collector, service, harness,
   diagnostic, and runtime log paths.
 - `beacon endpoint wazuh validate` writes a valid Beacon JSONL event.

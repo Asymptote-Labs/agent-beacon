@@ -42,6 +42,10 @@ collector-builder/dist/beacon-otelcol/beacon-otelcol
 Override those paths with `BEACON_BIN` and `BEACON_COLLECTOR` if release
 automation builds into a different directory.
 
+The Homebrew release archive also includes `beacon-otelcol` from
+`collector-builder/dist/beacon-otelcol/beacon-otelcol` and installs it beside
+`beacon`, so `beacon endpoint install` works without extra flags.
+
 ## Package Build
 
 Create an unsigned local test package:

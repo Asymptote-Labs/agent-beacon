@@ -41,7 +41,7 @@ func ResolveBinary(configured string) (string, error) {
 	if path := DiscoverBinary(""); path != "" {
 		return path, nil
 	}
-	return "", fmt.Errorf("beacon endpoint install requires the Beacon OpenTelemetry Collector (%s); install the macOS package that includes %s, ensure %s is on PATH, or pass --collector /path/to/%s", BinaryName, PackagedBinaryPath, BinaryName, BinaryName)
+	return "", fmt.Errorf("Beacon installation is missing the endpoint collector (%s); reinstall Beacon so %s is installed beside the beacon CLI, or pass --collector /path/to/%s for development and custom deployments", BinaryName, BinaryName, BinaryName)
 }
 
 func DiscoverBinary(configured string) string {
