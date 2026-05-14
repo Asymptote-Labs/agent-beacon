@@ -9,10 +9,6 @@ before:
     - bash -c 'cd ../beacon-hooks && go mod tidy'
     - cp ../../collector-builder/dist/beacon-otelcol/beacon-otelcol ./beacon-otelcol
 
-after:
-  hooks:
-    - rm -f ./beacon-otelcol
-
 builds:
   - id: beacon
     main: .
