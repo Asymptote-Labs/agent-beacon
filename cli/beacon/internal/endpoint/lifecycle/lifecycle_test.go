@@ -75,11 +75,11 @@ func TestSelectRuntimeLogWarnsWhenSystemCollectorConflictsWithUserMode(t *testin
 		systemCfg,
 	)
 
-	if !got.EffectiveUserMode {
-		t.Fatal("expected effective user mode")
+	if got.EffectiveUserMode {
+		t.Fatal("expected effective system mode")
 	}
-	if got.EffectiveLogPath != userLog {
-		t.Fatalf("EffectiveLogPath = %q, want %q", got.EffectiveLogPath, userLog)
+	if got.EffectiveLogPath != systemLog {
+		t.Fatalf("EffectiveLogPath = %q, want %q", got.EffectiveLogPath, systemLog)
 	}
 	if got.Warning == "" || !strings.Contains(got.Warning, userLog) || !strings.Contains(got.Warning, systemLog) {
 		t.Fatalf("Warning = %q, want user/system log paths", got.Warning)

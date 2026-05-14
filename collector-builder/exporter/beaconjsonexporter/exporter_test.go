@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
@@ -21,6 +22,29 @@ func TestConfigValidateRequiresPath(t *testing.T) {
 	cfg.Path = filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
+func TestDefaultConfigUsesFullRetention(t *testing.T) {
+	cfg := createDefaultConfig()
+	if cfg.ContentRetention != "full" {
+		t.Fatalf("ContentRetention = %q, want full", cfg.ContentRetention)
+	}
+}
+
+func TestNewExporterDefaultsEmptyRetentionToFull(t *testing.T) {
+	cfg := &Config{
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}
+	exp, err := newExporter(cfg, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	if exp.cfg.ContentRetention != "full" {
+		t.Fatalf("ContentRetention = %q, want full", exp.cfg.ContentRetention)
 	}
 }
 
@@ -76,6 +100,70 @@ func TestConsumeLogsWritesBeaconJSONL(t *testing.T) {
 	}
 }
 
+func TestConsumeLogsMapsPromptForFullRetention(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	sl := rl.ScopeLogs().AppendEmpty()
+	rec := sl.LogRecords().AppendEmpty()
+	rec.Body().SetStr("prompt submitted")
+	rec.Attributes().PutStr("beacon.event.action", "prompt.submitted")
+	rec.Attributes().PutStr("gen_ai.prompt", "summarize token=prompt-secret")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "summarize token=[REDACTED]" {
+		t.Fatalf("prompt = %#v, want redacted typed prompt", event.Prompt)
+	}
+}
+
+func TestMetadataRetentionOmitsTypedPrompt(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	attrs := map[string]interface{}{
+		"beacon.event.action": "prompt.submitted",
+		"gen_ai.prompt":       "summarize this file",
+	}
+	logs := plog.NewLogs()
+	record := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	for key, value := range attrs {
+		record.Attributes().PutStr(key, value.(string))
+	}
+
+	event := exp.eventFromLog(nil, record)
+	if event.Prompt != nil {
+		t.Fatalf("metadata retention should omit prompt: %#v", event.Prompt)
+	}
+}
+
 func TestEventCategoryInfersFromAction(t *testing.T) {
 	tests := map[string]string{
 		"tool.invoked":       "tool",
@@ -94,6 +182,100 @@ func TestEventCategoryInfersFromAction(t *testing.T) {
 	}
 	if got := eventCategory("tool.invoked", "custom"); got != "custom" {
 		t.Fatalf("explicit category = %q, want custom", got)
+	}
+}
+
+func TestEventFromMetricDefaultsToObservedAction(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	metric := metrics.ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("codex.run.token_usage")
+
+	event := exp.eventFromMetric(map[string]interface{}{"service.name": "codex-cli"}, metric)
+	if event.Event.Action != "metric.observed" {
+		t.Fatalf("metric action = %q, want metric.observed", event.Event.Action)
+	}
+	if event.Event.Category != "metric" {
+		t.Fatalf("metric category = %q, want metric", event.Event.Category)
+	}
+	if event.Harness.Name != "codex_cli" {
+		t.Fatalf("harness = %q, want codex_cli", event.Harness.Name)
+	}
+	if event.Raw["metric_name"] != "codex.run.token_usage" {
+		t.Fatalf("metric raw payload = %#v", event.Raw)
+	}
+}
+
+func TestInferActionMapsCodexUserInputToPrompt(t *testing.T) {
+	attrs := map[string]interface{}{"service.name": "codex_cli_rs"}
+	if got := inferAction(attrs, "op.dispatch.user_input_with_turn_context"); got != "prompt.submitted" {
+		t.Fatalf("inferAction() = %q, want prompt.submitted", got)
+	}
+}
+
+func TestInferActionMapsCodexOpAttributeToPrompt(t *testing.T) {
+	attrs := map[string]interface{}{
+		"service.name": "codex_cli_rs",
+		"codex.op":     "user_input_with_turn_context",
+	}
+	if got := inferAction(attrs, "op.dispatch"); got != "prompt.submitted" {
+		t.Fatalf("inferAction() = %q, want prompt.submitted", got)
+	}
+}
+
+func TestEventFromSpanMapsCodexUserInputToPrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	span := testSpan("op.dispatch.user_input_with_turn_context")
+	span.Attributes().PutStr("prompt", "summarize token=codex-secret")
+
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "codex-cli")
+	span.CopyTo(rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty())
+
+	if err := exp.consumeTraces(context.Background(), traces); err != nil {
+		t.Fatalf("consumeTraces returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Event.Action != "prompt.submitted" {
+		t.Fatalf("span action = %q, want prompt.submitted", event.Event.Action)
+	}
+	if event.Event.Category != "prompt" {
+		t.Fatalf("span category = %q, want prompt", event.Event.Category)
+	}
+	if event.Harness.Name != "codex_cli" {
+		t.Fatalf("harness = %q, want codex_cli", event.Harness.Name)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "summarize token=[REDACTED]" {
+		t.Fatalf("prompt = %#v, want redacted Codex prompt", event.Prompt)
 	}
 }
 

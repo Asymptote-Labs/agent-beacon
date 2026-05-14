@@ -32,8 +32,9 @@ type Harness struct {
 }
 
 type ConfigureOptions struct {
-	Endpoint string
-	UserMode bool
+	Endpoint         string
+	UserMode         bool
+	ContentRetention string
 }
 
 type ValidationResult struct {
@@ -190,7 +191,7 @@ func ConfigureCodex(opts ConfigureOptions) (string, error) {
 			return "", err
 		}
 	}
-	updated := mergeCodexOTEL(existing, opts.Endpoint)
+	updated := mergeCodexOTELWithPrompt(existing, opts.Endpoint, opts.ContentRetention != "metadata")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err
 	}
@@ -215,6 +216,10 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 }
 
 func mergeCodexOTEL(existing, endpoint string) string {
+	return mergeCodexOTELWithPrompt(existing, endpoint, true)
+}
+
+func mergeCodexOTELWithPrompt(existing, endpoint string, logUserPrompt bool) string {
 	lines := strings.Split(existing, "\n")
 	var out []string
 	inOTEL := false
@@ -224,7 +229,7 @@ func mergeCodexOTEL(existing, endpoint string) string {
 		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
 			isOTELHeader := codexOTELHeader(trim)
 			if inOTEL && !isOTELHeader && !wroteOTEL {
-				out = append(out, codexOTELBlock(endpoint)...)
+				out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
 				wroteOTEL = true
 			}
 			inOTEL = isOTELHeader
@@ -239,14 +244,14 @@ func mergeCodexOTEL(existing, endpoint string) string {
 		out = append(out, line)
 	}
 	if inOTEL && !wroteOTEL {
-		out = append(out, codexOTELBlock(endpoint)...)
+		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
 		wroteOTEL = true
 	}
 	if !wroteOTEL {
 		if strings.TrimSpace(existing) != "" {
 			out = append(out, "")
 		}
-		out = append(out, codexOTELBlock(endpoint)...)
+		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
 	}
 	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
 }
@@ -255,11 +260,11 @@ func codexOTELHeader(header string) bool {
 	return header == "[otel]" || strings.HasPrefix(header, "[otel.")
 }
 
-func codexOTELBlock(endpoint string) []string {
+func codexOTELBlock(endpoint string, logUserPrompt bool) []string {
 	return []string{
 		"[otel]",
 		"environment = \"dev\"",
-		"log_user_prompt = false",
+		fmt.Sprintf("log_user_prompt = %t", logUserPrompt),
 		"",
 		"[otel.exporter.\"otlp-grpc\"]",
 		fmt.Sprintf("endpoint = %q", endpoint),

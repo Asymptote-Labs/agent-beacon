@@ -45,7 +45,7 @@ func Default(userMode bool, logPath string) Config {
 		UserMode:         userMode,
 		LogPath:          logPath,
 		Harnesses:        []string{"claude", "codex"},
-		ContentRetention: ContentRetentionMetadata,
+		ContentRetention: ContentRetentionFull,
 		Collector: Collector{
 			ConfigPath: filepath.Join(base, "otelcol.yaml"),
 			GRPCPort:   DefaultGRPCPort,
@@ -88,7 +88,7 @@ func Load(userMode bool) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ContentRetention == "" {
-		cfg.ContentRetention = ContentRetentionMetadata
+		cfg.ContentRetention = ContentRetentionFull
 	}
 	if err := ValidateContentRetention(cfg.ContentRetention); err != nil {
 		return Config{}, err
@@ -98,7 +98,7 @@ func Load(userMode bool) (Config, error) {
 
 func Save(cfg Config) (string, error) {
 	if cfg.ContentRetention == "" {
-		cfg.ContentRetention = ContentRetentionMetadata
+		cfg.ContentRetention = ContentRetentionFull
 	}
 	if err := ValidateContentRetention(cfg.ContentRetention); err != nil {
 		return "", err

@@ -112,6 +112,7 @@ func TestReadEventsFreeTextSearchMatchesStructuredFields(t *testing.T) {
 		testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "file.modified", "file", "repo-b"),
 		testSchemaEvent("2026-05-13T01:02:00Z", "cursor", "mcp.tool_invoked", "mcp", "repo-c"),
 		testSchemaEvent("2026-05-13T01:03:00Z", "cursor", "approval.denied", "approval", "repo-d"),
+		testSchemaEvent("2026-05-13T01:04:00Z", "cursor", "prompt.submitted", "prompt", "repo-e"),
 	}
 	events[0].Command = &schema.CommandInfo{Command: "go test ./internal/endpoint/dashboard"}
 	events[0].Session = &schema.SessionInfo{ID: "session-command"}
@@ -119,9 +120,10 @@ func TestReadEventsFreeTextSearchMatchesStructuredFields(t *testing.T) {
 	events[2].MCP = &schema.MCPInfo{Server: "github", Tool: "get_issue"}
 	events[3].Approval = &schema.ApprovalInfo{Decision: "denied", Reason: "dangerous shell"}
 	events[3].Message = "approval blocked for review"
+	events[4].Prompt = &schema.PromptInfo{Text: "summarize local telemetry"}
 	writeTestLog(t, path, marshalEvents(t, events...)...)
 
-	for _, query := range []string{"dashboard", "cmd/server.go", "github get_issue", "dangerous shell", "session-command", "repo-c", "blocked review"} {
+	for _, query := range []string{"dashboard", "cmd/server.go", "github get_issue", "dangerous shell", "session-command", "repo-c", "blocked review", "summarize telemetry"} {
 		result, err := ReadEvents(path, EventQuery{Q: query, Limit: 10})
 		if err != nil {
 			t.Fatalf("ReadEvents(%q) returned error: %v", query, err)

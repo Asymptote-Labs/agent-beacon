@@ -350,6 +350,9 @@ func searchFields(record EventRecord) []string {
 	if event.Policy != nil {
 		fields = append(fields, event.Policy.ID, event.Policy.Name, event.Policy.Decision, event.Policy.Enforcement, event.Policy.Reason)
 	}
+	if event.Prompt != nil {
+		fields = append(fields, event.Prompt.Text)
+	}
 	if event.Content != nil {
 		fields = append(fields, event.Content.Retention)
 		if event.Content.Included {

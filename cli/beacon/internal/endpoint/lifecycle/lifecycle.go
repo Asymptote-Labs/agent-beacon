@@ -237,6 +237,8 @@ func ResolveRuntimeLog(userMode bool, logPath string) RuntimeLogSource {
 func selectRuntimeLog(source RuntimeLogSource, requestedService, systemService service.Status, systemCfg endpointconfig.Config) RuntimeLogSource {
 	if systemService.Running && !requestedService.Running {
 		source.Reason = "requested endpoint configuration; system collector is also running on the configured OTLP ports"
+		source.EffectiveUserMode = false
+		source.EffectiveLogPath = systemCfg.LogPath
 		source.Warning = fmt.Sprintf("system collector is writing OTLP events to %s instead of the user runtime log %s; stop the system collector or install user mode to keep all events in one file", systemCfg.LogPath, source.RequestedLogPath)
 	}
 	return source
@@ -315,7 +317,7 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 			}
 			paths = append(paths, path)
 		case "codex", "codex_cli":
-			path, err := harness.ConfigureCodex(harness.ConfigureOptions{Endpoint: endpoint, UserMode: cfg.UserMode})
+			path, err := harness.ConfigureCodex(harness.ConfigureOptions{Endpoint: endpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
 			if err != nil {
 				return paths, err
 			}

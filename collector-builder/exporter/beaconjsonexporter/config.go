@@ -21,7 +21,7 @@ func createDefaultConfig() *Config {
 		MaxEventBytes:    defaultMaxEventBytes,
 		RotateBytes:      defaultRotateBytes,
 		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		ContentRetention: "full",
 	}
 }
 

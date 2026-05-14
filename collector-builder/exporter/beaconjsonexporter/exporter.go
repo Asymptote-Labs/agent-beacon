@@ -33,7 +33,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 		cfg.RotateBytes = defaultRotateBytes
 	}
 	if cfg.ContentRetention == "" {
-		cfg.ContentRetention = "metadata"
+		cfg.ContentRetention = "full"
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -215,7 +215,11 @@ func isCodexInternalSpan(name string) bool {
 
 func (e *beaconExporter) eventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) beaconEvent {
 	attrs := mergeMaps(resourceAttrs, map[string]interface{}{})
-	event := newBeaconEvent(firstString(attrs, "beacon.event.action", "event.action", "metric.observed"), "metric", "info", harnessName(attrs, metric.Name()), time.Now().UTC())
+	action := firstString(attrs, "beacon.event.action", "event.action")
+	if action == "" {
+		action = "metric.observed"
+	}
+	event := newBeaconEvent(action, "metric", "info", harnessName(attrs, metric.Name()), time.Now().UTC())
 	event.Message = metric.Name()
 	e.populateCommon(&event, attrs)
 	event.Raw = e.rawPayload(attrs, map[string]interface{}{
@@ -271,6 +275,11 @@ func (e *beaconExporter) populateCommon(event *beaconEvent, attrs map[string]int
 			Required: true,
 			Decision: decision,
 			Reason:   firstString(attrs, "approval.reason", "policy.reason"),
+		}
+	}
+	if e.cfg.ContentRetention != "metadata" && event.Event.Category == "prompt" {
+		if text := firstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt"); text != "" {
+			event.Prompt = &promptInfo{Text: text}
 		}
 	}
 	event.Content = &contentInfo{Retention: e.cfg.ContentRetention, Included: e.cfg.ContentRetention != "metadata", Redacted: e.cfg.ContentRetention == "redacted"}
@@ -415,9 +424,13 @@ func normalizeHarnessName(name string) string {
 
 func inferAction(attrs map[string]interface{}, fallback string) string {
 	tool := strings.ToLower(firstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name"))
-	text := strings.ToLower(fallback + " " + tool)
+	text := strings.ToLower(strings.Join([]string{
+		fallback,
+		tool,
+		firstString(attrs, "event.name", "codex.op", "rpc.method"),
+	}, " "))
 	switch {
-	case strings.Contains(text, "prompt"):
+	case strings.Contains(text, "prompt") || strings.Contains(text, "user_input"):
 		return "prompt.submitted"
 	case strings.Contains(text, "mcp"):
 		return "mcp.tool_invoked"

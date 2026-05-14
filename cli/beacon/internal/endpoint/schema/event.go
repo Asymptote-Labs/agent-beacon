@@ -91,12 +91,22 @@ type PolicyInfo struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
+type PromptInfo struct {
+	Text string `json:"text,omitempty"`
+}
+
 type ContentInfo struct {
 	Retention string `json:"retention"`
 	Included  bool   `json:"included"`
 	Redacted  bool   `json:"redacted,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
 }
+
+const (
+	ContentRetentionMetadata = "metadata"
+	ContentRetentionRedacted = "redacted"
+	ContentRetentionFull     = "full"
+)
 
 type DestinationInfo struct {
 	Type   string `json:"type,omitempty"`
@@ -127,6 +137,7 @@ type Event struct {
 	MCP           *MCPInfo               `json:"mcp,omitempty"`
 	Approval      *ApprovalInfo          `json:"approval,omitempty"`
 	Policy        *PolicyInfo            `json:"policy,omitempty"`
+	Prompt        *PromptInfo            `json:"prompt,omitempty"`
 	Content       *ContentInfo           `json:"content,omitempty"`
 	Destination   *DestinationInfo       `json:"destination,omitempty"`
 	Health        *HealthInfo            `json:"health,omitempty"`
@@ -203,6 +214,13 @@ func (e Event) Validate() error {
 	}
 	if e.Harness.Name == "" {
 		return errors.New("harness.name is required")
+	}
+	if e.Content != nil {
+		switch e.Content.Retention {
+		case ContentRetentionMetadata, ContentRetentionRedacted, ContentRetentionFull:
+		default:
+			return errors.New("content.retention must be metadata, redacted, or full")
+		}
 	}
 	return nil
 }

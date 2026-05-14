@@ -74,6 +74,9 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 	if event.Approval != nil {
 		event.Approval.Reason = w.cleanString(event.Approval.Reason, 4096)
 	}
+	if event.Prompt != nil {
+		event.Prompt.Text = w.cleanString(event.Prompt.Text, 4096)
+	}
 	if event.Raw != nil {
 		event.Raw = w.sanitizeMap(event.Raw)
 	}

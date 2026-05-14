@@ -169,6 +169,7 @@ func TestSanitizeEventRedactsToolPolicyAndRawValues(t *testing.T) {
 		Path:    strings.Repeat("p", 3000),
 	}
 	event.Policy = &schema.PolicyInfo{Reason: "api_key=policy-secret"}
+	event.Prompt = &schema.PromptInfo{Text: "token=prompt-secret"}
 	event.Raw = map[string]interface{}{
 		"nested": map[string]interface{}{"token": "token=raw-secret"},
 	}
@@ -179,7 +180,7 @@ func TestSanitizeEventRedactsToolPolicyAndRawValues(t *testing.T) {
 		t.Fatalf("marshal sanitized event: %v", err)
 	}
 	text := string(data)
-	for _, secret := range []string{"message-secret", "command-secret", "policy-secret", "raw-secret"} {
+	for _, secret := range []string{"message-secret", "command-secret", "policy-secret", "prompt-secret", "raw-secret"} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("secret %q was not redacted: %s", secret, text)
 		}

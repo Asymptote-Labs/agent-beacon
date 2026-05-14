@@ -92,6 +92,12 @@ func TestEndpointHarnessDefaultsDoNotClobberInstall(t *testing.T) {
 	}
 }
 
+func TestEndpointRepairSupportsNoStart(t *testing.T) {
+	if endpointRepairCmd.Flags().Lookup("no-start") == nil {
+		t.Fatal("repair command missing --no-start flag")
+	}
+}
+
 func TestEndpointCommandsDefaultToUserMode(t *testing.T) {
 	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDashboardCmd, endpointHooksInstallCmd} {
 		userFlag := cmd.Flags().Lookup("user")
