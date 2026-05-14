@@ -13,8 +13,26 @@ Beacon is visibility-first. The current public build focuses on observing local
 agent runtime activity, normalizing it into endpoint events, and leaving
 forwarding to existing localfile/Wazuh or customer-managed pipelines.
 
+## Product Vision
+
+Beacon is built around a simple thesis: as AI agents move from answering
+questions to taking actions on laptops and workstations, the endpoint becomes
+the place where intent, context, permissions, tools, credentials, and changes
+come together.
+
+The long-term vision is to make local agent activity observable,
+understandable, and eventually governable across the enterprise. Beacon starts
+with the visibility layer: a common, local-first record of what agents were
+asked to do, what context they accessed, which tools and commands they used,
+what files they touched, what approvals were granted, and what changed on the
+endpoint.
+
+Read more in
+[Introducing Beacon: Endpoint Telemetry for AI Agents](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry).
+
 ## Table Of Contents
 
+- [Product Vision](#product-vision)
 - [What Beacon Does](#what-beacon-does)
 - [Privacy And Retention](#privacy-and-retention)
 - [What Beacon Does Not Do](#what-beacon-does-not-do)
