@@ -22,6 +22,7 @@ import (
 
 var endpointOpts struct {
 	userMode                 bool
+	systemMode               bool
 	logPath                  string
 	harnesses                string
 	hookHarnesses            string
@@ -246,7 +247,8 @@ func init() {
 	endpointCoworkCmd.AddCommand(endpointCoworkValidateCmd)
 
 	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDiscoverCmd, endpointUninstallCmd, endpointRepairCmd} {
-		c.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 
@@ -261,22 +263,27 @@ func init() {
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "metadata", "Content retention mode: metadata, redacted, or full")
-	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.dashboardAddr, "addr", dashboard.DefaultAddr, "Local dashboard listen address")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.dashboardOpen, "open", false, "Open the dashboard in a browser")
 
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print discovery as JSON")
 	endpointStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
-	endpointWazuhPrintConfigCmd.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+	endpointWazuhPrintConfigCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+	endpointWazuhPrintConfigCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointWazuhPrintConfigCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	endpointWazuhInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Wazuh content pack")
-	endpointWazuhInstallPackCmd.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+	endpointWazuhInstallPackCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+	endpointWazuhInstallPackCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointWazuhInstallPackCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
-	endpointWazuhValidateCmd.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+	endpointWazuhValidateCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+	endpointWazuhValidateCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointWazuhValidateCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
-		c.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointCoworkPrintConfigCmd.Flags().StringVar(&endpointOpts.coworkHeaders, "headers", "", "Optional OTLP headers to show in setup guidance")
@@ -293,7 +300,8 @@ func init() {
 	endpointCoworkValidateCmd.Flags().StringVar(&endpointOpts.coworkSince, "since", "", "Require a Claude Cowork event within this duration, such as 10m")
 	endpointCoworkStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointHooksStatusCmd} {
-		c.Flags().BoolVar(&endpointOpts.userMode, "user", false, "Use per-user endpoint paths instead of system paths")
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 		c.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "cursor", "Comma-separated hook harnesses")
 		c.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
@@ -378,6 +386,10 @@ func runEndpointWazuhValidate(cmd *cobra.Command, args []string) error {
 
 func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
+	userMode := endpointUserMode()
+	runtimeLog := lifecycle.ResolveRuntimeLog(userMode, endpointOpts.logPath)
+	cfg.UserMode = runtimeLog.EffectiveUserMode
+	cfg.LogPath = runtimeLog.EffectiveLogPath
 	if endpointOpts.dashboardAddr == "" {
 		endpointOpts.dashboardAddr = dashboard.DefaultAddr
 	}
@@ -387,6 +399,9 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	url := dashboard.URL(endpointOpts.dashboardAddr)
 	fmt.Printf("Beacon endpoint dashboard: %s\n", url)
 	fmt.Printf("Runtime log: %s\n", cfg.LogPath)
+	if runtimeLog.Warning != "" {
+		fmt.Printf("Runtime log source: %s\n", runtimeLog.Warning)
+	}
 	if endpointOpts.dashboardOpen {
 		if err := dashboard.OpenBrowser(url); err != nil {
 			return err
@@ -401,7 +416,7 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
-		UserMode:         endpointOpts.userMode,
+		UserMode:         endpointUserMode(),
 		LogPath:          endpointOpts.logPath,
 		Harnesses:        splitCSV(endpointOpts.harnesses),
 		GRPCPort:         endpointOpts.grpcPort,
@@ -422,13 +437,16 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointStatus(cmd *cobra.Command, args []string) error {
-	status := lifecycle.GetStatus(endpointOpts.userMode, endpointOpts.logPath)
+	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(status)
 	}
 	fmt.Printf("Beacon Endpoint Agent %s\n", status.Version)
 	fmt.Printf("Config: %s\n", status.ConfigPath)
 	fmt.Printf("Runtime log: %s\n", status.LogPath)
+	if status.RuntimeLog.Warning != "" {
+		fmt.Printf("Runtime log source: %s\n", status.RuntimeLog.Warning)
+	}
 	fmt.Printf("Collector: grpc=%t http=%t", status.Collector.GRPCReady, status.Collector.HTTPReady)
 	if status.Collector.Message != "" {
 		fmt.Printf(" (%s)", status.Collector.Message)
@@ -509,7 +527,7 @@ func writeValidationEvent(cfg endpointconfig.Config, destination string) (string
 }
 
 func runEndpointUninstall(cmd *cobra.Command, args []string) error {
-	if err := lifecycle.Uninstall(lifecycle.UninstallOptions{UserMode: endpointOpts.userMode, LogPath: endpointOpts.logPath, KeepLogs: endpointOpts.keepLogs, KeepConfig: endpointOpts.keepConfig}); err != nil {
+	if err := lifecycle.Uninstall(lifecycle.UninstallOptions{UserMode: endpointUserMode(), LogPath: endpointOpts.logPath, KeepLogs: endpointOpts.keepLogs, KeepConfig: endpointOpts.keepConfig}); err != nil {
 		return err
 	}
 	fmt.Println("Endpoint service, config, and managed files removed.")
@@ -518,7 +536,7 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 
 func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
-		UserMode:         endpointOpts.userMode,
+		UserMode:         endpointUserMode(),
 		LogPath:          endpointOpts.logPath,
 		Harnesses:        splitCSV(endpointOpts.harnesses),
 		GRPCPort:         endpointOpts.grpcPort,
@@ -535,7 +553,8 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 }
 
 func loadOrDefaultConfig() endpointconfig.Config {
-	if cfg, err := endpointconfig.Load(endpointOpts.userMode); err == nil {
+	userMode := endpointUserMode()
+	if cfg, err := endpointconfig.Load(userMode); err == nil {
 		if endpointOpts.logPath != "" {
 			cfg.LogPath = endpointOpts.logPath
 		}
@@ -543,9 +562,13 @@ func loadOrDefaultConfig() endpointconfig.Config {
 	}
 	logPath := endpointOpts.logPath
 	if logPath == "" {
-		logPath = writer.DefaultPath(endpointOpts.userMode)
+		logPath = writer.DefaultPath(userMode)
 	}
-	return endpointconfig.Default(endpointOpts.userMode, logPath)
+	return endpointconfig.Default(userMode, logPath)
+}
+
+func endpointUserMode() bool {
+	return endpointOpts.userMode && !endpointOpts.systemMode
 }
 
 func splitCSV(value string) []string {

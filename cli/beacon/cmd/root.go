@@ -20,7 +20,7 @@ Beacon-hosted backend.`,
 		fmt.Println("Beacon Endpoint Agent")
 		fmt.Println()
 		fmt.Println("Start with:")
-		fmt.Println("  beacon endpoint install --user")
+		fmt.Println("  beacon endpoint install")
 		fmt.Println("  beacon endpoint status")
 		fmt.Println("  beacon endpoint wazuh print-config")
 		fmt.Println()

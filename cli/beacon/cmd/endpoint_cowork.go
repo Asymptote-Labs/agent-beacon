@@ -146,7 +146,7 @@ func displayValue(value string) string {
 func requireLocalOTLPHTTP(port int) error {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
 	if err != nil {
-		return fmt.Errorf("local OTLP HTTP receiver is not listening on 127.0.0.1:%d; run `beacon endpoint install --user` or `beacon endpoint repair --user` first", port)
+		return fmt.Errorf("local OTLP HTTP receiver is not listening on 127.0.0.1:%d; run `beacon endpoint install` or `beacon endpoint repair` first", port)
 	}
 	_ = conn.Close()
 	return nil

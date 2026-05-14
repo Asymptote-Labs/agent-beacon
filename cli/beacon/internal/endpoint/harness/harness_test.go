@@ -13,7 +13,8 @@ func TestMergeCodexOTELAddsBlock(t *testing.T) {
 	if !strings.Contains(got, "[otel]") {
 		t.Fatalf("expected otel block: %s", got)
 	}
-	if !strings.Contains(got, "endpoint = \"http://127.0.0.1:4317\"") {
+	if !strings.Contains(got, `[otel.exporter."otlp-grpc"]`) ||
+		!strings.Contains(got, `endpoint = "http://127.0.0.1:4317"`) {
 		t.Fatalf("expected endpoint: %s", got)
 	}
 	if !strings.Contains(got, "model = \"gpt-5\"") {
@@ -22,9 +23,9 @@ func TestMergeCodexOTELAddsBlock(t *testing.T) {
 }
 
 func TestMergeCodexOTELReplacesExistingBlock(t *testing.T) {
-	input := "[otel]\nenabled = false\nendpoint = \"https://example.com\"\n\n[profile]\nname = \"default\"\n"
+	input := "[otel]\nenabled = false\nendpoint = \"https://example.com\"\n\n[otel.exporter.\"otlp-http\"]\nendpoint = \"https://old.example.com/v1/logs\"\n\n[profile]\nname = \"default\"\n"
 	got := mergeCodexOTEL(input, "http://127.0.0.1:4317")
-	if strings.Contains(got, "https://example.com") || strings.Contains(got, "enabled = false") {
+	if strings.Contains(got, "https://example.com") || strings.Contains(got, "old.example.com") || strings.Contains(got, "enabled = false") {
 		t.Fatalf("old otel config was not replaced: %s", got)
 	}
 	if !strings.Contains(got, "[profile]\nname = \"default\"") {
@@ -135,9 +136,12 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 	for _, want := range []string{
 		"model = \"gpt-5\"",
 		"[otel]",
-		"enabled = true",
+		"environment = \"dev\"",
+		"log_user_prompt = false",
+		"[otel.exporter.\"otlp-grpc\"]",
+		"[otel.trace_exporter.\"otlp-grpc\"]",
+		"[otel.metrics_exporter.\"otlp-grpc\"]",
 		"endpoint = \"http://127.0.0.1:4317\"",
-		"service_name = \"codex-cli\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("codex config missing %q:\n%s", want, text)
@@ -160,9 +164,12 @@ func TestCodexStatusVariants(t *testing.T) {
 		status TelemetryStatus
 	}{
 		{name: "missing block", body: `model = "gpt-5"`, status: TelemetryDisabled},
-		{name: "disabled", body: "[otel]\nenabled = false\nendpoint = \"http://127.0.0.1:4317\"\n", status: TelemetryDisabled},
-		{name: "remote endpoint", body: "[otel]\nenabled = true\nendpoint = \"https://example.com\"\n", status: TelemetryMisconfigured},
-		{name: "enabled", body: "[otel]\nenabled = true\nendpoint = \"http://localhost:4317\"\n", status: TelemetryEnabled},
+		{name: "old shape", body: "[otel]\nenabled = true\nendpoint = \"http://127.0.0.1:4317\"\n", status: TelemetryDisabled},
+		{name: "exporter none", body: "[otel]\nexporter = \"none\"\n", status: TelemetryDisabled},
+		{name: "remote endpoint", body: "[otel]\nexporter = { otlp-grpc = { endpoint = \"https://example.com:4317\" } }\n", status: TelemetryMisconfigured},
+		{name: "grpc enabled", body: "[otel]\nexporter = { otlp-grpc = { endpoint = \"http://localhost:4317\" } }\n", status: TelemetryEnabled},
+		{name: "grpc table enabled", body: "[otel]\nlog_user_prompt = false\n\n[otel.exporter.\"otlp-grpc\"]\nendpoint = \"http://localhost:4317\"\n", status: TelemetryEnabled},
+		{name: "http enabled", body: "[otel]\nexporter = { otlp-http = { endpoint = \"http://127.0.0.1:4318/v1/logs\" } }\n", status: TelemetryEnabled},
 	}
 
 	for _, tt := range tests {

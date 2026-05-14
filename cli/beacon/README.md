@@ -11,20 +11,24 @@ make build
 ## Common Commands
 
 ```bash
-./beacon endpoint install --user
+./beacon endpoint install
 ./beacon endpoint status --json
 ./beacon endpoint discover --json
-./beacon endpoint repair --user
-./beacon endpoint dashboard --user
-./beacon endpoint uninstall --user --keep-logs
+./beacon endpoint repair
+./beacon endpoint dashboard
+./beacon endpoint uninstall --keep-logs
 ```
+
+Endpoint commands use per-user paths by default so hook and OTLP telemetry share
+`~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` for root-managed
+deployment paths.
 
 ## Dashboard
 
 ```bash
-./beacon endpoint dashboard --user
-./beacon endpoint dashboard --user --addr 127.0.0.1:8765
-./beacon endpoint dashboard --user --open
+./beacon endpoint dashboard
+./beacon endpoint dashboard --addr 127.0.0.1:8765
+./beacon endpoint dashboard --open
 ```
 
 The dashboard reads the configured runtime JSONL log and serves a local,
@@ -39,20 +43,20 @@ that may need review.
 ## Wazuh
 
 ```bash
-./beacon endpoint wazuh print-config --user
-./beacon endpoint wazuh install-pack --output ./beacon-wazuh --user
-./beacon endpoint wazuh validate --user
+./beacon endpoint wazuh print-config
+./beacon endpoint wazuh install-pack --output ./beacon-wazuh
+./beacon endpoint wazuh validate
 ```
 
 ## Optional Integrations
 
 ```bash
-./beacon endpoint hooks install --harness cursor --user
-./beacon endpoint hooks status --harness cursor --user
+./beacon endpoint hooks install --harness cursor
+./beacon endpoint hooks status --harness cursor
 
-./beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --user --open
-./beacon endpoint integrations claude-cowork setup --ngrok --user --open
-./beacon endpoint integrations claude-cowork validate --user --since 10m
+./beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --open
+./beacon endpoint integrations claude-cowork setup --ngrok --open
+./beacon endpoint integrations claude-cowork validate --since 10m
 ```
 
 Claude Cowork monitoring is configured in the Claude admin console at

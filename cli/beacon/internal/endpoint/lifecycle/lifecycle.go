@@ -49,11 +49,21 @@ type Status struct {
 	Version     string                   `json:"version"`
 	ConfigPath  string                   `json:"config_path"`
 	LogPath     string                   `json:"log_path"`
+	RuntimeLog  RuntimeLogSource         `json:"runtime_log"`
 	Collector   endpointcollector.Status `json:"collector"`
 	Service     service.Status           `json:"service"`
 	Harnesses   []harness.Harness        `json:"harnesses"`
 	Diagnostics []diagnostics.Check      `json:"diagnostics"`
 	LastEvent   string                   `json:"last_event,omitempty"`
+}
+
+type RuntimeLogSource struct {
+	RequestedUserMode bool   `json:"requested_user_mode"`
+	EffectiveUserMode bool   `json:"effective_user_mode"`
+	RequestedLogPath  string `json:"requested_log_path"`
+	EffectiveLogPath  string `json:"effective_log_path"`
+	Reason            string `json:"reason,omitempty"`
+	Warning           string `json:"warning,omitempty"`
 }
 
 type Manifest struct {
@@ -174,17 +184,69 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 
 func GetStatus(userMode bool, logPath string) Status {
 	cfg := loadOrDefault(userMode, logPath)
-	last, _ := writer.LastLine(cfg.LogPath)
+	runtimeLog := ResolveRuntimeLog(userMode, logPath)
+	effectiveCfg := cfg
+	effectiveCfg.UserMode = runtimeLog.EffectiveUserMode
+	if runtimeLog.EffectiveUserMode != cfg.UserMode {
+		effectiveCfg = loadOrDefault(runtimeLog.EffectiveUserMode, runtimeLog.EffectiveLogPath)
+	}
+	effectiveCfg.LogPath = runtimeLog.EffectiveLogPath
+	last, _ := writer.LastLine(effectiveCfg.LogPath)
+	checks := diagnostics.Run(effectiveCfg)
+	if runtimeLog.Warning != "" {
+		checks = append(checks, diagnostics.Check{
+			Name:     "runtime_log_source",
+			Status:   "warn",
+			Severity: "medium",
+			Message:  runtimeLog.Warning,
+		})
+	}
 	return Status{
 		Version:     version.GetVersion(),
-		ConfigPath:  endpointconfig.ConfigPath(cfg.UserMode),
-		LogPath:     cfg.LogPath,
-		Collector:   endpointcollector.CheckStatus(cfg),
-		Service:     service.Manager{UserMode: cfg.UserMode}.Status(),
+		ConfigPath:  endpointconfig.ConfigPath(effectiveCfg.UserMode),
+		LogPath:     effectiveCfg.LogPath,
+		RuntimeLog:  runtimeLog,
+		Collector:   endpointcollector.CheckStatus(effectiveCfg),
+		Service:     service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
 		Harnesses:   harness.DiscoverAll(),
-		Diagnostics: diagnostics.Run(cfg),
+		Diagnostics: checks,
 		LastEvent:   last,
 	}
+}
+
+func ResolveRuntimeLog(userMode bool, logPath string) RuntimeLogSource {
+	cfg := loadOrDefault(userMode, logPath)
+	source := RuntimeLogSource{
+		RequestedUserMode: userMode,
+		EffectiveUserMode: userMode,
+		RequestedLogPath:  cfg.LogPath,
+		EffectiveLogPath:  cfg.LogPath,
+		Reason:            "requested endpoint configuration",
+	}
+	if logPath != "" {
+		source.Reason = "explicit runtime log path"
+		return source
+	}
+	if !userMode {
+		return source
+	}
+	systemCfg, err := endpointconfig.Load(false)
+	if err != nil || !sameCollectorPorts(cfg, systemCfg) || systemCfg.LogPath == "" || systemCfg.LogPath == cfg.LogPath {
+		return source
+	}
+	return selectRuntimeLog(source, service.Manager{UserMode: true}.Status(), service.Manager{UserMode: false}.Status(), systemCfg)
+}
+
+func selectRuntimeLog(source RuntimeLogSource, requestedService, systemService service.Status, systemCfg endpointconfig.Config) RuntimeLogSource {
+	if systemService.Running && !requestedService.Running {
+		source.Reason = "requested endpoint configuration; system collector is also running on the configured OTLP ports"
+		source.Warning = fmt.Sprintf("system collector is writing OTLP events to %s instead of the user runtime log %s; stop the system collector or install user mode to keep all events in one file", systemCfg.LogPath, source.RequestedLogPath)
+	}
+	return source
+}
+
+func sameCollectorPorts(left, right endpointconfig.Config) bool {
+	return left.Collector.GRPCPort == right.Collector.GRPCPort && left.Collector.HTTPPort == right.Collector.HTTPPort
 }
 
 func buildConfig(opts InstallOptions) endpointconfig.Config {
@@ -230,7 +292,7 @@ func preflight(cfg endpointconfig.Config, startService bool) error {
 		return fmt.Errorf("production endpoint install is currently supported only on macOS")
 	}
 	if !cfg.UserMode && os.Geteuid() != 0 {
-		return fmt.Errorf("system install requires root; rerun with sudo or use --user")
+		return fmt.Errorf("system install requires root; rerun with sudo or omit --system for the default user install")
 	}
 	if !startService {
 		return nil

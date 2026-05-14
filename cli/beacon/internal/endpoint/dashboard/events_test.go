@@ -34,6 +34,23 @@ func TestReadEventsSkipsMalformedLinesAndFilters(t *testing.T) {
 	}
 }
 
+func TestReadEventsInfersMissingCategory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := testSchemaEvent("2026-05-13T01:00:00Z", "codex_cli", "tool.invoked", "", "repo-a")
+	writeTestLog(t, path, marshalEvents(t, event)...)
+
+	result, err := ReadEvents(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents returned error: %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(result.Events))
+	}
+	if got := result.Events[0].Event.Event.Category; got != "tool" {
+		t.Fatalf("Category = %q, want tool", got)
+	}
+}
+
 func TestBuildSummaryAggregatesSignals(t *testing.T) {
 	result := EventResult{
 		TotalMatched: 4,

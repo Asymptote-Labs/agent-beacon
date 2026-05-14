@@ -85,7 +85,7 @@ Run the local dashboard during manual testing:
 
 ```bash
 cd cli/beacon
-go run . endpoint dashboard --user
+go run . endpoint dashboard
 ```
 
 ## Implementation Notes

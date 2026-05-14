@@ -86,6 +86,9 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 			result.MalformedLines++
 			continue
 		}
+		if event.Event.Category == "" {
+			event.Event.Category = inferEventCategory(event.Event.Action)
+		}
 		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
 		record := EventRecord{
 			ID:         fmt.Sprintf("line-%d", lineNo),
@@ -146,6 +149,9 @@ func FindEvent(path, id string) (EventRecord, bool, error) {
 		var event schema.Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			return EventRecord{}, false, nil
+		}
+		if event.Event.Category == "" {
+			event.Event.Category = inferEventCategory(event.Event.Action)
 		}
 		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
 		return EventRecord{
@@ -262,6 +268,27 @@ func matchesCommand(event schema.Event, command string) bool {
 		return true
 	}
 	return false
+}
+
+func inferEventCategory(action string) string {
+	switch {
+	case strings.HasPrefix(action, "prompt."):
+		return "prompt"
+	case strings.HasPrefix(action, "command."):
+		return "command"
+	case strings.HasPrefix(action, "file."):
+		return "file"
+	case strings.HasPrefix(action, "mcp."):
+		return "mcp"
+	case strings.HasPrefix(action, "approval.") || strings.HasPrefix(action, "policy."):
+		return "approval"
+	case strings.HasPrefix(action, "metric."):
+		return "metric"
+	case strings.HasPrefix(action, "tool."):
+		return "tool"
+	default:
+		return ""
+	}
 }
 
 func matchesFreeText(record EventRecord, query string) bool {

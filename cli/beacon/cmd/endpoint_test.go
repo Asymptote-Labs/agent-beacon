@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/spf13/cobra"
+)
 
 func TestSplitCSV(t *testing.T) {
 	got := splitCSV("cursor, claude-cowork,,codex")
@@ -85,5 +89,20 @@ func TestEndpointHarnessDefaultsDoNotClobberInstall(t *testing.T) {
 	}
 	if got, want := hooksFlag.DefValue, "cursor"; got != want {
 		t.Fatalf("hooks install --harness default = %q, want %q", got, want)
+	}
+}
+
+func TestEndpointCommandsDefaultToUserMode(t *testing.T) {
+	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDashboardCmd, endpointHooksInstallCmd} {
+		userFlag := cmd.Flags().Lookup("user")
+		if userFlag == nil {
+			t.Fatalf("%s missing --user flag", cmd.Use)
+		}
+		if userFlag.DefValue != "true" {
+			t.Fatalf("%s --user default = %q, want true", cmd.Use, userFlag.DefValue)
+		}
+		if cmd.Flags().Lookup("system") == nil {
+			t.Fatalf("%s missing --system flag", cmd.Use)
+		}
 	}
 }

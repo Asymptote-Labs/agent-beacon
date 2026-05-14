@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 )
 
 func TestRestoreTargetTimestampedBackup(t *testing.T) {
@@ -53,6 +54,64 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 	if cfg.Collector.BinaryPath != collectorPath {
 		t.Fatalf("BinaryPath = %q, want %q", cfg.Collector.BinaryPath, collectorPath)
+	}
+}
+
+func TestSelectRuntimeLogWarnsWhenSystemCollectorConflictsWithUserMode(t *testing.T) {
+	userLog := filepath.Join(t.TempDir(), "user-runtime.jsonl")
+	systemLog := filepath.Join(t.TempDir(), "system-runtime.jsonl")
+	source := RuntimeLogSource{
+		RequestedUserMode: true,
+		EffectiveUserMode: true,
+		RequestedLogPath:  userLog,
+		EffectiveLogPath:  userLog,
+	}
+	systemCfg := endpointconfig.Config{LogPath: systemLog}
+
+	got := selectRuntimeLog(
+		source,
+		service.Status{Label: service.UserLabel, Loaded: false, Running: false},
+		service.Status{Label: service.SystemLabel, Loaded: true, Running: true},
+		systemCfg,
+	)
+
+	if !got.EffectiveUserMode {
+		t.Fatal("expected effective user mode")
+	}
+	if got.EffectiveLogPath != userLog {
+		t.Fatalf("EffectiveLogPath = %q, want %q", got.EffectiveLogPath, userLog)
+	}
+	if got.Warning == "" || !strings.Contains(got.Warning, userLog) || !strings.Contains(got.Warning, systemLog) {
+		t.Fatalf("Warning = %q, want user/system log paths", got.Warning)
+	}
+}
+
+func TestSelectRuntimeLogKeepsUserLogWhenUserCollectorIsRunning(t *testing.T) {
+	userLog := filepath.Join(t.TempDir(), "user-runtime.jsonl")
+	systemLog := filepath.Join(t.TempDir(), "system-runtime.jsonl")
+	source := RuntimeLogSource{
+		RequestedUserMode: true,
+		EffectiveUserMode: true,
+		RequestedLogPath:  userLog,
+		EffectiveLogPath:  userLog,
+	}
+	systemCfg := endpointconfig.Config{LogPath: systemLog}
+
+	got := selectRuntimeLog(
+		source,
+		service.Status{Label: service.UserLabel, Loaded: true, Running: true},
+		service.Status{Label: service.SystemLabel, Loaded: true, Running: true},
+		systemCfg,
+	)
+
+	if !got.EffectiveUserMode {
+		t.Fatal("expected effective user mode")
+	}
+	if got.EffectiveLogPath != userLog {
+		t.Fatalf("EffectiveLogPath = %q, want %q", got.EffectiveLogPath, userLog)
+	}
+	if got.Warning != "" {
+		t.Fatalf("Warning = %q, want empty", got.Warning)
 	}
 }
 

@@ -85,7 +85,7 @@ brews:
       bin.install "beacon"
     caveats: |
       To configure local endpoint telemetry, run:
-        beacon endpoint install --user
+        beacon endpoint install
     test: |
       system "#{bin}/beacon", "version"
 
@@ -110,7 +110,7 @@ release:
 
     ## Quick Start
     ```bash
-    beacon endpoint install --user
+    beacon endpoint install
     beacon endpoint status
     beacon endpoint wazuh print-config
     ```

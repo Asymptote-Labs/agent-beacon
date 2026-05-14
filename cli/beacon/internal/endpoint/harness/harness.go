@@ -225,11 +225,12 @@ func mergeCodexOTEL(existing, endpoint string) string {
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			if inOTEL && !wroteOTEL {
+			isOTELHeader := codexOTELHeader(trim)
+			if inOTEL && !isOTELHeader && !wroteOTEL {
 				out = append(out, codexOTELBlock(endpoint)...)
 				wroteOTEL = true
 			}
-			inOTEL = trim == "[otel]"
+			inOTEL = isOTELHeader
 			if !inOTEL {
 				out = append(out, line)
 			}
@@ -253,13 +254,24 @@ func mergeCodexOTEL(existing, endpoint string) string {
 	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
 }
 
+func codexOTELHeader(header string) bool {
+	return header == "[otel]" || strings.HasPrefix(header, "[otel.")
+}
+
 func codexOTELBlock(endpoint string) []string {
 	return []string{
 		"[otel]",
-		"enabled = true",
+		"environment = \"dev\"",
+		"log_user_prompt = false",
+		"",
+		"[otel.exporter.\"otlp-grpc\"]",
 		fmt.Sprintf("endpoint = %q", endpoint),
-		"service_name = \"codex-cli\"",
-		"sampling_ratio = 1.0",
+		"",
+		"[otel.trace_exporter.\"otlp-grpc\"]",
+		fmt.Sprintf("endpoint = %q", endpoint),
+		"",
+		"[otel.metrics_exporter.\"otlp-grpc\"]",
+		fmt.Sprintf("endpoint = %q", endpoint),
 	}
 }
 
@@ -295,8 +307,8 @@ func codexStatus(path string) (TelemetryStatus, string) {
 	if !strings.Contains(text, "[otel]") {
 		return TelemetryDisabled, "Codex [otel] config is missing"
 	}
-	if !strings.Contains(text, "enabled = true") {
-		return TelemetryDisabled, "Codex OTEL is not enabled"
+	if !strings.Contains(text, "otlp-grpc") && !strings.Contains(text, "otlp-http") {
+		return TelemetryDisabled, "Codex OTEL exporter is not configured"
 	}
 	if !strings.Contains(text, "127.0.0.1") && !strings.Contains(text, "localhost") {
 		return TelemetryMisconfigured, "Codex OTLP endpoint does not point to localhost"

@@ -110,24 +110,29 @@ cd cli/beacon
 make build
 ```
 
-### Install In User Mode
+### Install Locally
 
 ```bash
-beacon endpoint install --user
-beacon endpoint status --user
+beacon endpoint install
+beacon endpoint status
 ```
+
+The normal CLI flow uses per-user endpoint paths by default. Cursor hooks,
+Claude Code OTLP, and Codex OTLP all write to the same user runtime log:
+`~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` only for root-managed
+package or MDM deployments.
 
 ### Set Content Retention
 
 ```bash
-beacon endpoint install --user --content-retention metadata
+beacon endpoint install --content-retention metadata
 ```
 
 ### Configure Wazuh Output
 
 ```bash
-beacon endpoint wazuh print-config --user
-beacon endpoint wazuh validate --user
+beacon endpoint wazuh print-config
+beacon endpoint wazuh validate
 ```
 
 ### Run The macOS Smoke Test
@@ -141,7 +146,7 @@ sh packaging/macos/smoke-endpoint.sh
 ### Cursor Hooks
 
 ```bash
-beacon endpoint hooks install --harness cursor --user
+beacon endpoint hooks install --harness cursor
 ```
 
 ### Claude Cowork
@@ -150,15 +155,15 @@ Claude Cowork OpenTelemetry export is configured in the Claude admin console and
 requires a Team/Enterprise admin.
 
 ```bash
-beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --user --open
-beacon endpoint integrations claude-cowork validate --user --since 10m
+beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --open
+beacon endpoint integrations claude-cowork validate --since 10m
 ```
 
 For local testing only, Beacon can create a temporary authenticated ngrok tunnel
 to the local OTLP HTTP receiver:
 
 ```bash
-beacon endpoint integrations claude-cowork setup --ngrok --user --open
+beacon endpoint integrations claude-cowork setup --ngrok --open
 ```
 
 ## Claude Cowork Durable Collector
@@ -198,12 +203,13 @@ Recommended production shape:
 Run the local dashboard:
 
 ```bash
-beacon endpoint dashboard --user
-beacon endpoint dashboard --user --open
+beacon endpoint dashboard
+beacon endpoint dashboard --open
 ```
 
 The dashboard binds to loopback by default and reads the local runtime JSONL log.
-It is intended for local inspection, not remote administration.
+It is intended for local inspection, not remote administration. In the default
+CLI setup it reads the same user log used by hook and OTLP telemetry.
 
 ## Command Reference
 
@@ -211,16 +217,16 @@ Common commands:
 
 ```bash
 beacon version
-beacon endpoint install --user
-beacon endpoint status --user
+beacon endpoint install
+beacon endpoint status
 beacon endpoint discover
-beacon endpoint dashboard --user --open
-beacon endpoint wazuh print-config --user
-beacon endpoint wazuh validate --user
-beacon endpoint hooks install --harness cursor --user
-beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --user --open
-beacon endpoint integrations claude-cowork validate --user --since 10m
-beacon endpoint uninstall --user --keep-logs
+beacon endpoint dashboard --open
+beacon endpoint wazuh print-config
+beacon endpoint wazuh validate
+beacon endpoint hooks install --harness cursor
+beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --open
+beacon endpoint integrations claude-cowork validate --since 10m
+beacon endpoint uninstall --keep-logs
 ```
 
 - `beacon endpoint install`: configure the endpoint agent, Collector service, and Claude/Codex telemetry.
@@ -236,7 +242,7 @@ beacon endpoint uninstall --user --keep-logs
 Uninstall while keeping logs:
 
 ```bash
-beacon endpoint uninstall --user --keep-logs
+beacon endpoint uninstall --keep-logs
 ```
 
 ## Repository Layout
@@ -256,25 +262,25 @@ content-retention defaults, log paths, and uninstall behavior.
 
 For macOS, publish a signed and notarized package or Homebrew formula that
 installs the CLI, collector, Wazuh content pack, and deployment scripts. The
-package should apply explicit endpoint settings, for example:
+package should apply explicit system endpoint settings, for example:
 
 ```bash
-beacon endpoint install --harness claude,codex --content-retention metadata
+beacon endpoint install --system --harness claude,codex --content-retention metadata
 ```
 
 Before publishing a release, verify the build from a clean checkout and clean
 macOS host or VM:
 
 - `beacon version` reports the expected version, commit, and build date.
-- `beacon endpoint install --user --no-start` succeeds without developer
+- `beacon endpoint install --no-start` succeeds without developer
   tooling.
-- `beacon endpoint status --user` reports config, collector, service, harness,
+- `beacon endpoint status` reports config, collector, service, harness,
   diagnostic, and runtime log paths.
-- `beacon endpoint wazuh validate --user` writes a valid Beacon JSONL event.
-- `beacon endpoint dashboard --user` starts on `127.0.0.1`, serves a read-only
+- `beacon endpoint wazuh validate` writes a valid Beacon JSONL event.
+- `beacon endpoint dashboard` starts on `127.0.0.1`, serves a read-only
   dashboard, and can search local telemetry without external network
   dependencies.
-- `beacon endpoint uninstall --user` removes managed service and config files.
+- `beacon endpoint uninstall` removes managed service and config files.
 - macOS package signature and notarization are valid when distributing a `.pkg`.
 
 The repository smoke test keeps this flow local and non-root:

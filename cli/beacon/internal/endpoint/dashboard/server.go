@@ -15,7 +15,6 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 const DefaultAddr = "127.0.0.1:8765"
@@ -33,6 +32,7 @@ type StatusResponse struct {
 	Version          string                          `json:"version"`
 	ConfigPath       string                          `json:"config_path"`
 	LogPath          string                          `json:"log_path"`
+	RuntimeLog       lifecycle.RuntimeLogSource      `json:"runtime_log"`
 	ContentRetention endpointconfig.ContentRetention `json:"content_retention"`
 	Harnesses        interface{}                     `json:"harnesses"`
 	Collector        interface{}                     `json:"collector"`
@@ -41,9 +41,9 @@ type StatusResponse struct {
 }
 
 func Handler(opts Options) (http.Handler, error) {
-	if opts.LogPath == "" {
-		opts.LogPath = writer.DefaultPath(opts.UserMode)
-	}
+	runtimeLog := lifecycle.ResolveRuntimeLog(opts.UserMode, opts.LogPath)
+	opts.LogPath = runtimeLog.EffectiveLogPath
+	opts.UserMode = runtimeLog.EffectiveUserMode
 	staticRoot, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		return nil, err
@@ -66,6 +66,7 @@ func Handler(opts Options) (http.Handler, error) {
 			Version:          status.Version,
 			ConfigPath:       status.ConfigPath,
 			LogPath:          status.LogPath,
+			RuntimeLog:       runtimeLog,
 			ContentRetention: cfg.ContentRetention,
 			Harnesses:        status.Harnesses,
 			Collector:        status.Collector,

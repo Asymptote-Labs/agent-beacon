@@ -80,6 +80,9 @@ func (e *beaconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces
 			scopeSpans := resourceSpans.ScopeSpans().At(j)
 			for k := 0; k < scopeSpans.Spans().Len(); k++ {
 				span := scopeSpans.Spans().At(k)
+				if shouldDropSpan(resourceAttrs, span) {
+					continue
+				}
 				event := e.eventFromSpan(resourceAttrs, span)
 				if err := e.writer.append(event); err != nil && firstErr == nil {
 					firstErr = err
@@ -118,7 +121,7 @@ func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, reco
 		action = inferAction(attrs, record.Body().AsString())
 	}
 	message := firstNonEmpty(record.Body().AsString(), firstString(attrs, "message", "log.message"))
-	event := newBeaconEvent(action, firstString(attrs, "beacon.event.category", "event.category", "category"), severity(record.SeverityText(), record.SeverityNumber().String()), harnessName(attrs, message), ts)
+	event := newBeaconEvent(action, eventCategory(action, firstString(attrs, "beacon.event.category", "event.category", "category")), severity(record.SeverityText(), record.SeverityNumber().String()), harnessName(attrs, message), ts)
 	event.Message = message
 	e.populateCommon(&event, attrs)
 	event.Raw = e.rawPayload(attrs, map[string]interface{}{
@@ -135,7 +138,7 @@ func (e *beaconExporter) eventFromSpan(resourceAttrs map[string]interface{}, spa
 		action = inferAction(attrs, span.Name())
 	}
 	message := firstNonEmpty(firstString(attrs, "message", "gen_ai.prompt", "gen_ai.response"), span.Name())
-	event := newBeaconEvent(action, firstString(attrs, "beacon.event.category", "event.category", "tool"), spanSeverity(span.Status().Code().String()), harnessName(attrs, message, span.Name()), timestamp(span.StartTimestamp().AsTime()))
+	event := newBeaconEvent(action, eventCategory(action, firstString(attrs, "beacon.event.category", "event.category", "tool")), spanSeverity(span.Status().Code().String()), harnessName(attrs, message, span.Name()), timestamp(span.StartTimestamp().AsTime()))
 	event.Message = message
 	e.populateCommon(&event, attrs)
 	event.Raw = e.rawPayload(attrs, map[string]interface{}{
@@ -145,6 +148,69 @@ func (e *beaconExporter) eventFromSpan(resourceAttrs map[string]interface{}, spa
 		"status":      span.Status().Code().String(),
 	})
 	return event
+}
+
+func shouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
+	attrs := mergeMaps(resourceAttrs, attrsToMap(span.Attributes()))
+	if harnessName(attrs, span.Name()) != "codex_cli" {
+		return false
+	}
+	return isCodexInternalSpan(span.Name())
+}
+
+func isCodexInternalSpan(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return true
+	}
+	keepPrefixes := []string{
+		"codex.",
+		"op.dispatch",
+		"session_task.",
+		"model_client.",
+		"run_turn",
+		"run_sampling_request",
+		"try_run_sampling_request",
+		"stream_request",
+		"handle_responses",
+	}
+	for _, prefix := range keepPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return false
+		}
+	}
+	dropExact := map[string]struct{}{
+		"receiving":                     {},
+		"receiving_stream":              {},
+		"poll":                          {},
+		"poll_ready":                    {},
+		"popped":                        {},
+		"pop_frame":                     {},
+		"reserve_capacity":              {},
+		"try_assign_capacity":           {},
+		"try_reclaim_frame":             {},
+		"assign_connection_capacity":    {},
+		"updating stream flow":          {},
+		"updating connection flow":      {},
+		"recv_stream_window_update":     {},
+		"recv_connection_window_update": {},
+		"send_data":                     {},
+	}
+	if _, ok := dropExact[normalized]; ok {
+		return true
+	}
+	dropPrefixes := []string{
+		"framedread::",
+		"framedwrite::",
+		"hpack::",
+		"prioritize::",
+	}
+	for _, prefix := range dropPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *beaconExporter) eventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) beaconEvent {
@@ -363,5 +429,29 @@ func inferAction(attrs map[string]interface{}, fallback string) string {
 		return "approval.requested"
 	default:
 		return "tool.invoked"
+	}
+}
+
+func eventCategory(action, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	switch {
+	case strings.HasPrefix(action, "prompt."):
+		return "prompt"
+	case strings.HasPrefix(action, "command."):
+		return "command"
+	case strings.HasPrefix(action, "file."):
+		return "file"
+	case strings.HasPrefix(action, "mcp."):
+		return "mcp"
+	case strings.HasPrefix(action, "approval.") || strings.HasPrefix(action, "policy."):
+		return "approval"
+	case strings.HasPrefix(action, "metric."):
+		return "metric"
+	case strings.HasPrefix(action, "tool."):
+		return "tool"
+	default:
+		return ""
 	}
 }

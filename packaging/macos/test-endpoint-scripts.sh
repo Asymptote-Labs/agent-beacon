@@ -34,7 +34,7 @@ STUB_LOG="$STUB_LOG" \
 
 INSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$INSTALL_ARGS" in
-  "endpoint install --harness claude,codex,cursor --content-retention redacted --otlp-grpc-port 5317 --otlp-http-port 5318 --collector /tmp/beacon-otelcol") ;;
+  "endpoint install --system --harness claude,codex,cursor --content-retention redacted --otlp-grpc-port 5317 --otlp-http-port 5318 --collector /tmp/beacon-otelcol") ;;
   *)
     echo "unexpected install args: $INSTALL_ARGS" >&2
     exit 1
@@ -47,7 +47,7 @@ STUB_LOG="$STUB_LOG" \
 
 INSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$INSTALL_ARGS" in
-  "endpoint install --harness claude --content-retention metadata --otlp-grpc-port 6317 --otlp-http-port 6318 --collector /tmp/jamf-otelcol --no-start") ;;
+  "endpoint install --system --harness claude --content-retention metadata --otlp-grpc-port 6317 --otlp-http-port 6318 --collector /tmp/jamf-otelcol --no-start") ;;
   *)
     echo "unexpected Jamf positional install args: $INSTALL_ARGS" >&2
     exit 1
@@ -62,7 +62,7 @@ STUB_LOG="$STUB_LOG" \
 
 UNINSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$UNINSTALL_ARGS" in
-  "endpoint uninstall --keep-logs --keep-config") ;;
+  "endpoint uninstall --system --keep-logs --keep-config") ;;
   *)
     echo "unexpected uninstall args with keep logs: $UNINSTALL_ARGS" >&2
     exit 1
@@ -75,7 +75,7 @@ STUB_LOG="$STUB_LOG" \
 
 UNINSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$UNINSTALL_ARGS" in
-  "endpoint uninstall --keep-logs --keep-config") ;;
+  "endpoint uninstall --system --keep-logs --keep-config") ;;
   *)
     echo "unexpected Jamf positional uninstall args: $UNINSTALL_ARGS" >&2
     exit 1
@@ -117,7 +117,7 @@ STUB_LOG="$STUB_LOG" \
 
 UNINSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$UNINSTALL_ARGS" in
-  "endpoint uninstall") ;;
+  "endpoint uninstall --system") ;;
   *)
     echo "unexpected uninstall args without keep logs: $UNINSTALL_ARGS" >&2
     exit 1

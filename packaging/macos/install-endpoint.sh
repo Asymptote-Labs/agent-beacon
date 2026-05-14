@@ -21,6 +21,7 @@ if [ -z "$BEACON_COLLECTOR" ] && [ -x "/opt/beacon/bin/beacon-otelcol" ]; then
 fi
 
 set -- endpoint install \
+  --system \
   --harness "$BEACON_ENDPOINT_HARNESSES" \
   --content-retention "$BEACON_CONTENT_RETENTION" \
   --otlp-grpc-port "$BEACON_OTLP_GRPC_PORT" \
