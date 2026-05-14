@@ -23,9 +23,10 @@ const DefaultAddr = "127.0.0.1:8765"
 var staticFiles embed.FS
 
 type Options struct {
-	Addr     string
-	LogPath  string
-	UserMode bool
+	Addr       string
+	LogPath    string
+	UserMode   bool
+	RuntimeLog *lifecycle.RuntimeLogSource
 }
 
 type StatusResponse struct {
@@ -41,7 +42,12 @@ type StatusResponse struct {
 }
 
 func Handler(opts Options) (http.Handler, error) {
-	runtimeLog := lifecycle.ResolveRuntimeLog(opts.UserMode, opts.LogPath)
+	var runtimeLog lifecycle.RuntimeLogSource
+	if opts.RuntimeLog != nil {
+		runtimeLog = *opts.RuntimeLog
+	} else {
+		runtimeLog = lifecycle.ResolveRuntimeLog(opts.UserMode, opts.LogPath)
+	}
 	opts.LogPath = runtimeLog.EffectiveLogPath
 	opts.UserMode = runtimeLog.EffectiveUserMode
 	staticRoot, err := fs.Sub(staticFiles, "static")
