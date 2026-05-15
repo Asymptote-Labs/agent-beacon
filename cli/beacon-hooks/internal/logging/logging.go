@@ -95,67 +95,6 @@ func (l *Logger) write(entry map[string]interface{}) {
 	}
 }
 
-func (l *Logger) writeEndpointEvent(entry map[string]interface{}) {
-	path := endpointLogPath()
-	if path == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return
-	}
-	hostname, _ := os.Hostname()
-	action, severity := endpointAction(l.hookName, entry)
-	event := map[string]interface{}{
-		"timestamp":      time.Now().UTC().Format(time.RFC3339),
-		"vendor":         "beacon",
-		"product":        "endpoint-agent",
-		"schema_version": "1.0",
-		"event": map[string]interface{}{
-			"kind":     "agent_runtime",
-			"action":   action,
-			"category": "hook",
-		},
-		"severity": severity,
-		"endpoint": map[string]interface{}{
-			"hostname": hostname,
-			"os":       runtime.GOOS,
-		},
-		"user": map[string]interface{}{
-			"name": os.Getenv("USER"),
-		},
-		"harness": map[string]interface{}{
-			"name": l.platform,
-		},
-		"message": redactEndpointString(truncateEndpoint(fmt.Sprint(entry["message"]), 4096)),
-	}
-	if l.sessionID != "" {
-		event["session"] = map[string]interface{}{"id": l.sessionID}
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		return
-	}
-	if len(data) > 64*1024 {
-		event["field_truncated"] = true
-		event["message"] = truncateEndpoint(fmt.Sprint(event["message"]), 1024)
-		data, err = json.Marshal(event)
-		if err != nil {
-			return
-		}
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	defer f.Close()
-	_, _ = f.Write(append(data, '\n'))
-}
-
 func (l *Logger) EndpointEvent(action, category, severity, message string, fields map[string]interface{}) {
 	path := endpointLogPath()
 	if path == "" {
@@ -245,31 +184,6 @@ func writeEndpointJSON(path string, event map[string]interface{}) {
 	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	defer f.Close()
 	_, _ = f.Write(append(data, '\n'))
-}
-
-func endpointAction(hookName string, entry map[string]interface{}) (action, severity string) {
-	message := strings.ToLower(fmt.Sprint(entry["message"]))
-	switch hookName {
-	case "session-start":
-		return "session.started", "info"
-	case "session-end":
-		return "session.ended", "info"
-	case "pre-tool":
-		if strings.Contains(message, "denying") || strings.Contains(message, "block") {
-			return "policy.warned", "medium"
-		}
-		return "tool.invoked", "info"
-	case "stop-async-handler":
-		if strings.Contains(message, "blocking with violations") {
-			return "policy.blocked", "high"
-		}
-		if strings.Contains(message, "warning") {
-			return "policy.warned", "medium"
-		}
-		return "session.ended", "info"
-	default:
-		return "tool.invoked", "info"
-	}
 }
 
 func endpointLogPath() string {

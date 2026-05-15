@@ -49,8 +49,6 @@ func runPostTool(cmd *cobra.Command, args []string) {
 
 	var params *evaluationParams
 
-	emitPostToolObserved(logger, input)
-
 	if platformFlag == "cursor" {
 		// Cursor fires two hook types through post-tool:
 		//   - afterFileEdit: has "edits" array and top-level "file_path" (no output supported)
@@ -58,6 +56,7 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		// We use hook_event_name (present in all Cursor hook inputs) to distinguish them.
 		hookEvent, _ := input["hook_event_name"].(string)
 		if hookEvent != "afterFileEdit" {
+			emitPostToolObserved(logger, input)
 			outputJSON(emptyResponse)
 			return
 		}
@@ -68,6 +67,9 @@ func runPostTool(cmd *cobra.Command, args []string) {
 	}
 
 	if params == nil {
+		if platformFlag != "cursor" {
+			emitPostToolObserved(logger, input)
+		}
 		outputJSON(emptyResponse)
 		return
 	}
