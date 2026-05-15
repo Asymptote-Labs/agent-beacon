@@ -18,10 +18,6 @@
   <a href="#command-reference">Commands</a>
 </p>
 
-<p align="center">
-  <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
-</p>
-
 AI agents now take action directly on developer endpoints, but security teams
 often have little unified visibility into prompts, tools, approvals, commands,
 and file changes across local agent harnesses.
@@ -30,6 +26,10 @@ Beacon runs locally on the endpoint, captures supported activity from Claude
 Code, Codex CLI, Claude Cowork, and Cursor, and normalizes it into
 Wazuh-compatible JSONL for existing localfile/Wazuh or customer-managed
 pipelines.
+
+<p align="center">
+  <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
+</p>
 
 ### Why Teams Use Beacon
 
