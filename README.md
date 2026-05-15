@@ -11,9 +11,11 @@
 <p align="center">
   <a href="https://docs.asymptotelabs.ai/cli">Docs</a>
   ·
+  <a href="https://docs.asymptotelabs.ai/cli/installation">Install</a>
+  ·
   <a href="#for-security-and-it-teams">For Security and IT Teams</a>
   ·
-  <a href="#quick-start">Quick Start</a>
+  <a href="https://docs.asymptotelabs.ai/cli/mdm-deployment">MDM Deployment</a>
   ·
   <a href="#command-reference">Commands</a>
 </p>
@@ -66,68 +68,25 @@ package installs Beacon under `/opt/beacon`, creates system endpoint
 configuration, loads the local collector LaunchDaemon, and writes runtime JSONL
 to `/var/log/beacon-agent/runtime.jsonl`.
 
-The full Jamf and Fleet runbook lives in
-[`packaging/macos/README.md`](packaging/macos/README.md).
+Deployment guidance:
 
-### Jamf Pro
+- [For Security & IT Teams](https://docs.asymptotelabs.ai/cli/security-it-teams)
+  explains the operational model and security workflow.
+- [MDM Deployment](https://docs.asymptotelabs.ai/cli/mdm-deployment) covers the
+  managed macOS package layout, rollout model, environment variables, and
+  rollback behavior.
+- [Jamf](https://docs.asymptotelabs.ai/cli/jamf) and
+  [Fleet](https://docs.asymptotelabs.ai/cli/fleet) cover MDM-specific inventory,
+  repair, validation, and script parameters.
+- [`packaging/macos/README.md`](packaging/macos/README.md) documents the
+  repository-local packaging assets used to build and test the `.pkg`.
 
-1. Upload the `.pkg` from `dist/macos/` to Jamf Pro.
-2. Create a Policy scoped to a pilot Smart Group.
-3. Install the package. No script is required for the default install path.
-4. Upload Extension Attributes from
-   `packaging/macos/jamf/extension-attributes/`.
-5. Scope repair to unhealthy devices with `/opt/beacon/jamf/scripts/repair.sh`.
-
-Optional explicit install policy script:
-
-```bash
-/opt/beacon/jamf/scripts/install.sh "$@"
-```
-
-Jamf parameters:
-
-```text
-Parameter 4: harnesses, default claude,codex
-Parameter 5: content retention, default full
-Parameter 6: OTLP gRPC port, default 4317
-Parameter 7: OTLP HTTP port, default 4318
-Parameter 8: collector path, default /opt/beacon/bin/beacon-otelcol
-Parameter 9: no-start flag, accepts 1/true/yes
-```
-
-Validate a deployed Mac:
+Validate a managed Mac with:
 
 ```bash
 sudo /opt/beacon/bin/beacon endpoint status --json
 sudo /opt/beacon/bin/beacon endpoint wazuh validate
 sudo launchctl print system/com.beacon.endpoint.collector
-```
-
-### Fleet
-
-1. Upload the signed/notarized `.pkg` as Fleet software.
-2. Scope it to a pilot team or label.
-3. Install the package. No post-install script is required for the default path.
-4. Add queries from `packaging/macos/fleet/queries/` as Fleet policies or
-   labels.
-5. Use scripts from `/opt/beacon/fleet/scripts/` for validation, repair, or
-   uninstall workflows.
-
-Fleet install arguments:
-
-```text
-1: harnesses, default claude,codex
-2: content retention, default full
-3: OTLP gRPC port, default 4317
-4: OTLP HTTP port, default 4318
-5: collector path, default /opt/beacon/bin/beacon-otelcol
-6: no-start flag, accepts 1/true/yes
-```
-
-Validate with:
-
-```bash
-/opt/beacon/fleet/scripts/validate.sh
 ```
 
 Cursor telemetry is deployed separately in the logged-in user's context; do not
@@ -171,6 +130,12 @@ Beacon can currently:
 - **Wazuh content:** generate Wazuh localfile/rule content for the Beacon event
   schema.
 
+See the
+[architecture](https://docs.asymptotelabs.ai/cli/architecture),
+[supported surfaces](https://docs.asymptotelabs.ai/cli/supported-surfaces), and
+[endpoint event schema](https://docs.asymptotelabs.ai/cli/event-schema) docs for
+the detailed collection model and normalized JSONL fields.
+
 ## Privacy And Retention
 
 Beacon records configured content fields by default. Content retention is configurable with:
@@ -181,6 +146,9 @@ Beacon records configured content fields by default. Content retention is config
 - `full`: default; include configured content fields in local/customer-controlled
   logs, still subject to event size limits.
 
+The [endpoint agent docs](https://docs.asymptotelabs.ai/cli/endpoint) describe
+how retention settings are applied during install and repair.
+
 ## What Beacon Does Not Do
 
 Beacon does not currently provide kernel/process monitoring, shell history
@@ -188,12 +156,33 @@ collection, cloud audit ingestion, browser/SaaS telemetry, credential-use
 attribution, MCP configuration inventory, or direct Datadog/Splunk/Elastic/etc.
 exporters.
 
+For current support boundaries, see
+[Supported Surfaces](https://docs.asymptotelabs.ai/cli/supported-surfaces).
+
 ## Documentation
 
-See the [Beacon CLI documentation](https://docs.asymptotelabs.ai/cli) for setup
-guides and command details.
+Start with the [Beacon CLI documentation](https://docs.asymptotelabs.ai/cli).
+The most common next pages are:
+
+- [Installation](https://docs.asymptotelabs.ai/cli/installation) for local CLI
+  setup.
+- [Endpoint Agent](https://docs.asymptotelabs.ai/cli/endpoint) for install,
+  status, repair, and uninstall workflows.
+- [MDM Deployment](https://docs.asymptotelabs.ai/cli/mdm-deployment),
+  [Jamf](https://docs.asymptotelabs.ai/cli/jamf), and
+  [Fleet](https://docs.asymptotelabs.ai/cli/fleet) for managed macOS rollout.
+- [Wazuh](https://docs.asymptotelabs.ai/cli/wazuh) and
+  [SIEM Forwarding](https://docs.asymptotelabs.ai/cli/siem-forwarding) for
+  forwarding local JSONL events.
+- [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard),
+  [Cursor Hooks](https://docs.asymptotelabs.ai/cli/hooks), and
+  [Claude Cowork](https://docs.asymptotelabs.ai/cli/claude-cowork) for optional
+  runtime workflows.
 
 ## Quick Start
+
+For the full local setup guide, see
+[Installation](https://docs.asymptotelabs.ai/cli/installation).
 
 ### Install With Homebrew
 
@@ -224,6 +213,9 @@ Claude Code OTLP, and Codex OTLP all write to the same user runtime log:
 `~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` only for root-managed
 package or MDM deployments.
 
+Command details: [`beacon endpoint install`](https://docs.asymptotelabs.ai/cli/endpoint-install)
+and [`beacon endpoint status`](https://docs.asymptotelabs.ai/cli/endpoint-status).
+
 ### Set Content Retention
 
 ```bash
@@ -239,6 +231,10 @@ beacon endpoint wazuh print-config
 beacon endpoint wazuh validate
 ```
 
+See [Wazuh](https://docs.asymptotelabs.ai/cli/wazuh) and
+[SIEM Forwarding](https://docs.asymptotelabs.ai/cli/siem-forwarding) for
+production forwarding guidance.
+
 ### Run The macOS Smoke Test
 
 ```bash
@@ -252,6 +248,9 @@ sh packaging/macos/smoke-endpoint.sh
 ```bash
 beacon endpoint hooks install --harness cursor
 ```
+
+See [Cursor Hooks](https://docs.asymptotelabs.ai/cli/hooks) for install, status,
+and uninstall guidance.
 
 ### Claude Cowork
 
@@ -269,6 +268,9 @@ to the local OTLP HTTP receiver:
 ```bash
 beacon endpoint integrations claude-cowork setup --ngrok --open
 ```
+
+See [Claude Cowork](https://docs.asymptotelabs.ai/cli/claude-cowork) for
+production setup and validation details.
 
 ## Claude Cowork Durable Collector
 
@@ -302,6 +304,12 @@ Recommended production shape:
   redaction/export.
 - Use `--ngrok` only for demos, validation, or local development.
 
+The
+[`claude-cowork setup`](https://docs.asymptotelabs.ai/cli/claude-cowork-setup)
+and
+[`claude-cowork validate`](https://docs.asymptotelabs.ai/cli/claude-cowork-validate)
+command docs include the current CLI flags.
+
 ## Dashboard
 
 Run the local dashboard:
@@ -314,6 +322,10 @@ beacon endpoint dashboard --open
 The dashboard binds to loopback by default and reads the local runtime JSONL log.
 It is intended for local inspection, not remote administration. In the default
 CLI setup it reads the same user log used by hook and OTLP telemetry.
+
+See [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard) for usage and
+[`beacon endpoint dashboard`](https://docs.asymptotelabs.ai/cli/endpoint-dashboard)
+for command flags.
 
 ## Command Reference
 
@@ -343,6 +355,16 @@ beacon endpoint uninstall --keep-logs
 - `beacon endpoint wazuh`: print/install Wazuh content and write a validation event.
 - `beacon endpoint uninstall`: stop services and remove managed endpoint files.
 
+Full command docs are available under
+[Endpoint Agent](https://docs.asymptotelabs.ai/cli/endpoint), including
+[install](https://docs.asymptotelabs.ai/cli/endpoint-install),
+[repair](https://docs.asymptotelabs.ai/cli/endpoint-repair),
+[status](https://docs.asymptotelabs.ai/cli/endpoint-status),
+[discover](https://docs.asymptotelabs.ai/cli/endpoint-discover),
+[dashboard](https://docs.asymptotelabs.ai/cli/endpoint-dashboard),
+[hooks](https://docs.asymptotelabs.ai/cli/hooks), and
+[uninstall](https://docs.asymptotelabs.ai/cli/endpoint-uninstall).
+
 Uninstall while keeping logs:
 
 ```bash
@@ -371,6 +393,9 @@ package should apply explicit system endpoint settings, for example:
 ```bash
 beacon endpoint install --system --harness claude,codex --content-retention full
 ```
+
+See [MDM Deployment](https://docs.asymptotelabs.ai/cli/mdm-deployment) for the
+managed package layout and rollout model.
 
 Before publishing a release, verify the build from a clean checkout and clean
 macOS host or VM:
