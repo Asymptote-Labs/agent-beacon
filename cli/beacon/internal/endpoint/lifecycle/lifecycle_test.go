@@ -41,6 +41,11 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 		GRPCPort:      54317,
 		HTTPPort:      54318,
 		CollectorPath: collectorPath,
+		SplunkHEC: &endpointconfig.SplunkHEC{
+			Endpoint: "https://splunk.example:8088/services/collector",
+			Token:    "hec-token",
+			Index:    "beacon",
+		},
 	})
 
 	if !cfg.UserMode || cfg.LogPath != logPath {
@@ -54,6 +59,12 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 	if cfg.Collector.BinaryPath != collectorPath {
 		t.Fatalf("BinaryPath = %q, want %q", cfg.Collector.BinaryPath, collectorPath)
+	}
+	if cfg.Destinations == nil || cfg.Destinations.SplunkHEC == nil || !cfg.Destinations.SplunkHEC.Enabled {
+		t.Fatalf("Splunk destination not configured: %#v", cfg.Destinations)
+	}
+	if got := cfg.Destinations.SplunkHEC.Source; got != endpointconfig.DefaultSplunkSource {
+		t.Fatalf("Splunk source = %q, want default", got)
 	}
 }
 

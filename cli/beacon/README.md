@@ -23,6 +23,18 @@ Endpoint commands use per-user paths by default so hook and OTLP telemetry share
 `~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` for root-managed
 deployment paths.
 
+Add optional Splunk HEC forwarding during install or repair:
+
+```bash
+./beacon endpoint install \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+The local JSONL runtime log remains enabled when Splunk forwarding is
+configured.
+
 ## Dashboard
 
 ```bash

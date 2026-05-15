@@ -27,6 +27,7 @@ type InstallOptions struct {
 	CollectorPath    string
 	StartService     bool
 	ContentRetention endpointconfig.ContentRetention
+	SplunkHEC        *endpointconfig.SplunkHEC
 }
 
 type UninstallOptions struct {
@@ -46,15 +47,28 @@ type InstallResult struct {
 }
 
 type Status struct {
-	Version     string                   `json:"version"`
-	ConfigPath  string                   `json:"config_path"`
-	LogPath     string                   `json:"log_path"`
-	RuntimeLog  RuntimeLogSource         `json:"runtime_log"`
-	Collector   endpointcollector.Status `json:"collector"`
-	Service     service.Status           `json:"service"`
-	Harnesses   []harness.Harness        `json:"harnesses"`
-	Diagnostics []diagnostics.Check      `json:"diagnostics"`
-	LastEvent   string                   `json:"last_event,omitempty"`
+	Version      string                   `json:"version"`
+	ConfigPath   string                   `json:"config_path"`
+	LogPath      string                   `json:"log_path"`
+	RuntimeLog   RuntimeLogSource         `json:"runtime_log"`
+	Collector    endpointcollector.Status `json:"collector"`
+	Service      service.Status           `json:"service"`
+	Harnesses    []harness.Harness        `json:"harnesses"`
+	Diagnostics  []diagnostics.Check      `json:"diagnostics"`
+	LastEvent    string                   `json:"last_event,omitempty"`
+	Destinations DestinationStatus        `json:"destinations"`
+}
+
+type DestinationStatus struct {
+	SplunkHEC ConfiguredStatus `json:"splunk_hec"`
+}
+
+type ConfiguredStatus struct {
+	Configured bool   `json:"configured"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	Index      string `json:"index,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Sourcetype string `json:"sourcetype,omitempty"`
 }
 
 type RuntimeLogSource struct {
@@ -135,7 +149,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		Harness:      schema.HarnessInfo{Name: "endpoint"},
 		Message:      "Beacon endpoint local telemetry configured",
 	})
-	event.Destination = &schema.DestinationInfo{Type: "wazuh", Mode: "localfile", Status: "configured"}
+	event.Destination = installDestination(cfg)
 	if _, err := writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {
 		return InstallResult{}, err
 	}
@@ -199,15 +213,16 @@ func GetStatus(userMode bool, logPath string) Status {
 		})
 	}
 	return Status{
-		Version:     version.GetVersion(),
-		ConfigPath:  endpointconfig.ConfigPath(effectiveCfg.UserMode),
-		LogPath:     effectiveCfg.LogPath,
-		RuntimeLog:  runtimeLog,
-		Collector:   endpointcollector.CheckStatus(effectiveCfg),
-		Service:     service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
-		Harnesses:   harness.DiscoverAll(),
-		Diagnostics: checks,
-		LastEvent:   last,
+		Version:      version.GetVersion(),
+		ConfigPath:   endpointconfig.ConfigPath(effectiveCfg.UserMode),
+		LogPath:      effectiveCfg.LogPath,
+		RuntimeLog:   runtimeLog,
+		Collector:    endpointcollector.CheckStatus(effectiveCfg),
+		Service:      service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
+		Harnesses:    harness.DiscoverAll(),
+		Diagnostics:  checks,
+		LastEvent:    last,
+		Destinations: destinationStatus(effectiveCfg),
 	}
 }
 
@@ -267,7 +282,36 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	if opts.ContentRetention != "" {
 		cfg.ContentRetention = opts.ContentRetention
 	}
+	if opts.SplunkHEC != nil {
+		cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: opts.SplunkHEC}
+		endpointconfig.NormalizeDestinations(&cfg)
+	}
 	return cfg
+}
+
+func installDestination(cfg endpointconfig.Config) *schema.DestinationInfo {
+	destination := &schema.DestinationInfo{Type: "local_jsonl", Mode: "file", Status: "configured"}
+	if cfg.Destinations != nil && cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Enabled {
+		destination.Type = "local_jsonl,splunk_hec"
+		destination.Mode = "file,hec"
+	}
+	return destination
+}
+
+func destinationStatus(cfg endpointconfig.Config) DestinationStatus {
+	status := DestinationStatus{}
+	if cfg.Destinations == nil || cfg.Destinations.SplunkHEC == nil || !cfg.Destinations.SplunkHEC.Enabled {
+		return status
+	}
+	splunk := cfg.Destinations.SplunkHEC
+	status.SplunkHEC = ConfiguredStatus{
+		Configured: true,
+		Endpoint:   splunk.Endpoint,
+		Index:      splunk.Index,
+		Source:     splunk.Source,
+		Sourcetype: splunk.Sourcetype,
+	}
+	return status
 }
 
 func loadOrDefault(userMode bool, logPath string) endpointconfig.Config {
@@ -285,6 +329,9 @@ func loadOrDefault(userMode bool, logPath string) endpointconfig.Config {
 
 func preflight(cfg endpointconfig.Config, startService bool) error {
 	if err := endpointconfig.ValidateContentRetention(cfg.ContentRetention); err != nil {
+		return err
+	}
+	if err := endpointconfig.ValidateDestinations(cfg.Destinations); err != nil {
 		return err
 	}
 	if runtime.GOOS != "darwin" {

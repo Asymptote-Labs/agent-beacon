@@ -42,6 +42,13 @@ var endpointOpts struct {
 	coworkSince              string
 	hookLevel                string
 	contentRetention         string
+	splunkHECEndpoint        string
+	splunkHECToken           string
+	splunkIndex              string
+	splunkSource             string
+	splunkSourcetype         string
+	splunkInsecureSkipVerify bool
+	splunkCAFile             string
 	dashboardAddr            string
 	dashboardOpen            bool
 }
@@ -258,12 +265,14 @@ func init() {
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
+	registerSplunkFlags(endpointInstallCmd)
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
+	registerSplunkFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -425,6 +434,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		CollectorPath:    endpointOpts.collectorPath,
 		StartService:     !endpointOpts.noStart,
 		ContentRetention: endpointconfig.ContentRetention(endpointOpts.contentRetention),
+		SplunkHEC:        splunkHECOptions(),
 	})
 	if err != nil {
 		return err
@@ -545,6 +555,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		CollectorPath:    endpointOpts.collectorPath,
 		StartService:     !endpointOpts.noStart,
 		ContentRetention: endpointconfig.ContentRetention(endpointOpts.contentRetention),
+		SplunkHEC:        splunkHECOptions(),
 	})
 	if err != nil {
 		return err
@@ -582,4 +593,35 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func registerSplunkFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&endpointOpts.splunkHECEndpoint, "splunk-hec-endpoint", "", "Splunk HEC endpoint URL")
+	cmd.Flags().StringVar(&endpointOpts.splunkHECToken, "splunk-hec-token", "", "Splunk HEC token")
+	cmd.Flags().StringVar(&endpointOpts.splunkIndex, "splunk-index", "", "Optional Splunk index")
+	cmd.Flags().StringVar(&endpointOpts.splunkSource, "splunk-source", endpointconfig.DefaultSplunkSource, "Optional Splunk source")
+	cmd.Flags().StringVar(&endpointOpts.splunkSourcetype, "splunk-sourcetype", endpointconfig.DefaultSplunkSourcetype, "Optional Splunk sourcetype")
+	cmd.Flags().BoolVar(&endpointOpts.splunkInsecureSkipVerify, "splunk-insecure-skip-verify", false, "Skip Splunk HEC TLS certificate verification")
+	cmd.Flags().StringVar(&endpointOpts.splunkCAFile, "splunk-ca-file", "", "Optional CA certificate path for Splunk HEC TLS verification")
+}
+
+func splunkHECOptions() *endpointconfig.SplunkHEC {
+	if endpointOpts.splunkHECEndpoint == "" &&
+		endpointOpts.splunkHECToken == "" &&
+		endpointOpts.splunkIndex == "" &&
+		endpointOpts.splunkSource == endpointconfig.DefaultSplunkSource &&
+		endpointOpts.splunkSourcetype == endpointconfig.DefaultSplunkSourcetype &&
+		!endpointOpts.splunkInsecureSkipVerify &&
+		endpointOpts.splunkCAFile == "" {
+		return nil
+	}
+	return &endpointconfig.SplunkHEC{
+		Endpoint:           endpointOpts.splunkHECEndpoint,
+		Token:              endpointOpts.splunkHECToken,
+		Index:              endpointOpts.splunkIndex,
+		Source:             endpointOpts.splunkSource,
+		Sourcetype:         endpointOpts.splunkSourcetype,
+		InsecureSkipVerify: endpointOpts.splunkInsecureSkipVerify,
+		CAFile:             endpointOpts.splunkCAFile,
+	}
 }

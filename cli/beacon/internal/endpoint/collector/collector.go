@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
@@ -84,16 +85,36 @@ func validateExecutable(path string) error {
 }
 
 func WriteConfig(cfg endpointconfig.Config) error {
+	endpointconfig.NormalizeDestinations(&cfg)
+	if err := endpointconfig.ValidateDestinations(cfg.Destinations); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(cfg.Collector.ConfigPath), 0755); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.Collector.SpoolPath), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), 0644)
+	perm := os.FileMode(0644)
+	if endpointconfig.HasSecretDestinations(cfg) {
+		perm = 0600
+	}
+	if err := os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), perm); err != nil {
+		return err
+	}
+	if endpointconfig.HasSecretDestinations(cfg) {
+		return os.Chmod(cfg.Collector.ConfigPath, perm)
+	}
+	return nil
 }
 
 func ConfigYAML(cfg endpointconfig.Config) string {
+	endpointconfig.NormalizeDestinations(&cfg)
+	exporters := "[beaconjson]"
+	splunkExporter := splunkHECYAML(cfg)
+	if splunkExporter != "" {
+		exporters = "[beaconjson, splunk_hec]"
+	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
@@ -117,7 +138,7 @@ exporters:
     rotate_bytes: 10485760
     redact_secrets: true
     content_retention: %q
-
+%s
 extensions:
   health_check:
     endpoint: 127.0.0.1:13133
@@ -131,16 +152,46 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [beaconjson]
+      exporters: %s
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [beaconjson]
+      exporters: %s
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [beaconjson]
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention)
+      exporters: %s
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, splunkExporter, exporters, exporters, exporters)
+}
+
+func splunkHECYAML(cfg endpointconfig.Config) string {
+	if cfg.Destinations == nil || cfg.Destinations.SplunkHEC == nil || !cfg.Destinations.SplunkHEC.Enabled {
+		return ""
+	}
+	splunk := cfg.Destinations.SplunkHEC
+	var b strings.Builder
+	fmt.Fprintf(&b, "  splunk_hec:\n")
+	fmt.Fprintf(&b, "    token: %q\n", splunk.Token)
+	fmt.Fprintf(&b, "    endpoint: %q\n", splunk.Endpoint)
+	if splunk.Source != "" {
+		fmt.Fprintf(&b, "    source: %q\n", splunk.Source)
+	}
+	if splunk.Sourcetype != "" {
+		fmt.Fprintf(&b, "    sourcetype: %q\n", splunk.Sourcetype)
+	}
+	if splunk.Index != "" {
+		fmt.Fprintf(&b, "    index: %q\n", splunk.Index)
+	}
+	if splunk.InsecureSkipVerify || splunk.CAFile != "" {
+		fmt.Fprintf(&b, "    tls:\n")
+		if splunk.InsecureSkipVerify {
+			fmt.Fprintf(&b, "      insecure_skip_verify: true\n")
+		}
+		if splunk.CAFile != "" {
+			fmt.Fprintf(&b, "      ca_file: %q\n", splunk.CAFile)
+		}
+	}
+	return b.String()
 }
 
 func CheckStatus(cfg endpointconfig.Config) Status {

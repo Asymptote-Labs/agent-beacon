@@ -51,6 +51,38 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 	}
 }
 
+func TestConfigYAMLIncludesSplunkHECWhenConfigured(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{
+		Endpoint:           "https://splunk.example:8088/services/collector",
+		Token:              "hec-token",
+		Index:              "beacon",
+		Source:             "beacon-endpoint-agent",
+		Sourcetype:         "beacon:endpoint",
+		InsecureSkipVerify: true,
+		CAFile:             "/tmp/ca.pem",
+	}}
+
+	yaml := ConfigYAML(cfg)
+
+	for _, want := range []string{
+		"splunk_hec:",
+		`token: "hec-token"`,
+		`endpoint: "https://splunk.example:8088/services/collector"`,
+		`index: "beacon"`,
+		`source: "beacon-endpoint-agent"`,
+		`sourcetype: "beacon:endpoint"`,
+		"tls:",
+		"insecure_skip_verify: true",
+		`ca_file: "/tmp/ca.pem"`,
+		"exporters: [beaconjson, splunk_hec]",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
+		}
+	}
+}
+
 func TestWriteConfigCreatesConfigAndSpoolDirectory(t *testing.T) {
 	cfg := testConfig(t)
 
@@ -62,6 +94,25 @@ func TestWriteConfigCreatesConfigAndSpoolDirectory(t *testing.T) {
 	}
 	if info, err := os.Stat(filepath.Dir(cfg.Collector.SpoolPath)); err != nil || !info.IsDir() {
 		t.Fatalf("spool dir not created: info=%v err=%v", info, err)
+	}
+}
+
+func TestWriteConfigUsesPrivatePermissionsWithSplunkToken(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{
+		Endpoint: "https://splunk.example:8088/services/collector",
+		Token:    "hec-token",
+	}}
+
+	if err := WriteConfig(cfg); err != nil {
+		t.Fatalf("WriteConfig returned error: %v", err)
+	}
+	info, err := os.Stat(cfg.Collector.ConfigPath)
+	if err != nil {
+		t.Fatalf("stat collector config: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+		t.Fatalf("collector config permissions = %o, want %o", got, want)
 	}
 }
 

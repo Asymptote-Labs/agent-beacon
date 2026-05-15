@@ -68,6 +68,55 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveLoadSplunkHECRoundTripAndPrivatePermissions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
+	cfg.Destinations = &Destinations{SplunkHEC: &SplunkHEC{
+		Endpoint: "https://splunk.example:8088/services/collector",
+		Token:    "hec-token",
+		Index:    "beacon",
+	}}
+
+	path, err := Save(cfg)
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+		t.Fatalf("config permissions = %o, want %o", got, want)
+	}
+
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	splunk := loaded.Destinations.SplunkHEC
+	if !splunk.Enabled {
+		t.Fatal("SplunkHEC.Enabled = false, want true")
+	}
+	if splunk.Source != DefaultSplunkSource || splunk.Sourcetype != DefaultSplunkSourcetype {
+		t.Fatalf("Splunk defaults = source %q sourcetype %q", splunk.Source, splunk.Sourcetype)
+	}
+	if splunk.Token != "hec-token" || splunk.Index != "beacon" {
+		t.Fatalf("Splunk config did not round-trip: %#v", splunk)
+	}
+}
+
+func TestSaveRejectsIncompleteSplunkHEC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := Default(true, filepath.Join(home, "runtime.jsonl"))
+	cfg.Destinations = &Destinations{SplunkHEC: &SplunkHEC{Endpoint: "https://splunk.example:8088/services/collector"}}
+
+	if _, err := Save(cfg); err == nil {
+		t.Fatal("expected missing Splunk token error")
+	}
+}
+
 func TestLoadDefaultsMissingContentRetentionToFull(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -27,7 +27,8 @@ and file changes across local agent harnesses.
 Beacon runs locally on the endpoint, captures supported activity from Claude
 Code, Codex CLI, Claude Cowork, and Cursor, and normalizes it into
 Wazuh-compatible JSONL for existing localfile/Wazuh or customer-managed
-pipelines.
+pipelines. Splunk HEC forwarding is available as an optional collector
+destination for teams that want direct SIEM ingestion.
 
 <p align="center">
   <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
@@ -42,7 +43,8 @@ pipelines.
 - **Security-team friendly:** ships macOS package assets for Jamf Pro and Fleet
   deployment, validation, repair, and inventory.
 - **SIEM-ready output:** writes Wazuh-compatible JSONL for local or
-  customer-managed forwarding.
+  customer-managed forwarding, with optional Splunk HEC export through the
+  bundled collector.
 
 ## Table Of Contents
 
@@ -122,13 +124,17 @@ Beacon can currently:
   activity, approval decisions, and file edits where Cursor exposes those hook
   payloads.
 - **Collector export:** convert OTLP logs, traces, metrics, and resource
-  attributes into Beacon endpoint JSONL with the `beaconjson` collector exporter.
+  attributes into Beacon endpoint JSONL with the `beaconjson` collector exporter,
+  and optionally forward the same OTLP signals to Splunk HEC.
 - **Local JSONL output:** write Wazuh-compatible JSONL to a local runtime log.
 - **Local dashboard:** run a local-only dashboard for inspecting runtime
   inventory, summaries, timelines, filters, and event details from the JSONL
   log.
 - **Wazuh content:** generate Wazuh localfile/rule content for the Beacon event
   schema.
+- **Splunk HEC forwarding:** send logs, traces, and metrics to a
+  customer-managed Splunk HTTP Event Collector while preserving the local JSONL
+  audit log.
 
 See the
 [architecture](https://docs.asymptotelabs.ai/cli/architecture),
@@ -153,7 +159,7 @@ how retention settings are applied during install and repair.
 
 Beacon does not currently provide kernel/process monitoring, shell history
 collection, cloud audit ingestion, browser/SaaS telemetry, credential-use
-attribution, MCP configuration inventory, or direct Datadog/Splunk/Elastic/etc.
+attribution, MCP configuration inventory, or direct Datadog/Elastic/etc.
 exporters.
 
 For current support boundaries, see
@@ -234,6 +240,19 @@ beacon endpoint wazuh validate
 See [Wazuh](https://docs.asymptotelabs.ai/cli/wazuh) and
 [SIEM Forwarding](https://docs.asymptotelabs.ai/cli/siem-forwarding) for
 production forwarding guidance.
+
+### Configure Splunk HEC Forwarding
+
+```bash
+beacon endpoint install \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+Splunk forwarding is additive: Beacon still writes the local runtime JSONL log,
+and the bundled collector also sends logs, traces, and metrics to the configured
+HEC endpoint.
 
 ### Run The macOS Smoke Test
 

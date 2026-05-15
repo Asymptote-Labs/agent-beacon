@@ -91,7 +91,17 @@ Parameter 6: OTLP gRPC port, default 4317
 Parameter 7: OTLP HTTP port, default 4318
 Parameter 8: collector path, default /opt/beacon/bin/beacon-otelcol
 Parameter 9: no-start flag for install.sh only
+Parameter 10: Splunk HEC endpoint for install.sh only
+Parameter 11: Splunk HEC token for install.sh only
+Parameter 12: Splunk index for install.sh only
+Parameter 13: Splunk source for install.sh only
+Parameter 14: Splunk sourcetype for install.sh only
+Parameter 15: Splunk insecure TLS skip verify for install.sh only
+Parameter 16: Splunk CA file for install.sh only
 ```
+
+For repair workflows, pass Splunk settings with `BEACON_SPLUNK_*` environment
+variables when possible so HEC tokens are not exposed as script parameters.
 
 Upload Extension Attributes from
 `packaging/macos/jamf/extension-attributes` and build Smart Groups for missing,
@@ -110,6 +120,15 @@ Fleet remediation and validation scripts are packaged under
 missing, unhealthy, stale, or misconfigured endpoints. Scope `repair.sh` to
 hosts that fail the collector health, log freshness, retention, or log
 writability policies.
+
+Splunk HEC forwarding can be configured with:
+
+```bash
+BEACON_SPLUNK_HEC_ENDPOINT="https://splunk.example:8088/services/collector" \
+BEACON_SPLUNK_HEC_TOKEN="$SPLUNK_HEC_TOKEN" \
+BEACON_SPLUNK_INDEX="beacon" \
+  /opt/beacon/scripts/install-endpoint.sh
+```
 
 Release gates:
 

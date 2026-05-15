@@ -98,6 +98,24 @@ func TestEndpointRepairSupportsNoStart(t *testing.T) {
 	}
 }
 
+func TestEndpointInstallAndRepairSupportSplunkFlags(t *testing.T) {
+	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointRepairCmd} {
+		for _, name := range []string{
+			"splunk-hec-endpoint",
+			"splunk-hec-token",
+			"splunk-index",
+			"splunk-source",
+			"splunk-sourcetype",
+			"splunk-insecure-skip-verify",
+			"splunk-ca-file",
+		} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("%s command missing --%s flag", cmd.Use, name)
+			}
+		}
+	}
+}
+
 func TestEndpointCommandsDefaultToUserMode(t *testing.T) {
 	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDashboardCmd, endpointHooksInstallCmd} {
 		userFlag := cmd.Flags().Lookup("user")

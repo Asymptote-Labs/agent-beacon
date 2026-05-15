@@ -93,6 +93,13 @@ BEACON_OTLP_GRPC_PORT: default 4317
 BEACON_OTLP_HTTP_PORT: default 4318
 BEACON_COLLECTOR: default /opt/beacon/bin/beacon-otelcol when present
 BEACON_NO_START: accepts 1/true/yes
+BEACON_SPLUNK_HEC_ENDPOINT: optional Splunk HEC URL
+BEACON_SPLUNK_HEC_TOKEN: optional Splunk HEC token
+BEACON_SPLUNK_INDEX: optional Splunk index
+BEACON_SPLUNK_SOURCE: optional Splunk source
+BEACON_SPLUNK_SOURCETYPE: optional Splunk sourcetype
+BEACON_SPLUNK_INSECURE_SKIP_VERIFY: accepts 1/true/yes
+BEACON_SPLUNK_CA_FILE: optional CA certificate path
 ```
 
 Recommended rollout:
@@ -131,7 +138,17 @@ Parameter 6: OTLP gRPC port, default 4317
 Parameter 7: OTLP HTTP port, default 4318
 Parameter 8: collector path, default /opt/beacon/bin/beacon-otelcol
 Parameter 9: no-start flag for install.sh only
+Parameter 10: Splunk HEC endpoint for install.sh only
+Parameter 11: Splunk HEC token for install.sh only
+Parameter 12: Splunk index for install.sh only
+Parameter 13: Splunk source for install.sh only
+Parameter 14: Splunk sourcetype for install.sh only
+Parameter 15: Splunk insecure TLS skip verify for install.sh only
+Parameter 16: Splunk CA file for install.sh only
 ```
+
+For repair policies, prefer the `BEACON_SPLUNK_*` environment variables so
+tokens do not need to be entered as visible script parameters.
 
 Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where
 Extension Attributes report a stale or unhealthy install. Use
@@ -148,6 +165,7 @@ Upload scripts from `packaging/macos/jamf/extension-attributes` to inventory:
 - Content retention mode
 - Configured harnesses
 - Runtime log writability
+- Splunk HEC forwarding state
 
 Suggested Smart Groups:
 
@@ -190,6 +208,13 @@ install.sh argument 3: OTLP gRPC port, default 4317
 install.sh argument 4: OTLP HTTP port, default 4318
 install.sh argument 5: collector path, default /opt/beacon/bin/beacon-otelcol
 install.sh argument 6: no-start flag, accepts 1/true/yes
+install.sh argument 7: Splunk HEC endpoint
+install.sh argument 8: Splunk HEC token
+install.sh argument 9: Splunk index
+install.sh argument 10: Splunk source
+install.sh argument 11: Splunk sourcetype
+install.sh argument 12: Splunk insecure TLS skip verify
+install.sh argument 13: Splunk CA file
 ```
 
 Fleet repair script positional arguments:
@@ -199,6 +224,13 @@ repair.sh argument 1: harnesses, default claude,codex
 repair.sh argument 2: content retention, default full
 repair.sh argument 3: OTLP gRPC port, default 4317
 repair.sh argument 4: OTLP HTTP port, default 4318
+repair.sh argument 5: Splunk HEC endpoint
+repair.sh argument 6: Splunk HEC token
+repair.sh argument 7: Splunk index
+repair.sh argument 8: Splunk source
+repair.sh argument 9: Splunk sourcetype
+repair.sh argument 10: Splunk insecure TLS skip verify
+repair.sh argument 11: Splunk CA file
 ```
 
 Add queries from `packaging/macos/fleet/queries` as Fleet policies or labels.
@@ -212,6 +244,7 @@ content retention, harness configuration, Wazuh validation, and launchd health.
 - `content-retention.sql`
 - `configured-harnesses.sql`
 - `runtime-log-writable.sql`
+- `splunk-hec-forwarding.sql`
 
 Recommended Fleet policies:
 
