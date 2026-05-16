@@ -118,6 +118,9 @@ func readFactorySettings(path string) (factorySettings, error) {
 	} else if !os.IsNotExist(err) {
 		return factorySettings{}, err
 	}
+	if settings.hooks == nil {
+		settings.hooks = map[string][]factoryHookGroup{}
+	}
 	return settings, nil
 }
 
@@ -141,8 +144,12 @@ func (settings factorySettings) marshal() ([]byte, error) {
 func mergeFactoryEndpointHook(existing []factoryHookGroup, group factoryHookGroup) []factoryHookGroup {
 	out := make([]factoryHookGroup, 0, len(existing)+1)
 	for _, item := range existing {
-		if !isFactoryEndpointHookGroup(item) {
+		filtered, changed := filterFactoryEndpointHooks(item)
+		if !changed || len(filtered.Hooks) > 0 {
 			out = append(out, item)
+			if changed {
+				out[len(out)-1] = filtered
+			}
 		}
 	}
 	return append(out, group)
@@ -160,11 +167,14 @@ func removeFactoryEndpointHooks(path string) (bool, error) {
 	for eventName, groups := range settings.hooks {
 		filtered := groups[:0]
 		for _, group := range groups {
-			if isFactoryEndpointHookGroup(group) {
+			withoutEndpointHooks, groupChanged := filterFactoryEndpointHooks(group)
+			if groupChanged {
 				changed = true
+			}
+			if len(withoutEndpointHooks.Hooks) == 0 {
 				continue
 			}
-			filtered = append(filtered, group)
+			filtered = append(filtered, withoutEndpointHooks)
 		}
 		if len(filtered) == 0 {
 			delete(settings.hooks, eventName)
@@ -189,6 +199,20 @@ func isFactoryEndpointHookGroup(group factoryHookGroup) bool {
 		}
 	}
 	return false
+}
+
+func filterFactoryEndpointHooks(group factoryHookGroup) (factoryHookGroup, bool) {
+	filtered := group
+	filtered.Hooks = group.Hooks[:0]
+	changed := false
+	for _, hook := range group.Hooks {
+		if isEndpointHookCommand(hook.Command, "factory") {
+			changed = true
+			continue
+		}
+		filtered.Hooks = append(filtered.Hooks, hook)
+	}
+	return filtered, changed
 }
 
 func isFactoryInstalledAt(path string) bool {
