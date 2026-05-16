@@ -173,6 +173,7 @@ func normalizeDashboardEvent(event *schema.Event) {
 	if event.Event.Category == "" {
 		event.Event.Category = inferEventCategory(event.Event.Action)
 	}
+	metricName = metricEventName(event)
 	if event.Event.Category == "metric" && (event.Event.Action == "" || event.Event.Action == "metric.observed") {
 		event.Event.Action = metricName
 		if event.Event.Action == "" {
