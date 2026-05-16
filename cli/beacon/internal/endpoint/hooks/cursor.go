@@ -66,10 +66,6 @@ func CursorHookStatus(opts CursorOptions) CursorStatus {
 	return cursorStatusFromRuntime(runtimeHookStatus(cursorRuntime, RuntimeOptions(opts)))
 }
 
-func IsCursorInstalled(opts CursorOptions) bool {
-	return isRuntimeInstalled(cursorRuntime, RuntimeOptions(opts))
-}
-
 func cursorStatusFromRuntime(status runtimeStatus) CursorStatus {
 	return CursorStatus{
 		Installed:     status.Installed,

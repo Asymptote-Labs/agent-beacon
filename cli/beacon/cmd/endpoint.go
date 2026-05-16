@@ -408,6 +408,11 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if endpointOpts.jsonOutput {
+		if len(statuses) == 1 {
+			for _, v := range statuses {
+				return json.NewEncoder(os.Stdout).Encode(v)
+			}
+		}
 		return json.NewEncoder(os.Stdout).Encode(statuses)
 	}
 	for _, name := range splitCSV(endpointOpts.hookHarnesses) {

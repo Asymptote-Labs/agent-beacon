@@ -64,10 +64,6 @@ func FactoryHookStatus(opts FactoryOptions) FactoryStatus {
 	return factoryStatusFromRuntime(runtimeHookStatus(factoryRuntime, RuntimeOptions(opts)))
 }
 
-func IsFactoryInstalled(opts FactoryOptions) bool {
-	return isRuntimeInstalled(factoryRuntime, RuntimeOptions(opts))
-}
-
 func factoryStatusFromRuntime(status runtimeStatus) FactoryStatus {
 	return FactoryStatus{
 		Installed:    status.Installed,
