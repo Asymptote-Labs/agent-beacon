@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
 func TestInstallCursorHooksJSONPreservesNonBeaconHooks(t *testing.T) {
@@ -74,21 +76,14 @@ func TestCursorTargetDirProjectLevel(t *testing.T) {
 	}
 }
 
-func TestReadHooksJSONTreatsCorruptJSONAsEmptyConfig(t *testing.T) {
+func TestReadHooksJSONReturnsCorruptJSONError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	if err := os.WriteFile(path, []byte("{not json"), 0644); err != nil {
 		t.Fatalf("write corrupt hooks.json: %v", err)
 	}
 
-	hooksJSON, err := readHooksJSON(path)
-	if err != nil {
-		t.Fatalf("readHooksJSON returned error: %v", err)
-	}
-	if hooksJSON.Version != 1 {
-		t.Fatalf("Version = %d, want 1", hooksJSON.Version)
-	}
-	if len(hooksJSON.Hooks) != 0 {
-		t.Fatalf("Hooks = %#v, want empty map", hooksJSON.Hooks)
+	if _, err := readHooksJSON(path); err == nil {
+		t.Fatal("expected corrupt hooks.json error")
 	}
 }
 
@@ -139,6 +134,25 @@ func TestInstallCursorHooksJSONReplacesExistingBeaconHook(t *testing.T) {
 	}
 }
 
+func TestInstallCursorHooksJSONDoesNotReplaceUserCommandWithBeaconEnvOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"BEACON_ENDPOINT_MODE=1 echo keep"}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installCursorHooksJSON(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installCursorHooksJSON returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	if !strings.Contains(string(data), "BEACON_ENDPOINT_MODE=1 echo keep") {
+		t.Fatalf("user hook with Beacon-like env token was removed: %s", string(data))
+	}
+}
+
 func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -148,5 +162,14 @@ func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 	}
 	if status.Installed {
 		t.Fatalf("status should not be installed on error: %#v", status)
+	}
+}
+
+func TestEndpointConfigPathForHookUsesSystemConfigForSystemLog(t *testing.T) {
+	if got := endpointConfigPathForHook("/var/log/beacon-agent/runtime.jsonl", true); got != endpointconfig.ConfigPath(false) {
+		t.Fatalf("system log config path = %q, want system endpoint config", got)
+	}
+	if got := endpointConfigPathForHook("/tmp/runtime.jsonl", true); got != endpointconfig.ConfigPath(true) {
+		t.Fatalf("user log config path = %q, want user endpoint config", got)
 	}
 }

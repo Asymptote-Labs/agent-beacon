@@ -51,6 +51,43 @@ func TestReadEventsInfersMissingCategory(t *testing.T) {
 	}
 }
 
+func TestReadEventsNormalizesMetricWithMissingAction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := testSchemaEvent("2026-05-13T01:00:00Z", "cli", "", "metric", "")
+	event.Message = "droid.hook.invocations"
+	writeTestLog(t, path, marshalEvents(t, event)...)
+
+	result, err := ReadEvents(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents returned error: %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(result.Events))
+	}
+	if got := result.Events[0].Event.Event.Action; got != "droid.hook.invocations" {
+		t.Fatalf("Action = %q, want droid.hook.invocations", got)
+	}
+}
+
+func TestReadEventsPromotesRawMetricName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := testSchemaEvent("2026-05-13T01:00:00Z", "cli", "metric.observed", "metric", "")
+	event.Message = "fallback.metric"
+	event.Raw = map[string]interface{}{"metric_name": "droid.tool.execution_time"}
+	writeTestLog(t, path, marshalEvents(t, event)...)
+
+	result, err := ReadEvents(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents returned error: %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(result.Events))
+	}
+	if got := result.Events[0].Event.Event.Action; got != "droid.tool.execution_time" {
+		t.Fatalf("Action = %q, want droid.tool.execution_time", got)
+	}
+}
+
 func TestBuildSummaryAggregatesSignals(t *testing.T) {
 	result := EventResult{
 		TotalMatched: 4,

@@ -9,10 +9,10 @@ installs:
 - Fleet scripts and osquery policy/label examples
 - Wazuh content pack files for admins that want to import examples/rules
 
-`beacon-hooks` is embedded in the `beacon` binary for Cursor hook installation.
-Do not configure Cursor hooks during the base package install; use the Jamf
-`install-cursor-hooks.sh` helper or an equivalent Fleet user-context script so
-the command runs in the target user's context.
+`beacon-hooks` is embedded in the `beacon` binary for Cursor and Factory hook
+installation. Do not configure hooks during the base package install; use the
+Jamf `install-cursor-hooks.sh` helper or an equivalent Fleet user-context script
+so the command runs in the target user's context.
 
 ## Build Inputs
 

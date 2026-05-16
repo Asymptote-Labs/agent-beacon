@@ -257,11 +257,22 @@ function signalCell(record) {
   const info = event.event || {};
   const harness = event.harness || {};
   const parts = [
-    `<strong>${escapeHTML(info.action || "unknown")}</strong>`,
+    `<strong>${escapeHTML(signalAction(record))}</strong>`,
     `<span class="muted">${escapeHTML(info.category || "uncategorized")} · ${escapeHTML(harness.name || "unknown")}</span>`,
     record.wazuh_level ? `<span class="muted">Wazuh level ${escapeHTML(record.wazuh_level)}</span>` : "",
   ].filter(Boolean);
   return parts.join("<br />");
+}
+
+function signalAction(record) {
+  const event = record.event || {};
+  const info = event.event || {};
+  if (info.category === "metric") return metricName(event) || info.action || "metric.observed";
+  return info.action || "unknown";
+}
+
+function metricName(event) {
+  return event.raw?.metric_name || event.message || "";
 }
 
 function primaryArtifact(event) {
@@ -272,7 +283,7 @@ function primaryArtifact(event) {
   if (event.tool?.name || event.tool?.command) return [event.tool.name, event.tool.command].filter(Boolean).join(" ");
   if (event.approval?.decision || event.approval?.reason) return [event.approval.decision, event.approval.reason].filter(Boolean).join(": ");
   if (event.policy?.decision || event.policy?.name) return [event.policy.decision, event.policy.name].filter(Boolean).join(": ");
-  if (event.raw?.metric_name) return event.raw.metric_name;
+  if (event.event?.category === "metric") return metricName(event);
   return event.model || event.branch || "";
 }
 
@@ -293,7 +304,7 @@ function detailSummary(record) {
   const event = record.event || {};
   const info = event.event || {};
   const rows = [
-    ["Action", info.action],
+    ["Action", signalAction(record)],
     ["Category", info.category],
     ["Severity", event.severity],
     ["Wazuh level", record.wazuh_level || ""],

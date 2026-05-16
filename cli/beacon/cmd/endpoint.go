@@ -335,6 +335,16 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Printf("Cursor hooks installed: %s\n", status.HooksJSONPath)
+		case "factory", "droid":
+			status, err := endpointhooks.InstallFactory(endpointhooks.FactoryOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Factory hooks installed: %s\n", status.SettingsPath)
 		case "":
 		default:
 			return fmt.Errorf("unsupported hook harness %q", name)
@@ -357,6 +367,16 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Println(status.Message)
+		case "factory", "droid":
+			status, err := endpointhooks.UninstallFactory(endpointhooks.FactoryOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(status.Message)
 		case "":
 		default:
 			return fmt.Errorf("unsupported hook harness %q", name)
@@ -367,16 +387,41 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 
 func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
-	status := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{
-		Level:    endpointhooks.Level(endpointOpts.hookLevel),
-		LogPath:  cfg.LogPath,
-		UserMode: cfg.UserMode,
-	})
-	if endpointOpts.jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(status)
+	statuses := map[string]interface{}{}
+	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
+		switch strings.TrimSpace(name) {
+		case "cursor":
+			statuses["cursor"] = endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+		case "factory", "droid":
+			statuses["factory"] = endpointhooks.FactoryHookStatus(endpointhooks.FactoryOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+		case "":
+		default:
+			return fmt.Errorf("unsupported hook harness %q", name)
+		}
 	}
-	fmt.Printf("Cursor hooks: installed=%t path=%s\n", status.Installed, status.HooksJSONPath)
-	fmt.Println(status.Message)
+	if endpointOpts.jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(statuses)
+	}
+	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
+		switch strings.TrimSpace(name) {
+		case "cursor":
+			status := statuses["cursor"].(endpointhooks.CursorStatus)
+			fmt.Printf("Cursor hooks: installed=%t path=%s\n", status.Installed, status.HooksJSONPath)
+			fmt.Println(status.Message)
+		case "factory", "droid":
+			status := statuses["factory"].(endpointhooks.FactoryStatus)
+			fmt.Printf("Factory hooks: installed=%t path=%s\n", status.Installed, status.SettingsPath)
+			fmt.Println(status.Message)
+		}
+	}
 	return nil
 }
 

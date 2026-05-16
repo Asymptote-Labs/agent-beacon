@@ -5,10 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
 type Level string
@@ -42,78 +38,45 @@ type CursorStatus struct {
 	Message       string `json:"message,omitempty"`
 }
 
+var cursorRuntime = hookRuntime{
+	displayName: "Cursor",
+	configPath:  cursorHooksJSONPath,
+	install:     installCursorHooksJSON,
+	uninstall:   removeEndpointHooks,
+	isInstalled: isCursorInstalledAt,
+}
+
 func InstallCursor(opts CursorOptions) (CursorStatus, error) {
-	if !embedded.HasEmbeddedBinary() {
-		return CursorStatus{}, fmt.Errorf("no hooks binary embedded")
-	}
-	if opts.LogPath == "" {
-		opts.LogPath = defaultLogPath(opts.UserMode)
-	}
-	binaryPath, err := writeEndpointHookBinary(opts.UserMode)
+	status, err := installRuntimeHooks(cursorRuntime, RuntimeOptions(opts))
 	if err != nil {
 		return CursorStatus{}, err
 	}
-	targetDir, err := cursorTargetDir(opts.Level)
-	if err != nil {
-		return CursorStatus{}, err
-	}
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return CursorStatus{}, err
-	}
-	hooksPath := filepath.Join(targetDir, "hooks.json")
-	if err := installCursorHooksJSON(hooksPath, binaryPath, opts.LogPath, endpointconfig.ConfigPath(opts.UserMode)); err != nil {
-		return CursorStatus{}, err
-	}
-	return CursorStatus{Installed: true, BinaryPath: binaryPath, HooksJSONPath: hooksPath, Message: "Cursor endpoint hooks installed"}, nil
+	return cursorStatusFromRuntime(status), nil
 }
 
 func UninstallCursor(opts CursorOptions) (CursorStatus, error) {
-	targetDir, err := cursorTargetDir(opts.Level)
+	status, err := uninstallRuntimeHooks(cursorRuntime, RuntimeOptions(opts))
 	if err != nil {
 		return CursorStatus{}, err
 	}
-	hooksPath := filepath.Join(targetDir, "hooks.json")
-	updated, err := removeEndpointHooks(hooksPath)
-	if err != nil {
-		return CursorStatus{}, err
-	}
-	status := CursorStatus{HooksJSONPath: hooksPath, Message: "Cursor endpoint hooks were not present"}
-	if updated {
-		status.Message = "Cursor endpoint hooks removed"
-	}
-	status.Installed = IsCursorInstalled(opts)
-	return status, nil
+	return cursorStatusFromRuntime(status), nil
 }
 
 func CursorHookStatus(opts CursorOptions) CursorStatus {
-	targetDir, err := cursorTargetDir(opts.Level)
-	if err != nil {
-		return CursorStatus{Message: err.Error()}
-	}
-	hooksPath := filepath.Join(targetDir, "hooks.json")
-	status := CursorStatus{HooksJSONPath: hooksPath}
-	status.Installed = IsCursorInstalled(opts)
-	if status.Installed {
-		status.Message = "Cursor endpoint hooks are installed"
-	} else {
-		status.Message = "Cursor endpoint hooks are not installed"
-	}
-	if path, err := endpointHookBinaryPath(opts.UserMode); err == nil {
-		status.BinaryPath = path
-	}
-	return status
+	return cursorStatusFromRuntime(runtimeHookStatus(cursorRuntime, RuntimeOptions(opts)))
 }
 
 func IsCursorInstalled(opts CursorOptions) bool {
-	targetDir, err := cursorTargetDir(opts.Level)
-	if err != nil {
-		return false
+	return isRuntimeInstalled(cursorRuntime, RuntimeOptions(opts))
+}
+
+func cursorStatusFromRuntime(status runtimeStatus) CursorStatus {
+	return CursorStatus{
+		Installed:     status.Installed,
+		BinaryPath:    status.BinaryPath,
+		HooksJSONPath: status.ConfigPath,
+		Message:       status.Message,
 	}
-	data, err := os.ReadFile(filepath.Join(targetDir, "hooks.json"))
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(data), "BEACON_ENDPOINT_MODE=1") && strings.Contains(string(data), "beacon-hooks")
 }
 
 func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error {
@@ -121,7 +84,7 @@ func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error 
 	if err != nil {
 		return err
 	}
-	commandPrefix := fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s %s --platform cursor", shellQuote(logPath), shellQuote(configPath), shellQuote(binaryPath))
+	commandPrefix := endpointCommandPrefix("cursor", binaryPath, logPath, configPath)
 	endpointHooks := map[string]HookRef{
 		"sessionStart":       {Command: commandPrefix + " session-start"},
 		"beforeSubmitPrompt": {Command: commandPrefix + " prompt-submit", Timeout: 30},
@@ -146,7 +109,11 @@ func readHooksJSON(path string) (HooksJSON, error) {
 	var hooksJSON HooksJSON
 	data, err := os.ReadFile(path)
 	if err == nil {
-		_ = json.Unmarshal(data, &hooksJSON)
+		if err := json.Unmarshal(data, &hooksJSON); err != nil {
+			return HooksJSON{}, err
+		}
+	} else if !os.IsNotExist(err) {
+		return HooksJSON{}, err
 	}
 	if hooksJSON.Version == 0 {
 		hooksJSON.Version = 1
@@ -209,24 +176,34 @@ func removeEndpointHooks(path string) (bool, error) {
 }
 
 func isEndpointHook(command string) bool {
-	return strings.Contains(command, "BEACON_ENDPOINT_MODE=1") || strings.Contains(command, "beacon-hooks")
+	return isEndpointHookCommand(command, "cursor")
 }
 
-func writeEndpointHookBinary(userMode bool) (string, error) {
-	path, err := endpointHookBinaryPath(userMode)
+func isCursorInstalledAt(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var hooksJSON HooksJSON
+	if err := json.Unmarshal(data, &hooksJSON); err != nil {
+		return false
+	}
+	for _, refs := range hooksJSON.Hooks {
+		for _, ref := range refs {
+			if isEndpointHook(ref.Command) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cursorHooksJSONPath(level Level) (string, error) {
+	targetDir, err := cursorTargetDir(level)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return "", err
-	}
-	_ = os.Remove(path)
-	return path, os.WriteFile(path, embedded.HooksBinary, 0755)
-}
-
-func endpointHookBinaryPath(userMode bool) (string, error) {
-	base := endpointconfig.BaseDir(userMode)
-	return filepath.Join(base, "hooks", embedded.GetBinaryName()), nil
+	return filepath.Join(targetDir, "hooks.json"), nil
 }
 
 func cursorTargetDir(level Level) (string, error) {
@@ -246,18 +223,4 @@ func cursorTargetDir(level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
-}
-
-func defaultLogPath(userMode bool) string {
-	if userMode {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
-		}
-	}
-	return "/var/log/beacon-agent/runtime.jsonl"
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

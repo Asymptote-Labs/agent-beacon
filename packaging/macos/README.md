@@ -112,13 +112,17 @@ Recommended rollout:
 4. Scope repair/remediation to unhealthy devices.
 5. Broaden deployment in stages after inventory and validation stay healthy.
 
-Cursor hook installation is separate from the base system package because Cursor
-configuration is per user. Run the Cursor hook helper only when an interactive
-console user is present.
+Cursor and Factory hook installation is separate from the base system package
+because both integrations write per-user or per-project runtime settings. Run
+hook helpers only when an interactive console user is present. Cursor hooks use
+`.cursor/hooks.json`; Factory hooks use `.factory/settings.json`; restart the
+runtime after installation so new sessions pick up the settings. Install hooks
+with the same endpoint log path as the collector when you want hook telemetry and
+OTLP telemetry to appear in one dashboard.
 
-Factory Droid telemetry is also managed outside the base system package. Droid
-reads OTLP settings from its launch environment, so deploy the environment from
-a user-context MDM policy or another customer-owned launch policy:
+Factory Droid OTLP metrics are also managed outside the base system package.
+Droid reads OTLP settings from its launch environment, so deploy the environment
+from a user-context MDM policy or another customer-owned launch policy:
 
 ```sh
 export OTEL_TELEMETRY_ENDPOINT="http://127.0.0.1:4318"
@@ -128,6 +132,13 @@ Beacon's endpoint status and discovery commands can validate whether the
 effective Droid environment points at the local OTLP HTTP receiver. If
 `OTEL_TELEMETRY_HEADERS` is needed, treat it as customer-managed secret material
 and avoid storing it in Beacon defaults or package parameters.
+
+For richer Factory prompt/session/tool/file telemetry, install Beacon's Factory
+hooks in the logged-in user's context:
+
+```bash
+beacon endpoint hooks install --harness factory --level user --log-path /var/log/beacon-agent/runtime.jsonl
+```
 
 ## Jamf Pro
 
@@ -166,7 +177,9 @@ tokens do not need to be entered as visible script parameters.
 Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where
 Extension Attributes report a stale or unhealthy install. Use
 `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-context
-policy for Cursor telemetry.
+policy for hook telemetry. Set `BEACON_HOOK_HARNESSES=cursor,factory` to install
+both supported hook integrations; the helper writes hook events to
+`/var/log/beacon-agent/runtime.jsonl` by default.
 
 ### Jamf Extension Attributes
 
@@ -290,6 +303,7 @@ removal remains under the MDM/package receipt lifecycle.
   writable by the collector.
 - No recent runtime events: confirm supported harnesses are configured and the
   local OTLP ports are not in use by another process.
-- Cursor hooks are missing: run the Cursor hook helper while a non-root console
-  user is logged in.
+- Cursor or Factory hooks are missing: run the hook helper while a non-root
+  console user is logged in, and confirm the helper uses the same runtime log
+  path as the endpoint collector.
 
