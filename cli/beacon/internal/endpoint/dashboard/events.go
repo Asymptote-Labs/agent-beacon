@@ -224,7 +224,7 @@ func matchesQuery(record EventRecord, query EventQuery) bool {
 	if query.Action != "" && !strings.EqualFold(event.Event.Action, query.Action) {
 		return false
 	}
-	if query.Severity != "" && !strings.EqualFold(string(event.Severity), query.Severity) {
+	if query.Severity != "" && !matchesSeverity(string(event.Severity), query.Severity) {
 		return false
 	}
 	if query.Category != "" && !strings.EqualFold(event.Event.Category, query.Category) {
@@ -288,6 +288,15 @@ func matchesDecision(event schema.Event, decision string) bool {
 	}
 	if event.Policy != nil && containsFold(event.Policy.Decision, decision) {
 		return true
+	}
+	return false
+}
+
+func matchesSeverity(severity, filter string) bool {
+	for _, part := range strings.Split(filter, ",") {
+		if strings.EqualFold(severity, strings.TrimSpace(part)) {
+			return true
+		}
 	}
 	return false
 }

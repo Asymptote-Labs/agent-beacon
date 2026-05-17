@@ -91,15 +91,18 @@ async function load({ updateLocation = false } = {}) {
   state.error = null;
   renderLoading();
   try {
-    const [status, summary, events] = await Promise.all([
+    const fetches = [
       getJSON("/api/status"),
       getJSON(`/api/summary${suffix}`),
-      getJSON(`/api/events${suffix}`),
-    ]);
+    ];
+    if (!isOverviewPage) fetches.push(getJSON(`/api/events${suffix}`));
+    const [status, summary, events] = await Promise.all(fetches);
     state.status = status;
     state.summary = summary;
-    state.eventResult = events;
-    state.events = events.events || [];
+    if (!isOverviewPage) {
+      state.eventResult = events;
+      state.events = events.events || [];
+    }
   } catch (err) {
     state.error = err;
   } finally {
@@ -127,7 +130,7 @@ function renderCards() {
   const cards = [
     { label: "Events", value: state.summary?.total_events || 0, hint: "matching current view" },
     { label: "Needs Review", value: state.summary?.needs_review_events || 0, tone: "danger", filters: { review: "true" } },
-    { label: "High/Critical", value: (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), tone: "danger", filters: { review: "true" } },
+    { label: "High/Critical", value: (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), tone: "danger", filters: { severity: "high,critical" } },
     { label: "Denied/Blocked", value: (state.summary?.denied_approval_events || 0) + (state.summary?.policy_blocked_events || 0), tone: "danger", filters: { category: "approval", review: "true" } },
     { label: "Failed Tools", value: state.summary?.failed_tool_events || 0, tone: "warn", filters: { action: "tool.failed" } },
     { label: "Sessions", value: state.summary?.active_sessions || 0, hint: "active sessions" },
@@ -379,7 +382,7 @@ function detailSummary(record) {
     ["Harness", event.harness?.name],
     ["Model", event.model],
     ["Session", event.session?.id],
-    ["Repository", repositoryLabel(event)],
+    ["Repository", repositoryLabel(event), event.repository],
     ["Prompt", event.prompt?.text],
     ["Artifact", event.prompt?.text ? "" : primaryArtifact(event)],
     ["Approval", event.approval ? [event.approval.decision, event.approval.reason].filter(Boolean).join(": ") : ""],
@@ -387,13 +390,14 @@ function detailSummary(record) {
     ["Content", event.content ? `${event.content.retention}${event.content.redacted ? ", redacted" : ""}${event.content.truncated ? ", truncated" : ""}` : ""],
   ].filter(([, value]) => value);
   return rows
-    .map(([label, value]) => {
+    .map(([label, value, filterValue]) => {
       const key = detailFilterKey(label);
+      const fv = filterValue || value;
       return `
         <div>
           <span class="muted">${escapeHTML(label)}</span>
           <strong>${escapeHTML(value)}</strong>
-          ${key ? `<button type="button" class="text-button" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(value)}">Filter by this</button>` : ""}
+          ${key ? `<button type="button" class="text-button" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(fv)}">Filter by this</button>` : ""}
         </div>
       `;
     })
@@ -497,7 +501,7 @@ function attentionItems() {
     { name: "Denied approvals", count: state.summary?.denied_approval_events || 0, filters: { action: "approval.denied" } },
     { name: "Blocked policies", count: state.summary?.policy_blocked_events || 0, filters: { action: "policy.blocked" } },
     { name: "Failed tools", count: state.summary?.failed_tool_events || 0, filters: { action: "tool.failed" } },
-    { name: "High or critical severity", count: (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), filters: { review: "true" } },
+    { name: "High or critical severity", count: (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), filters: { severity: "high,critical" } },
   ];
   return items.filter((item) => item.count > 0);
 }
