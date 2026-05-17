@@ -10,8 +10,12 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Local-only</p>
-        <h1>Beacon Endpoint Dashboard</h1>
+        <h1>Beacon Endpoint Log Search</h1>
       </div>
+      <nav class="nav-toggle" aria-label="Dashboard navigation">
+        <a class="active" href="/" aria-current="page">Log Search</a>
+        <a href="/overview.html">Security Overview</a>
+      </nav>
       <button id="refresh">Refresh</button>
     </header>
 
@@ -24,15 +28,11 @@
         <div id="retention" class="pill">metadata</div>
       </section>
 
-      <section class="cards" id="cards"></section>
-
-      <section class="insights" id="insights"></section>
-
       <section class="panel">
         <div class="section-head">
           <div>
             <h2>Investigation Search</h2>
-            <p class="muted">Search actions, commands, files, MCP tools, approvals, sessions, repositories, and event messages.</p>
+            <p class="muted">Search commands, files, MCP tools, prompts, approval reasons, sessions, repositories, models, harnesses, and event messages.</p>
           </div>
           <div id="result-meta" class="muted"></div>
         </div>
@@ -42,6 +42,48 @@
             <button type="submit">Search</button>
             <button type="button" id="clear-search">Clear</button>
           </div>
+          <div class="primary-filters">
+            <label class="harness-filter">
+              <span>Agent harness</span>
+              <select name="harness" id="harness-filter">
+                <option value="">All agent harnesses</option>
+              </select>
+            </label>
+            <label>
+              <span>Model</span>
+              <select name="model" id="model-filter">
+                <option value="">All models</option>
+              </select>
+            </label>
+            <label>
+              <span>Severity</span>
+              <select name="severity">
+                <option value="">Any severity</option>
+                <option value="info">Info</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+            <label>
+              <span>Category</span>
+              <select name="category">
+                <option value="">Any category</option>
+                <option value="prompt">Prompt</option>
+                <option value="tool">Tool</option>
+                <option value="command">Command</option>
+                <option value="file">File</option>
+                <option value="mcp">MCP</option>
+                <option value="approval">Approval</option>
+                <option value="session">Session</option>
+                <option value="inventory">Inventory</option>
+                <option value="validation">Validation</option>
+                <option value="metric">Metric</option>
+              </select>
+            </label>
+          </div>
+          <div id="facets" class="facets"></div>
           <div class="quick-filters" aria-label="Quick filters">
             <button type="button" data-preset="review">Needs Review</button>
             <button type="button" data-preset="commands">Commands</button>
@@ -54,28 +96,7 @@
           <details class="advanced-filters">
             <summary>Advanced filters</summary>
             <div class="filters">
-              <input name="harness" placeholder="Harness" />
-              <input name="action" placeholder="Action" />
-              <select name="severity">
-                <option value="">Any severity</option>
-                <option value="info">Info</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-              <select name="category">
-                <option value="">Any category</option>
-                <option value="prompt">Prompt</option>
-                <option value="tool">Tool</option>
-                <option value="command">Command</option>
-                <option value="file">File</option>
-                <option value="mcp">MCP</option>
-                <option value="approval">Approval</option>
-                <option value="session">Session</option>
-                <option value="inventory">Inventory</option>
-                <option value="validation">Validation</option>
-              </select>
+              <input name="action" list="action-options" placeholder="Action" />
               <input name="repository" placeholder="Repository" />
               <input name="session" placeholder="Session" />
               <input name="file" placeholder="File path" />
@@ -101,8 +122,18 @@
               </select>
             </div>
           </details>
+          <datalist id="action-options"></datalist>
           <input type="hidden" name="review" />
         </form>
+        <div class="search-help">
+          <strong>Search examples:</strong>
+          <span>model name</span>
+          <span>cursor</span>
+          <span>go test</span>
+          <span>approval denied</span>
+          <span>mcp github</span>
+          <span>src/server.go</span>
+        </div>
         <div id="active-filters" class="chips"></div>
         <div id="notice" class="notice" hidden></div>
         <div class="table-wrap">

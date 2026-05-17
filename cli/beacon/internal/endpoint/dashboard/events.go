@@ -33,6 +33,7 @@ type EventQuery struct {
 	Since      time.Time
 	Q          string
 	Harness    string
+	Model      string
 	Action     string
 	Severity   string
 	Category   string
@@ -215,6 +216,9 @@ func matchesQuery(record EventRecord, query EventQuery) bool {
 		}
 	}
 	if query.Harness != "" && !strings.EqualFold(event.Harness.Name, query.Harness) {
+		return false
+	}
+	if query.Model != "" && !containsFold(event.Model, query.Model) {
 		return false
 	}
 	if query.Action != "" && !strings.EqualFold(event.Event.Action, query.Action) {
@@ -414,6 +418,7 @@ func activeFilters(query EventQuery) map[string]string {
 		}
 	}
 	add("harness", query.Harness)
+	add("model", query.Model)
 	add("action", query.Action)
 	add("severity", query.Severity)
 	add("category", query.Category)

@@ -97,6 +97,7 @@ func TestBuildSummaryAggregatesSignals(t *testing.T) {
 				Event:     schema.EventInfo{Action: "command.executed", Category: "command"},
 				Severity:  schema.SeverityInfo,
 				Harness:   schema.HarnessInfo{Name: "cursor"},
+				Model:     "gpt-5.5",
 				Session:   &schema.SessionInfo{ID: "s1"},
 				Command:   &schema.CommandInfo{Command: "go test ./..."},
 			}},
@@ -105,6 +106,7 @@ func TestBuildSummaryAggregatesSignals(t *testing.T) {
 				Event:     schema.EventInfo{Action: "mcp.tool_invoked", Category: "mcp"},
 				Severity:  schema.SeverityHigh,
 				Harness:   schema.HarnessInfo{Name: "cursor"},
+				Model:     "claude-4-sonnet",
 				Session:   &schema.SessionInfo{ID: "s2"},
 				MCP:       &schema.MCPInfo{Server: "github", Tool: "get_issue"},
 			}, WazuhLevel: WazuhLevel("mcp.tool_invoked")},
@@ -136,6 +138,15 @@ func TestBuildSummaryAggregatesSignals(t *testing.T) {
 	}
 	if summary.CountsByHarness["cursor"] != 4 {
 		t.Fatalf("cursor harness count = %d, want 4", summary.CountsByHarness["cursor"])
+	}
+	if summary.CountsByModel["gpt-5.5"] != 1 || summary.CountsByModel["claude-4-sonnet"] != 1 {
+		t.Fatalf("model counts = %#v, want gpt-5.5 and claude-4-sonnet", summary.CountsByModel)
+	}
+	if len(summary.TopHarnesses) == 0 || summary.TopHarnesses[0].Name != "cursor" {
+		t.Fatalf("top harnesses = %#v, want cursor first", summary.TopHarnesses)
+	}
+	if len(summary.TopModels) != 2 {
+		t.Fatalf("top models = %#v, want 2 models", summary.TopModels)
 	}
 	if summary.NeedsReviewEvents != 3 || summary.DeniedApprovalEvents != 1 || summary.PolicyBlockedEvents != 1 {
 		t.Fatalf("review counts = needs %d denied %d blocked %d, want 3/1/1", summary.NeedsReviewEvents, summary.DeniedApprovalEvents, summary.PolicyBlockedEvents)
@@ -217,6 +228,28 @@ func TestReadEventsSecurityFilters(t *testing.T) {
 	}
 }
 
+func TestReadEventsFiltersByModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a"),
+		testSchemaEvent("2026-05-13T01:01:00Z", "claude_code", "prompt.submitted", "prompt", "repo-b"),
+	}
+	events[0].Model = "claude-4-sonnet"
+	events[1].Model = "gpt-5.5"
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadEvents(path, EventQuery{Model: "sonnet", Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents returned error: %v", err)
+	}
+	if result.TotalMatched != 1 || result.Events[0].Event.Model != "claude-4-sonnet" {
+		t.Fatalf("matched %d model %q, want 1 claude-4-sonnet", result.TotalMatched, result.Events[0].Event.Model)
+	}
+	if got := result.Filters["model"]; got != "sonnet" {
+		t.Fatalf("model filter = %q, want sonnet", got)
+	}
+}
+
 func TestFindEventCanReadOutsideTailWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	lines := make([][]byte, 0, maxEventLimit+1)
@@ -286,6 +319,32 @@ func TestHandlerEventsEndpoint(t *testing.T) {
 	}
 	if len(result.Events) != 1 {
 		t.Fatalf("events len = %d, want 1", len(result.Events))
+	}
+}
+
+func TestHandlerEventsEndpointParsesModelFilter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	event.Model = "gpt-5.5"
+	writeTestLog(t, path, marshalEvents(t, event)...)
+
+	handler, err := Handler(Options{LogPath: path, UserMode: true})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/events?model=gpt-5.5", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var result EventResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result.Events) != 1 || result.Events[0].Event.Model != "gpt-5.5" {
+		t.Fatalf("events len/model = %d/%q, want 1/gpt-5.5", len(result.Events), result.Events[0].Event.Model)
 	}
 }
 

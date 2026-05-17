@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,5 +32,33 @@ func TestStatusUsesExplicitRuntimeLogPath(t *testing.T) {
 	}
 	if status.RuntimeLog.EffectiveLogPath != logPath {
 		t.Fatalf("RuntimeLog.EffectiveLogPath = %q, want %q", status.RuntimeLog.EffectiveLogPath, logPath)
+	}
+}
+
+func TestStaticDashboardPagesServe(t *testing.T) {
+	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{path: "/", want: "Beacon Endpoint Log Search"},
+		{path: "/overview.html", want: "Beacon Endpoint Security Overview"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("body did not contain %q", tc.want)
+			}
+		})
 	}
 }

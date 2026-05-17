@@ -19,6 +19,7 @@ type Summary struct {
 	CountsByApprovalDecision map[string]int `json:"counts_by_approval_decision"`
 	CountsByMCPServer        map[string]int `json:"counts_by_mcp_server"`
 	CountsByRepository       map[string]int `json:"counts_by_repository"`
+	CountsByModel            map[string]int `json:"counts_by_model"`
 	PromptEvents             int            `json:"prompt_events"`
 	ToolEvents               int            `json:"tool_events"`
 	CommandEvents            int            `json:"command_events"`
@@ -32,6 +33,8 @@ type Summary struct {
 	DeniedApprovalEvents     int            `json:"denied_approval_events"`
 	PolicyBlockedEvents      int            `json:"policy_blocked_events"`
 	TopActions               []Count        `json:"top_actions"`
+	TopHarnesses             []Count        `json:"top_harnesses"`
+	TopModels                []Count        `json:"top_models"`
 	TopRepositories          []Count        `json:"top_repositories"`
 	TopMCPServers            []Count        `json:"top_mcp_servers"`
 }
@@ -47,6 +50,7 @@ func BuildSummary(result EventResult) Summary {
 		CountsByApprovalDecision: map[string]int{},
 		CountsByMCPServer:        map[string]int{},
 		CountsByRepository:       map[string]int{},
+		CountsByModel:            map[string]int{},
 	}
 	sessions := map[string]bool{}
 	for _, record := range result.Events {
@@ -71,6 +75,9 @@ func BuildSummary(result EventResult) Summary {
 		}
 		if event.Repository != "" {
 			summary.CountsByRepository[event.Repository]++
+		}
+		if event.Model != "" {
+			summary.CountsByModel[event.Model]++
 		}
 		if event.MCP != nil && event.MCP.Server != "" {
 			summary.CountsByMCPServer[event.MCP.Server]++
@@ -125,6 +132,8 @@ func BuildSummary(result EventResult) Summary {
 	}
 	summary.ActiveSessions = len(sessions)
 	summary.TopActions = topCounts(summary.CountsByAction, 5)
+	summary.TopHarnesses = topCounts(summary.CountsByHarness, 5)
+	summary.TopModels = topCounts(summary.CountsByModel, 5)
 	summary.TopRepositories = topCounts(summary.CountsByRepository, 5)
 	summary.TopMCPServers = topCounts(summary.CountsByMCPServer, 5)
 	return summary

@@ -9,9 +9,11 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const isOverviewPage = document.body.dataset.page === "overview";
 const formFields = [
   "q",
   "harness",
+  "model",
   "action",
   "severity",
   "category",
@@ -55,7 +57,9 @@ async function getJSON(path) {
 }
 
 function queryFromFilters() {
-  const data = new FormData($("#filters"));
+  const form = $("#filters");
+  if (!form) return "";
+  const data = new FormData(form);
   const params = new URLSearchParams();
   for (const [key, value] of data.entries()) {
     const trimmed = String(value).trim();
@@ -65,6 +69,7 @@ function queryFromFilters() {
 }
 
 function hydrateFiltersFromURL() {
+  if (!$("#filters")) return;
   const params = new URLSearchParams(window.location.search);
   for (const field of formFields) {
     const input = $(`[name="${field}"]`);
@@ -104,8 +109,10 @@ async function load({ updateLocation = false } = {}) {
 }
 
 function render() {
-  $("#log-path").textContent = state.status?.log_path || "Runtime log unavailable";
-  $("#retention").textContent = `retention: ${state.status?.content_retention || "metadata"}`;
+  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
+  setText("#retention", `retention: ${state.status?.content_retention || "metadata"}`);
+  setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
+  renderFilterOptions();
   renderCards();
   renderInsights();
   renderSearchState();
@@ -114,46 +121,72 @@ function render() {
 }
 
 function renderCards() {
+  if (!$("#cards")) return;
+  const topHarness = firstCount(state.summary?.top_harnesses);
+  const topModel = firstCount(state.summary?.top_models);
   const cards = [
-    ["Events", state.summary?.total_events || 0],
-    ["Needs Review", state.summary?.needs_review_events || 0, "danger"],
-    ["High/Critical", (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), "danger"],
-    ["Denied/Blocked", (state.summary?.denied_approval_events || 0) + (state.summary?.policy_blocked_events || 0), "danger"],
-    ["Failed Tools", state.summary?.failed_tool_events || 0, "warn"],
-    ["Sessions", state.summary?.active_sessions || 0],
-    ["Commands", state.summary?.command_events || 0],
-    ["Files", state.summary?.file_events || 0],
-    ["MCP", state.summary?.mcp_events || 0],
-    ["Approvals", state.summary?.approval_events || 0],
-    ["Malformed", state.summary?.malformed_lines || 0],
+    { label: "Events", value: state.summary?.total_events || 0, hint: "matching current view" },
+    { label: "Needs Review", value: state.summary?.needs_review_events || 0, tone: "danger", filters: { review: "true" } },
+    { label: "High/Critical", value: (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), tone: "danger", filters: { review: "true" } },
+    { label: "Denied/Blocked", value: (state.summary?.denied_approval_events || 0) + (state.summary?.policy_blocked_events || 0), tone: "danger", filters: { category: "approval", review: "true" } },
+    { label: "Failed Tools", value: state.summary?.failed_tool_events || 0, tone: "warn", filters: { action: "tool.failed" } },
+    { label: "Sessions", value: state.summary?.active_sessions || 0, hint: "active sessions" },
+    { label: "Top Harness", value: topHarness?.name || "None", hint: topHarness ? `${topHarness.count} events` : "no harness events", filters: topHarness ? { harness: topHarness.name } : null },
+    { label: "Top Model", value: topModel?.name || "None", hint: topModel ? `${topModel.count} events` : "no model events", filters: topModel ? { model: topModel.name } : null },
   ];
   $("#cards").innerHTML = cards
-    .map(([label, value, tone]) => `<div class="card ${tone ? `card-${tone}` : ""}"><span class="muted">${escapeHTML(label)}</span><span class="value">${value}</span></div>`)
+    .map((card, index) => `
+      <button type="button" class="card ${card.tone ? `card-${card.tone}` : ""}" data-card="${index}">
+        <span class="muted">${escapeHTML(card.label)}</span>
+        <span class="value">${escapeHTML(card.value)}</span>
+        ${card.hint ? `<span class="muted">${escapeHTML(card.hint)}</span>` : ""}
+      </button>
+    `)
     .join("");
+  $$("#cards [data-card]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const card = cards[Number(button.dataset.card)];
+      if (card?.filters) applyFilters(card.filters, { reset: true });
+    });
+  });
 }
 
 function renderInsights() {
+  if (!$("#insights")) return;
+  const attention = attentionItems();
   const sections = [
+    ["What Needs Attention", attention, "attention"],
+    ["Agent Harnesses", state.summary?.top_harnesses || []],
+    ["Models", state.summary?.top_models || []],
     ["Top Actions", state.summary?.top_actions || []],
     ["Top Repositories", state.summary?.top_repositories || []],
     ["MCP Servers", state.summary?.top_mcp_servers || []],
   ];
   $("#insights").innerHTML = sections
-    .map(([title, values]) => `
+    .map(([title, values, tone]) => `
       <div class="panel insight">
         <h2>${escapeHTML(title)}</h2>
         <div class="stack">
-          ${values.length ? values.map((item) => `<button type="button" data-insight="${escapeHTML(title)}" data-value="${escapeHTML(item.name)}"><span>${escapeHTML(item.name)}</span><strong>${item.count}</strong></button>`).join("") : `<span class="muted">No data yet</span>`}
+          ${values.length ? values.map((item, index) => `<button type="button" class="${tone === "attention" ? "attention-item" : ""}" data-insight="${escapeHTML(title)}" data-index="${index}" data-value="${escapeHTML(item.name)}"><span>${escapeHTML(item.name)}</span><strong>${escapeHTML(item.count)}</strong></button>`).join("") : `<span class="muted">No data yet</span>`}
         </div>
       </div>
     `)
     .join("");
   $$("[data-insight]").forEach((button) => {
-    button.addEventListener("click", () => applyInsight(button.dataset.insight, button.dataset.value));
+    button.addEventListener("click", () => {
+      if (button.dataset.insight === "What Needs Attention") {
+        const item = attention[Number(button.dataset.index)];
+        if (item?.filters) applyFilters(item.filters, { reset: true });
+        return;
+      }
+      applyInsight(button.dataset.insight, button.dataset.value);
+    });
   });
+  renderFacets();
 }
 
 function renderSearchState() {
+  if (!$("#result-meta")) return;
   const result = state.eventResult || {};
   const returned = result.returned ?? state.events.length;
   const total = result.total_matched ?? 0;
@@ -178,12 +211,16 @@ function renderSearchState() {
   const chips = [];
   for (const [key, value] of params.entries()) {
     if (key === "limit") continue;
-    chips.push(`<span class="chip"><strong>${escapeHTML(labelForParam(key))}</strong>${escapeHTML(value)}</span>`);
+    chips.push(`<button type="button" class="chip" data-clear-filter="${escapeHTML(key)}"><strong>${escapeHTML(labelForParam(key))}</strong>${escapeHTML(value)}<span aria-hidden="true">x</span></button>`);
   }
   $("#active-filters").innerHTML = chips.join("");
+  $$("[data-clear-filter]").forEach((button) => {
+    button.addEventListener("click", () => clearFilter(button.dataset.clearFilter));
+  });
 }
 
 function renderHarnesses() {
+  if (!$("#harnesses")) return;
   const harnesses = state.status?.harnesses || [];
   $("#harnesses").innerHTML = harnesses
     .map((harness) => `
@@ -198,6 +235,7 @@ function renderHarnesses() {
 }
 
 function renderEvents() {
+  if (!$("#events")) return;
   if (state.loading) {
     renderLoading();
     return;
@@ -219,7 +257,7 @@ function renderEvents() {
         <tr data-id="${escapeHTML(record.id)}">
           <td class="nowrap">${escapeHTML(formatTime(event.timestamp))}</td>
           <td>${signalCell(record)}</td>
-          <td>${escapeHTML(primaryArtifact(event))}</td>
+          <td>${artifactCell(event)}</td>
           <td>${badge(event.severity || "unknown", `severity-${event.severity || "unknown"}`)}</td>
           <td>${reviewCell(record)}</td>
           <td class="mono">${escapeHTML(session.id || "")}</td>
@@ -230,26 +268,37 @@ function renderEvents() {
     })
     .join("");
   document.querySelectorAll("#events tr").forEach((row) => {
-    row.addEventListener("click", () => showEvent(row.dataset.id));
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      showEvent(row.dataset.id);
+    });
+  });
+  $$("#events [data-apply-filter]").forEach((button) => {
+    button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
   });
 }
 
 async function showEvent(id) {
+  if (!$("#drawer")) return;
   const record = await getJSON(`/api/event?id=${encodeURIComponent(id)}`);
   $("#event-summary").innerHTML = detailSummary(record);
   $("#event-json").textContent = JSON.stringify(record.event, null, 2);
+  $$("#event-summary [data-apply-filter]").forEach((button) => {
+    button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
+  });
   $("#drawer").classList.add("open");
   $("#drawer").setAttribute("aria-hidden", "false");
 }
 
 function closeDrawer() {
+  if (!$("#drawer")) return;
   $("#drawer").classList.remove("open");
   $("#drawer").setAttribute("aria-hidden", "true");
 }
 
 function renderLoading() {
-  $("#result-meta").textContent = "Loading...";
-  $("#events").innerHTML = `<tr><td colspan="8">Loading events...</td></tr>`;
+  setText("#result-meta", "Loading...");
+  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="8">Loading events...</td></tr>`;
 }
 
 function signalCell(record) {
@@ -258,7 +307,12 @@ function signalCell(record) {
   const harness = event.harness || {};
   const parts = [
     `<strong>${escapeHTML(signalAction(record))}</strong>`,
-    `<span class="muted">${escapeHTML(info.category || "uncategorized")} · ${escapeHTML(harness.name || "unknown")}</span>`,
+    `<span class="muted">${escapeHTML(info.category || "uncategorized")} · ${escapeHTML(harness.name || "unknown")}${event.model ? ` · ${escapeHTML(event.model)}` : ""}</span>`,
+    filterButtons([
+      ["harness", harness.name],
+      ["model", event.model],
+      ["action", signalAction(record)],
+    ]),
     record.wazuh_level ? `<span class="muted">Wazuh level ${escapeHTML(record.wazuh_level)}</span>` : "",
   ].filter(Boolean);
   return parts.join("<br />");
@@ -287,6 +341,20 @@ function primaryArtifact(event) {
   return event.model || event.branch || "";
 }
 
+function artifactCell(event) {
+  const artifact = primaryArtifact(event);
+  const meta = [
+    event.command?.exit_code !== undefined ? `exit ${event.command.exit_code}` : "",
+    event.command?.duration_ms ? `${event.command.duration_ms}ms` : "",
+    event.file?.language,
+    event.mcp?.server,
+  ].filter(Boolean);
+  return `
+    <div class="artifact">${escapeHTML(truncateMiddle(artifact || event.message || "", 140))}</div>
+    ${meta.length ? `<div class="muted">${escapeHTML(meta.join(" · "))}</div>` : ""}
+  `;
+}
+
 function reviewCell(record) {
   const event = record.event || {};
   const labels = [];
@@ -308,6 +376,8 @@ function detailSummary(record) {
     ["Category", info.category],
     ["Severity", event.severity],
     ["Wazuh level", record.wazuh_level || ""],
+    ["Harness", event.harness?.name],
+    ["Model", event.model],
     ["Session", event.session?.id],
     ["Repository", repositoryLabel(event)],
     ["Prompt", event.prompt?.text],
@@ -317,7 +387,16 @@ function detailSummary(record) {
     ["Content", event.content ? `${event.content.retention}${event.content.redacted ? ", redacted" : ""}${event.content.truncated ? ", truncated" : ""}` : ""],
   ].filter(([, value]) => value);
   return rows
-    .map(([label, value]) => `<div><span class="muted">${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`)
+    .map(([label, value]) => {
+      const key = detailFilterKey(label);
+      return `
+        <div>
+          <span class="muted">${escapeHTML(label)}</span>
+          <strong>${escapeHTML(value)}</strong>
+          ${key ? `<button type="button" class="text-button" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(value)}">Filter by this</button>` : ""}
+        </div>
+      `;
+    })
     .join("");
 }
 
@@ -337,7 +416,171 @@ function formatTime(timestamp) {
 }
 
 function labelForParam(key) {
-  return key.replaceAll("_", " ");
+  const labels = {
+    q: "search",
+    mcp: "MCP",
+    wazuh_level: "Wazuh",
+  };
+  return labels[key] || key.replaceAll("_", " ");
+}
+
+function renderFilterOptions() {
+  if (!$("#filters")) return;
+  renderHarnessSelect(state.summary?.top_harnesses || []);
+  renderModelSelect(state.summary?.top_models || []);
+  renderDatalist("action-options", state.summary?.top_actions || []);
+}
+
+function renderHarnessSelect(values) {
+  const select = $("#harness-filter");
+  if (!select) return;
+  const current = select.value;
+  const options = [
+    `<option value="">All agent harnesses</option>`,
+    ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(harnessLabel(item.name))} (${escapeHTML(item.count)})</option>`),
+  ];
+  select.innerHTML = options.join("");
+  select.value = values.some((item) => item.name === current) ? current : "";
+}
+
+function renderModelSelect(values) {
+  const select = $("#model-filter");
+  if (!select) return;
+  const current = select.value;
+  const options = [
+    `<option value="">All models</option>`,
+    ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(item.name)} (${escapeHTML(item.count)})</option>`),
+  ];
+  select.innerHTML = options.join("");
+  select.value = values.some((item) => item.name === current) ? current : "";
+}
+
+function renderDatalist(id, values) {
+  const list = $(`#${id}`);
+  if (!list) return;
+  list.innerHTML = values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(item.count)} events</option>`).join("");
+}
+
+function harnessLabel(value) {
+  const labels = {
+    cursor: "Cursor",
+    claude_code: "Claude Code",
+    codex_cli: "Codex CLI",
+    cli: "Beacon CLI",
+  };
+  return labels[value] || value;
+}
+
+function renderFacets() {
+  if (!$("#facets")) return;
+  const groups = [
+    ["Harness", "harness", state.summary?.top_harnesses || []],
+    ["Model", "model", state.summary?.top_models || []],
+  ];
+  $("#facets").innerHTML = groups
+    .filter(([, , values]) => values.length)
+    .map(([label, key, values]) => `
+      <div class="facet-group">
+        <span class="muted">${escapeHTML(label)}</span>
+        ${values.slice(0, 5).map((item) => `<button type="button" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(item.name)}">${escapeHTML(item.name)} <strong>${escapeHTML(item.count)}</strong></button>`).join("")}
+      </div>
+    `)
+    .join("");
+  $$("#facets [data-apply-filter]").forEach((button) => {
+    button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
+  });
+}
+
+function attentionItems() {
+  const items = [
+    { name: "Needs review", count: state.summary?.needs_review_events || 0, filters: { review: "true" } },
+    { name: "Denied approvals", count: state.summary?.denied_approval_events || 0, filters: { action: "approval.denied" } },
+    { name: "Blocked policies", count: state.summary?.policy_blocked_events || 0, filters: { action: "policy.blocked" } },
+    { name: "Failed tools", count: state.summary?.failed_tool_events || 0, filters: { action: "tool.failed" } },
+    { name: "High or critical severity", count: (state.summary?.high_severity_events || 0) + (state.summary?.critical_severity_events || 0), filters: { review: "true" } },
+  ];
+  return items.filter((item) => item.count > 0);
+}
+
+function firstCount(values) {
+  return values && values.length ? values[0] : null;
+}
+
+function filterButtons(values) {
+  return values
+    .filter(([, value]) => value)
+    .map(([key, value]) => `<button type="button" class="mini-filter" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(value)}">${escapeHTML(labelForParam(key))}</button>`)
+    .join(" ");
+}
+
+function detailFilterKey(label) {
+  switch (label) {
+    case "Action":
+      return "action";
+    case "Category":
+      return "category";
+    case "Severity":
+      return "severity";
+    case "Harness":
+      return "harness";
+    case "Model":
+      return "model";
+    case "Session":
+      return "session";
+    case "Repository":
+      return "repository";
+    default:
+      return "";
+  }
+}
+
+function setFilters(filters, { reset = false } = {}) {
+  if (reset) clearFields(false);
+  for (const [key, value] of Object.entries(filters)) {
+    const input = $(`[name="${key}"]`);
+    if (input) input.value = value;
+  }
+  load({ updateLocation: true }).catch(console.error);
+}
+
+function applyFilters(filters, options = {}) {
+  if (isOverviewPage) {
+    const query = queryStringFromObject(filters);
+    window.location.href = query ? `/?${query}` : "/";
+    return;
+  }
+  setFilters(filters, options);
+}
+
+function queryStringFromObject(values) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value) params.set(key, value);
+  }
+  return params.toString();
+}
+
+function clearFilter(key) {
+  if (!$("#filters")) return;
+  const input = $(`[name="${key}"]`);
+  if (input) input.value = "";
+  load({ updateLocation: true }).catch(console.error);
+}
+
+function clearFields(loadAfter = true) {
+  if (!$("#filters")) return;
+  for (const field of formFields) {
+    const input = $(`[name="${field}"]`);
+    if (input) input.value = field === "limit" ? "500" : "";
+  }
+  if (loadAfter) load({ updateLocation: true }).catch(console.error);
+}
+
+function truncateMiddle(value, maxLength) {
+  value = String(value || "");
+  if (value.length <= maxLength) return value;
+  const keep = Math.floor((maxLength - 3) / 2);
+  return `${value.slice(0, keep)}...${value.slice(value.length - keep)}`;
 }
 
 function escapeHTML(value) {
@@ -350,40 +593,30 @@ function escapeHTML(value) {
 }
 
 function applyPreset(name) {
-  for (const field of formFields) {
-    const input = $(`[name="${field}"]`);
-    if (input) input.value = field === "limit" ? "500" : "";
-  }
-  const preset = presets[name] || {};
-  for (const [key, value] of Object.entries(preset)) {
-    const input = $(`[name="${key}"]`);
-    if (input) input.value = value;
-  }
-  load({ updateLocation: true }).catch(console.error);
+  applyFilters(presets[name] || {}, { reset: true });
 }
 
 function applyInsight(kind, value) {
-  const key = kind === "Top Actions" ? "action" : kind === "Top Repositories" ? "repository" : "mcp";
-  const input = $(`[name="${key}"]`);
-  if (input) input.value = value;
-  load({ updateLocation: true }).catch(console.error);
+  const key =
+    kind === "Top Actions" ? "action" :
+    kind === "Top Repositories" ? "repository" :
+    kind === "Agent Harnesses" ? "harness" :
+    kind === "Models" ? "model" :
+    "mcp";
+  applyFilters({ [key]: value });
 }
 
 function clearSearch() {
-  for (const field of formFields) {
-    const input = $(`[name="${field}"]`);
-    if (input) input.value = field === "limit" ? "500" : "";
-  }
-  load({ updateLocation: true }).catch(console.error);
+  clearFields();
 }
 
-$("#refresh").addEventListener("click", () => load().catch(console.error));
-$("#filters").addEventListener("submit", (event) => {
+$("#refresh")?.addEventListener("click", () => load().catch(console.error));
+$("#filters")?.addEventListener("submit", (event) => {
   event.preventDefault();
   load({ updateLocation: true }).catch(console.error);
 });
-$("#clear-search").addEventListener("click", clearSearch);
-$("#close-drawer").addEventListener("click", closeDrawer);
+$("#clear-search")?.addEventListener("click", clearSearch);
+$("#close-drawer")?.addEventListener("click", closeDrawer);
 $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
@@ -391,3 +624,8 @@ $$("[data-preset]").forEach((button) => {
 hydrateFiltersFromURL();
 load().catch(console.error);
 setInterval(() => load().catch(console.error), 10000);
+
+function setText(selector, value) {
+  const element = $(selector);
+  if (element) element.textContent = value;
+}

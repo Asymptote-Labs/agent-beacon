@@ -38,16 +38,66 @@ button {
   cursor: pointer;
 }
 
+label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+label span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(120px, 1fr);
   align-items: center;
-  justify-content: space-between;
+  gap: 1rem;
   padding: 1.5rem 2rem;
   border-bottom: 1px solid var(--line);
   background: rgba(17, 24, 39, 0.9);
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+.topbar > button {
+  justify-self: end;
+}
+
+.nav-toggle {
+  display: inline-flex;
+  justify-self: center;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0.3rem;
+  background: rgba(31, 41, 55, 0.85);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.28);
+}
+
+.nav-toggle a {
+  border-radius: 12px;
+  color: var(--muted);
+  min-width: 145px;
+  padding: 0.65rem 1rem;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nav-toggle a.active {
+  background: var(--accent);
+  color: #082f49;
+}
+
+.nav-toggle a:not(.active):hover {
+  background: var(--panel-soft);
+  color: var(--text);
 }
 
 h1,
@@ -101,8 +151,12 @@ main {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 1rem;
+}
+
+.overview-head {
+  margin-bottom: 0.75rem;
 }
 
 .insights {
@@ -139,6 +193,12 @@ main {
   font-size: 1.8rem;
   font-weight: 700;
   margin-top: 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.card {
+  text-align: left;
 }
 
 .card-danger {
@@ -172,15 +232,55 @@ main {
   gap: 0.75rem;
 }
 
+.primary-filters {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.harness-filter {
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  border-radius: 12px;
+  background: rgba(125, 211, 252, 0.06);
+  padding: 0.75rem;
+}
+
 .search-input {
   width: 100%;
 }
 
 .quick-filters,
-.chips {
+.chips,
+.facets,
+.facet-group {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.facets {
+  display: grid;
+}
+
+.facet-group {
+  align-items: center;
+}
+
+.facet-group button,
+.mini-filter,
+.text-button {
+  padding: 0.25rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.mini-filter,
+.text-button {
+  margin-top: 0.35rem;
+}
+
+.text-button {
+  width: fit-content;
+  color: var(--accent);
 }
 
 .quick-filters button {
@@ -217,6 +317,10 @@ main {
   background: var(--panel-soft);
   font-size: 0.78rem;
   white-space: nowrap;
+}
+
+button.chip {
+  cursor: pointer;
 }
 
 .chip strong {
@@ -272,6 +376,11 @@ tr:hover {
   background: var(--panel-soft);
 }
 
+.artifact {
+  max-width: 32rem;
+  overflow-wrap: anywhere;
+}
+
 .severity-high,
 .severity-critical,
 .badge-danger {
@@ -301,6 +410,22 @@ tr:hover {
   border-radius: 12px;
   padding: 0.85rem;
   background: var(--panel-soft);
+}
+
+.search-help {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.search-help span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
 }
 
 .drawer {
@@ -362,7 +487,18 @@ pre {
   .status-panel,
   .section-head {
     align-items: flex-start;
+    display: flex;
     flex-direction: column;
+  }
+
+  .nav-toggle {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .nav-toggle a {
+    min-width: 0;
+    flex: 1;
   }
 
   .search-row {
