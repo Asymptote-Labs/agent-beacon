@@ -35,6 +35,9 @@ func installRuntimeHooks(runtime hookRuntime, opts RuntimeOptions) (runtimeStatu
 	if !embedded.HasEmbeddedBinary() {
 		return runtimeStatus{}, fmt.Errorf("no hooks binary embedded")
 	}
+	if err := embedded.ValidateArchitecture(); err != nil {
+		return runtimeStatus{}, fmt.Errorf("embedded hooks binary is not usable on this host: %w", err)
+	}
 	if opts.LogPath == "" {
 		opts.LogPath = defaultLogPath(opts.UserMode)
 	}

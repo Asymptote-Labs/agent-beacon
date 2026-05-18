@@ -13,9 +13,8 @@ func TestValidateArchitecture_CurrentPlatform(t *testing.T) {
 		t.Skip("no real binary embedded (placeholder)")
 	}
 
-	err := ValidateArchitecture()
-	if err != nil {
-		t.Logf("ValidateArchitecture returned error (may be expected in dev): %v", err)
+	if err := ValidateArchitecture(); err != nil {
+		t.Fatalf("embedded hooks binary should match current platform: %v", err)
 	}
 }
 
