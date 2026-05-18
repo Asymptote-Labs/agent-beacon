@@ -28,23 +28,49 @@
   <a href="https://docs.asymptotelabs.ai/cli/command-reference">Commands</a>
 </p>
 
-<p align="center">
-  <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
-</p>
-
 ## What Is Beacon?
 
 Beacon is Asymptote's open-source endpoint agent for security and IT teams that
 need visibility into local AI agent activity.
 
-It runs locally, captures supported activity from Claude Code, Codex CLI,
-Factory Droid, Claude Cowork, and Cursor, then normalizes that activity into
-endpoint events your team can inspect locally, retain as JSONL, and forward into
-Wazuh, Splunk HEC, or customer-managed SIEM pipelines.
+It runs locally, captures supported activity from local agent harnesses like
+Claude Code, Codex CLI, Factory Droid, Claude Cowork, and Cursor, then
+normalizes that activity into endpoint events your team can inspect and retain
+locally.
 
-Beacon is visibility-first and local-first: no hosted account, remote policy
-fetch, or external network dependency is required during normal endpoint
-collection.
+Beacon is built to be easy to deploy for Security and IT teams through
+[MDM deployment](https://docs.asymptotelabs.ai/cli/security-it-teams) and to
+connect to Wazuh, Splunk HEC, or customer-managed SIEM pipelines, while
+remaining visibility-first and local-first during normal endpoint collection.
+
+## High-Level Architecture
+
+Beacon keeps collection, processing, and inspection local to the endpoint while
+leaving forwarding under customer control.
+
+<p align="center">
+  <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
+</p>
+
+- **Agent runtime layer:** Local hooks and OpenTelemetry sources capture
+  supported activity from AI agent harnesses on the endpoint.
+- **Beacon endpoint layer:** Local processing normalizes events, applies
+  retention and redaction settings, and writes durable endpoint telemetry.
+- **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
+  or forward records into Wazuh, Splunk HEC, and customer-managed SIEM
+  pipelines.
+
+## Dashboard
+
+Beacon includes a local, read-only dashboard for validating endpoint activity
+without a hosted backend. The overview screen summarizes recent runtime events
+and collection status, while log search helps teams inspect normalized event
+records during rollout, testing, and investigations.
+
+<p align="center">
+  <img src="images/dashboard-overview.png" alt="Beacon dashboard overview" width="420">
+  <img src="images/dashboard-log-search.png" alt="Beacon dashboard log search" width="420">
+</p>
 
 ## Start Here
 
