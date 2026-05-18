@@ -33,6 +33,7 @@ type EventQuery struct {
 	Since      time.Time
 	Q          string
 	Harness    string
+	Model      string
 	Action     string
 	Severity   string
 	Category   string
@@ -86,9 +87,7 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 			result.MalformedLines++
 			continue
 		}
-		if event.Event.Category == "" {
-			event.Event.Category = inferEventCategory(event.Event.Action)
-		}
+		normalizeDashboardEvent(&event)
 		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
 		record := EventRecord{
 			ID:         fmt.Sprintf("line-%d", lineNo),
@@ -150,9 +149,7 @@ func FindEvent(path, id string) (EventRecord, bool, error) {
 		if err := json.Unmarshal(line, &event); err != nil {
 			return EventRecord{}, false, nil
 		}
-		if event.Event.Category == "" {
-			event.Event.Category = inferEventCategory(event.Event.Action)
-		}
+		normalizeDashboardEvent(&event)
 		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
 		return EventRecord{
 			ID:         id,
@@ -167,6 +164,38 @@ func FindEvent(path, id string) (EventRecord, bool, error) {
 		return EventRecord{}, false, err
 	}
 	return EventRecord{}, false, nil
+}
+
+func normalizeDashboardEvent(event *schema.Event) {
+	metricName := metricEventName(event)
+	if event.Event.Category == "" && metricName != "" {
+		event.Event.Category = "metric"
+	}
+	if event.Event.Category == "" {
+		event.Event.Category = inferEventCategory(event.Event.Action)
+	}
+	metricName = metricEventName(event)
+	if event.Event.Category == "metric" && (event.Event.Action == "" || event.Event.Action == "metric.observed") {
+		event.Event.Action = metricName
+		if event.Event.Action == "" {
+			event.Event.Action = "metric.observed"
+		}
+	}
+}
+
+func metricEventName(event *schema.Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Raw != nil {
+		if value, ok := event.Raw["metric_name"].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	if event.Event.Category == "metric" {
+		return strings.TrimSpace(event.Message)
+	}
+	return ""
 }
 
 func normalizeLimit(limit int) int {
@@ -187,6 +216,9 @@ func matchesQuery(record EventRecord, query EventQuery) bool {
 		}
 	}
 	if query.Harness != "" && !strings.EqualFold(event.Harness.Name, query.Harness) {
+		return false
+	}
+	if query.Model != "" && !containsFold(event.Model, query.Model) {
 		return false
 	}
 	if query.Action != "" && !strings.EqualFold(event.Event.Action, query.Action) {
@@ -386,6 +418,7 @@ func activeFilters(query EventQuery) map[string]string {
 		}
 	}
 	add("harness", query.Harness)
+	add("model", query.Model)
 	add("action", query.Action)
 	add("severity", query.Severity)
 	add("category", query.Category)

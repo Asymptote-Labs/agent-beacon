@@ -55,6 +55,42 @@ func TestRunPromptSubmitUsesCursorResponse(t *testing.T) {
 	}
 }
 
+func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "factory"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"session_id":      "factory-session",
+		"transcript_path": "/tmp/factory-session.jsonl",
+		"cwd":             "/repo",
+		"hook_event_name": "UserPromptSubmit",
+		"permission_mode": "off",
+		"prompt":          "summarize token=prompt-secret",
+	})
+	if len(out) != 0 {
+		t.Fatalf("factory prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["message"]; got != "Prompt submitted to agent" {
+		t.Fatalf("message = %q, want prompt submitted", got)
+	}
+	harness := event["harness"].(map[string]interface{})
+	if harness["name"] != "factory" {
+		t.Fatalf("harness = %#v, want factory", harness)
+	}
+	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+		t.Fatalf("event.action = %q, want prompt.submitted", action)
+	}
+	prompt := event["prompt"].(map[string]interface{})
+	if got := prompt["text"]; got != "summarize token=[REDACTED]" {
+		t.Fatalf("prompt.text = %q, want redacted prompt", got)
+	}
+}
+
 func TestRunPromptSubmitEmitsTypedPromptForFullRetention(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"

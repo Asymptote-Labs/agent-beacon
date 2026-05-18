@@ -285,3 +285,56 @@ func TestCodexStatusVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/bash")
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	droidPath := filepath.Join(binDir, "droid")
+	if err := os.WriteFile(droidPath, []byte("#!/bin/sh\necho 0.127.0\n"), 0755); err != nil {
+		t.Fatalf("write fake droid executable: %v", err)
+	}
+
+	h := DiscoverFactory()
+	if !h.Detected {
+		t.Fatalf("DiscoverFactory did not detect executable on PATH: %#v", h)
+	}
+	if h.ExecutablePath != droidPath {
+		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, droidPath)
+	}
+	if h.Version != "0.127.0" {
+		t.Fatalf("Version = %q, want fake executable version", h.Version)
+	}
+	if h.ConfigPath != filepath.Join(home, ".bash_profile") {
+		t.Fatalf("ConfigPath = %q, want bash profile", h.ConfigPath)
+	}
+}
+
+func TestFactoryStatusVariants(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name   string
+		body   string
+		status TelemetryStatus
+	}{
+		{name: "missing export", body: `export OTHER=1`, status: TelemetryDisabled},
+		{name: "remote endpoint", body: `export OTEL_TELEMETRY_ENDPOINT="https://example.com:4318"`, status: TelemetryMisconfigured},
+		{name: "localhost enabled", body: `export OTEL_TELEMETRY_ENDPOINT="http://localhost:4318"`, status: TelemetryEnabled},
+		{name: "loopback enabled", body: `export OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`, status: TelemetryEnabled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "_")+".profile")
+			if err := os.WriteFile(path, []byte(tt.body), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			status, _ := factoryStatus(path)
+			if status != tt.status {
+				t.Fatalf("factoryStatus = %q, want %q", status, tt.status)
+			}
+		})
+	}
+}

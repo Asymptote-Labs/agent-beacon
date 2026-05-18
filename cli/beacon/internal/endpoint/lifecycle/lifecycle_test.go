@@ -133,6 +133,21 @@ func TestConfigureHarnessesRejectsUnsupportedHarness(t *testing.T) {
 	}
 }
 
+func TestConfigureHarnessesRejectsFactoryAsMDMManaged(t *testing.T) {
+	cfg := endpointconfig.Config{
+		Harnesses: []string{"factory"},
+		Collector: endpointconfig.Collector{
+			GRPCPort: 54317,
+			HTTPPort: 54318,
+		},
+	}
+
+	_, err := configureHarnesses(cfg)
+	if err == nil || !strings.Contains(err.Error(), "Factory Droid telemetry is MDM-managed") || !strings.Contains(err.Error(), "54318") {
+		t.Fatalf("configureHarnesses error = %v, want MDM-managed Factory error with HTTP port", err)
+	}
+}
+
 func TestWriteReadManifestRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

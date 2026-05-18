@@ -65,6 +65,52 @@ case "$REPAIR_ARGS" in
     ;;
 esac
 
+FAKE_BIN="$TMP_DIR/fake-bin"
+FAKE_HOME="$TMP_DIR/fake-home"
+mkdir -p "$FAKE_BIN" "$FAKE_HOME"
+cat >"$FAKE_BIN/stat" <<'STUB'
+#!/bin/sh
+printf 'alice\n'
+STUB
+cat >"$FAKE_BIN/dscl" <<'STUB'
+#!/bin/sh
+printf 'NFSHomeDirectory: %s\n' "$FAKE_HOME"
+STUB
+cat >"$FAKE_BIN/sudo" <<'STUB'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -u)
+      shift 2
+      ;;
+    *=*)
+      shift
+      ;;
+    *)
+      exec "$@"
+      ;;
+  esac
+done
+STUB
+chmod +x "$FAKE_BIN/stat" "$FAKE_BIN/dscl" "$FAKE_BIN/sudo"
+
+BEACON_BIN="$STUB_BIN" \
+PATH="$FAKE_BIN:$PATH" \
+FAKE_HOME="$FAKE_HOME" \
+BEACON_HOOK_HARNESSES="cursor,factory" \
+BEACON_HOOK_LEVEL="user" \
+STUB_LOG="$STUB_LOG" \
+"$ROOT_DIR/packaging/macos/jamf/scripts/install-cursor-hooks.sh"
+
+HOOK_ARGS="$(cat "$STUB_LOG")"
+case "$HOOK_ARGS" in
+  "endpoint hooks install --harness cursor,factory --level user --log-path /var/log/beacon-agent/runtime.jsonl") ;;
+  *)
+    echo "unexpected hook install args: $HOOK_ARGS" >&2
+    exit 1
+    ;;
+esac
+
 BEACON_BIN="$STUB_BIN" \
 STUB_LOG="$STUB_LOG" \
 "$INSTALL_SCRIPT" _ _ _ "claude" "metadata" "6317" "6318" "/tmp/jamf-otelcol" "1" "https://jamf-splunk.example:8088/services/collector" "jamf-token" "jamf-index" "jamf-source" "jamf:sourcetype" "true" "/tmp/jamf-ca.pem"

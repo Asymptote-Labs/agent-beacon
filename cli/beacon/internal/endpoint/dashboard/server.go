@@ -180,6 +180,7 @@ func parseQuery(r *http.Request, fallbackLimit int) EventQuery {
 		Limit:      limit,
 		Q:          q.Get("q"),
 		Harness:    q.Get("harness"),
+		Model:      q.Get("model"),
 		Action:     q.Get("action"),
 		Severity:   q.Get("severity"),
 		Category:   q.Get("category"),

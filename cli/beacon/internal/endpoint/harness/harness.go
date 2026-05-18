@@ -47,6 +47,7 @@ func DiscoverAll() []Harness {
 	return []Harness{
 		DiscoverClaude(),
 		DiscoverCodex(),
+		DiscoverFactory(),
 		DiscoverCursor(),
 		DiscoverClaudeCowork(),
 	}
@@ -101,6 +102,27 @@ func DiscoverCodex() Harness {
 	} else {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Codex config file was not found"
+	}
+	return h
+}
+
+func DiscoverFactory() Harness {
+	h := Harness{Name: "factory", DisplayName: "Factory Droid", Capability: "otel_env"}
+	path, err := exec.LookPath("droid")
+	if err == nil {
+		h.Detected = true
+		h.ExecutablePath = path
+		h.Version = commandVersion(path)
+	}
+	home, _ := os.UserHomeDir()
+	h.ConfigPath = factoryProfilePath(home)
+	if fileExists(h.ConfigPath) {
+		status, msg := factoryStatus(h.ConfigPath)
+		h.TelemetryStatus = status
+		h.Message = msg
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Factory Droid telemetry is configured by the launch environment; set OTEL_TELEMETRY_ENDPOINT to the local OTLP HTTP receiver"
 	}
 	return h
 }
@@ -206,6 +228,7 @@ func ConfigureCodex(opts ConfigureOptions) (string, error) {
 func ValidateConfigured(endpoint string) []ValidationResult {
 	claude := DiscoverClaude()
 	codex := DiscoverCodex()
+	factory := DiscoverFactory()
 	return []ValidationResult{
 		{
 			Harness: claude.Name,
@@ -216,6 +239,11 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 			Harness: codex.Name,
 			Status:  codex.TelemetryStatus,
 			Message: validateEndpointMessage(codex.TelemetryStatus, codex.Message, endpoint),
+		},
+		{
+			Harness: factory.Name,
+			Status:  factory.TelemetryStatus,
+			Message: validateEndpointMessage(factory.TelemetryStatus, factory.Message, endpoint),
 		},
 	}
 }
@@ -321,6 +349,46 @@ func codexStatus(path string) (TelemetryStatus, string) {
 		return TelemetryMisconfigured, "Codex OTLP endpoint does not point to localhost"
 	}
 	return TelemetryEnabled, "Codex telemetry is configured for local OTLP"
+}
+
+func factoryStatus(path string) (TelemetryStatus, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return TelemetryMissing, err.Error()
+	}
+	text := string(data)
+	endpoint := shellExportValue(text, "OTEL_TELEMETRY_ENDPOINT")
+	if endpoint == "" {
+		return TelemetryDisabled, "Factory Droid OTEL_TELEMETRY_ENDPOINT is not configured"
+	}
+	if !strings.Contains(endpoint, "127.0.0.1") && !strings.Contains(endpoint, "localhost") {
+		return TelemetryMisconfigured, "Factory Droid OTEL endpoint does not point to localhost"
+	}
+	return TelemetryEnabled, "Factory Droid telemetry is configured for local OTLP HTTP"
+}
+
+func shellExportValue(text, key string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "export ")
+		if !strings.HasPrefix(line, key+"=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, key+"="))
+		return strings.Trim(value, `"'`)
+	}
+	return ""
+}
+
+func factoryProfilePath(home string) string {
+	switch filepath.Base(os.Getenv("SHELL")) {
+	case "zsh":
+		return filepath.Join(home, ".zshrc")
+	case "bash":
+		return filepath.Join(home, ".bash_profile")
+	default:
+		return filepath.Join(home, ".profile")
+	}
 }
 
 func commandVersion(path string) string {

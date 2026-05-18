@@ -4,6 +4,7 @@ set -eu
 BEACON_BIN="${BEACON_BIN:-/opt/beacon/bin/beacon}"
 HOOK_HARNESSES="${BEACON_HOOK_HARNESSES:-${4:-cursor}}"
 HOOK_LEVEL="${BEACON_HOOK_LEVEL:-${5:-user}}"
+HOOK_LOG_PATH="${BEACON_HOOK_LOG_PATH:-${6:-/var/log/beacon-agent/runtime.jsonl}}"
 CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || echo "")"
 
 if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" = "loginwindow" ]; then
@@ -19,4 +20,5 @@ fi
 
 exec sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" "$BEACON_BIN" endpoint hooks install \
   --harness "$HOOK_HARNESSES" \
-  --level "$HOOK_LEVEL"
+  --level "$HOOK_LEVEL" \
+  --log-path "$HOOK_LOG_PATH"

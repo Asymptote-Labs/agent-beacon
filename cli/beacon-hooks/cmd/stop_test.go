@@ -15,6 +15,7 @@ func TestPlatformToTranscriptName(t *testing.T) {
 		{"claude", "claude_code"},
 		{"copilot", "copilot"},
 		{"cursor", "cursor"},
+		{"factory", "factory"},
 		{"unknown", "claude_code"},
 	}
 
@@ -25,6 +26,30 @@ func TestPlatformToTranscriptName(t *testing.T) {
 				t.Errorf("platformToTranscriptName(%q) = %q, want %q", tt.platform, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExtractMessagesFromFactoryTranscript(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "factory.jsonl")
+	content := `{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Please edit the file"}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit"}]}}
+{"type":"message","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"Done editing."}]}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	messages := extractMessagesFromFactoryTranscript(transcriptPath)
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 text messages, got %d: %#v", len(messages), messages)
+	}
+	if messages[0]["role"] != "user" || messages[0]["content"] != "Please edit the file" {
+		t.Fatalf("unexpected first message: %#v", messages[0])
+	}
+	if messages[1]["role"] != "assistant" || messages[1]["content"] != "Done editing." {
+		t.Fatalf("unexpected second message: %#v", messages[1])
 	}
 }
 

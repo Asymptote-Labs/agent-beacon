@@ -355,22 +355,24 @@ func preflight(cfg endpointconfig.Config, startService bool) error {
 }
 
 func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.GRPCPort)
+	grpcEndpoint := fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.GRPCPort)
 	var paths []string
 	for _, name := range cfg.Harnesses {
 		switch name {
 		case "claude", "claude_code":
-			path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: endpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
+			path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
 			if err != nil {
 				return paths, err
 			}
 			paths = append(paths, path)
 		case "codex", "codex_cli":
-			path, err := harness.ConfigureCodex(harness.ConfigureOptions{Endpoint: endpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
+			path, err := harness.ConfigureCodex(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
 			if err != nil {
 				return paths, err
 			}
 			paths = append(paths, path)
+		case "factory", "droid":
+			return paths, fmt.Errorf("Factory Droid telemetry is MDM-managed; set OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:%d in the Droid launch environment instead of using --harness %s", cfg.Collector.HTTPPort, name)
 		case "":
 		default:
 			return paths, fmt.Errorf("unsupported harness %q", name)
