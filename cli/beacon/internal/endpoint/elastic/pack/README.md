@@ -26,6 +26,14 @@ If those ports are already in use, set `BEACON_ELASTIC_ES_PORT` or
 The Docker stack loads the ILM policy, component templates, index template,
 ingest pipeline, and starter Kibana saved objects before Filebeat ships events.
 
+Validate ingestion with the ECS-adjacent fields produced by the ingest pipeline:
+
+```bash
+curl "$ES_HOSTS/logs-beacon.endpoint-*/_search?q=beacon.product:endpoint-agent"
+curl "$ES_HOSTS/logs-beacon.endpoint-*/_search?q=beacon.prompt.text:%22Beacon%20E2E%22"
+curl "$ES_HOSTS/logs-beacon.endpoint-*/_search?q=beacon.harness.name:cursor"
+```
+
 Stop it with:
 
 ```bash

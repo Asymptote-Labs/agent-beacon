@@ -41,7 +41,6 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"max_event_bytes: 65536",
 		"rotate_bytes: 10485760",
 		"redact_secrets: true",
-		"include_runtime_metrics: false",
 		"level: none",
 		"receivers: [otlp]",
 		"exporters: [beaconjson]",
@@ -49,6 +48,9 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		if !strings.Contains(yaml, want) {
 			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
 		}
+	}
+	if strings.Contains(yaml, "include_runtime_metrics") {
+		t.Fatalf("ConfigYAML should omit runtime metrics option unless explicitly enabled:\n%s", yaml)
 	}
 }
 

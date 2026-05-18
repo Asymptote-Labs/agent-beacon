@@ -83,6 +83,7 @@ func TestPackJSONFilesAreValid(t *testing.T) {
 func TestKibanaAssetsAreParseableNDJSON(t *testing.T) {
 	scanner := bufio.NewScanner(strings.NewReader(mustRead("pack/kibana-assets.ndjson")))
 	line := 0
+	var foundDataView bool
 	for scanner.Scan() {
 		line++
 		var doc map[string]interface{}
@@ -92,12 +93,40 @@ func TestKibanaAssetsAreParseableNDJSON(t *testing.T) {
 		if doc["type"] == "" || doc["id"] == "" {
 			t.Fatalf("kibana-assets.ndjson line %d missing type/id: %#v", line, doc)
 		}
+		if doc["type"] == "index-pattern" {
+			attrs, ok := doc["attributes"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("kibana data view missing attributes: %#v", doc)
+			}
+			if attrs["name"] == "Beacon Endpoint Events" {
+				foundDataView = true
+			}
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
 	if line == 0 {
 		t.Fatal("kibana-assets.ndjson was empty")
+	}
+	if !foundDataView {
+		t.Fatal("kibana-assets.ndjson should include the Beacon Endpoint Events data view")
+	}
+}
+
+func TestPackREADMEUsesIngestedFieldNames(t *testing.T) {
+	readme := mustRead("pack/README.md")
+	for _, want := range []string{
+		"beacon.product:endpoint-agent",
+		"beacon.prompt.text",
+		"beacon.harness.name",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Fatalf("pack README missing ingested field query %q", want)
+		}
+	}
+	if strings.Contains(readme, "product:endpoint-agent") && !strings.Contains(readme, "beacon.product:endpoint-agent") {
+		t.Fatalf("pack README should not use raw pre-ingest product field query")
 	}
 }
 

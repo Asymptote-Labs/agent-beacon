@@ -3,6 +3,11 @@ version: 2
 
 project_name: beacon
 
+# Each target build embeds a platform-specific beacon-hooks binary by writing
+# internal/embedded/hooks.bin in a pre-build hook. Keep release builds
+# serialized so concurrent targets cannot race and embed the wrong architecture.
+parallelism: 1
+
 before:
   hooks:
     - go mod tidy
@@ -36,9 +41,10 @@ builds:
     hooks:
       pre:
         # Build the hooks binary for this target platform and embed it.
-        # IMPORTANT: This writes to a shared hooks.bin file. The -a flag above
-        # forces a full rebuild for each target so Go re-reads the freshly-built
-        # hooks.bin instead of serving a stale copy from the build cache.
+        # IMPORTANT: This writes to a shared hooks.bin file. Release builds are
+        # serialized at the top level so target builds cannot race here. The -a
+        # flag above forces a full rebuild for each target so Go re-reads the
+        # freshly-built hooks.bin instead of serving a stale copy from cache.
         - cmd: bash -c 'cd ../beacon-hooks && GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
           output: true
 
