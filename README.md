@@ -68,8 +68,11 @@ and collection status, while log search helps teams inspect normalized event
 records during rollout, testing, and investigations.
 
 <p align="center">
-  <img src="images/dashboard-overview.png" alt="Beacon dashboard overview" width="420">
-  <img src="images/dashboard-log-search.png" alt="Beacon dashboard log search" width="420">
+  <img src="images/dashboard-overview.png" alt="Beacon dashboard overview" width="860">
+</p>
+
+<p align="center">
+  <img src="images/dashboard-log-search.png" alt="Beacon dashboard log search" width="860">
 </p>
 
 ## Start Here
