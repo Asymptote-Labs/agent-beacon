@@ -20,134 +20,126 @@
     </header>
 
     <main>
-      <section class="panel status-panel">
-        <div>
-          <h2>Endpoint</h2>
-          <p id="log-path" class="muted">Loading runtime log...</p>
-        </div>
-        <div id="retention" class="pill">metadata</div>
-      </section>
-
-      <section class="panel">
+      <section class="panel search-panel">
         <div class="section-head">
           <div>
             <h2>Investigation Search</h2>
             <p class="muted">Search commands, files, MCP tools, prompts, approval reasons, sessions, repositories, models, harnesses, and event messages.</p>
           </div>
-          <div id="result-meta" class="muted"></div>
+          <div class="section-actions">
+            <a class="docs-link" href="https://docs.asymptotelabs.ai/cli/event-schema#entity-model" target="_blank" rel="noreferrer">Entity data model docs</a>
+            <div id="result-meta" class="muted"></div>
+          </div>
         </div>
         <form id="filters" class="search-form">
-          <div class="search-row">
-            <input class="search-input" name="q" placeholder="Search session, command, file path, MCP tool, approval reason, repository, or action" autocomplete="off" />
-            <button type="submit">Search</button>
-            <button type="button" id="clear-search">Clear</button>
-          </div>
-          <div class="primary-filters">
-            <label class="harness-filter">
-              <span>Agent harness</span>
-              <select name="harness" id="harness-filter">
-                <option value="">All agent harnesses</option>
-              </select>
-            </label>
-            <label>
-              <span>Model</span>
-              <select name="model" id="model-filter">
-                <option value="">All models</option>
-              </select>
-            </label>
-            <label>
-              <span>Severity</span>
-              <select name="severity">
-                <option value="">Any severity</option>
-                <option value="info">Info</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </label>
-            <label>
-              <span>Category</span>
-              <select name="category">
-                <option value="">Any category</option>
-                <option value="prompt">Prompt</option>
-                <option value="tool">Tool</option>
-                <option value="command">Command</option>
-                <option value="file">File</option>
-                <option value="mcp">MCP</option>
-                <option value="approval">Approval</option>
-                <option value="session">Session</option>
-                <option value="inventory">Inventory</option>
-                <option value="validation">Validation</option>
-                <option value="metric">Metric</option>
-              </select>
-            </label>
-          </div>
-          <div id="facets" class="facets"></div>
-          <div class="quick-filters" aria-label="Quick filters">
-            <button type="button" data-preset="review">Needs Review</button>
-            <button type="button" data-preset="commands">Commands</button>
-            <button type="button" data-preset="files">File Changes</button>
-            <button type="button" data-preset="mcp">MCP</button>
-            <button type="button" data-preset="approvals">Approvals</button>
-            <button type="button" data-preset="failures">Failures</button>
-            <button type="button" data-preset="high">High Severity</button>
-          </div>
-          <details class="advanced-filters">
-            <summary>Advanced filters</summary>
-            <div class="filters">
-              <input name="action" list="action-options" placeholder="Action" />
-              <input name="repository" placeholder="Repository" />
-              <input name="session" placeholder="Session" />
-              <input name="file" placeholder="File path" />
-              <input name="command" placeholder="Command or tool" />
-              <input name="mcp" placeholder="MCP server or tool" />
-              <input name="approval" placeholder="Approval decision or reason" />
-              <input name="decision" placeholder="Approval/policy decision" />
-              <input name="policy" placeholder="Policy id, name, or reason" />
-              <select name="wazuh_level">
-                <option value="">Any Wazuh level</option>
-                <option value="5">Level 5 workflow</option>
-                <option value="7">Level 7 command/MCP</option>
-                <option value="9">Level 9 failure</option>
-                <option value="10">Level 10 block/denial</option>
-                <option value="12">Level 12 health/tamper</option>
-              </select>
-              <input name="since" placeholder="Since RFC3339, e.g. 2026-05-13T12:00:00Z" />
-              <select name="limit">
-                <option value="100">100 events</option>
-                <option value="500" selected>500 events</option>
-                <option value="1000">1000 events</option>
-                <option value="2000">2000 events</option>
-              </select>
+          <div class="filter-section">
+            <div class="filter-main-row">
+              <div class="primary-filters">
+                <label>
+                  <select name="harness" id="harness-filter" aria-label="Agent harness">
+                    <option value="">All agent harnesses</option>
+                  </select>
+                </label>
+                <label>
+                  <select name="model" id="model-filter" aria-label="Model">
+                    <option value="">All models</option>
+                  </select>
+                </label>
+                <label>
+                  <select name="severity" aria-label="Severity">
+                    <option value="">Any severity</option>
+                    <option value="info">Info</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </label>
+                <label>
+                  <select name="category" aria-label="Category">
+                    <option value="">Any category</option>
+                    <option value="prompt">Prompt</option>
+                    <option value="tool">Tool</option>
+                    <option value="command">Command</option>
+                    <option value="file">File</option>
+                    <option value="mcp">MCP</option>
+                    <option value="approval">Approval</option>
+                    <option value="session">Session</option>
+                    <option value="inventory">Inventory</option>
+                    <option value="validation">Validation</option>
+                    <option value="metric">Metric</option>
+                  </select>
+                </label>
+              </div>
+              <div class="quick-filters" aria-label="Quick filters">
+                <button type="button" data-preset="review">Needs Review</button>
+                <button type="button" data-preset="commands">Commands</button>
+                <button type="button" data-preset="files">File Changes</button>
+                <button type="button" data-preset="mcp">MCP</button>
+                <button type="button" data-preset="approvals">Approvals</button>
+                <button type="button" data-preset="failures">Failures</button>
+                <button type="button" data-preset="high">High Severity</button>
+              </div>
             </div>
-          </details>
+            <div id="facets" class="facets"></div>
+            <details class="advanced-filters">
+              <summary>Advanced filters</summary>
+              <div class="filters">
+                <input name="action" list="action-options" placeholder="Action" />
+                <input name="repository" placeholder="Repository" />
+                <input name="session" placeholder="Session" />
+                <input name="file" placeholder="File path" />
+                <input name="command" placeholder="Command or tool" />
+                <input name="mcp" placeholder="MCP server or tool" />
+                <input name="approval" placeholder="Approval decision or reason" />
+                <input name="decision" placeholder="Approval/policy decision" />
+                <input name="policy" placeholder="Policy id, name, or reason" />
+                <select name="wazuh_level">
+                  <option value="">Any Wazuh level</option>
+                  <option value="5">Level 5 workflow</option>
+                  <option value="7">Level 7 command/MCP</option>
+                  <option value="9">Level 9 failure</option>
+                  <option value="10">Level 10 block/denial</option>
+                  <option value="12">Level 12 health/tamper</option>
+                </select>
+                <input name="since" placeholder="Since RFC3339, e.g. 2026-05-13T12:00:00Z" />
+                <select name="limit">
+                  <option value="100">100 events</option>
+                  <option value="500" selected>500 events</option>
+                  <option value="1000">1000 events</option>
+                  <option value="2000">2000 events</option>
+                </select>
+              </div>
+            </details>
+          </div>
+          <div class="search-row">
+            <label class="search-field">
+              <span class="search-input-wrap">
+                <span class="search-icon" aria-hidden="true"></span>
+                <input class="search-input" name="q" placeholder="Search logs..." autocomplete="off" aria-label="Search logs" />
+              </span>
+            </label>
+          </div>
           <datalist id="action-options"></datalist>
           <input type="hidden" name="review" />
         </form>
-        <div class="search-help">
-          <strong>Search examples:</strong>
-          <span>model name</span>
-          <span>cursor</span>
-          <span>go test</span>
-          <span>approval denied</span>
-          <span>mcp github</span>
-          <span>src/server.go</span>
-        </div>
         <div id="active-filters" class="chips"></div>
         <div id="notice" class="notice" hidden></div>
+        <button type="button" id="new-events" class="new-events" hidden></button>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Signal</th>
-                <th>Artifact</th>
-                <th>Severity</th>
-                <th>Review</th>
+                <th class="col-timestamp">Timestamp</th>
                 <th>Session</th>
                 <th>Repository</th>
-                <th>Message</th>
+                <th>Tags</th>
+                <th>Severity</th>
+                <th>Data Retention Config</th>
+                <th>Signal</th>
+                <th>Agent Harness</th>
+                <th class="col-artifact">Artifact</th>
+                <th class="col-message">Message</th>
               </tr>
             </thead>
             <tbody id="events"></tbody>
@@ -156,7 +148,14 @@
       </section>
 
       <section class="panel">
-        <h2>Runtime Inventory</h2>
+        <div class="section-head">
+          <div>
+            <h2>Endpoint Diagnostics</h2>
+            <p id="log-path" class="muted">Loading runtime log...</p>
+          </div>
+          <div id="retention" class="pill">metadata</div>
+        </div>
+        <h2 class="subsection-title">Runtime Inventory</h2>
         <div id="harnesses" class="harnesses"></div>
       </section>
     </main>

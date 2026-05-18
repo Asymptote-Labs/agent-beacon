@@ -5,6 +5,8 @@ const state = {
   eventResult: null,
   loading: false,
   error: null,
+  currentQuery: "",
+  newEventCount: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -83,35 +85,46 @@ function updateURL(query) {
   window.history.replaceState(null, "", next);
 }
 
-async function load({ updateLocation = false } = {}) {
+async function load({ updateLocation = false, mode = "replace" } = {}) {
   const query = queryFromFilters();
   if (updateLocation) updateURL(query);
   const suffix = query ? `?${query}` : "";
-  state.loading = true;
+  const quiet = mode === "poll";
+  state.loading = !quiet;
   state.error = null;
-  renderLoading();
+  if (!quiet) renderLoading();
+  let rendered = false;
   try {
     const [status, summary, events] = await Promise.all([
       getJSON("/api/status"),
       getJSON(`/api/summary${suffix}`),
       getJSON(`/api/events${suffix}`),
     ]);
+    const previousEvents = state.events;
+    const previousQuery = state.currentQuery;
     state.status = status;
     state.summary = summary;
     state.eventResult = events;
+    state.currentQuery = query;
     state.events = events.events || [];
+    if (quiet && previousQuery === query && canPatchEvents(previousEvents, state.events)) {
+      patchEvents(previousEvents, state.events);
+      renderSummaryOnly();
+      rendered = true;
+    }
   } catch (err) {
     state.error = err;
   } finally {
     state.loading = false;
-    render();
+    if (!rendered) render();
   }
 }
 
 function render() {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
-  setText("#retention", `retention: ${state.status?.content_retention || "metadata"}`);
+  setText("#retention", `Data retention: ${state.status?.content_retention || "metadata"}`);
   setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
+  renderNewEventsIndicator();
   renderFilterOptions();
   renderCards();
   renderInsights();
@@ -219,6 +232,18 @@ function renderSearchState() {
   });
 }
 
+function renderSummaryOnly() {
+  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
+  setText("#retention", `Data retention: ${state.status?.content_retention || "metadata"}`);
+  setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
+  renderNewEventsIndicator();
+  renderFilterOptions();
+  renderCards();
+  renderInsights();
+  renderSearchState();
+  renderHarnesses();
+}
+
 function renderHarnesses() {
   if (!$("#harnesses")) return;
   const harnesses = state.status?.harnesses || [];
@@ -241,41 +266,106 @@ function renderEvents() {
     return;
   }
   if (state.error) {
-    $("#events").innerHTML = `<tr><td colspan="8">Failed to load dashboard: ${escapeHTML(state.error.message)}</td></tr>`;
+    $("#events").innerHTML = `<tr><td colspan="10">Failed to load dashboard: ${escapeHTML(state.error.message)}</td></tr>`;
     return;
   }
   if (!state.events.length) {
-    $("#events").innerHTML = `<tr><td colspan="8">No events match this search. Clear filters or broaden the query.</td></tr>`;
+    $("#events").innerHTML = `<tr><td colspan="10">No events match this search. Clear filters or broaden the query.</td></tr>`;
     return;
   }
   $("#events").innerHTML = state.events
-    .map((record) => {
-      const event = record.event || {};
-      const info = event.event || {};
-      const session = event.session || {};
-      return `
-        <tr data-id="${escapeHTML(record.id)}">
-          <td class="nowrap">${escapeHTML(formatTime(event.timestamp))}</td>
-          <td>${signalCell(record)}</td>
-          <td>${artifactCell(event)}</td>
-          <td>${badge(event.severity || "unknown", `severity-${event.severity || "unknown"}`)}</td>
-          <td>${reviewCell(record)}</td>
-          <td class="mono">${escapeHTML(session.id || "")}</td>
-          <td>${escapeHTML(repositoryLabel(event))}</td>
-          <td>${escapeHTML(event.message || "")}</td>
-        </tr>
-      `;
-    })
+    .map((record) => eventRowHTML(record))
     .join("");
-  document.querySelectorAll("#events tr").forEach((row) => {
+  bindEventRows();
+}
+
+function eventRowHTML(record) {
+  const event = record.event || {};
+  const session = event.session || {};
+  return `
+    <tr data-id="${escapeHTML(record.id)}">
+      <td class="nowrap col-timestamp">${escapeHTML(formatTime(event.timestamp))}</td>
+      <td class="mono">${escapeHTML(session.id || "")}</td>
+      <td>${escapeHTML(repositoryShortLabel(event))}</td>
+      <td>${tagCell(record)}</td>
+      <td>${badge(event.severity || "unknown", `severity-${event.severity || "unknown"}`)}</td>
+      <td>${retentionCell(record)}</td>
+      <td>${signalCell(record)}</td>
+      <td>${harnessCell(event)}</td>
+      <td class="col-artifact">${artifactCell(event)}</td>
+      <td class="col-message">${escapeHTML(event.message || "")}</td>
+    </tr>
+  `;
+}
+
+function bindEventRows(scope = document) {
+  const rows = scope.matches?.("tr[data-id]") ? [scope] : Array.from(scope.querySelectorAll("#events tr, tr[data-id]"));
+  rows.forEach((row) => {
     row.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
       showEvent(row.dataset.id);
     });
   });
-  $$("#events [data-apply-filter]").forEach((button) => {
+  Array.from(scope.querySelectorAll("[data-apply-filter]")).forEach((button) => {
     button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
   });
+}
+
+function canPatchEvents(previousEvents, nextEvents) {
+  return $("#events") && previousEvents.length > 0 && nextEvents.length > 0;
+}
+
+function patchEvents(previousEvents, nextEvents) {
+  const tbody = $("#events");
+  if (!tbody) return;
+  const existing = new Set(previousEvents.map((record) => record.id));
+  const newest = [];
+  for (const record of nextEvents) {
+    if (existing.has(record.id)) break;
+    newest.push(record);
+  }
+  if (!newest.length) return;
+  prependEventRows(newest);
+}
+
+function prependEventRows(records) {
+  const tbody = $("#events");
+  if (!tbody) return;
+  const nearTop = window.scrollY < 160;
+  const beforeTop = tbody.getBoundingClientRect().top;
+  const template = document.createElement("template");
+  template.innerHTML = records.map((record) => eventRowHTML(record)).join("");
+  const rows = Array.from(template.content.children);
+  const fragment = document.createDocumentFragment();
+  rows.forEach((row) => fragment.appendChild(row));
+  tbody.prepend(fragment);
+  rows.forEach((row) => bindEventRows(row));
+  if (!nearTop) {
+    const afterTop = tbody.getBoundingClientRect().top;
+    window.scrollBy(0, afterTop - beforeTop);
+    state.newEventCount += records.length;
+  } else {
+    state.newEventCount = 0;
+  }
+  renderNewEventsIndicator();
+}
+
+function renderNewEventsIndicator() {
+  const button = $("#new-events");
+  if (!button) return;
+  if (state.newEventCount > 0) {
+    button.hidden = false;
+    button.textContent = `${state.newEventCount} new event${state.newEventCount === 1 ? "" : "s"} available`;
+  } else {
+    button.hidden = true;
+    button.textContent = "";
+  }
+}
+
+function showNewEvents() {
+  state.newEventCount = 0;
+  renderNewEventsIndicator();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 async function showEvent(id) {
@@ -298,24 +388,31 @@ function closeDrawer() {
 
 function renderLoading() {
   setText("#result-meta", "Loading...");
-  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="8">Loading events...</td></tr>`;
+  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="10">Loading events...</td></tr>`;
 }
 
 function signalCell(record) {
   const event = record.event || {};
   const info = event.event || {};
-  const harness = event.harness || {};
   const parts = [
     `<strong>${escapeHTML(signalAction(record))}</strong>`,
-    `<span class="muted">${escapeHTML(info.category || "uncategorized")} · ${escapeHTML(harness.name || "unknown")}${event.model ? ` · ${escapeHTML(event.model)}` : ""}</span>`,
-    filterButtons([
-      ["harness", harness.name],
-      ["model", event.model],
-      ["action", signalAction(record)],
-    ]),
-    record.wazuh_level ? `<span class="muted">Wazuh level ${escapeHTML(record.wazuh_level)}</span>` : "",
+    `<span class="muted">${escapeHTML(info.category || "uncategorized")}${event.model ? ` · ${escapeHTML(event.model)}` : ""}</span>`,
   ].filter(Boolean);
   return parts.join("<br />");
+}
+
+function tagCell(record) {
+  const event = record.event || {};
+  return filterButtons([
+    ["action", signalAction(record)],
+    ["model", event.model],
+  ]);
+}
+
+function harnessCell(event) {
+  const harness = event.harness || {};
+  if (!harness.name) return "";
+  return escapeHTML(harnessLabel(harness.name));
 }
 
 function signalAction(record) {
@@ -355,17 +452,13 @@ function artifactCell(event) {
   `;
 }
 
-function reviewCell(record) {
+function retentionCell(record) {
   const event = record.event || {};
   const labels = [];
-  if (event.severity === "critical" || event.severity === "high") labels.push(badge(event.severity, "badge-danger"));
-  if (record.wazuh_level >= 9) labels.push(badge(`L${record.wazuh_level}`, "badge-danger"));
-  if (event.event?.action === "tool.failed") labels.push(badge("failed", "badge-warn"));
-  if (event.event?.action === "policy.blocked") labels.push(badge("blocked", "badge-danger"));
-  if (event.event?.action === "approval.denied" || event.approval?.decision === "denied") labels.push(badge("denied", "badge-danger"));
-  if (event.content?.truncated || event.field_truncated) labels.push(badge("truncated", "badge-warn"));
   if (event.content?.retention) labels.push(badge(event.content.retention, "badge-muted"));
-  return labels.join(" ") || badge("normal", "badge-muted");
+  if (event.content?.truncated || event.field_truncated) labels.push(badge("truncated", "badge-warn"));
+  if (event.content?.redacted) labels.push(badge("redacted", "badge-warn"));
+  return labels.join(" ") || badge("default", "badge-muted");
 }
 
 function detailSummary(record) {
@@ -402,6 +495,14 @@ function detailSummary(record) {
 
 function repositoryLabel(event) {
   return [event.repository, event.branch].filter(Boolean).join(" @ ");
+}
+
+function repositoryShortLabel(event) {
+  if (!event.repository) return event.branch || "";
+  const parts = event.repository.split("/").filter(Boolean);
+  const repo = parts[parts.length - 1] || event.repository;
+  const label = parts.length > 1 ? `../${repo}` : repo;
+  return [label, event.branch].filter(Boolean).join(" @ ");
 }
 
 function badge(value, className) {
@@ -536,6 +637,7 @@ function detailFilterKey(label) {
 
 function setFilters(filters, { reset = false } = {}) {
   if (reset) clearFields(false);
+  state.newEventCount = 0;
   for (const [key, value] of Object.entries(filters)) {
     const input = $(`[name="${key}"]`);
     if (input) input.value = value;
@@ -562,6 +664,7 @@ function queryStringFromObject(values) {
 
 function clearFilter(key) {
   if (!$("#filters")) return;
+  state.newEventCount = 0;
   const input = $(`[name="${key}"]`);
   if (input) input.value = "";
   load({ updateLocation: true }).catch(console.error);
@@ -569,6 +672,7 @@ function clearFilter(key) {
 
 function clearFields(loadAfter = true) {
   if (!$("#filters")) return;
+  state.newEventCount = 0;
   for (const field of formFields) {
     const input = $(`[name="${field}"]`);
     if (input) input.value = field === "limit" ? "500" : "";
@@ -617,13 +721,14 @@ $("#filters")?.addEventListener("submit", (event) => {
 });
 $("#clear-search")?.addEventListener("click", clearSearch);
 $("#close-drawer")?.addEventListener("click", closeDrawer);
+$("#new-events")?.addEventListener("click", showNewEvents);
 $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
 
 hydrateFiltersFromURL();
 load().catch(console.error);
-setInterval(() => load().catch(console.error), 10000);
+setInterval(() => load({ mode: "poll" }).catch(console.error), 10000);
 
 function setText(selector, value) {
   const element = $(selector);
