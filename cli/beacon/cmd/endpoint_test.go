@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -76,6 +77,11 @@ func TestEndpointElasticCommandsRegistered(t *testing.T) {
 	if endpointElasticDownCmd.Flags().Lookup("pack-dir") == nil {
 		t.Fatal("elastic down command missing --pack-dir flag")
 	}
+	for _, name := range []string{"user", "system", "log-path"} {
+		if endpointElasticDownCmd.Flags().Lookup(name) == nil {
+			t.Fatalf("elastic down command missing --%s flag", name)
+		}
+	}
 }
 
 func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
@@ -97,6 +103,9 @@ func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
 }
 
 func TestRunEndpointElasticDownIgnoresMissingPack(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("elastic down is currently macOS-only")
+	}
 	oldPackDir := endpointOpts.elasticPackDir
 	endpointOpts.elasticPackDir = filepath.Join(t.TempDir(), "missing-pack")
 	t.Cleanup(func() {

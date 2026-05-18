@@ -344,7 +344,7 @@ func init() {
 	endpointWazuhValidateCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointWazuhValidateCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointWazuhValidateCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
-	for _, c := range []*cobra.Command{endpointElasticPrintConfigCmd, endpointElasticInstallPackCmd, endpointElasticUpCmd} {
+	for _, c := range []*cobra.Command{endpointElasticPrintConfigCmd, endpointElasticInstallPackCmd, endpointElasticUpCmd, endpointElasticDownCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
