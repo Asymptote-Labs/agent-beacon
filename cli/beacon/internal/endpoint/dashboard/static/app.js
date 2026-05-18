@@ -121,15 +121,7 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
 }
 
 function render() {
-  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
-  setText("#retention", `Data retention: ${state.status?.content_retention || "metadata"}`);
-  setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
-  renderNewEventsIndicator();
-  renderFilterOptions();
-  renderCards();
-  renderInsights();
-  renderSearchState();
-  renderHarnesses();
+  renderSummaryOnly();
   renderEvents();
 }
 
@@ -332,7 +324,8 @@ function prependEventRows(records) {
   const tbody = $("#events");
   if (!tbody) return;
   const nearTop = window.scrollY < 160;
-  const beforeTop = tbody.getBoundingClientRect().top;
+  const anchor = tbody.firstElementChild;
+  const beforeTop = anchor ? anchor.getBoundingClientRect().top : 0;
   const template = document.createElement("template");
   template.innerHTML = records.map((record) => eventRowHTML(record)).join("");
   const rows = Array.from(template.content.children);
@@ -340,8 +333,8 @@ function prependEventRows(records) {
   rows.forEach((row) => fragment.appendChild(row));
   tbody.prepend(fragment);
   rows.forEach((row) => bindEventRows(row));
-  if (!nearTop) {
-    const afterTop = tbody.getBoundingClientRect().top;
+  if (!nearTop && anchor) {
+    const afterTop = anchor.getBoundingClientRect().top;
     window.scrollBy(0, afterTop - beforeTop);
     state.newEventCount += records.length;
   } else {
