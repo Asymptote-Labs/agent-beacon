@@ -191,8 +191,8 @@ tokens do not need to be entered as visible script parameters.
 Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where
 Extension Attributes report a stale or unhealthy install. Use
 `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-context
-policy for hook telemetry. Set `BEACON_HOOK_HARNESSES=cursor,factory` to install
-both supported hook integrations; the helper writes hook events to
+policy for hook telemetry. Set `BEACON_HOOK_HARNESSES=cursor,factory,opencode`
+to install supported hook integrations; the helper writes hook events to
 `/var/log/beacon-agent/runtime.jsonl` by default.
 
 ### Jamf Extension Attributes
@@ -317,7 +317,7 @@ removal remains under the MDM/package receipt lifecycle.
   writable by the collector.
 - No recent runtime events: confirm supported harnesses are configured and the
   local OTLP ports are not in use by another process.
-- Cursor or Factory hooks are missing: run the hook helper while a non-root
-  console user is logged in, and confirm the helper uses the same runtime log
-  path as the endpoint collector.
+- Cursor, Factory, or opencode hooks are missing: run the hook helper while a
+  non-root console user is logged in, and confirm the helper uses the same
+  runtime log path as the endpoint collector.
 
