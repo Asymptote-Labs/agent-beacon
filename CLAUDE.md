@@ -89,6 +89,116 @@ cd cli/beacon
 go run . endpoint dashboard
 ```
 
+## Release Deployments
+
+Homebrew releases are published by GoReleaser from `cli/beacon/.goreleaser.yaml`.
+Prefer a CI-based release workflow triggered by an annotated version tag. Use a
+local GoReleaser publish only as a fallback when CI release automation is not
+available or the maintainer explicitly asks for a local release.
+
+Use the next semver tag requested by the maintainer, usually the next `v0.0.x`
+tag unless they explicitly decide Beacon is ready for `v1.0.0`.
+
+Before tagging:
+
+```bash
+git fetch --tags origin
+git status -sb --untracked-files=all
+git tag --sort=-v:refname | sed -n '1,8p'
+git log --oneline <previous-tag>..HEAD
+gh release view <new-tag> --json tagName,url,isDraft,isPrerelease 2>/dev/null || true
+git ls-remote --tags origin "refs/tags/<new-tag>"
+```
+
+Run the release gates before publishing:
+
+```bash
+cd cli/beacon && go test ./...
+cd ../beacon-hooks && go test ./...
+cd ../../collector-builder/exporter/beaconjsonexporter && go test ./...
+cd ../../..
+sh packaging/macos/test-endpoint-scripts.sh
+```
+
+### Preferred CI Release
+
+CI release automation should:
+
+- Trigger only on pushed tags matching `v*`.
+- Check out the tagged commit with full history (`fetch-depth: 0`) so GoReleaser
+  can compute changelogs from the previous tag.
+- Build or restore the collector binaries expected by `.goreleaser.yaml` under
+  `collector-builder/dist/beacon-otelcol/<goos>_<goarch>/beacon-otelcol`.
+- Run `goreleaser check` before publishing.
+- Run `goreleaser release --clean` from `cli/beacon`.
+- Provide `GITHUB_TOKEN` for the GitHub release and `HOMEBREW_TAP_TOKEN` with
+  write access to `asymptote-labs/homebrew-tap`.
+
+Once release CI exists, the normal deployment flow is:
+
+```bash
+git fetch --tags origin
+git status -sb --untracked-files=all
+git tag -a <tag> -m "<tag>"
+git push origin <tag>
+gh run list --workflow <release-workflow-name> --limit 5
+```
+
+After the workflow succeeds, verify both the GitHub release and the Homebrew tap:
+
+```bash
+gh release view <tag> --json url,tagName,assets --jq '.tagName + " " + .url + " assets=" + (.assets | length | tostring)'
+gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.content' | base64 --decode | sed -n '1,70p'
+gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
+```
+
+If the workflow fails after the tag is pushed, do not create a second tag until
+the failure is understood. Fix the release workflow or source issue, then rerun
+the failed workflow for the same tag when possible. Delete and recreate a pushed
+tag only with maintainer approval.
+
+### Local Fallback Release
+
+Do not publish locally from a dirty checkout unless the maintainer explicitly
+wants those uncommitted changes in the release archive. If unrelated local
+changes are present, create a temporary clean worktree at `HEAD` and copy the
+prebuilt collector binaries into it before running GoReleaser:
+
+```bash
+rm -rf .tmp/release-<tag>
+git worktree add .tmp/release-<tag> HEAD
+mkdir -p .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/{darwin_amd64,darwin_arm64,linux_amd64,linux_arm64}
+cp collector-builder/dist/beacon-otelcol/darwin_amd64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/darwin_amd64/beacon-otelcol
+cp collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol
+cp collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol
+cp collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol
+```
+
+Tag and publish from the clean release checkout. Prefer explicitly exported
+tokens; use `gh auth token` only as a local fallback:
+
+```bash
+git -C .tmp/release-<tag> tag -a <tag> -m "<tag>"
+git -C .tmp/release-<tag> push origin <tag>
+cd .tmp/release-<tag>/cli/beacon
+goreleaser check
+GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}" HOMEBREW_TAP_TOKEN="${HOMEBREW_TAP_TOKEN:-$(gh auth token)}" goreleaser release --clean
+```
+
+After GoReleaser succeeds, verify both the GitHub release and the Homebrew tap:
+
+```bash
+gh release view <tag> --json url,tagName,assets --jq '.tagName + " " + .url + " assets=" + (.assets | length | tostring)'
+gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.content' | base64 --decode | sed -n '1,70p'
+gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
+```
+
+Clean up the temporary worktree after verification:
+
+```bash
+git worktree remove --force .tmp/release-<tag>
+```
+
 ## Implementation Notes
 
 - Prefer deterministic tests that use `t.TempDir()`, `t.Setenv("HOME", ...)`, fake binaries, and free local ports.
