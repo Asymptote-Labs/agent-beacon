@@ -115,6 +115,10 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	if splunkExporter != "" {
 		exporters = "[beaconjson, splunk_hec]"
 	}
+	runtimeMetricsYAML := ""
+	if cfg.Collector.IncludeRuntimeMetrics {
+		runtimeMetricsYAML = "    include_runtime_metrics: true\n"
+	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
@@ -138,7 +142,6 @@ exporters:
     rotate_bytes: 10485760
     redact_secrets: true
     content_retention: %q
-    include_runtime_metrics: %t
 %s
 extensions:
   health_check:
@@ -162,7 +165,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: %s
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, cfg.Collector.IncludeRuntimeMetrics, splunkExporter, exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, runtimeMetricsYAML+splunkExporter, exporters, exporters, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
