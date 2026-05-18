@@ -60,6 +60,28 @@ that may need review.
 ./beacon endpoint wazuh validate
 ```
 
+## Elastic
+
+Generate Filebeat, standalone Elastic Agent, Elasticsearch, and Kibana content
+for the configured Beacon runtime log:
+
+```bash
+./beacon endpoint elastic print-config
+./beacon endpoint elastic install-pack --output ./beacon-elastic-pack
+```
+
+On macOS with Docker Desktop, start a loopback-only Elasticsearch, Kibana, and
+Filebeat stack for local validation:
+
+```bash
+./beacon endpoint elastic up --pack-dir ./beacon-elastic-pack
+./beacon endpoint elastic down --pack-dir ./beacon-elastic-pack
+```
+
+For Elastic Cloud or a self-managed cluster, install the JSON assets from the
+pack and run Filebeat or standalone Elastic Agent with `ES_HOSTS` plus one
+authentication method, such as `ES_API_KEY`.
+
 ## Optional Integrations
 
 ```bash

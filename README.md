@@ -82,22 +82,55 @@ records during rollout, testing, and investigations.
   <img src="images/dashboard-log-search.png" alt="Beacon dashboard log search" width="860">
 </p>
 
-## Elastic
+## SIEM Forwarding
 
-Beacon ships an Elastic content pack for teams that want to search endpoint
-events in Elasticsearch and Kibana without giving Beacon cluster credentials.
-The pack tails the same local `runtime.jsonl` file with Filebeat or standalone
-Elastic Agent, installs ECS-oriented templates and an ingest pipeline, and
-includes starter Kibana assets.
+Beacon keeps endpoint collection local and writes one durable JSONL source of
+truth at `runtime.jsonl`. SIEM forwarding is additive: Wazuh, Elastic/Filebeat,
+Splunk HEC, and customer-managed pipelines can read the same local file without
+changing how Beacon captures agent activity.
+
+### Elastic
+
+Beacon `v0.0.11` adds an Elastic content pack for teams that want to search
+endpoint events in Elasticsearch and Kibana without giving Beacon cluster
+credentials. The pack includes Filebeat and standalone Elastic Agent
+configuration, ECS-oriented index templates, an ingest pipeline, ILM policy, a
+sample event, and starter Kibana assets.
+
+For a local macOS trial with Docker Desktop:
 
 ```bash
-beacon endpoint elastic install-pack --output ./beacon-elastic-pack
-beacon endpoint elastic up --pack-dir ./beacon-elastic-pack
+brew tap asymptote-labs/tap
+brew install beacon
+
+beacon endpoint install
+beacon endpoint elastic up
 ```
 
-The local stack binds Elasticsearch and Kibana to loopback. Existing self-managed
-or Elastic Cloud deployments can use the same pack by pointing Filebeat at their
-cluster with `ES_HOSTS` and `ES_API_KEY`.
+The local stack binds Elasticsearch and Kibana to loopback:
+
+- Elasticsearch: `http://localhost:9200`
+- Kibana: `http://localhost:5601`
+
+Stop the local stack with:
+
+```bash
+beacon endpoint elastic down
+```
+
+For Elastic Cloud or a self-managed Elastic deployment, generate the content
+pack and configure Filebeat on the endpoint or in your endpoint management
+workflow:
+
+```bash
+beacon endpoint install
+beacon endpoint elastic install-pack --output ./beacon-elastic-pack
+```
+
+Then install the JSON assets from `./beacon-elastic-pack`, point
+`filebeat.yml` or `elastic-agent-standalone.yml` at your cluster with
+`ES_HOSTS`, and enable one authentication method such as `ES_API_KEY`. Beacon
+does not store Elastic hosts, API keys, usernames, or passwords.
 
 ## Start Here
 
