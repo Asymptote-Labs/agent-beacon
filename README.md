@@ -60,6 +60,13 @@ leaving forwarding under customer control.
   or forward records into Wazuh, Splunk HEC, and customer-managed SIEM
   pipelines.
 
+Beacon filters generic process and runtime metrics, such as Node.js event loop,
+V8 heap, process CPU, and process memory telemetry, out of the local endpoint
+JSONL by default so agent prompts, tools, approvals, and file activity remain
+easy to inspect. Advanced deployments can opt back into those low-level OTLP
+metrics with `beacon endpoint install --include-runtime-metrics` or
+`beacon endpoint repair --include-runtime-metrics`.
+
 ## Dashboard
 
 Beacon includes a local, read-only dashboard for validating endpoint activity

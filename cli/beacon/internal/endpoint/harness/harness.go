@@ -189,6 +189,11 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	env["OTEL_METRICS_EXPORTER"] = "otlp"
 	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
 	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = opts.Endpoint
+	if opts.ContentRetention == "metadata" {
+		delete(env, "OTEL_LOG_USER_PROMPTS")
+	} else {
+		env["OTEL_LOG_USER_PROMPTS"] = "1"
+	}
 	settings["env"] = env
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err

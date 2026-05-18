@@ -39,6 +39,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 	cfg := Default(true, logPath)
 	cfg.Collector.BinaryPath = filepath.Join(home, "bin", "otelcol")
+	cfg.Collector.IncludeRuntimeMetrics = true
 	cfg.EventCategories = []string{"tool", "session"}
 	cfg.ContentRetention = ContentRetentionRedacted
 
@@ -59,6 +60,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Collector.BinaryPath != cfg.Collector.BinaryPath {
 		t.Fatalf("BinaryPath = %q, want %q", loaded.Collector.BinaryPath, cfg.Collector.BinaryPath)
+	}
+	if !loaded.Collector.IncludeRuntimeMetrics {
+		t.Fatal("IncludeRuntimeMetrics = false, want true")
 	}
 	if len(loaded.EventCategories) != 2 || loaded.EventCategories[1] != "session" {
 		t.Fatalf("EventCategories did not round-trip: %#v", loaded.EventCategories)

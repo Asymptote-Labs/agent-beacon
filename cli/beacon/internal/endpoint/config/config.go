@@ -38,11 +38,12 @@ type Config struct {
 }
 
 type Collector struct {
-	BinaryPath string `json:"binary_path,omitempty"`
-	ConfigPath string `json:"config_path,omitempty"`
-	GRPCPort   int    `json:"grpc_port"`
-	HTTPPort   int    `json:"http_port"`
-	SpoolPath  string `json:"spool_path,omitempty"`
+	BinaryPath            string `json:"binary_path,omitempty"`
+	ConfigPath            string `json:"config_path,omitempty"`
+	GRPCPort              int    `json:"grpc_port"`
+	HTTPPort              int    `json:"http_port"`
+	SpoolPath             string `json:"spool_path,omitempty"`
+	IncludeRuntimeMetrics bool   `json:"include_runtime_metrics,omitempty"`
 }
 
 type Destinations struct {

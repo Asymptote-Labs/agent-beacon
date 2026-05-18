@@ -103,6 +103,9 @@ func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Met
 			scopeMetrics := resourceMetrics.ScopeMetrics().At(j)
 			for k := 0; k < scopeMetrics.Metrics().Len(); k++ {
 				metric := scopeMetrics.Metrics().At(k)
+				if !e.cfg.IncludeRuntimeMetrics && shouldDropRuntimeMetric(metric.Name()) {
+					continue
+				}
 				event := e.eventFromMetric(resourceAttrs, metric)
 				if err := e.writer.append(event); err != nil && firstErr == nil {
 					firstErr = err
@@ -111,6 +114,25 @@ func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Met
 		}
 	}
 	return firstErr
+}
+
+func shouldDropRuntimeMetric(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return false
+	}
+	dropPrefixes := []string{
+		"process.",
+		"nodejs.",
+		"runtime.nodejs.",
+		"v8js.",
+	}
+	for _, prefix := range dropPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) beaconEvent {

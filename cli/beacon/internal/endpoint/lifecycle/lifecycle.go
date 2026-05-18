@@ -19,15 +19,16 @@ import (
 )
 
 type InstallOptions struct {
-	UserMode         bool
-	LogPath          string
-	Harnesses        []string
-	GRPCPort         int
-	HTTPPort         int
-	CollectorPath    string
-	StartService     bool
-	ContentRetention endpointconfig.ContentRetention
-	SplunkHEC        *endpointconfig.SplunkHEC
+	UserMode              bool
+	LogPath               string
+	Harnesses             []string
+	GRPCPort              int
+	HTTPPort              int
+	CollectorPath         string
+	StartService          bool
+	ContentRetention      endpointconfig.ContentRetention
+	IncludeRuntimeMetrics bool
+	SplunkHEC             *endpointconfig.SplunkHEC
 }
 
 type UninstallOptions struct {
@@ -279,6 +280,7 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		cfg.Collector.HTTPPort = opts.HTTPPort
 	}
 	cfg.Collector.BinaryPath = opts.CollectorPath
+	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
 	if opts.ContentRetention != "" {
 		cfg.ContentRetention = opts.ContentRetention
 	}
@@ -358,7 +360,7 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 	for _, name := range cfg.Harnesses {
 		switch name {
 		case "claude", "claude_code":
-			path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode})
+			path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
 			if err != nil {
 				return paths, err
 			}

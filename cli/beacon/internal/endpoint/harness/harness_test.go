@@ -68,6 +68,7 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 		"OTEL_METRICS_EXPORTER":        "otlp",
 		"OTEL_EXPORTER_OTLP_PROTOCOL":  "grpc",
 		"OTEL_EXPORTER_OTLP_ENDPOINT":  "http://127.0.0.1:4317",
+		"OTEL_LOG_USER_PROMPTS":        "1",
 	} {
 		if got := env[key]; got != want {
 			t.Fatalf("env[%s] = %q, want %q; env=%#v", key, got, want, env)
@@ -79,6 +80,41 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 	}
 	if len(backups) != 1 {
 		t.Fatalf("expected one backup, got %#v", backups)
+	}
+}
+
+func TestConfigureClaudeDisablesPromptLoggingForMetadataRetention(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir claude config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"env":{"OTEL_LOG_USER_PROMPTS":"1"}}`), 0600); err != nil {
+		t.Fatalf("write existing claude config: %v", err)
+	}
+
+	written, err := ConfigureClaude(ConfigureOptions{
+		Endpoint:         "http://127.0.0.1:4317",
+		UserMode:         true,
+		ContentRetention: "metadata",
+	})
+	if err != nil {
+		t.Fatalf("ConfigureClaude returned error: %v", err)
+	}
+	if written != path {
+		t.Fatalf("ConfigureClaude path = %q, want %q", written, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read claude config: %v", err)
+	}
+	var settings map[string]map[string]string
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal claude config: %v", err)
+	}
+	if _, ok := settings["env"]["OTEL_LOG_USER_PROMPTS"]; ok {
+		t.Fatalf("metadata retention should remove OTEL_LOG_USER_PROMPTS: %#v", settings["env"])
 	}
 }
 

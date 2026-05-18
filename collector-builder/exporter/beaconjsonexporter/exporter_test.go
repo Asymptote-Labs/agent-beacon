@@ -216,6 +216,102 @@ func TestEventFromMetricDefaultsToObservedAction(t *testing.T) {
 	}
 }
 
+func TestConsumeMetricsDropsRuntimeMetricsByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "unknown_service:node")
+	rm.Resource().Attributes().PutStr("process.command", "/tmp/mcp-server-elasticsearch")
+	sm := rm.ScopeMetrics().AppendEmpty()
+	for _, name := range []string{
+		"process.cpu.utilization",
+		"process.memory.usage",
+		"nodejs.eventloop.utilization",
+		"v8js.memory.heap.used",
+	} {
+		sm.Metrics().AppendEmpty().SetName(name)
+	}
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		t.Fatalf("runtime metrics should have been dropped, wrote: %s", string(data))
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read runtime log: %v", err)
+	}
+}
+
+func TestConsumeMetricsIncludesRuntimeMetricsWhenConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:                  path,
+		MaxEventBytes:         defaultMaxEventBytes,
+		RotateBytes:           defaultRotateBytes,
+		RedactSecrets:         true,
+		ContentRetention:      "full",
+		IncludeRuntimeMetrics: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	metric := metrics.ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("nodejs.eventloop.utilization")
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if !strings.Contains(string(data), "nodejs.eventloop.utilization") {
+		t.Fatalf("runtime metric was not written: %s", string(data))
+	}
+}
+
+func TestConsumeMetricsKeepsAgentMetricsByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	metric := metrics.ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("codex.tool.call.duration_ms")
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if !strings.Contains(string(data), "codex.tool.call.duration_ms") {
+		t.Fatalf("agent metric was not written: %s", string(data))
+	}
+}
+
 func TestInferActionMapsCodexUserInputToPrompt(t *testing.T) {
 	attrs := map[string]interface{}{"service.name": "codex_cli_rs"}
 	if got := inferAction(attrs, "op.dispatch.user_input_with_turn_context"); got != "prompt.submitted" {

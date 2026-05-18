@@ -138,6 +138,7 @@ exporters:
     rotate_bytes: 10485760
     redact_secrets: true
     content_retention: %q
+    include_runtime_metrics: %t
 %s
 extensions:
   health_check:
@@ -161,7 +162,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: %s
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, splunkExporter, exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, cfg.Collector.IncludeRuntimeMetrics, splunkExporter, exporters, exporters, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
