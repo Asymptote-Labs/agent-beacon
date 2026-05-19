@@ -114,6 +114,10 @@ Parameter 15: Splunk insecure TLS skip verify for install.sh only
 Parameter 16: Splunk CA file for install.sh only
 ```
 
+Gemini CLI telemetry is opt-in. Include `gemini` in the harness parameter, for
+example `claude,codex,gemini`, when the package deployment should manage Gemini
+local OpenTelemetry settings.
+
 For repair workflows, pass Splunk settings with `BEACON_SPLUNK_*` environment
 variables when possible so HEC tokens are not exposed as script parameters.
 

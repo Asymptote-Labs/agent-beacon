@@ -371,6 +371,12 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 				return paths, err
 			}
 			paths = append(paths, path)
+		case "gemini", "gemini_cli":
+			path, err := harness.ConfigureGemini(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
+			if err != nil {
+				return paths, err
+			}
+			paths = append(paths, path)
 		case "opencode":
 			return paths, fmt.Errorf("opencode telemetry is installed with `beacon endpoint hooks install --harness opencode`, not endpoint install")
 		case "factory", "droid":
