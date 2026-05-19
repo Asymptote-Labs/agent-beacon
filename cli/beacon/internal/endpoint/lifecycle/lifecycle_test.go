@@ -156,6 +156,36 @@ func TestConfigureHarnessesRejectsOpenCodeAsHookManaged(t *testing.T) {
 	}
 }
 
+func TestConfigureHarnessesAcceptsGemini(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := endpointconfig.Config{
+		UserMode:         true,
+		Harnesses:        []string{"gemini"},
+		ContentRetention: endpointconfig.ContentRetentionMetadata,
+		Collector: endpointconfig.Collector{
+			GRPCPort: 54317,
+		},
+	}
+
+	paths, err := configureHarnesses(cfg)
+	if err != nil {
+		t.Fatalf("configureHarnesses returned error: %v", err)
+	}
+	wantPath := filepath.Join(home, ".gemini", "settings.json")
+	if len(paths) != 1 || paths[0] != wantPath {
+		t.Fatalf("paths = %#v, want %q", paths, wantPath)
+	}
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read Gemini settings: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"otlpEndpoint": "http://127.0.0.1:54317"`) || !strings.Contains(text, `"logPrompts": false`) {
+		t.Fatalf("Gemini settings were not configured for metadata retention:\n%s", text)
+	}
+}
+
 func TestWriteReadManifestRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

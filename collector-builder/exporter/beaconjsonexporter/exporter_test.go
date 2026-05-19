@@ -375,6 +375,139 @@ func TestEventFromSpanMapsCodexUserInputToPrompt(t *testing.T) {
 	}
 }
 
+func TestConsumeLogsMapsGeminiPrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "gemini-cli")
+	rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Attributes().PutStr("event.name", "gemini_cli.user_prompt")
+	rec.Attributes().PutStr("session.id", "gemini-session")
+	rec.Attributes().PutStr("prompt", "summarize token=gemini-secret")
+	rec.Attributes().PutStr("prompt_id", "prompt-1")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Harness.Name != "gemini_cli" {
+		t.Fatalf("harness = %q, want gemini_cli", event.Harness.Name)
+	}
+	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+		t.Fatalf("unexpected event action/category: %#v", event.Event)
+	}
+	if event.Session == nil || event.Session.ID != "gemini-session" {
+		t.Fatalf("session missing from event: %#v", event.Session)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "summarize token=[REDACTED]" {
+		t.Fatalf("prompt = %#v, want redacted Gemini prompt", event.Prompt)
+	}
+}
+
+func TestConsumeLogsMapsGeminiMCPTool(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "gemini")
+	rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Attributes().PutStr("event.name", "gemini_cli.tool_call")
+	rec.Attributes().PutStr("function_name", "search_docs")
+	rec.Attributes().PutStr("function_args", `{"query":"otel"}`)
+	rec.Attributes().PutStr("tool_type", "mcp")
+	rec.Attributes().PutStr("mcp_server_name", "docs")
+	rec.Attributes().PutStr("decision", "accept")
+	rec.Attributes().PutInt("duration_ms", 42)
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Event.Action != "mcp.tool_invoked" || event.Event.Category != "mcp" {
+		t.Fatalf("unexpected event action/category: %#v", event.Event)
+	}
+	if event.Tool == nil || event.Tool.Name != "search_docs" || event.Tool.Command != `{"query":"otel"}` {
+		t.Fatalf("tool mapping missing: %#v", event.Tool)
+	}
+	if event.MCP == nil || event.MCP.Server != "docs" || event.MCP.Tool != "search_docs" {
+		t.Fatalf("mcp mapping missing: %#v", event.MCP)
+	}
+	if event.Approval == nil || event.Approval.Decision != "accept" {
+		t.Fatalf("approval mapping missing: %#v", event.Approval)
+	}
+}
+
+func TestConsumeLogsMapsGeminiFileOperation(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rec := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Attributes().PutStr("service.name", "gemini-cli")
+	rec.Attributes().PutStr("event.name", "gemini_cli.file_operation")
+	rec.Attributes().PutStr("file_path", "/tmp/main.go")
+	rec.Attributes().PutStr("operation", "create")
+
+	event := exp.eventFromLog(nil, rec)
+	if event.Event.Action != "file.created" || event.Event.Category != "file" {
+		t.Fatalf("unexpected event action/category: %#v", event.Event)
+	}
+	if event.File == nil || event.File.Path != "/tmp/main.go" || event.File.Operation != "create" {
+		t.Fatalf("file mapping missing: %#v", event.File)
+	}
+}
+
+func TestInferActionMapsGeminiApprovalEvents(t *testing.T) {
+	for _, name := range []string{"approval_mode_switch", "approval_mode_duration", "plan_execution"} {
+		if got := inferAction(map[string]interface{}{"service.name": "gemini-cli"}, name); got != "approval.requested" {
+			t.Fatalf("inferAction(%q) = %q, want approval.requested", name, got)
+		}
+	}
+}
+
 func TestMetadataRetentionDropsRawAttributes(t *testing.T) {
 	exp, err := newExporter(&Config{
 		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),

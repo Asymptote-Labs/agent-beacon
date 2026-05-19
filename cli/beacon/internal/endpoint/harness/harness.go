@@ -47,6 +47,7 @@ func DiscoverAll() []Harness {
 	return []Harness{
 		DiscoverClaude(),
 		DiscoverCodex(),
+		DiscoverGemini(),
 		DiscoverOpenCode(),
 		DiscoverFactory(),
 		DiscoverCursor(),
@@ -259,6 +260,7 @@ func ConfigureCodex(opts ConfigureOptions) (string, error) {
 func ValidateConfigured(endpoint string) []ValidationResult {
 	claude := DiscoverClaude()
 	codex := DiscoverCodex()
+	gemini := DiscoverGemini()
 	factory := DiscoverFactory()
 	return []ValidationResult{
 		{
@@ -270,6 +272,11 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 			Harness: codex.Name,
 			Status:  codex.TelemetryStatus,
 			Message: validateEndpointMessage(codex.TelemetryStatus, codex.Message, endpoint),
+		},
+		{
+			Harness: gemini.Name,
+			Status:  gemini.TelemetryStatus,
+			Message: validateEndpointMessage(gemini.TelemetryStatus, gemini.Message, endpoint),
 		},
 		{
 			Harness: factory.Name,

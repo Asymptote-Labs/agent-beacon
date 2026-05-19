@@ -102,6 +102,10 @@ BEACON_SPLUNK_INSECURE_SKIP_VERIFY: accepts 1/true/yes
 BEACON_SPLUNK_CA_FILE: optional CA certificate path
 ```
 
+Gemini CLI is available as an opt-in local OpenTelemetry harness. Include it in
+the harness list, for example `BEACON_ENDPOINT_HARNESSES=claude,codex,gemini`,
+when you want the deployment to manage Gemini telemetry settings.
+
 Recommended rollout:
 
 1. Upload the signed/notarized package to a pilot group.
@@ -184,6 +188,9 @@ Parameter 14: Splunk sourcetype for install.sh only
 Parameter 15: Splunk insecure TLS skip verify for install.sh only
 Parameter 16: Splunk CA file for install.sh only
 ```
+
+To opt in Gemini CLI telemetry through Jamf, include `gemini` in parameter 4,
+for example `claude,codex,gemini`.
 
 For repair policies, prefer the `BEACON_SPLUNK_*` environment variables so
 tokens do not need to be entered as visible script parameters.
@@ -272,6 +279,9 @@ repair.sh argument 9: Splunk sourcetype
 repair.sh argument 10: Splunk insecure TLS skip verify
 repair.sh argument 11: Splunk CA file
 ```
+
+To opt in Gemini CLI telemetry through Fleet, include `gemini` in the harness
+argument, for example `claude,codex,gemini`.
 
 Add queries from `packaging/macos/fleet/queries` as Fleet policies or labels.
 They cover package/service/log/config presence and freshness; run

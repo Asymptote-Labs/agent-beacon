@@ -11,7 +11,7 @@ Run on macOS with:
 - Homebrew available and online.
 - Docker Desktop or Docker Compose available for local Elastic validation.
 - A dedicated test macOS user or a workstation where changing local AI runtime config is acceptable.
-- Authenticated/installable runtimes for the full matrix: Cursor, Claude Code, Codex CLI, and OpenCode.
+- Authenticated/installable runtimes for the full matrix: Cursor, Claude Code, Codex CLI, Gemini CLI, and OpenCode.
 - Repo checkout available locally. Set `BEACON_REPO` to that checkout path for writing notes and later researching fixes.
 - Integration validation is user-assisted for now. The agent prepares Beacon, asks the user to submit unique prompts in each runtime, then self-verifies the resulting events in `runtime.jsonl` and Elastic. Headless/noninteractive runtime commands can be used as an optional fast path only when local auth and CLI behavior are known to be reliable.
 
@@ -31,6 +31,8 @@ which claude || true
 claude --version || true
 which codex || true
 codex --version || true
+which gemini || true
+gemini --version || true
 which opencode || true
 opencode --version || true
 ```
@@ -47,6 +49,7 @@ for path in \
   "$HOME/.beacon" \
   "$HOME/.claude/settings.json" \
   "$HOME/.codex/config.toml" \
+  "$HOME/.gemini/settings.json" \
   "$HOME/.cursor/hooks.json" \
   "$HOME/.config/opencode/plugins/beacon.ts"; do
   if [ -e "$path" ]; then
@@ -270,6 +273,53 @@ Repo areas to research later:
 
 - [`cli/beacon/internal/endpoint/harness/harness.go`](cli/beacon/internal/endpoint/harness/harness.go)
 - [`collector-builder/exporter/beaconjsonexporter/exporter_test.go`](collector-builder/exporter/beaconjsonexporter/exporter_test.go)
+
+## Gemini CLI Integration Test
+Gemini CLI support is opt-in, so repair the endpoint with the Gemini harness included, then ask the user to submit a unique prompt in Gemini CLI:
+
+```bash
+beacon endpoint repair --harness claude,codex,gemini
+python3 -m json.tool < "$HOME/.gemini/settings.json" > "$BEACON_E2E_RUN/gemini-settings.pretty.json" || true
+beacon endpoint status --json > "$BEACON_E2E_RUN/status-before-gemini.json"
+```
+
+Runtime action:
+
+```bash
+export BEACON_E2E_GEMINI_MARKER="Beacon E2E Gemini prompt $(date +%s)"
+printf 'Please submit this prompt in Gemini CLI: %s\n' "$BEACON_E2E_GEMINI_MARKER"
+```
+
+Optional headless fast path, only when Gemini CLI noninteractive mode and auth are known to work:
+
+```bash
+gemini --prompt "$BEACON_E2E_GEMINI_MARKER: answer with exactly the word beacon-ok." \
+  > "$BEACON_E2E_RUN/gemini-headless.out" \
+  2> "$BEACON_E2E_RUN/gemini-headless.err"
+```
+
+If the installed Gemini CLI uses a different noninteractive command or flag set, document the discrepancy and use the current recommended command from `gemini --help`.
+
+Validation:
+
+```bash
+rg "gemini|$BEACON_E2E_GEMINI_MARKER|beacon-ok" "$HOME/.beacon/endpoint/logs/runtime.jsonl" \
+  > "$BEACON_E2E_RUN/gemini-runtime-events.txt"
+```
+
+Acceptance criteria:
+
+- `~/.gemini/settings.json` contains Beacon-managed local OTLP telemetry settings with `target` set to `local`, `otlpProtocol` set to `grpc`, `useCollector` set to `true`, and no `outfile`.
+- The user confirms the prompt was submitted, or the optional noninteractive command exits successfully.
+- Runtime log receives Gemini OTLP-derived events with `harness.name=gemini_cli`.
+- Prompt content appears only when retention mode permits it.
+- If no events appear, check for project Gemini settings or `GEMINI_TELEMETRY_*` environment variables overriding the user settings.
+
+Repo areas to research later:
+
+- [`cli/beacon/internal/endpoint/harness/gemini.go`](cli/beacon/internal/endpoint/harness/gemini.go)
+- [`cli/beacon/internal/endpoint/lifecycle/lifecycle.go`](cli/beacon/internal/endpoint/lifecycle/lifecycle.go)
+- [`collector-builder/exporter/beaconjsonexporter/exporter.go`](collector-builder/exporter/beaconjsonexporter/exporter.go)
 
 ## OpenCode Integration Test
 Install OpenCode hooks, then ask the user to submit a unique prompt in OpenCode:

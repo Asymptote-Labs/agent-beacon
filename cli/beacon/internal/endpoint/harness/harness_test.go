@@ -286,6 +286,167 @@ func TestCodexStatusVariants(t *testing.T) {
 	}
 }
 
+func TestConfigureGeminiWritesTelemetryAndBackup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".gemini", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir gemini config dir: %v", err)
+	}
+	existing := `{"general":{"vimMode":true},"telemetry":{"enabled":false,"outfile":".gemini/telemetry.log"}}`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatalf("write existing gemini config: %v", err)
+	}
+
+	written, err := ConfigureGemini(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true, ContentRetention: "full"})
+	if err != nil {
+		t.Fatalf("ConfigureGemini returned error: %v", err)
+	}
+	if written != path {
+		t.Fatalf("ConfigureGemini path = %q, want %q", written, path)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read gemini config: %v", err)
+	}
+	var settings map[string]map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal gemini config: %v", err)
+	}
+	if settings["general"]["vimMode"] != true {
+		t.Fatalf("unrelated settings were not preserved: %#v", settings)
+	}
+	telemetry := settings["telemetry"]
+	for key, want := range map[string]interface{}{
+		"enabled":      true,
+		"target":       "local",
+		"otlpEndpoint": "http://127.0.0.1:4317",
+		"otlpProtocol": "grpc",
+		"useCollector": true,
+		"logPrompts":   true,
+		"traces":       true,
+	} {
+		if got := telemetry[key]; got != want {
+			t.Fatalf("telemetry[%s] = %#v, want %#v; telemetry=%#v", key, got, want, telemetry)
+		}
+	}
+	if _, ok := telemetry["outfile"]; ok {
+		t.Fatalf("outfile should be removed so OTLP is used: %#v", telemetry)
+	}
+	backups, err := filepath.Glob(path + ".beacon.*.bak")
+	if err != nil {
+		t.Fatalf("glob backups: %v", err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("expected one backup, got %#v", backups)
+	}
+}
+
+func TestConfigureGeminiDisablesPromptLoggingForMetadataRetention(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := ConfigureGemini(ConfigureOptions{
+		Endpoint:         "http://127.0.0.1:4317",
+		UserMode:         true,
+		ContentRetention: "metadata",
+	})
+	if err != nil {
+		t.Fatalf("ConfigureGemini returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read gemini config: %v", err)
+	}
+	var settings map[string]map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal gemini config: %v", err)
+	}
+	telemetry := settings["telemetry"]
+	if telemetry["logPrompts"] != false {
+		t.Fatalf("metadata retention should disable prompt logging: %#v", telemetry)
+	}
+	if telemetry["traces"] != false {
+		t.Fatalf("metadata retention should disable detailed traces: %#v", telemetry)
+	}
+}
+
+func TestDiscoverGeminiDoesNotDetectConfigDirectoryOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0755); err != nil {
+		t.Fatalf("mkdir gemini config dir: %v", err)
+	}
+
+	h := DiscoverGemini()
+	if h.Detected {
+		t.Fatalf("DiscoverGemini detected Gemini from config directory only: %#v", h)
+	}
+	if h.ConfigPath != filepath.Join(home, ".gemini", "settings.json") {
+		t.Fatalf("ConfigPath = %q, want home config path", h.ConfigPath)
+	}
+	if h.TelemetryStatus != TelemetryMissing {
+		t.Fatalf("TelemetryStatus = %q, want %q", h.TelemetryStatus, TelemetryMissing)
+	}
+}
+
+func TestDiscoverGeminiDetectsExecutableOnPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	geminiPath := filepath.Join(binDir, "gemini")
+	if err := os.WriteFile(geminiPath, []byte("#!/bin/sh\necho gemini 0.34.0\n"), 0755); err != nil {
+		t.Fatalf("write fake gemini executable: %v", err)
+	}
+
+	h := DiscoverGemini()
+	if !h.Detected {
+		t.Fatalf("DiscoverGemini did not detect executable on PATH: %#v", h)
+	}
+	if h.ExecutablePath != geminiPath {
+		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, geminiPath)
+	}
+	if h.Version != "gemini 0.34.0" {
+		t.Fatalf("Version = %q, want fake executable version", h.Version)
+	}
+}
+
+func TestGeminiStatusVariants(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name   string
+		body   string
+		status TelemetryStatus
+	}{
+		{name: "invalid json", body: `{`, status: TelemetryMisconfigured},
+		{name: "missing telemetry", body: `{}`, status: TelemetryDisabled},
+		{name: "disabled", body: `{"telemetry":{"enabled":false}}`, status: TelemetryDisabled},
+		{name: "remote target", body: `{"telemetry":{"enabled":true,"target":"gcp","otlpEndpoint":"http://127.0.0.1:4317","otlpProtocol":"grpc","useCollector":true}}`, status: TelemetryMisconfigured},
+		{name: "outfile", body: `{"telemetry":{"enabled":true,"target":"local","outfile":".gemini/telemetry.log","otlpEndpoint":"http://127.0.0.1:4317","otlpProtocol":"grpc","useCollector":true}}`, status: TelemetryMisconfigured},
+		{name: "remote endpoint", body: `{"telemetry":{"enabled":true,"target":"local","otlpEndpoint":"https://example.com:4317","otlpProtocol":"grpc","useCollector":true}}`, status: TelemetryMisconfigured},
+		{name: "http protocol", body: `{"telemetry":{"enabled":true,"target":"local","otlpEndpoint":"http://127.0.0.1:4317","otlpProtocol":"http","useCollector":true}}`, status: TelemetryMisconfigured},
+		{name: "collector disabled", body: `{"telemetry":{"enabled":true,"target":"local","otlpEndpoint":"http://127.0.0.1:4317","otlpProtocol":"grpc","useCollector":false}}`, status: TelemetryDisabled},
+		{name: "enabled", body: `{"telemetry":{"enabled":true,"target":"local","otlpEndpoint":"http://localhost:4317","otlpProtocol":"grpc","useCollector":true}}`, status: TelemetryEnabled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "_")+".json")
+			if err := os.WriteFile(path, []byte(tt.body), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			status, _ := geminiStatus(path)
+			if status != tt.status {
+				t.Fatalf("geminiStatus = %q, want %q", status, tt.status)
+			}
+		})
+	}
+}
+
 func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

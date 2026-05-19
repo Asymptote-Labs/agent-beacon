@@ -142,7 +142,7 @@ func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, reco
 	if action == "" {
 		action = inferAction(attrs, record.Body().AsString())
 	}
-	message := firstNonEmpty(record.Body().AsString(), firstString(attrs, "message", "log.message"))
+	message := firstNonEmpty(record.Body().AsString(), firstString(attrs, "message", "log.message", "event.name"))
 	event := newBeaconEvent(action, eventCategory(action, firstString(attrs, "beacon.event.category", "event.category", "category")), severity(record.SeverityText(), record.SeverityNumber().String()), harnessName(attrs, message), ts)
 	event.Message = message
 	e.populateCommon(&event, attrs)
@@ -257,17 +257,17 @@ func (e *beaconExporter) populateCommon(event *beaconEvent, attrs map[string]int
 	event.Model = firstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
 	event.Repository = firstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = firstString(attrs, "vcs.branch.name", "git.branch", "branch")
-	if id := firstString(attrs, "session.id", "conversation.id", "conversation_id", "gen_ai.conversation.id"); id != "" || firstString(attrs, "cwd", "working_directory") != "" {
+	if id := firstString(attrs, "session.id", "conversation.id", "conversation_id", "gen_ai.conversation.id"); id != "" || firstString(attrs, "cwd", "working_directory", "workspace") != "" {
 		event.Session = &sessionInfo{
 			ID:               id,
-			WorkingDirectory: firstString(attrs, "cwd", "working_directory", "process.command_args.cwd"),
+			WorkingDirectory: firstString(attrs, "cwd", "working_directory", "process.command_args.cwd", "workspace"),
 		}
 	}
-	if name := firstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name"); name != "" || firstString(attrs, "tool.command", "command") != "" {
+	if name := firstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || firstString(attrs, "tool.command", "command", "function_args") != "" {
 		event.Tool = &toolInfo{
 			Name:    name,
-			Command: firstString(attrs, "tool.command", "command", "process.command_line"),
-			Path:    firstString(attrs, "tool.path", "file.path"),
+			Command: firstString(attrs, "tool.command", "command", "process.command_line", "function_args"),
+			Path:    firstString(attrs, "tool.path", "file.path", "file_path"),
 		}
 	}
 	if path := firstString(attrs, "file.path", "file_path", "code.filepath"); path != "" {
@@ -286,17 +286,17 @@ func (e *beaconExporter) populateCommon(event *beaconEvent, attrs map[string]int
 			event.Command.DurationMS = duration
 		}
 	}
-	if server := firstString(attrs, "mcp.server.name", "mcp.server", "gen_ai.mcp.server"); server != "" || firstString(attrs, "mcp.tool.name") != "" {
+	if server := firstString(attrs, "mcp.server.name", "mcp.server", "gen_ai.mcp.server", "mcp_server_name"); server != "" || firstString(attrs, "mcp.tool.name") != "" || firstString(attrs, "tool_type") == "mcp" {
 		event.MCP = &mcpInfo{
 			Server: server,
-			Tool:   firstString(attrs, "mcp.tool.name", "tool.name"),
+			Tool:   firstString(attrs, "mcp.tool.name", "tool.name", "function_name"),
 		}
 	}
-	if decision := firstString(attrs, "approval.decision", "policy.decision"); decision != "" {
+	if decision := firstString(attrs, "approval.decision", "policy.decision", "decision"); decision != "" {
 		event.Approval = &approvalInfo{
 			Required: true,
 			Decision: decision,
-			Reason:   firstString(attrs, "approval.reason", "policy.reason"),
+			Reason:   firstString(attrs, "approval.reason", "policy.reason", "approval_mode", "active_approval_mode"),
 		}
 	}
 	if e.cfg.ContentRetention != "metadata" && event.Event.Category == "prompt" {
@@ -437,6 +437,8 @@ func normalizeHarnessName(name string) string {
 		return "claude_code"
 	case strings.Contains(lower, "codex"):
 		return "codex_cli"
+	case strings.Contains(lower, "gemini"):
+		return "gemini_cli"
 	case name != "":
 		return name
 	default:
@@ -445,13 +447,21 @@ func normalizeHarnessName(name string) string {
 }
 
 func inferAction(attrs map[string]interface{}, fallback string) string {
-	tool := strings.ToLower(firstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name"))
+	tool := strings.ToLower(firstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"))
 	text := strings.ToLower(strings.Join([]string{
 		fallback,
 		tool,
 		firstString(attrs, "event.name", "codex.op", "rpc.method"),
 	}, " "))
 	switch {
+	case strings.Contains(text, "gemini_cli.user_prompt"):
+		return "prompt.submitted"
+	case strings.Contains(text, "gemini_cli.tool_call"):
+		return geminiToolAction(attrs)
+	case strings.Contains(text, "gemini_cli.file_operation"):
+		return geminiFileAction(attrs)
+	case strings.Contains(text, "approval_mode_switch") || strings.Contains(text, "approval_mode_duration") || strings.Contains(text, "plan_execution"):
+		return "approval.requested"
 	case strings.Contains(text, "prompt") || strings.Contains(text, "user_input"):
 		return "prompt.submitted"
 	case strings.Contains(text, "mcp"):
@@ -464,6 +474,24 @@ func inferAction(attrs map[string]interface{}, fallback string) string {
 		return "approval.requested"
 	default:
 		return "tool.invoked"
+	}
+}
+
+func geminiToolAction(attrs map[string]interface{}) string {
+	if firstString(attrs, "tool_type") == "mcp" || firstString(attrs, "mcp_server_name") != "" {
+		return "mcp.tool_invoked"
+	}
+	return "tool.invoked"
+}
+
+func geminiFileAction(attrs map[string]interface{}) string {
+	switch strings.ToLower(firstString(attrs, "operation")) {
+	case "read":
+		return "file.read"
+	case "create":
+		return "file.created"
+	default:
+		return "file.modified"
 	}
 }
 
