@@ -69,6 +69,9 @@ that may need review.
 ./beacon endpoint hooks install --harness opencode
 ./beacon endpoint hooks status --harness opencode
 
+./beacon endpoint hooks install --harness devin --level project
+./beacon endpoint hooks status --harness devin --level project
+
 ./beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --open
 ./beacon endpoint integrations claude-cowork setup --ngrok --open
 ./beacon endpoint integrations claude-cowork validate --since 10m
@@ -80,6 +83,12 @@ raw opencode hook payloads to Beacon's Go hook binary; Beacon handles
 normalization, retention, redaction, and JSONL output locally. For local
 troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches
 opencode to emit best-effort plugin debug logs.
+
+The Devin integration writes Claude-compatible command hooks for Devin for
+Terminal. Project-level installs use `.devin/hooks.v1.json`; user-level installs
+use `~/.config/devin/config.json` under the `hooks` key. The hooks invoke
+Beacon's local Go hook binary and write normalized prompt, tool, command, file,
+approval, and session events to the configured runtime JSONL log.
 
 Claude Cowork monitoring is configured in the Claude admin console at
 `https://claude.ai/admin-settings/cowork`. The OTLP endpoint must be reachable
