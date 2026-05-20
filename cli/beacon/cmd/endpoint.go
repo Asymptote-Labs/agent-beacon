@@ -15,6 +15,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/datadog"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/elastic"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
@@ -122,6 +123,11 @@ var endpointWazuhCmd = &cobra.Command{
 var endpointElasticCmd = &cobra.Command{
 	Use:   "elastic",
 	Short: "Manage Elasticsearch integration content",
+}
+
+var endpointDatadogCmd = &cobra.Command{
+	Use:   "datadog",
+	Short: "Manage Datadog integration content",
 }
 
 var endpointIntegrationsCmd = &cobra.Command{
@@ -328,6 +334,29 @@ var endpointElasticDownCmd = &cobra.Command{
 	},
 }
 
+var endpointDatadogPrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print a Datadog Agent custom log config for Beacon endpoint events",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		fmt.Print(datadog.ConfigSnippet(cfg.LogPath))
+	},
+}
+
+var endpointDatadogInstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write Datadog Agent custom log integration content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointDatadogInstallPack,
+}
+
+var endpointDatadogValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe a Datadog validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointDatadogValidate,
+}
+
 func init() {
 	rootCmd.AddCommand(endpointCmd)
 
@@ -339,6 +368,7 @@ func init() {
 	endpointCmd.AddCommand(endpointDashboardCmd)
 	endpointCmd.AddCommand(endpointWazuhCmd)
 	endpointCmd.AddCommand(endpointElasticCmd)
+	endpointCmd.AddCommand(endpointDatadogCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
 	endpointWazuhCmd.AddCommand(endpointWazuhPrintConfigCmd)
@@ -348,6 +378,9 @@ func init() {
 	endpointElasticCmd.AddCommand(endpointElasticInstallPackCmd)
 	endpointElasticCmd.AddCommand(endpointElasticUpCmd)
 	endpointElasticCmd.AddCommand(endpointElasticDownCmd)
+	endpointDatadogCmd.AddCommand(endpointDatadogPrintConfigCmd)
+	endpointDatadogCmd.AddCommand(endpointDatadogInstallPackCmd)
+	endpointDatadogCmd.AddCommand(endpointDatadogValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
 	endpointHooksCmd.AddCommand(endpointHooksInstallCmd)
@@ -411,6 +444,12 @@ func init() {
 	endpointElasticInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Elasticsearch content pack")
 	endpointElasticUpCmd.Flags().StringVar(&endpointOpts.elasticPackDir, "pack-dir", elastic.DefaultOutputDir, "Elasticsearch pack directory")
 	endpointElasticDownCmd.Flags().StringVar(&endpointOpts.elasticPackDir, "pack-dir", elastic.DefaultOutputDir, "Elasticsearch pack directory")
+	for _, c := range []*cobra.Command{endpointDatadogPrintConfigCmd, endpointDatadogInstallPackCmd, endpointDatadogValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointDatadogInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Datadog content pack")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -625,6 +664,31 @@ func runEndpointWazuhValidate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Wazuh localfile snippet:")
 	fmt.Print(wazuh.LocalfileSnippet(cfg.LogPath))
 	fmt.Println("Expected base rule: 100500")
+	return nil
+}
+
+func runEndpointDatadogInstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = datadog.DefaultOutputDir
+	}
+	if err := datadog.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("Datadog content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointDatadogValidate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "datadog")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected Datadog fields: service=beacon-endpoint-agent vendor=beacon product=endpoint-agent")
+	fmt.Println(`Expected validation query: service:beacon-endpoint-agent "Beacon endpoint datadog validation event"`)
 	return nil
 }
 
@@ -919,15 +983,21 @@ func runEndpointDiscover(cmd *cobra.Command, args []string) error {
 }
 
 func writeValidationEvent(cfg endpointconfig.Config, destination string) (string, error) {
+	message := "Beacon endpoint Wazuh validation event"
+	mode := "localfile"
+	if destination == "datadog" {
+		message = "Beacon endpoint datadog validation event"
+		mode = "agent_file"
+	}
 	event := schema.NewEvent(schema.NewEventOptions{
 		Action:       "agent.detected",
 		Category:     "validation",
 		Severity:     schema.SeverityInfo,
 		AgentVersion: version.GetVersion(),
 		Harness:      schema.HarnessInfo{Name: "test_harness", Version: "test"},
-		Message:      "Beacon endpoint Wazuh validation event",
+		Message:      message,
 	})
-	event.Destination = &schema.DestinationInfo{Type: destination, Mode: "localfile", Status: "configured"}
+	event.Destination = &schema.DestinationInfo{Type: destination, Mode: mode, Status: "configured"}
 	return writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode})
 }
 

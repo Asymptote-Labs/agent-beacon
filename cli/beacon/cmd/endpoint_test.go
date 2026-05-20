@@ -109,6 +109,30 @@ func TestEndpointElasticCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointDatadogCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"datadog", "print-config"},
+		{"datadog", "install-pack"},
+		{"datadog", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("datadog command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("datadog command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointDatadogInstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("datadog install-pack command missing --output flag")
+	}
+}
+
 func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")

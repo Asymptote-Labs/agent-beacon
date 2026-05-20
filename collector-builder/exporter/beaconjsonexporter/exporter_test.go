@@ -483,8 +483,8 @@ func TestConsumeLogsMapsCodexSemanticEventsAndDropsTransportNoise(t *testing.T) 
 			if event.Prompt == nil || event.Prompt.Text != "look up weather token=[REDACTED]" {
 				t.Fatalf("prompt = %#v, want redacted typed prompt", event.Prompt)
 			}
-			if event.Message != "look up weather token=[REDACTED]" {
-				t.Fatalf("prompt message = %q, want prompt text", event.Message)
+			if event.Message != "Codex prompt submitted" {
+				t.Fatalf("prompt message = %q, want generic placeholder", event.Message)
 			}
 		}
 	}

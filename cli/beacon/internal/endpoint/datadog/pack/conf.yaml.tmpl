@@ -1,0 +1,11 @@
+# Beacon endpoint runtime events.
+# Requires logs_enabled: true in /opt/datadog-agent/etc/datadog.yaml.
+logs:
+  - type: file
+    path: "{{LOG_PATH}}"
+    service: beacon-endpoint-agent
+    source: beacon
+    sourcecategory: agent-runtime
+    tags:
+      - vendor:beacon
+      - product:endpoint-agent

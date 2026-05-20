@@ -264,11 +264,7 @@ func (e *beaconExporter) normalizeCodexLogEvent(event *beaconEvent, attrs map[st
 	case codexUserPrompt:
 		event.Event.Action = "prompt.submitted"
 		event.Event.Category = "prompt"
-		if prompt := firstString(attrs, "prompt", "gen_ai.prompt", "user_prompt", "input.prompt"); e.cfg.ContentRetention != "metadata" && prompt != "" {
-			event.Message = prompt
-		} else {
-			event.Message = "Codex prompt submitted"
-		}
+		event.Message = "Codex prompt submitted"
 	case codexToolDecision:
 		decision := firstString(attrs, "decision")
 		if strings.EqualFold(decision, "denied") || strings.EqualFold(decision, "deny") {
