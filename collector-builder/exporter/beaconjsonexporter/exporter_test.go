@@ -788,6 +788,11 @@ func TestHarnessNameSeparatesClaudeCodeAndCowork(t *testing.T) {
 			attrs: map[string]interface{}{"service.name": "codex-cli"},
 			want:  "codex_cli",
 		},
+		{
+			name:  "openclaw gateway service",
+			attrs: map[string]interface{}{"service.name": "openclaw-gateway"},
+			want:  "openclaw_gateway",
+		},
 	}
 
 	for _, tt := range tests {

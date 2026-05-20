@@ -531,6 +531,8 @@ func normalizeHarnessName(name string) string {
 		return "claude_code"
 	case lower == "claude" || strings.Contains(lower, "claude"):
 		return "claude_code"
+	case strings.Contains(lower, "openclaw") || strings.Contains(lower, "open-claw"):
+		return "openclaw_gateway"
 	case strings.Contains(lower, "codex"):
 		return "codex_cli"
 	case strings.Contains(lower, "gemini"):

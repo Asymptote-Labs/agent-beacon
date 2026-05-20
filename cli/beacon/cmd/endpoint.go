@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/wazuh"
@@ -47,6 +49,8 @@ var endpointOpts struct {
 	coworkNgrok              bool
 	coworkOpen               bool
 	coworkSince              string
+	openClawEndpoint         string
+	openClawSince            string
 	elasticPackDir           string
 	hookLevel                string
 	contentRetention         string
@@ -209,6 +213,54 @@ var endpointCoworkValidateCmd = &cobra.Command{
 	RunE:         func(cmd *cobra.Command, args []string) error { return runEndpointCoworkValidate() },
 }
 
+var endpointOpenClawCmd = &cobra.Command{
+	Use:   "openclaw",
+	Short: "Manage OpenClaw Gateway OpenTelemetry integration",
+}
+
+var endpointOpenClawPrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print OpenClaw Gateway OTLP setup guidance",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		endpoint := endpointOpts.openClawEndpoint
+		if endpoint == "" {
+			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
+		}
+		fmt.Print(openclaw.PrintConfig(openclaw.Config{
+			Endpoint:    endpoint,
+			Protocol:    "http/protobuf",
+			ServiceName: "openclaw-gateway",
+		}))
+	},
+}
+
+var endpointOpenClawStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show OpenClaw Gateway endpoint integration status",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		status := openclaw.GetStatus(cfg.LogPath)
+		if endpointOpts.jsonOutput {
+			_ = json.NewEncoder(os.Stdout).Encode(status)
+			return
+		}
+		fmt.Printf("%s: observed=%t", status.DisplayName, status.LastEventObserved)
+		if status.LastEventObservedAt != "" {
+			fmt.Printf(" last=%s", status.LastEventObservedAt)
+		}
+		fmt.Println()
+		fmt.Println(status.Message)
+	},
+}
+
+var endpointOpenClawValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Validate whether OpenClaw OTLP-derived events are arriving",
+	SilenceUsage: true,
+	RunE:         func(cmd *cobra.Command, args []string) error { return runEndpointOpenClawValidate() },
+}
+
 var endpointWazuhPrintConfigCmd = &cobra.Command{
 	Use:   "print-config",
 	Short: "Print a Wazuh localfile snippet",
@@ -297,6 +349,7 @@ func init() {
 	endpointElasticCmd.AddCommand(endpointElasticUpCmd)
 	endpointElasticCmd.AddCommand(endpointElasticDownCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
+	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
 	endpointHooksCmd.AddCommand(endpointHooksInstallCmd)
 	endpointHooksCmd.AddCommand(endpointHooksUninstallCmd)
 	endpointHooksCmd.AddCommand(endpointHooksStatusCmd)
@@ -304,6 +357,9 @@ func init() {
 	endpointCoworkCmd.AddCommand(endpointCoworkSetupCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkStatusCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkValidateCmd)
+	endpointOpenClawCmd.AddCommand(endpointOpenClawPrintConfigCmd)
+	endpointOpenClawCmd.AddCommand(endpointOpenClawStatusCmd)
+	endpointOpenClawCmd.AddCommand(endpointOpenClawValidateCmd)
 
 	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDiscoverCmd, endpointUninstallCmd, endpointRepairCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
@@ -373,6 +429,15 @@ func init() {
 	endpointCoworkValidateCmd.Flags().StringVar(&endpointOpts.coworkResourceAttributes, "resource-attributes", "", "Optional Claude Cowork resource attributes")
 	endpointCoworkValidateCmd.Flags().StringVar(&endpointOpts.coworkSince, "since", "", "Require a Claude Cowork event within this duration, such as 10m")
 	endpointCoworkStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
+	for _, c := range []*cobra.Command{endpointOpenClawPrintConfigCmd, endpointOpenClawStatusCmd, endpointOpenClawValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointOpenClawPrintConfigCmd.Flags().StringVar(&endpointOpts.openClawEndpoint, "endpoint", "", "OTLP HTTP endpoint to show in setup guidance")
+	endpointOpenClawValidateCmd.Flags().StringVar(&endpointOpts.openClawEndpoint, "endpoint", "", "OTLP HTTP endpoint to show when validation fails")
+	endpointOpenClawValidateCmd.Flags().StringVar(&endpointOpts.openClawSince, "since", "", "Require an OpenClaw event within this duration, such as 10m")
+	endpointOpenClawStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointHooksStatusCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -560,6 +625,47 @@ func runEndpointWazuhValidate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Wazuh localfile snippet:")
 	fmt.Print(wazuh.LocalfileSnippet(cfg.LogPath))
 	fmt.Println("Expected base rule: 100500")
+	return nil
+}
+
+func runEndpointOpenClawValidate() error {
+	cfg := loadOrDefaultConfig()
+	setup := func() {
+		endpoint := endpointOpts.openClawEndpoint
+		if endpoint == "" {
+			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
+		}
+		fmt.Print(openclaw.PrintConfig(openclaw.Config{
+			Endpoint:    endpoint,
+			Protocol:    "http/protobuf",
+			ServiceName: "openclaw-gateway",
+		}))
+	}
+	if endpointOpts.openClawSince != "" {
+		duration, err := time.ParseDuration(endpointOpts.openClawSince)
+		if err != nil {
+			return fmt.Errorf("--since must be a duration such as 10m: %w", err)
+		}
+		since := time.Now().Add(-duration)
+		if !openclaw.HasOpenClawEventSince(cfg.LogPath, since) {
+			setup()
+			return fmt.Errorf("no OpenClaw OTLP-derived events observed in %s since %s", cfg.LogPath, since.UTC().Format(time.RFC3339))
+		}
+		fmt.Printf("OpenClaw OTLP-derived events observed in endpoint runtime log since %s.\n", since.UTC().Format(time.RFC3339))
+		fmt.Println("Validation confirms at least one OpenClaw event reached Beacon; it does not prove logs, traces, and metrics are each flowing.")
+		return nil
+	}
+	status := openclaw.GetStatus(cfg.LogPath)
+	if !status.LastEventObserved {
+		setup()
+		return fmt.Errorf("no OpenClaw OTLP-derived events observed in %s", cfg.LogPath)
+	}
+	if status.LastEventObservedAt != "" {
+		fmt.Printf("OpenClaw OTLP-derived events observed in endpoint runtime log. Last observed: %s.\n", status.LastEventObservedAt)
+	} else {
+		fmt.Println("OpenClaw OTLP-derived events observed in endpoint runtime log.")
+	}
+	fmt.Println("Validation confirms at least one OpenClaw event reached Beacon; it does not prove logs, traces, and metrics are each flowing.")
 	return nil
 }
 

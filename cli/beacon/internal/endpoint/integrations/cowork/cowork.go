@@ -1,14 +1,14 @@
 package cowork
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
 )
 
 const (
@@ -111,48 +111,15 @@ func GetStatus(logPath string) Status {
 }
 
 func HasRecentCoworkEvent(logPath string) bool {
-	_, ok := LastCoworkEvent(logPath)
-	return ok
+	return integrations.HasRecentHarnessEvent(logPath, Name)
 }
 
 func HasCoworkEventSince(logPath string, since time.Time) bool {
-	last, ok := LastCoworkEvent(logPath)
-	if !ok || last.IsZero() {
-		return false
-	}
-	return !last.Before(since)
+	return integrations.HasHarnessEventSince(logPath, Name, since)
 }
 
 func LastCoworkEvent(logPath string) (time.Time, bool) {
-	if logPath == "" {
-		return time.Time{}, false
-	}
-	file, err := os.Open(logPath)
-	if err != nil {
-		return time.Time{}, false
-	}
-	defer file.Close()
-	var last time.Time
-	found := false
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		var event map[string]interface{}
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			continue
-		}
-		if harness, ok := event["harness"].(map[string]interface{}); ok {
-			if name, _ := harness["name"].(string); strings.EqualFold(name, Name) {
-				found = true
-				if ts, ok := event["timestamp"].(string); ok {
-					if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil && parsed.After(last) {
-						last = parsed
-					}
-				}
-			}
-		}
-	}
-	return last, found
+	return integrations.LastHarnessEvent(logPath, Name)
 }
 
 func headerText(headers string) string {

@@ -35,8 +35,8 @@ need visibility into local AI agent activity.
 
 It runs locally, captures supported activity from local agent harnesses like
 Claude Code, Codex CLI, Gemini CLI, OpenCode, Devin, Factory Droid, Claude
-Cowork, and Cursor, then normalizes that activity into endpoint events your team
-can inspect and retain locally.
+Cowork, OpenClaw Gateway, and Cursor, then normalizes that activity into endpoint
+events your team can inspect and retain locally.
 
 Beacon is built to be easy to deploy for Security and IT teams through
 [MDM deployment](https://docs.asymptotelabs.ai/cli/security-it-teams) and to
@@ -60,6 +60,7 @@ security pipelines.
 | Devin | Beacon hook adapter |
 | Factory Droid | Local OpenTelemetry configuration and optional hook adapter |
 | Claude Cowork | Admin-configured OpenTelemetry setup |
+| OpenClaw Gateway | Gateway-configured OTLP/HTTP export |
 | Cursor | Beacon hook adapter |
 
 ### SIEM / Output Destinations

@@ -75,6 +75,10 @@ that may need review.
 ./beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --open
 ./beacon endpoint integrations claude-cowork setup --ngrok --open
 ./beacon endpoint integrations claude-cowork validate --since 10m
+
+./beacon endpoint integrations openclaw print-config
+./beacon endpoint integrations openclaw status
+./beacon endpoint integrations openclaw validate --since 10m
 ```
 
 The opencode integration installs Beacon's owned local plugin at
@@ -95,6 +99,12 @@ Claude Cowork monitoring is configured in the Claude admin console at
 by Claude Cowork, so use a durable public HTTPS Collector endpoint for ongoing
 monitoring. The `--ngrok` mode is for short-lived local testing and prints an
 authenticated tunnel URL plus the matching `Authorization` header.
+
+OpenClaw Gateway monitoring is configured in OpenClaw's local Gateway config
+with the `diagnostics-otel` plugin enabled. Beacon prints a local OTLP/HTTP
+configuration that points OpenClaw at the endpoint collector. OpenClaw does not
+export raw prompt, response, tool, or system-prompt content unless
+`diagnostics.otel.captureContent.*` is explicitly enabled.
 
 ## Test
 

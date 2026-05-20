@@ -53,6 +53,31 @@ func TestEndpointCoworkSetupCommandRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointOpenClawCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"integrations", "openclaw", "print-config"},
+		{"integrations", "openclaw", "status"},
+		{"integrations", "openclaw", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("openclaw command %v not registered: %#v", path, cmd)
+		}
+	}
+	if endpointOpenClawPrintConfigCmd.Flags().Lookup("endpoint") == nil {
+		t.Fatal("openclaw print-config command missing --endpoint flag")
+	}
+	if endpointOpenClawStatusCmd.Flags().Lookup("json") == nil {
+		t.Fatal("openclaw status command missing --json flag")
+	}
+	if endpointOpenClawValidateCmd.Flags().Lookup("since") == nil {
+		t.Fatal("openclaw validate command missing --since flag")
+	}
+}
+
 func TestEndpointElasticCommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
 		{"elastic", "print-config"},
