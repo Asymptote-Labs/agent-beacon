@@ -37,6 +37,7 @@ var endpointOpts struct {
 	httpPort                 int
 	collectorPath            string
 	includeRuntimeMetrics    bool
+	includeCodexSpans        bool
 	keepLogs                 bool
 	keepConfig               bool
 	noStart                  bool
@@ -315,6 +316,7 @@ func init() {
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics in the runtime JSONL log")
+	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
 	registerSplunkFlags(endpointInstallCmd)
@@ -323,6 +325,7 @@ func init() {
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics in the runtime JSONL log")
+	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
 	registerSplunkFlags(endpointRepairCmd)
@@ -718,6 +721,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		StartService:          !endpointOpts.noStart,
 		ContentRetention:      endpointconfig.ContentRetention(endpointOpts.contentRetention),
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
+		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
 		SplunkHEC:             splunkHECOptions(),
 	})
 	if err != nil {
@@ -840,6 +844,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		StartService:          !endpointOpts.noStart,
 		ContentRetention:      endpointconfig.ContentRetention(endpointOpts.contentRetention),
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
+		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
 		SplunkHEC:             splunkHECOptions(),
 	})
 	if err != nil {

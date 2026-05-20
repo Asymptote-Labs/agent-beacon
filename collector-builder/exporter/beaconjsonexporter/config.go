@@ -15,6 +15,7 @@ type Config struct {
 	RedactSecrets         bool   `mapstructure:"redact_secrets"`
 	ContentRetention      string `mapstructure:"content_retention"`
 	IncludeRuntimeMetrics bool   `mapstructure:"include_runtime_metrics"`
+	IncludeCodexSpans     bool   `mapstructure:"include_codex_spans"`
 }
 
 func createDefaultConfig() *Config {

@@ -193,10 +193,13 @@ func TestEndpointInstallAndRepairSupportSplunkFlags(t *testing.T) {
 	}
 }
 
-func TestEndpointInstallAndRepairSupportRuntimeMetricsFlag(t *testing.T) {
+func TestEndpointInstallAndRepairSupportDebugTelemetryFlags(t *testing.T) {
 	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointRepairCmd} {
 		if cmd.Flags().Lookup("include-runtime-metrics") == nil {
 			t.Fatalf("%s command missing --include-runtime-metrics flag", cmd.Use)
+		}
+		if cmd.Flags().Lookup("include-codex-spans") == nil {
+			t.Fatalf("%s command missing --include-codex-spans flag", cmd.Use)
 		}
 	}
 }

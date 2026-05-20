@@ -103,6 +103,14 @@ easy to inspect. Advanced deployments can opt back into those low-level OTLP
 metrics with `beacon endpoint install --include-runtime-metrics` or
 `beacon endpoint repair --include-runtime-metrics`.
 
+Codex CLI can also emit high-volume internal spans for startup, dispatch, model
+requests, streaming, and transport activity. Beacon keeps the default Codex path
+low-noise by recording semantic Codex log events for sessions, prompts,
+approvals, and tool results while dropping Codex spans. For troubleshooting
+Codex OTLP internals, opt back into those spans with
+`beacon endpoint install --include-codex-spans` or
+`beacon endpoint repair --include-codex-spans`.
+
 ## Dashboard
 
 Beacon includes a local, read-only dashboard for validating endpoint activity

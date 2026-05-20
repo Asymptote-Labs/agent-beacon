@@ -44,6 +44,7 @@ type Collector struct {
 	HTTPPort              int    `json:"http_port"`
 	SpoolPath             string `json:"spool_path,omitempty"`
 	IncludeRuntimeMetrics bool   `json:"include_runtime_metrics,omitempty"`
+	IncludeCodexSpans     bool   `json:"include_codex_spans,omitempty"`
 }
 
 type Destinations struct {

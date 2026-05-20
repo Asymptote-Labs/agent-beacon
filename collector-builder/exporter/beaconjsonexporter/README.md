@@ -20,6 +20,16 @@ Required behavior:
 - Redact common secrets and cap event size before writing.
 - Emit health failure events when write failures occur.
 
+Noise controls:
+
+- Generic process/runtime metrics are dropped by default unless
+  `include_runtime_metrics: true` is set.
+- Codex spans are dropped by default because Codex semantic logs carry the
+  endpoint activity Beacon needs. Set `include_codex_spans: true` only when
+  troubleshooting Codex OTLP internals.
+- Codex metrics and transport/startup/debug logs remain suppressed by default so
+  one prompt does not flood the endpoint runtime log.
+
 The production implementation should live here and be included by
 `collector-builder/builder.yaml`.
 
