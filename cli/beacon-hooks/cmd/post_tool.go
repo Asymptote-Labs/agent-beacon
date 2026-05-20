@@ -114,12 +114,12 @@ func parseCursorInput(input map[string]interface{}, logger *logging.Logger) *eva
 	}
 }
 
-// parseClaudeCopilotInput extracts evaluation params from Claude/Copilot PostToolUse format.
+// parseClaudeCopilotInput extracts evaluation params from Claude/Copilot-compatible PostToolUse format.
 func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logger) *evaluationParams {
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
-	if platformFlag == "copilot" {
+	if platformFlag == "copilot" || platformFlag == "devin" {
 		sessionID = resolveSessionID(input, platformFlag)
 		toolName = getFirstStr(input, "toolName", "tool_name")
 		toolInput = resolveToolInput(input)
@@ -140,7 +140,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		filePath = diff.GetStringFromMaps("filePath", toolInput, toolResponse)
 	}
 
-	if sessionID == "" || toolName == "" || filePath == "" {
+	if (sessionID == "" && platformFlag != "devin") || toolName == "" || filePath == "" {
 		return nil
 	}
 
@@ -174,7 +174,9 @@ func recordLocalEdit(params *evaluationParams, logger *logging.Logger) {
 		fields[key] = value
 	}
 	fields["tool"] = map[string]interface{}{"name": params.toolName, "path": params.filePath}
-	fields["session"] = map[string]interface{}{"id": params.sessionID}
+	if params.sessionID != "" {
+		fields["session"] = map[string]interface{}{"id": params.sessionID}
+	}
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 
@@ -256,6 +258,10 @@ func isFileEditTool(platform, toolName string) bool {
 	}
 	if platform == "factory" {
 		return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit" || toolName == "Create"
+	}
+	if platform == "devin" {
+		lower := strings.ToLower(toolName)
+		return lower == "edit" || lower == "write"
 	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
 }

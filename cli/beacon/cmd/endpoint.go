@@ -416,6 +416,16 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Printf("opencode plugin installed: %s\n", status.PluginPath)
+		case "devin":
+			status, err := endpointhooks.InstallDevin(endpointhooks.DevinOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Devin hooks installed: %s\n", status.ConfigPath)
 		case "":
 		default:
 			return fmt.Errorf("unsupported hook harness %q", name)
@@ -458,6 +468,16 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Println(status.Message)
+		case "devin":
+			status, err := endpointhooks.UninstallDevin(endpointhooks.DevinOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(status.Message)
 		case "":
 		default:
 			return fmt.Errorf("unsupported hook harness %q", name)
@@ -489,6 +509,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "devin":
+			statuses["devin"] = endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "":
 		default:
 			return fmt.Errorf("unsupported hook harness %q", name)
@@ -510,6 +536,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "opencode":
 			status := statuses["opencode"].(endpointhooks.OpenCodeStatus)
 			fmt.Printf("opencode plugin: installed=%t path=%s\n", status.Installed, status.PluginPath)
+			fmt.Println(status.Message)
+		case "devin":
+			status := statuses["devin"].(endpointhooks.DevinStatus)
+			fmt.Printf("Devin hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
 			fmt.Println(status.Message)
 		}
 	}

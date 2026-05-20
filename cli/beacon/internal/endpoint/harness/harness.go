@@ -51,6 +51,7 @@ func DiscoverAll() []Harness {
 		DiscoverOpenCode(),
 		DiscoverFactory(),
 		DiscoverCursor(),
+		DiscoverDevin(),
 		DiscoverClaudeCowork(),
 	}
 }
@@ -184,6 +185,35 @@ func DiscoverCursor() Harness {
 	} else {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Cursor hooks.json was not found"
+	}
+	return h
+}
+
+func DiscoverDevin() Harness {
+	h := Harness{Name: "devin", DisplayName: "Devin", Capability: "hooks"}
+	path, err := exec.LookPath("devin")
+	if err == nil {
+		h.Detected = true
+		h.ExecutablePath = path
+		h.Version = commandVersion(path)
+	}
+	home, _ := os.UserHomeDir()
+	userConfig := filepath.Join(home, ".config", "devin", "config.json")
+	projectConfig := filepath.Join(".devin", "hooks.v1.json")
+	h.ConfigPath = userConfig
+	if fileExists(projectConfig) {
+		h.ConfigPath = projectConfig
+	}
+	if !h.Detected && (dirExists(filepath.Join(home, ".config", "devin")) || dirExists(".devin")) {
+		h.Detected = true
+	}
+	if fileExists(h.ConfigPath) {
+		status, msg := devinStatus(h.ConfigPath)
+		h.TelemetryStatus = status
+		h.Message = msg
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Devin endpoint hooks were not found"
 	}
 	return h
 }
@@ -403,6 +433,48 @@ func factoryStatus(path string) (TelemetryStatus, string) {
 		return TelemetryMisconfigured, "Factory Droid OTEL endpoint does not point to localhost"
 	}
 	return TelemetryEnabled, "Factory Droid telemetry is configured for local OTLP HTTP"
+}
+
+func devinStatus(path string) (TelemetryStatus, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return TelemetryMissing, err.Error()
+	}
+	if hasBeaconDevinHooks, err := hasBeaconDevinHooks(data); err != nil {
+		return TelemetryMisconfigured, "Devin hooks JSON is invalid"
+	} else if hasBeaconDevinHooks {
+		return TelemetryEnabled, "Devin endpoint hooks are configured"
+	}
+	return TelemetryDisabled, "Devin hooks exist but endpoint hooks were not found"
+}
+
+func hasBeaconDevinHooks(data []byte) (bool, error) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false, err
+	}
+	rawHooks := data
+	if raw, ok := root["hooks"]; ok {
+		rawHooks = raw
+	}
+	var hooks map[string][]struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(rawHooks, &hooks); err != nil {
+		return false, nil
+	}
+	for _, groups := range hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") && strings.Contains(hook.Command, "--platform devin") {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 func shellExportValue(text, key string) string {

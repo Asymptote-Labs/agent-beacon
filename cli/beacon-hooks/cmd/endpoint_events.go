@@ -132,6 +132,18 @@ func fileOperation(toolName string) string {
 
 func actionForTool(hookEvent, toolName string) string {
 	lower := strings.ToLower(toolName)
+	if platformFlag == "devin" {
+		switch {
+		case strings.HasPrefix(lower, "mcp__"):
+			return "mcp.tool_invoked"
+		case lower == "exec":
+			return "command.executed"
+		case lower == "read":
+			return "file.read"
+		case lower == "edit" || lower == "write":
+			return "file.modified"
+		}
+	}
 	switch {
 	case strings.Contains(lower, "mcp"):
 		return "mcp.tool_invoked"

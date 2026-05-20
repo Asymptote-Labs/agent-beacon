@@ -91,6 +91,138 @@ func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
 	}
 }
 
+func TestRunPromptSubmitEmitsDevinPromptWithoutSession(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+	t.Setenv("DEVIN_PROJECT_DIR", "/repo")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"hook_event_name": "UserPromptSubmit",
+		"prompt":          "summarize token=devin-secret",
+	})
+	if len(out) != 0 {
+		t.Fatalf("devin prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+		t.Fatalf("event.action = %q, want prompt.submitted", action)
+	}
+	if _, ok := event["session"].(map[string]interface{})["id"]; ok {
+		t.Fatalf("devin event should not invent session id: %#v", event["session"])
+	}
+	if got := event["repository"]; got != "/repo" {
+		t.Fatalf("repository = %q, want DEVIN_PROJECT_DIR", got)
+	}
+}
+
+func TestRunPreToolEmitsDevinToolTelemetryWithoutApproval(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "exec",
+		"tool_input": map[string]interface{}{
+			"command": "git status",
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("devin pre-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", action)
+	}
+	if _, ok := event["approval"]; ok {
+		t.Fatalf("PreToolUse should not emit approval telemetry: %#v", event["approval"])
+	}
+	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
+		t.Fatalf("command = %q, want git status", command)
+	}
+}
+
+func TestRunPermissionRequestEmitsDevinApproval(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
+		"hook_event_name": "PermissionRequest",
+		"tool_name":       "exec",
+		"tool_input": map[string]interface{}{
+			"command": "git status",
+		},
+	})
+	if out["decision"] != "approve" {
+		t.Fatalf("devin permission response = %#v, want decision=approve", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "approval.allowed" {
+		t.Fatalf("event.action = %q, want approval.allowed", action)
+	}
+	approval := event["approval"].(map[string]interface{})
+	if approval["decision"] != "approve" {
+		t.Fatalf("approval = %#v, want approve", approval)
+	}
+}
+
+func TestRunPermissionRequestNoopsForNonDevinPlatform(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
+		"hook_event_name": "PermissionRequest",
+		"tool_name":       "Shell",
+	})
+	if len(out) != 0 {
+		t.Fatalf("non-Devin permission response = %#v, want empty response", out)
+	}
+	if _, err := os.Stat(logPath); err == nil {
+		t.Fatalf("non-Devin permission request should not write endpoint log")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected endpoint log stat error: %v", err)
+	}
+}
+
+func TestRunSessionLifecycleEmitsDevinEventsWithoutSession(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("DEVIN_PROJECT_DIR", "/repo")
+
+	runHookWithInput(t, runSessionStart, map[string]interface{}{"source": "startup"})
+	runHookWithInput(t, runStop, map[string]interface{}{"stop_hook_active": false})
+	runHookWithInput(t, runSessionEnd, map[string]interface{}{"reason": "exit"})
+
+	events := endpointEvents(t, logPath)
+	if len(events) != 3 {
+		t.Fatalf("event count = %d, want 3: %#v", len(events), events)
+	}
+	want := []string{"session.started", "tool.completed", "session.ended"}
+	for i, action := range want {
+		if got := events[i]["event"].(map[string]interface{})["action"]; got != action {
+			t.Fatalf("event[%d].action = %q, want %q", i, got, action)
+		}
+		if session, ok := events[i]["session"].(map[string]interface{}); ok {
+			if _, hasID := session["id"]; hasID {
+				t.Fatalf("event[%d] should not invent session id: %#v", i, session)
+			}
+		}
+	}
+}
+
 func TestRunPromptSubmitEmitsTypedPromptForFullRetention(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
@@ -186,6 +318,7 @@ func setupHookConfigDirs(t *testing.T) {
 	origClaudeDir := hookconfig.ClaudeDir
 	origCopilotDir := hookconfig.CopilotDir
 	origCursorDir := hookconfig.CursorDir
+	origDevinDir := hookconfig.DevinDir
 	origFactoryDir := hookconfig.FactoryDir
 	origOpenCodeDir := hookconfig.OpenCodeDir
 	origPlatform := platformFlag
@@ -193,6 +326,7 @@ func setupHookConfigDirs(t *testing.T) {
 	hookconfig.ClaudeDir = filepath.Join(tmp, "claude")
 	hookconfig.CopilotDir = filepath.Join(tmp, "copilot")
 	hookconfig.CursorDir = filepath.Join(tmp, "cursor")
+	hookconfig.DevinDir = filepath.Join(tmp, "devin")
 	hookconfig.FactoryDir = filepath.Join(tmp, "factory")
 	hookconfig.OpenCodeDir = filepath.Join(tmp, "opencode")
 	t.Cleanup(func() {
@@ -200,6 +334,7 @@ func setupHookConfigDirs(t *testing.T) {
 		hookconfig.ClaudeDir = origClaudeDir
 		hookconfig.CopilotDir = origCopilotDir
 		hookconfig.CursorDir = origCursorDir
+		hookconfig.DevinDir = origDevinDir
 		hookconfig.FactoryDir = origFactoryDir
 		hookconfig.OpenCodeDir = origOpenCodeDir
 		platformFlag = origPlatform

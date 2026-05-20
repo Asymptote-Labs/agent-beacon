@@ -23,7 +23,7 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 
 	// Fall back to tool-specific construction
 	switch toolName {
-	case "Edit":
+	case "Edit", "edit":
 		oldString := resolveEditString("old_string", "oldString", "old_str", toolInput, toolResponse)
 		newString := resolveEditString("new_string", "newString", "new_str", toolInput, toolResponse)
 		return fromEditTool(filePath, oldString, newString)
@@ -33,7 +33,7 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 		content := GetStringFromMaps("code", toolInput, toolResponse)
 		return fromWriteTool(filePath, content, "")
 
-	case "Write", "Create":
+	case "Write", "Create", "write":
 		content := GetStringFromMaps("content", toolInput, toolResponse)
 		originalFile := GetStringFromMaps("originalFile", toolInput, toolResponse)
 		return fromWriteTool(filePath, content, originalFile)

@@ -41,6 +41,9 @@ func runSessionEnd(cmd *cobra.Command, args []string) {
 		if err := os.Remove(logFile); err != nil && !os.IsNotExist(err) {
 			platformLogger.Warn("Failed to remove session log", "session_id", sessionID, "error", err.Error())
 		}
+	} else if platformFlag == "devin" {
+		platformLogger.Info("Session ended", "platform", platformFlag)
+		emitHookEvent(platformLogger, "session.ended", "session", "info", "Agent session ended", input, sessionFields("", input))
 	}
 
 	cleaned := state.CleanupStaleForPlatform(platformFlag)

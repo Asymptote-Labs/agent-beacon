@@ -30,6 +30,11 @@ func TestIsFileEditTool(t *testing.T) {
 		{"factory MultiEdit", "factory", "MultiEdit", true},
 		{"factory Create", "factory", "Create", true},
 		{"factory Read (not edit)", "factory", "Read", false},
+
+		// Devin tools
+		{"devin edit", "devin", "edit", true},
+		{"devin write", "devin", "write", true},
+		{"devin exec (not edit)", "devin", "exec", false},
 	}
 
 	for _, tt := range tests {
@@ -39,6 +44,47 @@ func TestIsFileEditTool(t *testing.T) {
 				t.Errorf("isFileEditTool(%q, %q) = %v, want %v", tt.platform, tt.toolName, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunPostToolEmitsDevinFileModifiedEvent(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"cwd":       "/repo",
+		"tool_name": "edit",
+		"tool_input": map[string]interface{}{
+			"file_path": "/repo/main.go",
+			"old_str":   "old",
+			"new_str":   "new token=devin-secret",
+		},
+		"tool_response": map[string]interface{}{"success": true},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin" {
+		t.Fatalf("harness = %q, want devin", harness)
+	}
+	if session, ok := event["session"].(map[string]interface{}); ok {
+		if _, hasID := session["id"]; hasID {
+			t.Fatalf("devin file event should not include empty session id: %#v", session)
+		}
+	}
+	file := event["file"].(map[string]interface{})
+	if file["path"] != "/repo/main.go" {
+		t.Fatalf("file = %#v, want /repo/main.go", file)
+	}
+	if _, ok := file["diff_hash"]; !ok {
+		t.Fatalf("file diff_hash missing: %#v", file)
 	}
 }
 

@@ -473,6 +473,59 @@ func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
 	}
 }
 
+func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	devinPath := filepath.Join(binDir, "devin")
+	if err := os.WriteFile(devinPath, []byte("#!/bin/sh\necho devin 1.2.3\n"), 0755); err != nil {
+		t.Fatalf("write fake devin executable: %v", err)
+	}
+
+	h := DiscoverDevin()
+	if !h.Detected {
+		t.Fatalf("DiscoverDevin did not detect executable on PATH: %#v", h)
+	}
+	if h.ExecutablePath != devinPath {
+		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, devinPath)
+	}
+	if h.Version != "devin 1.2.3" {
+		t.Fatalf("Version = %q, want fake executable version", h.Version)
+	}
+	if h.ConfigPath != filepath.Join(home, ".config", "devin", "config.json") {
+		t.Fatalf("ConfigPath = %q, want user config path", h.ConfigPath)
+	}
+}
+
+func TestDevinStatusVariants(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name   string
+		body   string
+		status TelemetryStatus
+	}{
+		{name: "invalid json", body: `{`, status: TelemetryMisconfigured},
+		{name: "no beacon hooks", body: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`, status: TelemetryDisabled},
+		{name: "enabled", body: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin pre-tool"}]}]}}`, status: TelemetryEnabled},
+		{name: "standalone enabled", body: `{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin pre-tool"}]}]}`, status: TelemetryEnabled},
+		{name: "beacon string outside hooks", body: `{"note":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin pre-tool"}`, status: TelemetryDisabled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "_")+".json")
+			if err := os.WriteFile(path, []byte(tt.body), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			status, _ := devinStatus(path)
+			if status != tt.status {
+				t.Fatalf("devinStatus = %q, want %q", status, tt.status)
+			}
+		})
+	}
+}
+
 func TestFactoryStatusVariants(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {

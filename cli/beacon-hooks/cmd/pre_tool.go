@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"strings"
+
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
@@ -24,7 +26,7 @@ var allowResponse = map[string]interface{}{"permission": "allow"}
 func runPreTool(cmd *cobra.Command, args []string) {
 	input, err := readStdinJSON()
 	if err != nil {
-		outputJSON(allowResponse)
+		outputJSON(preToolResponse())
 		return
 	}
 
@@ -36,9 +38,13 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		logger = logging.NewLoggerForPlatform("pre-tool", platformFlag)
 	}
 
-	logger.Debug("Pre-tool observed, allowing")
-	emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
-	outputJSON(allowResponse)
+	logger.Debug("Pre-tool observed")
+	if platformFlag == "devin" {
+		emitPreToolObserved(logger, input, sessionID)
+	} else {
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
+	}
+	outputJSON(preToolResponse())
 }
 
 func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, sessionID, action, decision, reason string) {
@@ -54,4 +60,34 @@ func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, s
 		"reason":   reason,
 	}
 	emitHookEvent(logger, action, "approval", "info", reason, input, fields)
+}
+
+func preToolResponse() map[string]interface{} {
+	if platformFlag == "devin" {
+		return emptyResponse
+	}
+	return allowResponse
+}
+
+func emitPreToolObserved(logger *logging.Logger, input map[string]interface{}, sessionID string) {
+	toolName := getFirstStr(input, "tool_name", "toolName")
+	toolInput := resolveToolInput(input)
+	fields := sessionFields(sessionID, input)
+	for key, value := range toolFields(toolName, toolInput) {
+		fields[key] = value
+	}
+	action := "tool.invoked"
+	category := "tool"
+	if platformFlag != "devin" {
+		action = actionForTool(getFirstStr(input, "hook_event_name"), toolName)
+		switch {
+		case strings.HasPrefix(action, "command."):
+			category = "command"
+		case strings.HasPrefix(action, "file."):
+			category = "file"
+		case strings.HasPrefix(action, "mcp."):
+			category = "mcp"
+		}
+	}
+	emitHookEvent(logger, action, category, "info", "Tool invocation observed", input, fields)
 }

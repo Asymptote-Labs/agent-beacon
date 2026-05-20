@@ -47,6 +47,12 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	logger.Debug("Stop hook called", "session_id", sessionID, "has_transcript", transcriptPath != "", "platform", platformFlag)
 	if sessionID == "" {
+		if platformFlag == "devin" {
+			logger.Info("stop completed")
+			emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields("", input))
+			outputJSON(emptyResponse)
+			return
+		}
 		outputJSONAndExit(emptyResponse)
 		return
 	}
@@ -77,6 +83,8 @@ func platformToTranscriptName(platform string) string {
 		return "cursor"
 	case "factory":
 		return "factory"
+	case "devin":
+		return "devin"
 	default:
 		return "claude_code"
 	}
@@ -91,6 +99,8 @@ func extractMessages(transcriptPath, platform string) []map[string]interface{} {
 		return extractMessagesFromCursorTranscript(transcriptPath)
 	case "factory":
 		return extractMessagesFromFactoryTranscript(transcriptPath)
+	case "devin":
+		return extractMessagesFromClaudeTranscript(transcriptPath)
 	default:
 		return extractMessagesFromClaudeTranscript(transcriptPath)
 	}
