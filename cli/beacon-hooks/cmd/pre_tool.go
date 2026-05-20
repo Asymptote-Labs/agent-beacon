@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"strings"
-
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
@@ -76,18 +74,5 @@ func emitPreToolObserved(logger *logging.Logger, input map[string]interface{}, s
 	for key, value := range toolFields(toolName, toolInput) {
 		fields[key] = value
 	}
-	action := "tool.invoked"
-	category := "tool"
-	if platformFlag != "devin" {
-		action = actionForTool(getFirstStr(input, "hook_event_name"), toolName)
-		switch {
-		case strings.HasPrefix(action, "command."):
-			category = "command"
-		case strings.HasPrefix(action, "file."):
-			category = "file"
-		case strings.HasPrefix(action, "mcp."):
-			category = "mcp"
-		}
-	}
-	emitHookEvent(logger, action, category, "info", "Tool invocation observed", input, fields)
+	emitHookEvent(logger, "tool.invoked", "tool", "info", "Tool invocation observed", input, fields)
 }
