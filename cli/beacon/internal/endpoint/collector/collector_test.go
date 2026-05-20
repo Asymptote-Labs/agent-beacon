@@ -52,6 +52,9 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 	if strings.Contains(yaml, "include_runtime_metrics") {
 		t.Fatalf("ConfigYAML should omit runtime metrics option unless explicitly enabled:\n%s", yaml)
 	}
+	if strings.Contains(yaml, "include_codex_spans") {
+		t.Fatalf("ConfigYAML should omit Codex span option unless explicitly enabled:\n%s", yaml)
+	}
 }
 
 func TestConfigYAMLIncludesRuntimeMetricsOptIn(t *testing.T) {
@@ -61,6 +64,16 @@ func TestConfigYAMLIncludesRuntimeMetricsOptIn(t *testing.T) {
 	yaml := ConfigYAML(cfg)
 	if !strings.Contains(yaml, "include_runtime_metrics: true") {
 		t.Fatalf("ConfigYAML missing runtime metrics opt-in:\n%s", yaml)
+	}
+}
+
+func TestConfigYAMLIncludesCodexSpansOptIn(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Collector.IncludeCodexSpans = true
+
+	yaml := ConfigYAML(cfg)
+	if !strings.Contains(yaml, "include_codex_spans: true") {
+		t.Fatalf("ConfigYAML missing Codex spans opt-in:\n%s", yaml)
 	}
 }
 

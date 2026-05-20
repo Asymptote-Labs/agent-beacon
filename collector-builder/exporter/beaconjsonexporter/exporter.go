@@ -2,6 +2,7 @@ package beaconjsonexporter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,25 @@ type beaconExporter struct {
 	cfg    *Config
 	writer jsonlWriter
 	logger *zap.Logger
+}
+
+const (
+	codexConversationStarts = "codex.conversation_starts"
+	codexUserPrompt         = "codex.user_prompt"
+	codexToolDecision       = "codex.tool_decision"
+	codexToolResult         = "codex.tool_result"
+)
+
+var allowedCodexLogEvents = map[string]struct{}{
+	codexConversationStarts: {},
+	codexUserPrompt:         {},
+	codexToolDecision:       {},
+	codexToolResult:         {},
+}
+
+var noisyCodexLogMessages = []string{
+	"runtime metrics reset skipped",
+	"flushing otel metrics",
 }
 
 func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, error) {
@@ -60,6 +80,9 @@ func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error 
 			scopeLogs := resourceLogs.ScopeLogs().At(j)
 			for k := 0; k < scopeLogs.LogRecords().Len(); k++ {
 				record := scopeLogs.LogRecords().At(k)
+				if shouldDropLog(resourceAttrs, record) {
+					continue
+				}
 				event := e.eventFromLog(resourceAttrs, record)
 				if err := e.writer.append(event); err != nil && firstErr == nil {
 					firstErr = err
@@ -80,7 +103,7 @@ func (e *beaconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces
 			scopeSpans := resourceSpans.ScopeSpans().At(j)
 			for k := 0; k < scopeSpans.Spans().Len(); k++ {
 				span := scopeSpans.Spans().At(k)
-				if shouldDropSpan(resourceAttrs, span) {
+				if e.shouldDropSpan(resourceAttrs, span) {
 					continue
 				}
 				event := e.eventFromSpan(resourceAttrs, span)
@@ -103,7 +126,7 @@ func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Met
 			scopeMetrics := resourceMetrics.ScopeMetrics().At(j)
 			for k := 0; k < scopeMetrics.Metrics().Len(); k++ {
 				metric := scopeMetrics.Metrics().At(k)
-				if !e.cfg.IncludeRuntimeMetrics && shouldDropRuntimeMetric(metric.Name()) {
+				if shouldDropMetric(resourceAttrs, metric.Name(), e.cfg.IncludeRuntimeMetrics) {
 					continue
 				}
 				event := e.eventFromMetric(resourceAttrs, metric)
@@ -114,6 +137,43 @@ func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Met
 		}
 	}
 	return firstErr
+}
+
+func shouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
+	attrs := mergeMaps(resourceAttrs, attrsToMap(record.Attributes()))
+	if harnessName(attrs, record.Body().AsString()) != "codex_cli" {
+		return false
+	}
+	return isNoisyCodexLog(attrs, record.Body().AsString())
+}
+
+func isNoisyCodexLog(attrs map[string]interface{}, body string) bool {
+	eventName := codexLogEventName(attrs)
+	if eventName == "" {
+		message := strings.ToLower(firstNonEmpty(body, firstString(attrs, "message", "log.message")))
+		for _, noisy := range noisyCodexLogMessages {
+			if strings.Contains(message, noisy) {
+				return true
+			}
+		}
+		return false
+	}
+	if _, ok := allowedCodexLogEvents[eventName]; ok {
+		return false
+	}
+	// Codex adds new observability events over time. Keep endpoint activity quiet
+	// unless a Codex log event is explicitly mapped into Beacon's stable schema.
+	return strings.HasPrefix(eventName, "codex.")
+}
+
+func shouldDropMetric(resourceAttrs map[string]interface{}, name string, includeRuntimeMetrics bool) bool {
+	if shouldDropCodexMetric(resourceAttrs, name) {
+		return true
+	}
+	if !includeRuntimeMetrics && shouldDropRuntimeMetric(name) {
+		return true
+	}
+	return false
 }
 
 func shouldDropRuntimeMetric(name string) bool {
@@ -135,6 +195,14 @@ func shouldDropRuntimeMetric(name string) bool {
 	return false
 }
 
+func shouldDropCodexMetric(resourceAttrs map[string]interface{}, name string) bool {
+	if harnessName(resourceAttrs, name) != "codex_cli" {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(normalized, "codex.")
+}
+
 func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) beaconEvent {
 	attrs := mergeMaps(resourceAttrs, attrsToMap(record.Attributes()))
 	ts := timestamp(record.Timestamp().AsTime())
@@ -150,6 +218,7 @@ func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, reco
 		"otel_signal": "logs",
 		"severity":    record.SeverityText(),
 	})
+	normalizeCodexLogEvent(&event, attrs)
 	return event
 }
 
@@ -172,67 +241,94 @@ func (e *beaconExporter) eventFromSpan(resourceAttrs map[string]interface{}, spa
 	return event
 }
 
-func shouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
+func (e *beaconExporter) shouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
 	attrs := mergeMaps(resourceAttrs, attrsToMap(span.Attributes()))
 	if harnessName(attrs, span.Name()) != "codex_cli" {
 		return false
 	}
-	return isCodexInternalSpan(span.Name())
+	// Codex spans are high-volume internals that duplicate the semantic Codex log
+	// events Beacon uses for session, prompt, approval, and tool activity. Keep
+	// them disabled by default, but allow opt-in troubleshooting capture.
+	return !e.cfg.IncludeCodexSpans
 }
 
-func isCodexInternalSpan(name string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "" {
-		return true
+func normalizeCodexLogEvent(event *beaconEvent, attrs map[string]interface{}) {
+	if event == nil || event.Harness.Name != "codex_cli" {
+		return
 	}
-	keepPrefixes := []string{
-		"codex.",
-		"op.dispatch",
-		"session_task.",
-		"model_client.",
-		"run_turn",
-		"run_sampling_request",
-		"try_run_sampling_request",
-		"stream_request",
-		"handle_responses",
-	}
-	for _, prefix := range keepPrefixes {
-		if strings.HasPrefix(normalized, prefix) {
-			return false
+	switch codexLogEventName(attrs) {
+	case codexConversationStarts:
+		event.Event.Action = "session.started"
+		event.Event.Category = "session"
+		event.Message = "Codex session started"
+	case codexUserPrompt:
+		event.Event.Action = "prompt.submitted"
+		event.Event.Category = "prompt"
+		if prompt := firstString(attrs, "prompt", "gen_ai.prompt", "user_prompt", "input.prompt"); prompt != "" {
+			event.Message = prompt
+		} else {
+			event.Message = "Codex prompt submitted"
 		}
-	}
-	dropExact := map[string]struct{}{
-		"receiving":                     {},
-		"receiving_stream":              {},
-		"poll":                          {},
-		"poll_ready":                    {},
-		"popped":                        {},
-		"pop_frame":                     {},
-		"reserve_capacity":              {},
-		"try_assign_capacity":           {},
-		"try_reclaim_frame":             {},
-		"assign_connection_capacity":    {},
-		"updating stream flow":          {},
-		"updating connection flow":      {},
-		"recv_stream_window_update":     {},
-		"recv_connection_window_update": {},
-		"send_data":                     {},
-	}
-	if _, ok := dropExact[normalized]; ok {
-		return true
-	}
-	dropPrefixes := []string{
-		"framedread::",
-		"framedwrite::",
-		"hpack::",
-		"prioritize::",
-	}
-	for _, prefix := range dropPrefixes {
-		if strings.HasPrefix(normalized, prefix) {
-			return true
+	case codexToolDecision:
+		decision := firstString(attrs, "decision")
+		if strings.EqualFold(decision, "denied") || strings.EqualFold(decision, "deny") {
+			event.Event.Action = "approval.denied"
+		} else {
+			event.Event.Action = "approval.requested"
 		}
+		event.Event.Category = "approval"
+		event.Message = "Codex tool decision"
+		if event.Approval == nil {
+			event.Approval = &approvalInfo{}
+		}
+		event.Approval.Required = true
+		event.Approval.Decision = decision
+		event.Approval.Reason = firstString(attrs, "source", "approval_mode", "active_approval_mode")
+	case codexToolResult:
+		normalizeCodexToolResult(event, attrs)
 	}
-	return false
+}
+
+func codexLogEventName(attrs map[string]interface{}) string {
+	return strings.ToLower(firstString(attrs, "event.name"))
+}
+
+func normalizeCodexToolResult(event *beaconEvent, attrs map[string]interface{}) {
+	toolName := firstString(attrs, "tool.name", "tool_name", "function_name", "tool", "mcp_server")
+	args := firstString(attrs, "arguments", "function_args", "tool.command", "command")
+	event.Event.Action = "tool.invoked"
+	event.Event.Category = "tool"
+	if event.Tool == nil {
+		event.Tool = &toolInfo{}
+	}
+	event.Tool.Name = toolName
+	event.Tool.Command = args
+	if command := codexShellCommand(toolName, args); command != "" {
+		event.Event.Action = "command.executed"
+		event.Event.Category = "command"
+		event.Command = &commandInfo{Command: command}
+	}
+	event.Message = firstNonEmpty(toolName, "Codex tool result")
+}
+
+func codexShellCommand(toolName, args string) string {
+	if strings.EqualFold(toolName, "shell") {
+		if cmd := codexArgumentCommand(args); cmd != "" {
+			return cmd
+		}
+		return args
+	}
+	return codexArgumentCommand(args)
+}
+
+func codexArgumentCommand(args string) string {
+	var payload struct {
+		Cmd string `json:"cmd"`
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Cmd)
 }
 
 func (e *beaconExporter) eventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) beaconEvent {

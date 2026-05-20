@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -283,7 +284,7 @@ func TestConsumeMetricsIncludesRuntimeMetricsWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestConsumeMetricsKeepsAgentMetricsByDefault(t *testing.T) {
+func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
 		Path:             path,
@@ -297,18 +298,26 @@ func TestConsumeMetricsKeepsAgentMetricsByDefault(t *testing.T) {
 	}
 
 	metrics := pmetric.NewMetrics()
-	metric := metrics.ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
-	metric.SetName("codex.tool.call.duration_ms")
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "codex-cli")
+	sm := rm.ScopeMetrics().AppendEmpty()
+	for _, name := range []string{
+		"codex.turn.memory",
+		"codex.turn.token_usage",
+		"codex.websocket.event.duration_ms",
+		"codex.remote_models.load_cache.duration_ms",
+		"codex.tool.call.duration_ms",
+	} {
+		sm.Metrics().AppendEmpty().SetName(name)
+	}
 
 	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
 		t.Fatalf("consumeMetrics returned error: %v", err)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		t.Fatalf("codex metrics should have been dropped, wrote: %s", string(data))
+	} else if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("read runtime log: %v", err)
-	}
-	if !strings.Contains(string(data), "codex.tool.call.duration_ms") {
-		t.Fatalf("agent metric was not written: %s", string(data))
 	}
 }
 
@@ -329,7 +338,7 @@ func TestInferActionMapsCodexOpAttributeToPrompt(t *testing.T) {
 	}
 }
 
-func TestEventFromSpanMapsCodexUserInputToPrompt(t *testing.T) {
+func TestConsumeTracesDropsCodexUserInputSpan(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
 		Path:             path,
@@ -337,6 +346,38 @@ func TestEventFromSpanMapsCodexUserInputToPrompt(t *testing.T) {
 		RotateBytes:      defaultRotateBytes,
 		RedactSecrets:    true,
 		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	span := testSpan("op.dispatch.user_input_with_turn_context")
+	span.Attributes().PutStr("prompt", "summarize token=codex-secret")
+
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "codex-cli")
+	span.CopyTo(rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty())
+
+	if err := exp.consumeTraces(context.Background(), traces); err != nil {
+		t.Fatalf("consumeTraces returned error: %v", err)
+	}
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		t.Fatalf("Codex user input span should have been dropped, wrote: %s", string(data))
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read runtime log: %v", err)
+	}
+}
+
+func TestConsumeTracesIncludesCodexSpansWhenConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:              path,
+		MaxEventBytes:     defaultMaxEventBytes,
+		RotateBytes:       defaultRotateBytes,
+		RedactSecrets:     true,
+		ContentRetention:  "full",
+		IncludeCodexSpans: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -364,14 +405,112 @@ func TestEventFromSpanMapsCodexUserInputToPrompt(t *testing.T) {
 	if event.Event.Action != "prompt.submitted" {
 		t.Fatalf("span action = %q, want prompt.submitted", event.Event.Action)
 	}
-	if event.Event.Category != "prompt" {
-		t.Fatalf("span category = %q, want prompt", event.Event.Category)
+	if event.Raw["otel_signal"] != "traces" || event.Raw["span_name"] != "op.dispatch.user_input_with_turn_context" {
+		t.Fatalf("trace raw payload missing: %#v", event.Raw)
 	}
-	if event.Harness.Name != "codex_cli" {
-		t.Fatalf("harness = %q, want codex_cli", event.Harness.Name)
+}
+
+func TestConsumeLogsMapsCodexSemanticEventsAndDropsTransportNoise(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
 	}
-	if event.Prompt == nil || event.Prompt.Text != "summarize token=[REDACTED]" {
-		t.Fatalf("prompt = %#v, want redacted Codex prompt", event.Prompt)
+
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "codex_cli_rs")
+	sl := rl.ScopeLogs().AppendEmpty()
+	for _, eventName := range []string{
+		"codex.conversation_starts",
+		"codex.user_prompt",
+		"codex.tool_decision",
+		"codex.tool_result",
+		"codex.startup_phase",
+		"codex.turn_ttft",
+		"codex.websocket_event",
+		"codex.sse_event",
+	} {
+		rec := sl.LogRecords().AppendEmpty()
+		rec.Attributes().PutStr("event.name", eventName)
+		rec.Attributes().PutStr("conversation.id", "codex-session")
+		rec.Attributes().PutStr("model", "gpt-5.5")
+		switch eventName {
+		case "codex.user_prompt":
+			rec.Body().SetStr("op.dispatch.user_input_with_turn_context")
+			rec.Attributes().PutStr("prompt", "look up weather token=codex-secret")
+		case "codex.tool_decision":
+			rec.Attributes().PutStr("decision", "approved")
+			rec.Attributes().PutStr("source", "Config")
+		case "codex.tool_result":
+			rec.Attributes().PutStr("tool", "shell")
+			rec.Attributes().PutStr("arguments", `{"cmd":"date"}`)
+		}
+	}
+	debug := sl.LogRecords().AppendEmpty()
+	debug.Body().SetStr("runtime metrics reset skipped: runtime metrics snapshot reader is not enabled")
+	flush := sl.LogRecords().AppendEmpty()
+	flush.Body().SetStr("flushing OTEL metrics")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	text := string(data)
+	for _, noisy := range []string{"codex.startup_phase", "codex.turn_ttft", "codex.websocket_event", "codex.sse_event", "runtime metrics reset skipped", "flushing OTEL metrics"} {
+		if strings.Contains(text, noisy) {
+			t.Fatalf("noisy Codex event %q was written: %s", noisy, text)
+		}
+	}
+
+	var actions []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		var event beaconEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		actions = append(actions, event.Event.Action)
+		if event.Event.Action == "prompt.submitted" {
+			if event.Prompt == nil || event.Prompt.Text != "look up weather token=[REDACTED]" {
+				t.Fatalf("prompt = %#v, want redacted typed prompt", event.Prompt)
+			}
+			if event.Message != "look up weather token=[REDACTED]" {
+				t.Fatalf("prompt message = %q, want prompt text", event.Message)
+			}
+		}
+	}
+	wantActions := []string{"session.started", "prompt.submitted", "approval.requested", "command.executed"}
+	for _, want := range wantActions {
+		if !containsString(actions, want) {
+			t.Fatalf("actions = %#v, want %q", actions, want)
+		}
+	}
+}
+
+func TestCodexToolResultExtractsShellCommand(t *testing.T) {
+	event := newBeaconEvent("tool.invoked", "tool", "info", "codex_cli", time.Now())
+	normalizeCodexToolResult(&event, map[string]interface{}{
+		"tool":      "shell",
+		"arguments": `{"cmd":"date","workdir":"/tmp"}`,
+	})
+
+	if event.Event.Action != "command.executed" || event.Event.Category != "command" {
+		t.Fatalf("unexpected action/category: %#v", event.Event)
+	}
+	if event.Command == nil || event.Command.Command != "date" {
+		t.Fatalf("command = %#v, want parsed date command", event.Command)
+	}
+	if event.Tool == nil || event.Tool.Command != `{"cmd":"date","workdir":"/tmp"}` {
+		t.Fatalf("tool payload not preserved: %#v", event.Tool)
 	}
 }
 
@@ -531,15 +670,23 @@ func TestMetadataRetentionDropsRawAttributes(t *testing.T) {
 
 func TestCodexInternalSpanFilter(t *testing.T) {
 	codexAttrs := map[string]interface{}{"service.name": "codex-cli"}
+	exp := &beaconExporter{cfg: &Config{}}
 
-	if !shouldDropSpan(codexAttrs, testSpan("FramedRead::poll_next")) {
+	if !exp.shouldDropSpan(codexAttrs, testSpan("FramedRead::poll_next")) {
 		t.Fatal("expected Codex transport span to be dropped")
 	}
-	if shouldDropSpan(codexAttrs, testSpan("session_task.turn")) {
-		t.Fatal("expected meaningful Codex session span to be kept")
+	if !exp.shouldDropSpan(codexAttrs, testSpan("session_task.turn")) {
+		t.Fatal("expected Codex session_task span to be dropped")
 	}
-	if shouldDropSpan(map[string]interface{}{"service.name": "other-agent"}, testSpan("FramedRead::poll_next")) {
+	if !exp.shouldDropSpan(codexAttrs, testSpan("op.dispatch.user_input_with_turn_context")) {
+		t.Fatal("expected Codex user input span to be dropped")
+	}
+	if exp.shouldDropSpan(map[string]interface{}{"service.name": "other-agent"}, testSpan("FramedRead::poll_next")) {
 		t.Fatal("expected non-Codex span to be kept")
+	}
+	debugExp := &beaconExporter{cfg: &Config{IncludeCodexSpans: true}}
+	if debugExp.shouldDropSpan(codexAttrs, testSpan("session_task.turn")) {
+		t.Fatal("expected Codex span to be kept when configured")
 	}
 }
 
@@ -562,20 +709,17 @@ func TestConsumeTracesDropsCodexInternalSpans(t *testing.T) {
 	spans := rs.ScopeSpans().AppendEmpty().Spans()
 	spans.AppendEmpty().SetName("FramedRead::poll_next")
 	spans.AppendEmpty().SetName("session_task.turn")
+	spans.AppendEmpty().SetName("run_sampling_request")
+	spans.AppendEmpty().SetName("handle_responses")
+	spans.AppendEmpty().SetName("op.dispatch.user_input_with_turn_context")
 
 	if err := exp.consumeTraces(context.Background(), traces); err != nil {
 		t.Fatalf("consumeTraces returned error: %v", err)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		t.Fatalf("Codex spans should have been dropped, wrote: %s", string(data))
+	} else if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("read runtime log: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "FramedRead::poll_next") {
-		t.Fatalf("transport span was written: %s", text)
-	}
-	if !strings.Contains(text, "session_task.turn") {
-		t.Fatalf("meaningful span was not written: %s", text)
 	}
 }
 
@@ -624,4 +768,13 @@ func TestHarnessNameSeparatesClaudeCodeAndCowork(t *testing.T) {
 			}
 		})
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

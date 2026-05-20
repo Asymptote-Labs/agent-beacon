@@ -83,7 +83,7 @@ func TestPackJSONFilesAreValid(t *testing.T) {
 func TestKibanaAssetsAreParseableNDJSON(t *testing.T) {
 	scanner := bufio.NewScanner(strings.NewReader(mustRead("pack/kibana-assets.ndjson")))
 	line := 0
-	var foundDataView bool
+	var foundDataView, foundPromptColumn bool
 	for scanner.Scan() {
 		line++
 		var doc map[string]interface{}
@@ -102,6 +102,21 @@ func TestKibanaAssetsAreParseableNDJSON(t *testing.T) {
 				foundDataView = true
 			}
 		}
+		if doc["type"] == "search" {
+			attrs, ok := doc["attributes"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("kibana search missing attributes: %#v", doc)
+			}
+			columns, ok := attrs["columns"].([]interface{})
+			if !ok {
+				t.Fatalf("kibana search missing columns: %#v", attrs)
+			}
+			for _, column := range columns {
+				if column == "beacon.prompt.text" {
+					foundPromptColumn = true
+				}
+			}
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
@@ -111,6 +126,9 @@ func TestKibanaAssetsAreParseableNDJSON(t *testing.T) {
 	}
 	if !foundDataView {
 		t.Fatal("kibana-assets.ndjson should include the Beacon Endpoint Events data view")
+	}
+	if !foundPromptColumn {
+		t.Fatal("kibana saved search should expose beacon.prompt.text so prompts are visible in Elastic")
 	}
 }
 

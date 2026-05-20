@@ -28,6 +28,7 @@ type InstallOptions struct {
 	StartService          bool
 	ContentRetention      endpointconfig.ContentRetention
 	IncludeRuntimeMetrics bool
+	IncludeCodexSpans     bool
 	SplunkHEC             *endpointconfig.SplunkHEC
 }
 
@@ -281,6 +282,7 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	}
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
+	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
 	if opts.ContentRetention != "" {
 		cfg.ContentRetention = opts.ContentRetention
 	}

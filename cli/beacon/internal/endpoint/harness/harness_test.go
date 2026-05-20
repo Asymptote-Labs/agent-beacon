@@ -175,12 +175,18 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 		"environment = \"dev\"",
 		"log_user_prompt = true",
 		"[otel.exporter.\"otlp-grpc\"]",
-		"[otel.trace_exporter.\"otlp-grpc\"]",
-		"[otel.metrics_exporter.\"otlp-grpc\"]",
 		"endpoint = \"http://127.0.0.1:4317\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("codex config missing %q:\n%s", want, text)
+		}
+	}
+	for _, noisy := range []string{
+		"[otel.trace_exporter.\"otlp-grpc\"]",
+		"[otel.metrics_exporter.\"otlp-grpc\"]",
+	} {
+		if strings.Contains(text, noisy) {
+			t.Fatalf("codex config should not enable noisy exporter %q:\n%s", noisy, text)
 		}
 	}
 	backups, err := filepath.Glob(path + ".beacon.*.bak")

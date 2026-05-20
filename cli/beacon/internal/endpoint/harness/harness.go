@@ -369,12 +369,6 @@ func codexOTELBlock(endpoint string, logUserPrompt bool) []string {
 		"",
 		"[otel.exporter.\"otlp-grpc\"]",
 		fmt.Sprintf("endpoint = %q", endpoint),
-		"",
-		"[otel.trace_exporter.\"otlp-grpc\"]",
-		fmt.Sprintf("endpoint = %q", endpoint),
-		"",
-		"[otel.metrics_exporter.\"otlp-grpc\"]",
-		fmt.Sprintf("endpoint = %q", endpoint),
 	}
 }
 
