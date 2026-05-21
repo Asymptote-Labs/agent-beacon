@@ -15,6 +15,7 @@ var (
 	CursorDir   = filepath.Join(BeaconDir, "cursor")
 	DevinDir    = filepath.Join(BeaconDir, "devin")
 	FactoryDir  = filepath.Join(BeaconDir, "factory")
+	GrokDir     = filepath.Join(BeaconDir, "grok")
 	OpenCodeDir = filepath.Join(BeaconDir, "opencode")
 )
 
@@ -93,6 +94,8 @@ func GetStateDir(platform string) string {
 		return DevinDir
 	case "factory":
 		return FactoryDir
+	case "grok":
+		return GrokDir
 	case "opencode":
 		return OpenCodeDir
 	default:

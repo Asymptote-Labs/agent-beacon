@@ -116,12 +116,13 @@ Recommended rollout:
 4. Scope repair/remediation to unhealthy devices.
 5. Broaden deployment in stages after inventory and validation stay healthy.
 
-Cursor, Devin, Factory, and opencode hook installation is separate from the base
+Cursor, Devin, Factory, Grok Build, and opencode hook installation is separate from the base
 system package because these integrations write per-user or per-project runtime
 settings. Run hook helpers only when an interactive console user is present.
 Cursor hooks use `.cursor/hooks.json`; Devin hooks use `.devin/hooks.v1.json`
 for project installs or `~/.config/devin/config.json` for user installs; Factory
-hooks use `.factory/settings.json`; opencode uses Beacon's owned plugin at
+hooks use `.factory/settings.json`; Grok Build uses `.grok/hooks/beacon.json`
+or `~/.grok/hooks/beacon.json`; opencode uses Beacon's owned plugin at
 `~/.config/opencode/plugins/beacon.ts`. Restart the runtime after installation
 so new sessions pick up the settings. Install hooks with the same endpoint log
 path as the collector when you want hook telemetry and OTLP telemetry to appear
@@ -152,6 +153,15 @@ the logged-in user's context:
 
 ```bash
 beacon endpoint hooks install --harness opencode --level user --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+For Grok Build session/prompt/tool telemetry, install Beacon's Grok hook file.
+User-level hooks are always trusted by Grok; project-level hooks require
+`/hooks-trust` in Grok before they execute:
+
+```bash
+beacon endpoint hooks install --harness grok --level user --log-path /var/log/beacon-agent/runtime.jsonl
+beacon endpoint hooks install --harness grok --level project --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
 For Devin prompt/session/tool/approval/file telemetry, install Beacon's Devin

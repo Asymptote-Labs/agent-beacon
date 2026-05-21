@@ -523,6 +523,19 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Printf("opencode plugin installed: %s\n", status.PluginPath)
+		case "grok":
+			status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Grok hooks installed: %s\n", status.HooksPath)
+			if strings.Contains(status.Message, "/hooks-trust") {
+				fmt.Println(status.Message)
+			}
 		case "devin":
 			status, err := endpointhooks.InstallDevin(endpointhooks.DevinOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -575,6 +588,16 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Println(status.Message)
+		case "grok":
+			status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(status.Message)
 		case "devin":
 			status, err := endpointhooks.UninstallDevin(endpointhooks.DevinOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -616,6 +639,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "grok":
+			statuses["grok"] = endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "devin":
 			statuses["devin"] = endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -643,6 +672,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "opencode":
 			status := statuses["opencode"].(endpointhooks.OpenCodeStatus)
 			fmt.Printf("opencode plugin: installed=%t path=%s\n", status.Installed, status.PluginPath)
+			fmt.Println(status.Message)
+		case "grok":
+			status := statuses["grok"].(endpointhooks.GrokStatus)
+			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
 		case "devin":
 			status := statuses["devin"].(endpointhooks.DevinStatus)

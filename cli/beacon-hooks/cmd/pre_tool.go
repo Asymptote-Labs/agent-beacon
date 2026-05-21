@@ -37,7 +37,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	}
 
 	logger.Debug("Pre-tool observed")
-	if platformFlag == "devin" {
+	if platformFlag == "devin" || platformFlag == "grok" {
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
@@ -61,6 +61,9 @@ func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, s
 }
 
 func preToolResponse() map[string]interface{} {
+	if platformFlag == "grok" {
+		return map[string]interface{}{"decision": "allow"}
+	}
 	if platformFlag == "devin" {
 		return emptyResponse
 	}

@@ -53,6 +53,8 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		return getFirstStr(input, "conversation_id")
 	case "devin":
 		return getFirstStr(input, "session_id", "sessionId", "conversation_id")
+	case "grok":
+		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	case "opencode":
 		return getFirstStr(input, "session_id", "sessionID")
 	default:
@@ -79,6 +81,9 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 	case "devin":
 		sessionID = getFirstStr(input, "session_id", "sessionId", "conversation_id")
 		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
+		return
+	case "grok":
+		sessionID = getFirstStr(input, "sessionId", "session_id", "sessionID")
 		return
 	case "opencode":
 		sessionID = getFirstStr(input, "session_id", "sessionID")
@@ -128,6 +133,12 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 			return cwd
 		}
 		return os.Getenv("DEVIN_PROJECT_DIR")
+	}
+	if platform == "grok" {
+		if cwd := getFirstStr(input, "workspaceRoot", "workspace_root", "cwd"); cwd != "" {
+			return cwd
+		}
+		return os.Getenv("GROK_WORKSPACE_ROOT")
 	}
 	cwd, _ := input["cwd"].(string)
 	return cwd
