@@ -123,6 +123,48 @@ func TestGrokInstalledUsesManagedEndpointCommand(t *testing.T) {
 	}
 }
 
+func TestRemoveLegacyGrokHookFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".grok", "hooks")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	legacyContent := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform grok session-start"}]}]}}`
+	legacyPath := filepath.Join(dir, "beacon.json")
+	if err := os.WriteFile(legacyPath, []byte(legacyContent), 0644); err != nil {
+		t.Fatalf("write legacy hook: %v", err)
+	}
+
+	removeLegacyGrokHookFile(LevelUser)
+
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy beacon.json should have been removed, stat error: %v", err)
+	}
+}
+
+func TestRemoveLegacyGrokHookFileIgnoresUserContent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".grok", "hooks")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	userContent := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo my-custom-hook"}]}]}}`
+	legacyPath := filepath.Join(dir, "beacon.json")
+	if err := os.WriteFile(legacyPath, []byte(userContent), 0644); err != nil {
+		t.Fatalf("write user hook: %v", err)
+	}
+
+	removeLegacyGrokHookFile(LevelUser)
+
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("user beacon.json should not have been removed: %v", err)
+	}
+}
+
 func TestGrokManagedDetectionRequiresMarker(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "beacon-endpoint.json")
 	if err := os.WriteFile(path, []byte(`{"description":"user copied Beacon command","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform grok session-start"}]}]}}`), 0644); err != nil {

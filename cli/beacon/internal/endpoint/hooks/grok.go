@@ -10,6 +10,7 @@ import (
 
 const (
 	grokManagedHookFileName = "beacon-endpoint.json"
+	grokLegacyHookFileName  = "beacon.json"
 	grokManagedHookMarker   = "beacon-managed-grok-hooks:v1"
 )
 
@@ -53,6 +54,7 @@ var grokRuntime = hookRuntime{
 }
 
 func InstallGrok(opts GrokOptions) (GrokStatus, error) {
+	removeLegacyGrokHookFile(opts.Level)
 	status, err := installRuntimeHooks(grokRuntime, RuntimeOptions(opts))
 	if err != nil {
 		return GrokStatus{}, err
@@ -61,6 +63,7 @@ func InstallGrok(opts GrokOptions) (GrokStatus, error) {
 }
 
 func UninstallGrok(opts GrokOptions) (GrokStatus, error) {
+	removeLegacyGrokHookFile(opts.Level)
 	status, err := uninstallRuntimeHooks(grokRuntime, RuntimeOptions(opts))
 	if err != nil {
 		return GrokStatus{}, err
@@ -176,6 +179,38 @@ func grokHooksDir(level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
+}
+
+func removeLegacyGrokHookFile(level Level) {
+	dir, err := grokHooksDir(level)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(dir, grokLegacyHookFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if isLegacyGrokManagedHookFile(data) {
+		_ = os.Remove(path)
+	}
+}
+
+func isLegacyGrokManagedHookFile(data []byte) bool {
+	var hooks grokHooksFile
+	if err := json.Unmarshal(data, &hooks); err != nil {
+		return false
+	}
+	for _, groups := range hooks.Hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if isEndpointHookCommand(hook.Command, "grok") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func grokProjectTrustMessage(status GrokStatus, level Level) GrokStatus {
