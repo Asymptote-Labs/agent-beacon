@@ -69,6 +69,9 @@ that may need review.
 ./beacon endpoint hooks install --harness opencode
 ./beacon endpoint hooks status --harness opencode
 
+./beacon endpoint hooks install --harness grok
+./beacon endpoint hooks status --harness grok
+
 ./beacon endpoint hooks install --harness devin --level project
 ./beacon endpoint hooks status --harness devin --level project
 
@@ -87,6 +90,11 @@ raw opencode hook payloads to Beacon's Go hook binary; Beacon handles
 normalization, retention, redaction, and JSONL output locally. For local
 troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches
 opencode to emit best-effort plugin debug logs.
+
+The Grok Build integration writes Beacon's owned local hook file at
+`~/.grok/hooks/beacon.json` for user-level installs or `.grok/hooks/beacon.json`
+for project-level installs. Project hooks require trusting the project in Grok
+with `/hooks-trust` before they execute.
 
 The Devin integration writes Claude-compatible command hooks for Devin for
 Terminal. Project-level installs use `.devin/hooks.v1.json`; user-level installs

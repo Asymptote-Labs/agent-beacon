@@ -42,7 +42,7 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 	logger.Debug("Prompt submit observed")
 	fields := sessionFields(sessionID, input)
 	if config.ContentRetentionMode() != config.ContentRetentionMetadata {
-		if prompt := getFirstStr(input, "prompt", "user_prompt", "text"); prompt != "" {
+		if prompt := getFirstStr(input, "prompt", "user_prompt", "text", "promptText"); prompt != "" {
 			fields["prompt"] = map[string]interface{}{"text": prompt}
 		}
 	}

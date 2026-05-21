@@ -15,6 +15,9 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if fields == nil {
 		fields = map[string]interface{}{}
 	}
+	if platformFlag == "grok" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"grok": input})
+	}
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}
@@ -132,6 +135,19 @@ func fileOperation(toolName string) string {
 
 func actionForTool(hookEvent, toolName string) string {
 	lower := strings.ToLower(toolName)
+	if platformFlag == "grok" {
+		if hookEvent == "post_tool_use_failure" {
+			return "tool.failed"
+		}
+		switch lower {
+		case "run_terminal_cmd":
+			return "command.executed"
+		case "read_file":
+			return "file.read"
+		case "search_replace", "write_file":
+			return "file.modified"
+		}
+	}
 	if platformFlag == "devin" {
 		switch {
 		case strings.HasPrefix(lower, "mcp__"):

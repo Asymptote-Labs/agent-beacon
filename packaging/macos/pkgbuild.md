@@ -90,6 +90,16 @@ normalization, retention, redaction, and JSONL output. Set
 `BEACON_OPENCODE_DEBUG=1` in the opencode launch environment only when
 troubleshooting plugin delivery.
 
+Grok Build support is also installed separately in the target user's context:
+
+```bash
+beacon endpoint hooks install --harness grok --level user --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+This writes Beacon's owned hook file to `~/.grok/hooks/beacon.json`. Project
+installs write `.grok/hooks/beacon.json` and require `/hooks-trust` in Grok before
+hooks execute.
+
 ## Jamf Deployment
 
 Upload the generated `.pkg` to Jamf Pro and create a Policy scoped to a pilot

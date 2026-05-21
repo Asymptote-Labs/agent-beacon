@@ -567,6 +567,7 @@ function harnessLabel(value) {
     cursor: "Cursor",
     claude_code: "Claude Code",
     codex_cli: "Codex CLI",
+    grok: "Grok Build",
     cli: "Beacon CLI",
   };
   return labels[value] || value;

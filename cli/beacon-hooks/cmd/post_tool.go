@@ -119,7 +119,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
-	if platformFlag == "copilot" || platformFlag == "devin" {
+	if platformFlag == "copilot" || platformFlag == "devin" || platformFlag == "grok" {
 		sessionID = resolveSessionID(input, platformFlag)
 		toolName = getFirstStr(input, "toolName", "tool_name")
 		toolInput = resolveToolInput(input)
@@ -185,6 +185,9 @@ func resolveToolInput(input map[string]interface{}) map[string]interface{} {
 	if m, ok := input["tool_input"].(map[string]interface{}); ok {
 		return m
 	}
+	if m, ok := input["toolInput"].(map[string]interface{}); ok {
+		return m
+	}
 	// Fallback: some Copilot versions send toolArgs as stringified JSON
 	if argsStr, ok := input["toolArgs"].(string); ok && argsStr != "" {
 		var parsed map[string]interface{}
@@ -203,6 +206,9 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 	if m, ok := input["tool_response"].(map[string]interface{}); ok {
 		return m
 	}
+	if m, ok := input["toolResponse"].(map[string]interface{}); ok {
+		return m
+	}
 	if m, ok := input["toolResult"].(map[string]interface{}); ok {
 		return m
 	}
@@ -215,7 +221,7 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 
 func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) {
 	toolName := getFirstStr(input, "tool_name", "toolName")
-	hookEvent := getFirstStr(input, "hook_event_name")
+	hookEvent := getFirstStr(input, "hook_event_name", "hookEventName")
 	toolInput := resolveToolInput(input)
 	if toolInput == nil {
 		if nested, ok := input["tool_input"].(map[string]interface{}); ok {
@@ -227,7 +233,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	for key, value := range toolFields(toolName, toolInput) {
 		fields[key] = value
 	}
-	if hookEvent == "postToolUseFailure" {
+	if hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
@@ -262,6 +268,10 @@ func isFileEditTool(platform, toolName string) bool {
 	if platform == "devin" {
 		lower := strings.ToLower(toolName)
 		return lower == "edit" || lower == "write"
+	}
+	if platform == "grok" {
+		lower := strings.ToLower(toolName)
+		return lower == "search_replace" || lower == "write_file" || strings.Contains(lower, "edit") || strings.Contains(lower, "write")
 	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
 }

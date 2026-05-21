@@ -34,7 +34,7 @@ Beacon is [Asymptote's open-source endpoint agent](https://justindsouza.substack
 need visibility into local AI agent activity.
 
 It runs locally, captures supported activity from local agent harnesses like
-Claude Code, Codex CLI, Gemini CLI, OpenCode, Devin, Factory Droid, Claude
+Claude Code, Codex CLI, Gemini CLI, Grok Build, OpenCode, Devin, Factory Droid, Claude
 Cowork, OpenClaw Gateway, and Cursor, then normalizes that activity into endpoint
 events your team can inspect and retain locally.
 
@@ -57,6 +57,7 @@ security pipelines.
 | Claude Code | Local OpenTelemetry configuration |
 | Codex CLI | Local OpenTelemetry configuration |
 | Gemini CLI | Opt-in local OpenTelemetry configuration |
+| Grok Build | Beacon hook adapter |
 | OpenCode | Beacon hook adapter |
 | Devin | Beacon hook adapter |
 | Factory Droid | Local OpenTelemetry configuration and optional hook adapter |
