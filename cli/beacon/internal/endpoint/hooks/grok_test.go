@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestInstallGrokHooksWritesManagedHookFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "beacon.json")
+	path := filepath.Join(t.TempDir(), "beacon-endpoint.json")
 	if err := installGrokHooks(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installGrokHooks returned error: %v", err)
 	}
@@ -16,20 +17,38 @@ func TestInstallGrokHooksWritesManagedHookFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Grok hooks: %v", err)
 	}
-	text := string(data)
-	for _, want := range []string{
-		"Beacon managed Grok endpoint telemetry hooks",
-		"SessionStart",
-		"UserPromptSubmit",
-		"PreToolUse",
-		"PostToolUseFailure",
-		"BEACON_ENDPOINT_MODE=1",
-		"--platform grok",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("Grok hook file missing %q:\n%s", want, text)
+	var hooks grokHooksFile
+	if err := json.Unmarshal(data, &hooks); err != nil {
+		t.Fatalf("decode Grok hooks: %v", err)
+	}
+	if hooks.Beacon != grokManagedHookMarker {
+		t.Fatalf("managed marker = %q, want %q", hooks.Beacon, grokManagedHookMarker)
+	}
+	wantCommands := map[string]string{
+		"SessionStart":       "session-start",
+		"UserPromptSubmit":   "prompt-submit",
+		"PreToolUse":         "pre-tool",
+		"PostToolUse":        "post-tool",
+		"PostToolUseFailure": "post-tool",
+		"Stop":               "stop",
+		"SessionEnd":         "session-end",
+	}
+	for eventName, commandName := range wantCommands {
+		groups := hooks.Hooks[eventName]
+		if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+			t.Fatalf("%s hook shape = %#v, want one command hook", eventName, groups)
+		}
+		command := groups[0].Hooks[0].Command
+		for _, want := range []string{
+			"BEACON_ENDPOINT_MODE=1",
+			"--platform grok",
+			"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
+			"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+			commandName,
+		} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s command missing %q:\n%s", eventName, want, command)
+			}
 		}
 	}
 }
@@ -51,7 +70,7 @@ func TestRemoveGrokHooksOnlyRemovesManagedHookFile(t *testing.T) {
 		t.Fatalf("user hook was removed: %v", err)
 	}
 
-	managed := filepath.Join(dir, "beacon.json")
+	managed := filepath.Join(dir, "beacon-endpoint.json")
 	if err := installGrokHooks(managed, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installGrokHooks returned error: %v", err)
 	}
@@ -70,13 +89,13 @@ func TestRemoveGrokHooksOnlyRemovesManagedHookFile(t *testing.T) {
 func TestGrokHookPathLevels(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if got, want := mustGrokHooksPath(t, LevelUser), filepath.Join(home, ".grok", "hooks", "beacon.json"); got != want {
+	if got, want := mustGrokHooksPath(t, LevelUser), filepath.Join(home, ".grok", "hooks", "beacon-endpoint.json"); got != want {
 		t.Fatalf("user Grok hook path = %q, want %q", got, want)
 	}
 
 	project := t.TempDir()
 	t.Chdir(project)
-	if got, want := mustGrokHooksPath(t, LevelProject), filepath.Join(project, ".grok", "hooks", "beacon.json"); got != want {
+	if got, want := mustGrokHooksPath(t, LevelProject), filepath.Join(project, ".grok", "hooks", "beacon-endpoint.json"); got != want {
 		t.Fatalf("project Grok hook path = %q, want %q", got, want)
 	}
 }
@@ -89,7 +108,7 @@ func TestGrokProjectStatusMentionsTrust(t *testing.T) {
 }
 
 func TestGrokInstalledUsesManagedEndpointCommand(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "beacon.json")
+	path := filepath.Join(t.TempDir(), "beacon-endpoint.json")
 	if err := os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 echo keep"}]}]}}`), 0644); err != nil {
 		t.Fatalf("write unmarked hook: %v", err)
 	}
@@ -101,6 +120,26 @@ func TestGrokInstalledUsesManagedEndpointCommand(t *testing.T) {
 	}
 	if !isGrokInstalledAt(path) {
 		t.Fatal("managed Grok hook should be detected")
+	}
+}
+
+func TestGrokManagedDetectionRequiresMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beacon-endpoint.json")
+	if err := os.WriteFile(path, []byte(`{"description":"user copied Beacon command","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform grok session-start"}]}]}}`), 0644); err != nil {
+		t.Fatalf("write unmarked copied command hook: %v", err)
+	}
+	if isGrokInstalledAt(path) {
+		t.Fatal("unmarked copied Beacon command should not be detected as managed")
+	}
+	changed, err := removeGrokHooks(path)
+	if err != nil {
+		t.Fatalf("removeGrokHooks returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("unmarked copied Beacon command should not be removed")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("unmarked hook was removed: %v", err)
 	}
 }
 

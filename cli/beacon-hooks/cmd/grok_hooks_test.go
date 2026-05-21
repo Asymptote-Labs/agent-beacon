@@ -74,7 +74,7 @@ func TestGrokPreToolRecordsToolAndAllows(t *testing.T) {
 		"hookEventName": "pre_tool_use",
 		"sessionId":     "grok-session-1",
 		"workspaceRoot": "/tmp/grok-project",
-		"toolName":      "run_terminal_cmd",
+		"toolName":      "run_terminal_command",
 		"toolInput": map[string]interface{}{
 			"command": "npm test",
 		},
@@ -87,7 +87,7 @@ func TestGrokPreToolRecordsToolAndAllows(t *testing.T) {
 		t.Fatalf("event.action = %q, want tool.invoked", action)
 	}
 	tool := event["tool"].(map[string]interface{})
-	if tool["name"] != "run_terminal_cmd" || tool["command"] != "npm test" {
+	if tool["name"] != "run_terminal_command" || tool["command"] != "npm test" {
 		t.Fatalf("tool fields = %#v, want name and command", tool)
 	}
 	if command := event["command"].(map[string]interface{})["command"]; command != "npm test" {
@@ -105,7 +105,7 @@ func TestGrokPostToolMapsCommandAndFailure(t *testing.T) {
 	runHookWithInput(t, runPostTool, map[string]interface{}{
 		"hookEventName": "post_tool_use",
 		"sessionId":     "grok-session-1",
-		"toolName":      "run_terminal_cmd",
+		"toolName":      "run_terminal_command",
 		"toolInput": map[string]interface{}{
 			"command": "go test ./...",
 		},
@@ -132,7 +132,7 @@ func TestGrokPostToolMapsCommandAndFailure(t *testing.T) {
 	runHookWithInput(t, runPostTool, map[string]interface{}{
 		"hookEventName": "post_tool_use_failure",
 		"sessionId":     "grok-session-1",
-		"toolName":      "run_terminal_cmd",
+		"toolName":      "run_terminal_command",
 		"toolInput": map[string]interface{}{
 			"command": "exit 1",
 		},

@@ -140,7 +140,7 @@ func actionForTool(hookEvent, toolName string) string {
 			return "tool.failed"
 		}
 		switch lower {
-		case "run_terminal_cmd":
+		case "run_terminal_command":
 			return "command.executed"
 		case "read_file":
 			return "file.read"

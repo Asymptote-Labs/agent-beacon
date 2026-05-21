@@ -96,8 +96,8 @@ Grok Build support is also installed separately in the target user's context:
 beacon endpoint hooks install --harness grok --level user --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
-This writes Beacon's owned hook file to `~/.grok/hooks/beacon.json`. Project
-installs write `.grok/hooks/beacon.json` and require `/hooks-trust` in Grok before
+This writes Beacon's owned hook file to `~/.grok/hooks/beacon-endpoint.json`. Project
+installs write `.grok/hooks/beacon-endpoint.json` and require `/hooks-trust` in Grok before
 hooks execute.
 
 ## Jamf Deployment

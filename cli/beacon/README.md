@@ -92,7 +92,7 @@ troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches
 opencode to emit best-effort plugin debug logs.
 
 The Grok Build integration writes Beacon's owned local hook file at
-`~/.grok/hooks/beacon.json` for user-level installs or `.grok/hooks/beacon.json`
+`~/.grok/hooks/beacon-endpoint.json` for user-level installs or `.grok/hooks/beacon-endpoint.json`
 for project-level installs. Project hooks require trusting the project in Grok
 with `/hooks-trust` before they execute.
 

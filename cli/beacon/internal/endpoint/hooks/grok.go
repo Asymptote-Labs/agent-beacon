@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-const grokManagedHookFileName = "beacon.json"
+const (
+	grokManagedHookFileName = "beacon-endpoint.json"
+	grokManagedHookMarker   = "beacon-managed-grok-hooks:v1"
+)
 
 type GrokOptions struct {
 	Level    Level
@@ -25,6 +28,7 @@ type GrokStatus struct {
 
 type grokHooksFile struct {
 	Description string                     `json:"description,omitempty"`
+	Beacon      string                     `json:"beacon,omitempty"`
 	Hooks       map[string][]grokHookGroup `json:"hooks"`
 }
 
@@ -85,6 +89,7 @@ func installGrokHooks(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("grok", binaryPath, logPath, configPath)
 	hooks := grokHooksFile{
 		Description: "Beacon managed Grok endpoint telemetry hooks.",
+		Beacon:      grokManagedHookMarker,
 		Hooks: map[string][]grokHookGroup{
 			"SessionStart":     {{Hooks: []grokHookRef{{Type: "command", Command: prefix + " session-start"}}}},
 			"UserPromptSubmit": {{Hooks: []grokHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}}}},
@@ -129,6 +134,9 @@ func isGrokInstalledAt(path string) bool {
 func isGrokManagedHookFile(data []byte) bool {
 	var hooks grokHooksFile
 	if err := json.Unmarshal(data, &hooks); err != nil {
+		return false
+	}
+	if hooks.Beacon != grokManagedHookMarker {
 		return false
 	}
 	for _, groups := range hooks.Hooks {

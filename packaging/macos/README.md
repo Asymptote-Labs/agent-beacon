@@ -121,8 +121,8 @@ system package because these integrations write per-user or per-project runtime
 settings. Run hook helpers only when an interactive console user is present.
 Cursor hooks use `.cursor/hooks.json`; Devin hooks use `.devin/hooks.v1.json`
 for project installs or `~/.config/devin/config.json` for user installs; Factory
-hooks use `.factory/settings.json`; Grok Build uses `.grok/hooks/beacon.json`
-or `~/.grok/hooks/beacon.json`; opencode uses Beacon's owned plugin at
+hooks use `.factory/settings.json`; Grok Build uses `.grok/hooks/beacon-endpoint.json`
+or `~/.grok/hooks/beacon-endpoint.json`; opencode uses Beacon's owned plugin at
 `~/.config/opencode/plugins/beacon.ts`. Restart the runtime after installation
 so new sessions pick up the settings. Install hooks with the same endpoint log
 path as the collector when you want hook telemetry and OTLP telemetry to appear
