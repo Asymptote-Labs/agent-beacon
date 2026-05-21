@@ -136,6 +136,9 @@ func fileOperation(toolName string) string {
 func actionForTool(hookEvent, toolName string) string {
 	lower := strings.ToLower(toolName)
 	if platformFlag == "grok" {
+		if hookEvent == "post_tool_use_failure" {
+			return "tool.failed"
+		}
 		switch lower {
 		case "run_terminal_cmd":
 			return "command.executed"
@@ -143,9 +146,6 @@ func actionForTool(hookEvent, toolName string) string {
 			return "file.read"
 		case "search_replace", "write_file":
 			return "file.modified"
-		}
-		if hookEvent == "post_tool_use_failure" {
-			return "tool.failed"
 		}
 	}
 	if platformFlag == "devin" {

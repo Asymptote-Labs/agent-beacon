@@ -124,6 +124,26 @@ func TestGrokPostToolMapsCommandAndFailure(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
 		t.Fatalf("failure event.action = %q, want tool.failed", action)
 	}
+	if sev := event["severity"]; sev != "high" {
+		t.Fatalf("failure severity = %q, want high", sev)
+	}
+
+	// Known tool failures must also be recorded as tool.failed with high severity.
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"hookEventName": "post_tool_use_failure",
+		"sessionId":     "grok-session-1",
+		"toolName":      "run_terminal_cmd",
+		"toolInput": map[string]interface{}{
+			"command": "exit 1",
+		},
+	})
+	event = lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
+		t.Fatalf("known tool failure event.action = %q, want tool.failed", action)
+	}
+	if sev := event["severity"]; sev != "high" {
+		t.Fatalf("known tool failure severity = %q, want high", sev)
+	}
 }
 
 func TestGrokCwdFallsBackToEnvironment(t *testing.T) {

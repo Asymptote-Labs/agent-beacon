@@ -233,7 +233,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	for key, value := range toolFields(toolName, toolInput) {
 		fields[key] = value
 	}
-	if hookEvent == "postToolUseFailure" {
+	if hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
