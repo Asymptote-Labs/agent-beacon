@@ -274,6 +274,9 @@ func TestEndpointInstallAndRepairSupportDebugTelemetryFlags(t *testing.T) {
 		if cmd.Flags().Lookup("include-codex-spans") == nil {
 			t.Fatalf("%s command missing --include-codex-spans flag", cmd.Use)
 		}
+		if cmd.Flags().Lookup("include-openclaw-runtime-metrics") == nil {
+			t.Fatalf("%s command missing --include-openclaw-runtime-metrics flag", cmd.Use)
+		}
 	}
 }
 

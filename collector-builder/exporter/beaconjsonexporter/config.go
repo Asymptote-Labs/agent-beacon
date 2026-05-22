@@ -9,13 +9,14 @@ const (
 
 // Config controls local JSONL export for Beacon endpoint events.
 type Config struct {
-	Path                  string `mapstructure:"path"`
-	MaxEventBytes         int    `mapstructure:"max_event_bytes"`
-	RotateBytes           int64  `mapstructure:"rotate_bytes"`
-	RedactSecrets         bool   `mapstructure:"redact_secrets"`
-	ContentRetention      string `mapstructure:"content_retention"`
-	IncludeRuntimeMetrics bool   `mapstructure:"include_runtime_metrics"`
-	IncludeCodexSpans     bool   `mapstructure:"include_codex_spans"`
+	Path                          string `mapstructure:"path"`
+	MaxEventBytes                 int    `mapstructure:"max_event_bytes"`
+	RotateBytes                   int64  `mapstructure:"rotate_bytes"`
+	RedactSecrets                 bool   `mapstructure:"redact_secrets"`
+	ContentRetention              string `mapstructure:"content_retention"`
+	IncludeRuntimeMetrics         bool   `mapstructure:"include_runtime_metrics"`
+	IncludeCodexSpans             bool   `mapstructure:"include_codex_spans"`
+	IncludeOpenClawRuntimeMetrics bool   `mapstructure:"include_openclaw_runtime_metrics"`
 }
 
 func createDefaultConfig() *Config {

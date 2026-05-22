@@ -19,17 +19,18 @@ import (
 )
 
 type InstallOptions struct {
-	UserMode              bool
-	LogPath               string
-	Harnesses             []string
-	GRPCPort              int
-	HTTPPort              int
-	CollectorPath         string
-	StartService          bool
-	ContentRetention      endpointconfig.ContentRetention
-	IncludeRuntimeMetrics bool
-	IncludeCodexSpans     bool
-	SplunkHEC             *endpointconfig.SplunkHEC
+	UserMode                      bool
+	LogPath                       string
+	Harnesses                     []string
+	GRPCPort                      int
+	HTTPPort                      int
+	CollectorPath                 string
+	StartService                  bool
+	ContentRetention              endpointconfig.ContentRetention
+	IncludeRuntimeMetrics         bool
+	IncludeCodexSpans             bool
+	IncludeOpenClawRuntimeMetrics bool
+	SplunkHEC                     *endpointconfig.SplunkHEC
 }
 
 type UninstallOptions struct {
@@ -283,6 +284,7 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
+	cfg.Collector.IncludeOpenClawRuntimeMetrics = opts.IncludeOpenClawRuntimeMetrics
 	if opts.ContentRetention != "" {
 		cfg.ContentRetention = opts.ContentRetention
 	}
