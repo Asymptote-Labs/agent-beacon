@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 
 	"github.com/spf13/cobra"
 )
@@ -289,5 +293,113 @@ func TestEndpointCommandsDefaultToUserMode(t *testing.T) {
 		if cmd.Flags().Lookup("system") == nil {
 			t.Fatalf("%s missing --system flag", cmd.Use)
 		}
+	}
+}
+
+func TestRobustEndpointCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"doctor"},
+		{"inventory"},
+		{"test-event"},
+		{"bundle-diagnostics"},
+		{"config", "show"},
+		{"config", "validate"},
+		{"config", "set-retention"},
+		{"integrations", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil {
+			t.Fatalf("command %v not registered", path)
+		}
+	}
+}
+
+func TestTopLevelAliasesRegistered(t *testing.T) {
+	for _, name := range []string{"doctor", "status", "inventory"} {
+		cmd, _, err := rootCmd.Find([]string{name})
+		if err != nil {
+			t.Fatalf("Find %s returned error: %v", name, err)
+		}
+		if cmd == nil || cmd.Use != name {
+			t.Fatalf("top-level %s alias not registered: %#v", name, cmd)
+		}
+		if cmd.Flags().Lookup("user") == nil || cmd.Flags().Lookup("log-path") == nil {
+			t.Fatalf("top-level %s alias missing endpoint flags", name)
+		}
+	}
+}
+
+func TestRobustCLIFlagsRegistered(t *testing.T) {
+	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointRepairCmd, endpointUninstallCmd, endpointHooksInstallCmd, endpointHooksUninstallCmd} {
+		if cmd.Flags().Lookup("dry-run") == nil {
+			t.Fatalf("%s missing --dry-run", cmd.Use)
+		}
+	}
+	for _, cmd := range []*cobra.Command{endpointDiscoverCmd, endpointInventoryCmd, endpointHooksStatusCmd, endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointIntegrationsValidateCmd} {
+		if cmd.Flags().Lookup("all") == nil {
+			t.Fatalf("%s missing --all", cmd.Use)
+		}
+	}
+	if endpointBundleDiagnosticsCmd.Flags().Lookup("include-event-summaries") == nil {
+		t.Fatal("bundle-diagnostics missing --include-event-summaries")
+	}
+	if endpointBundleDiagnosticsCmd.Flags().Lookup("include-raw-events") == nil {
+		t.Fatal("bundle-diagnostics missing --include-raw-events")
+	}
+}
+
+func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
+	for _, name := range []string{"completion", "docs"} {
+		cmd, _, err := rootCmd.Find([]string{name})
+		if err != nil {
+			t.Fatalf("Find %s returned error: %v", name, err)
+		}
+		if cmd == nil || cmd.Use == "" {
+			t.Fatalf("%s command not registered: %#v", name, cmd)
+		}
+	}
+	if docsCmd.Flags().Lookup("output") == nil {
+		t.Fatal("docs command missing --output")
+	}
+}
+
+func TestRedactConfigScrubsSplunkToken(t *testing.T) {
+	cfg := endpointconfig.Default(true, "/tmp/runtime.jsonl")
+	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{
+		Endpoint: "https://splunk.example/services/collector",
+		Token:    "secret-token",
+	}}
+	redacted := redactConfig(cfg)
+	if redacted.Destinations.SplunkHEC.Token != "[REDACTED]" {
+		t.Fatalf("token was not redacted: %#v", redacted.Destinations.SplunkHEC)
+	}
+	if cfg.Destinations.SplunkHEC.Token != "secret-token" {
+		t.Fatal("redactConfig mutated input config")
+	}
+}
+
+func TestAggregateCheckStatus(t *testing.T) {
+	if got := aggregateCheckStatus([]diagnostics.Check{{Status: "ok"}}); got != "ok" {
+		t.Fatalf("ok aggregate = %q", got)
+	}
+	if got := aggregateCheckStatus([]diagnostics.Check{{Status: "ok"}, {Status: "warn"}}); got != "warn" {
+		t.Fatalf("warn aggregate = %q", got)
+	}
+	if got := aggregateCheckStatus([]diagnostics.Check{{Status: "warn"}, {Status: "fail"}}); got != "fail" {
+		t.Fatalf("fail aggregate = %q", got)
+	}
+}
+
+func TestSyntheticEventDestinations(t *testing.T) {
+	event := syntheticEvent("pipeline")
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Destination.Type != "pipeline" || event.Destination.Mode != "local_jsonl" {
+		t.Fatalf("pipeline destination = %#v json=%s", event.Destination, data)
 	}
 }

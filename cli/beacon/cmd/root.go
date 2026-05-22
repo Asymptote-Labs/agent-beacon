@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/cobra/doc"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -28,6 +29,45 @@ Beacon-hosted backend.`,
 	},
 }
 
+var completionCmd = &cobra.Command{
+	Use:   "completion [bash|zsh|fish|powershell]",
+	Short: "Generate shell completion scripts",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		switch args[0] {
+		case "bash":
+			return rootCmd.GenBashCompletion(os.Stdout)
+		case "zsh":
+			return rootCmd.GenZshCompletion(os.Stdout)
+		case "fish":
+			return rootCmd.GenFishCompletion(os.Stdout, true)
+		case "powershell":
+			return rootCmd.GenPowerShellCompletion(os.Stdout)
+		default:
+			return fmt.Errorf("unsupported shell %q", args[0])
+		}
+	},
+}
+
+var docsCmd = &cobra.Command{
+	Use:          "docs --output <dir>",
+	Short:        "Generate command reference markdown",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		output, err := cmd.Flags().GetString("output")
+		if err != nil {
+			return err
+		}
+		if output == "" {
+			return fmt.Errorf("--output is required")
+		}
+		if err := os.MkdirAll(output, 0755); err != nil {
+			return err
+		}
+		return doc.GenMarkdownTree(rootCmd, output)
+	},
+}
+
 // Execute runs the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
@@ -41,4 +81,7 @@ func init() {
 
 	// Add version flag shorthand
 	rootCmd.Flags().BoolP("version", "v", false, "Print the version number")
+	docsCmd.Flags().String("output", "", "Output directory for markdown command docs")
+	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(docsCmd)
 }

@@ -45,6 +45,8 @@ var endpointOpts struct {
 	keepLogs                 bool
 	keepConfig               bool
 	noStart                  bool
+	dryRun                   bool
+	allTargets               bool
 	coworkHeaders            string
 	coworkEndpoint           string
 	coworkResourceAttributes string
@@ -65,6 +67,8 @@ var endpointOpts struct {
 	splunkCAFile             string
 	dashboardAddr            string
 	dashboardOpen            bool
+	includeEventSummaries    bool
+	includeRawEvents         bool
 }
 
 var endpointCmd = &cobra.Command{
@@ -88,11 +92,40 @@ var endpointStatusCmd = &cobra.Command{
 	RunE:         runEndpointStatus,
 }
 
+var endpointDoctorCmd = &cobra.Command{
+	Use:          "doctor",
+	Short:        "Run local endpoint health checks",
+	SilenceUsage: true,
+	RunE:         runEndpointDoctor,
+}
+
+var endpointInventoryCmd = &cobra.Command{
+	Use:          "inventory",
+	Short:        "Show installed, configured, and observed endpoint inventory",
+	SilenceUsage: true,
+	RunE:         runEndpointInventory,
+}
+
 var endpointDiscoverCmd = &cobra.Command{
 	Use:          "discover",
 	Short:        "Discover supported local AI agent runtimes",
 	SilenceUsage: true,
 	RunE:         runEndpointDiscover,
+}
+
+var endpointTestEventCmd = &cobra.Command{
+	Use:          "test-event",
+	Aliases:      []string{"validate-pipeline"},
+	Short:        "Write a synthetic endpoint validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointTestEvent,
+}
+
+var endpointBundleDiagnosticsCmd = &cobra.Command{
+	Use:          "bundle-diagnostics",
+	Short:        "Write a redacted local diagnostics bundle",
+	SilenceUsage: true,
+	RunE:         runEndpointBundleDiagnostics,
 }
 
 var endpointUninstallCmd = &cobra.Command{
@@ -141,9 +174,43 @@ var endpointIntegrationsCmd = &cobra.Command{
 	Short: "Manage admin-configured endpoint integrations",
 }
 
+var endpointIntegrationsValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Validate admin-configured endpoint integrations",
+	SilenceUsage: true,
+	RunE:         runEndpointIntegrationsValidate,
+}
+
 var endpointHooksCmd = &cobra.Command{
 	Use:   "hooks",
 	Short: "Manage endpoint hook integrations",
+}
+
+var endpointConfigCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Inspect and safely update endpoint configuration",
+}
+
+var endpointConfigShowCmd = &cobra.Command{
+	Use:          "show",
+	Short:        "Print endpoint configuration with secrets redacted",
+	SilenceUsage: true,
+	RunE:         runEndpointConfigShow,
+}
+
+var endpointConfigValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Validate endpoint configuration",
+	SilenceUsage: true,
+	RunE:         runEndpointConfigValidate,
+}
+
+var endpointConfigSetRetentionCmd = &cobra.Command{
+	Use:          "set-retention <metadata|redacted|full>",
+	Short:        "Set endpoint content retention mode",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runEndpointConfigSetRetention,
 }
 
 var endpointHooksInstallCmd = &cobra.Command{
@@ -151,6 +218,27 @@ var endpointHooksInstallCmd = &cobra.Command{
 	Short:        "Install endpoint hooks for supported harnesses",
 	SilenceUsage: true,
 	RunE:         runEndpointHooksInstall,
+}
+
+var topLevelDoctorCmd = &cobra.Command{
+	Use:          "doctor",
+	Short:        "Alias for beacon endpoint doctor",
+	SilenceUsage: true,
+	RunE:         runEndpointDoctor,
+}
+
+var topLevelStatusCmd = &cobra.Command{
+	Use:          "status",
+	Short:        "Alias for beacon endpoint status",
+	SilenceUsage: true,
+	RunE:         runEndpointStatus,
+}
+
+var topLevelInventoryCmd = &cobra.Command{
+	Use:          "inventory",
+	Short:        "Alias for beacon endpoint inventory",
+	SilenceUsage: true,
+	RunE:         runEndpointInventory,
 }
 
 var endpointHooksUninstallCmd = &cobra.Command{
@@ -388,10 +476,17 @@ var endpointSumoValidateCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(endpointCmd)
+	rootCmd.AddCommand(topLevelDoctorCmd)
+	rootCmd.AddCommand(topLevelStatusCmd)
+	rootCmd.AddCommand(topLevelInventoryCmd)
 
 	endpointCmd.AddCommand(endpointInstallCmd)
 	endpointCmd.AddCommand(endpointStatusCmd)
+	endpointCmd.AddCommand(endpointDoctorCmd)
+	endpointCmd.AddCommand(endpointInventoryCmd)
 	endpointCmd.AddCommand(endpointDiscoverCmd)
+	endpointCmd.AddCommand(endpointTestEventCmd)
+	endpointCmd.AddCommand(endpointBundleDiagnosticsCmd)
 	endpointCmd.AddCommand(endpointUninstallCmd)
 	endpointCmd.AddCommand(endpointRepairCmd)
 	endpointCmd.AddCommand(endpointDashboardCmd)
@@ -401,6 +496,10 @@ func init() {
 	endpointCmd.AddCommand(endpointSumoCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
+	endpointCmd.AddCommand(endpointConfigCmd)
+	endpointConfigCmd.AddCommand(endpointConfigShowCmd)
+	endpointConfigCmd.AddCommand(endpointConfigValidateCmd)
+	endpointConfigCmd.AddCommand(endpointConfigSetRetentionCmd)
 	endpointWazuhCmd.AddCommand(endpointWazuhPrintConfigCmd)
 	endpointWazuhCmd.AddCommand(endpointWazuhInstallPackCmd)
 	endpointWazuhCmd.AddCommand(endpointWazuhValidateCmd)
@@ -414,6 +513,7 @@ func init() {
 	endpointSumoCmd.AddCommand(endpointSumoPrintConfigCmd)
 	endpointSumoCmd.AddCommand(endpointSumoInstallPackCmd)
 	endpointSumoCmd.AddCommand(endpointSumoValidateCmd)
+	endpointIntegrationsCmd.AddCommand(endpointIntegrationsValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
 	endpointHooksCmd.AddCommand(endpointHooksInstallCmd)
@@ -427,7 +527,7 @@ func init() {
 	endpointOpenClawCmd.AddCommand(endpointOpenClawStatusCmd)
 	endpointOpenClawCmd.AddCommand(endpointOpenClawValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDiscoverCmd, endpointUninstallCmd, endpointRepairCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointConfigSetRetentionCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -440,6 +540,7 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and OpenClaw operational metrics in the runtime JSONL log")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
+	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
 	registerSplunkFlags(endpointInstallCmd)
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
@@ -449,6 +550,7 @@ func init() {
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and OpenClaw operational metrics in the runtime JSONL log")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the launchd service")
+	endpointRepairCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
 	registerSplunkFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
@@ -458,7 +560,21 @@ func init() {
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.dashboardOpen, "open", false, "Open the dashboard in a browser")
 
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print discovery as JSON")
+	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Discover all supported runtime targets")
 	endpointStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
+	endpointDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
+	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
+	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")
+	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
+	topLevelStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
+	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
+	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")
+	endpointTestEventCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print validation stages as JSON")
+	endpointBundleDiagnosticsCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for diagnostics bundle")
+	endpointBundleDiagnosticsCmd.Flags().BoolVar(&endpointOpts.includeEventSummaries, "include-event-summaries", false, "Include redacted event summaries")
+	endpointBundleDiagnosticsCmd.Flags().BoolVar(&endpointOpts.includeRawEvents, "include-raw-events", false, "Include raw runtime JSONL events")
+	endpointIntegrationsValidateCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Validate all supported admin integrations")
+	endpointIntegrationsValidateCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print validation as JSON")
 	endpointWazuhPrintConfigCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointWazuhPrintConfigCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointWazuhPrintConfigCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -523,14 +639,27 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "cursor", "Comma-separated hook harnesses")
 		c.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
 	}
+	endpointHooksInstallCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Target all supported hook harnesses")
+	endpointHooksInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned hook actions without changing files")
+	endpointHooksUninstallCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Target all supported hook harnesses")
+	endpointHooksUninstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned hook actions without changing files")
 	endpointHooksStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
+	endpointHooksStatusCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Show all supported hook harnesses")
 	endpointUninstallCmd.Flags().BoolVar(&endpointOpts.keepLogs, "keep-logs", false, "Keep runtime logs during uninstall")
 	endpointUninstallCmd.Flags().BoolVar(&endpointOpts.keepConfig, "keep-config", false, "Keep harness telemetry configuration during uninstall")
+	endpointUninstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 }
 
 func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
+	if endpointOpts.dryRun {
+		actions := []plannedAction{}
+		for _, name := range hookTargets() {
+			actions = append(actions, plannedAction{Action: "configure_harness", Target: name, Message: "install endpoint hook integration"})
+		}
+		return printPlannedActions(actions)
+	}
 	cfg := loadOrDefaultConfig()
-	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
+	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
 		case "cursor":
 			status, err := endpointhooks.InstallCursor(endpointhooks.CursorOptions{
@@ -594,8 +723,15 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
+	if endpointOpts.dryRun {
+		actions := []plannedAction{}
+		for _, name := range hookTargets() {
+			actions = append(actions, plannedAction{Action: "remove_hook", Target: name, Message: "uninstall endpoint hook integration"})
+		}
+		return printPlannedActions(actions)
+	}
 	cfg := loadOrDefaultConfig()
-	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
+	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
 		case "cursor":
 			status, err := endpointhooks.UninstallCursor(endpointhooks.CursorOptions{
@@ -658,7 +794,7 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
 	statuses := map[string]interface{}{}
-	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
+	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
 		case "cursor":
 			statuses["cursor"] = endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{
@@ -698,7 +834,7 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(statuses)
 	}
-	for _, name := range splitCSV(endpointOpts.hookHarnesses) {
+	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
 		case "cursor":
 			status := statuses["cursor"].(endpointhooks.CursorStatus)
@@ -978,6 +1114,9 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
+	if endpointOpts.dryRun {
+		return printPlannedActions(plannedInstallActions(false))
+	}
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -1080,28 +1219,13 @@ func runEndpointDiscover(cmd *cobra.Command, args []string) error {
 }
 
 func writeValidationEvent(cfg endpointconfig.Config, destination string) (string, error) {
-	message := "Beacon endpoint Wazuh validation event"
-	mode := "localfile"
-	if destination == "datadog" {
-		message = "Beacon endpoint datadog validation event"
-		mode = "agent_file"
-	} else if destination == "sumo" {
-		message = "Beacon endpoint Sumo validation event"
-		mode = "http_source_jsonl"
-	}
-	event := schema.NewEvent(schema.NewEventOptions{
-		Action:       "agent.detected",
-		Category:     "validation",
-		Severity:     schema.SeverityInfo,
-		AgentVersion: version.GetVersion(),
-		Harness:      schema.HarnessInfo{Name: "test_harness", Version: "test"},
-		Message:      message,
-	})
-	event.Destination = &schema.DestinationInfo{Type: destination, Mode: mode, Status: "configured"}
-	return writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode})
+	return writer.AppendEvent(syntheticEvent(destination), writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode})
 }
 
 func runEndpointUninstall(cmd *cobra.Command, args []string) error {
+	if endpointOpts.dryRun {
+		return printPlannedActions(plannedUninstallActions())
+	}
 	if err := lifecycle.Uninstall(lifecycle.UninstallOptions{UserMode: endpointUserMode(), LogPath: endpointOpts.logPath, KeepLogs: endpointOpts.keepLogs, KeepConfig: endpointOpts.keepConfig}); err != nil {
 		return err
 	}
@@ -1110,6 +1234,9 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointRepair(cmd *cobra.Command, args []string) error {
+	if endpointOpts.dryRun {
+		return printPlannedActions(plannedInstallActions(true))
+	}
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
