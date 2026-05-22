@@ -51,7 +51,11 @@ Beacon captures supported agent harness activity locally and writes normalized
 endpoint events that teams can inspect in place or forward into customer-managed
 security pipelines.
 
-### Coding Agents / Runtimes
+### Agent Runtimes
+
+Agent Beacon supports the most popular enterprise coding agent harnesses (e.g.
+Claude Code, Codex, Cursor, etc.) and knowledge worker agent harnesses (e.g.
+Claude Cowork, OpenClaw).
 
 | Agent Harness | Support path |
 | --- | --- |
@@ -68,7 +72,10 @@ security pipelines.
 
 ### SIEM / Output Destinations
 
-| SIEM / output destination | Support path |
+Agent Beacon emits agent harness telemetry logs to all the major
+enterprise-grade SIEMs.
+
+| SIEMs | Support path |
 | --- | --- |
 | Local JSONL | Default endpoint log and local dashboard source |
 | Wazuh | Localfile configuration and Beacon Wazuh content pack |
@@ -79,6 +86,9 @@ security pipelines.
 | Customer-managed SIEM pipelines | Forwarding from local Beacon JSONL under customer control |
 
 ### MDM Deployment
+
+Agent Beacon is designed for Security and IT teams to deploy and validate
+through standard MDM workflows.
 
 | MDM platform | Support path |
 | --- | --- |
