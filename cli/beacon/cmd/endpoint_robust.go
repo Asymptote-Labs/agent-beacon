@@ -100,19 +100,23 @@ func runEndpointDoctor(cmd *cobra.Command, args []string) error {
 	if result.Status == "ok" {
 		fmt.Println("All endpoint health checks passed.")
 	}
+	if result.Status == "fail" {
+		return fmt.Errorf("endpoint health checks failed")
+	}
 	return nil
 }
 
 func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
+	effectiveCfg := loadConfigForMode(status.RuntimeLog.EffectiveUserMode, status.LogPath)
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,
 		ConfigPath:        status.ConfigPath,
 		LogPath:           status.LogPath,
-		ContentRetention:  loadOrDefaultConfig().ContentRetention,
+		ContentRetention:  effectiveCfg.ContentRetention,
 		Harnesses:         status.Harnesses,
-		Hooks:             hookStatuses(hookTargets()),
+		Hooks:             hookStatusesWithConfig(hookTargets(), effectiveCfg),
 		Destinations:      status.Destinations,
 		LastEventObserved: status.LastEvent != "",
 	}
@@ -354,6 +358,10 @@ func hookTargets() []string {
 
 func hookStatuses(targets []string) map[string]hookTargetResult {
 	cfg := loadOrDefaultConfig()
+	return hookStatusesWithConfig(targets, cfg)
+}
+
+func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[string]hookTargetResult {
 	statuses := map[string]hookTargetResult{}
 	for _, name := range targets {
 		switch strings.TrimSpace(name) {

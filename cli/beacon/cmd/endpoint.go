@@ -1284,6 +1284,19 @@ func loadOrDefaultConfig() endpointconfig.Config {
 	return endpointconfig.Default(userMode, logPath)
 }
 
+func loadConfigForMode(userMode bool, logPath string) endpointconfig.Config {
+	if cfg, err := endpointconfig.Load(userMode); err == nil {
+		if logPath != "" {
+			cfg.LogPath = logPath
+		}
+		return cfg
+	}
+	if logPath == "" {
+		logPath = writer.DefaultPath(userMode)
+	}
+	return endpointconfig.Default(userMode, logPath)
+}
+
 func endpointUserMode() bool {
 	return endpointOpts.userMode && !endpointOpts.systemMode
 }
