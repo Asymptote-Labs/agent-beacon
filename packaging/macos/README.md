@@ -84,6 +84,22 @@ loads the local collector LaunchDaemon. The shared endpoint wrapper installs
 system-level configuration and writes logs to
 `/var/log/beacon-agent/runtime.jsonl`.
 
+For Sumo Logic, keep Beacon as the local JSONL producer and deploy a
+customer-managed shipper that tails `/var/log/beacon-agent/runtime.jsonl` into a
+Hosted Collector HTTP Logs & Metrics Source. Generate Beacon's Sumo content pack
+for setup guidance, a one-shot smoke test, and sample events:
+
+```bash
+/opt/beacon/bin/beacon endpoint sumo install-pack --system --output ./beacon-sumo-pack
+/opt/beacon/bin/beacon endpoint sumo validate --system
+```
+
+Recommended Sumo metadata is `_sourceCategory=security/agentbeacon`, source
+name `agentbeacon`, and fields
+`product=agentbeacon,telemetry=ai_agent,env=prod`. For production forwarding,
+use a tailing shipper that checkpoints offsets, batches JSONL records, sends
+gzip-compressed POST payloads, and avoids repeatedly uploading the whole file.
+
 Environment variables take precedence, followed by MDM script parameters:
 
 ```text

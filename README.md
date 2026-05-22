@@ -40,9 +40,9 @@ events your team can inspect and retain locally.
 
 Beacon is built to be easy to deploy for Security and IT teams through
 [MDM deployment](https://docs.asymptotelabs.ai/cli/security-it-teams) and to
-connect to Wazuh, Elastic, Datadog, Splunk HEC, or customer-managed SIEM
-pipelines, while remaining visibility-first and local-first during normal
-endpoint collection.
+connect to Wazuh, Elastic, Datadog, Sumo Logic, Splunk HEC, or
+customer-managed SIEM pipelines, while remaining visibility-first and
+local-first during normal endpoint collection.
 
 ## Supported Surfaces
 
@@ -73,6 +73,7 @@ security pipelines.
 | Wazuh | Localfile configuration and Beacon Wazuh content pack |
 | Elastic | Filebeat or Elastic Agent content pack over local JSONL |
 | Datadog | Datadog Agent custom log collection over local JSONL |
+| Sumo Logic | HTTP Logs & Metrics Source content pack over local JSONL |
 | Splunk HEC | Optional endpoint forwarding during install or repair |
 | Customer-managed SIEM pipelines | Forwarding from local Beacon JSONL under customer control |
 
@@ -97,7 +98,7 @@ leaving forwarding under customer control.
 - **Beacon endpoint layer:** Local processing normalizes events, applies
   retention and redaction settings, and writes durable endpoint telemetry.
 - **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
-  or forward records into Wazuh, Elastic, Datadog, Splunk HEC, and
+  or forward records into Wazuh, Elastic, Datadog, Sumo Logic, Splunk HEC, and
   customer-managed SIEM pipelines.
 
 Beacon filters generic process and runtime metrics, such as Node.js event loop,

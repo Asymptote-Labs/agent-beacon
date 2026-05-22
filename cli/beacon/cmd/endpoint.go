@@ -23,6 +23,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sumo"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/wazuh"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
@@ -128,6 +129,11 @@ var endpointElasticCmd = &cobra.Command{
 var endpointDatadogCmd = &cobra.Command{
 	Use:   "datadog",
 	Short: "Manage Datadog integration content",
+}
+
+var endpointSumoCmd = &cobra.Command{
+	Use:   "sumo",
+	Short: "Manage Sumo Logic integration content",
 }
 
 var endpointIntegrationsCmd = &cobra.Command{
@@ -357,6 +363,29 @@ var endpointDatadogValidateCmd = &cobra.Command{
 	RunE:         runEndpointDatadogValidate,
 }
 
+var endpointSumoPrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print a Sumo HTTP Source smoke-test uploader for Beacon endpoint events",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		fmt.Print(sumo.UploadSmokeTest(cfg.LogPath))
+	},
+}
+
+var endpointSumoInstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write Sumo Logic HTTP Source forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointSumoInstallPack,
+}
+
+var endpointSumoValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe a Sumo Logic validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointSumoValidate,
+}
+
 func init() {
 	rootCmd.AddCommand(endpointCmd)
 
@@ -369,6 +398,7 @@ func init() {
 	endpointCmd.AddCommand(endpointWazuhCmd)
 	endpointCmd.AddCommand(endpointElasticCmd)
 	endpointCmd.AddCommand(endpointDatadogCmd)
+	endpointCmd.AddCommand(endpointSumoCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
 	endpointWazuhCmd.AddCommand(endpointWazuhPrintConfigCmd)
@@ -381,6 +411,9 @@ func init() {
 	endpointDatadogCmd.AddCommand(endpointDatadogPrintConfigCmd)
 	endpointDatadogCmd.AddCommand(endpointDatadogInstallPackCmd)
 	endpointDatadogCmd.AddCommand(endpointDatadogValidateCmd)
+	endpointSumoCmd.AddCommand(endpointSumoPrintConfigCmd)
+	endpointSumoCmd.AddCommand(endpointSumoInstallPackCmd)
+	endpointSumoCmd.AddCommand(endpointSumoValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
 	endpointHooksCmd.AddCommand(endpointHooksInstallCmd)
@@ -450,6 +483,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointDatadogInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Datadog content pack")
+	for _, c := range []*cobra.Command{endpointSumoPrintConfigCmd, endpointSumoInstallPackCmd, endpointSumoValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointSumoInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Sumo Logic content pack")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -722,6 +761,31 @@ func runEndpointDatadogValidate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Validation event written to %s\n", path)
 	fmt.Println("Expected Datadog fields: service=beacon-endpoint-agent vendor=beacon product=endpoint-agent")
 	fmt.Println(`Expected validation query: service:beacon-endpoint-agent "Beacon endpoint datadog validation event"`)
+	return nil
+}
+
+func runEndpointSumoInstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = sumo.DefaultOutputDir
+	}
+	if err := sumo.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("Sumo Logic content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointSumoValidate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "sumo")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected Sumo fields: _sourceCategory=security/agentbeacon product=agentbeacon telemetry=ai_agent")
+	fmt.Println(`Expected validation query: _sourceCategory=security/agentbeacon "Beacon endpoint Sumo validation event"`)
 	return nil
 }
 
@@ -1021,6 +1085,9 @@ func writeValidationEvent(cfg endpointconfig.Config, destination string) (string
 	if destination == "datadog" {
 		message = "Beacon endpoint datadog validation event"
 		mode = "agent_file"
+	} else if destination == "sumo" {
+		message = "Beacon endpoint Sumo validation event"
+		mode = "http_source_jsonl"
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
 		Action:       "agent.detected",

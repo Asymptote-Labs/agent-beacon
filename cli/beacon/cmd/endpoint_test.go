@@ -133,6 +133,30 @@ func TestEndpointDatadogCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointSumoCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"sumo", "print-config"},
+		{"sumo", "install-pack"},
+		{"sumo", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("sumo command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("sumo command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointSumoInstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("sumo install-pack command missing --output flag")
+	}
+}
+
 func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")

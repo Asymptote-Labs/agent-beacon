@@ -60,6 +60,19 @@ that may need review.
 ./beacon endpoint wazuh validate
 ```
 
+## Sumo Logic
+
+```bash
+./beacon endpoint sumo print-config
+./beacon endpoint sumo install-pack --output ./beacon-sumo-pack
+./beacon endpoint sumo validate
+```
+
+The Sumo pack keeps Beacon as a local JSONL producer and documents forwarding
+`runtime.jsonl` into a customer-managed Sumo Hosted Collector HTTP Logs &
+Metrics Source. Use a tailing forwarder for production so offsets are
+checkpointed and the whole file is not repeatedly uploaded.
+
 ## Optional Integrations
 
 ```bash

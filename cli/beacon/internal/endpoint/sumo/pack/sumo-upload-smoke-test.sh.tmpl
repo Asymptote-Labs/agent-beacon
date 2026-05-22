@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
+SUMO_SOURCE_CATEGORY="${SUMO_SOURCE_CATEGORY:-security/agentbeacon}"
+SUMO_FIELDS="${SUMO_FIELDS:-product=agentbeacon,telemetry=ai_agent,env=prod}"
+
+if [ -z "${SUMO_URL:-}" ]; then
+  echo "SUMO_URL is required. Use the HTTP Logs & Metrics Source URL from Sumo Logic." >&2
+  exit 2
+fi
+
+if [ ! -r "$BEACON_LOG" ]; then
+  echo "Beacon runtime log is not readable: $BEACON_LOG" >&2
+  exit 2
+fi
+
+args="-X POST -H X-Sumo-Category: $SUMO_SOURCE_CATEGORY -H X-Sumo-Fields: $SUMO_FIELDS -T $BEACON_LOG"
+
+if [ -n "${SUMO_TOKEN:-}" ]; then
+  # Use Sumo's Auth Header source URL with a separate token when available.
+  curl -X POST \
+    -H "x-sumo-token: $SUMO_TOKEN" \
+    -H "X-Sumo-Category: $SUMO_SOURCE_CATEGORY" \
+    -H "X-Sumo-Fields: $SUMO_FIELDS" \
+    -T "$BEACON_LOG" \
+    "$SUMO_URL"
+else
+  curl -X POST \
+    -H "X-Sumo-Category: $SUMO_SOURCE_CATEGORY" \
+    -H "X-Sumo-Fields: $SUMO_FIELDS" \
+    -T "$BEACON_LOG" \
+    "$SUMO_URL"
+fi
