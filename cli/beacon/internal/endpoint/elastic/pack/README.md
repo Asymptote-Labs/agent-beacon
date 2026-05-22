@@ -76,7 +76,7 @@ Filebeat needs cluster `monitor` plus `auto_configure`, `create_doc`, and
 Convert the sample JSONL into a simulate request and post it to Elasticsearch:
 
 ```bash
-awk '{print "{\"docs\":[{\"_source\":" $0 "}]}"}' sample-event.jsonl | \
+awk 'BEGIN{printf "{\"docs\":["} NR>1{printf ","} {printf "{\"_source\":" $0 "}"} END{print "]}"}' sample-event.jsonl | \
   curl -X POST "$ES_HOSTS/_ingest/pipeline/beacon-endpoint/_simulate" \
     -H 'Content-Type: application/json' \
     --data-binary @-
