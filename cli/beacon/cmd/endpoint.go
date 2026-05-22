@@ -527,7 +527,7 @@ func init() {
 	endpointOpenClawCmd.AddCommand(endpointOpenClawStatusCmd)
 	endpointOpenClawCmd.AddCommand(endpointOpenClawValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointConfigSetRetentionCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointConfigSetRetentionCmd, endpointIntegrationsValidateCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
