@@ -33,20 +33,21 @@
 Beacon is [Asymptote's open-source endpoint agent](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for security and IT teams that
 need visibility into local AI agent activity.
 
-It runs locally, captures supported activity from local agent harnesses like
-Claude Code, Codex CLI, Gemini CLI, Grok Build, OpenCode, Devin, Factory Droid, Claude
-Cowork, OpenClaw Gateway, and Cursor, then normalizes that activity into endpoint
-events your team can inspect and retain locally.
+It runs locally, captures all agent activity (e.g. prompts, tool use, file edits, etc.) from
+[all the major local agent harnesses](#coding-agents--runtimes), then
+normalizes that activity into endpoint events your team can inspect and retain
+locally.
 
 Beacon is built to be easy to deploy for Security and IT teams through
-[MDM deployment](https://docs.asymptotelabs.ai/cli/security-it-teams) and to
-connect to Wazuh, Elastic, Datadog, Sumo Logic, Splunk HEC, or
-customer-managed SIEM pipelines, while remaining visibility-first and
-local-first during normal endpoint collection.
+[MDM deployment](#mdm-deployment) and to
+emit agent harness telemetry logs to
+[all the major enterprise-grade SIEMs](#siem--output-destinations).
+
+Learn more in the [Agent Beacon Documentation](https://docs.asymptotelabs.ai/cli).
 
 ## Supported Surfaces
 
-Beacon captures supported coding-agent activity locally and writes normalized
+Beacon captures supported agent harness activity locally and writes normalized
 endpoint events that teams can inspect in place or forward into customer-managed
 security pipelines.
 
@@ -98,8 +99,7 @@ leaving forwarding under customer control.
 - **Beacon endpoint layer:** Local processing normalizes events, applies
   retention and redaction settings, and writes durable endpoint telemetry.
 - **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
-  or forward records into Wazuh, Elastic, Datadog, Sumo Logic, Splunk HEC, and
-  customer-managed SIEM pipelines.
+  or forward records into all the major enterprise-grade SIEMs.
 
 Beacon filters generic process and runtime metrics, such as Node.js event loop,
 V8 heap, process CPU, and process memory telemetry, out of the local endpoint
