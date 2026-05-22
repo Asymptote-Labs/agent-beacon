@@ -117,6 +117,15 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		LastEventObserved: status.LastEvent != "",
 	}
 	if endpointOpts.jsonOutput {
+		if !endpointOpts.allTargets {
+			filtered := []harness.Harness{}
+			for _, h := range result.Harnesses {
+				if h.Detected {
+					filtered = append(filtered, h)
+				}
+			}
+			result.Harnesses = filtered
+		}
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}
 	fmt.Printf("Config: %s\n", result.ConfigPath)
