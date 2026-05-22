@@ -138,8 +138,22 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 
 func runEndpointTestEvent(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
-	stages := []validationStage{
-		stageFromCheck(checkLogWritable(cfg)),
+	writableStage := stageFromCheck(checkLogWritable(cfg))
+	stages := []validationStage{writableStage}
+	if writableStage.Status != "ok" {
+		if endpointOpts.jsonOutput {
+			_ = json.NewEncoder(os.Stdout).Encode(stages)
+		} else {
+			fmt.Printf("%s: %s", writableStage.Name, writableStage.Status)
+			if writableStage.Target != "" {
+				fmt.Printf(" target=%s", writableStage.Target)
+			}
+			if writableStage.Message != "" {
+				fmt.Printf(" (%s)", writableStage.Message)
+			}
+			fmt.Println()
+		}
+		return fmt.Errorf("runtime log is not writable: %s", writableStage.Evidence)
 	}
 	path, err := writeValidationEvent(cfg, "pipeline")
 	if err != nil {
@@ -176,6 +190,7 @@ func runEndpointBundleDiagnostics(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
+	status.LastEvent = redactLastEvent(status.LastEvent)
 	if err := writeJSONFile(filepath.Join(out, "status.json"), status); err != nil {
 		return err
 	}
@@ -422,6 +437,13 @@ func checkLogWritable(cfg endpointconfig.Config) diagnostics.Check {
 
 func stageFromCheck(check diagnostics.Check) validationStage {
 	return validationStage{Name: check.Name, Target: check.Target, Status: check.Status, Severity: check.Severity, Message: check.Message, Evidence: check.Evidence}
+}
+
+func redactLastEvent(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return "[present]"
 }
 
 func redactConfig(cfg endpointconfig.Config) endpointconfig.Config {

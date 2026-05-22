@@ -1183,9 +1183,21 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 func runEndpointDiscover(cmd *cobra.Command, args []string) error {
 	discovered := harness.DiscoverAll()
 	if endpointOpts.jsonOutput {
+		if !endpointOpts.allTargets {
+			filtered := []harness.Harness{}
+			for _, h := range discovered {
+				if h.Detected {
+					filtered = append(filtered, h)
+				}
+			}
+			return json.NewEncoder(os.Stdout).Encode(filtered)
+		}
 		return json.NewEncoder(os.Stdout).Encode(discovered)
 	}
 	for _, h := range discovered {
+		if !endpointOpts.allTargets && !h.Detected {
+			continue
+		}
 		state := "not detected"
 		if h.Detected {
 			state = "detected"
