@@ -34,7 +34,7 @@ Beacon is [Asymptote's open-source endpoint agent](https://justindsouza.substack
 need visibility into local AI agent activity.
 
 It runs locally, captures all agent activity (e.g. prompts, tool use, file edits, etc.) from
-[all the major local agent harnesses](#coding-agents--runtimes), then
+all the [major local agent harnesses](#agent-runtimes), then
 normalizes that activity into endpoint events your team can inspect and retain
 locally.
 
