@@ -260,6 +260,7 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 	}
 	cfg := loadOrDefaultConfig()
 	results := map[string]validationStage{}
+	broken := []string{}
 	for _, target := range targets {
 		switch target {
 		case "claude-cowork":
@@ -270,6 +271,9 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 				stage.Severity = "info"
 				stage.Evidence = "last_event_observed"
 			}
+			if stage.Status == "broken" {
+				broken = append(broken, target)
+			}
 			results[target] = stage
 		case "openclaw":
 			status := openclaw.GetStatus(cfg.LogPath)
@@ -279,11 +283,20 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 				stage.Severity = "info"
 				stage.Evidence = "last_event_observed"
 			}
+			if stage.Status == "broken" {
+				broken = append(broken, target)
+			}
 			results[target] = stage
 		}
 	}
 	if endpointOpts.jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(results)
+		if err := json.NewEncoder(os.Stdout).Encode(results); err != nil {
+			return err
+		}
+		if len(broken) > 0 {
+			return fmt.Errorf("integration validation failed for %s", strings.Join(broken, ", "))
+		}
+		return nil
 	}
 	for _, target := range targets {
 		stage := results[target]
@@ -292,6 +305,9 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 			fmt.Printf(" (%s)", stage.Message)
 		}
 		fmt.Println()
+	}
+	if len(broken) > 0 {
+		return fmt.Errorf("integration validation failed for %s", strings.Join(broken, ", "))
 	}
 	return nil
 }

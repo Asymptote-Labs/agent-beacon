@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -393,6 +395,63 @@ func TestAggregateCheckStatus(t *testing.T) {
 	}
 }
 
+func TestEndpointIntegrationsValidateAllReturnsErrorForBrokenText(t *testing.T) {
+	oldAllTargets := endpointOpts.allTargets
+	oldJSONOutput := endpointOpts.jsonOutput
+	oldLogPath := endpointOpts.logPath
+	endpointOpts.allTargets = true
+	endpointOpts.jsonOutput = false
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "missing.jsonl")
+	t.Cleanup(func() {
+		endpointOpts.allTargets = oldAllTargets
+		endpointOpts.jsonOutput = oldJSONOutput
+		endpointOpts.logPath = oldLogPath
+	})
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointIntegrationsValidate(endpointIntegrationsValidateCmd, nil)
+	})
+	if err == nil {
+		t.Fatal("runEndpointIntegrationsValidate returned nil for broken integrations")
+	}
+	if !strings.Contains(output, "claude-cowork: broken") {
+		t.Fatalf("text output missing claude-cowork broken status: %s", output)
+	}
+	if !strings.Contains(output, "openclaw: broken") {
+		t.Fatalf("text output missing openclaw broken status: %s", output)
+	}
+}
+
+func TestEndpointIntegrationsValidateAllReturnsErrorForBrokenJSON(t *testing.T) {
+	oldAllTargets := endpointOpts.allTargets
+	oldJSONOutput := endpointOpts.jsonOutput
+	oldLogPath := endpointOpts.logPath
+	endpointOpts.allTargets = true
+	endpointOpts.jsonOutput = true
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "missing.jsonl")
+	t.Cleanup(func() {
+		endpointOpts.allTargets = oldAllTargets
+		endpointOpts.jsonOutput = oldJSONOutput
+		endpointOpts.logPath = oldLogPath
+	})
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointIntegrationsValidate(endpointIntegrationsValidateCmd, nil)
+	})
+	if err == nil {
+		t.Fatal("runEndpointIntegrationsValidate returned nil for broken integrations")
+	}
+	var results map[string]validationStage
+	if err := json.Unmarshal([]byte(output), &results); err != nil {
+		t.Fatalf("json output did not decode: %v output=%s", err, output)
+	}
+	for _, target := range []string{"claude-cowork", "openclaw"} {
+		if got := results[target].Status; got != "broken" {
+			t.Fatalf("%s status = %q, want broken", target, got)
+		}
+	}
+}
+
 func TestSyntheticEventDestinations(t *testing.T) {
 	event := syntheticEvent("pipeline")
 	data, err := json.Marshal(event)
@@ -402,4 +461,27 @@ func TestSyntheticEventDestinations(t *testing.T) {
 	if event.Destination.Type != "pipeline" || event.Destination.Mode != "local_jsonl" {
 		t.Fatalf("pipeline destination = %#v json=%s", event.Destination, data)
 	}
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	oldStdout := os.Stdout
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writeEnd
+	runErr := fn()
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = oldStdout
+	output, err := io.ReadAll(readEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(output), runErr
 }
