@@ -15,8 +15,6 @@ if [ ! -r "$BEACON_LOG" ]; then
   exit 2
 fi
 
-args="-X POST -H X-Sumo-Category: $SUMO_SOURCE_CATEGORY -H X-Sumo-Fields: $SUMO_FIELDS -T $BEACON_LOG"
-
 if [ -n "${SUMO_TOKEN:-}" ]; then
   # Use Sumo's Auth Header source URL with a separate token when available.
   curl -X POST \
