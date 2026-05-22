@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -170,6 +171,9 @@ func shouldDropMetric(resourceAttrs map[string]interface{}, name string, include
 	if shouldDropCodexMetric(resourceAttrs, name) {
 		return true
 	}
+	if shouldDropOpenClawMetric(resourceAttrs, name, includeRuntimeMetrics) {
+		return true
+	}
 	if !includeRuntimeMetrics && shouldDropRuntimeMetric(name) {
 		return true
 	}
@@ -201,6 +205,52 @@ func shouldDropCodexMetric(resourceAttrs map[string]interface{}, name string) bo
 	}
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	return strings.HasPrefix(normalized, "codex.")
+}
+
+func shouldDropOpenClawMetric(resourceAttrs map[string]interface{}, name string, includeRuntimeMetrics bool) bool {
+	if includeRuntimeMetrics {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return false
+	}
+	if harnessName(resourceAttrs, name) != "openclaw_gateway" {
+		return false
+	}
+	if slices.Contains(openClawKeptMetricNames, normalized) {
+		return false
+	}
+	if slices.Contains(openClawDroppedMetricNames, normalized) {
+		return true
+	}
+	for _, prefix := range openClawDroppedMetricPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+var openClawKeptMetricNames = []string{
+	"gen_ai.client.token.usage",
+	"openclaw.context.tokens",
+	"openclaw.tokens",
+}
+
+var openClawDroppedMetricNames = []string{
+	"openclaw.harness.duration_ms",
+	"openclaw.run.duration_ms",
+	"openclaw.session.state",
+	"openclaw.tool.execution.duration_ms",
+}
+
+var openClawDroppedMetricPrefixes = []string{
+	"openclaw.liveness.",
+	"openclaw.memory.",
+	"openclaw.queue.",
+	"openclaw.session.recovery.",
+	"openclaw.telemetry.exporter.",
 }
 
 func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) beaconEvent {

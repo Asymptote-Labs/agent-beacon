@@ -284,6 +284,103 @@ func TestConsumeMetricsIncludesRuntimeMetricsWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestConsumeMetricsDropsOpenClawOperationalMetricsByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "openclaw-gateway")
+	sm := rm.ScopeMetrics().AppendEmpty()
+	for _, name := range []string{
+		"gen_ai.client.token.usage",
+		"openclaw.context.tokens",
+		"openclaw.harness.duration_ms",
+		"openclaw.liveness.cpu_core_ratio",
+		"openclaw.memory.rss_bytes",
+		"openclaw.queue.depth",
+		"openclaw.session.recovery.completed",
+		"openclaw.session.state",
+		"openclaw.telemetry.exporter.events",
+		"openclaw.tool.execution.duration_ms",
+		"openclaw.tokens",
+	} {
+		metric := sm.Metrics().AppendEmpty()
+		metric.SetName(name)
+		metric.SetEmptySum().DataPoints().AppendEmpty().SetIntValue(1)
+	}
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	text := strings.TrimSpace(string(data))
+	for _, dropped := range []string{
+		"openclaw.harness.duration_ms",
+		"openclaw.liveness.cpu_core_ratio",
+		"openclaw.memory.rss_bytes",
+		"openclaw.queue.depth",
+		"openclaw.session.recovery.completed",
+		"openclaw.session.state",
+		"openclaw.telemetry.exporter.events",
+		"openclaw.tool.execution.duration_ms",
+	} {
+		if strings.Contains(text, dropped) {
+			t.Fatalf("OpenClaw operational metric %q should have been dropped, wrote: %s", dropped, text)
+		}
+	}
+	for _, kept := range []string{"gen_ai.client.token.usage", "openclaw.context.tokens", "openclaw.tokens"} {
+		if !strings.Contains(text, kept) {
+			t.Fatalf("OpenClaw token metric %q should have been kept, wrote: %s", kept, text)
+		}
+	}
+}
+
+func TestConsumeMetricsIncludesOpenClawOperationalMetricsWhenConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:                  path,
+		MaxEventBytes:         defaultMaxEventBytes,
+		RotateBytes:           defaultRotateBytes,
+		RedactSecrets:         true,
+		ContentRetention:      "metadata",
+		IncludeRuntimeMetrics: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "openclaw-gateway")
+	metric := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("openclaw.memory.rss_bytes")
+	metric.SetEmptySum().DataPoints().AppendEmpty().SetIntValue(1)
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if !strings.Contains(string(data), "openclaw.memory.rss_bytes") {
+		t.Fatalf("OpenClaw operational metric should have been kept: %s", string(data))
+	}
+}
+
 func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
