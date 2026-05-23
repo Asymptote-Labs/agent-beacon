@@ -221,10 +221,7 @@ func GetEvent(logPath, id string) (EventResult, error) {
 }
 
 func ListFilters(query Query) (FilterValuesResult, error) {
-	if query.Limit == 0 {
-		query.Limit = 2000
-	}
-	result, err := read(query)
+	result, err := readAll(query)
 	if err != nil {
 		return FilterValuesResult{}, err
 	}
@@ -294,6 +291,33 @@ func InspectLog(logPath string) (sampledEvents, malformedLines int, archives []s
 	}
 	sort.Strings(archives)
 	return len(result.Events), result.MalformedLines, archives, nil
+}
+
+func readAll(query Query) (dashboard.EventResult, error) {
+	if query.LogPath == "" {
+		return dashboard.EventResult{}, fmt.Errorf("runtime log path is required")
+	}
+	return dashboard.ReadEvents(query.LogPath, dashboard.EventQuery{
+		NoLimit:    true,
+		Since:      query.Since,
+		Until:      query.Until,
+		Q:          query.Q,
+		Harness:    query.Harness,
+		Model:      query.Model,
+		Action:     query.Action,
+		Severity:   query.Severity,
+		Category:   query.Category,
+		Repository: query.Repository,
+		Session:    query.Session,
+		File:       query.File,
+		Command:    query.Command,
+		MCP:        query.MCP,
+		Approval:   query.Approval,
+		Decision:   query.Decision,
+		Policy:     query.Policy,
+		Review:     query.Review,
+		WazuhLevel: query.WazuhLevel,
+	})
 }
 
 func read(query Query) (dashboard.EventResult, error) {

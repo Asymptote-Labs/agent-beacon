@@ -31,6 +31,7 @@ type EventRecord struct {
 
 type EventQuery struct {
 	Limit      int
+	NoLimit    bool
 	Since      time.Time
 	Until      time.Time
 	Q          string
@@ -121,14 +122,16 @@ func readEventsFromSource(source eventSource, query EventQuery, result *EventRes
 		}
 		result.TotalMatched++
 		result.Events = append(result.Events, record)
-		sort.SliceStable(result.Events, func(i, j int) bool {
-			if result.Events[i].Parsed.Equal(result.Events[j].Parsed) {
-				return result.Events[i].ID > result.Events[j].ID
+		if !query.NoLimit {
+			sort.SliceStable(result.Events, func(i, j int) bool {
+				if result.Events[i].Parsed.Equal(result.Events[j].Parsed) {
+					return result.Events[i].ID > result.Events[j].ID
+				}
+				return result.Events[i].Parsed.After(result.Events[j].Parsed)
+			})
+			if len(result.Events) > limit {
+				result.Events = result.Events[:limit]
 			}
-			return result.Events[i].Parsed.After(result.Events[j].Parsed)
-		})
-		if len(result.Events) > limit {
-			result.Events = result.Events[:limit]
 		}
 	}
 	if err := scanner.Err(); err != nil {
