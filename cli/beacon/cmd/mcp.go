@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,10 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/activity"
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpserver"
 )
 
@@ -92,7 +89,7 @@ func runMCPDoctor(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	runtimeLog := resolveMCPRuntimeLog()
-	cfg := loadMCPConfig(runtimeLog.EffectiveUserMode, runtimeLog.EffectiveLogPath)
+	cfg := loadConfigForMode(runtimeLog.EffectiveUserMode, runtimeLog.EffectiveLogPath)
 	fmt.Println("Beacon MCP doctor")
 	fmt.Println()
 	fmt.Printf("Transport: %s\n", normalizedTransport())
@@ -112,15 +109,15 @@ func runMCPDoctor(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Runtime log warning: %s\n", runtimeLog.Warning)
 	}
 	fmt.Printf("Content retention: %s\n", cfg.ContentRetention)
+	if _, statErr := os.Stat(runtimeLog.EffectiveLogPath); statErr != nil && os.IsNotExist(statErr) {
+		fmt.Println("Runtime log check: no log file yet")
+		fmt.Println("Beacon MCP can still start, but activity answers will be empty until endpoint telemetry writes events.")
+	}
 	sampled, malformed, archives, err := activity.InspectLog(runtimeLog.EffectiveLogPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("Runtime log check: no log file yet")
-			fmt.Println("Beacon MCP can still start, but activity answers will be empty until endpoint telemetry writes events.")
-		} else {
-			return err
-		}
-	} else {
+		return err
+	}
+	if _, statErr := os.Stat(runtimeLog.EffectiveLogPath); statErr == nil {
 		fmt.Println("Runtime log check: ok")
 	}
 	fmt.Printf("Sampled events: %d\n", sampled)
@@ -148,19 +145,6 @@ func runMCPDoctor(cmd *cobra.Command, args []string) error {
 
 func resolveMCPRuntimeLog() lifecycle.RuntimeLogSource {
 	return lifecycle.ResolveRuntimeLog(mcpUserMode(), mcpOpts.logPath)
-}
-
-func loadMCPConfig(userMode bool, logPath string) endpointconfig.Config {
-	if cfg, err := endpointconfig.Load(userMode); err == nil {
-		if logPath != "" {
-			cfg.LogPath = logPath
-		}
-		return cfg
-	}
-	if logPath == "" {
-		logPath = writer.DefaultPath(userMode)
-	}
-	return endpointconfig.Default(userMode, logPath)
 }
 
 func mcpUserMode() bool {
