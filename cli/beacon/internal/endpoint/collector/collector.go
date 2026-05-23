@@ -144,6 +144,7 @@ exporters:
     path: %q
     max_event_bytes: 65536
     rotate_bytes: 10485760
+    rotate_archives: 5
     redact_secrets: true
     content_retention: %q
 %s

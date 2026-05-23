@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,16 @@ func TestDefaultConfigUsesFullRetention(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigUsesBoundedRotation(t *testing.T) {
+	cfg := createDefaultConfig()
+	if cfg.RotateBytes != defaultRotateBytes {
+		t.Fatalf("RotateBytes = %d, want %d", cfg.RotateBytes, defaultRotateBytes)
+	}
+	if cfg.RotateArchives != defaultRotateArchives {
+		t.Fatalf("RotateArchives = %d, want %d", cfg.RotateArchives, defaultRotateArchives)
+	}
+}
+
 func TestNewExporterDefaultsEmptyRetentionToFull(t *testing.T) {
 	cfg := &Config{
 		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
@@ -46,6 +57,62 @@ func TestNewExporterDefaultsEmptyRetentionToFull(t *testing.T) {
 	}
 	if exp.cfg.ContentRetention != "full" {
 		t.Fatalf("ContentRetention = %q, want full", exp.cfg.ContentRetention)
+	}
+}
+
+func TestNewExporterNormalizesRotationDefaults(t *testing.T) {
+	cfg := &Config{
+		Path:           filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes:  defaultMaxEventBytes,
+		RotateBytes:    -1,
+		RotateArchives: -1,
+		RedactSecrets:  true,
+	}
+	exp, err := newExporter(cfg, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	if exp.writer.rotateBytes != defaultRotateBytes {
+		t.Fatalf("writer rotateBytes = %d, want %d", exp.writer.rotateBytes, defaultRotateBytes)
+	}
+	if exp.writer.rotateArchives != defaultRotateArchives {
+		t.Fatalf("writer rotateArchives = %d, want %d", exp.writer.rotateArchives, defaultRotateArchives)
+	}
+}
+
+func TestJSONLWriterRotatesAndPrunesArchives(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runtime.jsonl")
+	for i := 0; i <= 3; i++ {
+		target := path
+		if i > 0 {
+			target = path + "." + strconv.Itoa(i)
+		}
+		if err := os.WriteFile(target, []byte("log-"+strconv.Itoa(i)), 0644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
+	}
+	writer := jsonlWriter{
+		path:           path,
+		maxEventBytes:  defaultMaxEventBytes,
+		rotateBytes:    1,
+		rotateArchives: 2,
+		redactSecrets:  true,
+	}
+	event := newBeaconEvent("tool.invoked", "tool", "info", "test", time.Now())
+	event.Message = "new event"
+
+	if err := writer.append(event); err != nil {
+		t.Fatalf("append returned error: %v", err)
+	}
+	if _, err := os.Stat(path + ".3"); !os.IsNotExist(err) {
+		t.Fatalf("expected .3 archive to be pruned, err=%v", err)
+	}
+	if data, err := os.ReadFile(path + ".1"); err != nil || string(data) != "log-0" {
+		t.Fatalf(".1 = %q err=%v, want prior active log", string(data), err)
+	}
+	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), "new event") {
+		t.Fatalf("current log = %q err=%v, want new event", string(data), err)
 	}
 }
 

@@ -50,8 +50,11 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	if cfg.MaxEventBytes == 0 {
 		cfg.MaxEventBytes = defaultMaxEventBytes
 	}
-	if cfg.RotateBytes == 0 {
+	if cfg.RotateBytes <= 0 {
 		cfg.RotateBytes = defaultRotateBytes
+	}
+	if cfg.RotateArchives <= 0 {
+		cfg.RotateArchives = defaultRotateArchives
 	}
 	if cfg.ContentRetention == "" {
 		cfg.ContentRetention = "full"
@@ -62,10 +65,11 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	return &beaconExporter{
 		cfg: cfg,
 		writer: jsonlWriter{
-			path:          cfg.Path,
-			maxEventBytes: cfg.MaxEventBytes,
-			rotateBytes:   cfg.RotateBytes,
-			redactSecrets: cfg.RedactSecrets,
+			path:           cfg.Path,
+			maxEventBytes:  cfg.MaxEventBytes,
+			rotateBytes:    cfg.RotateBytes,
+			rotateArchives: cfg.RotateArchives,
+			redactSecrets:  cfg.RedactSecrets,
 		},
 		logger: set.Logger,
 	}, nil

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -14,10 +15,12 @@ import (
 )
 
 const (
-	SystemLogPath = "/var/log/beacon-agent/runtime.jsonl"
-	UserLogPath   = ".beacon/endpoint/logs/runtime.jsonl"
-	MaxEventBytes = 64 * 1024
-	RotateBytes   = 10 * 1024 * 1024
+	SystemLogPath         = "/var/log/beacon-agent/runtime.jsonl"
+	UserLogPath           = ".beacon/endpoint/logs/runtime.jsonl"
+	MaxEventBytes         = 64 * 1024
+	DefaultRotateBytes    = 10 * 1024 * 1024
+	DefaultRotateArchives = 5
+	RotateBytes           = DefaultRotateBytes
 )
 
 var secretPatterns = []*regexp.Regexp{
@@ -28,10 +31,11 @@ var secretPatterns = []*regexp.Regexp{
 }
 
 type Options struct {
-	Path       string
-	UserMode   bool
-	MaxBytes   int
-	RotateSize int64
+	Path           string
+	UserMode       bool
+	MaxBytes       int
+	RotateSize     int64
+	RotateArchives int
 }
 
 func DefaultPath(userMode bool) string {
@@ -52,17 +56,14 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	if opts.MaxBytes == 0 {
 		opts.MaxBytes = MaxEventBytes
 	}
-	if opts.RotateSize == 0 {
-		opts.RotateSize = RotateBytes
+	if opts.RotateSize <= 0 {
+		opts.RotateSize = DefaultRotateBytes
+	}
+	if opts.RotateArchives < 1 {
+		opts.RotateArchives = DefaultRotateArchives
 	}
 	event = SanitizeEvent(event, opts.MaxBytes)
 	if err := event.Validate(); err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(opts.Path), 0755); err != nil {
-		return "", err
-	}
-	if err := rotateIfNeeded(opts.Path, opts.RotateSize); err != nil {
 		return "", err
 	}
 	data, err := json.Marshal(event)
@@ -81,17 +82,7 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	if len(data) > opts.MaxBytes {
 		return "", fmt.Errorf("event exceeds maximum size after truncation: %d bytes", len(data))
 	}
-	f, err := os.OpenFile(opts.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return "", err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return "", err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	defer f.Close()
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	if err := appendJSONL(opts.Path, append(data, '\n'), opts.RotateSize, opts.RotateArchives); err != nil {
 		return "", err
 	}
 	return opts.Path, nil
@@ -201,7 +192,39 @@ func truncate(value string, limit int) string {
 	return value[:limit-15] + "...[truncated]"
 }
 
-func rotateIfNeeded(path string, maxSize int64) error {
+func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		_ = lock.Close()
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer lock.Close()
+	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(line)
+	return err
+}
+
+func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
+	if maxSize <= 0 {
+		return nil
+	}
+	if archives < 1 {
+		archives = DefaultRotateArchives
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -209,10 +232,44 @@ func rotateIfNeeded(path string, maxSize int64) error {
 		}
 		return err
 	}
-	if info.Size() <= maxSize {
+	if info.Size() == 0 || info.Size()+nextWriteBytes <= maxSize {
 		return nil
 	}
+	if err := removeOverflowArchives(path, archives); err != nil {
+		return err
+	}
+	for i := archives - 1; i >= 1; i-- {
+		from := path + fmt.Sprintf(".%d", i)
+		to := path + fmt.Sprintf(".%d", i+1)
+		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	rotated := path + ".1"
-	_ = os.Remove(rotated)
 	return os.Rename(path, rotated)
+}
+
+func removeOverflowArchives(path string, archives int) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	prefix := base + "."
+	for _, entry := range entries {
+		name := entry.Name()
+		suffix, ok := strings.CutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		index, err := strconv.Atoi(suffix)
+		if err != nil || index < archives {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
