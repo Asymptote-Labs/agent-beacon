@@ -146,6 +146,7 @@ records during rollout, testing, and investigations.
 - [Beacon CLI docs](https://docs.asymptotelabs.ai/cli) — full documentation index.
 - [Installation](https://docs.asymptotelabs.ai/cli/installation) — install Beacon locally.
 - [For Security & IT Teams](https://docs.asymptotelabs.ai/cli/security-it-teams) — rollout, validation, and security workflows.
+- [Security review](https://docs.asymptotelabs.ai/cli/security-review) — review Beacon's architecture, data handling, and local-only posture.
 - [Endpoint agent](https://docs.asymptotelabs.ai/cli/endpoint) — install, status, repair, and uninstall.
 - [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard) — inspect local runtime logs.
 - [Endpoint event schema](https://docs.asymptotelabs.ai/cli/event-schema) — normalized JSONL event model.
@@ -162,7 +163,8 @@ full setup paths.
 Start with the
 [security and IT quickstart](https://docs.asymptotelabs.ai/cli/quickstart) and
 [managed deployment guidance](https://docs.asymptotelabs.ai/cli/security-it-teams)
-for rollout, validation, retention, and SIEM forwarding.
+for rollout, validation, retention, and SIEM forwarding. For vendor review, see
+the [security review](https://docs.asymptotelabs.ai/cli/security-review).
 
 ### For Developers
 
