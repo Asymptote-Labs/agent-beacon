@@ -137,15 +137,14 @@ func readEventsFromSource(source eventSource, query EventQuery, result *EventRes
 }
 
 func FindEvent(path, id string) (EventRecord, bool, error) {
-	sourceIndex, lineNo, ok := parseRecordID(id)
+	archiveNum, lineNo, ok := parseRecordID(id)
 	if !ok {
 		return EventRecord{}, false, nil
 	}
-	sources := eventSources(path)
-	if sourceIndex >= len(sources) {
+	source, found := findSource(eventSources(path), archiveNum)
+	if !found {
 		return EventRecord{}, false, nil
 	}
-	source := sources[sourceIndex]
 	file, err := os.Open(source.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -226,6 +225,15 @@ func eventSources(path string) []eventSource {
 		return archives[i].archive < archives[j].archive
 	})
 	return append(sources, archives...)
+}
+
+func findSource(sources []eventSource, archive int) (eventSource, bool) {
+	for _, s := range sources {
+		if s.archive == archive {
+			return s, true
+		}
+	}
+	return eventSource{}, false
 }
 
 func normalizeDashboardEvent(event *schema.Event) {
