@@ -45,6 +45,22 @@ emit agent harness telemetry logs to
 
 Learn more in the [Agent Beacon Documentation](https://docs.asymptotelabs.ai/cli).
 
+## High-Level Architecture
+
+Beacon keeps collection, processing, and inspection local to the endpoint while
+leaving forwarding under customer control.
+
+<p align="center">
+  <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
+</p>
+
+- **Agent runtime layer:** Local hooks and OpenTelemetry sources capture
+  supported activity from AI agent harnesses on the endpoint.
+- **Beacon endpoint layer:** Local processing normalizes events, applies
+  retention and redaction settings, and writes durable endpoint telemetry.
+- **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
+  or forward records into all the major enterprise-grade SIEMs.
+
 ## Supported Surfaces
 
 Beacon captures supported agent harness activity locally and writes normalized
@@ -94,37 +110,6 @@ through standard MDM workflows.
 | --- | --- |
 | Jamf Pro | macOS package, policy scripts, validation, and Extension Attributes |
 | Fleet | macOS package and user-context deployment helpers |
-
-## High-Level Architecture
-
-Beacon keeps collection, processing, and inspection local to the endpoint while
-leaving forwarding under customer control.
-
-<p align="center">
-  <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
-</p>
-
-- **Agent runtime layer:** Local hooks and OpenTelemetry sources capture
-  supported activity from AI agent harnesses on the endpoint.
-- **Beacon endpoint layer:** Local processing normalizes events, applies
-  retention and redaction settings, and writes durable endpoint telemetry.
-- **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
-  or forward records into all the major enterprise-grade SIEMs.
-
-Beacon filters generic process and runtime metrics, such as Node.js event loop,
-V8 heap, process CPU, and process memory telemetry, out of the local endpoint
-JSONL by default so agent prompts, tools, approvals, and file activity remain
-easy to inspect. Advanced deployments can opt back into those low-level OTLP
-metrics with `beacon endpoint install --include-runtime-metrics` or
-`beacon endpoint repair --include-runtime-metrics`.
-
-Codex CLI can also emit high-volume internal spans for startup, dispatch, model
-requests, streaming, and transport activity. Beacon keeps the default Codex path
-low-noise by recording semantic Codex log events for sessions, prompts,
-approvals, and tool results while dropping Codex spans. For troubleshooting
-Codex OTLP internals, opt back into those spans with
-`beacon endpoint install --include-codex-spans` or
-`beacon endpoint repair --include-codex-spans`.
 
 ## Dashboard
 
