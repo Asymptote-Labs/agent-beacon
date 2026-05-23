@@ -198,7 +198,7 @@ func Search(query Query) (SearchResult, error) {
 }
 
 func Summarize(query Query) (SummaryResult, error) {
-	result, err := read(query)
+	result, err := readAll(query)
 	if err != nil {
 		return SummaryResult{}, err
 	}
@@ -300,6 +300,33 @@ func read(query Query) (dashboard.EventResult, error) {
 	}
 	return dashboard.ReadEvents(query.LogPath, dashboard.EventQuery{
 		Limit:      limitOrDefault(query.Limit),
+		Since:      query.Since,
+		Until:      query.Until,
+		Q:          query.Q,
+		Harness:    query.Harness,
+		Model:      query.Model,
+		Action:     query.Action,
+		Severity:   query.Severity,
+		Category:   query.Category,
+		Repository: query.Repository,
+		Session:    query.Session,
+		File:       query.File,
+		Command:    query.Command,
+		MCP:        query.MCP,
+		Approval:   query.Approval,
+		Decision:   query.Decision,
+		Policy:     query.Policy,
+		Review:     query.Review,
+		WazuhLevel: query.WazuhLevel,
+	})
+}
+
+func readAll(query Query) (dashboard.EventResult, error) {
+	if query.LogPath == "" {
+		return dashboard.EventResult{}, fmt.Errorf("runtime log path is required")
+	}
+	return dashboard.ReadEvents(query.LogPath, dashboard.EventQuery{
+		NoLimit:    true,
 		Since:      query.Since,
 		Until:      query.Until,
 		Q:          query.Q,
