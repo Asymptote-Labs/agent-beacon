@@ -40,18 +40,18 @@ func TestEndpointEventStillWritesStructuredTelemetry(t *testing.T) {
 
 func TestEndpointEventRotatesRuntimeLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	if err := os.WriteFile(logPath, []byte(strings.Repeat("old", 4*1024*1024)), 0644); err != nil {
+	if err := os.WriteFile(logPath, []byte("old log contents"), 0644); err != nil {
 		t.Fatalf("write existing log: %v", err)
 	}
 
-	logger := NewLoggerForPlatform("pre-tool", "test")
-	logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil)
-
-	if rotated, err := os.ReadFile(logPath + ".1"); err != nil || len(rotated) == 0 {
-		t.Fatalf("expected rotated archive, len=%d err=%v", len(rotated), err)
+	if err := appendEndpointJSONL(logPath, []byte("{\"message\":\"new event\"}\n"), 1, 2); err != nil {
+		t.Fatalf("appendEndpointJSONL returned error: %v", err)
 	}
-	if current, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(current), "Pre-tool observed") {
+
+	if rotated, err := os.ReadFile(logPath + ".1"); err != nil || string(rotated) != "old log contents" {
+		t.Fatalf("expected rotated archive, data=%q err=%v", string(rotated), err)
+	}
+	if current, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(current), "new event") {
 		t.Fatalf("expected current log to contain new event, data=%q err=%v", string(current), err)
 	}
 }

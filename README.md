@@ -136,9 +136,9 @@ records during rollout, testing, and investigations.
 Beacon writes endpoint activity to a stable local `runtime.jsonl` file. The
 active file rotates at 10 MiB with five numbered local archives, keeping the
 endpoint handoff file bounded while external SIEM forwarders continue tailing
-the active path. The dashboard and local validation commands read the active log
-in this release; SIEM destinations remain the source of truth for long-term
-retention and search.
+the active path. The dashboard reads the active log plus retained numbered
+archives for local triage; SIEM destinations remain the source of truth for
+long-term retention and search.
 
 <p align="center">
   <img src="images/dashboard-overview.png" alt="Beacon dashboard overview" width="860">

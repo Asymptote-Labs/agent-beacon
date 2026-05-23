@@ -250,6 +250,33 @@ func TestReadEventsFiltersByModel(t *testing.T) {
 	}
 }
 
+func TestReadEventsIncludesRotatedArchives(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestLog(t, path+".2",
+		testEvent("2026-05-13T01:00:00Z", "cursor", "command.executed", "command", "repo-a"),
+	)
+	writeTestLog(t, path+".1",
+		testEvent("2026-05-13T01:01:00Z", "cursor", "file.modified", "file", "repo-b"),
+	)
+	writeTestLog(t, path,
+		testEvent("2026-05-13T01:02:00Z", "cursor", "prompt.submitted", "prompt", "repo-c"),
+	)
+
+	result, err := ReadEvents(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents returned error: %v", err)
+	}
+	if result.TotalMatched != 3 || len(result.Events) != 3 {
+		t.Fatalf("matched events = total %d len %d, want 3/3", result.TotalMatched, len(result.Events))
+	}
+	wantIDs := []string{"line-1", "archive-1-line-1", "archive-2-line-1"}
+	for i, want := range wantIDs {
+		if result.Events[i].ID != want {
+			t.Fatalf("event %d ID = %q, want %q", i, result.Events[i].ID, want)
+		}
+	}
+}
+
 func TestFindEventCanReadOutsideTailWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	lines := make([][]byte, 0, maxEventLimit+1)
@@ -265,6 +292,22 @@ func TestFindEventCanReadOutsideTailWindow(t *testing.T) {
 	}
 	if !ok || record.Event.Event.Action != "command.executed" {
 		t.Fatalf("FindEvent returned ok=%t action=%q, want line-1 command.executed", ok, record.Event.Event.Action)
+	}
+}
+
+func TestFindEventCanReadRotatedArchive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestLog(t, path+".1",
+		testEvent("2026-05-13T01:00:00Z", "cursor", "command.executed", "command", "repo-a"),
+		testEvent("2026-05-13T01:01:00Z", "cursor", "file.modified", "file", "repo-b"),
+	)
+
+	record, ok, err := FindEvent(path, "archive-1-line-2")
+	if err != nil {
+		t.Fatalf("FindEvent returned error: %v", err)
+	}
+	if !ok || record.Event.Event.Action != "file.modified" {
+		t.Fatalf("FindEvent returned ok=%t action=%q, want archive-1-line-2 file.modified", ok, record.Event.Event.Action)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,16 +63,33 @@ type EventResult struct {
 
 func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	limit := normalizeLimit(query.Limit)
-	file, err := os.Open(path)
+	result := EventResult{Limit: limit, Query: strings.TrimSpace(query.Q), Filters: activeFilters(query)}
+	for _, source := range eventSources(path) {
+		if err := readEventsFromSource(source, query, &result, limit); err != nil {
+			return EventResult{}, err
+		}
+	}
+	sort.SliceStable(result.Events, func(i, j int) bool {
+		if result.Events[i].Parsed.Equal(result.Events[j].Parsed) {
+			return result.Events[i].ID > result.Events[j].ID
+		}
+		return result.Events[i].Parsed.After(result.Events[j].Parsed)
+	})
+	result.Returned = len(result.Events)
+	result.Truncated = result.TotalMatched > len(result.Events)
+	return result, nil
+}
+
+func readEventsFromSource(source eventSource, query EventQuery, result *EventResult, limit int) error {
+	file, err := os.Open(source.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return EventResult{Events: []EventRecord{}, Limit: limit}, nil
+			return nil
 		}
-		return EventResult{}, err
+		return err
 	}
 	defer file.Close()
 
-	result := EventResult{Limit: limit, Query: strings.TrimSpace(query.Q), Filters: activeFilters(query)}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
@@ -90,7 +108,7 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 		normalizeDashboardEvent(&event)
 		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
 		record := EventRecord{
-			ID:         fmt.Sprintf("line-%d", lineNo),
+			ID:         source.lineID(lineNo),
 			Line:       lineNo,
 			Event:      event,
 			Raw:        append(json.RawMessage(nil), line...),
@@ -102,29 +120,33 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 		}
 		result.TotalMatched++
 		result.Events = append(result.Events, record)
+		sort.SliceStable(result.Events, func(i, j int) bool {
+			if result.Events[i].Parsed.Equal(result.Events[j].Parsed) {
+				return result.Events[i].ID > result.Events[j].ID
+			}
+			return result.Events[i].Parsed.After(result.Events[j].Parsed)
+		})
 		if len(result.Events) > limit {
-			copy(result.Events, result.Events[1:])
 			result.Events = result.Events[:limit]
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return EventResult{}, err
+		return err
 	}
-
-	sort.SliceStable(result.Events, func(i, j int) bool {
-		return result.Events[i].Line > result.Events[j].Line
-	})
-	result.Returned = len(result.Events)
-	result.Truncated = result.TotalMatched > len(result.Events)
-	return result, nil
+	return nil
 }
 
 func FindEvent(path, id string) (EventRecord, bool, error) {
-	lineNo, ok := parseLineID(id)
+	sourceIndex, lineNo, ok := parseRecordID(id)
 	if !ok {
 		return EventRecord{}, false, nil
 	}
-	file, err := os.Open(path)
+	sources := eventSources(path)
+	if sourceIndex >= len(sources) {
+		return EventRecord{}, false, nil
+	}
+	source := sources[sourceIndex]
+	file, err := os.Open(source.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return EventRecord{}, false, nil
@@ -152,7 +174,7 @@ func FindEvent(path, id string) (EventRecord, bool, error) {
 		normalizeDashboardEvent(&event)
 		parsed, _ := time.Parse(time.RFC3339, event.Timestamp)
 		return EventRecord{
-			ID:         id,
+			ID:         source.lineID(lineNo),
 			Line:       lineNo,
 			Event:      event,
 			Raw:        append(json.RawMessage(nil), line...),
@@ -164,6 +186,46 @@ func FindEvent(path, id string) (EventRecord, bool, error) {
 		return EventRecord{}, false, err
 	}
 	return EventRecord{}, false, nil
+}
+
+type eventSource struct {
+	path    string
+	archive int
+}
+
+func (s eventSource) lineID(line int) string {
+	if s.archive == 0 {
+		return fmt.Sprintf("line-%d", line)
+	}
+	return fmt.Sprintf("archive-%d-line-%d", s.archive, line)
+}
+
+func eventSources(path string) []eventSource {
+	sources := []eventSource{{path: path}}
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return sources
+	}
+	prefix := base + "."
+	var archives []eventSource
+	for _, entry := range entries {
+		name := entry.Name()
+		suffix, ok := strings.CutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		index, err := strconv.Atoi(suffix)
+		if err != nil || index <= 0 {
+			continue
+		}
+		archives = append(archives, eventSource{path: filepath.Join(dir, name), archive: index})
+	}
+	sort.Slice(archives, func(i, j int) bool {
+		return archives[i].archive < archives[j].archive
+	})
+	return append(sources, archives...)
 }
 
 func normalizeDashboardEvent(event *schema.Event) {
@@ -450,16 +512,27 @@ func truthy(value string) bool {
 	}
 }
 
-func parseLineID(id string) (int, bool) {
+func parseRecordID(id string) (int, int, bool) {
+	if archiveID, rest, ok := strings.Cut(strings.TrimPrefix(id, "archive-"), "-line-"); ok && strings.HasPrefix(id, "archive-") {
+		archive, err := strconv.Atoi(archiveID)
+		if err != nil || archive <= 0 {
+			return 0, 0, false
+		}
+		lineNo, err := strconv.Atoi(rest)
+		if err != nil || lineNo <= 0 {
+			return 0, 0, false
+		}
+		return archive, lineNo, true
+	}
 	line, ok := strings.CutPrefix(id, "line-")
 	if !ok {
-		return 0, false
+		return 0, 0, false
 	}
 	lineNo, err := strconv.Atoi(line)
 	if err != nil || lineNo <= 0 {
-		return 0, false
+		return 0, 0, false
 	}
-	return lineNo, true
+	return 0, lineNo, true
 }
 
 func WazuhLevel(action string) int {
