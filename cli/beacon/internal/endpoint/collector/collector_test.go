@@ -40,6 +40,7 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"path: " + `"` + cfg.LogPath + `"`,
 		"max_event_bytes: 65536",
 		"rotate_bytes: 10485760",
+		"rotate_archives: 5",
 		"redact_secrets: true",
 		"level: none",
 		"receivers: [otlp]",

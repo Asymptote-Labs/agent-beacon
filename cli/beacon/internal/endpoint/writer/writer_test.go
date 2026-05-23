@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -112,6 +114,78 @@ func TestAppendEventRotatesExistingLog(t *testing.T) {
 	}
 	if !strings.Contains(string(current), "new event") {
 		t.Fatalf("current log missing new event: %s", string(current))
+	}
+}
+
+func TestAppendEventPrunesNumberedArchives(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runtime.jsonl")
+	for i := 0; i <= 3; i++ {
+		target := path
+		if i > 0 {
+			target = path + "." + strconv.Itoa(i)
+		}
+		if err := os.WriteFile(target, []byte("log-"+strconv.Itoa(i)), 0644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
+	}
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "agent.detected",
+		Harness: schema.HarnessInfo{Name: "test"},
+		Message: "new event",
+	})
+
+	if _, err := AppendEvent(event, Options{Path: path, RotateSize: 1, RotateArchives: 2}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+	if _, err := os.Stat(path + ".3"); !os.IsNotExist(err) {
+		t.Fatalf("expected .3 archive to be pruned, err=%v", err)
+	}
+	if data, err := os.ReadFile(path + ".1"); err != nil || string(data) != "log-0" {
+		t.Fatalf(".1 = %q err=%v, want prior active log", string(data), err)
+	}
+	if data, err := os.ReadFile(path + ".2"); err != nil || string(data) != "log-1" {
+		t.Fatalf(".2 = %q err=%v, want prior .1 archive", string(data), err)
+	}
+}
+
+func TestAppendEventSerializesConcurrentWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "agent.detected",
+		Harness: schema.HarnessInfo{Name: "test"},
+		Message: "concurrent event",
+	})
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := AppendEvent(event, Options{Path: path, RotateSize: 64 * 1024})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("AppendEvent returned error: %v", err)
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 20 {
+		t.Fatalf("expected 20 complete lines, got %d: %s", len(lines), string(data))
+	}
+	for _, line := range lines {
+		var decoded map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			t.Fatalf("line is not JSON: %v line=%q", err, line)
+		}
 	}
 }
 

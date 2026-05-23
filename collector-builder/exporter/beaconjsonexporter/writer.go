@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -18,10 +19,11 @@ var secretPatterns = []*regexp.Regexp{
 }
 
 type jsonlWriter struct {
-	path          string
-	maxEventBytes int
-	rotateBytes   int64
-	redactSecrets bool
+	path           string
+	maxEventBytes  int
+	rotateBytes    int64
+	rotateArchives int
+	redactSecrets  bool
 }
 
 func (w jsonlWriter) append(event beaconEvent) error {
@@ -45,21 +47,7 @@ func (w jsonlWriter) append(event beaconEvent) error {
 	if err := os.MkdirAll(filepath.Dir(w.path), 0755); err != nil {
 		return err
 	}
-	if err := rotateIfNeeded(w.path, w.rotateBytes); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	defer f.Close()
-	_, err = f.Write(append(data, '\n'))
-	return err
+	return appendJSONL(w.path, append(data, '\n'), w.rotateBytes, w.rotateArchives)
 }
 
 func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
@@ -153,9 +141,39 @@ func truncate(value string, limit int) string {
 	return value[:limit-15] + "...[truncated]"
 }
 
-func rotateIfNeeded(path string, maxSize int64) error {
-	if maxSize == 0 {
+// Keep this rotation contract mirrored with the endpoint CLI and hook writer.
+func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		_ = lock.Close()
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer lock.Close()
+	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(line)
+	return err
+}
+
+func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
+	if maxSize <= 0 {
 		return nil
+	}
+	if archives < 1 {
+		archives = defaultRotateArchives
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -164,10 +182,43 @@ func rotateIfNeeded(path string, maxSize int64) error {
 		}
 		return err
 	}
-	if info.Size() <= maxSize {
+	if info.Size() == 0 || info.Size()+nextWriteBytes <= maxSize {
 		return nil
 	}
-	rotated := path + ".1"
-	_ = os.Remove(rotated)
-	return os.Rename(path, rotated)
+	if err := removeOverflowArchives(path, archives); err != nil {
+		return err
+	}
+	for i := archives - 1; i >= 1; i-- {
+		from := path + fmt.Sprintf(".%d", i)
+		to := path + fmt.Sprintf(".%d", i+1)
+		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return os.Rename(path, path+".1")
+}
+
+func removeOverflowArchives(path string, archives int) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	prefix := base + "."
+	for _, entry := range entries {
+		name := entry.Name()
+		suffix, ok := strings.CutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		index, err := strconv.Atoi(suffix)
+		if err != nil || index < archives {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
