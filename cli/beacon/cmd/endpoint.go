@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/crowdstrike"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/datadog"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/elastic"
@@ -134,6 +135,11 @@ var endpointDatadogCmd = &cobra.Command{
 var endpointSumoCmd = &cobra.Command{
 	Use:   "sumo",
 	Short: "Manage Sumo Logic integration content",
+}
+
+var endpointCrowdStrikeCmd = &cobra.Command{
+	Use:   "crowdstrike",
+	Short: "Manage CrowdStrike AIDR integration content",
 }
 
 var endpointIntegrationsCmd = &cobra.Command{
@@ -386,6 +392,29 @@ var endpointSumoValidateCmd = &cobra.Command{
 	RunE:         runEndpointSumoValidate,
 }
 
+var endpointCrowdStrikePrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print an OpenTelemetry Collector config for CrowdStrike AIDR",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		fmt.Print(crowdstrike.CollectorConfig(cfg.LogPath))
+	},
+}
+
+var endpointCrowdStrikeInstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write CrowdStrike AIDR OpenTelemetry forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointCrowdStrikeInstallPack,
+}
+
+var endpointCrowdStrikeValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe a CrowdStrike AIDR validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointCrowdStrikeValidate,
+}
+
 func init() {
 	rootCmd.AddCommand(endpointCmd)
 
@@ -399,6 +428,7 @@ func init() {
 	endpointCmd.AddCommand(endpointElasticCmd)
 	endpointCmd.AddCommand(endpointDatadogCmd)
 	endpointCmd.AddCommand(endpointSumoCmd)
+	endpointCmd.AddCommand(endpointCrowdStrikeCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
 	endpointWazuhCmd.AddCommand(endpointWazuhPrintConfigCmd)
@@ -414,6 +444,9 @@ func init() {
 	endpointSumoCmd.AddCommand(endpointSumoPrintConfigCmd)
 	endpointSumoCmd.AddCommand(endpointSumoInstallPackCmd)
 	endpointSumoCmd.AddCommand(endpointSumoValidateCmd)
+	endpointCrowdStrikeCmd.AddCommand(endpointCrowdStrikePrintConfigCmd)
+	endpointCrowdStrikeCmd.AddCommand(endpointCrowdStrikeInstallPackCmd)
+	endpointCrowdStrikeCmd.AddCommand(endpointCrowdStrikeValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
 	endpointHooksCmd.AddCommand(endpointHooksInstallCmd)
@@ -489,6 +522,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointSumoInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Sumo Logic content pack")
+	for _, c := range []*cobra.Command{endpointCrowdStrikePrintConfigCmd, endpointCrowdStrikeInstallPackCmd, endpointCrowdStrikeValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointCrowdStrikeInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for CrowdStrike AIDR content pack")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -786,6 +825,32 @@ func runEndpointSumoValidate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Validation event written to %s\n", path)
 	fmt.Println("Expected Sumo fields: _sourceCategory=security/agentbeacon product=agentbeacon telemetry=ai_agent")
 	fmt.Println(`Expected validation query: _sourceCategory=security/agentbeacon "Beacon endpoint Sumo validation event"`)
+	return nil
+}
+
+func runEndpointCrowdStrikeInstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = crowdstrike.DefaultOutputDir
+	}
+	if err := crowdstrike.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("CrowdStrike AIDR content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointCrowdStrikeValidate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "crowdstrike")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected AIDR fields: event.name=gen_ai.assistant.message service.name=beacon-endpoint-agent")
+	fmt.Println(`Expected AIDR Findings search: "Beacon endpoint CrowdStrike AIDR validation event"`)
+	fmt.Println(`Expected Falcon Next-Gen SIEM query: event_type="AIDRPromptDataEvent"`)
 	return nil
 }
 
@@ -1088,6 +1153,9 @@ func writeValidationEvent(cfg endpointconfig.Config, destination string) (string
 	} else if destination == "sumo" {
 		message = "Beacon endpoint Sumo validation event"
 		mode = "http_source_jsonl"
+	} else if destination == "crowdstrike" {
+		message = "Beacon endpoint CrowdStrike AIDR validation event"
+		mode = "aidr_otel_logs"
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
 		Action:       "agent.detected",

@@ -82,6 +82,7 @@ enterprise-grade SIEMs.
 | Elastic | Filebeat or Elastic Agent content pack over local JSONL |
 | Datadog | Datadog Agent custom log collection over local JSONL |
 | Sumo Logic | HTTP Logs & Metrics Source content pack over local JSONL |
+| CrowdStrike AIDR | OpenTelemetry Collector content pack over local JSONL |
 | Splunk HEC | Optional endpoint forwarding during install or repair |
 | Customer-managed SIEM pipelines | Forwarding from local Beacon JSONL under customer control |
 

@@ -73,6 +73,19 @@ The Sumo pack keeps Beacon as a local JSONL producer and documents forwarding
 Metrics Source. Use a tailing forwarder for production so offsets are
 checkpointed and the whole file is not repeatedly uploaded.
 
+## CrowdStrike AIDR
+
+```bash
+./beacon endpoint crowdstrike print-config
+./beacon endpoint crowdstrike install-pack --output ./beacon-crowdstrike-pack
+./beacon endpoint crowdstrike validate
+```
+
+The CrowdStrike pack keeps Beacon as a local JSONL producer and documents
+forwarding `runtime.jsonl` into CrowdStrike AIDR with a customer-managed
+OpenTelemetry Collector. Keep AIDR collector tokens in the collector environment
+or endpoint-management secret store, not in Beacon configuration.
+
 ## Optional Integrations
 
 ```bash

@@ -1,0 +1,82 @@
+receivers:
+  filelog/beacon_runtime:
+    include:
+      - "{{LOG_PATH}}"
+    start_at: end
+    operators:
+      - type: json_parser
+        id: parse_beacon_json
+        parse_from: body
+        parse_to: body
+        timestamp:
+          parse_from: body.timestamp
+          layout_type: gotime
+          layout: "2006-01-02T15:04:05Z07:00"
+
+processors:
+  transform/aidr_genai:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["service.name"], "beacon-endpoint-agent")
+          - set(attributes["beacon.vendor"], body["vendor"])
+          - set(attributes["beacon.product"], body["product"])
+          - set(attributes["beacon.schema_version"], body["schema_version"])
+          - set(attributes["beacon.event.action"], body["event"]["action"])
+          - set(attributes["beacon.event.category"], body["event"]["category"])
+          - set(attributes["beacon.harness.name"], body["harness"]["name"])
+          - set(attributes["beacon.endpoint.hostname"], body["endpoint"]["hostname"])
+          - set(attributes["beacon.session.id"], body["session"]["id"])
+          - set(attributes["beacon.repository"], body["repository"])
+          - set(attributes["beacon.branch"], body["branch"])
+          - set(attributes["beacon.tool.name"], body["tool"]["name"])
+          - set(attributes["beacon.mcp.server"], body["mcp"]["server"])
+          - set(attributes["beacon.mcp.tool"], body["mcp"]["tool"])
+          - set(attributes["beacon.file.path"], body["file"]["path"])
+          - set(attributes["beacon.file.operation"], body["file"]["operation"])
+          - set(attributes["beacon.content.retention"], body["content"]["retention"])
+          - set(attributes["gen_ai.user.id"], body["user"]["uid"]) where body["user"]["uid"] != nil
+          - set(attributes["gen_ai.user.id"], body["user"]["name"]) where attributes["gen_ai.user.id"] == nil and body["user"]["name"] != nil
+          - set(attributes["gen_ai.request.model"], body["model"]) where body["model"] != nil
+          - set(attributes["gen_ai.system"], body["harness"]["name"]) where body["harness"]["name"] != nil
+          - set(attributes["event.name"], "gen_ai.user.message") where body["event"]["category"] == "prompt"
+          - set(attributes["event.name"], "gen_ai.tool.message") where body["event"]["category"] == "tool" or body["event"]["category"] == "mcp" or body["event"]["category"] == "command"
+          - set(attributes["event.name"], "gen_ai.assistant.message") where body["event"]["category"] == "approval" or body["event"]["category"] == "file" or body["event"]["category"] == "validation"
+          - set(attributes["event.name"], "gen_ai.agent.event") where attributes["event.name"] == nil
+          - set(attributes["aidr.body.content"], body["prompt"]["text"]) where body["prompt"]["text"] != nil
+          - set(attributes["aidr.body.content"], body["tool"]["command"]) where attributes["aidr.body.content"] == nil and body["tool"]["command"] != nil
+          - set(attributes["aidr.body.content"], body["command"]["command"]) where attributes["aidr.body.content"] == nil and body["command"]["command"] != nil
+          - set(attributes["aidr.body.content"], body["message"]) where attributes["aidr.body.content"] == nil and body["message"] != nil
+          - set(attributes["aidr.body.content"], Concat(["Beacon ", attributes["beacon.event.action"], " event from ", attributes["beacon.harness.name"]], "")) where attributes["aidr.body.content"] == nil
+          - set(body, attributes["aidr.body.content"])
+          - delete_key(attributes, "aidr.body.content")
+  filter/beacon_ai_activity:
+    logs:
+      include:
+        match_type: regexp
+        record_attributes:
+          - key: beacon.event.category
+            value: "^(prompt|tool|mcp|command|file|approval|validation)$"
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+  otlphttp/aidr_logs:
+    logs_endpoint: "${env:CS_AIDR_BASE_URL:-https://api.crowdstrike.com/aidr/aiguard}/v1/otel/logs"
+    headers:
+      Authorization: "Bearer ${env:CS_AIDR_TOKEN}"
+      Content-Type: "application/json"
+    encoding: json
+    compression: none
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    logs/aidr:
+      receivers: [filelog/beacon_runtime]
+      processors: [transform/aidr_genai, filter/beacon_ai_activity, batch]
+      exporters: [otlphttp/aidr_logs, debug]

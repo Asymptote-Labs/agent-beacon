@@ -1,0 +1,10 @@
+services:
+  crowdstrike-aidr-otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config", "/etc/otelcol/config.yaml"]
+    environment:
+      CS_AIDR_BASE_URL: "${CS_AIDR_BASE_URL:-https://api.crowdstrike.com/aidr/aiguard}"
+      CS_AIDR_TOKEN: "${CS_AIDR_TOKEN}"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+      - "${BEACON_LOG_DIR:-/var/log/beacon-agent}:${BEACON_LOG_DIR:-/var/log/beacon-agent}:ro"

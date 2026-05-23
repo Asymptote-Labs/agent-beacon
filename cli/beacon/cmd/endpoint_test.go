@@ -157,6 +157,30 @@ func TestEndpointSumoCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointCrowdStrikeCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"crowdstrike", "print-config"},
+		{"crowdstrike", "install-pack"},
+		{"crowdstrike", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("crowdstrike command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("crowdstrike command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointCrowdStrikeInstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("crowdstrike install-pack command missing --output flag")
+	}
+}
+
 func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")
