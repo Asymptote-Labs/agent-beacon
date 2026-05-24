@@ -351,7 +351,7 @@ func TestConsumeMetricsIncludesRuntimeMetricsWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestConsumeMetricsDropsOpenClawOperationalMetricsByDefault(t *testing.T) {
+func TestConsumeMetricsDropsOpenClawMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
 		Path:             path,
@@ -391,10 +391,16 @@ func TestConsumeMetricsDropsOpenClawOperationalMetricsByDefault(t *testing.T) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read runtime log: %v", err)
+		if os.IsNotExist(err) {
+			data = nil
+		} else {
+			t.Fatalf("read runtime log: %v", err)
+		}
 	}
 	text := strings.TrimSpace(string(data))
 	for _, dropped := range []string{
+		"gen_ai.client.token.usage",
+		"openclaw.context.tokens",
 		"openclaw.harness.duration_ms",
 		"openclaw.liveness.cpu_core_ratio",
 		"openclaw.memory.rss_bytes",
@@ -403,19 +409,18 @@ func TestConsumeMetricsDropsOpenClawOperationalMetricsByDefault(t *testing.T) {
 		"openclaw.session.state",
 		"openclaw.telemetry.exporter.events",
 		"openclaw.tool.execution.duration_ms",
+		"openclaw.tokens",
 	} {
 		if strings.Contains(text, dropped) {
-			t.Fatalf("OpenClaw operational metric %q should have been dropped, wrote: %s", dropped, text)
+			t.Fatalf("OpenClaw metric %q should have been dropped, wrote: %s", dropped, text)
 		}
 	}
-	for _, kept := range []string{"gen_ai.client.token.usage", "openclaw.context.tokens", "openclaw.tokens"} {
-		if !strings.Contains(text, kept) {
-			t.Fatalf("OpenClaw token metric %q should have been kept, wrote: %s", kept, text)
-		}
+	if text != "" {
+		t.Fatalf("OpenClaw metrics should have been dropped by default, wrote: %s", text)
 	}
 }
 
-func TestConsumeMetricsIncludesOpenClawOperationalMetricsWhenConfigured(t *testing.T) {
+func TestConsumeMetricsIncludesOpenClawMetricsWhenConfigured(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
 		Path:                  path,
@@ -432,9 +437,17 @@ func TestConsumeMetricsIncludesOpenClawOperationalMetricsWhenConfigured(t *testi
 	metrics := pmetric.NewMetrics()
 	rm := metrics.ResourceMetrics().AppendEmpty()
 	rm.Resource().Attributes().PutStr("service.name", "openclaw-gateway")
-	metric := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
-	metric.SetName("openclaw.memory.rss_bytes")
-	metric.SetEmptySum().DataPoints().AppendEmpty().SetIntValue(1)
+	sm := rm.ScopeMetrics().AppendEmpty()
+	for _, name := range []string{
+		"gen_ai.client.token.usage",
+		"openclaw.context.tokens",
+		"openclaw.memory.rss_bytes",
+		"openclaw.tokens",
+	} {
+		metric := sm.Metrics().AppendEmpty()
+		metric.SetName(name)
+		metric.SetEmptySum().DataPoints().AppendEmpty().SetIntValue(1)
+	}
 
 	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
 		t.Fatalf("consumeMetrics returned error: %v", err)
@@ -443,8 +456,10 @@ func TestConsumeMetricsIncludesOpenClawOperationalMetricsWhenConfigured(t *testi
 	if err != nil {
 		t.Fatalf("read runtime log: %v", err)
 	}
-	if !strings.Contains(string(data), "openclaw.memory.rss_bytes") {
-		t.Fatalf("OpenClaw operational metric should have been kept: %s", string(data))
+	for _, kept := range []string{"gen_ai.client.token.usage", "openclaw.context.tokens", "openclaw.memory.rss_bytes", "openclaw.tokens"} {
+		if !strings.Contains(string(data), kept) {
+			t.Fatalf("OpenClaw metric %q should have been kept: %s", kept, string(data))
+		}
 	}
 }
 
@@ -485,7 +500,7 @@ func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 	}
 }
 
-func TestConsumeMetricsDropsCopilotOperationalMetricsByDefault(t *testing.T) {
+func TestConsumeMetricsDropsCopilotMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
 		Path:             path,
@@ -521,10 +536,16 @@ func TestConsumeMetricsDropsCopilotOperationalMetricsByDefault(t *testing.T) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read runtime log: %v", err)
+		if os.IsNotExist(err) {
+			data = nil
+		} else {
+			t.Fatalf("read runtime log: %v", err)
+		}
 	}
 	text := strings.TrimSpace(string(data))
 	for _, dropped := range []string{
+		"gen_ai.client.operation.duration",
+		"gen_ai.client.token.usage",
 		"github.copilot.mcp.server.connection.count",
 		"github.copilot.agent.turn.count",
 		"github.copilot.tool.call.duration",
@@ -537,10 +558,8 @@ func TestConsumeMetricsDropsCopilotOperationalMetricsByDefault(t *testing.T) {
 			t.Fatalf("Copilot operational metric %q should have been dropped, wrote: %s", dropped, text)
 		}
 	}
-	for _, kept := range []string{"gen_ai.client.operation.duration", "gen_ai.client.token.usage"} {
-		if !strings.Contains(text, kept) {
-			t.Fatalf("Copilot GenAI metric %q should have been kept, wrote: %s", kept, text)
-		}
+	if text != "" {
+		t.Fatalf("Copilot metrics should have been dropped by default, wrote: %s", text)
 	}
 }
 
@@ -563,6 +582,8 @@ func TestConsumeMetricsIncludesCopilotOperationalMetricsWhenConfigured(t *testin
 	rm.Resource().Attributes().PutStr("service.name", "github-copilot")
 	sm := rm.ScopeMetrics().AppendEmpty()
 	for _, name := range []string{
+		"gen_ai.client.operation.duration",
+		"gen_ai.client.token.usage",
 		"github.copilot.tool.call.count",
 		"copilot_chat.tool.call.count",
 	} {
@@ -576,7 +597,7 @@ func TestConsumeMetricsIncludesCopilotOperationalMetricsWhenConfigured(t *testin
 	if err != nil {
 		t.Fatalf("read runtime log: %v", err)
 	}
-	for _, kept := range []string{"github.copilot.tool.call.count", "copilot_chat.tool.call.count"} {
+	for _, kept := range []string{"gen_ai.client.operation.duration", "gen_ai.client.token.usage", "github.copilot.tool.call.count", "copilot_chat.tool.call.count"} {
 		if !strings.Contains(string(data), kept) {
 			t.Fatalf("Copilot operational metric %q should have been kept: %s", kept, string(data))
 		}
@@ -1082,11 +1103,15 @@ func TestCopilotSpanActions(t *testing.T) {
 		name      string
 		spanName  string
 		operation string
+		attrs     map[string]string
 		want      string
 		category  string
 	}{
 		{name: "agent invocation", spanName: "invoke_agent", operation: "invoke_agent", want: "session.activity", category: "session"},
-		{name: "chat", spanName: "chat gpt-4o", operation: "chat", want: "prompt.submitted", category: "prompt"},
+		{name: "user chat", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.initiator": "user", "github.copilot.turn_id": "0"}, want: "prompt.submitted", category: "prompt"},
+		{name: "agent chat", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.initiator": "agent", "github.copilot.turn_id": "1"}, want: "session.activity", category: "session"},
+		{name: "nonzero chat turn", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.turn_id": "2"}, want: "session.activity", category: "session"},
+		{name: "legacy chat", spanName: "chat gpt-4o", operation: "chat", want: "prompt.submitted", category: "prompt"},
 		{name: "tool", spanName: "execute_tool readFile", operation: "execute_tool", want: "tool.invoked", category: "tool"},
 		{name: "permission", spanName: "permission", operation: "", want: "approval.requested", category: "approval"},
 		{name: "hook", spanName: "hook postToolUse", operation: "", want: "tool.invoked", category: "tool"},
@@ -1099,6 +1124,9 @@ func TestCopilotSpanActions(t *testing.T) {
 			span.SetName(tt.spanName)
 			if tt.operation != "" {
 				span.Attributes().PutStr("gen_ai.operation.name", tt.operation)
+			}
+			for key, value := range tt.attrs {
+				span.Attributes().PutStr(key, value)
 			}
 			event := exp.eventFromSpan(map[string]interface{}{"service.name": "github-copilot"}, span)
 			if event.Harness.Name != "copilot_cli" {

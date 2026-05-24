@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -225,18 +224,7 @@ func shouldDropOpenClawMetric(resourceAttrs map[string]interface{}, name string,
 	if harnessName(resourceAttrs, name) != "openclaw_gateway" {
 		return false
 	}
-	if slices.Contains(openClawKeptMetricNames, normalized) {
-		return false
-	}
-	if slices.Contains(openClawDroppedMetricNames, normalized) {
-		return true
-	}
-	for _, prefix := range openClawDroppedMetricPrefixes {
-		if strings.HasPrefix(normalized, prefix) {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, includeRuntimeMetrics bool) bool {
@@ -250,33 +238,7 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 	if normalized == "" {
 		return false
 	}
-	return !slices.Contains(copilotKeptMetricNames, normalized)
-}
-
-var copilotKeptMetricNames = []string{
-	"gen_ai.client.operation.duration",
-	"gen_ai.client.token.usage",
-}
-
-var openClawKeptMetricNames = []string{
-	"gen_ai.client.token.usage",
-	"openclaw.context.tokens",
-	"openclaw.tokens",
-}
-
-var openClawDroppedMetricNames = []string{
-	"openclaw.harness.duration_ms",
-	"openclaw.run.duration_ms",
-	"openclaw.session.state",
-	"openclaw.tool.execution.duration_ms",
-}
-
-var openClawDroppedMetricPrefixes = []string{
-	"openclaw.liveness.",
-	"openclaw.memory.",
-	"openclaw.queue.",
-	"openclaw.session.recovery.",
-	"openclaw.telemetry.exporter.",
+	return true
 }
 
 func (e *beaconExporter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) beaconEvent {
@@ -630,7 +592,7 @@ func inferAction(attrs map[string]interface{}, fallback string) string {
 	}, " "))
 	switch {
 	case harness == "copilot_cli":
-		return copilotAction(operation, text)
+		return copilotAction(attrs, operation, text)
 	case strings.Contains(text, "gemini_cli.user_prompt"):
 		return "prompt.submitted"
 	case strings.Contains(text, "gemini_cli.tool_call"):
@@ -654,11 +616,16 @@ func inferAction(attrs map[string]interface{}, fallback string) string {
 	}
 }
 
-func copilotAction(operation, text string) string {
+func copilotAction(attrs map[string]interface{}, operation, text string) string {
 	switch {
 	case operation == "invoke_agent":
 		return "session.activity"
 	case operation == "chat":
+		initiator := strings.ToLower(firstString(attrs, "github.copilot.initiator"))
+		turnID := firstString(attrs, "github.copilot.turn_id")
+		if initiator == "agent" || (turnID != "" && turnID != "0") {
+			return "session.activity"
+		}
 		return "prompt.submitted"
 	case operation == "execute_tool":
 		return "tool.invoked"

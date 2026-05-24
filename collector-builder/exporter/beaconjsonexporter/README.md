@@ -29,11 +29,13 @@ Noise controls:
   troubleshooting Codex OTLP internals.
 - Codex metrics and transport/startup/debug logs remain suppressed by default so
   one prompt does not flood the endpoint runtime log.
-- Copilot CLI operational metrics (`github.copilot.*`, legacy
-  `copilot_chat.*`) are suppressed by default; only
-  `gen_ai.client.token.usage` and `gen_ai.client.operation.duration` are kept.
+- Copilot CLI metrics are suppressed by default, including
+  `github.copilot.*`, legacy `copilot_chat.*`, and `gen_ai.client.*` metrics.
   Activity comes from OTLP spans. Set `include_runtime_metrics: true` for
   troubleshooting.
+- OpenClaw metrics are suppressed by default, including `openclaw.*` and
+  `gen_ai.client.*` token metrics. Activity comes from OTLP logs and traces.
+  Set `include_runtime_metrics: true` for troubleshooting.
 
 The production implementation should live here and be included by
 `collector-builder/builder.yaml`.
