@@ -1109,8 +1109,11 @@ func TestCopilotSpanActions(t *testing.T) {
 	}{
 		{name: "agent invocation", spanName: "invoke_agent", operation: "invoke_agent", want: "session.activity", category: "session"},
 		{name: "user chat", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.initiator": "user", "github.copilot.turn_id": "0"}, want: "prompt.submitted", category: "prompt"},
+		{name: "user input messages override nonzero turn", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.turn_id": "2", "gen_ai.input.messages": `[{"role":"user","parts":[{"type":"text","content":"summarize this repo"}]}]`}, want: "prompt.submitted", category: "prompt"},
 		{name: "agent chat", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.initiator": "agent", "github.copilot.turn_id": "1"}, want: "session.activity", category: "session"},
+		{name: "agent chat with prior user history", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.initiator": "agent", "gen_ai.input.messages": `[{"role":"user","parts":[{"type":"text","content":"prior prompt"}]}]`}, want: "session.activity", category: "session"},
 		{name: "nonzero chat turn", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.turn_id": "2"}, want: "session.activity", category: "session"},
+		{name: "tool only chat messages", spanName: "chat gpt-4o", operation: "chat", attrs: map[string]string{"github.copilot.turn_id": "2", "gen_ai.input.messages": `[{"role":"tool","parts":[{"type":"tool_call_response","response":"done"}]}]`}, want: "session.activity", category: "session"},
 		{name: "legacy chat", spanName: "chat gpt-4o", operation: "chat", want: "prompt.submitted", category: "prompt"},
 		{name: "tool", spanName: "execute_tool readFile", operation: "execute_tool", want: "tool.invoked", category: "tool"},
 		{name: "permission", spanName: "permission", operation: "", want: "approval.requested", category: "approval"},
@@ -1139,6 +1142,63 @@ func TestCopilotSpanActions(t *testing.T) {
 				t.Fatalf("category = %q, want %q", event.Event.Category, tt.category)
 			}
 		})
+	}
+}
+
+func TestCopilotSpanExtractsPromptTextFromGenAIInputMessages(t *testing.T) {
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	span := testSpan("chat gpt-5.3-codex")
+	span.Attributes().PutStr("gen_ai.operation.name", "chat")
+	span.Attributes().PutStr("github.copilot.turn_id", "2")
+	span.Attributes().PutStr("gen_ai.input.messages", `[
+		{"role":"system","parts":[{"type":"text","content":"system prompt"}]},
+		{"role":"user","parts":[{"type":"text","content":"old prompt"}]},
+		{"role":"assistant","parts":[{"type":"text","content":"old answer"}]},
+		{"role":"user","parts":[{"type":"text","content":"summarize token=copilot-secret"},{"type":"image","content":"ignored"}]}
+	]`)
+
+	event := exp.eventFromSpan(map[string]interface{}{"service.name": "github-copilot"}, span)
+	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+		t.Fatalf("unexpected action/category: %#v", event.Event)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "summarize token=copilot-secret" {
+		t.Fatalf("prompt = %#v, want latest user text from gen_ai.input.messages", event.Prompt)
+	}
+	if event.Content == nil || !event.Content.Included || event.Content.Retention != "full" {
+		t.Fatalf("content = %#v, want full included retention", event.Content)
+	}
+}
+
+func TestCopilotSpanWithContentRetentionMetadataOmitsPromptText(t *testing.T) {
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "metadata"}}
+	span := testSpan("chat gpt-5.3-codex")
+	span.Attributes().PutStr("gen_ai.operation.name", "chat")
+	span.Attributes().PutStr("gen_ai.input.messages", `[{"role":"user","parts":[{"type":"text","content":"do not retain"}]}]`)
+
+	event := exp.eventFromSpan(map[string]interface{}{"service.name": "github-copilot"}, span)
+	if event.Event.Action != "prompt.submitted" {
+		t.Fatalf("action = %q, want prompt.submitted", event.Event.Action)
+	}
+	if event.Prompt != nil {
+		t.Fatalf("metadata retention should omit prompt: %#v", event.Prompt)
+	}
+	if event.Content == nil || event.Content.Included {
+		t.Fatalf("content = %#v, want metadata retention to omit content", event.Content)
+	}
+	rawAttrs, ok := event.Raw["attributes"]
+	if ok {
+		t.Fatalf("metadata retention should omit raw attributes, got %#v", rawAttrs)
+	}
+}
+
+func TestPromptTextFromGenAIInputMessagesSupportsContentString(t *testing.T) {
+	attrs := map[string]interface{}{
+		"gen_ai.input.messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "plain content prompt"},
+		},
+	}
+	if got := promptTextFromAttrs(attrs); got != "plain content prompt" {
+		t.Fatalf("promptTextFromAttrs() = %q, want plain content prompt", got)
 	}
 }
 

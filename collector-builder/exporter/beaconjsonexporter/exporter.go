@@ -430,11 +430,104 @@ func (e *beaconExporter) populateCommon(event *beaconEvent, attrs map[string]int
 		}
 	}
 	if e.cfg.ContentRetention != "metadata" && event.Event.Category == "prompt" {
-		if text := firstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt"); text != "" {
+		if text := promptTextFromAttrs(attrs); text != "" {
 			event.Prompt = &promptInfo{Text: text}
 		}
 	}
 	event.Content = &contentInfo{Retention: e.cfg.ContentRetention, Included: e.cfg.ContentRetention != "metadata", Redacted: e.cfg.ContentRetention == "redacted"}
+}
+
+func promptTextFromAttrs(attrs map[string]interface{}) string {
+	if text := firstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt"); text != "" {
+		return text
+	}
+	return userTextFromGenAIInputMessages(attrs["gen_ai.input.messages"])
+}
+
+func hasUserTextInGenAIInputMessages(attrs map[string]interface{}) bool {
+	return userTextFromGenAIInputMessages(attrs["gen_ai.input.messages"]) != ""
+}
+
+func userTextFromGenAIInputMessages(value interface{}) string {
+	messages, ok := genAIMessages(value)
+	if !ok {
+		return ""
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		message, ok := messages[i].(map[string]interface{})
+		if !ok || !strings.EqualFold(firstMapString(message, "role"), "user") {
+			continue
+		}
+		if text := textFromGenAIMessage(message); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func genAIMessages(value interface{}) ([]interface{}, bool) {
+	switch typed := value.(type) {
+	case string:
+		var messages []interface{}
+		if err := json.Unmarshal([]byte(typed), &messages); err != nil {
+			return nil, false
+		}
+		return messages, true
+	case []interface{}:
+		return typed, true
+	default:
+		return nil, false
+	}
+}
+
+func textFromGenAIMessage(message map[string]interface{}) string {
+	if text := stringValue(message["content"]); text != "" {
+		return text
+	}
+	if text := textFromGenAIParts(message["parts"]); text != "" {
+		return text
+	}
+	return ""
+}
+
+func textFromGenAIParts(value interface{}) string {
+	parts, ok := value.([]interface{})
+	if !ok {
+		return stringValue(value)
+	}
+	var texts []string
+	for _, partValue := range parts {
+		part, ok := partValue.(map[string]interface{})
+		if !ok {
+			if text := stringValue(partValue); text != "" {
+				texts = append(texts, text)
+			}
+			continue
+		}
+		partType := strings.ToLower(firstMapString(part, "type"))
+		if partType != "" && partType != "text" {
+			continue
+		}
+		if text := stringValue(part["content"]); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n"))
+}
+
+func firstMapString(values map[string]interface{}, key string) string {
+	return stringValue(values[key])
+}
+
+func stringValue(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return ""
+	}
 }
 
 func (e *beaconExporter) rawPayload(attrs map[string]interface{}, extra map[string]interface{}) map[string]interface{} {
@@ -622,8 +715,14 @@ func copilotAction(attrs map[string]interface{}, operation, text string) string 
 		return "session.activity"
 	case operation == "chat":
 		initiator := strings.ToLower(firstString(attrs, "github.copilot.initiator"))
+		if initiator == "agent" {
+			return "session.activity"
+		}
+		if hasUserTextInGenAIInputMessages(attrs) {
+			return "prompt.submitted"
+		}
 		turnID := firstString(attrs, "github.copilot.turn_id")
-		if initiator == "agent" || (turnID != "" && turnID != "0") {
+		if turnID != "" && turnID != "0" {
 			return "session.activity"
 		}
 		return "prompt.submitted"

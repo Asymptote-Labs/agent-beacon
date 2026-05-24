@@ -428,6 +428,7 @@ function metricName(event) {
 
 function primaryArtifact(event) {
   if (event.prompt?.text) return event.prompt.text;
+  if (promptTextUnavailable(event)) return "Prompt text unavailable from source telemetry";
   if (event.command?.command) return event.command.command;
   if (event.file?.path) return `${event.file.operation || "file"} ${event.file.path}`;
   if (event.mcp?.server || event.mcp?.tool) return [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
@@ -456,9 +457,23 @@ function retentionCell(record) {
   const event = record.event || {};
   const labels = [];
   if (event.content?.retention) labels.push(badge(event.content.retention, "badge-muted"));
+  if (promptTextUnavailable(event)) labels.push(badge("prompt unavailable", "badge-warn"));
   if (event.content?.truncated || event.field_truncated) labels.push(badge("truncated", "badge-warn"));
   if (event.content?.redacted) labels.push(badge("redacted", "badge-warn"));
   return labels.join(" ") || badge("default", "badge-muted");
+}
+
+function promptTextUnavailable(event) {
+  return event.event?.category === "prompt" && !event.prompt?.text;
+}
+
+function contentDetail(event) {
+  if (!event.content) return "";
+  const values = [event.content.retention];
+  if (promptTextUnavailable(event)) values.push("prompt text unavailable");
+  if (event.content.redacted) values.push("redacted");
+  if (event.content.truncated) values.push("truncated");
+  return values.filter(Boolean).join(", ");
 }
 
 function detailSummary(record) {
@@ -473,11 +488,11 @@ function detailSummary(record) {
     ["Model", event.model],
     ["Session", event.session?.id],
     ["Repository", repositoryLabel(event)],
-    ["Prompt", event.prompt?.text],
-    ["Artifact", event.prompt?.text ? "" : primaryArtifact(event)],
+    ["Prompt", event.prompt?.text || (promptTextUnavailable(event) ? "Prompt text unavailable from source telemetry" : "")],
+    ["Artifact", (event.prompt?.text || promptTextUnavailable(event)) ? "" : primaryArtifact(event)],
     ["Approval", event.approval ? [event.approval.decision, event.approval.reason].filter(Boolean).join(": ") : ""],
     ["Policy", event.policy ? [event.policy.decision, event.policy.name, event.policy.reason].filter(Boolean).join(": ") : ""],
-    ["Content", event.content ? `${event.content.retention}${event.content.redacted ? ", redacted" : ""}${event.content.truncated ? ", truncated" : ""}` : ""],
+    ["Content", contentDetail(event)],
   ].filter(([, value]) => value);
   return rows
     .map(([label, value]) => {
