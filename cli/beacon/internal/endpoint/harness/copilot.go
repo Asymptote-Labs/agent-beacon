@@ -87,11 +87,10 @@ func copilotStatusFromEnv(env copilotEnv, expectedEndpoint string) (TelemetrySta
 	if env.fileExporter != "" {
 		return TelemetryMisconfigured, "GitHub Copilot CLI file exporter is configured and will bypass local OTLP"
 	}
-	enabled := truthySetting(env.enabled)
-	endpoint := env.endpoint
-	if !enabled && endpoint == "" {
+	if !truthySetting(env.enabled) {
 		return TelemetryDisabled, "GitHub Copilot CLI OTel env is not configured"
 	}
+	endpoint := env.endpoint
 	if endpoint == "" {
 		endpoint = "http://localhost:4318"
 	}

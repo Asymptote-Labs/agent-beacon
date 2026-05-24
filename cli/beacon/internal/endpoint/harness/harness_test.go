@@ -612,9 +612,12 @@ func TestCopilotStatusVariants(t *testing.T) {
 	}{
 		{name: "missing export", body: `export OTHER=1`, status: TelemetryDisabled},
 		{name: "enabled default endpoint", body: `export COPILOT_OTEL_ENABLED=true`, status: TelemetryEnabled},
-		{name: "remote endpoint", body: `export OTEL_EXPORTER_OTLP_ENDPOINT="https://example.com:4318"`, status: TelemetryMisconfigured},
-		{name: "copilot endpoint enabled", body: `export COPILOT_OTEL_ENDPOINT="http://localhost:4318"`, status: TelemetryEnabled},
-		{name: "standard endpoint enabled", body: `export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`, status: TelemetryEnabled},
+		{name: "endpoint without enable flag", body: `export OTEL_EXPORTER_OTLP_ENDPOINT="https://example.com:4318"`, status: TelemetryDisabled},
+		{name: "copilot endpoint without enable flag", body: `export COPILOT_OTEL_ENDPOINT="http://localhost:4318"`, status: TelemetryDisabled},
+		{name: "standard endpoint without enable flag", body: `export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`, status: TelemetryDisabled},
+		{name: "enabled remote endpoint", body: "export COPILOT_OTEL_ENABLED=true\nexport OTEL_EXPORTER_OTLP_ENDPOINT=\"https://example.com:4318\"", status: TelemetryMisconfigured},
+		{name: "enabled copilot endpoint", body: "export COPILOT_OTEL_ENABLED=true\nexport COPILOT_OTEL_ENDPOINT=\"http://localhost:4318\"", status: TelemetryEnabled},
+		{name: "enabled standard endpoint", body: "export COPILOT_OTEL_ENABLED=true\nexport OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318", status: TelemetryEnabled},
 		{name: "file exporter bypass", body: "export COPILOT_OTEL_ENABLED=true\nexport COPILOT_OTEL_FILE_EXPORTER_PATH=/tmp/copilot.jsonl", status: TelemetryMisconfigured},
 	}
 
