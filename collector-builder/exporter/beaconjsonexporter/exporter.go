@@ -178,6 +178,9 @@ func shouldDropMetric(resourceAttrs map[string]interface{}, name string, include
 	if shouldDropOpenClawMetric(resourceAttrs, name, includeRuntimeMetrics) {
 		return true
 	}
+	if shouldDropCopilotMetric(resourceAttrs, name, includeRuntimeMetrics) {
+		return true
+	}
 	if !includeRuntimeMetrics && shouldDropRuntimeMetric(name) {
 		return true
 	}
@@ -234,6 +237,25 @@ func shouldDropOpenClawMetric(resourceAttrs map[string]interface{}, name string,
 		}
 	}
 	return false
+}
+
+func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, includeRuntimeMetrics bool) bool {
+	if includeRuntimeMetrics {
+		return false
+	}
+	if harnessName(resourceAttrs, name) != "copilot_cli" {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if slices.Contains(copilotKeptMetricNames, normalized) {
+		return false
+	}
+	return strings.HasPrefix(normalized, "copilot_chat.")
+}
+
+var copilotKeptMetricNames = []string{
+	"gen_ai.client.operation.duration",
+	"gen_ai.client.token.usage",
 }
 
 var openClawKeptMetricNames = []string{
@@ -587,6 +609,8 @@ func normalizeHarnessName(name string) string {
 		return "codex_cli"
 	case strings.Contains(lower, "gemini"):
 		return "gemini_cli"
+	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot-chat") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
+		return "copilot_cli"
 	case name != "":
 		return name
 	default:
@@ -596,12 +620,17 @@ func normalizeHarnessName(name string) string {
 
 func inferAction(attrs map[string]interface{}, fallback string) string {
 	tool := strings.ToLower(firstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"))
+	operation := strings.ToLower(firstString(attrs, "gen_ai.operation.name"))
+	harness := harnessName(attrs, fallback)
 	text := strings.ToLower(strings.Join([]string{
 		fallback,
 		tool,
+		operation,
 		firstString(attrs, "event.name", "codex.op", "rpc.method"),
 	}, " "))
 	switch {
+	case harness == "copilot_cli":
+		return copilotAction(operation, text)
 	case strings.Contains(text, "gemini_cli.user_prompt"):
 		return "prompt.submitted"
 	case strings.Contains(text, "gemini_cli.tool_call"):
@@ -619,6 +648,21 @@ func inferAction(attrs map[string]interface{}, fallback string) string {
 	case strings.Contains(text, "file") || strings.Contains(text, "write") || strings.Contains(text, "edit"):
 		return "file.modified"
 	case strings.Contains(text, "approval"):
+		return "approval.requested"
+	default:
+		return "tool.invoked"
+	}
+}
+
+func copilotAction(operation, text string) string {
+	switch {
+	case operation == "invoke_agent":
+		return "session.activity"
+	case operation == "chat":
+		return "prompt.submitted"
+	case operation == "execute_tool":
+		return "tool.invoked"
+	case strings.Contains(text, "permission"):
 		return "approval.requested"
 	default:
 		return "tool.invoked"
@@ -658,6 +702,8 @@ func eventCategory(action, explicit string) string {
 		return "mcp"
 	case strings.HasPrefix(action, "approval.") || strings.HasPrefix(action, "policy."):
 		return "approval"
+	case strings.HasPrefix(action, "session."):
+		return "session"
 	case strings.HasPrefix(action, "metric."):
 		return "metric"
 	case strings.HasPrefix(action, "tool."):

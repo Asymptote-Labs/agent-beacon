@@ -122,6 +122,22 @@ Gemini CLI is available as an opt-in local OpenTelemetry harness. Include it in
 the harness list, for example `BEACON_ENDPOINT_HARNESSES=claude,codex,gemini`,
 when you want the deployment to manage Gemini telemetry settings.
 
+GitHub Copilot CLI is opt-in and MDM-managed. Do not add it to the default
+Beacon harness list; instead, deploy Copilot's OTel environment in the Copilot
+CLI launch environment so it exports to Beacon's local OTLP HTTP receiver:
+
+```sh
+export COPILOT_OTEL_ENABLED="true"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="true"
+```
+
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` is optional and should
+match deployments that intentionally use Beacon's `full` content retention.
+Beacon validates Copilot CLI through endpoint discovery/status and normalizes
+events when the MDM-managed environment sends OTLP. Copilot CLI currently
+exports OTLP over HTTP, not gRPC.
+
 Recommended rollout:
 
 1. Upload the signed/notarized package to a pilot group.
@@ -228,6 +244,16 @@ Parameter 16: Splunk CA file for install.sh only
 To opt in Gemini CLI telemetry through Jamf, include `gemini` in parameter 4,
 for example `claude,codex,gemini`.
 
+For GitHub Copilot CLI, keep parameter 4 at the normal default unless you want
+install or repair output to call out that Copilot is MDM-managed. Configure the
+Copilot launch environment separately:
+
+```sh
+export COPILOT_OTEL_ENABLED="true"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="true"
+```
+
 For repair policies, prefer the `BEACON_SPLUNK_*` environment variables so
 tokens do not need to be entered as visible script parameters.
 
@@ -319,6 +345,11 @@ repair.sh argument 11: Splunk CA file
 
 To opt in Gemini CLI telemetry through Fleet, include `gemini` in the harness
 argument, for example `claude,codex,gemini`.
+
+For GitHub Copilot CLI, deploy the same `COPILOT_OTEL_ENABLED=true` and
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` environment outside the
+Beacon package. Copilot is not part of the default Fleet harness argument and
+Beacon does not write Copilot shell profiles or `~/.copilot/config.json`.
 
 Add queries from `packaging/macos/fleet/queries` as Fleet policies or labels.
 They cover package/service/log/config presence and freshness; run

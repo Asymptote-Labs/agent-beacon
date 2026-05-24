@@ -148,6 +148,21 @@ func TestConfigureHarnessesRejectsFactoryAsMDMManaged(t *testing.T) {
 	}
 }
 
+func TestConfigureHarnessesRejectsCopilotCLIAsMDMManaged(t *testing.T) {
+	cfg := endpointconfig.Config{
+		Harnesses: []string{"copilot"},
+		Collector: endpointconfig.Collector{
+			GRPCPort: 54317,
+			HTTPPort: 54318,
+		},
+	}
+
+	_, err := configureHarnesses(cfg)
+	if err == nil || !strings.Contains(err.Error(), "Copilot CLI telemetry is MDM-managed") || !strings.Contains(err.Error(), "54318") {
+		t.Fatalf("configureHarnesses error = %v, want MDM-managed Copilot CLI error with HTTP port", err)
+	}
+}
+
 func TestConfigureHarnessesRejectsOpenCodeAsHookManaged(t *testing.T) {
 	cfg := endpointconfig.Config{Harnesses: []string{"opencode"}}
 	_, err := configureHarnesses(cfg)

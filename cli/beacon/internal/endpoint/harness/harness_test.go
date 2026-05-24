@@ -479,6 +479,50 @@ func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
 	}
 }
 
+func TestDiscoverCopilotCLIDetectsExecutableOnPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/bash")
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	copilotPath := filepath.Join(binDir, "copilot")
+	if err := os.WriteFile(copilotPath, []byte("#!/bin/sh\necho copilot 1.0.4\n"), 0755); err != nil {
+		t.Fatalf("write fake copilot executable: %v", err)
+	}
+
+	h := DiscoverCopilotCLI()
+	if !h.Detected {
+		t.Fatalf("DiscoverCopilotCLI did not detect executable on PATH: %#v", h)
+	}
+	if h.ExecutablePath != copilotPath {
+		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, copilotPath)
+	}
+	if h.Version != "copilot 1.0.4" {
+		t.Fatalf("Version = %q, want fake executable version", h.Version)
+	}
+	if h.ConfigPath != filepath.Join(home, ".bash_profile") {
+		t.Fatalf("ConfigPath = %q, want bash profile", h.ConfigPath)
+	}
+}
+
+func TestDiscoverCopilotCLIDetectsConfigFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	configPath := filepath.Join(home, ".copilot", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("mkdir copilot config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{}`), 0600); err != nil {
+		t.Fatalf("write copilot config: %v", err)
+	}
+
+	h := DiscoverCopilotCLI()
+	if !h.Detected {
+		t.Fatalf("DiscoverCopilotCLI did not detect config file: %#v", h)
+	}
+}
+
 func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -556,5 +600,89 @@ func TestFactoryStatusVariants(t *testing.T) {
 				t.Fatalf("factoryStatus = %q, want %q", status, tt.status)
 			}
 		})
+	}
+}
+
+func TestCopilotStatusVariants(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name   string
+		body   string
+		status TelemetryStatus
+	}{
+		{name: "missing export", body: `export OTHER=1`, status: TelemetryDisabled},
+		{name: "enabled default endpoint", body: `export COPILOT_OTEL_ENABLED=true`, status: TelemetryEnabled},
+		{name: "endpoint without enable flag", body: `export OTEL_EXPORTER_OTLP_ENDPOINT="https://example.com:4318"`, status: TelemetryDisabled},
+		{name: "copilot endpoint without enable flag", body: `export COPILOT_OTEL_ENDPOINT="http://localhost:4318"`, status: TelemetryDisabled},
+		{name: "standard endpoint without enable flag", body: `export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`, status: TelemetryDisabled},
+		{name: "enabled remote endpoint", body: "export COPILOT_OTEL_ENABLED=true\nexport OTEL_EXPORTER_OTLP_ENDPOINT=\"https://example.com:4318\"", status: TelemetryMisconfigured},
+		{name: "enabled copilot endpoint", body: "export COPILOT_OTEL_ENABLED=true\nexport COPILOT_OTEL_ENDPOINT=\"http://localhost:4318\"", status: TelemetryEnabled},
+		{name: "enabled standard endpoint", body: "export COPILOT_OTEL_ENABLED=true\nexport OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318", status: TelemetryEnabled},
+		{name: "file exporter bypass", body: "export COPILOT_OTEL_ENABLED=true\nexport COPILOT_OTEL_FILE_EXPORTER_PATH=/tmp/copilot.jsonl", status: TelemetryMisconfigured},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearCopilotEnv(t)
+			path := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "_")+".profile")
+			if err := os.WriteFile(path, []byte(tt.body), 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			status, _ := copilotStatus(path)
+			if status != tt.status {
+				t.Fatalf("copilotStatus = %q, want %q", status, tt.status)
+			}
+		})
+	}
+}
+
+func TestCopilotStatusReadsProcessEnvironment(t *testing.T) {
+	clearCopilotEnv(t)
+	t.Setenv("COPILOT_OTEL_ENABLED", "true")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:54318")
+
+	status, msg := copilotStatus(filepath.Join(t.TempDir(), "missing.profile"), "http://127.0.0.1:54318")
+	if status != TelemetryEnabled {
+		t.Fatalf("copilotStatus = %q (%s), want %q", status, msg, TelemetryEnabled)
+	}
+}
+
+func TestCopilotStatusValidatesExpectedHTTPPort(t *testing.T) {
+	clearCopilotEnv(t)
+	path := filepath.Join(t.TempDir(), "profile")
+	if err := os.WriteFile(path, []byte(`export COPILOT_OTEL_ENABLED=true`), 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	status, _ := copilotStatus(path, "http://127.0.0.1:54318")
+	if status != TelemetryMisconfigured {
+		t.Fatalf("copilotStatus = %q, want %q for default 4318 endpoint with expected custom port", status, TelemetryMisconfigured)
+	}
+}
+
+func TestCopilotStatusMergesProfileWithGenericProcessEndpoint(t *testing.T) {
+	clearCopilotEnv(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+
+	path := filepath.Join(t.TempDir(), "profile")
+	if err := os.WriteFile(path, []byte("export COPILOT_OTEL_ENABLED=true\n"), 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	status, msg := copilotStatus(path)
+	if status != TelemetryEnabled {
+		t.Fatalf("copilotStatus = %q (%s), want %q; generic OTEL_EXPORTER_OTLP_ENDPOINT should not suppress profile COPILOT_OTEL_ENABLED", status, msg, TelemetryEnabled)
+	}
+}
+
+func clearCopilotEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"COPILOT_OTEL_ENABLED",
+		"COPILOT_OTEL_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"COPILOT_OTEL_FILE_EXPORTER_PATH",
+	} {
+		t.Setenv(key, "")
 	}
 }

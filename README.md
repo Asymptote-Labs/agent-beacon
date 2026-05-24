@@ -78,6 +78,7 @@ Claude Cowork, OpenClaw).
 | Claude Code | Local OpenTelemetry configuration |
 | Codex CLI | Local OpenTelemetry configuration |
 | Gemini CLI | Opt-in local OpenTelemetry configuration |
+| GitHub Copilot CLI | MDM-managed OpenTelemetry (OTLP HTTP) |
 | Grok Build | Beacon hook adapter |
 | OpenCode | Beacon hook adapter |
 | Devin | Beacon hook adapter |

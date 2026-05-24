@@ -485,6 +485,84 @@ func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 	}
 }
 
+func TestConsumeMetricsDropsCopilotOperationalMetricsByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "github-copilot")
+	sm := rm.ScopeMetrics().AppendEmpty()
+	for _, name := range []string{
+		"gen_ai.client.operation.duration",
+		"gen_ai.client.token.usage",
+		"copilot_chat.tool.call.count",
+		"copilot_chat.agent.invocation.duration",
+	} {
+		sm.Metrics().AppendEmpty().SetName(name)
+	}
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	text := strings.TrimSpace(string(data))
+	for _, dropped := range []string{"copilot_chat.tool.call.count", "copilot_chat.agent.invocation.duration"} {
+		if strings.Contains(text, dropped) {
+			t.Fatalf("Copilot operational metric %q should have been dropped, wrote: %s", dropped, text)
+		}
+	}
+	for _, kept := range []string{"gen_ai.client.operation.duration", "gen_ai.client.token.usage"} {
+		if !strings.Contains(text, kept) {
+			t.Fatalf("Copilot GenAI metric %q should have been kept, wrote: %s", kept, text)
+		}
+	}
+}
+
+func TestConsumeMetricsIncludesCopilotOperationalMetricsWhenConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:                  path,
+		MaxEventBytes:         defaultMaxEventBytes,
+		RotateBytes:           defaultRotateBytes,
+		RedactSecrets:         true,
+		ContentRetention:      "metadata",
+		IncludeRuntimeMetrics: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "github-copilot")
+	metric := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("copilot_chat.tool.call.count")
+
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if !strings.Contains(string(data), "copilot_chat.tool.call.count") {
+		t.Fatalf("Copilot operational metric should have been kept: %s", string(data))
+	}
+}
+
 func TestInferActionMapsCodexUserInputToPrompt(t *testing.T) {
 	attrs := map[string]interface{}{"service.name": "codex_cli_rs"}
 	if got := inferAction(attrs, "op.dispatch.user_input_with_turn_context"); got != "prompt.submitted" {
@@ -953,6 +1031,16 @@ func TestHarnessNameSeparatesClaudeCodeAndCowork(t *testing.T) {
 			want:  "codex_cli",
 		},
 		{
+			name:  "copilot service",
+			attrs: map[string]interface{}{"service.name": "github-copilot"},
+			want:  "copilot_cli",
+		},
+		{
+			name:  "copilot chat wrapper",
+			attrs: map[string]interface{}{"service.name": "copilot-chat"},
+			want:  "copilot_cli",
+		},
+		{
 			name:  "openclaw gateway service",
 			attrs: map[string]interface{}{"service.name": "openclaw-gateway"},
 			want:  "openclaw_gateway",
@@ -963,6 +1051,44 @@ func TestHarnessNameSeparatesClaudeCodeAndCowork(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := harnessName(tt.attrs, tt.hints...); got != tt.want {
 				t.Fatalf("harnessName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCopilotSpanActions(t *testing.T) {
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "metadata"}}
+	tests := []struct {
+		name      string
+		spanName  string
+		operation string
+		want      string
+		category  string
+	}{
+		{name: "agent invocation", spanName: "invoke_agent", operation: "invoke_agent", want: "session.activity", category: "session"},
+		{name: "chat", spanName: "chat gpt-4o", operation: "chat", want: "prompt.submitted", category: "prompt"},
+		{name: "tool", spanName: "execute_tool readFile", operation: "execute_tool", want: "tool.invoked", category: "tool"},
+		{name: "permission", spanName: "permission", operation: "", want: "approval.requested", category: "approval"},
+		{name: "hook", spanName: "hook postToolUse", operation: "", want: "tool.invoked", category: "tool"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			traces := ptrace.NewTraces()
+			span := traces.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+			span.SetName(tt.spanName)
+			if tt.operation != "" {
+				span.Attributes().PutStr("gen_ai.operation.name", tt.operation)
+			}
+			event := exp.eventFromSpan(map[string]interface{}{"service.name": "github-copilot"}, span)
+			if event.Harness.Name != "copilot_cli" {
+				t.Fatalf("harness = %q, want copilot_cli", event.Harness.Name)
+			}
+			if event.Event.Action != tt.want {
+				t.Fatalf("action = %q, want %q", event.Event.Action, tt.want)
+			}
+			if event.Event.Category != tt.category {
+				t.Fatalf("category = %q, want %q", event.Event.Category, tt.category)
 			}
 		})
 	}

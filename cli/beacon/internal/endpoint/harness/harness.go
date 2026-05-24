@@ -48,6 +48,7 @@ func DiscoverAll() []Harness {
 		DiscoverClaude(),
 		DiscoverCodex(),
 		DiscoverGemini(),
+		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
 		DiscoverFactory(),
 		DiscoverCursor(),
@@ -291,6 +292,7 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 	claude := DiscoverClaude()
 	codex := DiscoverCodex()
 	gemini := DiscoverGemini()
+	copilot := discoverCopilotCLI(endpoint)
 	factory := DiscoverFactory()
 	return []ValidationResult{
 		{
@@ -307,6 +309,11 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 			Harness: gemini.Name,
 			Status:  gemini.TelemetryStatus,
 			Message: validateEndpointMessage(gemini.TelemetryStatus, gemini.Message, endpoint),
+		},
+		{
+			Harness: copilot.Name,
+			Status:  copilot.TelemetryStatus,
+			Message: validateEndpointMessage(copilot.TelemetryStatus, copilot.Message, endpoint),
 		},
 		{
 			Harness: factory.Name,
