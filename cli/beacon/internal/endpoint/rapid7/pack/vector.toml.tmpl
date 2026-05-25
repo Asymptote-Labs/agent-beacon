@@ -1,0 +1,39 @@
+# Beacon Endpoint Agent -> Rapid7 InsightIDR Custom Logs
+#
+# Run Vector as a customer-managed host agent. Keep RAPID7_WEBHOOK_URL in your
+# deployment tooling or Vector service environment, not in Beacon config.
+
+data_dir = "/var/lib/vector/beacon-rapid7"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+read_from = "end"
+
+[transforms.beacon_json]
+type = "remap"
+inputs = ["beacon_runtime"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.rapid7_custom_logs]
+type = "http"
+inputs = ["beacon_json"]
+uri = "${RAPID7_WEBHOOK_URL}"
+method = "post"
+
+[sinks.rapid7_custom_logs.encoding]
+codec = "ndjson"
+
+[sinks.rapid7_custom_logs.batch]
+max_events = 500
+timeout_secs = 5
+
+[sinks.rapid7_custom_logs.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300
+
+[sinks.rapid7_custom_logs.headers]
+Content-Type = "application/x-ndjson"

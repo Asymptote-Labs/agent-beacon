@@ -1,0 +1,42 @@
+# Beacon Endpoint Agent -> Sumo Logic HTTP Logs & Metrics Source
+#
+# Run Vector as a customer-managed host agent. Keep SUMO_URL and optional
+# SUMO_TOKEN in your deployment tooling or Vector service environment, not in
+# Beacon config.
+
+data_dir = "/var/lib/vector/beacon-sumo"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+read_from = "end"
+
+[transforms.beacon_json]
+type = "remap"
+inputs = ["beacon_runtime"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.sumo_http_logs]
+type = "http"
+inputs = ["beacon_json"]
+uri = "${SUMO_URL}"
+method = "post"
+
+[sinks.sumo_http_logs.encoding]
+codec = "ndjson"
+
+[sinks.sumo_http_logs.batch]
+max_events = 500
+timeout_secs = 5
+
+[sinks.sumo_http_logs.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300
+
+[sinks.sumo_http_logs.headers]
+X-Sumo-Category = "${SUMO_SOURCE_CATEGORY:-security/agentbeacon}"
+X-Sumo-Fields = "${SUMO_FIELDS:-product=agentbeacon,telemetry=ai_agent,env=prod}"
+x-sumo-token = "${SUMO_TOKEN:-}"

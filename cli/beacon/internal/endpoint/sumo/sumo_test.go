@@ -39,7 +39,7 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if err := InstallPack(dir, "/tmp/beacon/runtime.jsonl"); err != nil {
 		t.Fatalf("InstallPack returned error: %v", err)
 	}
-	for _, name := range []string{"README.md", "sumo-upload-smoke-test.sh", "sample-event.jsonl"} {
+	for _, name := range []string{"README.md", "sumo-upload-smoke-test.sh", "sample-event.jsonl", "vector.toml"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("expected %s: %v", name, err)
 		}
@@ -58,6 +58,40 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	}
 	if info.Mode().Perm()&0111 == 0 {
 		t.Fatalf("generated script should be executable, mode=%s", info.Mode())
+	}
+	vectorPath := filepath.Join(dir, "vector.toml")
+	vectorConfig, err := os.ReadFile(vectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(vectorConfig), "/tmp/beacon/runtime.jsonl") {
+		t.Fatalf("generated vector config missing configured log path: %s", vectorConfig)
+	}
+	info, err = os.Stat(vectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Fatalf("generated vector config should be 0644, mode=%s", info.Mode().Perm())
+	}
+}
+
+func TestVectorConfigUsesSumoDestinationAndPreservesJSONShape(t *testing.T) {
+	got := mustRead("pack/vector.toml.tmpl")
+	for _, want := range []string{
+		`include = ["{{LOG_PATH}}"]`,
+		`read_from = "end"`,
+		`. = parse_json!(.message)`,
+		`uri = "${SUMO_URL}"`,
+		`codec = "ndjson"`,
+		`retry_attempts = 10`,
+		`X-Sumo-Category = "${SUMO_SOURCE_CATEGORY:-security/agentbeacon}"`,
+		`X-Sumo-Fields = "${SUMO_FIELDS:-product=agentbeacon,telemetry=ai_agent,env=prod}"`,
+		`x-sumo-token = "${SUMO_TOKEN:-}"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("vector config missing %q: %s", want, got)
+		}
 	}
 }
 
@@ -97,6 +131,10 @@ func TestPackREADMEMentionsSumoSetupAndProductionForwarding(t *testing.T) {
 		"100 KB to 1 MB",
 		"Content-Encoding: gzip",
 		"Live Tail",
+		"vector.toml",
+		"customer-managed host-agent",
+		"SUMO_URL",
+		"without a Vector wrapper",
 		"content retention",
 		"/var/log/beacon-agent/runtime.jsonl",
 	} {

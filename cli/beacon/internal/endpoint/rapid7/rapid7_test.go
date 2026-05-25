@@ -35,7 +35,7 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if err := InstallPack(dir, "/tmp/beacon/runtime.jsonl"); err != nil {
 		t.Fatalf("InstallPack returned error: %v", err)
 	}
-	for _, name := range []string{"README.md", "rapid7-upload-smoke-test.sh", "sample-event.jsonl"} {
+	for _, name := range []string{"README.md", "rapid7-upload-smoke-test.sh", "sample-event.jsonl", "vector.toml"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("expected %s: %v", name, err)
 		}
@@ -54,6 +54,38 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	}
 	if info.Mode().Perm()&0111 == 0 {
 		t.Fatalf("generated script should be executable, mode=%s", info.Mode())
+	}
+	vectorPath := filepath.Join(dir, "vector.toml")
+	vectorConfig, err := os.ReadFile(vectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(vectorConfig), "/tmp/beacon/runtime.jsonl") {
+		t.Fatalf("generated vector config missing configured log path: %s", vectorConfig)
+	}
+	info, err = os.Stat(vectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Fatalf("generated vector config should be 0644, mode=%s", info.Mode().Perm())
+	}
+}
+
+func TestVectorConfigUsesRapid7WebhookAndPreservesJSONShape(t *testing.T) {
+	got := mustRead("pack/vector.toml.tmpl")
+	for _, want := range []string{
+		`include = ["{{LOG_PATH}}"]`,
+		`read_from = "end"`,
+		`. = parse_json!(.message)`,
+		`uri = "${RAPID7_WEBHOOK_URL}"`,
+		`codec = "ndjson"`,
+		`retry_attempts = 10`,
+		`Content-Type = "application/x-ndjson"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("vector config missing %q: %s", want, got)
+		}
 	}
 }
 
@@ -94,6 +126,9 @@ func TestPackREADMEMentionsRapid7SetupAndProductionForwarding(t *testing.T) {
 		"application/x-ndjson",
 		"Beacon endpoint Rapid7 validation event",
 		"vendor=beacon product=endpoint-agent destination.type=rapid7",
+		"vector.toml",
+		"customer-managed host-agent",
+		"without a Vector wrapper",
 		"content retention",
 		"/var/log/beacon-agent/runtime.jsonl",
 	} {

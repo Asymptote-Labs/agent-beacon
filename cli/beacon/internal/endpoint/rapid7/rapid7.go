@@ -3,9 +3,8 @@ package rapid7
 import (
 	"embed"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
 
 //go:embed pack/*
@@ -17,15 +16,17 @@ const (
 )
 
 type File struct {
-	Name    string
-	Content string
+	Name            string
+	Content         string
+	TemplateLogPath bool
 }
 
 func Files() []File {
 	return []File{
 		{Name: "README.md", Content: mustRead("pack/README.md")},
-		{Name: "rapid7-upload-smoke-test.sh", Content: UploadSmokeTest(DefaultLogPath)},
+		{Name: "rapid7-upload-smoke-test.sh", Content: mustRead("pack/rapid7-upload-smoke-test.sh.tmpl"), TemplateLogPath: true},
 		{Name: "sample-event.jsonl", Content: mustRead("pack/sample-event.jsonl")},
+		{Name: "vector.toml", Content: mustRead("pack/vector.toml.tmpl"), TemplateLogPath: true},
 	}
 }
 
@@ -33,39 +34,27 @@ func UploadSmokeTest(logPath string) string {
 	if logPath == "" {
 		logPath = DefaultLogPath
 	}
-	return strings.ReplaceAll(mustRead("pack/rapid7-upload-smoke-test.sh.tmpl"), "{{LOG_PATH}}", logPath)
+	return siempack.RenderLogPath(mustRead("pack/rapid7-upload-smoke-test.sh.tmpl"), logPath)
 }
 
 func InstallPack(outputDir, logPath string) error {
 	if outputDir == "" {
 		outputDir = DefaultOutputDir
 	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return err
+	if logPath == "" {
+		logPath = DefaultLogPath
 	}
+	files := make([]siempack.File, 0, len(Files()))
 	for _, file := range Files() {
-		content := file.Content
-		if file.Name == "rapid7-upload-smoke-test.sh" {
-			content = UploadSmokeTest(logPath)
-		}
-		if err := os.WriteFile(filepath.Join(outputDir, file.Name), []byte(content), fileMode(file.Name)); err != nil {
-			return err
-		}
+		files = append(files, siempack.File(file))
 	}
-	return nil
-}
-
-func fileMode(name string) os.FileMode {
-	if strings.HasSuffix(name, ".sh") {
-		return 0755
-	}
-	return 0644
+	return siempack.Install(outputDir, files, logPath)
 }
 
 func mustRead(path string) string {
-	data, err := packFS.ReadFile(path)
+	data, err := siempack.ReadFile(packFS, path)
 	if err != nil {
 		panic(fmt.Sprintf("rapid7 pack asset %s: %v", path, err))
 	}
-	return string(data)
+	return data
 }
