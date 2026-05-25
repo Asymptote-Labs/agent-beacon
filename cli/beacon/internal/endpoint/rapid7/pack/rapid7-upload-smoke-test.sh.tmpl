@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
+
+if [ -z "${RAPID7_WEBHOOK_URL:-}" ]; then
+  echo "RAPID7_WEBHOOK_URL is required. Use the Custom Logs webhook URL from Rapid7 InsightIDR." >&2
+  exit 2
+fi
+
+if [ ! -r "$BEACON_LOG" ]; then
+  echo "Beacon runtime log is not readable: $BEACON_LOG" >&2
+  exit 2
+fi
+
+curl -X POST \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary @"$BEACON_LOG" \
+  "$RAPID7_WEBHOOK_URL"

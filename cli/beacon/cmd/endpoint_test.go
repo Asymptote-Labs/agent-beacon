@@ -163,6 +163,30 @@ func TestEndpointSumoCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointRapid7CommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"rapid7", "print-config"},
+		{"rapid7", "install-pack"},
+		{"rapid7", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("rapid7 command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("rapid7 command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointRapid7InstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("rapid7 install-pack command missing --output flag")
+	}
+}
+
 func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")
@@ -460,6 +484,14 @@ func TestSyntheticEventDestinations(t *testing.T) {
 	}
 	if event.Destination.Type != "pipeline" || event.Destination.Mode != "local_jsonl" {
 		t.Fatalf("pipeline destination = %#v json=%s", event.Destination, data)
+	}
+
+	rapid7Event := syntheticEvent("rapid7")
+	if rapid7Event.Destination.Type != "rapid7" || rapid7Event.Destination.Mode != "custom_logs_webhook_ndjson" {
+		t.Fatalf("rapid7 destination = %#v", rapid7Event.Destination)
+	}
+	if rapid7Event.Message != "Beacon endpoint Rapid7 validation event" {
+		t.Fatalf("rapid7 message = %q", rapid7Event.Message)
 	}
 }
 

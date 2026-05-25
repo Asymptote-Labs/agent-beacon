@@ -22,6 +22,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/rapid7"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sumo"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/wazuh"
@@ -167,6 +168,11 @@ var endpointDatadogCmd = &cobra.Command{
 var endpointSumoCmd = &cobra.Command{
 	Use:   "sumo",
 	Short: "Manage Sumo Logic integration content",
+}
+
+var endpointRapid7Cmd = &cobra.Command{
+	Use:   "rapid7",
+	Short: "Manage Rapid7 InsightIDR integration content",
 }
 
 var endpointIntegrationsCmd = &cobra.Command{
@@ -474,6 +480,29 @@ var endpointSumoValidateCmd = &cobra.Command{
 	RunE:         runEndpointSumoValidate,
 }
 
+var endpointRapid7PrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print a Rapid7 Custom Logs webhook smoke-test uploader for Beacon endpoint events",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		fmt.Print(rapid7.UploadSmokeTest(cfg.LogPath))
+	},
+}
+
+var endpointRapid7InstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write Rapid7 InsightIDR Custom Logs forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointRapid7InstallPack,
+}
+
+var endpointRapid7ValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe a Rapid7 InsightIDR validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointRapid7Validate,
+}
+
 func init() {
 	rootCmd.AddCommand(endpointCmd)
 	rootCmd.AddCommand(topLevelDoctorCmd)
@@ -494,6 +523,7 @@ func init() {
 	endpointCmd.AddCommand(endpointElasticCmd)
 	endpointCmd.AddCommand(endpointDatadogCmd)
 	endpointCmd.AddCommand(endpointSumoCmd)
+	endpointCmd.AddCommand(endpointRapid7Cmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
 	endpointCmd.AddCommand(endpointConfigCmd)
@@ -513,6 +543,9 @@ func init() {
 	endpointSumoCmd.AddCommand(endpointSumoPrintConfigCmd)
 	endpointSumoCmd.AddCommand(endpointSumoInstallPackCmd)
 	endpointSumoCmd.AddCommand(endpointSumoValidateCmd)
+	endpointRapid7Cmd.AddCommand(endpointRapid7PrintConfigCmd)
+	endpointRapid7Cmd.AddCommand(endpointRapid7InstallPackCmd)
+	endpointRapid7Cmd.AddCommand(endpointRapid7ValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointIntegrationsValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
@@ -605,6 +638,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointSumoInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Sumo Logic content pack")
+	for _, c := range []*cobra.Command{endpointRapid7PrintConfigCmd, endpointRapid7InstallPackCmd, endpointRapid7ValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointRapid7InstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Rapid7 InsightIDR content pack")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -922,6 +961,31 @@ func runEndpointSumoValidate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Validation event written to %s\n", path)
 	fmt.Println("Expected Sumo fields: _sourceCategory=security/agentbeacon product=agentbeacon telemetry=ai_agent")
 	fmt.Println(`Expected validation query: _sourceCategory=security/agentbeacon "Beacon endpoint Sumo validation event"`)
+	return nil
+}
+
+func runEndpointRapid7InstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = rapid7.DefaultOutputDir
+	}
+	if err := rapid7.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("Rapid7 InsightIDR content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointRapid7Validate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "rapid7")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected Rapid7 fields: vendor=beacon product=endpoint-agent destination.type=rapid7")
+	fmt.Println(`Expected validation query: "Beacon endpoint Rapid7 validation event"`)
 	return nil
 }
 
