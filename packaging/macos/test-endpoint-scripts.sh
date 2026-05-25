@@ -37,12 +37,19 @@ BEACON_SPLUNK_SOURCE="beacon-source" \
 BEACON_SPLUNK_SOURCETYPE="beacon:sourcetype" \
 BEACON_SPLUNK_INSECURE_SKIP_VERIFY="1" \
 BEACON_SPLUNK_CA_FILE="/tmp/splunk-ca.pem" \
+BEACON_FALCON_HEC_ENDPOINT="https://cloud.us.humio.com/api/v1/ingest/hec" \
+BEACON_FALCON_HEC_TOKEN="falcon-token" \
+BEACON_FALCON_INDEX="beacon-repo" \
+BEACON_FALCON_SOURCE="falcon-source" \
+BEACON_FALCON_SOURCETYPE="json" \
+BEACON_FALCON_INSECURE_SKIP_VERIFY="1" \
+BEACON_FALCON_CA_FILE="/tmp/falcon-ca.pem" \
 STUB_LOG="$STUB_LOG" \
 "$INSTALL_SCRIPT"
 
 INSTALL_ARGS="$(cat "$STUB_LOG")"
 case "$INSTALL_ARGS" in
-  "endpoint install --system --harness claude,codex,cursor --content-retention full --otlp-grpc-port 5317 --otlp-http-port 5318 --collector /tmp/beacon-otelcol --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --splunk-index beacon --splunk-source beacon-source --splunk-sourcetype beacon:sourcetype --splunk-insecure-skip-verify --splunk-ca-file /tmp/splunk-ca.pem") ;;
+  "endpoint install --system --harness claude,codex,cursor --content-retention full --otlp-grpc-port 5317 --otlp-http-port 5318 --collector /tmp/beacon-otelcol --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --splunk-index beacon --splunk-source beacon-source --splunk-sourcetype beacon:sourcetype --splunk-insecure-skip-verify --splunk-ca-file /tmp/splunk-ca.pem --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token --falcon-index beacon-repo --falcon-source falcon-source --falcon-sourcetype json --falcon-insecure-skip-verify --falcon-ca-file /tmp/falcon-ca.pem") ;;
   *)
     echo "unexpected install args: $INSTALL_ARGS" >&2
     exit 1
@@ -53,12 +60,14 @@ BEACON_BIN="$STUB_BIN" \
 BEACON_COLLECTOR="/tmp/beacon-otelcol" \
 BEACON_SPLUNK_HEC_ENDPOINT="https://splunk.example:8088/services/collector" \
 BEACON_SPLUNK_HEC_TOKEN="hec-token" \
+BEACON_FALCON_HEC_ENDPOINT="https://cloud.us.humio.com/api/v1/ingest/hec" \
+BEACON_FALCON_HEC_TOKEN="falcon-token" \
 STUB_LOG="$STUB_LOG" \
 "$REPAIR_SCRIPT"
 
 REPAIR_ARGS="$(cat "$STUB_LOG")"
 case "$REPAIR_ARGS" in
-  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,codex --content-retention full --otlp-grpc-port 4317 --otlp-http-port 4318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token") ;;
+  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,codex --content-retention full --otlp-grpc-port 4317 --otlp-http-port 4318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token") ;;
   *)
     echo "unexpected repair args: $REPAIR_ARGS" >&2
     exit 1
@@ -171,12 +180,15 @@ BEACON_COLLECTOR="/tmp/beacon-otelcol" \
 BEACON_SPLUNK_HEC_ENDPOINT="https://splunk.example:8088/services/collector" \
 BEACON_SPLUNK_HEC_TOKEN="hec-token" \
 BEACON_SPLUNK_INDEX="beacon" \
+BEACON_FALCON_HEC_ENDPOINT="https://cloud.us.humio.com/api/v1/ingest/hec" \
+BEACON_FALCON_HEC_TOKEN="falcon-token" \
+BEACON_FALCON_INDEX="beacon-repo" \
 STUB_LOG="$STUB_LOG" \
 "$FLEET_REPAIR_SCRIPT" "claude,cursor" "metadata" "8317" "8318"
 
 REPAIR_ARGS="$(cat "$STUB_LOG")"
 case "$REPAIR_ARGS" in
-  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,cursor --content-retention metadata --otlp-grpc-port 8317 --otlp-http-port 8318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --splunk-index beacon") ;;
+  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,cursor --content-retention metadata --otlp-grpc-port 8317 --otlp-http-port 8318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --splunk-index beacon --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token --falcon-index beacon-repo") ;;
   *)
     echo "unexpected Fleet positional repair args: $REPAIR_ARGS" >&2
     exit 1

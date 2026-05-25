@@ -35,6 +35,23 @@ Add optional Splunk HEC forwarding during install or repair:
 The local JSONL runtime log remains enabled when Splunk forwarding is
 configured.
 
+Add optional Falcon LogScale HEC forwarding during install or repair:
+
+```bash
+./beacon endpoint repair \
+  --falcon-hec-endpoint "$LOGSCALE_URL/api/v1/ingest/hec" \
+  --falcon-hec-token "$LOGSCALE_INGEST_TOKEN" \
+  --falcon-source beacon-endpoint-agent \
+  --falcon-sourcetype json
+```
+
+Beacon sends LogScale HEC requests with `Authorization: Bearer <ingest token>`.
+The HEC `event` value is the normalized Beacon event object with an ISO
+`@timestamp` nested inside it for LogScale's built-in JSON parser. The optional
+`--falcon-index` flag maps to a LogScale repository and is usually only needed
+with organization or system multi-repository ingest tokens; repository-scoped
+ingest tokens already select the target repository.
+
 ## Dashboard
 
 ```bash

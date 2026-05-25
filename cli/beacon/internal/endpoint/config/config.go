@@ -17,6 +17,8 @@ const (
 const (
 	DefaultSplunkSource     = "beacon-endpoint-agent"
 	DefaultSplunkSourcetype = "beacon:endpoint"
+	DefaultFalconSource     = "beacon-endpoint-agent"
+	DefaultFalconSourcetype = "json"
 )
 
 type ContentRetention string
@@ -49,9 +51,21 @@ type Collector struct {
 
 type Destinations struct {
 	SplunkHEC *SplunkHEC `json:"splunk_hec,omitempty"`
+	FalconHEC *FalconHEC `json:"falcon_hec,omitempty"`
 }
 
 type SplunkHEC struct {
+	Enabled            bool   `json:"enabled,omitempty"`
+	Endpoint           string `json:"endpoint,omitempty"`
+	Token              string `json:"token,omitempty"`
+	Index              string `json:"index,omitempty"`
+	Source             string `json:"source,omitempty"`
+	Sourcetype         string `json:"sourcetype,omitempty"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty"`
+	CAFile             string `json:"ca_file,omitempty"`
+}
+
+type FalconHEC struct {
 	Enabled            bool   `json:"enabled,omitempty"`
 	Endpoint           string `json:"endpoint,omitempty"`
 	Token              string `json:"token,omitempty"`
@@ -165,51 +179,84 @@ func ValidateContentRetention(mode ContentRetention) error {
 }
 
 func NormalizeDestinations(cfg *Config) {
-	if cfg == nil || cfg.Destinations == nil || cfg.Destinations.SplunkHEC == nil {
+	if cfg == nil || cfg.Destinations == nil {
 		return
 	}
-	splunk := cfg.Destinations.SplunkHEC
-	if splunk.Endpoint != "" || splunk.Token != "" {
-		splunk.Enabled = true
+	if splunk := cfg.Destinations.SplunkHEC; splunk != nil {
+		if splunk.Endpoint != "" || splunk.Token != "" {
+			splunk.Enabled = true
+		}
+		if splunk.Enabled {
+			if splunk.Source == "" {
+				splunk.Source = DefaultSplunkSource
+			}
+			if splunk.Sourcetype == "" {
+				splunk.Sourcetype = DefaultSplunkSourcetype
+			}
+		}
 	}
-	if !splunk.Enabled {
-		return
-	}
-	if splunk.Source == "" {
-		splunk.Source = DefaultSplunkSource
-	}
-	if splunk.Sourcetype == "" {
-		splunk.Sourcetype = DefaultSplunkSourcetype
+	if falcon := cfg.Destinations.FalconHEC; falcon != nil {
+		if falcon.Endpoint != "" || falcon.Token != "" {
+			falcon.Enabled = true
+		}
+		if falcon.Enabled {
+			if falcon.Source == "" {
+				falcon.Source = DefaultFalconSource
+			}
+			if falcon.Sourcetype == "" {
+				falcon.Sourcetype = DefaultFalconSourcetype
+			}
+		}
 	}
 }
 
 func ValidateDestinations(destinations *Destinations) error {
-	if destinations == nil || destinations.SplunkHEC == nil {
+	if destinations == nil {
 		return nil
 	}
-	splunk := destinations.SplunkHEC
-	configured := splunk.Enabled ||
-		splunk.Endpoint != "" ||
-		splunk.Token != "" ||
-		splunk.Index != "" ||
-		splunk.Source != "" ||
-		splunk.Sourcetype != "" ||
-		splunk.InsecureSkipVerify ||
-		splunk.CAFile != ""
-	if !configured {
-		return nil
+	if destinations.SplunkHEC != nil {
+		splunk := destinations.SplunkHEC
+		configured := splunk.Enabled ||
+			splunk.Endpoint != "" ||
+			splunk.Token != "" ||
+			splunk.Index != "" ||
+			splunk.Source != "" ||
+			splunk.Sourcetype != "" ||
+			splunk.InsecureSkipVerify ||
+			splunk.CAFile != ""
+		if configured {
+			if splunk.Endpoint == "" {
+				return fmt.Errorf("splunk HEC endpoint is required when Splunk forwarding is configured")
+			}
+			if splunk.Token == "" {
+				return fmt.Errorf("splunk HEC token is required when Splunk forwarding is configured")
+			}
+		}
 	}
-	if splunk.Endpoint == "" {
-		return fmt.Errorf("splunk HEC endpoint is required when Splunk forwarding is configured")
-	}
-	if splunk.Token == "" {
-		return fmt.Errorf("splunk HEC token is required when Splunk forwarding is configured")
+	if destinations.FalconHEC != nil {
+		falcon := destinations.FalconHEC
+		configured := falcon.Enabled ||
+			falcon.Endpoint != "" ||
+			falcon.Token != "" ||
+			falcon.Index != "" ||
+			falcon.Source != "" ||
+			falcon.Sourcetype != "" ||
+			falcon.InsecureSkipVerify ||
+			falcon.CAFile != ""
+		if configured {
+			if falcon.Endpoint == "" {
+				return fmt.Errorf("falcon HEC endpoint is required when Falcon forwarding is configured")
+			}
+			if falcon.Token == "" {
+				return fmt.Errorf("falcon HEC token is required when Falcon forwarding is configured")
+			}
+		}
 	}
 	return nil
 }
 
 func HasSecretDestinations(cfg Config) bool {
 	return cfg.Destinations != nil &&
-		cfg.Destinations.SplunkHEC != nil &&
-		cfg.Destinations.SplunkHEC.Token != ""
+		((cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Token != "") ||
+			(cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Token != ""))
 }

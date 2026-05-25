@@ -30,6 +30,7 @@ type InstallOptions struct {
 	IncludeRuntimeMetrics bool
 	IncludeCodexSpans     bool
 	SplunkHEC             *endpointconfig.SplunkHEC
+	FalconHEC             *endpointconfig.FalconHEC
 }
 
 type UninstallOptions struct {
@@ -63,6 +64,7 @@ type Status struct {
 
 type DestinationStatus struct {
 	SplunkHEC ConfiguredStatus `json:"splunk_hec"`
+	FalconHEC ConfiguredStatus `json:"falcon_hec"`
 }
 
 type ConfiguredStatus struct {
@@ -287,7 +289,18 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		cfg.ContentRetention = opts.ContentRetention
 	}
 	if opts.SplunkHEC != nil {
-		cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: opts.SplunkHEC}
+		if cfg.Destinations == nil {
+			cfg.Destinations = &endpointconfig.Destinations{}
+		}
+		cfg.Destinations.SplunkHEC = opts.SplunkHEC
+	}
+	if opts.FalconHEC != nil {
+		if cfg.Destinations == nil {
+			cfg.Destinations = &endpointconfig.Destinations{}
+		}
+		cfg.Destinations.FalconHEC = opts.FalconHEC
+	}
+	if cfg.Destinations != nil {
 		endpointconfig.NormalizeDestinations(&cfg)
 	}
 	return cfg
@@ -296,24 +309,40 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 func installDestination(cfg endpointconfig.Config) *schema.DestinationInfo {
 	destination := &schema.DestinationInfo{Type: "local_jsonl", Mode: "file", Status: "configured"}
 	if cfg.Destinations != nil && cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Enabled {
-		destination.Type = "local_jsonl,splunk_hec"
-		destination.Mode = "file,hec"
+		destination.Type += ",splunk_hec"
+		destination.Mode += ",hec"
+	}
+	if cfg.Destinations != nil && cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Enabled {
+		destination.Type += ",falcon_hec"
+		destination.Mode += ",hec"
 	}
 	return destination
 }
 
 func destinationStatus(cfg endpointconfig.Config) DestinationStatus {
 	status := DestinationStatus{}
-	if cfg.Destinations == nil || cfg.Destinations.SplunkHEC == nil || !cfg.Destinations.SplunkHEC.Enabled {
+	if cfg.Destinations == nil {
 		return status
 	}
-	splunk := cfg.Destinations.SplunkHEC
-	status.SplunkHEC = ConfiguredStatus{
-		Configured: true,
-		Endpoint:   splunk.Endpoint,
-		Index:      splunk.Index,
-		Source:     splunk.Source,
-		Sourcetype: splunk.Sourcetype,
+	if cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Enabled {
+		splunk := cfg.Destinations.SplunkHEC
+		status.SplunkHEC = ConfiguredStatus{
+			Configured: true,
+			Endpoint:   splunk.Endpoint,
+			Index:      splunk.Index,
+			Source:     splunk.Source,
+			Sourcetype: splunk.Sourcetype,
+		}
+	}
+	if cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Enabled {
+		falcon := cfg.Destinations.FalconHEC
+		status.FalconHEC = ConfiguredStatus{
+			Configured: true,
+			Endpoint:   falcon.Endpoint,
+			Index:      falcon.Index,
+			Source:     falcon.Source,
+			Sourcetype: falcon.Sourcetype,
+		}
 	}
 	return status
 }

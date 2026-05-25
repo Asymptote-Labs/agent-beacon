@@ -44,6 +44,34 @@ func TestEndpointDashboardCommandRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointInstallAndRepairRegisterFalconFlags(t *testing.T) {
+	for _, cmd := range []*cobra.Command{endpointInstallCmd, endpointRepairCmd} {
+		for _, name := range []string{
+			"falcon-hec-endpoint",
+			"falcon-hec-token",
+			"falcon-index",
+			"falcon-source",
+			"falcon-sourcetype",
+			"falcon-insecure-skip-verify",
+			"falcon-ca-file",
+		} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("%s missing --%s flag", cmd.Use, name)
+			}
+		}
+	}
+}
+
+func TestFalconHECOptionsDefaultIsNil(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.falconSource = endpointconfig.DefaultFalconSource
+	endpointOpts.falconSourcetype = endpointconfig.DefaultFalconSourcetype
+	if got := falconHECOptions(); got != nil {
+		t.Fatalf("falconHECOptions() = %#v, want nil", got)
+	}
+}
+
 func TestEndpointCoworkSetupCommandRegistered(t *testing.T) {
 	cmd, _, err := endpointCmd.Find([]string{"integrations", "claude-cowork", "setup"})
 	if err != nil {
@@ -403,6 +431,21 @@ func TestRedactConfigScrubsSplunkToken(t *testing.T) {
 		t.Fatalf("token was not redacted: %#v", redacted.Destinations.SplunkHEC)
 	}
 	if cfg.Destinations.SplunkHEC.Token != "secret-token" {
+		t.Fatal("redactConfig mutated input config")
+	}
+}
+
+func TestRedactConfigScrubsFalconToken(t *testing.T) {
+	cfg := endpointconfig.Default(true, "/tmp/runtime.jsonl")
+	cfg.Destinations = &endpointconfig.Destinations{FalconHEC: &endpointconfig.FalconHEC{
+		Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
+		Token:    "secret-token",
+	}}
+	redacted := redactConfig(cfg)
+	if redacted.Destinations.FalconHEC.Token != "[REDACTED]" {
+		t.Fatalf("token was not redacted: %#v", redacted.Destinations.FalconHEC)
+	}
+	if cfg.Destinations.FalconHEC.Token != "secret-token" {
 		t.Fatal("redactConfig mutated input config")
 	}
 }

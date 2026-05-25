@@ -13,6 +13,8 @@ processors:
 exporters:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     path: ./exporter/beaconjsonexporter
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/falconhecexporter v0.0.0
+    path: ./exporter/beaconjsonexporter/falconhecexporter
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/splunkhecexporter v0.121.0
 
 extensions:

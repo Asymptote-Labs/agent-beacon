@@ -101,6 +101,7 @@ enterprise-grade SIEMs.
 | [Sumo Logic](https://docs.asymptotelabs.ai/cli/siem-forwarding-sumo) | HTTP Logs & Metrics Source content pack over local JSONL |
 | [Rapid7 InsightIDR](https://docs.asymptotelabs.ai/cli/siem-forwarding-rapid7) | Custom Logs webhook content pack over local JSONL |
 | [Splunk HEC](https://docs.asymptotelabs.ai/cli/siem-forwarding-splunk) | Optional endpoint forwarding during install or repair |
+| CrowdStrike Falcon LogScale HEC | Optional endpoint forwarding with LogScale ingest tokens during install or repair |
 | [Customer-managed SIEM pipelines](https://docs.asymptotelabs.ai/cli/siem-forwarding) | Forwarding from local Beacon JSONL under customer control |
 
 ### MDM Deployment
