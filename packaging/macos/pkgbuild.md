@@ -130,6 +130,20 @@ local OpenTelemetry settings.
 
 For repair workflows, pass Splunk settings with `BEACON_SPLUNK_*` environment
 variables when possible so HEC tokens are not exposed as script parameters.
+Falcon LogScale HEC settings are environment-only and are not exposed as package
+positional parameters:
+
+```bash
+BEACON_FALCON_HEC_ENDPOINT="https://cloud.us.humio.com/api/v1/ingest/hec" \
+BEACON_FALCON_HEC_TOKEN="$LOGSCALE_INGEST_TOKEN" \
+BEACON_FALCON_SOURCE="beacon-endpoint-agent" \
+BEACON_FALCON_SOURCETYPE="json" \
+  /opt/beacon/scripts/install-endpoint.sh
+```
+
+Use `BEACON_FALCON_INDEX` only with LogScale organization or system
+multi-repository ingest tokens. Repository-scoped ingest tokens already choose
+the target repository.
 
 Upload Extension Attributes from
 `packaging/macos/jamf/extension-attributes` and build Smart Groups for missing,
@@ -155,6 +169,15 @@ Splunk HEC forwarding can be configured with:
 BEACON_SPLUNK_HEC_ENDPOINT="https://splunk.example:8088/services/collector" \
 BEACON_SPLUNK_HEC_TOKEN="$SPLUNK_HEC_TOKEN" \
 BEACON_SPLUNK_INDEX="beacon" \
+  /opt/beacon/scripts/install-endpoint.sh
+```
+
+Falcon LogScale HEC forwarding can be configured with:
+
+```bash
+BEACON_FALCON_HEC_ENDPOINT="https://cloud.us.humio.com/api/v1/ingest/hec" \
+BEACON_FALCON_HEC_TOKEN="$LOGSCALE_INGEST_TOKEN" \
+BEACON_FALCON_SOURCETYPE="json" \
   /opt/beacon/scripts/install-endpoint.sh
 ```
 

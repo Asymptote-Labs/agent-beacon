@@ -66,6 +66,13 @@ var endpointOpts struct {
 	splunkSourcetype         string
 	splunkInsecureSkipVerify bool
 	splunkCAFile             string
+	falconHECEndpoint        string
+	falconHECToken           string
+	falconIndex              string
+	falconSource             string
+	falconSourcetype         string
+	falconInsecureSkipVerify bool
+	falconCAFile             string
 	dashboardAddr            string
 	dashboardOpen            bool
 	includeEventSummaries    bool
@@ -576,6 +583,7 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
 	registerSplunkFlags(endpointInstallCmd)
+	registerFalconFlags(endpointInstallCmd)
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
@@ -586,6 +594,7 @@ func init() {
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "full", "Content retention mode: metadata, redacted, or full")
 	registerSplunkFlags(endpointRepairCmd)
+	registerFalconFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -1193,6 +1202,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
 		SplunkHEC:             splunkHECOptions(),
+		FalconHEC:             falconHECOptions(),
 	})
 	if err != nil {
 		return err
@@ -1325,6 +1335,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
 		SplunkHEC:             splunkHECOptions(),
+		FalconHEC:             falconHECOptions(),
 	})
 	if err != nil {
 		return err
@@ -1387,6 +1398,16 @@ func registerSplunkFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&endpointOpts.splunkCAFile, "splunk-ca-file", "", "Optional CA certificate path for Splunk HEC TLS verification")
 }
 
+func registerFalconFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&endpointOpts.falconHECEndpoint, "falcon-hec-endpoint", "", "Falcon LogScale HEC endpoint URL")
+	cmd.Flags().StringVar(&endpointOpts.falconHECToken, "falcon-hec-token", "", "Falcon LogScale ingest token")
+	cmd.Flags().StringVar(&endpointOpts.falconIndex, "falcon-index", "", "Optional Falcon LogScale repository for multi-repository tokens")
+	cmd.Flags().StringVar(&endpointOpts.falconSource, "falcon-source", endpointconfig.DefaultFalconSource, "Optional Falcon LogScale source")
+	cmd.Flags().StringVar(&endpointOpts.falconSourcetype, "falcon-sourcetype", endpointconfig.DefaultFalconSourcetype, "Optional Falcon LogScale parser or sourcetype")
+	cmd.Flags().BoolVar(&endpointOpts.falconInsecureSkipVerify, "falcon-insecure-skip-verify", false, "Skip Falcon LogScale HEC TLS certificate verification")
+	cmd.Flags().StringVar(&endpointOpts.falconCAFile, "falcon-ca-file", "", "Optional CA certificate path for Falcon LogScale HEC TLS verification")
+}
+
 func splunkHECOptions() *endpointconfig.SplunkHEC {
 	if endpointOpts.splunkHECEndpoint == "" &&
 		endpointOpts.splunkHECToken == "" &&
@@ -1405,5 +1426,26 @@ func splunkHECOptions() *endpointconfig.SplunkHEC {
 		Sourcetype:         endpointOpts.splunkSourcetype,
 		InsecureSkipVerify: endpointOpts.splunkInsecureSkipVerify,
 		CAFile:             endpointOpts.splunkCAFile,
+	}
+}
+
+func falconHECOptions() *endpointconfig.FalconHEC {
+	if endpointOpts.falconHECEndpoint == "" &&
+		endpointOpts.falconHECToken == "" &&
+		endpointOpts.falconIndex == "" &&
+		endpointOpts.falconSource == endpointconfig.DefaultFalconSource &&
+		endpointOpts.falconSourcetype == endpointconfig.DefaultFalconSourcetype &&
+		!endpointOpts.falconInsecureSkipVerify &&
+		endpointOpts.falconCAFile == "" {
+		return nil
+	}
+	return &endpointconfig.FalconHEC{
+		Endpoint:           endpointOpts.falconHECEndpoint,
+		Token:              endpointOpts.falconHECToken,
+		Index:              endpointOpts.falconIndex,
+		Source:             endpointOpts.falconSource,
+		Sourcetype:         endpointOpts.falconSourcetype,
+		InsecureSkipVerify: endpointOpts.falconInsecureSkipVerify,
+		CAFile:             endpointOpts.falconCAFile,
 	}
 }

@@ -480,11 +480,24 @@ func redactLastEvent(raw string) string {
 }
 
 func redactConfig(cfg endpointconfig.Config) endpointconfig.Config {
-	if cfg.Destinations != nil && cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Token != "" {
-		destinations := *cfg.Destinations
+	if cfg.Destinations == nil {
+		return cfg
+	}
+	destinations := *cfg.Destinations
+	changed := false
+	if cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Token != "" {
 		splunk := *cfg.Destinations.SplunkHEC
 		splunk.Token = "[REDACTED]"
 		destinations.SplunkHEC = &splunk
+		changed = true
+	}
+	if cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Token != "" {
+		falcon := *cfg.Destinations.FalconHEC
+		falcon.Token = "[REDACTED]"
+		destinations.FalconHEC = &falcon
+		changed = true
+	}
+	if changed {
 		cfg.Destinations = &destinations
 	}
 	return cfg

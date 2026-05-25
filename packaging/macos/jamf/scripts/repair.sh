@@ -14,6 +14,13 @@ BEACON_SPLUNK_SOURCE="${BEACON_SPLUNK_SOURCE:-${11:-}}"
 BEACON_SPLUNK_SOURCETYPE="${BEACON_SPLUNK_SOURCETYPE:-${12:-}}"
 BEACON_SPLUNK_INSECURE_SKIP_VERIFY="${BEACON_SPLUNK_INSECURE_SKIP_VERIFY:-${13:-0}}"
 BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-${14:-}}"
+BEACON_FALCON_HEC_ENDPOINT="${BEACON_FALCON_HEC_ENDPOINT:-}"
+BEACON_FALCON_HEC_TOKEN="${BEACON_FALCON_HEC_TOKEN:-}"
+BEACON_FALCON_INDEX="${BEACON_FALCON_INDEX:-}"
+BEACON_FALCON_SOURCE="${BEACON_FALCON_SOURCE:-}"
+BEACON_FALCON_SOURCETYPE="${BEACON_FALCON_SOURCETYPE:-}"
+BEACON_FALCON_INSECURE_SKIP_VERIFY="${BEACON_FALCON_INSECURE_SKIP_VERIFY:-0}"
+BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
 
 set -- endpoint repair \
   --collector "$BEACON_COLLECTOR" \
@@ -44,6 +51,30 @@ case "$BEACON_SPLUNK_INSECURE_SKIP_VERIFY" in
 esac
 if [ -n "$BEACON_SPLUNK_CA_FILE" ]; then
   set -- "$@" --splunk-ca-file "$BEACON_SPLUNK_CA_FILE"
+fi
+
+if [ -n "$BEACON_FALCON_HEC_ENDPOINT" ]; then
+  set -- "$@" --falcon-hec-endpoint "$BEACON_FALCON_HEC_ENDPOINT"
+fi
+if [ -n "$BEACON_FALCON_HEC_TOKEN" ]; then
+  set -- "$@" --falcon-hec-token "$BEACON_FALCON_HEC_TOKEN"
+fi
+if [ -n "$BEACON_FALCON_INDEX" ]; then
+  set -- "$@" --falcon-index "$BEACON_FALCON_INDEX"
+fi
+if [ -n "$BEACON_FALCON_SOURCE" ]; then
+  set -- "$@" --falcon-source "$BEACON_FALCON_SOURCE"
+fi
+if [ -n "$BEACON_FALCON_SOURCETYPE" ]; then
+  set -- "$@" --falcon-sourcetype "$BEACON_FALCON_SOURCETYPE"
+fi
+case "$BEACON_FALCON_INSECURE_SKIP_VERIFY" in
+  1|true|TRUE|yes|YES)
+    set -- "$@" --falcon-insecure-skip-verify
+    ;;
+esac
+if [ -n "$BEACON_FALCON_CA_FILE" ]; then
+  set -- "$@" --falcon-ca-file "$BEACON_FALCON_CA_FILE"
 fi
 
 exec "$BEACON_BIN" "$@"

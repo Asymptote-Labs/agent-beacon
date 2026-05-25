@@ -110,6 +110,62 @@ func TestConfigYAMLIncludesSplunkHECWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestConfigYAMLIncludesFalconHECWhenConfigured(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ContentRetention = endpointconfig.ContentRetentionRedacted
+	cfg.Collector.IncludeRuntimeMetrics = true
+	cfg.Collector.IncludeCodexSpans = true
+	cfg.Destinations = &endpointconfig.Destinations{FalconHEC: &endpointconfig.FalconHEC{
+		Endpoint:           "https://cloud.us.humio.com/api/v1/ingest/hec",
+		Token:              "ingest-token",
+		Index:              "beacon-repo",
+		Source:             "beacon-endpoint-agent",
+		Sourcetype:         "json",
+		InsecureSkipVerify: true,
+		CAFile:             "/tmp/logscale-ca.pem",
+	}}
+
+	yaml := ConfigYAML(cfg)
+
+	for _, want := range []string{
+		"falcon_hec:",
+		`token: "ingest-token"`,
+		`endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec"`,
+		`content_retention: "redacted"`,
+		"include_runtime_metrics: true",
+		"include_codex_spans: true",
+		`index: "beacon-repo"`,
+		`source: "beacon-endpoint-agent"`,
+		`sourcetype: "json"`,
+		"insecure_skip_verify: true",
+		`ca_file: "/tmp/logscale-ca.pem"`,
+		"exporters: [beaconjson, falcon_hec]",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
+		}
+	}
+}
+
+func TestConfigYAMLIncludesSplunkAndFalconHECWhenConfigured(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{
+		SplunkHEC: &endpointconfig.SplunkHEC{
+			Endpoint: "https://splunk.example:8088/services/collector",
+			Token:    "hec-token",
+		},
+		FalconHEC: &endpointconfig.FalconHEC{
+			Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
+			Token:    "ingest-token",
+		},
+	}
+
+	yaml := ConfigYAML(cfg)
+	if !strings.Contains(yaml, "exporters: [beaconjson, splunk_hec, falcon_hec]") {
+		t.Fatalf("ConfigYAML missing combined exporters:\n%s", yaml)
+	}
+}
+
 func TestWriteConfigCreatesConfigAndSpoolDirectory(t *testing.T) {
 	cfg := testConfig(t)
 
@@ -129,6 +185,25 @@ func TestWriteConfigUsesPrivatePermissionsWithSplunkToken(t *testing.T) {
 	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{
 		Endpoint: "https://splunk.example:8088/services/collector",
 		Token:    "hec-token",
+	}}
+
+	if err := WriteConfig(cfg); err != nil {
+		t.Fatalf("WriteConfig returned error: %v", err)
+	}
+	info, err := os.Stat(cfg.Collector.ConfigPath)
+	if err != nil {
+		t.Fatalf("stat collector config: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+		t.Fatalf("collector config permissions = %o, want %o", got, want)
+	}
+}
+
+func TestWriteConfigUsesPrivatePermissionsWithFalconToken(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{FalconHEC: &endpointconfig.FalconHEC{
+		Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
+		Token:    "ingest-token",
 	}}
 
 	if err := WriteConfig(cfg); err != nil {

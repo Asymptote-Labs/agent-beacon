@@ -110,11 +110,16 @@ func WriteConfig(cfg endpointconfig.Config) error {
 
 func ConfigYAML(cfg endpointconfig.Config) string {
 	endpointconfig.NormalizeDestinations(&cfg)
-	exporters := "[beaconjson]"
+	exporterNames := []string{"beaconjson"}
 	splunkExporter := splunkHECYAML(cfg)
 	if splunkExporter != "" {
-		exporters = "[beaconjson, splunk_hec]"
+		exporterNames = append(exporterNames, "splunk_hec")
 	}
+	falconExporter := falconHECYAML(cfg)
+	if falconExporter != "" {
+		exporterNames = append(exporterNames, "falcon_hec")
+	}
+	exporters := "[" + strings.Join(exporterNames, ", ") + "]"
 	runtimeMetricsYAML := ""
 	if cfg.Collector.IncludeRuntimeMetrics {
 		runtimeMetricsYAML = "    include_runtime_metrics: true\n"
@@ -170,7 +175,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: %s
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, runtimeMetricsYAML+codexSpansYAML+splunkExporter, exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, cfg.ContentRetention, runtimeMetricsYAML+codexSpansYAML+splunkExporter+falconExporter, exporters, exporters, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
@@ -199,6 +204,40 @@ func splunkHECYAML(cfg endpointconfig.Config) string {
 		if splunk.CAFile != "" {
 			fmt.Fprintf(&b, "      ca_file: %q\n", splunk.CAFile)
 		}
+	}
+	return b.String()
+}
+
+func falconHECYAML(cfg endpointconfig.Config) string {
+	if cfg.Destinations == nil || cfg.Destinations.FalconHEC == nil || !cfg.Destinations.FalconHEC.Enabled {
+		return ""
+	}
+	falcon := cfg.Destinations.FalconHEC
+	var b strings.Builder
+	fmt.Fprintf(&b, "  falcon_hec:\n")
+	fmt.Fprintf(&b, "    token: %q\n", falcon.Token)
+	fmt.Fprintf(&b, "    endpoint: %q\n", falcon.Endpoint)
+	fmt.Fprintf(&b, "    content_retention: %q\n", cfg.ContentRetention)
+	if cfg.Collector.IncludeRuntimeMetrics {
+		fmt.Fprintf(&b, "    include_runtime_metrics: true\n")
+	}
+	if cfg.Collector.IncludeCodexSpans {
+		fmt.Fprintf(&b, "    include_codex_spans: true\n")
+	}
+	if falcon.Source != "" {
+		fmt.Fprintf(&b, "    source: %q\n", falcon.Source)
+	}
+	if falcon.Sourcetype != "" {
+		fmt.Fprintf(&b, "    sourcetype: %q\n", falcon.Sourcetype)
+	}
+	if falcon.Index != "" {
+		fmt.Fprintf(&b, "    index: %q\n", falcon.Index)
+	}
+	if falcon.InsecureSkipVerify {
+		fmt.Fprintf(&b, "    insecure_skip_verify: true\n")
+	}
+	if falcon.CAFile != "" {
+		fmt.Fprintf(&b, "    ca_file: %q\n", falcon.CAFile)
 	}
 	return b.String()
 }

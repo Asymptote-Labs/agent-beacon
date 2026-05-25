@@ -125,6 +125,55 @@ func TestSaveRejectsIncompleteSplunkHEC(t *testing.T) {
 	}
 }
 
+func TestSaveLoadFalconHECRoundTripAndPrivatePermissions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
+	cfg.Destinations = &Destinations{FalconHEC: &FalconHEC{
+		Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
+		Token:    "ingest-token",
+		Index:    "beacon-repo",
+	}}
+
+	path, err := Save(cfg)
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+		t.Fatalf("config permissions = %o, want %o", got, want)
+	}
+
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	falcon := loaded.Destinations.FalconHEC
+	if !falcon.Enabled {
+		t.Fatal("FalconHEC.Enabled = false, want true")
+	}
+	if falcon.Source != DefaultFalconSource || falcon.Sourcetype != DefaultFalconSourcetype {
+		t.Fatalf("Falcon defaults = source %q sourcetype %q", falcon.Source, falcon.Sourcetype)
+	}
+	if falcon.Token != "ingest-token" || falcon.Index != "beacon-repo" {
+		t.Fatalf("Falcon config did not round-trip: %#v", falcon)
+	}
+}
+
+func TestSaveRejectsIncompleteFalconHEC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := Default(true, filepath.Join(home, "runtime.jsonl"))
+	cfg.Destinations = &Destinations{FalconHEC: &FalconHEC{Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec"}}
+
+	if _, err := Save(cfg); err == nil {
+		t.Fatal("expected missing Falcon token error")
+	}
+}
+
 func TestLoadDefaultsMissingContentRetentionToFull(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

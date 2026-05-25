@@ -46,6 +46,11 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 			Token:    "hec-token",
 			Index:    "beacon",
 		},
+		FalconHEC: &endpointconfig.FalconHEC{
+			Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
+			Token:    "ingest-token",
+			Index:    "beacon-repo",
+		},
 	})
 
 	if !cfg.UserMode || cfg.LogPath != logPath {
@@ -65,6 +70,12 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 	if got := cfg.Destinations.SplunkHEC.Source; got != endpointconfig.DefaultSplunkSource {
 		t.Fatalf("Splunk source = %q, want default", got)
+	}
+	if cfg.Destinations.FalconHEC == nil || !cfg.Destinations.FalconHEC.Enabled {
+		t.Fatalf("Falcon destination not configured: %#v", cfg.Destinations)
+	}
+	if got := cfg.Destinations.FalconHEC.Sourcetype; got != endpointconfig.DefaultFalconSourcetype {
+		t.Fatalf("Falcon sourcetype = %q, want default", got)
 	}
 }
 
