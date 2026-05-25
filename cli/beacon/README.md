@@ -73,6 +73,19 @@ The Sumo pack keeps Beacon as a local JSONL producer and documents forwarding
 Metrics Source. Use a tailing forwarder for production so offsets are
 checkpointed and the whole file is not repeatedly uploaded.
 
+## Rapid7 InsightIDR
+
+```bash
+./beacon endpoint rapid7 print-config
+./beacon endpoint rapid7 install-pack --output ./beacon-rapid7-pack
+./beacon endpoint rapid7 validate
+```
+
+The Rapid7 pack keeps Beacon as a local JSONL producer and documents forwarding
+`runtime.jsonl` into a Rapid7 InsightIDR Custom Logs webhook as NDJSON. Store the
+webhook URL in your customer-managed shipper or deployment tooling, not in
+Beacon endpoint configuration.
+
 ## Optional Integrations
 
 ```bash

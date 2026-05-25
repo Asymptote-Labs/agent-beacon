@@ -100,6 +100,21 @@ name `agentbeacon`, and fields
 use a tailing shipper that checkpoints offsets, batches JSONL records, sends
 gzip-compressed POST payloads, and avoids repeatedly uploading the whole file.
 
+For Rapid7 InsightIDR, use the same local JSONL producer model and deploy a
+customer-managed shipper that tails `/var/log/beacon-agent/runtime.jsonl` into a
+Custom Logs webhook as NDJSON. Generate Beacon's Rapid7 content pack for setup
+guidance, a one-shot smoke test, and sample events:
+
+```bash
+/opt/beacon/bin/beacon endpoint rapid7 install-pack --system --output ./beacon-rapid7-pack
+/opt/beacon/bin/beacon endpoint rapid7 validate --system
+```
+
+Keep the Rapid7 webhook URL in deployment tooling or the forwarder environment,
+not in Beacon endpoint configuration. For production forwarding, use a tailing
+shipper that checkpoints offsets, batches JSONL records, and avoids repeatedly
+uploading the whole file.
+
 Environment variables take precedence, followed by MDM script parameters:
 
 ```text

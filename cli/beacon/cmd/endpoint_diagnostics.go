@@ -548,6 +548,9 @@ func syntheticEvent(destination string) schema.Event {
 	case "sumo":
 		mode = "http_source_jsonl"
 		message = "Beacon endpoint Sumo validation event"
+	case "rapid7":
+		mode = "custom_logs_webhook_ndjson"
+		message = "Beacon endpoint Rapid7 validation event"
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
 		Action:       "agent.detected",
