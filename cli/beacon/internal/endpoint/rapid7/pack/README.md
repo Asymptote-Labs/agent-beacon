@@ -44,6 +44,8 @@ For MDM or managed endpoint deployment, prefer Beacon system mode so your
 customer-managed log shipper can tail `/var/log/beacon-agent/runtime.jsonl`
 without per-user home directory ACLs.
 
+The generated `vector.toml` uses the same selected Beacon log path.
+
 ## One-Shot Smoke Test
 
 Use the generated script to upload the current file once. This is only for
@@ -67,9 +69,33 @@ individual event.
 
 ## Production Forwarding
 
-For production, use your fleet's existing log shipper or a customer-managed
-collector to tail `runtime.jsonl` and POST batches to the Rapid7 Custom Logs
-webhook. The forwarder should:
+For production, use the generated Vector config as a customer-managed host-agent
+forwarding template. Beacon remains the local JSONL producer; Vector tails
+`runtime.jsonl`, checkpoints file offsets in its `data_dir`, batches Beacon
+events, and posts NDJSON payloads to the Rapid7 Custom Logs webhook.
+
+Install Vector using your normal endpoint management tooling, then copy the
+generated config into Vector's config directory. On a macOS system-mode Beacon
+deployment, the generated config tails `/var/log/beacon-agent/runtime.jsonl`:
+
+```bash
+sudo mkdir -p /etc/vector
+sudo cp ./beacon-rapid7-pack/vector.toml /etc/vector/beacon-rapid7.toml
+export RAPID7_WEBHOOK_URL="https://..."
+vector validate /etc/vector/beacon-rapid7.toml
+vector --config /etc/vector/beacon-rapid7.toml
+```
+
+In managed deployments, provide `RAPID7_WEBHOOK_URL` through the Vector service
+environment or your MDM/secret tooling. Do not store Rapid7 webhook URLs in
+Beacon endpoint configuration.
+
+The Vector template is intentionally simple and expects a Vector version with
+the `file` source, `remap` transform, and `http` sink. It parses each Beacon
+JSONL line and re-encodes the original Beacon event as NDJSON so Rapid7 receives
+one Beacon event per line, without a Vector wrapper.
+
+If you adapt the config or use another forwarder, it should:
 
 - checkpoint file offsets,
 - batch newline-delimited JSON records,
