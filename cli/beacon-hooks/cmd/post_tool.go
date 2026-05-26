@@ -138,6 +138,10 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		return nil
 	}
 
+	if platformFlag == "antigravity" && getFirstStr(input, "error") != "" {
+		return nil
+	}
+
 	filePath := diff.GetStringFromMaps("file_path", toolInput, toolResponse)
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("filePath", toolInput, toolResponse)
@@ -151,6 +155,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
 	}
+	filePath = diff.NormalizePath(filePath)
 
 	if (sessionID == "" && platformFlag != "devin") || toolName == "" || filePath == "" {
 		return nil

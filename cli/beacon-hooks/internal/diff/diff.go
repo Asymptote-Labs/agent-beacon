@@ -21,6 +21,7 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 	if filePath == "" {
 		filePath = GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
 	}
+	filePath = NormalizePath(filePath)
 	if filePath == "" {
 		return ""
 	}
@@ -32,7 +33,7 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 
 	// Fall back to tool-specific construction
 	switch toolName {
-	case "Edit", "edit":
+	case "Edit", "edit", "edit_file":
 		oldString := resolveEditString("old_string", "oldString", "old_str", toolInput, toolResponse)
 		newString := resolveEditString("new_string", "newString", "new_str", toolInput, toolResponse)
 		return fromEditTool(filePath, oldString, newString)
@@ -301,6 +302,12 @@ func splitLines(s string) []string {
 		return []string{}
 	}
 	return strings.Split(s, "\n")
+}
+
+// NormalizePath strips surrounding double quotes and whitespace from a path string.
+func NormalizePath(s string) string {
+	s = strings.TrimSpace(s)
+	return strings.Trim(s, `"`)
 }
 
 // GetStringFromMaps returns the first non-empty string value for key across the given maps.
