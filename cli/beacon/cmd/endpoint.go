@@ -709,6 +709,16 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
 	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
+		case "antigravity", "antigravity_cli":
+			status, err := endpointhooks.InstallAntigravity(endpointhooks.AntigravityOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Antigravity hooks installed: %s\n", status.ConfigPath)
 		case "cursor":
 			status, err := endpointhooks.InstallCursor(endpointhooks.CursorOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -781,6 +791,16 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
 	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
+		case "antigravity", "antigravity_cli":
+			status, err := endpointhooks.UninstallAntigravity(endpointhooks.AntigravityOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(status.Message)
 		case "cursor":
 			status, err := endpointhooks.UninstallCursor(endpointhooks.CursorOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -844,6 +864,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 	statuses := map[string]interface{}{}
 	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
+		case "antigravity", "antigravity_cli":
+			statuses["antigravity"] = endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "cursor":
 			statuses["cursor"] = endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -884,6 +910,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 	}
 	for _, name := range hookTargets() {
 		switch strings.TrimSpace(name) {
+		case "antigravity", "antigravity_cli":
+			status := statuses["antigravity"].(endpointhooks.AntigravityStatus)
+			fmt.Printf("Antigravity hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
+			fmt.Println(status.Message)
 		case "cursor":
 			status := statuses["cursor"].(endpointhooks.CursorStatus)
 			fmt.Printf("Cursor hooks: installed=%t path=%s\n", status.Installed, status.HooksJSONPath)

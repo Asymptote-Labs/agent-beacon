@@ -35,6 +35,11 @@ func TestIsFileEditTool(t *testing.T) {
 		{"devin edit", "devin", "edit", true},
 		{"devin write", "devin", "write", true},
 		{"devin exec (not edit)", "devin", "exec", false},
+
+		// Antigravity tools
+		{"antigravity write", "antigravity", "write_file", true},
+		{"antigravity patch", "antigravity", "apply_patch", true},
+		{"antigravity command (not edit)", "antigravity", "run_command", false},
 	}
 
 	for _, tt := range tests {
@@ -44,6 +49,107 @@ func TestIsFileEditTool(t *testing.T) {
 				t.Errorf("isFileEditTool(%q, %q) = %v, want %v", tt.platform, tt.toolName, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunPostToolEmitsAntigravityToolFailed(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversationId": "ag-session",
+		"workspacePaths": []interface{}{"/repo"},
+		"toolCall": map[string]interface{}{
+			"name": "run_command",
+			"args": map[string]interface{}{
+				"CommandLine": "npm test",
+				"Cwd":         "/repo",
+			},
+		},
+		"error": "exit status 1",
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
+		t.Fatalf("event.action = %q, want tool.failed", action)
+	}
+	if severity := event["severity"]; severity != "high" {
+		t.Fatalf("severity = %q, want high", severity)
+	}
+	if command := event["command"].(map[string]interface{})["command"]; command != "npm test" {
+		t.Fatalf("command = %q, want npm test", command)
+	}
+}
+
+func TestRunPostToolEmitsAntigravityFileModifiedEvent(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversationId": "ag-session",
+		"toolCall": map[string]interface{}{
+			"name": "write_file",
+			"args": map[string]interface{}{
+				"Path":    "/repo/main.go",
+				"content": "package main\n// token=ag-secret",
+			},
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	file := event["file"].(map[string]interface{})
+	if file["path"] != "/repo/main.go" {
+		t.Fatalf("file = %#v, want /repo/main.go", file)
+	}
+	if _, ok := file["diff_hash"]; !ok {
+		t.Fatalf("file diff_hash missing: %#v", file)
+	}
+}
+
+func TestRunPostToolEmitsAntigravityFileReadPathFields(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversationId": "ag-session",
+		"workspacePaths": []interface{}{"/repo"},
+		"toolCall": map[string]interface{}{
+			"name": "list_dir",
+			"args": map[string]interface{}{
+				"DirectoryPath": "/repo/docs",
+			},
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.read" {
+		t.Fatalf("event.action = %q, want file.read", action)
+	}
+	file := event["file"].(map[string]interface{})
+	if file["path"] != "/repo/docs" || file["operation"] != "read" {
+		t.Fatalf("file = %#v, want /repo/docs read", file)
+	}
+	tool := event["tool"].(map[string]interface{})
+	if tool["path"] != "/repo/docs" {
+		t.Fatalf("tool = %#v, want path /repo/docs", tool)
 	}
 }
 

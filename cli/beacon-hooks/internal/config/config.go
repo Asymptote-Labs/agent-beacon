@@ -9,14 +9,15 @@ import (
 
 // Directories
 var (
-	BeaconDir   = getBeaconDir()
-	ClaudeDir   = filepath.Join(BeaconDir, "claude")
-	CopilotDir  = filepath.Join(BeaconDir, "copilot")
-	CursorDir   = filepath.Join(BeaconDir, "cursor")
-	DevinDir    = filepath.Join(BeaconDir, "devin")
-	FactoryDir  = filepath.Join(BeaconDir, "factory")
-	GrokDir     = filepath.Join(BeaconDir, "grok")
-	OpenCodeDir = filepath.Join(BeaconDir, "opencode")
+	BeaconDir      = getBeaconDir()
+	ClaudeDir      = filepath.Join(BeaconDir, "claude")
+	AntigravityDir = filepath.Join(BeaconDir, "antigravity")
+	CopilotDir     = filepath.Join(BeaconDir, "copilot")
+	CursorDir      = filepath.Join(BeaconDir, "cursor")
+	DevinDir       = filepath.Join(BeaconDir, "devin")
+	FactoryDir     = filepath.Join(BeaconDir, "factory")
+	GrokDir        = filepath.Join(BeaconDir, "grok")
+	OpenCodeDir    = filepath.Join(BeaconDir, "opencode")
 )
 
 // Log rotation
@@ -86,6 +87,8 @@ func IsScannableFile(filePath string) bool {
 // GetStateDir returns the state directory for the given platform
 func GetStateDir(platform string) string {
 	switch platform {
+	case "antigravity":
+		return AntigravityDir
 	case "copilot":
 		return CopilotDir
 	case "cursor":

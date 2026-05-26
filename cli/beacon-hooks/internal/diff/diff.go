@@ -13,6 +13,15 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 		filePath = GetStringFromMaps("filePath", toolInput, toolResponse)
 	}
 	if filePath == "" {
+		filePath = GetStringFromMaps("path", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = GetStringFromMaps("Path", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
+	}
+	if filePath == "" {
 		return ""
 	}
 
@@ -33,7 +42,7 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 		content := GetStringFromMaps("code", toolInput, toolResponse)
 		return fromWriteTool(filePath, content, "")
 
-	case "Write", "Create", "write":
+	case "Write", "Create", "write", "write_file":
 		content := GetStringFromMaps("content", toolInput, toolResponse)
 		originalFile := GetStringFromMaps("originalFile", toolInput, toolResponse)
 		return fromWriteTool(filePath, content, originalFile)

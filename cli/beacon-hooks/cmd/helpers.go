@@ -43,6 +43,8 @@ func getFirstStr(input map[string]interface{}, keys ...string) string {
 // For Claude, it reads session_id directly.
 func resolveSessionID(input map[string]interface{}, platform string) string {
 	switch platform {
+	case "antigravity":
+		return getFirstStr(input, "conversationId", "conversation_id", "session_id", "sessionId")
 	case "copilot":
 		transcriptPath := getFirstStr(input, "transcriptPath", "transcript_path")
 		if id := sessionIDFromTranscriptPath(transcriptPath); id != "" {
@@ -67,6 +69,10 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 // Used by commands that need the transcript path for upload.
 func resolveSessionIDWithTranscript(input map[string]interface{}, platform string) (sessionID, transcriptPath string) {
 	switch platform {
+	case "antigravity":
+		sessionID = getFirstStr(input, "conversationId", "conversation_id", "session_id", "sessionId")
+		transcriptPath = getFirstStr(input, "transcriptPath", "transcript_path")
+		return
 	case "copilot":
 		transcriptPath = getFirstStr(input, "transcriptPath", "transcript_path")
 		sessionID = sessionIDFromTranscriptPath(transcriptPath)
@@ -109,6 +115,27 @@ func sessionIDFromTranscriptPath(transcriptPath string) string {
 // For Cursor: tries input["cwd"], then workspace_roots[0], then CURSOR_PROJECT_DIR env var.
 // For other platforms: reads input["cwd"] directly.
 func resolveCwd(input map[string]interface{}, platform string) string {
+	if platform == "antigravity" {
+		if cwd := getFirstStr(input, "cwd", "workingDirectoryPath"); cwd != "" {
+			return cwd
+		}
+		if toolInput := resolveToolInput(input); toolInput != nil {
+			if cwd := firstToolString(toolInput, "Cwd", "cwd", "workingDirectoryPath"); cwd != "" {
+				return cwd
+			}
+		}
+		if roots, ok := input["workspacePaths"].([]interface{}); ok && len(roots) > 0 {
+			if cwd, ok := roots[0].(string); ok && cwd != "" {
+				return cwd
+			}
+		}
+		if roots, ok := input["workspace_paths"].([]interface{}); ok && len(roots) > 0 {
+			if cwd, ok := roots[0].(string); ok && cwd != "" {
+				return cwd
+			}
+		}
+		return ""
+	}
 	if platform == "cursor" {
 		if cwd := getFirstStr(input, "cwd"); cwd != "" {
 			return cwd

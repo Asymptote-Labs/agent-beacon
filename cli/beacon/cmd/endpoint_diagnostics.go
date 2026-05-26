@@ -367,7 +367,7 @@ func printPlannedActions(actions []plannedAction) error {
 
 func hookTargets() []string {
 	if endpointOpts.allTargets {
-		return []string{"cursor", "factory", "opencode", "grok", "devin"}
+		return []string{"cursor", "factory", "opencode", "grok", "devin", "antigravity"}
 	}
 	return splitCSV(endpointOpts.hookHarnesses)
 }
@@ -381,6 +381,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 	statuses := map[string]hookTargetResult{}
 	for _, name := range targets {
 		switch strings.TrimSpace(name) {
+		case "antigravity", "antigravity_cli":
+			status := endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
 		case "cursor":
 			status := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksJSONPath, Raw: status}

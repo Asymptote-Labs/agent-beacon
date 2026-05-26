@@ -48,6 +48,7 @@ func DiscoverAll() []Harness {
 		DiscoverClaude(),
 		DiscoverCodex(),
 		DiscoverGemini(),
+		DiscoverAntigravity(),
 		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
 		DiscoverFactory(),
@@ -55,6 +56,38 @@ func DiscoverAll() []Harness {
 		DiscoverDevin(),
 		DiscoverClaudeCowork(),
 	}
+}
+
+func DiscoverAntigravity() Harness {
+	h := Harness{Name: "antigravity_cli", DisplayName: "Antigravity CLI", Capability: "hooks"}
+	for _, name := range []string{"antigravity", "antigravity-cli"} {
+		path, err := exec.LookPath(name)
+		if err == nil {
+			h.Detected = true
+			h.ExecutablePath = path
+			h.Version = commandVersion(path)
+			break
+		}
+	}
+	home, _ := os.UserHomeDir()
+	userConfig := filepath.Join(home, ".gemini", "config", "hooks.json")
+	projectConfig := filepath.Join(".agents", "hooks.json")
+	h.ConfigPath = userConfig
+	if fileExists(projectConfig) {
+		h.ConfigPath = projectConfig
+	}
+	if !h.Detected && (dirExists(filepath.Join(home, ".gemini", "config")) || dirExists(".agents")) {
+		h.Detected = true
+	}
+	if fileExists(h.ConfigPath) {
+		status, msg := antigravityStatus(h.ConfigPath)
+		h.TelemetryStatus = status
+		h.Message = msg
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Antigravity hooks.json was not found"
+	}
+	return h
 }
 
 func DiscoverClaude() Harness {
@@ -473,6 +506,34 @@ func hasBeaconDevinHooks(data []byte) (bool, error) {
 					return true, nil
 				}
 			}
+		}
+	}
+	return false, nil
+}
+
+func antigravityStatus(path string) (TelemetryStatus, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return TelemetryMissing, err.Error()
+	}
+	hasHooks, err := hasBeaconAntigravityHooks(data)
+	if err != nil {
+		return TelemetryMisconfigured, "Antigravity hooks JSON is invalid"
+	}
+	if hasHooks {
+		return TelemetryEnabled, "Antigravity endpoint hooks are configured"
+	}
+	return TelemetryDisabled, "Antigravity hooks exist but endpoint hooks were not found"
+}
+
+func hasBeaconAntigravityHooks(data []byte) (bool, error) {
+	var blocks map[string]json.RawMessage
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return false, err
+	}
+	for _, raw := range blocks {
+		if strings.Contains(string(raw), "BEACON_ENDPOINT_MODE=1") && strings.Contains(string(raw), "--platform antigravity") {
+			return true, nil
 		}
 	}
 	return false, nil

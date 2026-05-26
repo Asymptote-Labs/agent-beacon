@@ -119,9 +119,12 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
-	if platformFlag == "copilot" || platformFlag == "devin" || platformFlag == "grok" {
+	if platformFlag == "antigravity" || platformFlag == "copilot" || platformFlag == "devin" || platformFlag == "grok" {
 		sessionID = resolveSessionID(input, platformFlag)
 		toolName = getFirstStr(input, "toolName", "tool_name")
+		if platformFlag == "antigravity" {
+			toolName = antigravityToolName(input)
+		}
 		toolInput = resolveToolInput(input)
 		toolResponse = resolveToolResponse(input)
 	} else {
@@ -138,6 +141,15 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	filePath := diff.GetStringFromMaps("file_path", toolInput, toolResponse)
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("filePath", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("path", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("Path", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
 	}
 
 	if (sessionID == "" && platformFlag != "devin") || toolName == "" || filePath == "" {
@@ -182,6 +194,11 @@ func recordLocalEdit(params *evaluationParams, logger *logging.Logger) {
 
 // resolveToolInput extracts tool input from Copilot's various formats.
 func resolveToolInput(input map[string]interface{}) map[string]interface{} {
+	if toolCall, ok := input["toolCall"].(map[string]interface{}); ok {
+		if args, ok := toolCall["args"].(map[string]interface{}); ok {
+			return args
+		}
+	}
 	if m, ok := input["tool_input"].(map[string]interface{}); ok {
 		return m
 	}
@@ -203,6 +220,23 @@ func resolveToolInput(input map[string]interface{}) map[string]interface{} {
 
 // resolveToolResponse extracts tool response from Copilot's various formats.
 func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
+	if platformFlag == "antigravity" {
+		response := map[string]interface{}{}
+		if errMsg := getFirstStr(input, "error"); errMsg != "" {
+			response["error"] = errMsg
+		}
+		if result, ok := input["toolResult"]; ok {
+			response["result"] = result
+		}
+		if result, ok := input["toolResult"].(map[string]interface{}); ok {
+			for key, value := range result {
+				response[key] = value
+			}
+		}
+		if len(response) > 0 {
+			return response
+		}
+	}
 	if m, ok := input["tool_response"].(map[string]interface{}); ok {
 		return m
 	}
@@ -221,6 +255,9 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 
 func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) {
 	toolName := getFirstStr(input, "tool_name", "toolName")
+	if platformFlag == "antigravity" {
+		toolName = antigravityToolName(input)
+	}
 	hookEvent := getFirstStr(input, "hook_event_name", "hookEventName")
 	toolInput := resolveToolInput(input)
 	if toolInput == nil {
@@ -233,7 +270,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	for key, value := range toolFields(toolName, toolInput) {
 		fields[key] = value
 	}
-	if hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" {
+	if hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != "" {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
@@ -273,5 +310,21 @@ func isFileEditTool(platform, toolName string) bool {
 		lower := strings.ToLower(toolName)
 		return lower == "search_replace" || lower == "write_file" || strings.Contains(lower, "edit") || strings.Contains(lower, "write")
 	}
+	if platform == "antigravity" {
+		lower := strings.ToLower(toolName)
+		return strings.Contains(lower, "edit") ||
+			strings.Contains(lower, "write") ||
+			strings.Contains(lower, "create") ||
+			strings.Contains(lower, "patch")
+	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
+}
+
+func antigravityToolName(input map[string]interface{}) string {
+	if toolCall, ok := input["toolCall"].(map[string]interface{}); ok {
+		if name, ok := toolCall["name"].(string); ok {
+			return name
+		}
+	}
+	return getFirstStr(input, "tool_name", "toolName")
 }
