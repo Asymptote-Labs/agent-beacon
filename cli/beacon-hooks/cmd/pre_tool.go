@@ -106,12 +106,14 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 	if prompt == "" {
 		return
 	}
+	if !st.MarkPromptEmittedIfNeeded() {
+		return
+	}
 	fields := sessionFields(sessionID, input)
 	if config.ContentRetentionMode() != config.ContentRetentionMetadata {
 		fields["prompt"] = map[string]interface{}{"text": prompt}
 	}
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
-	st.SetPromptEmitted()
 }
 
 func antigravityPromptFromTranscript(input map[string]interface{}, sessionID string) string {
