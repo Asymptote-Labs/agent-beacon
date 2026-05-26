@@ -22,10 +22,12 @@ func Files() []File {
 	rules := mustRead("pack/beacon-rules.xml")
 	sample := mustRead("pack/sample-event.jsonl")
 	readme := mustRead("pack/README.md")
+	dashboardColumns := mustRead("pack/apply-dashboard-default-columns.sh")
 	return []File{
 		{Name: "ossec-localfile.xml", Content: localfile},
 		{Name: "beacon-rules.xml", Content: rules},
 		{Name: "sample-event.jsonl", Content: sample},
+		{Name: "apply-dashboard-default-columns.sh", Content: dashboardColumns},
 		{Name: "README.md", Content: readme},
 	}
 }
