@@ -5,6 +5,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
 )
 
 var promptSubmitCmd = &cobra.Command{
@@ -41,12 +42,17 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 
 	logger.Debug("Prompt submit observed")
 	fields := sessionFields(sessionID, input)
-	if config.ContentRetentionMode() != config.ContentRetentionMetadata {
-		if prompt := getFirstStr(input, "prompt", "user_prompt", "text", "promptText"); prompt != "" {
-			fields["prompt"] = map[string]interface{}{"text": prompt}
-		}
+	prompt := getFirstStr(input, "prompt", "user_prompt", "userPrompt", "text", "promptText", "input")
+	hasPrompt := prompt != ""
+	if hasPrompt && config.ContentRetentionMode() != config.ContentRetentionMetadata {
+		fields["prompt"] = map[string]interface{}{"text": prompt}
 	}
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
+
+	if platformFlag == "antigravity" && sessionID != "" && hasPrompt {
+		st := state.NewSessionState(sessionID, "antigravity")
+		st.SetPromptEmitted()
+	}
 
 	outputJSON(noopResponse)
 }

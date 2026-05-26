@@ -52,11 +52,11 @@ func toolFields(toolName string, toolInput map[string]interface{}) map[string]in
 	if toolName != "" {
 		fields["tool"] = map[string]interface{}{"name": toolName}
 	}
-	if command := firstToolString(toolInput, "command", "cmd", "shell_command"); command != "" {
+	if command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine"); command != "" {
 		fields["command"] = map[string]interface{}{"command": command}
 		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
 	}
-	if path := firstToolString(toolInput, "file_path", "filePath", "path"); path != "" {
+	if path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "DirectoryPath", "SearchPath", "searchPath"); path != "" {
 		fields["file"] = map[string]interface{}{
 			"path":      path,
 			"operation": fileOperation(toolName),
@@ -111,7 +111,7 @@ func mergeNested(existing interface{}, values map[string]interface{}) map[string
 func firstToolString(input map[string]interface{}, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := input[key]; ok {
-			if str := strings.TrimSpace(fmt.Sprint(value)); str != "" && str != "<nil>" {
+			if str := normalizeToolString(value); str != "" {
 				return str
 			}
 		}
@@ -119,10 +119,18 @@ func firstToolString(input map[string]interface{}, keys ...string) string {
 	return ""
 }
 
+func normalizeToolString(value interface{}) string {
+	str := strings.TrimSpace(fmt.Sprint(value))
+	if str == "" || str == "<nil>" {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(str), `"`)
+}
+
 func fileOperation(toolName string) string {
 	lower := strings.ToLower(toolName)
 	switch {
-	case strings.Contains(lower, "read"):
+	case strings.Contains(lower, "read") || strings.Contains(lower, "view") || strings.Contains(lower, "list") || strings.Contains(lower, "grep") || strings.Contains(lower, "search"):
 		return "read"
 	case strings.Contains(lower, "write") || strings.Contains(lower, "create"):
 		return "create"
@@ -157,6 +165,16 @@ func actionForTool(hookEvent, toolName string) string {
 		case lower == "read":
 			return "file.read"
 		case lower == "edit" || lower == "write":
+			return "file.modified"
+		}
+	}
+	if platformFlag == "antigravity" {
+		switch lower {
+		case "run_command":
+			return "command.executed"
+		case "view_file", "list_dir", "grep_search", "find_by_name":
+			return "file.read"
+		case "edit_file", "write_file", "apply_patch":
 			return "file.modified"
 		}
 	}

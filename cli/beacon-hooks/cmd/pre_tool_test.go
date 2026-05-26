@@ -91,6 +91,110 @@ func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
 	}
 }
 
+func TestRunPromptSubmitEmitsAntigravityPromptEvent(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversationId": "ag-session",
+		"workspacePaths": []interface{}{"/repo"},
+		"prompt":         "summarize token=ag-secret",
+	})
+	if len(out) != 0 {
+		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+		t.Fatalf("event.action = %q, want prompt.submitted", action)
+	}
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity" {
+		t.Fatalf("harness = %q, want antigravity", harness)
+	}
+	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
+		t.Fatalf("prompt.text = %q, want redacted prompt", got)
+	}
+	if got := event["repository"]; got != "/repo" {
+		t.Fatalf("repository = %q, want /repo", got)
+	}
+}
+
+func TestRunPromptSubmitEmitsAntigravityUserPromptEvent(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversationId": "ag-session",
+		"userPrompt":     "explain this repo token=ag-secret",
+	})
+	if len(out) != 0 {
+		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+		t.Fatalf("event.action = %q, want prompt.submitted", action)
+	}
+	if got := event["prompt"].(map[string]interface{})["text"]; got != "explain this repo token=[REDACTED]" {
+		t.Fatalf("prompt.text = %q, want redacted prompt", got)
+	}
+}
+
+func TestRunPromptSubmitOmitsAntigravityPromptForMetadataRetention(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversationId": "ag-session",
+		"prompt":         "summarize this file",
+	})
+	if len(out) != 0 {
+		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if _, ok := event["prompt"]; ok {
+		t.Fatalf("metadata retention should omit prompt field: %#v", event["prompt"])
+	}
+}
+
+func TestRunSessionLifecycleEmitsAntigravityEvents(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	input := map[string]interface{}{
+		"conversationId": "ag-session",
+		"workspacePaths": []interface{}{"/repo"},
+	}
+	runHookWithInput(t, runSessionStart, input)
+	runHookWithInput(t, runSessionEnd, input)
+
+	events := endpointEvents(t, logPath)
+	if len(events) != 2 {
+		t.Fatalf("event count = %d, want 2: %#v", len(events), events)
+	}
+	want := []string{"session.started", "session.ended"}
+	for i, action := range want {
+		if got := events[i]["event"].(map[string]interface{})["action"]; got != action {
+			t.Fatalf("event[%d].action = %q, want %q", i, got, action)
+		}
+		if session := events[i]["session"].(map[string]interface{}); session["id"] != "ag-session" {
+			t.Fatalf("event[%d] session = %#v, want ag-session", i, session)
+		}
+	}
+}
+
 func TestRunPromptSubmitEmitsDevinPromptWithoutSession(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "devin"
@@ -145,6 +249,91 @@ func TestRunPreToolEmitsDevinToolTelemetryWithoutApproval(t *testing.T) {
 	}
 	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
 		t.Fatalf("command = %q, want git status", command)
+	}
+}
+
+func TestRunPreToolEmitsAntigravityCommandTelemetry(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"conversationId": "ag-session",
+		"workspacePaths": []interface{}{
+			"/repo",
+		},
+		"toolCall": map[string]interface{}{
+			"name": "run_command",
+			"args": map[string]interface{}{
+				"CommandLine": "npm test",
+				"Cwd":         "/repo",
+			},
+		},
+		"stepIdx": 19,
+	})
+	if out["decision"] != "allow" {
+		t.Fatalf("antigravity pre-tool response = %#v, want decision=allow", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity" {
+		t.Fatalf("harness = %q, want antigravity", harness)
+	}
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", action)
+	}
+	if _, ok := event["approval"]; ok {
+		t.Fatalf("Antigravity PreToolUse should not emit approval telemetry: %#v", event["approval"])
+	}
+	if command := event["command"].(map[string]interface{})["command"]; command != "npm test" {
+		t.Fatalf("command = %q, want npm test", command)
+	}
+	session := event["session"].(map[string]interface{})
+	if session["id"] != "ag-session" || session["working_directory"] != "/repo" {
+		t.Fatalf("session = %#v, want id and working_directory", session)
+	}
+}
+
+func TestRunPreToolSynthesizesAntigravityPromptFromTranscript(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>\ntell me about token=ag-secret\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nignored\n</ADDITIONAL_METADATA>"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	input := map[string]interface{}{
+		"conversationId":  "ag-session",
+		"transcriptPath":  transcriptPath,
+		"workspacePaths":  []interface{}{"/repo"},
+		"toolCall":        map[string]interface{}{"name": "list_dir", "args": map[string]interface{}{"DirectoryPath": `"/repo"`}},
+		"artifactDirPath": "/tmp/artifacts",
+	}
+	out := runHookWithInput(t, runPreTool, input)
+	if out["decision"] != "allow" {
+		t.Fatalf("antigravity pre-tool response = %#v, want decision=allow", out)
+	}
+	out = runHookWithInput(t, runPreTool, input)
+	if out["decision"] != "allow" {
+		t.Fatalf("second antigravity pre-tool response = %#v, want decision=allow", out)
+	}
+
+	events := endpointEvents(t, logPath)
+	if len(events) != 3 {
+		t.Fatalf("event count = %d, want prompt plus two tool events: %#v", len(events), events)
+	}
+	if action := events[0]["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+		t.Fatalf("first event.action = %q, want prompt.submitted", action)
+	}
+	if got := events[0]["prompt"].(map[string]interface{})["text"]; got != "tell me about token=[REDACTED]" {
+		t.Fatalf("prompt.text = %q, want redacted transcript prompt", got)
+	}
+	if got := events[1]["file"].(map[string]interface{})["path"]; got != "/repo" {
+		t.Fatalf("file.path = %q, want normalized /repo", got)
 	}
 }
 
@@ -316,6 +505,7 @@ func setupHookConfigDirs(t *testing.T) {
 	tmp := t.TempDir()
 	origBeaconDir := hookconfig.BeaconDir
 	origClaudeDir := hookconfig.ClaudeDir
+	origAntigravityDir := hookconfig.AntigravityDir
 	origCopilotDir := hookconfig.CopilotDir
 	origCursorDir := hookconfig.CursorDir
 	origDevinDir := hookconfig.DevinDir
@@ -325,6 +515,7 @@ func setupHookConfigDirs(t *testing.T) {
 	origPlatform := platformFlag
 	hookconfig.BeaconDir = tmp
 	hookconfig.ClaudeDir = filepath.Join(tmp, "claude")
+	hookconfig.AntigravityDir = filepath.Join(tmp, "antigravity")
 	hookconfig.CopilotDir = filepath.Join(tmp, "copilot")
 	hookconfig.CursorDir = filepath.Join(tmp, "cursor")
 	hookconfig.DevinDir = filepath.Join(tmp, "devin")
@@ -334,6 +525,7 @@ func setupHookConfigDirs(t *testing.T) {
 	t.Cleanup(func() {
 		hookconfig.BeaconDir = origBeaconDir
 		hookconfig.ClaudeDir = origClaudeDir
+		hookconfig.AntigravityDir = origAntigravityDir
 		hookconfig.CopilotDir = origCopilotDir
 		hookconfig.CursorDir = origCursorDir
 		hookconfig.DevinDir = origDevinDir

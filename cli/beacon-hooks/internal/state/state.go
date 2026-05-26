@@ -28,6 +28,7 @@ type SessionData struct {
 	Evaluations   []Evaluation `json:"evaluations"`
 	RepromptCount int          `json:"reprompt_count"`
 	Model         string       `json:"model,omitempty"`
+	PromptEmitted bool         `json:"prompt_emitted,omitempty"`
 	CreatedAt     string       `json:"created_at,omitempty"`
 }
 
@@ -109,6 +110,41 @@ func (s *SessionState) GetModel() string {
 		return sessionData.Model
 	}
 	return ""
+}
+
+func (s *SessionState) HasPromptEmitted() bool {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	state := s.loadStateFile()
+	if sessionData, ok := state[s.sessionID]; ok {
+		return sessionData.PromptEmitted
+	}
+	return false
+}
+
+func (s *SessionState) SetPromptEmitted() {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	state := s.loadStateFile()
+	s.ensureSession(state)
+	state[s.sessionID].PromptEmitted = true
+	s.saveStateFile(state)
+}
+
+func (s *SessionState) MarkPromptEmittedIfNeeded() bool {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	state := s.loadStateFile()
+	s.ensureSession(state)
+	if state[s.sessionID].PromptEmitted {
+		return false
+	}
+	state[s.sessionID].PromptEmitted = true
+	s.saveStateFile(state)
+	return true
 }
 
 // AddEvaluation adds a new pending evaluation
