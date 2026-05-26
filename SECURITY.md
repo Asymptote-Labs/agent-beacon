@@ -13,11 +13,11 @@ For the full enterprise review package, see the
 | Area | Default behavior |
 | --- | --- |
 | Collection | Local OpenTelemetry receivers on `127.0.0.1` or local `beacon-hooks` adapter execution |
-| Storage | Local `runtime.jsonl` on the endpoint, bounded by rotation at 10 MiB with five numbered archives |
-| Hosted dependency | None required for normal endpoint collection or hook execution |
-| Forwarding | Optional and customer configured |
 | Content retention | Configurable as `metadata`, `redacted`, or `full` |
+| Forwarding | Optional and customer configured |
+| Hosted dependency | None required for normal endpoint collection or hook execution |
 | Removal | Endpoint uninstall removes managed service and configuration files, with explicit flags to keep logs or config |
+| Storage | Local `runtime.jsonl` on the endpoint, bounded by rotation at 10 MiB with five numbered archives |
 
 ## Data Flow and Threat Model
 
