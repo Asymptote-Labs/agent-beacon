@@ -59,7 +59,7 @@
             "destinations": [
               "sentinelWorkspace"
             ],
-            "transformKql": "source | extend RawEvent = todynamic(RawData) | extend TimeGenerated = coalesce(todatetime(RawEvent.timestamp), TimeGenerated) | project TimeGenerated, Vendor = tostring(RawEvent.vendor), Product = tostring(RawEvent.product), SchemaVersion = tostring(RawEvent.schema_version), EventKind = tostring(RawEvent.event.kind), EventAction = tostring(RawEvent.event.action), EventCategory = tostring(RawEvent.event.category), Severity = tostring(RawEvent.severity), HostName = tostring(RawEvent.endpoint.hostname), UserName = tostring(RawEvent.user.name), HarnessName = tostring(RawEvent.harness.name), SessionId = tostring(RawEvent.session.id), ToolName = tostring(RawEvent.tool.name), CommandLine = coalesce(tostring(RawEvent.command.command), tostring(RawEvent.tool.command)), Repository = tostring(RawEvent.repository), Branch = tostring(RawEvent.branch), Message = tostring(RawEvent.message), ContentRetention = tostring(RawEvent.content.retention), RawData = RawEvent",
+            "transformKql": "{{DCR_TRANSFORM}}",
             "outputStream": "Custom-BeaconRuntime_CL"
           }
         ]

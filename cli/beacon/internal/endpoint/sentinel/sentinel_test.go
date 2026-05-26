@@ -66,6 +66,21 @@ func TestPackJSONFilesAreValid(t *testing.T) {
 	}
 }
 
+func TestRenderedDCRTemplateContainsTransformFromKQL(t *testing.T) {
+	rendered := renderDCRTemplate()
+	if strings.Contains(rendered, "{{DCR_TRANSFORM}}") {
+		t.Fatal("rendered DCR template still contains {{DCR_TRANSFORM}} placeholder")
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal([]byte(rendered), &doc); err != nil {
+		t.Fatalf("rendered DCR template is not valid JSON: %v", err)
+	}
+	transform := minifyKQL(DCRTransform())
+	if !strings.Contains(rendered, transform) {
+		t.Fatalf("rendered DCR template does not contain the minified dcr-transform.kql content")
+	}
+}
+
 func TestSampleEventsCoverValidationHookAndOTelShapes(t *testing.T) {
 	scanner := bufio.NewScanner(strings.NewReader(mustRead("pack/sample-event.jsonl")))
 	var sawValidation, sawHook, sawOTel bool
