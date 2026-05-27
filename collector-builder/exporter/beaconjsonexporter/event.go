@@ -25,6 +25,7 @@ type approvalInfo = beaconevent.ApprovalInfo
 type promptInfo = beaconevent.PromptInfo
 type contentInfo = beaconevent.ContentInfo
 type beaconEvent = beaconevent.Event
+type tokenUsage = beaconevent.TokenUsage
 
 func newBeaconEvent(action, category, severity, harnessName string, ts time.Time) beaconEvent {
 	return beaconevent.NewEvent(action, category, severity, harnessName, ts)

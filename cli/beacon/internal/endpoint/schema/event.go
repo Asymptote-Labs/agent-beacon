@@ -108,6 +108,28 @@ const (
 	ContentRetentionFull     = "full"
 )
 
+// TokenUsage holds token consumption counts for a single event.
+// Fields that are zero are omitted from JSON to keep non-token events lean.
+type TokenUsage struct {
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cache_read,omitempty"`
+	CacheWrite int64 `json:"cache_write,omitempty"`
+}
+
+// Total returns the sum of all token type counts.
+func (t *TokenUsage) Total() int64 {
+	if t == nil {
+		return 0
+	}
+	return t.Input + t.Output + t.CacheRead + t.CacheWrite
+}
+
+// IsZero reports whether no token counts have been recorded.
+func (t *TokenUsage) IsZero() bool {
+	return t == nil || (t.Input == 0 && t.Output == 0 && t.CacheRead == 0 && t.CacheWrite == 0)
+}
+
 type DestinationInfo struct {
 	Type   string `json:"type,omitempty"`
 	Mode   string `json:"mode,omitempty"`
@@ -141,6 +163,7 @@ type Event struct {
 	Content       *ContentInfo           `json:"content,omitempty"`
 	Destination   *DestinationInfo       `json:"destination,omitempty"`
 	Health        *HealthInfo            `json:"health,omitempty"`
+	Tokens        *TokenUsage            `json:"tokens,omitempty"`
 	Model         string                 `json:"model,omitempty"`
 	Repository    string                 `json:"repository,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`

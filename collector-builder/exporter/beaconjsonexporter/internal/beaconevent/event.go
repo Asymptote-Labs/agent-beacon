@@ -81,6 +81,20 @@ type ContentInfo struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
+// TokenUsage holds token consumption counts for a single event.
+// Fields that are zero are omitted from JSON to keep non-token events lean.
+type TokenUsage struct {
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cache_read,omitempty"`
+	CacheWrite int64 `json:"cache_write,omitempty"`
+}
+
+// IsZero reports whether no token counts have been recorded.
+func (t *TokenUsage) IsZero() bool {
+	return t == nil || (t.Input == 0 && t.Output == 0 && t.CacheRead == 0 && t.CacheWrite == 0)
+}
+
 type Event struct {
 	ObservedAt    time.Time              `json:"-"`
 	Timestamp     string                 `json:"timestamp"`
@@ -100,6 +114,7 @@ type Event struct {
 	Approval      *ApprovalInfo          `json:"approval,omitempty"`
 	Prompt        *PromptInfo            `json:"prompt,omitempty"`
 	Content       *ContentInfo           `json:"content,omitempty"`
+	Tokens        *TokenUsage            `json:"tokens,omitempty"`
 	Model         string                 `json:"model,omitempty"`
 	Repository    string                 `json:"repository,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`

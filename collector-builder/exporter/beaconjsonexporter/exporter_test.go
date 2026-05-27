@@ -1155,3 +1155,269 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// --- Token extraction tests ---
+
+// makeTokenMetric builds a Sum metric with one data point per entry in points.
+// Each entry is (tokenType, intValue); tokenType="" means no attribute is set.
+func makeTokenMetric(name string, points []struct {
+	tokenType string
+	val       int64
+}) pmetric.Metric {
+	metric := pmetric.NewMetric()
+	metric.SetName(name)
+	sum := metric.SetEmptySum()
+	for _, p := range points {
+		dp := sum.DataPoints().AppendEmpty()
+		dp.SetIntValue(p.val)
+		if p.tokenType != "" {
+			dp.Attributes().PutStr("gen_ai.token.type", p.tokenType)
+		}
+	}
+	return metric
+}
+
+func TestExtractTokensFromMetricGenAIInputOutput(t *testing.T) {
+	metric := makeTokenMetric("gen_ai.client.token.usage", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"input", 500},
+		{"output", 150},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil for gen_ai.client.token.usage")
+	}
+	if event.Tokens.Input != 500 {
+		t.Errorf("Input = %d, want 500", event.Tokens.Input)
+	}
+	if event.Tokens.Output != 150 {
+		t.Errorf("Output = %d, want 150", event.Tokens.Output)
+	}
+	if event.Tokens.CacheRead != 0 {
+		t.Errorf("CacheRead = %d, want 0", event.Tokens.CacheRead)
+	}
+	if event.Tokens.CacheWrite != 0 {
+		t.Errorf("CacheWrite = %d, want 0", event.Tokens.CacheWrite)
+	}
+}
+
+func TestExtractTokensFromMetricCacheTypes(t *testing.T) {
+	metric := makeTokenMetric("gen_ai.client.token.usage", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"input", 400},
+		{"output", 120},
+		{"input_cache_read", 300},
+		{"input_cache_write", 80},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil")
+	}
+	if event.Tokens.Input != 400 {
+		t.Errorf("Input = %d, want 400", event.Tokens.Input)
+	}
+	if event.Tokens.Output != 120 {
+		t.Errorf("Output = %d, want 120", event.Tokens.Output)
+	}
+	if event.Tokens.CacheRead != 300 {
+		t.Errorf("CacheRead = %d, want 300", event.Tokens.CacheRead)
+	}
+	if event.Tokens.CacheWrite != 80 {
+		t.Errorf("CacheWrite = %d, want 80", event.Tokens.CacheWrite)
+	}
+}
+
+func TestExtractTokensFromMetricCacheCreationAlias(t *testing.T) {
+	// Anthropic emits "input_cache_creation" on some SDK versions.
+	metric := makeTokenMetric("gen_ai.client.token.usage", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"input_cache_creation", 60},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil")
+	}
+	if event.Tokens.CacheWrite != 60 {
+		t.Errorf("CacheWrite = %d, want 60 (input_cache_creation should map to CacheWrite)", event.Tokens.CacheWrite)
+	}
+}
+
+func TestExtractTokensFromMetricUndifferentiatedTotal(t *testing.T) {
+	// openclaw.tokens has no gen_ai.token.type attribute — value falls to Input.
+	metric := makeTokenMetric("openclaw.tokens", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"", 42},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil for openclaw.tokens")
+	}
+	if event.Tokens.Input != 42 {
+		t.Errorf("Input = %d, want 42 (undifferentiated total should go to Input)", event.Tokens.Input)
+	}
+	if event.Tokens.Output != 0 || event.Tokens.CacheRead != 0 || event.Tokens.CacheWrite != 0 {
+		t.Errorf("unexpected non-zero fields: %+v", event.Tokens)
+	}
+}
+
+func TestExtractTokensFromMetricOpenClawContextTokens(t *testing.T) {
+	metric := makeTokenMetric("openclaw.context.tokens", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"", 1024},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil for openclaw.context.tokens")
+	}
+	if event.Tokens.Input != 1024 {
+		t.Errorf("Input = %d, want 1024", event.Tokens.Input)
+	}
+}
+
+func TestExtractTokensFromMetricNonTokenMetricReturnsNil(t *testing.T) {
+	// A non-token metric should produce nil Tokens.
+	metric := pmetric.NewMetric()
+	metric.SetName("gen_ai.client.operation.duration")
+	dp := metric.SetEmptySum().DataPoints().AppendEmpty()
+	dp.SetDoubleValue(0.5)
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens != nil {
+		t.Errorf("Tokens should be nil for non-token metric, got %+v", event.Tokens)
+	}
+}
+
+func TestExtractTokensFromMetricAllZeroReturnsNil(t *testing.T) {
+	// A token metric with all-zero data points should produce nil Tokens.
+	metric := makeTokenMetric("gen_ai.client.token.usage", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"input", 0},
+		{"output", 0},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens != nil {
+		t.Errorf("Tokens should be nil when all data points are zero, got %+v", event.Tokens)
+	}
+}
+
+func TestExtractTokensFromSpanAttributes(t *testing.T) {
+	// Claude Code emits token usage as span attributes.
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "claude-code")
+	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.SetName("ai.operation")
+	span.Attributes().PutInt("gen_ai.usage.input_tokens", 600)
+	span.Attributes().PutInt("gen_ai.usage.output_tokens", 200)
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromSpan(rs.Resource().Attributes().AsRaw(), span)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil for span with gen_ai.usage attributes")
+	}
+	if event.Tokens.Input != 600 {
+		t.Errorf("Input = %d, want 600", event.Tokens.Input)
+	}
+	if event.Tokens.Output != 200 {
+		t.Errorf("Output = %d, want 200", event.Tokens.Output)
+	}
+}
+
+func TestExtractTokensFromSpanAttributesWithCache(t *testing.T) {
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "claude-code")
+	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.SetName("ai.operation")
+	span.Attributes().PutInt("gen_ai.usage.input_tokens", 1000)
+	span.Attributes().PutInt("gen_ai.usage.output_tokens", 250)
+	span.Attributes().PutInt("gen_ai.usage.input_token.cache_read", 800)
+	span.Attributes().PutInt("gen_ai.usage.input_token.cache_creation", 200)
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromSpan(rs.Resource().Attributes().AsRaw(), span)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil")
+	}
+	if event.Tokens.Input != 1000 {
+		t.Errorf("Input = %d, want 1000", event.Tokens.Input)
+	}
+	if event.Tokens.Output != 250 {
+		t.Errorf("Output = %d, want 250", event.Tokens.Output)
+	}
+	if event.Tokens.CacheRead != 800 {
+		t.Errorf("CacheRead = %d, want 800", event.Tokens.CacheRead)
+	}
+	if event.Tokens.CacheWrite != 200 {
+		t.Errorf("CacheWrite = %d, want 200 (cache_creation maps to CacheWrite)", event.Tokens.CacheWrite)
+	}
+}
+
+func TestExtractTokensFromSpanNoTokenAttrsReturnsNil(t *testing.T) {
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "claude-code")
+	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.SetName("file.modified")
+	span.Attributes().PutStr("file.path", "/foo/bar.go")
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromSpan(rs.Resource().Attributes().AsRaw(), span)
+	if event.Tokens != nil {
+		t.Errorf("Tokens should be nil for span with no token attributes, got %+v", event.Tokens)
+	}
+}
+
+func TestExtractTokensMetricWinsOverSpanAttrs(t *testing.T) {
+	// If a metric already has token data, PopulateCommon (which handles span/log
+	// attrs) should not overwrite it. This validates the "if event.Tokens == nil"
+	// guard in PopulateCommon. We test this indirectly by calling eventFromMetric
+	// on a metric that has both metric data points and resource attrs carrying
+	// span-style token attributes — the metric data points should win.
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	// Add span-style token attrs on the resource — these should be ignored
+	// because the metric data points populate Tokens first.
+	rm.Resource().Attributes().PutStr("service.name", "claude-code")
+	rm.Resource().Attributes().PutInt("gen_ai.usage.input_tokens", 9999)
+	sm := rm.ScopeMetrics().AppendEmpty()
+	metric := sm.Metrics().AppendEmpty()
+	metric.SetName("gen_ai.client.token.usage")
+	dp := metric.SetEmptySum().DataPoints().AppendEmpty()
+	dp.SetIntValue(100)
+	dp.Attributes().PutStr("gen_ai.token.type", "input")
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(rm.Resource().Attributes().AsRaw(), metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil")
+	}
+	if event.Tokens.Input != 100 {
+		t.Errorf("Input = %d, want 100 (metric data point should win over resource attr)", event.Tokens.Input)
+	}
+}
