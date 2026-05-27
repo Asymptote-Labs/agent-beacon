@@ -21,6 +21,7 @@ import (
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/vscode"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/rapid7"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -56,6 +57,10 @@ var endpointOpts struct {
 	coworkSince              string
 	openClawEndpoint         string
 	openClawSince            string
+	vscodeEndpoint           string
+	vscodeSince              string
+	vscodeWorkspace          string
+	vscodeCaptureContent     bool
 	elasticPackDir           string
 	hookLevel                string
 	contentRetention         string
@@ -374,6 +379,67 @@ var endpointOpenClawValidateCmd = &cobra.Command{
 	RunE:         func(cmd *cobra.Command, args []string) error { return runEndpointOpenClawValidate() },
 }
 
+var endpointVSCodeCmd = &cobra.Command{
+	Use:   "vscode",
+	Short: "Manage VS Code Copilot OpenTelemetry integration",
+}
+
+var endpointVSCodePrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print VS Code Copilot OpenTelemetry setup guidance",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		endpoint := endpointOpts.vscodeEndpoint
+		if endpoint == "" {
+			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
+		}
+		fmt.Print(vscode.PrintConfig(vscode.Config{
+			Endpoint:       endpoint,
+			CaptureContent: endpointOpts.vscodeCaptureContent,
+			WorkspacePath:  endpointOpts.vscodeWorkspace,
+		}))
+	},
+}
+
+var endpointVSCodeSetupCmd = &cobra.Command{
+	Use:          "setup",
+	Short:        "Configure VS Code Copilot OpenTelemetry for local Beacon collection",
+	SilenceUsage: true,
+	RunE:         func(cmd *cobra.Command, args []string) error { return runEndpointVSCodeSetup() },
+}
+
+var endpointVSCodeStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show VS Code endpoint integration status",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		endpoint := endpointOpts.vscodeEndpoint
+		if endpoint == "" {
+			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
+		}
+		status := vscode.GetStatusForConfig(cfg.LogPath, endpoint, vscode.Config{
+			WorkspacePath: endpointOpts.vscodeWorkspace,
+		})
+		if endpointOpts.jsonOutput {
+			_ = json.NewEncoder(os.Stdout).Encode(status)
+			return
+		}
+		fmt.Printf("%s: detected=%t telemetry=%s", status.DisplayName, status.Detected, status.TelemetryStatus)
+		if status.LastEventObservedAt != "" {
+			fmt.Printf(" last=%s", status.LastEventObservedAt)
+		}
+		fmt.Println()
+		fmt.Println(status.Message)
+	},
+}
+
+var endpointVSCodeValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Validate whether VS Code events are arriving",
+	SilenceUsage: true,
+	RunE:         func(cmd *cobra.Command, args []string) error { return runEndpointVSCodeValidate() },
+}
+
 var endpointWazuhPrintConfigCmd = &cobra.Command{
 	Use:   "print-config",
 	Short: "Print a Wazuh localfile snippet",
@@ -556,6 +622,7 @@ func init() {
 	endpointIntegrationsCmd.AddCommand(endpointIntegrationsValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
+	endpointIntegrationsCmd.AddCommand(endpointVSCodeCmd)
 	endpointHooksCmd.AddCommand(endpointHooksInstallCmd)
 	endpointHooksCmd.AddCommand(endpointHooksUninstallCmd)
 	endpointHooksCmd.AddCommand(endpointHooksStatusCmd)
@@ -566,6 +633,10 @@ func init() {
 	endpointOpenClawCmd.AddCommand(endpointOpenClawPrintConfigCmd)
 	endpointOpenClawCmd.AddCommand(endpointOpenClawStatusCmd)
 	endpointOpenClawCmd.AddCommand(endpointOpenClawValidateCmd)
+	endpointVSCodeCmd.AddCommand(endpointVSCodePrintConfigCmd)
+	endpointVSCodeCmd.AddCommand(endpointVSCodeSetupCmd)
+	endpointVSCodeCmd.AddCommand(endpointVSCodeStatusCmd)
+	endpointVSCodeCmd.AddCommand(endpointVSCodeValidateCmd)
 
 	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointConfigSetRetentionCmd, endpointIntegrationsValidateCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
@@ -680,6 +751,17 @@ func init() {
 	endpointOpenClawValidateCmd.Flags().StringVar(&endpointOpts.openClawEndpoint, "endpoint", "", "OTLP HTTP endpoint to show when validation fails")
 	endpointOpenClawValidateCmd.Flags().StringVar(&endpointOpts.openClawSince, "since", "", "Require an OpenClaw event within this duration, such as 10m")
 	endpointOpenClawStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
+	for _, c := range []*cobra.Command{endpointVSCodePrintConfigCmd, endpointVSCodeSetupCmd, endpointVSCodeStatusCmd, endpointVSCodeValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+		c.Flags().StringVar(&endpointOpts.vscodeEndpoint, "endpoint", "", "OTLP HTTP endpoint for VS Code Copilot")
+		c.Flags().StringVar(&endpointOpts.vscodeWorkspace, "workspace", "", "Workspace path for .vscode/settings.json")
+		c.Flags().BoolVar(&endpointOpts.vscodeCaptureContent, "capture-content", false, "Enable full Copilot prompt, response, tool argument, and tool result capture")
+	}
+	endpointVSCodeSetupCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print VS Code setup guidance without changing settings")
+	endpointVSCodeValidateCmd.Flags().StringVar(&endpointOpts.vscodeSince, "since", "", "Require a VS Code event within this duration, such as 10m")
+	endpointVSCodeStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointHooksStatusCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -729,6 +811,16 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Printf("Cursor hooks installed: %s\n", status.HooksJSONPath)
+		case "vscode", "vs_code":
+			status, err := endpointhooks.InstallVSCode(endpointhooks.VSCodeOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("VS Code hooks installed: %s\n", status.HooksPath)
 		case "factory", "droid":
 			status, err := endpointhooks.InstallFactory(endpointhooks.FactoryOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -811,6 +903,16 @@ func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			fmt.Println(status.Message)
+		case "vscode", "vs_code":
+			status, err := endpointhooks.UninstallVSCode(endpointhooks.VSCodeOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(status.Message)
 		case "factory", "droid":
 			status, err := endpointhooks.UninstallFactory(endpointhooks.FactoryOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -876,6 +978,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "vscode", "vs_code":
+			statuses["vscode"] = endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "factory", "droid":
 			statuses["factory"] = endpointhooks.FactoryHookStatus(endpointhooks.FactoryOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -917,6 +1025,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "cursor":
 			status := statuses["cursor"].(endpointhooks.CursorStatus)
 			fmt.Printf("Cursor hooks: installed=%t path=%s\n", status.Installed, status.HooksJSONPath)
+			fmt.Println(status.Message)
+		case "vscode", "vs_code":
+			status := statuses["vscode"].(endpointhooks.VSCodeStatus)
+			fmt.Printf("VS Code hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
 		case "factory", "droid":
 			status := statuses["factory"].(endpointhooks.FactoryStatus)
@@ -1066,6 +1178,72 @@ func runEndpointOpenClawValidate() error {
 		fmt.Println("OpenClaw OTLP-derived events observed in endpoint runtime log.")
 	}
 	fmt.Println("Validation confirms at least one OpenClaw event reached Beacon; it does not prove logs, traces, and metrics are each flowing.")
+	return nil
+}
+
+func runEndpointVSCodeSetup() error {
+	cfg := loadOrDefaultConfig()
+	endpoint := endpointOpts.vscodeEndpoint
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
+	}
+	setup := vscode.Config{
+		Endpoint:       endpoint,
+		CaptureContent: endpointOpts.vscodeCaptureContent,
+		WorkspacePath:  endpointOpts.vscodeWorkspace,
+	}
+	if endpointOpts.dryRun {
+		fmt.Print(vscode.PrintConfig(setup))
+		return nil
+	}
+	path, err := vscode.Setup(setup)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("VS Code Copilot OTel settings written to %s\n", path)
+	return nil
+}
+
+func runEndpointVSCodeValidate() error {
+	cfg := loadOrDefaultConfig()
+	endpoint := endpointOpts.vscodeEndpoint
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
+	}
+	setup := func() {
+		fmt.Print(vscode.PrintConfig(vscode.Config{
+			Endpoint:       endpoint,
+			CaptureContent: endpointOpts.vscodeCaptureContent,
+			WorkspacePath:  endpointOpts.vscodeWorkspace,
+		}))
+	}
+	if endpointOpts.vscodeSince != "" {
+		duration, err := time.ParseDuration(endpointOpts.vscodeSince)
+		if err != nil {
+			return fmt.Errorf("--since must be a duration such as 10m: %w", err)
+		}
+		since := time.Now().Add(-duration)
+		if !vscode.HasVSCodeEventSince(cfg.LogPath, since) {
+			setup()
+			return fmt.Errorf("no VS Code events observed in %s since %s", cfg.LogPath, since.UTC().Format(time.RFC3339))
+		}
+		fmt.Printf("VS Code events observed in endpoint runtime log since %s.\n", since.UTC().Format(time.RFC3339))
+		fmt.Println("Validation confirms at least one low-noise VS Code event reached Beacon.")
+		return nil
+	}
+	status := vscode.GetStatusForConfig(cfg.LogPath, endpoint, vscode.Config{
+		WorkspacePath: endpointOpts.vscodeWorkspace,
+	})
+	if !status.LastEventObserved {
+		setup()
+		return fmt.Errorf("no VS Code events observed in %s", cfg.LogPath)
+	}
+	if status.LastEventObservedAt != "" {
+		fmt.Printf("VS Code events observed in endpoint runtime log. Last observed: %s.\n", status.LastEventObservedAt)
+	} else {
+		fmt.Println("VS Code events observed in endpoint runtime log.")
+	}
+	fmt.Println("Validation confirms at least one low-noise VS Code event reached Beacon.")
 	return nil
 }
 
@@ -1223,7 +1401,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
-		Harnesses:             splitCSV(endpointOpts.harnesses),
+		Harnesses:             splitHarnessCSV(endpointOpts.harnesses),
 		GRPCPort:              endpointOpts.grpcPort,
 		HTTPPort:              endpointOpts.httpPort,
 		CollectorPath:         endpointOpts.collectorPath,
@@ -1356,7 +1534,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
-		Harnesses:             splitCSV(endpointOpts.harnesses),
+		Harnesses:             splitHarnessCSV(endpointOpts.harnesses),
 		GRPCPort:              endpointOpts.grpcPort,
 		HTTPPort:              endpointOpts.httpPort,
 		CollectorPath:         endpointOpts.collectorPath,
@@ -1416,6 +1594,13 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func splitHarnessCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return []string{}
+	}
+	return splitCSV(value)
 }
 
 func registerSplunkFlags(cmd *cobra.Command) {

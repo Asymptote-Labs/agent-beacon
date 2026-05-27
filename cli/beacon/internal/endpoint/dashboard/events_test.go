@@ -154,6 +154,51 @@ func TestBuildSummaryAggregatesSignals(t *testing.T) {
 	}
 }
 
+func TestDashboardAPIsSurfaceVSCodeEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:00:00Z", "vscode", "prompt.submitted", "prompt", "repo-a"),
+		testSchemaEvent("2026-05-13T01:01:00Z", "vscode_copilot", "tool.invoked", "tool", "repo-a"),
+		testSchemaEvent("2026-05-13T01:02:00Z", "vscode", "file.modified", "file", "repo-a"),
+	}
+	events[1].Tool = &schema.ToolInfo{Name: "runCommand"}
+	events[2].File = &schema.FileInfo{Path: "main.go", Operation: "modify", Language: "go"}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	handler, err := Handler(Options{UserMode: true, LogPath: path})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/summary", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var summary Summary
+	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("unmarshal summary: %v", err)
+	}
+	if summary.CountsByHarness["vscode"] != 2 || summary.CountsByHarness["vscode_copilot"] != 1 {
+		t.Fatalf("VS Code harness counts = %#v", summary.CountsByHarness)
+	}
+	if summary.PromptEvents != 1 || summary.ToolEvents != 1 || summary.FileEvents != 1 {
+		t.Fatalf("signal counts = prompt %d tool %d file %d", summary.PromptEvents, summary.ToolEvents, summary.FileEvents)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/events?harness=vscode", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("events status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var result EventResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal events: %v", err)
+	}
+	if result.TotalMatched != 2 {
+		t.Fatalf("vscode filtered events = %d, want 2", result.TotalMatched)
+	}
+}
+
 func TestReadEventsFreeTextSearchMatchesStructuredFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	events := []schema.Event{

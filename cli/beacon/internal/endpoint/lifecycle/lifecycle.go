@@ -273,7 +273,7 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		logPath = writer.DefaultPath(opts.UserMode)
 	}
 	cfg := endpointconfig.Default(opts.UserMode, logPath)
-	if len(opts.Harnesses) > 0 {
+	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
 	}
 	if opts.GRPCPort != 0 {
@@ -387,6 +387,7 @@ func preflight(cfg endpointconfig.Config, startService bool) error {
 
 func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 	grpcEndpoint := fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.GRPCPort)
+	httpEndpoint := fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 	var paths []string
 	for _, name := range cfg.Harnesses {
 		switch name {
@@ -404,6 +405,12 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 			paths = append(paths, path)
 		case "gemini", "gemini_cli":
 			path, err := harness.ConfigureGemini(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, ContentRetention: string(cfg.ContentRetention)})
+			if err != nil {
+				return paths, err
+			}
+			paths = append(paths, path)
+		case "vscode", "vs_code", "vscode_copilot":
+			path, err := harness.ConfigureVSCode(harness.VSCodeConfigOptions{Endpoint: httpEndpoint})
 			if err != nil {
 				return paths, err
 			}

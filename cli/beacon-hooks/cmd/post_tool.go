@@ -119,7 +119,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
-	if platformFlag == "antigravity" || platformFlag == "copilot" || platformFlag == "devin" || platformFlag == "grok" {
+	if platformFlag == "antigravity" || platformFlag == "copilot" || platformFlag == "devin" || platformFlag == "grok" || platformFlag == "vscode" {
 		sessionID = resolveSessionID(input, platformFlag)
 		toolName = getFirstStr(input, "toolName", "tool_name")
 		if platformFlag == "antigravity" {
@@ -297,7 +297,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 
 // isFileEditTool returns true if the tool name represents a file edit operation.
 func isFileEditTool(platform, toolName string) bool {
-	if platform == "copilot" {
+	if platform == "copilot" || platform == "vscode" {
 		lower := strings.ToLower(toolName)
 		return strings.Contains(lower, "edit") ||
 			strings.Contains(lower, "write") ||

@@ -48,7 +48,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "devin" || platformFlag == "grok" {
+	} else if platformFlag == "devin" || platformFlag == "grok" || platformFlag == "vscode" {
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
@@ -75,7 +75,7 @@ func preToolResponse() map[string]interface{} {
 	if platformFlag == "antigravity" || platformFlag == "grok" {
 		return map[string]interface{}{"decision": "allow"}
 	}
-	if platformFlag == "devin" {
+	if platformFlag == "devin" || platformFlag == "vscode" {
 		return emptyResponse
 	}
 	return allowResponse

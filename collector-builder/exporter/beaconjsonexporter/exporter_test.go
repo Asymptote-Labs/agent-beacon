@@ -1079,7 +1079,7 @@ func TestHarnessNameSeparatesClaudeCodeAndCowork(t *testing.T) {
 		{
 			name:  "copilot chat wrapper",
 			attrs: map[string]interface{}{"service.name": "copilot-chat"},
-			want:  "copilot_cli",
+			want:  "vscode_copilot",
 		},
 		{
 			name:  "openclaw gateway service",
@@ -1144,6 +1144,196 @@ func TestCopilotSpanActions(t *testing.T) {
 				t.Fatalf("category = %q, want %q", event.Event.Category, tt.category)
 			}
 		})
+	}
+}
+
+func TestVSCodeCopilotDropsNoisySpansByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "copilot-chat")
+	spans := rs.ScopeSpans().AppendEmpty().Spans()
+	chat := spans.AppendEmpty()
+	chat.SetName("chat gpt-4o")
+	chat.Attributes().PutStr("gen_ai.operation.name", "chat")
+	tool := spans.AppendEmpty()
+	tool.SetName("execute_tool readFile")
+	tool.Attributes().PutStr("gen_ai.operation.name", "execute_tool")
+	tool.Attributes().PutStr("gen_ai.tool.name", "readFile")
+
+	if err := exp.consumeTraces(context.Background(), traces); err != nil {
+		t.Fatalf("consumeTraces returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "chat gpt-4o") {
+		t.Fatalf("chat span should be dropped by default: %s", text)
+	}
+	if !strings.Contains(text, "execute_tool readFile") || !strings.Contains(text, "vscode_copilot") {
+		t.Fatalf("normalized tool span missing: %s", text)
+	}
+}
+
+func TestVSCodeCopilotDropsNoisyMetricsByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "copilot-chat")
+	sm := rm.ScopeMetrics().AppendEmpty()
+	for _, name := range []string{"gen_ai.client.token.usage", "gen_ai.client.operation.duration", "copilot_chat.time_to_first_token"} {
+		sm.Metrics().AppendEmpty().SetName(name)
+	}
+	if err := exp.consumeMetrics(context.Background(), metrics); err != nil {
+		t.Fatalf("consumeMetrics returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("VS Code Copilot metrics should be dropped by default, wrote: %s", string(data))
+	}
+}
+
+func TestVSCodeCopilotKeepsActivityLogs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "copilot-chat")
+	rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Body().SetStr("copilot_chat.tool.call")
+	rec.Attributes().PutStr("event.name", "copilot_chat.tool.call")
+	rec.Attributes().PutStr("gen_ai.tool.name", "runCommand")
+	rec.Attributes().PutStr("success", "true")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "vscode_copilot") || !strings.Contains(text, "tool.invoked") {
+		t.Fatalf("activity log not normalized: %s", text)
+	}
+}
+
+func TestVSCodeCopilotDropsRepeatedSessionStartLogs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "copilot-chat")
+	for i := 0; i < 3; i++ {
+		rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+		rec.Body().SetStr("copilot_chat.session.start")
+		rec.Attributes().PutStr("event.name", "copilot_chat.session.start")
+		rec.Attributes().PutStr("session.id", "same-session")
+	}
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("session start logs should be dropped, wrote: %s", string(data))
+	}
+}
+
+func TestVSCodeCopilotInvokeAgentUserRequestBecomesPrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "full",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "copilot-chat")
+	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.SetName("invoke_agent GitHub Copilot Chat")
+	span.Attributes().PutStr("gen_ai.operation.name", "invoke_agent")
+	span.Attributes().PutStr("gen_ai.agent.name", "GitHub Copilot Chat")
+	span.Attributes().PutStr("gen_ai.request.model", "gpt-4.1")
+	span.Attributes().PutStr("copilot_chat.user_request", "please read CLAUDE.md for me")
+	span.Attributes().PutStr("copilot_chat.session_id", "chat-session")
+	span.Attributes().PutStr("session.id", "vscode-window")
+
+	if err := exp.consumeTraces(context.Background(), traces); err != nil {
+		t.Fatalf("consumeTraces returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Harness.Name != "vscode_copilot" {
+		t.Fatalf("harness = %q, want vscode_copilot", event.Harness.Name)
+	}
+	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+		t.Fatalf("event = %#v, want prompt.submitted/prompt", event.Event)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "please read CLAUDE.md for me" {
+		t.Fatalf("prompt = %#v, want user request", event.Prompt)
+	}
+	if event.Session == nil || event.Session.ID != "chat-session" {
+		t.Fatalf("session = %#v, want Copilot chat session", event.Session)
 	}
 }
 

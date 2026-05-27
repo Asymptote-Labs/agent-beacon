@@ -26,6 +26,14 @@ var allowedCodexLogEvents = map[string]struct{}{
 	CodexToolResult:         {},
 }
 
+var allowedVSCodeCopilotLogEvents = map[string]struct{}{
+	"copilot_chat.tool.call":            {},
+	"copilot_chat.edit.feedback":        {},
+	"copilot_chat.edit.hunk.action":     {},
+	"copilot_chat.inline.done":          {},
+	"copilot_chat.cloud.session.invoke": {},
+}
+
 var noisyCodexLogMessages = []string{
 	"runtime metrics reset skipped",
 	"flushing otel metrics",
@@ -107,10 +115,14 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
-	if HarnessName(attrs, record.Body().AsString()) != "codex_cli" {
+	switch HarnessName(attrs, record.Body().AsString()) {
+	case "codex_cli":
+		return isNoisyCodexLog(attrs, record.Body().AsString())
+	case "vscode_copilot":
+		return isNoisyVSCodeCopilotLog(attrs, record.Body().AsString())
+	default:
 		return false
 	}
-	return isNoisyCodexLog(attrs, record.Body().AsString())
 }
 
 func isNoisyCodexLog(attrs map[string]interface{}, body string) bool {
@@ -130,8 +142,22 @@ func isNoisyCodexLog(attrs map[string]interface{}, body string) bool {
 	return strings.HasPrefix(eventName, "codex.")
 }
 
+func isNoisyVSCodeCopilotLog(attrs map[string]interface{}, body string) bool {
+	eventName := FirstString(attrs, "event.name", "name")
+	if eventName == "" {
+		eventName = strings.TrimSpace(body)
+	}
+	if _, ok := allowedVSCodeCopilotLogEvents[eventName]; ok {
+		return false
+	}
+	return true
+}
+
 func ShouldDropMetric(resourceAttrs map[string]interface{}, name string, includeRuntimeMetrics bool) bool {
 	if shouldDropCodexMetric(resourceAttrs, name) {
+		return true
+	}
+	if shouldDropVSCodeCopilotMetric(resourceAttrs, name, includeRuntimeMetrics) {
 		return true
 	}
 	if shouldDropOpenClawMetric(resourceAttrs, name, includeRuntimeMetrics) {
@@ -177,6 +203,34 @@ func shouldDropOpenClawMetric(resourceAttrs map[string]interface{}, name string,
 		return false
 	}
 	if HarnessName(resourceAttrs, name) != "openclaw_gateway" {
+		return false
+	}
+	return true
+}
+
+func shouldDropVSCodeCopilotMetric(resourceAttrs map[string]interface{}, name string, includeRuntimeMetrics bool) bool {
+	if includeRuntimeMetrics {
+		return false
+	}
+	if HarnessName(resourceAttrs, name) != "vscode_copilot" {
+		return false
+	}
+	return true
+}
+
+func shouldDropVSCodeCopilotSpan(attrs map[string]interface{}, spanName string, includeRuntimeMetrics bool) bool {
+	if includeRuntimeMetrics {
+		return false
+	}
+	operation := strings.ToLower(FirstString(attrs, "gen_ai.operation.name"))
+	name := strings.ToLower(spanName)
+	switch operation {
+	case "invoke_agent", "execute_tool", "execute_hook":
+		return false
+	case "chat", "embeddings":
+		return true
+	}
+	if strings.Contains(name, "invoke_agent") || strings.Contains(name, "execute_tool") || strings.Contains(name, "execute_hook") {
 		return false
 	}
 	return true
@@ -236,10 +290,14 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 
 func (c Converter) ShouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
-	if HarnessName(attrs, span.Name()) != "codex_cli" {
+	switch HarnessName(attrs, span.Name()) {
+	case "codex_cli":
+		return !c.opts.IncludeCodexSpans
+	case "vscode_copilot":
+		return shouldDropVSCodeCopilotSpan(attrs, span.Name(), c.opts.IncludeRuntimeMetrics)
+	default:
 		return false
 	}
-	return !c.opts.IncludeCodexSpans
 }
 
 func (c Converter) NormalizeCodexLogEvent(event *Event, attrs map[string]interface{}) {
@@ -339,7 +397,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
-	if id := FirstString(attrs, "session.id", "conversation.id", "conversation_id", "gen_ai.conversation.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
+	if id := FirstString(attrs, "gen_ai.conversation.id", "copilot_chat.session_id", "copilot_chat.chat_session_id", "conversation.id", "conversation_id", "session.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
 		event.Session = &SessionInfo{
 			ID:               id,
 			WorkingDirectory: FirstString(attrs, "cwd", "working_directory", "process.command_args.cwd", "workspace"),
@@ -382,7 +440,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 		}
 	}
 	if c.opts.ContentRetention != "metadata" && event.Event.Category == "prompt" {
-		if text := FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt"); text != "" {
+		if text := FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request"); text != "" {
 			event.Prompt = &PromptInfo{Text: text}
 		}
 	}
@@ -525,7 +583,9 @@ func NormalizeHarnessName(name string) string {
 		return "codex_cli"
 	case strings.Contains(lower, "gemini"):
 		return "gemini_cli"
-	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot-chat") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
+	case strings.Contains(lower, "copilot-chat"):
+		return "vscode_copilot"
+	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
 		return "copilot_cli"
 	case name != "":
 		return name
@@ -545,7 +605,7 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 		FirstString(attrs, "event.name", "codex.op", "rpc.method"),
 	}, " "))
 	switch {
-	case harness == "copilot_cli":
+	case harness == "copilot_cli" || harness == "vscode_copilot":
 		return CopilotAction(attrs, operation, text)
 	case strings.Contains(text, "gemini_cli.user_prompt"):
 		return "prompt.submitted"
@@ -571,9 +631,26 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 }
 
 func CopilotAction(attrs map[string]interface{}, operation, text string) string {
+	if eventName := FirstString(attrs, "event.name", "name"); eventName != "" {
+		switch eventName {
+		case "copilot_chat.session.start", "copilot_chat.cloud.session.invoke":
+			return "session.activity"
+		case "copilot_chat.tool.call":
+			if strings.EqualFold(FirstString(attrs, "success"), "false") || FirstString(attrs, "error.type") != "" {
+				return "tool.failed"
+			}
+			return "tool.invoked"
+		case "copilot_chat.edit.feedback", "copilot_chat.edit.hunk.action", "copilot_chat.inline.done":
+			return "file.modified"
+		}
+	}
 	switch {
+	case operation == "invoke_agent" && FirstString(attrs, "copilot_chat.user_request") != "":
+		return "prompt.submitted"
 	case operation == "invoke_agent":
 		return "session.activity"
+	case operation == "execute_hook":
+		return "approval.requested"
 	case operation == "chat":
 		initiator := strings.ToLower(FirstString(attrs, "github.copilot.initiator"))
 		turnID := FirstString(attrs, "github.copilot.turn_id")

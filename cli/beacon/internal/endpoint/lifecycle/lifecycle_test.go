@@ -79,6 +79,17 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 }
 
+func TestBuildConfigPreservesExplicitEmptyHarnesses(t *testing.T) {
+	cfg := buildConfig(InstallOptions{UserMode: true, Harnesses: []string{}})
+	if cfg.Harnesses == nil || len(cfg.Harnesses) != 0 {
+		t.Fatalf("Harnesses = %#v, want explicit empty slice", cfg.Harnesses)
+	}
+	defaultCfg := buildConfig(InstallOptions{UserMode: true})
+	if len(defaultCfg.Harnesses) == 0 {
+		t.Fatalf("default harnesses should be preserved when Harnesses is nil")
+	}
+}
+
 func TestSelectRuntimeLogWarnsWhenSystemCollectorConflictsWithUserMode(t *testing.T) {
 	userLog := filepath.Join(t.TempDir(), "user-runtime.jsonl")
 	systemLog := filepath.Join(t.TempDir(), "system-runtime.jsonl")
@@ -357,6 +368,37 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 	}
 }
 
+func TestConfigureHarnessesAcceptsVSCode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := endpointconfig.Config{
+		UserMode:  true,
+		Harnesses: []string{"vscode"},
+		Collector: endpointconfig.Collector{
+			GRPCPort: 54317,
+			HTTPPort: 54318,
+		},
+	}
+
+	paths, err := configureHarnesses(cfg)
+	if err != nil {
+		t.Fatalf("configureHarnesses returned error: %v", err)
+	}
+	settingsPath := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+	if len(paths) != 1 || paths[0] != settingsPath {
+		t.Fatalf("paths = %#v, want VS Code settings path", paths)
+	}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read VS Code settings: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"github.copilot.chat.otel.otlpEndpoint": "http://127.0.0.1:54318"`) ||
+		!strings.Contains(text, `"github.copilot.chat.otel.captureContent": false`) {
+		t.Fatalf("VS Code settings did not configure low-noise local OTLP: %s", text)
+	}
+}
+
 func TestInstallUserModeWithoutStartingService(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("install preflight is macOS-only")
@@ -375,7 +417,7 @@ func TestInstallUserModeWithoutStartingService(t *testing.T) {
 	result, err := Install(InstallOptions{
 		UserMode:      true,
 		LogPath:       logPath,
-		Harnesses:     []string{""},
+		Harnesses:     []string{},
 		GRPCPort:      freePort(t),
 		HTTPPort:      freePort(t),
 		CollectorPath: collectorPath,
@@ -413,7 +455,7 @@ func TestInstallFailsBeforeWritingArtifactsWhenCollectorMissing(t *testing.T) {
 	_, err := Install(InstallOptions{
 		UserMode:      true,
 		LogPath:       logPath,
-		Harnesses:     []string{""},
+		Harnesses:     []string{},
 		GRPCPort:      freePort(t),
 		HTTPPort:      freePort(t),
 		CollectorPath: missingCollector,

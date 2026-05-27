@@ -81,6 +81,8 @@ func platformToTranscriptName(platform string) string {
 		return "copilot"
 	case "cursor":
 		return "cursor"
+	case "vscode":
+		return "vscode"
 	case "factory":
 		return "factory"
 	case "devin":
@@ -95,7 +97,7 @@ func extractMessages(transcriptPath, platform string) []map[string]interface{} {
 	switch platform {
 	case "copilot":
 		return extractMessagesFromCopilotTranscript(transcriptPath)
-	case "cursor":
+	case "cursor", "vscode":
 		return extractMessagesFromCursorTranscript(transcriptPath)
 	case "factory":
 		return extractMessagesFromFactoryTranscript(transcriptPath)

@@ -87,6 +87,7 @@ Claude Cowork, OpenClaw).
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Beacon hook adapter |
 | [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP export |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Beacon hook adapter |
+| VS Code | VS Code Copilot OpenTelemetry and optional Beacon hook adapter |
 
 ### SIEM / Output Destinations
 

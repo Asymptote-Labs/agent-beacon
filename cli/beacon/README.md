@@ -125,6 +125,11 @@ Beacon endpoint configuration.
 ./beacon endpoint integrations openclaw print-config
 ./beacon endpoint integrations openclaw status
 ./beacon endpoint integrations openclaw validate --since 10m
+
+./beacon endpoint integrations vscode setup
+./beacon endpoint integrations vscode status
+./beacon endpoint integrations vscode validate --since 10m
+./beacon endpoint hooks install --harness vscode --level project
 ```
 
 The opencode integration installs Beacon's owned local plugin at
@@ -156,6 +161,28 @@ with the `diagnostics-otel` plugin enabled. Beacon prints a local OTLP/HTTP
 configuration that points OpenClaw at the endpoint collector. OpenClaw does not
 export raw prompt, response, tool, or system-prompt content unless
 `diagnostics.otel.captureContent.*` is explicitly enabled.
+
+VS Code Copilot monitoring is configured in VS Code settings and exports
+OTLP/HTTP to Beacon's local collector. For a first-time local setup, install the
+endpoint collector with the VS Code harness, reload VS Code, and validate recent
+activity:
+
+```bash
+./beacon endpoint install --user --harness vscode
+./beacon endpoint integrations vscode validate --user --since 10m
+```
+
+VS Code hook support is optional and depends on the `Chat: Use Hooks` setting,
+which may be managed by the organization. When enabled, project-level hooks use
+`.github/hooks/beacon.json`:
+
+```bash
+cd /path/to/workspace
+beacon endpoint hooks install --harness vscode --level project --user
+```
+
+OTel-derived events use `harness.name=vscode_copilot`; hook-derived events use
+`harness.name=vscode`.
 
 ## Test
 

@@ -28,6 +28,17 @@ func TestSplitCSV(t *testing.T) {
 	}
 }
 
+func TestSplitHarnessCSVAllowsCollectorOnly(t *testing.T) {
+	got := splitHarnessCSV("")
+	if len(got) != 0 {
+		t.Fatalf("splitHarnessCSV empty = %#v, want empty slice", got)
+	}
+	got = splitHarnessCSV("claude,codex")
+	if len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
+		t.Fatalf("splitHarnessCSV populated = %#v, want claude/codex", got)
+	}
+}
+
 func TestEndpointDashboardCommandRegistered(t *testing.T) {
 	cmd, _, err := endpointCmd.Find([]string{"dashboard"})
 	if err != nil {
@@ -109,6 +120,37 @@ func TestEndpointOpenClawCommandsRegistered(t *testing.T) {
 	}
 	if endpointOpenClawValidateCmd.Flags().Lookup("since") == nil {
 		t.Fatal("openclaw validate command missing --since flag")
+	}
+}
+
+func TestEndpointVSCodeCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"integrations", "vscode", "print-config"},
+		{"integrations", "vscode", "setup"},
+		{"integrations", "vscode", "status"},
+		{"integrations", "vscode", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("vscode command %v not registered: %#v", path, cmd)
+		}
+	}
+	for _, name := range []string{"endpoint", "workspace", "capture-content"} {
+		if endpointVSCodeSetupCmd.Flags().Lookup(name) == nil {
+			t.Fatalf("vscode setup command missing --%s flag", name)
+		}
+	}
+	if endpointVSCodeSetupCmd.Flags().Lookup("dry-run") == nil {
+		t.Fatal("vscode setup command missing --dry-run flag")
+	}
+	if endpointVSCodeStatusCmd.Flags().Lookup("json") == nil {
+		t.Fatal("vscode status command missing --json flag")
+	}
+	if endpointVSCodeValidateCmd.Flags().Lookup("since") == nil {
+		t.Fatal("vscode validate command missing --since flag")
 	}
 }
 

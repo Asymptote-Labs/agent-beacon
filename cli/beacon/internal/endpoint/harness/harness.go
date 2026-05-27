@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -52,6 +53,7 @@ func DiscoverAll() []Harness {
 		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
 		DiscoverFactory(),
+		DiscoverVSCode(),
 		DiscoverCursor(),
 		DiscoverDevin(),
 		DiscoverClaudeCowork(),
@@ -327,6 +329,7 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 	gemini := DiscoverGemini()
 	copilot := discoverCopilotCLI(endpoint)
 	factory := DiscoverFactory()
+	vscode := discoverVSCode(endpoint)
 	return []ValidationResult{
 		{
 			Harness: claude.Name,
@@ -352,6 +355,11 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 			Harness: factory.Name,
 			Status:  factory.TelemetryStatus,
 			Message: validateEndpointMessage(factory.TelemetryStatus, factory.Message, endpoint),
+		},
+		{
+			Harness: vscode.Name,
+			Status:  vscode.TelemetryStatus,
+			Message: validateEndpointMessage(vscode.TelemetryStatus, vscode.Message, endpoint),
 		},
 	}
 }
@@ -564,10 +572,10 @@ func factoryProfilePath(home string) string {
 }
 
 func commandVersion(path string) string {
-	cmd := exec.Command(path, "--version")
-	timer := time.AfterFunc(2*time.Second, func() { _ = cmd.Process.Kill() })
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
 	out, err := cmd.CombinedOutput()
-	timer.Stop()
 	if err != nil {
 		return "unknown"
 	}

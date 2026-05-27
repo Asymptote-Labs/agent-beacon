@@ -14,6 +14,7 @@ var (
 	AntigravityDir = filepath.Join(BeaconDir, "antigravity")
 	CopilotDir     = filepath.Join(BeaconDir, "copilot")
 	CursorDir      = filepath.Join(BeaconDir, "cursor")
+	VSCodeDir      = filepath.Join(BeaconDir, "vscode")
 	DevinDir       = filepath.Join(BeaconDir, "devin")
 	FactoryDir     = filepath.Join(BeaconDir, "factory")
 	GrokDir        = filepath.Join(BeaconDir, "grok")
@@ -93,6 +94,8 @@ func GetStateDir(platform string) string {
 		return CopilotDir
 	case "cursor":
 		return CursorDir
+	case "vscode":
+		return VSCodeDir
 	case "devin":
 		return DevinDir
 	case "factory":

@@ -18,6 +18,9 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if platformFlag == "grok" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"grok": input})
 	}
+	if platformFlag == "vscode" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"vscode": input})
+	}
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}

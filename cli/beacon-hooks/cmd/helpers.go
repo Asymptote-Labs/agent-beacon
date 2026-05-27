@@ -53,6 +53,8 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		return getFirstStr(input, "sessionId", "session_id")
 	case "cursor":
 		return getFirstStr(input, "conversation_id")
+	case "vscode":
+		return getFirstStr(input, "sessionId", "session_id", "conversation_id", "gen_ai.conversation.id")
 	case "devin":
 		return getFirstStr(input, "session_id", "sessionId", "conversation_id")
 	case "grok":
@@ -83,6 +85,10 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 	case "cursor":
 		sessionID = getFirstStr(input, "conversation_id")
 		transcriptPath = getFirstStr(input, "transcript_path")
+		return
+	case "vscode":
+		sessionID = getFirstStr(input, "sessionId", "session_id", "conversation_id", "gen_ai.conversation.id")
+		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
 		return
 	case "devin":
 		sessionID = getFirstStr(input, "session_id", "sessionId", "conversation_id")
@@ -136,7 +142,7 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 		}
 		return ""
 	}
-	if platform == "cursor" {
+	if platform == "cursor" || platform == "vscode" {
 		if cwd := getFirstStr(input, "cwd"); cwd != "" {
 			return cwd
 		}
@@ -144,6 +150,14 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 			if cwd, ok := roots[0].(string); ok && cwd != "" {
 				return cwd
 			}
+		}
+		if roots, ok := input["workspaceFolders"].([]interface{}); ok && len(roots) > 0 {
+			if cwd, ok := roots[0].(string); ok && cwd != "" {
+				return cwd
+			}
+		}
+		if platform == "vscode" {
+			return os.Getenv("VSCODE_CWD")
 		}
 		if cwd := os.Getenv("CURSOR_PROJECT_DIR"); cwd != "" {
 			return cwd

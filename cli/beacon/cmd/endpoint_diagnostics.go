@@ -326,7 +326,7 @@ func plannedInstallActions(repair bool) []plannedAction {
 		plannedAction{Action: "write_plist", Message: "launchd service definition"},
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
 	)
-	for _, h := range splitCSV(endpointOpts.harnesses) {
+	for _, h := range splitHarnessCSV(endpointOpts.harnesses) {
 		actions = append(actions, plannedAction{Action: "configure_harness", Target: h})
 	}
 	if !endpointOpts.noStart {
@@ -367,7 +367,7 @@ func printPlannedActions(actions []plannedAction) error {
 
 func hookTargets() []string {
 	if endpointOpts.allTargets {
-		return []string{"cursor", "factory", "opencode", "grok", "devin", "antigravity"}
+		return []string{"cursor", "vscode", "factory", "opencode", "grok", "devin", "antigravity"}
 	}
 	return splitCSV(endpointOpts.hookHarnesses)
 }
@@ -387,6 +387,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 		case "cursor":
 			status := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksJSONPath, Raw: status}
+		case "vscode", "vs_code":
+			status := endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
 		case "factory", "droid":
 			status := endpointhooks.FactoryHookStatus(endpointhooks.FactoryOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.SettingsPath, Raw: status}

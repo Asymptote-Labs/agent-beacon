@@ -55,6 +55,67 @@ func TestRunPromptSubmitUsesCursorResponse(t *testing.T) {
 	}
 }
 
+func TestVSCodeHooksEmitLowNoiseTelemetry(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "vscode"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"sessionId":     "vscode-session",
+		"hookEventName": "PreToolUse",
+		"cwd":           "/repo",
+		"tool_name":     "runCommand",
+		"tool_input": map[string]interface{}{
+			"command": "go test ./...",
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("vscode pre-tool output = %#v, want empty non-controlling response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", action)
+	}
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode" {
+		t.Fatalf("harness = %q, want vscode", harness)
+	}
+	if _, ok := event["raw"].(map[string]interface{})["vscode"]; !ok {
+		t.Fatalf("raw.vscode missing: %#v", event["raw"])
+	}
+	if _, ok := event["prompt"]; ok {
+		t.Fatalf("metadata retention should omit prompt: %#v", event["prompt"])
+	}
+}
+
+func TestRunSubagentLifecycleEmitsVSCodeEvents(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "vscode"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, func(cmd *cobra.Command, args []string) {
+		runSubagentLifecycle("subagent.started", "Subagent started")
+	}, map[string]interface{}{
+		"sessionId":  "vscode-session",
+		"agent_id":   "agent-1",
+		"agent_type": "Plan",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "subagent.started" {
+		t.Fatalf("event.action = %q, want subagent.started", action)
+	}
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode" {
+		t.Fatalf("harness = %q, want vscode", harness)
+	}
+	if _, ok := event["tool"]; ok {
+		t.Fatalf("subagent event should not be encoded as tool: %#v", event["tool"])
+	}
+}
+
 func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "factory"
@@ -544,6 +605,7 @@ func setupHookConfigDirs(t *testing.T) {
 	origAntigravityDir := hookconfig.AntigravityDir
 	origCopilotDir := hookconfig.CopilotDir
 	origCursorDir := hookconfig.CursorDir
+	origVSCodeDir := hookconfig.VSCodeDir
 	origDevinDir := hookconfig.DevinDir
 	origFactoryDir := hookconfig.FactoryDir
 	origGrokDir := hookconfig.GrokDir
@@ -554,6 +616,7 @@ func setupHookConfigDirs(t *testing.T) {
 	hookconfig.AntigravityDir = filepath.Join(tmp, "antigravity")
 	hookconfig.CopilotDir = filepath.Join(tmp, "copilot")
 	hookconfig.CursorDir = filepath.Join(tmp, "cursor")
+	hookconfig.VSCodeDir = filepath.Join(tmp, "vscode")
 	hookconfig.DevinDir = filepath.Join(tmp, "devin")
 	hookconfig.FactoryDir = filepath.Join(tmp, "factory")
 	hookconfig.GrokDir = filepath.Join(tmp, "grok")
@@ -564,6 +627,7 @@ func setupHookConfigDirs(t *testing.T) {
 		hookconfig.AntigravityDir = origAntigravityDir
 		hookconfig.CopilotDir = origCopilotDir
 		hookconfig.CursorDir = origCursorDir
+		hookconfig.VSCodeDir = origVSCodeDir
 		hookconfig.DevinDir = origDevinDir
 		hookconfig.FactoryDir = origFactoryDir
 		hookconfig.GrokDir = origGrokDir

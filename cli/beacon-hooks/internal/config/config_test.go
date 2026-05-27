@@ -14,6 +14,7 @@ func TestGetStateDir(t *testing.T) {
 		{"claude", ClaudeDir},
 		{"copilot", CopilotDir},
 		{"cursor", CursorDir},
+		{"vscode", VSCodeDir},
 		{"unknown", ClaudeDir}, // defaults to claude
 	}
 
@@ -35,6 +36,7 @@ func TestGetLogFile(t *testing.T) {
 		{"claude", "hooks.log"},
 		{"copilot", "hooks.log"},
 		{"cursor", "hooks.log"},
+		{"vscode", "hooks.log"},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +57,7 @@ func TestGetSessionLogDir(t *testing.T) {
 		{"claude", "logs"},
 		{"copilot", "logs"},
 		{"cursor", "logs"},
+		{"vscode", "logs"},
 	}
 
 	for _, tt := range tests {
@@ -80,6 +83,7 @@ func TestGetSessionLogFile(t *testing.T) {
 		{"claude", "abc-123", "abc-123.log"},
 		{"copilot", "sess-456", "sess-456.log"},
 		{"cursor", "conv-789", "conv-789.log"},
+		{"vscode", "vscode-session", "vscode-session.log"},
 	}
 
 	for _, tt := range tests {
