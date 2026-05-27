@@ -7,10 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestInputSnippetUsesConfiguredPath(t *testing.T) {
-	got := InputSnippet("/tmp/beacon/runtime.jsonl")
+	got, err := InputSnippet("/tmp/beacon/runtime.jsonl")
+	if err != nil {
+		t.Fatalf("InputSnippet returned unexpected error: %v", err)
+	}
 	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("snippet did not include configured path: %s", got)
 	}
@@ -180,5 +184,84 @@ func TestIngestPipelineMentionsKeyMappings(t *testing.T) {
 	}
 	if strings.Contains(pipeline, "event.action = 'file.' + ctx.file.operation") {
 		t.Fatal("ingest pipeline should preserve Beacon file actions instead of deriving lossy file operation actions")
+	}
+}
+
+func TestFiles_NoError(t *testing.T) {
+	files, err := Files()
+	if err != nil {
+		t.Fatalf("Files() returned unexpected error: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("Files() returned no files")
+	}
+}
+
+func TestFiles_ContainsAllRequiredNames(t *testing.T) {
+	files, err := Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make(map[string]bool)
+	for _, f := range files {
+		names[f.Name] = true
+	}
+	for _, required := range []string{
+		"README.md", "filebeat.yml", "elastic-agent-standalone.yml",
+		"ilm-policy.json", "kibana-assets.ndjson", "docker-compose.yml",
+		"sample-event.jsonl",
+	} {
+		if !names[required] {
+			t.Errorf("Files() missing required file %q", required)
+		}
+	}
+}
+
+func TestFilesFromFS_PropagatesReadError(t *testing.T) {
+	emptyFS := fstest.MapFS{}
+	_, err := filesFromFS(emptyFS, DefaultLogPath)
+	if err == nil {
+		t.Fatal("filesFromFS with empty FS should return an error")
+	}
+	if !strings.Contains(err.Error(), "elastic pack asset") {
+		t.Fatalf("error should identify the pack source, got: %v", err)
+	}
+}
+
+func TestInputSnippetFromFS_ErrorOnMissingAsset(t *testing.T) {
+	emptyFS := fstest.MapFS{}
+	_, err := inputSnippetFromFS(emptyFS, "/some/path.jsonl")
+	if err == nil {
+		t.Fatal("inputSnippetFromFS with empty FS should return error")
+	}
+	if !strings.Contains(err.Error(), "elastic pack asset") {
+		t.Fatalf("error should identify the pack source, got: %v", err)
+	}
+}
+
+func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: filesystem permission restrictions do not apply")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0555); err != nil {
+		t.Skip("cannot set directory permissions:", err)
+	}
+	defer os.Chmod(dir, 0755)
+
+	subdir := filepath.Join(dir, "output")
+	err := InstallPack(subdir, DefaultLogPath)
+	if err == nil {
+		t.Fatal("InstallPack into read-only directory should return error")
+	}
+}
+
+func TestInputSnippet_DefaultLogPath(t *testing.T) {
+	got, err := InputSnippet("")
+	if err != nil {
+		t.Fatalf("InputSnippet with empty path returned error: %v", err)
+	}
+	if !strings.Contains(got, DefaultLogPath) {
+		t.Fatalf("InputSnippet with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

@@ -408,11 +408,17 @@ var endpointWazuhValidateCmd = &cobra.Command{
 }
 
 var endpointElasticPrintConfigCmd = &cobra.Command{
-	Use:   "print-config",
-	Short: "Print a Filebeat input for Beacon endpoint events",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print-config",
+	Short:        "Print a Filebeat input for Beacon endpoint events",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadOrDefaultConfig()
-		fmt.Print(elastic.InputSnippet(cfg.LogPath))
+		snippet, err := elastic.InputSnippet(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
 	},
 }
 
@@ -442,11 +448,17 @@ var endpointElasticDownCmd = &cobra.Command{
 }
 
 var endpointDatadogPrintConfigCmd = &cobra.Command{
-	Use:   "print-config",
-	Short: "Print a Datadog Agent custom log config for Beacon endpoint events",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print-config",
+	Short:        "Print a Datadog Agent custom log config for Beacon endpoint events",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadOrDefaultConfig()
-		fmt.Print(datadog.ConfigSnippet(cfg.LogPath))
+		snippet, err := datadog.ConfigSnippet(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
 	},
 }
 
@@ -465,11 +477,17 @@ var endpointDatadogValidateCmd = &cobra.Command{
 }
 
 var endpointSumoPrintConfigCmd = &cobra.Command{
-	Use:   "print-config",
-	Short: "Print a Sumo HTTP Source smoke-test uploader for Beacon endpoint events",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print-config",
+	Short:        "Print a Sumo HTTP Source smoke-test uploader for Beacon endpoint events",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadOrDefaultConfig()
-		fmt.Print(sumo.UploadSmokeTest(cfg.LogPath))
+		snippet, err := sumo.UploadSmokeTest(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
 	},
 }
 
@@ -488,11 +506,17 @@ var endpointSumoValidateCmd = &cobra.Command{
 }
 
 var endpointRapid7PrintConfigCmd = &cobra.Command{
-	Use:   "print-config",
-	Short: "Print a Rapid7 Custom Logs webhook smoke-test uploader for Beacon endpoint events",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print-config",
+	Short:        "Print a Rapid7 Custom Logs webhook smoke-test uploader for Beacon endpoint events",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadOrDefaultConfig()
-		fmt.Print(rapid7.UploadSmokeTest(cfg.LogPath))
+		snippet, err := rapid7.UploadSmokeTest(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
 	},
 }
 

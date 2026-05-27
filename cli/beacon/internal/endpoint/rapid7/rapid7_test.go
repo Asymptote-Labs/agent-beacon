@@ -7,10 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
-	got := UploadSmokeTest("/tmp/beacon/runtime.jsonl")
+	got, err := UploadSmokeTest("/tmp/beacon/runtime.jsonl")
+	if err != nil {
+		t.Fatalf("UploadSmokeTest returned unexpected error: %v", err)
+	}
 	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("script did not include configured path: %s", got)
 	}
@@ -136,5 +140,82 @@ func TestPackREADMEMentionsRapid7SetupAndProductionForwarding(t *testing.T) {
 		if !strings.Contains(readme, want) {
 			t.Fatalf("pack README missing %q", want)
 		}
+	}
+}
+
+func TestFiles_NoError(t *testing.T) {
+	files, err := Files()
+	if err != nil {
+		t.Fatalf("Files() returned unexpected error: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("Files() returned no files")
+	}
+}
+
+func TestFiles_ContainsAllRequiredNames(t *testing.T) {
+	files, err := Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make(map[string]bool)
+	for _, f := range files {
+		names[f.Name] = true
+	}
+	for _, required := range []string{
+		"README.md", "rapid7-upload-smoke-test.sh", "sample-event.jsonl", "vector.toml",
+	} {
+		if !names[required] {
+			t.Errorf("Files() missing required file %q", required)
+		}
+	}
+}
+
+func TestFilesFromFS_PropagatesReadError(t *testing.T) {
+	emptyFS := fstest.MapFS{}
+	_, err := filesFromFS(emptyFS, DefaultLogPath)
+	if err == nil {
+		t.Fatal("filesFromFS with empty FS should return an error")
+	}
+	if !strings.Contains(err.Error(), "rapid7 pack asset") {
+		t.Fatalf("error should identify the pack source, got: %v", err)
+	}
+}
+
+func TestUploadSmokeTestFromFS_ErrorOnMissingAsset(t *testing.T) {
+	emptyFS := fstest.MapFS{}
+	_, err := uploadSmokeTestFromFS(emptyFS, "/some/path.jsonl")
+	if err == nil {
+		t.Fatal("uploadSmokeTestFromFS with empty FS should return error")
+	}
+	if !strings.Contains(err.Error(), "rapid7 pack asset") {
+		t.Fatalf("error should identify the pack source, got: %v", err)
+	}
+}
+
+func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: filesystem permission restrictions do not apply")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0555); err != nil {
+		t.Skip("cannot set directory permissions:", err)
+	}
+	defer os.Chmod(dir, 0755)
+
+	subdir := filepath.Join(dir, "output")
+	err := InstallPack(subdir, DefaultLogPath)
+	if err == nil {
+		t.Fatal("InstallPack into read-only directory should return error")
+	}
+}
+
+func TestUploadSmokeTest_DefaultLogPath(t *testing.T) {
+	got, err := UploadSmokeTest("")
+	if err != nil {
+		t.Fatalf("UploadSmokeTest with empty path returned error: %v", err)
+	}
+	if !strings.Contains(got, DefaultLogPath) {
+		t.Fatalf("UploadSmokeTest with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

@@ -3,6 +3,7 @@ package rapid7
 import (
 	"embed"
 	"fmt"
+	"io/fs"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
@@ -21,22 +22,76 @@ type File struct {
 	TemplateLogPath bool
 }
 
-func Files() []File {
-	return []File{
-		{Name: "README.md", Content: mustRead("pack/README.md")},
-		{Name: "rapid7-upload-smoke-test.sh", Content: mustRead("pack/rapid7-upload-smoke-test.sh.tmpl"), TemplateLogPath: true},
-		{Name: "sample-event.jsonl", Content: mustRead("pack/sample-event.jsonl")},
-		{Name: "vector.toml", Content: mustRead("pack/vector.toml.tmpl"), TemplateLogPath: true},
+// readAsset reads an embedded asset using the module-level packFS and returns its
+// contents or an error.
+func readAsset(path string) (string, error) {
+	data, err := siempack.ReadFile(packFS, path)
+	if err != nil {
+		return "", fmt.Errorf("rapid7 pack asset %q: %w", path, err)
 	}
+	return data, nil
 }
 
-func UploadSmokeTest(logPath string) string {
+// mustRead returns the embedded asset at path or panics. Retained for test use
+// where the embedded FS is always present; all production code uses readAsset.
+func mustRead(path string) string {
+	s, err := readAsset(path)
+	if err != nil {
+		panic(err.Error())
+	}
+	return s
+}
+
+// uploadSmokeTestFromFS renders the Rapid7 upload smoke-test script using the supplied FS.
+func uploadSmokeTestFromFS(fsys fs.FS, logPath string) (string, error) {
 	if logPath == "" {
 		logPath = DefaultLogPath
 	}
-	return siempack.RenderLogPath(mustRead("pack/rapid7-upload-smoke-test.sh.tmpl"), logPath)
+	content, err := siempack.ReadFile(fsys, "pack/rapid7-upload-smoke-test.sh.tmpl")
+	if err != nil {
+		return "", fmt.Errorf("rapid7 pack asset %q: %w", "pack/rapid7-upload-smoke-test.sh.tmpl", err)
+	}
+	return siempack.RenderLogPath(content, logPath), nil
 }
 
+// filesFromFS builds the full file list from the supplied FS, propagating any
+// read errors instead of panicking.
+func filesFromFS(fsys fs.FS, logPath string) ([]File, error) {
+	readme, err := siempack.ReadFile(fsys, "pack/README.md")
+	if err != nil {
+		return nil, fmt.Errorf("rapid7 pack asset %q: %w", "pack/README.md", err)
+	}
+	smokeTest, err := siempack.ReadFile(fsys, "pack/rapid7-upload-smoke-test.sh.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("rapid7 pack asset %q: %w", "pack/rapid7-upload-smoke-test.sh.tmpl", err)
+	}
+	sample, err := siempack.ReadFile(fsys, "pack/sample-event.jsonl")
+	if err != nil {
+		return nil, fmt.Errorf("rapid7 pack asset %q: %w", "pack/sample-event.jsonl", err)
+	}
+	vector, err := siempack.ReadFile(fsys, "pack/vector.toml.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("rapid7 pack asset %q: %w", "pack/vector.toml.tmpl", err)
+	}
+	return []File{
+		{Name: "README.md", Content: readme},
+		{Name: "rapid7-upload-smoke-test.sh", Content: smokeTest, TemplateLogPath: true},
+		{Name: "sample-event.jsonl", Content: sample},
+		{Name: "vector.toml", Content: vector, TemplateLogPath: true},
+	}, nil
+}
+
+// Files returns all pack files, propagating any embedded asset read error.
+func Files() ([]File, error) {
+	return filesFromFS(packFS, DefaultLogPath)
+}
+
+// UploadSmokeTest returns the Rapid7 upload smoke-test script with logPath substituted.
+func UploadSmokeTest(logPath string) (string, error) {
+	return uploadSmokeTestFromFS(packFS, logPath)
+}
+
+// InstallPack writes the pack files to outputDir with logPath substituted.
 func InstallPack(outputDir, logPath string) error {
 	if outputDir == "" {
 		outputDir = DefaultOutputDir
@@ -44,17 +99,13 @@ func InstallPack(outputDir, logPath string) error {
 	if logPath == "" {
 		logPath = DefaultLogPath
 	}
-	files := make([]siempack.File, 0, len(Files()))
-	for _, file := range Files() {
-		files = append(files, siempack.File(file))
-	}
-	return siempack.Install(outputDir, files, logPath)
-}
-
-func mustRead(path string) string {
-	data, err := siempack.ReadFile(packFS, path)
+	files, err := filesFromFS(packFS, logPath)
 	if err != nil {
-		panic(fmt.Sprintf("rapid7 pack asset %s: %v", path, err))
+		return err
 	}
-	return data
+	sfiles := make([]siempack.File, 0, len(files))
+	for _, file := range files {
+		sfiles = append(sfiles, siempack.File(file))
+	}
+	return siempack.Install(outputDir, sfiles, logPath)
 }
