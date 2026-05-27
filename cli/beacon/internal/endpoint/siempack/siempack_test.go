@@ -15,6 +15,22 @@ func TestRenderLogPath(t *testing.T) {
 	}
 }
 
+func TestJSONEscapeForString(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"/var/log/beacon/runtime.jsonl", "/var/log/beacon/runtime.jsonl"},
+		{`C:\Users\me\beacon\runtime.jsonl`, `C:\\Users\\me\\beacon\\runtime.jsonl`},
+		{`path with "quotes"`, `path with \"quotes\"`},
+	}
+	for _, tt := range tests {
+		got := JSONEscapeForString(tt.in)
+		if got != tt.want {
+			t.Errorf("JSONEscapeForString(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestReadFile(t *testing.T) {
 	got, err := ReadFile(fstest.MapFS{
 		"pack/example.txt": {Data: []byte("hello")},

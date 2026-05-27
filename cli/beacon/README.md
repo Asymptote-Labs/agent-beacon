@@ -103,6 +103,20 @@ The Rapid7 pack keeps Beacon as a local JSONL producer and documents forwarding
 webhook URL in your customer-managed shipper or deployment tooling, not in
 Beacon endpoint configuration.
 
+## Microsoft Sentinel
+
+```bash
+./beacon endpoint sentinel print-config
+./beacon endpoint sentinel install-pack --output ./beacon-sentinel-pack
+./beacon endpoint sentinel validate
+```
+
+The Sentinel pack keeps Beacon as a local JSONL producer and documents
+forwarding `runtime.jsonl` through Azure Monitor Agent, a Data Collection Rule,
+and a `BeaconRuntime_CL` custom Log Analytics table. Store Azure workspace,
+DCR, endpoint, and credential details in Azure or customer-managed deployment
+tooling, not in Beacon endpoint configuration.
+
 ## Optional Integrations
 
 ```bash

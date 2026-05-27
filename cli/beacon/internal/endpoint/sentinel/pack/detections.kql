@@ -1,0 +1,20 @@
+// Detection idea: agent command execution in sensitive repositories.
+BeaconRuntime_CL
+| where TimeGenerated > ago(1h)
+| where EventAction == "command.executed" or isnotempty(CommandLine)
+| where Repository has_any ("production", "infra", "secrets", "security")
+| project TimeGenerated, HostName, UserName, HarnessName, SessionId, CommandLine, Repository, Branch, Message
+
+// Detection idea: Beacon event with retained full content in strict environments.
+BeaconRuntime_CL
+| where TimeGenerated > ago(1h)
+| where ContentRetention == "full"
+| project TimeGenerated, HostName, UserName, HarnessName, EventAction, ContentRetention, Message
+
+// Detection idea: agent edits to credential-like files.
+BeaconRuntime_CL
+| where TimeGenerated > ago(1h)
+| where EventAction startswith "file."
+| extend FilePath = tostring(RawData.file.path)
+| where FilePath matches regex @"(?i)(^|/)(\.env|id_rsa|credentials|secrets?|\.npmrc|\.pypirc|kubeconfig)(\.|$|/)"
+| project TimeGenerated, HostName, UserName, HarnessName, SessionId, EventAction, FilePath, Repository, Branch

@@ -1,0 +1,29 @@
+{
+  "name": "BeaconRuntime_CL",
+  "properties": {
+    "schema": {
+      "name": "BeaconRuntime_CL",
+      "columns": [
+        { "name": "TimeGenerated", "type": "dateTime" },
+        { "name": "Vendor", "type": "string" },
+        { "name": "Product", "type": "string" },
+        { "name": "SchemaVersion", "type": "string" },
+        { "name": "EventKind", "type": "string" },
+        { "name": "EventAction", "type": "string" },
+        { "name": "EventCategory", "type": "string" },
+        { "name": "Severity", "type": "string" },
+        { "name": "HostName", "type": "string" },
+        { "name": "UserName", "type": "string" },
+        { "name": "HarnessName", "type": "string" },
+        { "name": "SessionId", "type": "string" },
+        { "name": "ToolName", "type": "string" },
+        { "name": "CommandLine", "type": "string" },
+        { "name": "Repository", "type": "string" },
+        { "name": "Branch", "type": "string" },
+        { "name": "Message", "type": "string" },
+        { "name": "ContentRetention", "type": "string" },
+        { "name": "RawData", "type": "dynamic" }
+      ]
+    }
+  }
+}

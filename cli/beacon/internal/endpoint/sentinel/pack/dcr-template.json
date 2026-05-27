@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "dataCollectionRuleName": {
+      "type": "string",
+      "defaultValue": "dcr-beacon-runtime"
+    },
+    "workspaceResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the Log Analytics workspace enabled for Microsoft Sentinel."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dataCollectionRuleName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "dataSources": {
+          "logFiles": [
+            {
+              "streams": [
+                "Custom-BeaconRuntime_CL"
+              ],
+              "filePatterns": [
+                "{{LOG_PATH}}"
+              ],
+              "format": "text",
+              "settings": {
+                "text": {
+                  "recordStartTimestampFormat": "ISO 8601"
+                }
+              },
+              "name": "beaconRuntimeJsonl"
+            }
+          ]
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "workspaceResourceId": "[parameters('workspaceResourceId')]",
+              "name": "sentinelWorkspace"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "Custom-BeaconRuntime_CL"
+            ],
+            "destinations": [
+              "sentinelWorkspace"
+            ],
+            "transformKql": "{{DCR_TRANSFORM}}",
+            "outputStream": "Custom-BeaconRuntime_CL"
+          }
+        ]
+      }
+    }
+  ]
+}

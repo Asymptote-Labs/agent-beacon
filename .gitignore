@@ -33,6 +33,7 @@ cli/beacon-hooks/*.exe
 !cli/beacon/internal/endpoint/wazuh/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/sumo/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/rapid7/pack/sample-event.jsonl
+!cli/beacon/internal/endpoint/sentinel/pack/sample-event.jsonl
 *.log
 
 # Collector builder outputs

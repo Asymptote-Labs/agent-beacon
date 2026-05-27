@@ -1,0 +1,41 @@
+// Recent Beacon events.
+BeaconRuntime_CL
+| where TimeGenerated > ago(24h)
+| order by TimeGenerated desc
+| take 50
+
+// Validate the generated Beacon Sentinel validation event.
+BeaconRuntime_CL
+| where TimeGenerated > ago(24h)
+| where Message has "Beacon endpoint Sentinel validation event" or tostring(RawData.message) has "Beacon endpoint Sentinel validation event"
+| project TimeGenerated, HostName, UserName, HarnessName, EventAction, Message
+
+// Agent shell commands.
+BeaconRuntime_CL
+| where TimeGenerated > ago(24h)
+| where EventAction == "command.executed" or isnotempty(CommandLine)
+| project TimeGenerated, HostName, UserName, HarnessName, SessionId, CommandLine, Repository, Branch
+| order by TimeGenerated desc
+
+// Sensitive file edits by local agent runtimes.
+BeaconRuntime_CL
+| where TimeGenerated > ago(7d)
+| where EventAction startswith "file."
+| extend FilePath = tostring(RawData.file.path)
+| where FilePath matches regex @"(?i)(^|/)(\.env|id_rsa|credentials|secrets?|\.npmrc|\.pypirc|kubeconfig)(\.|$|/)"
+| project TimeGenerated, HostName, UserName, HarnessName, EventAction, FilePath, Repository, Branch, Message
+
+// Unusually high tool-call volume by session.
+BeaconRuntime_CL
+| where TimeGenerated > ago(1h)
+| where isnotempty(ToolName)
+| summarize ToolCalls = count(), Tools = make_set(ToolName, 20) by HostName, UserName, HarnessName, SessionId
+| where ToolCalls >= 50
+| order by ToolCalls desc
+
+// New or rare agent runtimes observed in the last day.
+BeaconRuntime_CL
+| where TimeGenerated > ago(14d)
+| summarize FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), Events = count() by HarnessName
+| where FirstSeen > ago(1d) or Events < 5
+| order by FirstSeen desc

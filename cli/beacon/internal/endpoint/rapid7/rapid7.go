@@ -20,6 +20,7 @@ type File struct {
 	Name            string
 	Content         string
 	TemplateLogPath bool
+	JSONEscape      bool
 }
 
 // readAsset reads an embedded asset using the module-level packFS and returns its

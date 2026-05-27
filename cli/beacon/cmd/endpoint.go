@@ -25,6 +25,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/rapid7"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sentinel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sumo"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/wazuh"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
@@ -185,6 +186,11 @@ var endpointSumoCmd = &cobra.Command{
 var endpointRapid7Cmd = &cobra.Command{
 	Use:   "rapid7",
 	Short: "Manage Rapid7 InsightIDR integration content",
+}
+
+var endpointSentinelCmd = &cobra.Command{
+	Use:   "sentinel",
+	Short: "Manage Microsoft Sentinel integration content",
 }
 
 var endpointIntegrationsCmd = &cobra.Command{
@@ -600,6 +606,30 @@ var endpointRapid7ValidateCmd = &cobra.Command{
 	RunE:         runEndpointRapid7Validate,
 }
 
+var endpointSentinelPrintConfigCmd = &cobra.Command{
+	Use:   "print-config",
+	Short: "Print a Sentinel DCR transform for Beacon endpoint events",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadOrDefaultConfig()
+		fmt.Printf("# Azure Monitor Agent file pattern: %s\n", cfg.LogPath)
+		fmt.Print(sentinel.DCRTransform())
+	},
+}
+
+var endpointSentinelInstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write Microsoft Sentinel forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointSentinelInstallPack,
+}
+
+var endpointSentinelValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe a Microsoft Sentinel validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointSentinelValidate,
+}
+
 func init() {
 	rootCmd.AddCommand(endpointCmd)
 	rootCmd.AddCommand(topLevelDoctorCmd)
@@ -621,6 +651,7 @@ func init() {
 	endpointCmd.AddCommand(endpointDatadogCmd)
 	endpointCmd.AddCommand(endpointSumoCmd)
 	endpointCmd.AddCommand(endpointRapid7Cmd)
+	endpointCmd.AddCommand(endpointSentinelCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
 	endpointCmd.AddCommand(endpointConfigCmd)
@@ -643,6 +674,9 @@ func init() {
 	endpointRapid7Cmd.AddCommand(endpointRapid7PrintConfigCmd)
 	endpointRapid7Cmd.AddCommand(endpointRapid7InstallPackCmd)
 	endpointRapid7Cmd.AddCommand(endpointRapid7ValidateCmd)
+	endpointSentinelCmd.AddCommand(endpointSentinelPrintConfigCmd)
+	endpointSentinelCmd.AddCommand(endpointSentinelInstallPackCmd)
+	endpointSentinelCmd.AddCommand(endpointSentinelValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointIntegrationsValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointCoworkCmd)
 	endpointIntegrationsCmd.AddCommand(endpointOpenClawCmd)
@@ -748,6 +782,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointRapid7InstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Rapid7 InsightIDR content pack")
+	for _, c := range []*cobra.Command{endpointSentinelPrintConfigCmd, endpointSentinelInstallPackCmd, endpointSentinelValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointSentinelInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Microsoft Sentinel content pack")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -1161,6 +1201,31 @@ func runEndpointRapid7Validate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Validation event written to %s\n", path)
 	fmt.Println("Expected Rapid7 fields: vendor=beacon product=endpoint-agent destination.type=rapid7")
 	fmt.Println(`Expected validation query: "Beacon endpoint Rapid7 validation event"`)
+	return nil
+}
+
+func runEndpointSentinelInstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = sentinel.DefaultOutputDir
+	}
+	if err := sentinel.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("Microsoft Sentinel content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointSentinelValidate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "sentinel")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected Sentinel table: BeaconRuntime_CL")
+	fmt.Println(`Expected validation query: BeaconRuntime_CL | where Message has "Beacon endpoint Sentinel validation event"`)
 	return nil
 }
 

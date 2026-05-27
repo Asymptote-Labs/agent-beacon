@@ -257,6 +257,30 @@ func TestEndpointRapid7CommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointSentinelCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"sentinel", "print-config"},
+		{"sentinel", "install-pack"},
+		{"sentinel", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("sentinel command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("sentinel command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointSentinelInstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("sentinel install-pack command missing --output flag")
+	}
+}
+
 func TestEnsureElasticPackDoesNotOverwriteExistingPack(t *testing.T) {
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")
