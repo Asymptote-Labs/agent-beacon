@@ -325,8 +325,8 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 	}
 	event := NewEvent(action, "metric", "info", HarnessName(attrs, metric.Name()), time.Now().UTC())
 	event.Message = metric.Name()
-	c.PopulateCommon(&event, attrs)
 	event.Tokens = ExtractTokensFromMetric(metric)
+	c.PopulateCommon(&event, attrs)
 	event.Raw = c.RawPayload(attrs, map[string]interface{}{
 		"otel_signal":        "metrics",
 		"metric_name":        metric.Name(),

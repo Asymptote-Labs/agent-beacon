@@ -1295,7 +1295,7 @@ func TestExtractTokensFromMetricOpenClawContextTokens(t *testing.T) {
 }
 
 func TestExtractTokensFromMetricNonTokenMetricReturnsNil(t *testing.T) {
-	// A non-token metric should produce nil Tokens.
+	// A metric not on the token-metric allowlist should produce nil Tokens.
 	metric := pmetric.NewMetric()
 	metric.SetName("gen_ai.client.operation.duration")
 	dp := metric.SetEmptySum().DataPoints().AppendEmpty()
@@ -1305,6 +1305,62 @@ func TestExtractTokensFromMetricNonTokenMetricReturnsNil(t *testing.T) {
 	event := exp.eventFromMetric(nil, metric)
 	if event.Tokens != nil {
 		t.Errorf("Tokens should be nil for non-token metric, got %+v", event.Tokens)
+	}
+}
+
+func TestExtractTokensFromMetricNameWithTokenSubstringNotOnAllowlistReturnsNil(t *testing.T) {
+	// A metric whose name contains "token" but is not on the exact allowlist
+	// must not be treated as a token-usage metric.
+	metric := makeTokenMetric("rate_limiter.token_bucket_available", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"", 100},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens != nil {
+		t.Errorf("Tokens should be nil for metric not on token allowlist, got %+v", event.Tokens)
+	}
+}
+
+func TestExtractTokensFromMetricUnknownTypeIsDropped(t *testing.T) {
+	// An unrecognised non-empty token type (e.g. a future "reasoning" type)
+	// must be dropped rather than silently inflating Input.
+	metric := makeTokenMetric("gen_ai.client.token.usage", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"reasoning", 500}, // unknown type — should be dropped
+		{"input", 100},     // known type — should be counted
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens == nil {
+		t.Fatal("Tokens should not be nil (input data point is present)")
+	}
+	if event.Tokens.Input != 100 {
+		t.Errorf("Input = %d, want 100 (unknown type 'reasoning' must not inflate Input)", event.Tokens.Input)
+	}
+}
+
+func TestExtractTokensFromMetricAllUnknownTypesReturnsNil(t *testing.T) {
+	// If every data point has an unrecognised type, the result should be nil
+	// (IsZero), not a TokenUsage with inflated Input.
+	metric := makeTokenMetric("gen_ai.client.token.usage", []struct {
+		tokenType string
+		val       int64
+	}{
+		{"reasoning", 500},
+		{"reasoning", 300},
+	})
+
+	exp := &beaconExporter{cfg: &Config{ContentRetention: "full"}}
+	event := exp.eventFromMetric(nil, metric)
+	if event.Tokens != nil {
+		t.Errorf("Tokens should be nil when all data point types are unrecognised, got %+v", event.Tokens)
 	}
 }
 
@@ -1394,15 +1450,12 @@ func TestExtractTokensFromSpanNoTokenAttrsReturnsNil(t *testing.T) {
 }
 
 func TestExtractTokensMetricWinsOverSpanAttrs(t *testing.T) {
-	// If a metric already has token data, PopulateCommon (which handles span/log
-	// attrs) should not overwrite it. This validates the "if event.Tokens == nil"
-	// guard in PopulateCommon. We test this indirectly by calling eventFromMetric
-	// on a metric that has both metric data points and resource attrs carrying
-	// span-style token attributes — the metric data points should win.
+	// EventFromMetric runs ExtractTokensFromMetric before PopulateCommon.
+	// PopulateCommon's nil-guard then skips attr-based extraction, so metric
+	// data-point values win over any gen_ai.usage.* resource attributes.
 	metrics := pmetric.NewMetrics()
 	rm := metrics.ResourceMetrics().AppendEmpty()
-	// Add span-style token attrs on the resource — these should be ignored
-	// because the metric data points populate Tokens first.
+	// Resource carries attr-style token counts that must NOT win.
 	rm.Resource().Attributes().PutStr("service.name", "claude-code")
 	rm.Resource().Attributes().PutInt("gen_ai.usage.input_tokens", 9999)
 	sm := rm.ScopeMetrics().AppendEmpty()
