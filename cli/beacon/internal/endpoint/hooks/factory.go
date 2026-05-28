@@ -80,20 +80,8 @@ func readFactorySettings(path string) (factorySettings, error) {
 	return readSettingsHooks(path)
 }
 
-func mergeFactoryEndpointHook(existing []factoryHookGroup, group factoryHookGroup) []factoryHookGroup {
-	return mergeSettingsEndpointHook(existing, group, "factory")
-}
-
 func removeFactoryEndpointHooks(path string) (bool, error) {
 	return removeSettingsEndpointHooks(path, "factory")
-}
-
-func isFactoryEndpointHookGroup(group factoryHookGroup) bool {
-	return isSettingsEndpointHookGroup(group, "factory")
-}
-
-func filterFactoryEndpointHooks(group factoryHookGroup) (factoryHookGroup, bool) {
-	return filterSettingsEndpointHooks(group, "factory")
 }
 
 func isFactoryInstalledAt(path string) bool {
