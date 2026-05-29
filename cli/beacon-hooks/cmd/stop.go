@@ -64,8 +64,11 @@ func runStop(cmd *cobra.Command, args []string) {
 	// left over from older hook versions instead of polling a hosted service.
 	pendingEvals := st.GetPendingEvaluations()
 	if len(pendingEvals) > 0 {
-		st.ClearEvaluations()
-		logger.Warn("Cleared stale remote evaluations in local-only build", "count", len(pendingEvals))
+		if err := st.ClearEvaluations(); err != nil {
+			logger.Warn("Failed to clear stale remote evaluations in local-only build", "count", len(pendingEvals), "error", err.Error())
+		} else {
+			logger.Warn("Cleared stale remote evaluations in local-only build", "count", len(pendingEvals))
+		}
 	}
 
 	elapsed := time.Since(start)

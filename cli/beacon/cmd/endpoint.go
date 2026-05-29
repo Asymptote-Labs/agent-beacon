@@ -1625,7 +1625,9 @@ func runEndpointDiscover(cmd *cobra.Command, args []string) error {
 				},
 				Message: h.DisplayName + " detected",
 			})
-			_, _ = writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode})
+			if _, err := writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -111,7 +111,9 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 		fields["prompt"] = map[string]interface{}{"text": prompt}
 	}
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
-	st.SetPromptEmitted()
+	if err := st.SetPromptEmitted(); err != nil {
+		logger.Warn("Failed to persist prompt state", "error", err.Error())
+	}
 }
 
 func antigravityPromptFromTranscript(input map[string]interface{}, sessionID string) string {

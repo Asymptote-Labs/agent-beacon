@@ -82,3 +82,21 @@ func TestSessionStateFileLocation(t *testing.T) {
 		t.Errorf("state.json not found at expected path %s: %v", stateFile, err)
 	}
 }
+
+func TestSessionStateSurfacesSaveFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDirPath := filepath.Join(tmpDir, "not-a-dir")
+	if err := os.WriteFile(stateDirPath, []byte("file"), 0644); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+	origCursorDir := config.CursorDir
+	config.CursorDir = stateDirPath
+	t.Cleanup(func() {
+		config.CursorDir = origCursorDir
+	})
+
+	st := NewSessionState("test-session", "cursor")
+	if err := st.SetModel("gpt-5.5"); err == nil {
+		t.Fatal("SetModel returned nil, want save failure")
+	}
+}

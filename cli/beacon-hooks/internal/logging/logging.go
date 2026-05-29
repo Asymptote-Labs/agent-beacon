@@ -101,10 +101,10 @@ func (l *Logger) write(entry map[string]interface{}) {
 	}
 }
 
-func (l *Logger) EndpointEvent(action, category, severity, message string, fields map[string]interface{}) {
+func (l *Logger) EndpointEvent(action, category, severity, message string, fields map[string]interface{}) error {
 	path := endpointLogPath()
 	if path == "" {
-		return
+		return nil
 	}
 	if severity == "" {
 		severity = "info"
@@ -128,7 +128,11 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 	if raw, ok := event["raw"].(map[string]interface{}); ok {
 		event["raw"] = retentionAwareRaw(raw, retention)
 	}
-	writeEndpointJSON(path, event)
+	if err := writeEndpointJSON(path, event); err != nil {
+		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
+		return err
+	}
+	return nil
 }
 
 func (l *Logger) baseEndpointEvent(action, category, severity, message string) map[string]interface{} {
@@ -162,13 +166,13 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 	return event
 }
 
-func writeEndpointJSON(path string, event map[string]interface{}) {
+func writeEndpointJSON(path string, event map[string]interface{}) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return
+		return err
 	}
 	data, err := json.Marshal(sanitizeEndpointMap(event))
 	if err != nil {
-		return
+		return err
 	}
 	if len(data) > 64*1024 {
 		event["field_truncated"] = true
@@ -176,10 +180,10 @@ func writeEndpointJSON(path string, event map[string]interface{}) {
 		event["message"] = truncateEndpoint(fmt.Sprint(event["message"]), 1024)
 		data, err = json.Marshal(sanitizeEndpointMap(event))
 		if err != nil {
-			return
+			return err
 		}
 	}
-	_ = appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
 }
 
 func endpointLogPath() string {

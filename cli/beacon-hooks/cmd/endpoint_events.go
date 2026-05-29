@@ -31,7 +31,9 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if branch := getFirstStr(input, "branch", "git_branch"); branch != "" {
 		fields["branch"] = branch
 	}
-	logger.EndpointEvent(action, category, severity, message, fields)
+	if err := logger.EndpointEvent(action, category, severity, message, fields); err != nil {
+		logger.Error("Failed to write endpoint event", "error", err.Error(), "action", action)
+	}
 }
 
 func sessionFields(sessionID string, input map[string]interface{}) map[string]interface{} {

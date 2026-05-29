@@ -18,6 +18,12 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
+var (
+	writeCollectorConfig = endpointcollector.WriteConfig
+	saveEndpointConfig   = endpointconfig.Save
+	appendInstallEvent   = writer.AppendEvent
+)
+
 type InstallOptions struct {
 	UserMode              bool
 	LogPath               string
@@ -94,6 +100,69 @@ type Manifest struct {
 	LogPath        string   `json:"log_path"`
 }
 
+type fileSnapshot struct {
+	Existed bool
+	Data    []byte
+	Mode    os.FileMode
+}
+
+type installRollback struct {
+	Manager       service.Manager
+	ServiceLoaded bool
+	files         []string
+	snapshots     map[string]fileSnapshot
+}
+
+func newInstallRollback(manager service.Manager) *installRollback {
+	return &installRollback{
+		Manager:   manager,
+		snapshots: map[string]fileSnapshot{},
+	}
+}
+
+func (r *installRollback) Track(path string) {
+	if r == nil || path == "" {
+		return
+	}
+	if _, ok := r.snapshots[path]; ok {
+		return
+	}
+	snapshot := fileSnapshot{}
+	if data, err := os.ReadFile(path); err == nil {
+		snapshot.Existed = true
+		snapshot.Data = data
+		if info, statErr := os.Stat(path); statErr == nil {
+			snapshot.Mode = info.Mode().Perm()
+		}
+	}
+	r.snapshots[path] = snapshot
+	r.files = append(r.files, path)
+}
+
+func (r *installRollback) Rollback(manifest Manifest) {
+	if r == nil {
+		rollback(manifest)
+		return
+	}
+	if r.ServiceLoaded {
+		_ = r.Manager.Unload()
+	}
+	restoreBackups(manifest.Backups)
+	for i := len(r.files) - 1; i >= 0; i-- {
+		path := r.files[i]
+		snapshot := r.snapshots[path]
+		if snapshot.Existed {
+			mode := snapshot.Mode
+			if mode == 0 {
+				mode = 0600
+			}
+			_ = os.WriteFile(path, snapshot.Data, mode)
+			continue
+		}
+		_ = os.Remove(path)
+	}
+}
+
 func Install(opts InstallOptions) (InstallResult, error) {
 	cfg := buildConfig(opts)
 	if err := preflight(cfg, opts.StartService); err != nil {
@@ -111,38 +180,57 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		ServiceLabel: manager.Label(),
 		LogPath:      cfg.LogPath,
 	}
-	if err := endpointcollector.WriteConfig(cfg); err != nil {
-		return InstallResult{}, err
-	}
+
+	tx := newInstallRollback(manager)
+	tx.Track(cfg.Collector.ConfigPath)
 	manifest.Files = append(manifest.Files, cfg.Collector.ConfigPath)
-	plistPath, err := manager.WritePlist(collectorBinary, cfg.Collector.ConfigPath)
-	if err != nil {
-		rollback(manifest)
+	if err := writeCollectorConfig(cfg); err != nil {
+		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
+
+	plistPath, err := manager.PlistPath()
+	if err != nil {
+		tx.Rollback(manifest)
+		return InstallResult{}, err
+	}
+	tx.Track(plistPath)
 	manifest.Files = append(manifest.Files, plistPath)
-	configPath, err := endpointconfig.Save(cfg)
-	if err != nil {
-		rollback(manifest)
+	if _, err := manager.WritePlist(collectorBinary, cfg.Collector.ConfigPath); err != nil {
+		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
+
+	configPath := endpointconfig.ConfigPath(cfg.UserMode)
+	tx.Track(configPath)
 	manifest.Files = append(manifest.Files, configPath)
-	harnessPaths, err := configureHarnesses(cfg)
-	if err != nil {
-		rollback(manifest)
+	if _, err := saveEndpointConfig(cfg); err != nil {
+		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
+
+	harnessPaths, err := configureHarnesses(cfg)
 	manifest.HarnessConfigs = harnessPaths
 	manifest.Backups = discoverBackups(harnessPaths)
+	if err != nil {
+		tx.Rollback(manifest)
+		return InstallResult{}, err
+	}
 	if opts.StartService {
 		if err := manager.Load(); err != nil {
-			rollback(manifest)
+			tx.Rollback(manifest)
+			return InstallResult{}, err
+		}
+		tx.ServiceLoaded = true
+		if err := endpointcollector.WaitUntilReady(cfg, 10*time.Second); err != nil {
+			tx.Rollback(manifest)
 			return InstallResult{}, err
 		}
 	}
+	tx.Track(manifestPath(cfg.UserMode))
 	manifestPath, err := writeManifest(cfg.UserMode, manifest)
 	if err != nil {
-		rollback(manifest)
+		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
@@ -154,7 +242,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		Message:      "Beacon endpoint local telemetry configured",
 	})
 	event.Destination = installDestination(cfg)
-	if _, err := writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {
+	if _, err := appendInstallEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {
+		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
 	return InstallResult{
@@ -193,7 +282,6 @@ func Uninstall(opts UninstallOptions) error {
 }
 
 func Repair(opts InstallOptions) (InstallResult, error) {
-	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true})
 	return Install(opts)
 }
 
@@ -377,12 +465,24 @@ func preflight(cfg endpointconfig.Config, startService bool) error {
 		return nil
 	}
 	if !endpointcollector.PortAvailable(cfg.Collector.GRPCPort) {
-		return fmt.Errorf("OTLP gRPC port %d is already in use", cfg.Collector.GRPCPort)
+		if !existingCollectorReady(cfg) {
+			return fmt.Errorf("OTLP gRPC port %d is already in use", cfg.Collector.GRPCPort)
+		}
 	}
 	if !endpointcollector.PortAvailable(cfg.Collector.HTTPPort) {
-		return fmt.Errorf("OTLP HTTP port %d is already in use", cfg.Collector.HTTPPort)
+		if !existingCollectorReady(cfg) {
+			return fmt.Errorf("OTLP HTTP port %d is already in use", cfg.Collector.HTTPPort)
+		}
 	}
 	return nil
+}
+
+func existingCollectorReady(cfg endpointconfig.Config) bool {
+	if !(service.Manager{UserMode: cfg.UserMode}).Status().Loaded {
+		return false
+	}
+	status := endpointcollector.CheckStatus(cfg)
+	return status.GRPCReady && status.HTTPReady && status.HealthReady
 }
 
 func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {

@@ -54,6 +54,15 @@ jobs:
           test -x packaging/macos/smoke-endpoint.sh
           test -f collector-builder/builder.yaml
           sh packaging/macos/test-endpoint-scripts.sh
+      - name: Build macOS package skeleton
+        run: |
+          (cd cli/beacon && go build -o beacon .)
+          mkdir -p /tmp/beacon-collector
+          printf '#!/bin/sh\nexit 0\n' > /tmp/beacon-collector/beacon-otelcol
+          chmod +x /tmp/beacon-collector/beacon-otelcol
+          OUT_DIR=/tmp/beacon-pkg BEACON_COLLECTOR=/tmp/beacon-collector/beacon-otelcol packaging/macos/build-pkg.sh
+          pkgutil --payload-files /tmp/beacon-pkg/*.pkg | awk '$0 == "./opt/beacon/bin/beacon" { found = 1 } END { exit !found }'
+          pkgutil --payload-files /tmp/beacon-pkg/*.pkg | awk '$0 == "./opt/beacon/bin/beacon-otelcol" { found = 1 } END { exit !found }'
       - name: Endpoint install smoke test
         run: sh packaging/macos/smoke-endpoint.sh
 

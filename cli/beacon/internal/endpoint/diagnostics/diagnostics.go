@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 )
@@ -25,6 +26,7 @@ func Run(cfg endpointconfig.Config) []Check {
 		checkFile("collector_config", cfg.Collector.ConfigPath, true),
 		checkFile("runtime_log", cfg.LogPath, false),
 		checkLogPermissions(cfg.LogPath),
+		checkCollectorHealth(cfg),
 	}
 	if runtime.GOOS == "darwin" {
 		checks = append(checks, checkFile("launchd_plist", launchPlistPath(cfg.UserMode), true))
@@ -32,9 +34,21 @@ func Run(cfg endpointconfig.Config) []Check {
 	return checks
 }
 
+func checkCollectorHealth(cfg endpointconfig.Config) Check {
+	status := collector.CheckStatus(cfg)
+	if status.HealthReady {
+		return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: "ok", Severity: "info", Message: "collector health check is ready", Evidence: "health_check_ready"}
+	}
+	message := status.Message
+	if message == "" {
+		message = "collector health check is not ready"
+	}
+	return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: "warn", Severity: "medium", Message: message, Evidence: "health_check_unavailable"}
+}
+
 func HasFailures(checks []Check) bool {
 	for _, check := range checks {
-		if check.Status != "ok" {
+		if check.Status == "fail" {
 			return true
 		}
 	}

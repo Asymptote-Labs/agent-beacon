@@ -17,6 +17,13 @@ PKG_ROOT="$WORK_DIR/pkgroot"
 PKG_SCRIPTS="$WORK_DIR/scripts"
 PKG_PATH="$OUT_DIR/$PKG_NAME-$VERSION.pkg"
 
+copy_file() {
+  if cp -X "$1" "$2" 2>/dev/null; then
+    return 0
+  fi
+  cp "$1" "$2"
+}
+
 if [ ! -x "$BEACON_BIN" ]; then
   echo "beacon binary not found or not executable: $BEACON_BIN" >&2
   echo "Build it first, for example: (cd cli/beacon && make build)" >&2
@@ -32,16 +39,16 @@ fi
 mkdir -p "$OUT_DIR" "$PKG_ROOT/opt/beacon/bin" "$PKG_ROOT/opt/beacon/scripts" \
   "$PKG_ROOT/opt/beacon/jamf" "$PKG_ROOT/opt/beacon/fleet" "$PKG_SCRIPTS"
 
-cp "$BEACON_BIN" "$PKG_ROOT/opt/beacon/bin/beacon"
-cp "$COLLECTOR_BIN" "$PKG_ROOT/opt/beacon/bin/beacon-otelcol"
-cp "$ROOT_DIR/packaging/macos/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh"
-cp "$ROOT_DIR/packaging/macos/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
-cp "$ROOT_DIR/packaging/macos/scripts/postinstall" "$PKG_SCRIPTS/postinstall"
-cp "$ROOT_DIR/packaging/macos/scripts/preinstall" "$PKG_SCRIPTS/preinstall"
+copy_file "$BEACON_BIN" "$PKG_ROOT/opt/beacon/bin/beacon"
+copy_file "$COLLECTOR_BIN" "$PKG_ROOT/opt/beacon/bin/beacon-otelcol"
+copy_file "$ROOT_DIR/packaging/macos/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh"
+copy_file "$ROOT_DIR/packaging/macos/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
+copy_file "$ROOT_DIR/packaging/macos/scripts/postinstall" "$PKG_SCRIPTS/postinstall"
+copy_file "$ROOT_DIR/packaging/macos/scripts/preinstall" "$PKG_SCRIPTS/preinstall"
 
 if command -v ditto >/dev/null 2>&1; then
-  ditto --norsrc "$ROOT_DIR/packaging/macos/jamf" "$PKG_ROOT/opt/beacon/jamf"
-  ditto --norsrc "$ROOT_DIR/packaging/macos/fleet" "$PKG_ROOT/opt/beacon/fleet"
+  ditto --norsrc --noextattr --noqtn "$ROOT_DIR/packaging/macos/jamf" "$PKG_ROOT/opt/beacon/jamf"
+  ditto --norsrc --noextattr --noqtn "$ROOT_DIR/packaging/macos/fleet" "$PKG_ROOT/opt/beacon/fleet"
 else
   cp -R "$ROOT_DIR/packaging/macos/jamf/." "$PKG_ROOT/opt/beacon/jamf/"
   cp -R "$ROOT_DIR/packaging/macos/fleet/." "$PKG_ROOT/opt/beacon/fleet/"
@@ -50,7 +57,7 @@ fi
 if [ -d "$ROOT_DIR/cli/beacon/internal/endpoint/wazuh/pack" ]; then
   mkdir -p "$PKG_ROOT/opt/beacon/wazuh"
   if command -v ditto >/dev/null 2>&1; then
-    ditto --norsrc "$ROOT_DIR/cli/beacon/internal/endpoint/wazuh/pack" "$PKG_ROOT/opt/beacon/wazuh"
+    ditto --norsrc --noextattr --noqtn "$ROOT_DIR/cli/beacon/internal/endpoint/wazuh/pack" "$PKG_ROOT/opt/beacon/wazuh"
   else
     cp -R "$ROOT_DIR/cli/beacon/internal/endpoint/wazuh/pack/." "$PKG_ROOT/opt/beacon/wazuh/"
   fi
@@ -80,6 +87,7 @@ if [ -n "${PKG_SIGN_IDENTITY:-}" ]; then
     --version "$VERSION" \
     --install-location / \
     --filter '(^|/)\._[^/]*$' \
+    --filter '.*\._.*' \
     --filter '/\.DS_Store$' \
     --filter '(^|/)CVS($|/)' \
     --filter '(^|/)\.svn($|/)' \
@@ -93,6 +101,7 @@ else
     --version "$VERSION" \
     --install-location / \
     --filter '(^|/)\._[^/]*$' \
+    --filter '.*\._.*' \
     --filter '/\.DS_Store$' \
     --filter '(^|/)CVS($|/)' \
     --filter '(^|/)\.svn($|/)' \

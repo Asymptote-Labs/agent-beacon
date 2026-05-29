@@ -3,10 +3,12 @@ package collector
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
@@ -14,6 +16,7 @@ import (
 const (
 	BinaryName         = "beacon-otelcol"
 	PackagedBinaryPath = "/opt/beacon/bin/beacon-otelcol"
+	HealthCheckPort    = 13133
 )
 
 var (
@@ -23,13 +26,14 @@ var (
 )
 
 type Status struct {
-	BinaryPath string `json:"binary_path,omitempty"`
-	ConfigPath string `json:"config_path,omitempty"`
-	GRPCPort   int    `json:"grpc_port"`
-	HTTPPort   int    `json:"http_port"`
-	GRPCReady  bool   `json:"grpc_ready"`
-	HTTPReady  bool   `json:"http_ready"`
-	Message    string `json:"message,omitempty"`
+	BinaryPath  string `json:"binary_path,omitempty"`
+	ConfigPath  string `json:"config_path,omitempty"`
+	GRPCPort    int    `json:"grpc_port"`
+	HTTPPort    int    `json:"http_port"`
+	GRPCReady   bool   `json:"grpc_ready"`
+	HTTPReady   bool   `json:"http_ready"`
+	HealthReady bool   `json:"health_ready"`
+	Message     string `json:"message,omitempty"`
 }
 
 func ResolveBinary(configured string) (string, error) {
@@ -245,19 +249,39 @@ func falconHECYAML(cfg endpointconfig.Config) string {
 func CheckStatus(cfg endpointconfig.Config) Status {
 	binary := DiscoverBinary(cfg.Collector.BinaryPath)
 	status := Status{
-		BinaryPath: binary,
-		ConfigPath: cfg.Collector.ConfigPath,
-		GRPCPort:   cfg.Collector.GRPCPort,
-		HTTPPort:   cfg.Collector.HTTPPort,
-		GRPCReady:  portOpen(cfg.Collector.GRPCPort),
-		HTTPReady:  portOpen(cfg.Collector.HTTPPort),
+		BinaryPath:  binary,
+		ConfigPath:  cfg.Collector.ConfigPath,
+		GRPCPort:    cfg.Collector.GRPCPort,
+		HTTPPort:    cfg.Collector.HTTPPort,
+		GRPCReady:   portOpen(cfg.Collector.GRPCPort),
+		HTTPReady:   portOpen(cfg.Collector.HTTPPort),
+		HealthReady: healthReady(),
 	}
 	if binary == "" {
 		status.Message = "OpenTelemetry Collector binary was not found on PATH"
 	} else if !status.GRPCReady && !status.HTTPReady {
 		status.Message = "Collector ports are not listening"
+	} else if !status.HealthReady {
+		status.Message = "Collector health check is not ready"
 	}
 	return status
+}
+
+func WaitUntilReady(cfg endpointconfig.Config, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		status := CheckStatus(cfg)
+		if status.GRPCReady && status.HTTPReady && status.HealthReady {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if status.Message != "" {
+				return fmt.Errorf("%s", status.Message)
+			}
+			return fmt.Errorf("collector did not become ready before timeout")
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 func PortAvailable(port int) bool {
@@ -276,6 +300,16 @@ func portOpen(port int) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+func healthReady() bool {
+	client := http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", HealthCheckPort))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
 func LaunchAgentPlist(cfg endpointconfig.Config) string {

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -9,7 +10,9 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 func TestRestoreTargetTimestampedBackup(t *testing.T) {
@@ -468,6 +471,99 @@ func TestInstallFailsBeforeWritingArtifactsWhenCollectorMissing(t *testing.T) {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 			t.Fatalf("%s exists or unexpected error after failed install: %v", path, statErr)
 		}
+	}
+}
+
+func TestInstallRollsBackArtifactsWhenFinalEventFails(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
+	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
+		t.Fatalf("mkdir fake collector dir: %v", err)
+	}
+	if err := os.WriteFile(collectorPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write fake collector: %v", err)
+	}
+	oldAppend := appendInstallEvent
+	appendInstallEvent = func(event schema.Event, opts writer.Options) (string, error) {
+		return "", errors.New("append failed")
+	}
+	t.Cleanup(func() {
+		appendInstallEvent = oldAppend
+	})
+	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+
+	_, err := Install(InstallOptions{
+		UserMode:      true,
+		LogPath:       logPath,
+		Harnesses:     []string{},
+		GRPCPort:      freePort(t),
+		HTTPPort:      freePort(t),
+		CollectorPath: collectorPath,
+		StartService:  false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "append failed") {
+		t.Fatalf("Install error = %v, want append failure", err)
+	}
+	cfg := endpointconfig.Default(true, logPath)
+	for _, path := range []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, manifestPath(true)} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("%s exists or unexpected error after rollback: %v", path, statErr)
+		}
+	}
+}
+
+func TestRepairPreservesExistingConfigWhenReinstallFails(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	configPath := endpointconfig.ConfigPath(true)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	const originalConfig = `{"user_mode":true,"log_path":"original","collector":{"config_path":"original","grpc_port":4317,"http_port":4318},"content_retention":"full"}`
+	if err := os.WriteFile(configPath, []byte(originalConfig), 0600); err != nil {
+		t.Fatalf("write original config: %v", err)
+	}
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
+	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
+		t.Fatalf("mkdir fake collector dir: %v", err)
+	}
+	if err := os.WriteFile(collectorPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write fake collector: %v", err)
+	}
+	oldAppend := appendInstallEvent
+	appendInstallEvent = func(event schema.Event, opts writer.Options) (string, error) {
+		return "", errors.New("append failed")
+	}
+	t.Cleanup(func() {
+		appendInstallEvent = oldAppend
+	})
+
+	_, err := Repair(InstallOptions{
+		UserMode:      true,
+		LogPath:       logPath,
+		Harnesses:     []string{},
+		GRPCPort:      freePort(t),
+		HTTPPort:      freePort(t),
+		CollectorPath: collectorPath,
+		StartService:  false,
+	})
+	if err == nil {
+		t.Fatal("Repair returned nil, want append failure")
+	}
+	data, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("read restored config: %v", readErr)
+	}
+	if string(data) != originalConfig {
+		t.Fatalf("config was not restored: %s", string(data))
 	}
 }
 

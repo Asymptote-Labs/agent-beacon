@@ -51,7 +51,9 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 
 	if platformFlag == "antigravity" && sessionID != "" && hasPrompt {
 		st := state.NewSessionState(sessionID, "antigravity")
-		st.SetPromptEmitted()
+		if err := st.SetPromptEmitted(); err != nil {
+			logger.Warn("Failed to persist prompt state", "error", err.Error())
+		}
 	}
 
 	outputJSON(noopResponse)

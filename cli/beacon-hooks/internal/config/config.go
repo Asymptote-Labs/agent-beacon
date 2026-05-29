@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -23,7 +25,8 @@ var (
 
 // Log rotation
 const (
-	LogMaxSizeBytes = 10 * 1024 * 1024 // 10 MB
+	LogMaxSizeBytes   = 10 * 1024 * 1024 // 10 MB
+	LogRotateArchives = 5
 )
 
 type ContentRetention string
@@ -129,7 +132,7 @@ func EnsureSessionLogDir(platform string) error {
 	return os.MkdirAll(GetSessionLogDir(platform), 0755)
 }
 
-// RotateLogIfNeededForPlatform clears the platform-specific log file if it exceeds LogMaxSizeBytes
+// RotateLogIfNeededForPlatform rotates the platform-specific log file if it exceeds LogMaxSizeBytes.
 func RotateLogIfNeededForPlatform(platform string) bool {
 	logFile := GetLogFile(platform)
 	info, err := os.Stat(logFile)
@@ -138,11 +141,51 @@ func RotateLogIfNeededForPlatform(platform string) bool {
 	}
 
 	if info.Size() > LogMaxSizeBytes {
-		os.WriteFile(logFile, []byte{}, 0644)
-		return true
+		return rotateLog(logFile, LogRotateArchives) == nil
 	}
 
 	return false
+}
+
+func rotateLog(path string, archives int) error {
+	if archives < 1 {
+		archives = LogRotateArchives
+	}
+	if err := removeOverflowArchives(path, archives); err != nil {
+		return err
+	}
+	for i := archives - 1; i >= 1; i-- {
+		from := path + fmt.Sprintf(".%d", i)
+		to := path + fmt.Sprintf(".%d", i+1)
+		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return os.Rename(path, path+".1")
+}
+
+func removeOverflowArchives(path string, archives int) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	prefix := base + "."
+	for _, entry := range entries {
+		suffix, ok := strings.CutPrefix(entry.Name(), prefix)
+		if !ok {
+			continue
+		}
+		index, err := strconv.Atoi(suffix)
+		if err != nil || index < archives {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // EnsureStateDir ensures the state directory for the given platform exists

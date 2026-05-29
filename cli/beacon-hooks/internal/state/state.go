@@ -63,7 +63,9 @@ func (s *SessionState) loadStateFile() map[string]*SessionData {
 }
 
 func (s *SessionState) saveStateFile(state map[string]*SessionData) error {
-	config.EnsureStateDir(s.platform)
+	if err := config.EnsureStateDir(s.platform); err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -90,14 +92,14 @@ func (s *SessionState) ensureSession(state map[string]*SessionData) {
 }
 
 // SetModel stores the AI model name for this session
-func (s *SessionState) SetModel(model string) {
+func (s *SessionState) SetModel(model string) error {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
 	state[s.sessionID].Model = model
-	s.saveStateFile(state)
+	return s.saveStateFile(state)
 }
 
 // GetModel returns the AI model name for this session
@@ -123,32 +125,34 @@ func (s *SessionState) HasPromptEmitted() bool {
 	return false
 }
 
-func (s *SessionState) SetPromptEmitted() {
+func (s *SessionState) SetPromptEmitted() error {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
 	state[s.sessionID].PromptEmitted = true
-	s.saveStateFile(state)
+	return s.saveStateFile(state)
 }
 
-func (s *SessionState) MarkPromptEmittedIfNeeded() bool {
+func (s *SessionState) MarkPromptEmittedIfNeeded() (bool, error) {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
 	if state[s.sessionID].PromptEmitted {
-		return false
+		return false, nil
 	}
 	state[s.sessionID].PromptEmitted = true
-	s.saveStateFile(state)
-	return true
+	if err := s.saveStateFile(state); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // AddEvaluation adds a new pending evaluation
-func (s *SessionState) AddEvaluation(evaluationID, filePath string) {
+func (s *SessionState) AddEvaluation(evaluationID, filePath string) error {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
@@ -161,7 +165,7 @@ func (s *SessionState) AddEvaluation(evaluationID, filePath string) {
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	})
 
-	s.saveStateFile(state)
+	return s.saveStateFile(state)
 }
 
 // GetPendingEvaluations returns pending evaluations for this session
@@ -177,14 +181,14 @@ func (s *SessionState) GetPendingEvaluations() []Evaluation {
 }
 
 // ClearEvaluations removes all evaluations for this session
-func (s *SessionState) ClearEvaluations() {
+func (s *SessionState) ClearEvaluations() error {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
 	state[s.sessionID].Evaluations = []Evaluation{}
-	s.saveStateFile(state)
+	return s.saveStateFile(state)
 }
 
 // GetRepromptCount returns the current re-prompt count
@@ -200,7 +204,7 @@ func (s *SessionState) GetRepromptCount() int {
 }
 
 // IncrementRepromptCount increments and returns the re-prompt count
-func (s *SessionState) IncrementRepromptCount() int {
+func (s *SessionState) IncrementRepromptCount() (int, error) {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
@@ -208,19 +212,21 @@ func (s *SessionState) IncrementRepromptCount() int {
 	s.ensureSession(state)
 	state[s.sessionID].RepromptCount++
 	newCount := state[s.sessionID].RepromptCount
-	s.saveStateFile(state)
-	return newCount
+	if err := s.saveStateFile(state); err != nil {
+		return 0, err
+	}
+	return newCount, nil
 }
 
 // ResetRepromptCount resets the re-prompt count to 0
-func (s *SessionState) ResetRepromptCount() {
+func (s *SessionState) ResetRepromptCount() error {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
 	state[s.sessionID].RepromptCount = 0
-	s.saveStateFile(state)
+	return s.saveStateFile(state)
 }
 
 // CleanupStaleForPlatform removes stale evaluations for the given platform

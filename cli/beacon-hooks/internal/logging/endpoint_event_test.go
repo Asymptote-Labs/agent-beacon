@@ -31,7 +31,9 @@ func TestEndpointEventStillWritesStructuredTelemetry(t *testing.T) {
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 
 	logger := NewLoggerForPlatform("pre-tool", "test")
-	logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil)
+	if err := logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
 
 	if data, err := os.ReadFile(logPath); err != nil || len(data) == 0 {
 		t.Fatalf("expected structured endpoint event, len=%d err=%v", len(data), err)
@@ -53,5 +55,19 @@ func TestEndpointEventRotatesRuntimeLog(t *testing.T) {
 	}
 	if current, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(current), "new event") {
 		t.Fatalf("expected current log to contain new event, data=%q err=%v", string(current), err)
+	}
+}
+
+func TestEndpointEventSurfacesWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	if err := os.Mkdir(logPath, 0755); err != nil {
+		t.Fatalf("mkdir log path: %v", err)
+	}
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("pre-tool", "test")
+	if err := logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil); err == nil {
+		t.Fatal("EndpointEvent returned nil, want write failure")
 	}
 }

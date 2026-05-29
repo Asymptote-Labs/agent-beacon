@@ -127,3 +127,60 @@ func TestRunLaunchctlWithContextExplainsBootstrapIOError(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerLoadReloadsAlreadyBootstrappedJob(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd reload is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var calls []string
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		switch len(calls) {
+		case 1:
+			return "Bootstrap failed: 5: already bootstrapped", errors.New("exit status 5")
+		case 2, 3:
+			return "", nil
+		default:
+			return "", errors.New("unexpected launchctl call")
+		}
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	if err := (Manager{UserMode: true}).Load(); err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("launchctl calls = %#v, want bootstrap/bootout/bootstrap", calls)
+	}
+	if !strings.HasPrefix(calls[0], "bootstrap gui/") || !strings.Contains(calls[1], "bootout gui/") || !strings.HasPrefix(calls[2], "bootstrap gui/") {
+		t.Fatalf("unexpected launchctl call sequence: %#v", calls)
+	}
+}
+
+func TestManagerLoadReturnsBootoutFailureWhenReloadFails(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd reload is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "bootstrap" {
+			return "Bootstrap failed: 5: already bootstrapped", errors.New("exit status 5")
+		}
+		return "Boot-out failed", errors.New("exit status 5")
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	err := (Manager{UserMode: true}).Load()
+	if err == nil || !strings.Contains(err.Error(), "Boot-out failed") {
+		t.Fatalf("Load error = %v, want bootout failure", err)
+	}
+}

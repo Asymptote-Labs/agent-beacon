@@ -56,8 +56,11 @@ func runSessionStart(cmd *cobra.Command, args []string) {
 	// Persist model name so post-tool can include it in evaluations
 	if model, ok := input["model"].(string); ok && model != "" {
 		st := state.NewSessionState(sessionID, platformFlag)
-		st.SetModel(model)
-		logger.Debug("Stored session model", "model", model)
+		if err := st.SetModel(model); err != nil {
+			logger.Warn("Failed to persist session model", "model", model, "error", err.Error())
+		} else {
+			logger.Debug("Stored session model", "model", model)
+		}
 	}
 
 	logger.Info("Session initialized", "session_id", sessionID, "platform", platformFlag)

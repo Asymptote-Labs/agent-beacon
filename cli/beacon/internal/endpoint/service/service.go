@@ -73,7 +73,19 @@ func (m Manager) Load() error {
 		return err
 	}
 	domain := serviceDomain(m.UserMode)
-	return runLaunchctlWithContext(domain, m.Label(), path, "bootstrap", domain, path)
+	out, err := runLaunchctlCommand("bootstrap", domain, path)
+	if err == nil {
+		return nil
+	}
+	text := strings.TrimSpace(out)
+	if strings.Contains(text, "already bootstrapped") {
+		target := domain + "/" + m.Label()
+		if err := runLaunchctlWithContext(domain, m.Label(), "", "bootout", target); err != nil {
+			return err
+		}
+		return runLaunchctlWithContext(domain, m.Label(), path, "bootstrap", domain, path)
+	}
+	return launchctlError(text, err, domain, m.Label(), path, "bootstrap", domain, path)
 }
 
 func (m Manager) Unload() error {
@@ -90,13 +102,13 @@ func (m Manager) Status() Status {
 		status.Message = "service status is available only on macOS"
 		return status
 	}
-	out, err := exec.Command("launchctl", "print", serviceDomain(m.UserMode)+"/"+m.Label()).CombinedOutput()
+	out, err := runLaunchctlCommand("print", serviceDomain(m.UserMode)+"/"+m.Label())
 	if err != nil {
-		status.Message = strings.TrimSpace(string(out))
+		status.Message = strings.TrimSpace(out)
 		return status
 	}
 	status.Loaded = true
-	text := string(out)
+	text := out
 	status.Running = strings.Contains(text, "state = running") || strings.Contains(text, "pid =")
 	return status
 }
@@ -111,9 +123,13 @@ func runLaunchctlWithContext(domain, label, plistPath string, args ...string) er
 		return nil
 	}
 	text := strings.TrimSpace(out)
-	if strings.Contains(text, "already bootstrapped") || strings.Contains(text, "No such process") {
+	if strings.Contains(text, "No such process") {
 		return nil
 	}
+	return launchctlError(text, err, domain, label, plistPath, args...)
+}
+
+func launchctlError(text string, err error, domain, label, plistPath string, args ...string) error {
 	context := launchctlContext(domain, label, plistPath)
 	guidance := launchctlGuidance(text, domain, label)
 	if guidance != "" {

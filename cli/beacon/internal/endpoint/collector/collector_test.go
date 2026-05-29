@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -300,6 +301,67 @@ func TestPortAvailabilityAndOpenChecks(t *testing.T) {
 	}
 	if !portOpen(port) {
 		t.Fatalf("portOpen(%d) = false while listener is active", port)
+	}
+}
+
+func TestCheckStatusDoesNotTreatOpenOTLPPortsAsHealthy(t *testing.T) {
+	if healthReady() {
+		t.Skip("collector health check endpoint is already active")
+	}
+	bin := filepath.Join(t.TempDir(), BinaryName)
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write fake collector: %v", err)
+	}
+	grpcLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen grpc: %v", err)
+	}
+	defer grpcLn.Close()
+	httpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpLn.Close()
+	cfg := testConfig(t)
+	cfg.Collector.BinaryPath = bin
+	cfg.Collector.GRPCPort = grpcLn.Addr().(*net.TCPAddr).Port
+	cfg.Collector.HTTPPort = httpLn.Addr().(*net.TCPAddr).Port
+
+	status := CheckStatus(cfg)
+	if !status.GRPCReady || !status.HTTPReady {
+		t.Fatalf("OTLP ports should appear open: %#v", status)
+	}
+	if status.HealthReady {
+		t.Fatalf("HealthReady = true for unrelated listeners: %#v", status)
+	}
+	if !strings.Contains(status.Message, "health check") {
+		t.Fatalf("Message = %q, want health check warning", status.Message)
+	}
+}
+
+func TestHealthReadyChecksCollectorHealthEndpoint(t *testing.T) {
+	if !PortAvailable(HealthCheckPort) {
+		t.Skip("collector health check port is already in use")
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	ln, err := net.Listen("tcp", "127.0.0.1:13133")
+	if err != nil {
+		t.Fatalf("listen health: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = server.Serve(ln)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = server.Close()
+		<-done
+	})
+
+	if !healthReady() {
+		t.Fatal("healthReady() = false, want true")
 	}
 }
 
