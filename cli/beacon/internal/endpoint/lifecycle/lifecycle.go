@@ -127,15 +127,7 @@ func (r *installRollback) Track(path string) {
 	if _, ok := r.snapshots[path]; ok {
 		return
 	}
-	snapshot := fileSnapshot{}
-	if data, err := os.ReadFile(path); err == nil {
-		snapshot.Existed = true
-		snapshot.Data = data
-		if info, statErr := os.Stat(path); statErr == nil {
-			snapshot.Mode = info.Mode().Perm()
-		}
-	}
-	r.snapshots[path] = snapshot
+	r.snapshots[path] = snapshotFile(path)
 	r.files = append(r.files, path)
 }
 
@@ -150,16 +142,7 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	restoreBackups(manifest.Backups)
 	for i := len(r.files) - 1; i >= 0; i-- {
 		path := r.files[i]
-		snapshot := r.snapshots[path]
-		if snapshot.Existed {
-			mode := snapshot.Mode
-			if mode == 0 {
-				mode = 0600
-			}
-			_ = os.WriteFile(path, snapshot.Data, mode)
-			continue
-		}
-		_ = os.Remove(path)
+		restoreFile(path, r.snapshots[path])
 	}
 }
 
@@ -282,8 +265,14 @@ func Uninstall(opts UninstallOptions) error {
 }
 
 func Repair(opts InstallOptions) (InstallResult, error) {
+	configPath := endpointconfig.ConfigPath(opts.UserMode)
+	configSnapshot := snapshotFile(configPath)
 	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true})
-	return Install(opts)
+	result, err := Install(opts)
+	if err != nil {
+		restoreFile(configPath, configSnapshot)
+	}
+	return result, err
 }
 
 func GetStatus(userMode bool, logPath string) Status {
@@ -447,6 +436,30 @@ func loadOrDefault(userMode bool, logPath string) endpointconfig.Config {
 		logPath = writer.DefaultPath(userMode)
 	}
 	return endpointconfig.Default(userMode, logPath)
+}
+
+func snapshotFile(path string) fileSnapshot {
+	snapshot := fileSnapshot{}
+	if data, err := os.ReadFile(path); err == nil {
+		snapshot.Existed = true
+		snapshot.Data = data
+		if info, statErr := os.Stat(path); statErr == nil {
+			snapshot.Mode = info.Mode().Perm()
+		}
+	}
+	return snapshot
+}
+
+func restoreFile(path string, snapshot fileSnapshot) {
+	if !snapshot.Existed {
+		_ = os.Remove(path)
+		return
+	}
+	mode := snapshot.Mode
+	if mode == 0 {
+		mode = 0600
+	}
+	_ = os.WriteFile(path, snapshot.Data, mode)
 }
 
 func preflight(cfg endpointconfig.Config, startService bool) error {
