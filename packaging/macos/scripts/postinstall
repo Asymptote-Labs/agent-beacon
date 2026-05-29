@@ -19,8 +19,9 @@ BEACON_NO_START=1 \
 
 if command -v launchctl >/dev/null 2>&1; then
   launchctl bootout system/com.beacon.endpoint.collector >/dev/null 2>&1 || true
-  launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.collector.plist >/dev/null 2>&1
-  launchctl print system/com.beacon.endpoint.collector >/dev/null 2>&1
+  launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.collector.plist >/dev/null 2>&1 || {
+    launchctl print system/com.beacon.endpoint.collector >/dev/null 2>&1 || exit 1
+  }
 fi
 
 exit 0

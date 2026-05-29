@@ -282,6 +282,7 @@ func Uninstall(opts UninstallOptions) error {
 }
 
 func Repair(opts InstallOptions) (InstallResult, error) {
+	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true})
 	return Install(opts)
 }
 
