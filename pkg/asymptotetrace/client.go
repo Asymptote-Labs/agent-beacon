@@ -2,10 +2,13 @@ package asymptotetrace
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+var ErrClosed = errors.New("asymptotetrace: client closed")
 
 type EmitResult struct {
 	Accepted bool
@@ -105,7 +108,7 @@ func (c *Client) Close(ctx context.Context) error {
 	command := workerCommand{kind: workerCommandStop, ctx: ctx, ack: ack}
 	select {
 	case <-c.done:
-		return nil
+		return ErrClosed
 	case c.commands <- command:
 		c.closing.Store(true)
 		c.accepting.Store(false)
@@ -116,6 +119,13 @@ func (c *Client) Close(ctx context.Context) error {
 	select {
 	case err := <-ack:
 		return err
+	case <-c.done:
+		select {
+		case err := <-ack:
+			return err
+		default:
+			return ErrClosed
+		}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -130,7 +140,7 @@ func (c *Client) sendBarrier(ctx context.Context, kind workerCommandKind) error 
 	command := workerCommand{kind: kind, ctx: ctx, ack: ack}
 	select {
 	case <-c.done:
-		return nil
+		return ErrClosed
 	case c.commands <- command:
 	case <-ctx.Done():
 		return ctx.Err()
@@ -140,10 +150,12 @@ func (c *Client) sendBarrier(ctx context.Context, kind workerCommandKind) error 
 	case err := <-ack:
 		return err
 	case <-c.done:
-		if kind == workerCommandStop {
-			return nil
+		select {
+		case err := <-ack:
+			return err
+		default:
+			return ErrClosed
 		}
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -189,8 +201,7 @@ func (c *Client) run() {
 			case workerCommandFlush:
 				command.ack <- flushBatch(command.ctx)
 			case workerCommandStop:
-				// Drain any remaining emit commands that may have been
-				// enqueued concurrently after the stop command.
+				var pendingAcks []chan error
 			drainLoop:
 				for {
 					select {
@@ -198,13 +209,16 @@ func (c *Client) run() {
 						if pending.kind == workerCommandEmit {
 							batch = append(batch, c.prepareEnvelope(pending.envelope))
 						} else if pending.ack != nil {
-							pending.ack <- nil
+							pendingAcks = append(pendingAcks, pending.ack)
 						}
 					default:
 						break drainLoop
 					}
 				}
 				err := flushBatch(command.ctx)
+				for _, ack := range pendingAcks {
+					ack <- err
+				}
 				if closeErr := c.opts.Sink.Close(); closeErr != nil {
 					c.stats.recordError(closeErr)
 					if err == nil {

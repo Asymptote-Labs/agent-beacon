@@ -1,6 +1,9 @@
 package asymptotetrace
 
-import "time"
+import (
+	"reflect"
+	"time"
+)
 
 const (
 	DefaultQueueSize     = 1024
@@ -17,7 +20,7 @@ type Options struct {
 }
 
 func (opts Options) withDefaults() Options {
-	if opts.Sink == nil {
+	if opts.Sink == nil || (reflect.ValueOf(opts.Sink).Kind() == reflect.Ptr && reflect.ValueOf(opts.Sink).IsNil()) {
 		opts.Sink = NoopSink{}
 	}
 	if opts.QueueSize <= 0 {
