@@ -60,8 +60,9 @@ func (c *Client) Emit(envelope Envelope) (EmitResult, error) {
 		return EmitResult{Dropped: true}, nil
 	}
 
+	snapshot := envelope.copy()
 	select {
-	case c.commands <- workerCommand{kind: workerCommandEmit, envelope: envelope}:
+	case c.commands <- workerCommand{kind: workerCommandEmit, envelope: snapshot}:
 		c.stats.accepted.Add(1)
 		return EmitResult{Accepted: true}, nil
 	default:
@@ -150,6 +151,7 @@ func (c *Client) sendBarrier(ctx context.Context, kind workerCommandKind) error 
 
 func (c *Client) run() {
 	defer close(c.done)
+	defer c.accepting.Store(false)
 
 	ticker := time.NewTicker(c.opts.FlushInterval)
 	defer ticker.Stop()
@@ -163,8 +165,8 @@ func (c *Client) run() {
 				firstErr = err
 			} else {
 				c.stats.written.Add(uint64(len(batch)))
-				batch = batch[:0]
 			}
+			batch = batch[:0]
 		}
 		if firstErr == nil {
 			if err := c.opts.Sink.Flush(ctx); err != nil {
@@ -195,6 +197,8 @@ func (c *Client) run() {
 					case pending := <-c.commands:
 						if pending.kind == workerCommandEmit {
 							batch = append(batch, c.prepareEnvelope(pending.envelope))
+						} else if pending.ack != nil {
+							pending.ack <- nil
 						}
 					default:
 						break drainLoop

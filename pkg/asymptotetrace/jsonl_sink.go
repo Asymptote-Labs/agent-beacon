@@ -1,6 +1,7 @@
 package asymptotetrace
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -29,13 +30,8 @@ func (s *JSONLSink) WriteBatch(ctx context.Context, envelopes []Envelope) error 
 	if err := os.MkdirAll(filepath.Dir(s.path), 0755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
 	for _, envelope := range envelopes {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -44,7 +40,15 @@ func (s *JSONLSink) WriteBatch(ctx context.Context, envelopes []Envelope) error 
 			return err
 		}
 	}
-	return nil
+
+	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.Write(buf.Bytes())
+	return err
 }
 
 func (s *JSONLSink) Flush(context.Context) error {
