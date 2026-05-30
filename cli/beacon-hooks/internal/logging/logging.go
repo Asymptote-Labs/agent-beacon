@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -13,14 +12,8 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
 )
-
-var endpointSecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)authorization\s*[:=]\s*bearer\s+[^"',\s]+`),
-	regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*["']?[^"',\s]+`),
-	regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/=-]+`),
-	regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`),
-}
 
 const (
 	defaultEndpointRotateBytes    = 10 * 1024 * 1024
@@ -158,7 +151,7 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 		"harness": map[string]interface{}{
 			"name": l.platform,
 		},
-		"message": redactEndpointString(truncateEndpoint(message, 4096)),
+		"message": asymptotetrace.CleanString(message, asymptotetrace.DefaultStringLimit, true),
 	}
 	if l.sessionID != "" {
 		event["session"] = map[string]interface{}{"id": l.sessionID}
@@ -201,69 +194,29 @@ func endpointLogPath() string {
 }
 
 func redactEndpointString(value string) string {
-	for _, pattern := range endpointSecretPatterns {
-		value = pattern.ReplaceAllStringFunc(value, func(match string) string {
-			if strings.Contains(match, "=") {
-				return match[:strings.Index(match, "=")+1] + "[REDACTED]"
-			}
-			if strings.Contains(match, ":") {
-				return match[:strings.Index(match, ":")+1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return value
+	return asymptotetrace.RedactString(value)
 }
 
 func retentionAwareRaw(raw map[string]interface{}, retention string) map[string]interface{} {
-	if retention != "metadata" {
-		return raw
-	}
-	return map[string]interface{}{"field_count": len(raw)}
+	return asymptotetrace.RetentionAwareRaw(raw, retention)
 }
 
 func sanitizeEndpointMap(input map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(input))
-	for key, value := range input {
-		switch typed := value.(type) {
-		case string:
-			out[key] = redactEndpointString(truncateEndpoint(typed, 4096))
-		case map[string]interface{}:
-			out[key] = sanitizeEndpointMap(typed)
-		case []interface{}:
-			out[key] = sanitizeEndpointSlice(typed)
-		default:
-			out[key] = typed
-		}
-	}
-	return out
+	return asymptotetrace.SanitizeMap(input, asymptotetrace.PrivacyOptions{
+		RedactSecrets: true,
+		StringLimit:   asymptotetrace.DefaultStringLimit,
+	})
 }
 
 func sanitizeEndpointSlice(input []interface{}) []interface{} {
-	out := make([]interface{}, len(input))
-	for i, value := range input {
-		switch typed := value.(type) {
-		case string:
-			out[i] = redactEndpointString(truncateEndpoint(typed, 4096))
-		case map[string]interface{}:
-			out[i] = sanitizeEndpointMap(typed)
-		case []interface{}:
-			out[i] = sanitizeEndpointSlice(typed)
-		default:
-			out[i] = typed
-		}
-	}
-	return out
+	return asymptotetrace.SanitizeSlice(input, asymptotetrace.PrivacyOptions{
+		RedactSecrets: true,
+		StringLimit:   asymptotetrace.DefaultStringLimit,
+	})
 }
 
 func truncateEndpoint(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	if limit < 32 {
-		return value[:limit]
-	}
-	return value[:limit-15] + "...[truncated]"
+	return asymptotetrace.TruncateString(value, limit)
 }
 
 // Keep this rotation contract mirrored with the endpoint CLI and beaconjson exporter.
