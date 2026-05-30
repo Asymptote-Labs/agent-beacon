@@ -33,3 +33,59 @@ func (e Envelope) Validate() error {
 	}
 	return event.Validate()
 }
+
+func (e Envelope) withDefaults() Envelope {
+	if e.Vendor == "" {
+		e.Vendor = Vendor
+	}
+	if e.SchemaVersion == "" {
+		e.SchemaVersion = SchemaVersion
+	}
+	return e
+}
+
+func (e Envelope) copy() Envelope {
+	out := e
+	if e.Session != nil {
+		session := *e.Session
+		out.Session = &session
+	}
+	if e.Run != nil {
+		run := *e.Run
+		out.Run = &run
+	}
+	if e.Raw != nil {
+		out.Raw = copyMap(e.Raw)
+	}
+	return out
+}
+
+func copyMap(input map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		switch typed := value.(type) {
+		case map[string]interface{}:
+			out[key] = copyMap(typed)
+		case []interface{}:
+			out[key] = copySlice(typed)
+		default:
+			out[key] = typed
+		}
+	}
+	return out
+}
+
+func copySlice(input []interface{}) []interface{} {
+	out := make([]interface{}, len(input))
+	for index, value := range input {
+		switch typed := value.(type) {
+		case map[string]interface{}:
+			out[index] = copyMap(typed)
+		case []interface{}:
+			out[index] = copySlice(typed)
+		default:
+			out[index] = typed
+		}
+	}
+	return out
+}
