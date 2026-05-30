@@ -115,8 +115,6 @@ func (c *Client) Close(ctx context.Context) error {
 	select {
 	case err := <-ack:
 		return err
-	case <-c.done:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -165,12 +163,12 @@ func (c *Client) run() {
 				firstErr = err
 			} else {
 				c.stats.written.Add(uint64(len(batch)))
+				batch = batch[:0]
 			}
-			batch = batch[:0]
 		}
-		if err := c.opts.Sink.Flush(ctx); err != nil {
-			c.stats.recordError(err)
-			if firstErr == nil {
+		if firstErr == nil {
+			if err := c.opts.Sink.Flush(ctx); err != nil {
+				c.stats.recordError(err)
 				firstErr = err
 			}
 		}
@@ -189,6 +187,19 @@ func (c *Client) run() {
 			case workerCommandFlush:
 				command.ack <- flushBatch(command.ctx)
 			case workerCommandStop:
+				// Drain any remaining emit commands that may have been
+				// enqueued concurrently after the stop command.
+			drainLoop:
+				for {
+					select {
+					case pending := <-c.commands:
+						if pending.kind == workerCommandEmit {
+							batch = append(batch, c.prepareEnvelope(pending.envelope))
+						}
+					default:
+						break drainLoop
+					}
+				}
 				err := flushBatch(command.ctx)
 				if closeErr := c.opts.Sink.Close(); closeErr != nil {
 					c.stats.recordError(closeErr)

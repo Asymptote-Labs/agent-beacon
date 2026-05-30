@@ -20,7 +20,9 @@ func NewJSONLSink(path string) *JSONLSink {
 }
 
 func (s *JSONLSink) WriteBatch(ctx context.Context, envelopes []Envelope) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -35,6 +37,9 @@ func (s *JSONLSink) WriteBatch(ctx context.Context, envelopes []Envelope) error 
 
 	encoder := json.NewEncoder(f)
 	for _, envelope := range envelopes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := encoder.Encode(envelope); err != nil {
 			return err
 		}
