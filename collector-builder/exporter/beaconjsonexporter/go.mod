@@ -3,12 +3,15 @@ module github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconj
 go 1.24.0
 
 require (
+	github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace v0.0.0
 	go.opentelemetry.io/collector/component v1.27.0
 	go.opentelemetry.io/collector/consumer v1.27.0
 	go.opentelemetry.io/collector/exporter v0.121.0
 	go.opentelemetry.io/collector/pdata v1.27.0
 	go.uber.org/zap v1.27.0
 )
+
+replace github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace => ../../../pkg/asymptotetrace
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect

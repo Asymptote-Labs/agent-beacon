@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
 )
 
 const (
@@ -22,13 +22,6 @@ const (
 	DefaultRotateArchives = 5
 	RotateBytes           = DefaultRotateBytes
 )
-
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)authorization\s*[:=]\s*bearer\s+[^"',\s]+`),
-	regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*["']?[^"',\s]+`),
-	regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/=-]+`),
-	regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`),
-}
 
 type Options struct {
 	Path           string
@@ -72,7 +65,7 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	}
 	if len(data) > opts.MaxBytes {
 		event.Raw = nil
-		event.Message = truncate(event.Message, 1024)
+		event.Message = asymptotetrace.TruncateString(event.Message, 1024)
 		event.Truncated = true
 		data, err = json.Marshal(event)
 		if err != nil {
@@ -107,89 +100,7 @@ func LastLine(path string) (string, error) {
 }
 
 func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
-	event.Message = redact(truncate(event.Message, 4096))
-	if event.Tool != nil {
-		event.Tool.Command = redact(truncate(event.Tool.Command, 4096))
-		event.Tool.Path = truncate(event.Tool.Path, 2048)
-	}
-	if event.Command != nil {
-		event.Command.Command = redact(truncate(event.Command.Command, 4096))
-	}
-	if event.Approval != nil {
-		event.Approval.Reason = redact(truncate(event.Approval.Reason, 4096))
-	}
-	if event.Policy != nil {
-		event.Policy.Reason = redact(truncate(event.Policy.Reason, 4096))
-	}
-	if event.Prompt != nil {
-		event.Prompt.Text = redact(truncate(event.Prompt.Text, 4096))
-	}
-	if event.Raw != nil {
-		event.Raw = sanitizeMap(event.Raw)
-	}
-	if data, err := json.Marshal(event); err == nil && len(data) > maxBytes {
-		event.Truncated = true
-	}
-	return event
-}
-
-func sanitizeMap(input map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(input))
-	for k, v := range input {
-		switch typed := v.(type) {
-		case string:
-			out[k] = redact(truncate(typed, 2048))
-		case map[string]interface{}:
-			out[k] = sanitizeMap(typed)
-		case []interface{}:
-			out[k] = sanitizeSlice(typed)
-		default:
-			out[k] = typed
-		}
-	}
-	return out
-}
-
-func sanitizeSlice(input []interface{}) []interface{} {
-	out := make([]interface{}, len(input))
-	for i, v := range input {
-		switch typed := v.(type) {
-		case string:
-			out[i] = redact(truncate(typed, 2048))
-		case map[string]interface{}:
-			out[i] = sanitizeMap(typed)
-		case []interface{}:
-			out[i] = sanitizeSlice(typed)
-		default:
-			out[i] = typed
-		}
-	}
-	return out
-}
-
-func redact(value string) string {
-	for _, pattern := range secretPatterns {
-		value = pattern.ReplaceAllStringFunc(value, func(match string) string {
-			if strings.Contains(match, "=") {
-				return match[:strings.Index(match, "=")+1] + "[REDACTED]"
-			}
-			if strings.Contains(match, ":") {
-				return match[:strings.Index(match, ":")+1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return value
-}
-
-func truncate(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	if limit < 32 {
-		return value[:limit]
-	}
-	return value[:limit-15] + "...[truncated]"
+	return asymptotetrace.SanitizeEvent(event, maxBytes)
 }
 
 func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {

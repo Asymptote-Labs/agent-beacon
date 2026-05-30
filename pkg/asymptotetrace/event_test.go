@@ -1,0 +1,181 @@
+package asymptotetrace
+
+import (
+	"encoding/json"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestNewEventSetsRequiredInvariants(t *testing.T) {
+	event := NewEvent(NewEventOptions{
+		Action:       "telemetry.enabled",
+		Category:     "telemetry",
+		AgentVersion: "test-version",
+		Harness:      HarnessInfo{Name: "endpoint"},
+		Message:      "configured",
+	})
+
+	if err := event.Validate(); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+	if event.Vendor != Vendor || event.Product != Product || event.SchemaVersion != SchemaVersion {
+		t.Fatalf("unexpected schema identity: %#v", event)
+	}
+	if event.Event.Kind != "agent_runtime" || event.Event.Action != "telemetry.enabled" || event.Event.Category != "telemetry" {
+		t.Fatalf("unexpected event info: %#v", event.Event)
+	}
+	if event.Severity != SeverityInfo {
+		t.Fatalf("default severity = %q, want %q", event.Severity, SeverityInfo)
+	}
+	if event.Endpoint.OS != runtime.GOOS || event.Endpoint.AgentVersion != "test-version" {
+		t.Fatalf("unexpected endpoint info: %#v", event.Endpoint)
+	}
+	if _, err := time.Parse(time.RFC3339, event.Timestamp); err != nil {
+		t.Fatalf("timestamp is not RFC3339: %q", event.Timestamp)
+	}
+	event.File = &FileInfo{Path: "main.go", Operation: "modify"}
+	event.Command = &CommandInfo{Command: "go test ./..."}
+	event.MCP = &MCPInfo{Server: "github", Tool: "get_issue"}
+	event.Prompt = &PromptInfo{Text: "Summarize this file"}
+	event.Content = &ContentInfo{Retention: ContentRetentionFull, Included: true}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("Validate rejected optional telemetry fields: %v", err)
+	}
+}
+
+func TestValidateContentRetentionValues(t *testing.T) {
+	for _, retention := range []string{ContentRetentionMetadata, ContentRetentionRedacted, ContentRetentionFull} {
+		t.Run(retention, func(t *testing.T) {
+			event := NewEvent(NewEventOptions{
+				Action:  "tool.invoked",
+				Harness: HarnessInfo{Name: "cursor"},
+			})
+			event.Content = &ContentInfo{Retention: retention, Included: retention != ContentRetentionMetadata}
+
+			if err := event.Validate(); err != nil {
+				t.Fatalf("Validate rejected retention %q: %v", retention, err)
+			}
+		})
+	}
+}
+
+func TestValidateOriginValues(t *testing.T) {
+	for _, origin := range []Origin{"", OriginLocal, OriginCloud, OriginCI} {
+		t.Run(string(origin), func(t *testing.T) {
+			event := NewEvent(NewEventOptions{
+				Action:  "tool.invoked",
+				Harness: HarnessInfo{Name: "cursor"},
+				Origin:  origin,
+			})
+			if err := event.Validate(); err != nil {
+				t.Fatalf("Validate rejected origin %q: %v", origin, err)
+			}
+		})
+	}
+
+	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}, Origin: "serverless"})
+	if err := event.Validate(); err == nil || !strings.Contains(err.Error(), "origin must be local, cloud, or ci") {
+		t.Fatalf("Validate error = %v, want origin error", err)
+	}
+}
+
+func TestRunAndOriginAreOmittedWhenUnset(t *testing.T) {
+	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	text := string(data)
+	for _, field := range []string{`"origin"`, `"run"`} {
+		if strings.Contains(text, field) {
+			t.Fatalf("unset additive field %s leaked into JSON: %s", field, text)
+		}
+	}
+}
+
+func TestRunAndOriginSerializeWhenSet(t *testing.T) {
+	event := NewEvent(NewEventOptions{
+		Action:  "tool.invoked",
+		Harness: HarnessInfo{Name: "claude"},
+		Origin:  OriginCI,
+		Run:     &RunInfo{Provider: "github_actions", RunID: "123", PR: "42", Ephemeral: true},
+	})
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{`"origin":"ci"`, `"provider":"github_actions"`, `"run_id":"123"`, `"ephemeral":true`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("JSON missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestValidateRejectsMissingOrInvalidRequiredFields(t *testing.T) {
+	valid := NewEvent(NewEventOptions{
+		Action:   "tool.invoked",
+		Harness:  HarnessInfo{Name: "cursor"},
+		Severity: SeverityHigh,
+	})
+
+	tests := []struct {
+		name string
+		edit func(*Event)
+		want string
+	}{
+		{
+			name: "vendor",
+			edit: func(e *Event) { e.Vendor = "other" },
+			want: "vendor must be beacon",
+		},
+		{
+			name: "product",
+			edit: func(e *Event) { e.Product = "other" },
+			want: "product must be endpoint-agent",
+		},
+		{
+			name: "schema version",
+			edit: func(e *Event) { e.SchemaVersion = "" },
+			want: "schema_version is required",
+		},
+		{
+			name: "action",
+			edit: func(e *Event) { e.Event.Action = "" },
+			want: "event.kind and event.action are required",
+		},
+		{
+			name: "severity",
+			edit: func(e *Event) { e.Severity = "" },
+			want: "severity is required",
+		},
+		{
+			name: "os",
+			edit: func(e *Event) { e.Endpoint.OS = "" },
+			want: "endpoint.os is required",
+		},
+		{
+			name: "harness",
+			edit: func(e *Event) { e.Harness.Name = "" },
+			want: "harness.name is required",
+		},
+		{
+			name: "content retention",
+			edit: func(e *Event) { e.Content = &ContentInfo{Retention: "raw", Included: true} },
+			want: "content.retention must be metadata, redacted, or full",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := valid
+			tt.edit(&event)
+			err := event.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
