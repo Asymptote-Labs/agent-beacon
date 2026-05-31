@@ -195,7 +195,10 @@ func (t *Tracer) sendBarrier(ctx context.Context, kind tracerCommandKind) error 
 	select {
 	case <-t.done:
 		t.finishCommandSend()
-		return nil
+		if t.shutdownErr != nil {
+			return t.shutdownErr
+		}
+		return ErrTracerClosed
 	case t.commands <- tracerCommand{kind: kind, ack: ack}:
 		t.finishCommandSend()
 	case <-ctx.Done():
