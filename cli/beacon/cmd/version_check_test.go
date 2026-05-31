@@ -13,12 +13,12 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
-type stubUpdateChecker struct {
+type stubVersionChecker struct {
 	result updatecheck.Result
 	err    error
 }
 
-func (c stubUpdateChecker) Check(context.Context) (updatecheck.Result, error) {
+func (c stubVersionChecker) Check(context.Context) (updatecheck.Result, error) {
 	if c.err != nil {
 		return updatecheck.Result{}, c.err
 	}
@@ -35,8 +35,8 @@ func TestVersionCheckCommandRegistered(t *testing.T) {
 	}
 }
 
-func TestRunUpdateCheckReportsUpToDate(t *testing.T) {
-	got := runUpdateCheckWithStub(t, "v0.0.10", stubUpdateChecker{
+func TestRunVersionCheckReportsUpToDate(t *testing.T) {
+	got := runVersionCheckWithStub(t, "v0.0.10", stubVersionChecker{
 		result: updatecheck.Result{CurrentVersion: "v0.0.10", LatestVersion: "v0.0.10"},
 	})
 	if !strings.Contains(got, "Beacon v0.0.10 is up to date.") {
@@ -44,8 +44,8 @@ func TestRunUpdateCheckReportsUpToDate(t *testing.T) {
 	}
 }
 
-func TestRunUpdateCheckReportsAvailableUpdate(t *testing.T) {
-	got := runUpdateCheckWithStub(t, "v0.0.10", stubUpdateChecker{
+func TestRunVersionCheckReportsAvailableUpdate(t *testing.T) {
+	got := runVersionCheckWithStub(t, "v0.0.10", stubVersionChecker{
 		result: updatecheck.Result{
 			CurrentVersion:  "v0.0.10",
 			LatestVersion:   "v0.0.12",
@@ -64,8 +64,8 @@ func TestRunUpdateCheckReportsAvailableUpdate(t *testing.T) {
 	}
 }
 
-func TestRunUpdateCheckReportsDevBuild(t *testing.T) {
-	got := runUpdateCheckWithStub(t, "dev", stubUpdateChecker{
+func TestRunVersionCheckReportsDevBuild(t *testing.T) {
+	got := runVersionCheckWithStub(t, "dev", stubVersionChecker{
 		result: updatecheck.Result{CurrentVersion: "dev", CurrentIsDev: true},
 	})
 	if !strings.Contains(got, "Beacon dev build: update checks require a released version.") {
@@ -73,8 +73,8 @@ func TestRunUpdateCheckReportsDevBuild(t *testing.T) {
 	}
 }
 
-func TestRunUpdateCheckReportsUnsupportedCurrentVersion(t *testing.T) {
-	got := runUpdateCheckWithStub(t, "v0.0.12+local", stubUpdateChecker{
+func TestRunVersionCheckReportsUnsupportedCurrentVersion(t *testing.T) {
+	got := runVersionCheckWithStub(t, "v0.0.12+local", stubVersionChecker{
 		result: updatecheck.Result{CurrentVersion: "v0.0.12+local", UnsupportedCurrentVersion: true},
 	})
 	if !strings.Contains(got, `Beacon version "v0.0.12+local" cannot be compared to released versions.`) {
@@ -82,36 +82,36 @@ func TestRunUpdateCheckReportsUnsupportedCurrentVersion(t *testing.T) {
 	}
 }
 
-func TestRunUpdateCheckReturnsFriendlyError(t *testing.T) {
+func TestRunVersionCheckReturnsFriendlyError(t *testing.T) {
 	restoreVersion := setVersionForTest(t, "v0.0.10")
 	defer restoreVersion()
-	restoreChecker := setUpdateCheckerForTest(t, stubUpdateChecker{err: errors.New("rate limited")})
+	restoreChecker := setVersionCheckerForTest(t, stubVersionChecker{err: errors.New("rate limited")})
 	defer restoreChecker()
 
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	err := runUpdateCheck(cmd, nil)
+	err := runVersionCheck(cmd, nil)
 	if err == nil {
-		t.Fatal("runUpdateCheck error = nil, want error")
+		t.Fatal("runVersionCheck error = nil, want error")
 	}
 	if !strings.Contains(err.Error(), "unable to check for Beacon updates") {
 		t.Fatalf("error = %v, want friendly update error", err)
 	}
 }
 
-func runUpdateCheckWithStub(t *testing.T, current string, checker stubUpdateChecker) string {
+func runVersionCheckWithStub(t *testing.T, current string, checker stubVersionChecker) string {
 	t.Helper()
 	restoreVersion := setVersionForTest(t, current)
 	defer restoreVersion()
-	restoreChecker := setUpdateCheckerForTest(t, checker)
+	restoreChecker := setVersionCheckerForTest(t, checker)
 	defer restoreChecker()
 
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	if err := runUpdateCheck(cmd, nil); err != nil {
-		t.Fatalf("runUpdateCheck returned error: %v", err)
+	if err := runVersionCheck(cmd, nil); err != nil {
+		t.Fatalf("runVersionCheck returned error: %v", err)
 	}
 	return out.String()
 }
@@ -123,11 +123,11 @@ func setVersionForTest(t *testing.T, v string) func() {
 	return func() { version.Version = old }
 }
 
-func setUpdateCheckerForTest(t *testing.T, checker updateChecker) func() {
+func setVersionCheckerForTest(t *testing.T, checker versionChecker) func() {
 	t.Helper()
-	old := newUpdateChecker
-	newUpdateChecker = func(currentVersion string) updateChecker {
+	old := newVersionChecker
+	newVersionChecker = func(currentVersion string) versionChecker {
 		return checker
 	}
-	return func() { newUpdateChecker = old }
+	return func() { newVersionChecker = old }
 }

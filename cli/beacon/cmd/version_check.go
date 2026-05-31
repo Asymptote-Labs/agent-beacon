@@ -11,33 +11,33 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
-type updateChecker interface {
+type versionChecker interface {
 	Check(context.Context) (updatecheck.Result, error)
 }
 
 var (
-	newUpdateChecker = func(currentVersion string) updateChecker {
+	newVersionChecker = func(currentVersion string) versionChecker {
 		return updatecheck.DefaultChecker(currentVersion)
 	}
-	updateCheckTimeout = 2 * time.Second
+	versionCheckTimeout = 2 * time.Second
 )
 
 var versionCheckCmd = &cobra.Command{
 	Use:          "check",
 	Short:        "Check whether a newer Beacon CLI release is available",
 	SilenceUsage: true,
-	RunE:         runUpdateCheck,
+	RunE:         runVersionCheck,
 }
 
-func runUpdateCheck(cmd *cobra.Command, args []string) error {
+func runVersionCheck(cmd *cobra.Command, args []string) error {
 	parent := cmd.Context()
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, updateCheckTimeout)
+	ctx, cancel := context.WithTimeout(parent, versionCheckTimeout)
 	defer cancel()
 
-	result, err := newUpdateChecker(version.GetVersion()).Check(ctx)
+	result, err := newVersionChecker(version.GetVersion()).Check(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to check for Beacon updates: %w", err)
 	}
