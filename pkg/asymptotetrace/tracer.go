@@ -57,10 +57,12 @@ type Tracer struct {
 	opts     Options
 	commands chan tracerCommand
 	done     chan struct{}
+	stopCh   chan struct{}
 
-	accepting atomic.Bool
-	closing   atomic.Bool
-	closeMu   sync.Mutex
+	accepting   atomic.Bool
+	closing     atomic.Bool
+	closeMu     sync.Mutex
+	shutdownErr error
 
 	accepted  atomic.Uint64
 	dropped   atomic.Uint64
@@ -92,6 +94,7 @@ func Start(opts Options) (*Tracer, error) {
 		opts:     normalized,
 		commands: make(chan tracerCommand, normalized.BufferSize),
 		done:     make(chan struct{}),
+		stopCh:   make(chan struct{}),
 	}
 	tracer.accepting.Store(true)
 	go tracer.run()
@@ -132,7 +135,7 @@ func (t *Tracer) Shutdown(ctx context.Context) error {
 	if t.closing.Load() {
 		select {
 		case <-t.done:
-			return nil
+			return t.shutdownErr
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -142,29 +145,17 @@ func (t *Tracer) Shutdown(ctx context.Context) error {
 	if t.closing.Load() {
 		select {
 		case <-t.done:
-			return nil
+			return t.shutdownErr
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-	ack := make(chan error, 1)
+	t.closing.Store(true)
+	t.accepting.Store(false)
+	close(t.stopCh)
 	select {
-	case t.commands <- tracerCommand{kind: tracerCommandStop, ack: ack}:
-		t.closing.Store(true)
-		t.accepting.Store(false)
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case err := <-ack:
-		return err
 	case <-t.done:
-		select {
-		case err := <-ack:
-			return err
-		default:
-			return nil
-		}
+		return t.shutdownErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -208,41 +199,48 @@ func (t *Tracer) sendBarrier(ctx context.Context, kind tracerCommandKind) error 
 
 func (t *Tracer) run() {
 	defer close(t.done)
-	for command := range t.commands {
-		switch command.kind {
-		case tracerCommandCapture:
-			if err := t.writeCapture(context.Background(), command.capture); err != nil {
-				t.recordError(err)
-			}
-		case tracerCommandFlush:
-			command.ack <- t.opts.Sink.Flush(context.Background())
-		case tracerCommandStop:
-			// Drain captures that raced with stop (enqueued after stop but
-			// before accepting was set to false by the caller).
-		drain:
-			for {
-				select {
-				case cmd := <-t.commands:
-					switch cmd.kind {
-					case tracerCommandCapture:
-						if err := t.writeCapture(context.Background(), cmd.capture); err != nil {
-							t.recordError(err)
-						}
-				case tracerCommandFlush:
-					cmd.ack <- t.opts.Sink.Flush(context.Background())
-					case tracerCommandStop:
-						cmd.ack <- nil
-					}
-				default:
-					break drain
+	for {
+		select {
+		case command := <-t.commands:
+			switch command.kind {
+			case tracerCommandCapture:
+				if err := t.writeCapture(context.Background(), command.capture); err != nil {
+					t.recordError(err)
 				}
+			case tracerCommandFlush:
+				command.ack <- t.opts.Sink.Flush(context.Background())
+			case tracerCommandStop:
+				t.shutdownErr = t.finalize()
+				command.ack <- t.shutdownErr
+				return
 			}
+		case <-t.stopCh:
+			t.shutdownErr = t.finalize()
+			return
+		}
+	}
+}
+
+func (t *Tracer) finalize() error {
+	for {
+		select {
+		case cmd := <-t.commands:
+			switch cmd.kind {
+			case tracerCommandCapture:
+				if err := t.writeCapture(context.Background(), cmd.capture); err != nil {
+					t.recordError(err)
+				}
+			case tracerCommandFlush:
+				cmd.ack <- t.opts.Sink.Flush(context.Background())
+			case tracerCommandStop:
+				cmd.ack <- nil
+			}
+		default:
 			err := t.opts.Sink.Flush(context.Background())
 			if closeErr := t.opts.Sink.Close(); closeErr != nil {
 				err = errors.Join(err, closeErr)
 			}
-			command.ack <- err
-			return
+			return err
 		}
 	}
 }
