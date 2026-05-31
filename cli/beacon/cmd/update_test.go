@@ -25,13 +25,13 @@ func (c stubUpdateChecker) Check(context.Context) (updatecheck.Result, error) {
 	return c.result, nil
 }
 
-func TestUpdateCheckCommandRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"update", "check"})
+func TestVersionCheckCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"version", "check"})
 	if err != nil {
-		t.Fatalf("Find update check returned error: %v", err)
+		t.Fatalf("Find version check returned error: %v", err)
 	}
 	if cmd == nil || cmd.Use != "check" {
-		t.Fatalf("update check command not registered: %#v", cmd)
+		t.Fatalf("version check command not registered: %#v", cmd)
 	}
 }
 

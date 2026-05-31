@@ -22,12 +22,7 @@ var (
 	updateCheckTimeout = 2 * time.Second
 )
 
-var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Check for Beacon CLI updates",
-}
-
-var updateCheckCmd = &cobra.Command{
+var versionCheckCmd = &cobra.Command{
 	Use:          "check",
 	Short:        "Check whether a newer Beacon CLI release is available",
 	SilenceUsage: true,
@@ -69,6 +64,5 @@ func runUpdateCheck(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
-	updateCmd.AddCommand(updateCheckCmd)
-	rootCmd.AddCommand(updateCmd)
+	versionCmd.AddCommand(versionCheckCmd)
 }
