@@ -228,8 +228,8 @@ func (t *Tracer) run() {
 						if err := t.writeCapture(context.Background(), cmd.capture); err != nil {
 							t.recordError(err)
 						}
-					case tracerCommandFlush:
-						cmd.ack <- nil
+				case tracerCommandFlush:
+					cmd.ack <- t.opts.Sink.Flush(context.Background())
 					case tracerCommandStop:
 						cmd.ack <- nil
 					}
