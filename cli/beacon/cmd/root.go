@@ -18,9 +18,14 @@ local telemetry, and writes Wazuh-compatible JSON logs without requiring an
 Beacon-hosted backend.`,
 	Version: version.GetVersion(),
 	Run: func(cmd *cobra.Command, args []string) {
-		printBeaconIntro(cmd)
-		cmd.SetOut(cmd.OutOrStdout())
-		_ = cmd.Usage()
+		fmt.Println("Beacon Endpoint Agent")
+		fmt.Println()
+		fmt.Println("Start with:")
+		fmt.Println("  beacon endpoint install")
+		fmt.Println("  beacon endpoint status")
+		fmt.Println("  beacon endpoint wazuh print-config")
+		fmt.Println()
+		cmd.Usage()
 	},
 }
 
