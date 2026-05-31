@@ -63,12 +63,15 @@ type Tracer struct {
 	closing     atomic.Bool
 	closeMu     sync.Mutex
 	shutdownErr error
+	commandMu   sync.Mutex
 
-	accepted  atomic.Uint64
-	dropped   atomic.Uint64
-	errors    atomic.Uint64
-	errMu     sync.Mutex
-	lastError string
+	accepted     atomic.Uint64
+	dropped      atomic.Uint64
+	errors       atomic.Uint64
+	pendingSends atomic.Int64
+	errMu        sync.Mutex
+	lastError    string
+	sendDone     chan struct{}
 }
 
 type tracerCommand struct {
@@ -95,6 +98,7 @@ func Start(opts Options) (*Tracer, error) {
 		commands: make(chan tracerCommand, normalized.BufferSize),
 		done:     make(chan struct{}),
 		stopCh:   make(chan struct{}),
+		sendDone: make(chan struct{}, 1),
 	}
 	tracer.accepting.Store(true)
 	go tracer.run()
@@ -109,6 +113,11 @@ func (t *Tracer) Observe(ctx context.Context, capture Capture) (ObserveResult, e
 		t.dropped.Add(1)
 		return ObserveResult{Dropped: true}, ErrTracerClosed
 	}
+	if !t.beginCommandSend() {
+		t.dropped.Add(1)
+		return ObserveResult{Dropped: true}, ErrTracerClosed
+	}
+	defer t.finishCommandSend()
 	select {
 	case t.commands <- tracerCommand{kind: tracerCommandCapture, capture: capture}:
 		t.accepted.Add(1)
@@ -175,11 +184,22 @@ func (t *Tracer) Stats() TracerStats {
 
 func (t *Tracer) sendBarrier(ctx context.Context, kind tracerCommandKind) error {
 	ack := make(chan error, 1)
+	if !t.beginCommandSend() {
+		select {
+		case <-t.done:
+			return t.shutdownErr
+		default:
+			return ErrTracerClosed
+		}
+	}
 	select {
 	case <-t.done:
+		t.finishCommandSend()
 		return nil
 	case t.commands <- tracerCommand{kind: kind, ack: ack}:
+		t.finishCommandSend()
 	case <-ctx.Done():
+		t.finishCommandSend()
 		return ctx.Err()
 	}
 	select {
@@ -190,10 +210,31 @@ func (t *Tracer) sendBarrier(ctx context.Context, kind tracerCommandKind) error 
 		case err := <-ack:
 			return err
 		default:
-			return nil
+			if t.shutdownErr != nil {
+				return t.shutdownErr
+			}
+			return ErrTracerClosed
 		}
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (t *Tracer) beginCommandSend() bool {
+	t.commandMu.Lock()
+	defer t.commandMu.Unlock()
+	if t.closing.Load() {
+		return false
+	}
+	t.pendingSends.Add(1)
+	return true
+}
+
+func (t *Tracer) finishCommandSend() {
+	t.pendingSends.Add(-1)
+	select {
+	case t.sendDone <- struct{}{}:
+	default:
 	}
 }
 
@@ -225,23 +266,35 @@ func (t *Tracer) finalize() error {
 	for {
 		select {
 		case cmd := <-t.commands:
-			switch cmd.kind {
-			case tracerCommandCapture:
-				if err := t.writeCapture(context.Background(), cmd.capture); err != nil {
-					t.recordError(err)
-				}
-			case tracerCommandFlush:
-				cmd.ack <- t.opts.Sink.Flush(context.Background())
-			case tracerCommandStop:
-				cmd.ack <- nil
-			}
+			t.handleFinalCommand(cmd)
 		default:
+			if t.pendingSends.Load() != 0 {
+				select {
+				case cmd := <-t.commands:
+					t.handleFinalCommand(cmd)
+				case <-t.sendDone:
+				}
+				continue
+			}
 			err := t.opts.Sink.Flush(context.Background())
 			if closeErr := t.opts.Sink.Close(); closeErr != nil {
 				err = errors.Join(err, closeErr)
 			}
 			return err
 		}
+	}
+}
+
+func (t *Tracer) handleFinalCommand(cmd tracerCommand) {
+	switch cmd.kind {
+	case tracerCommandCapture:
+		if err := t.writeCapture(context.Background(), cmd.capture); err != nil {
+			t.recordError(err)
+		}
+	case tracerCommandFlush:
+		cmd.ack <- t.opts.Sink.Flush(context.Background())
+	case tracerCommandStop:
+		cmd.ack <- nil
 	}
 }
 

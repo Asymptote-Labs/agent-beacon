@@ -55,6 +55,57 @@ func (s *blockingSink) snapshot() []Event {
 	return events
 }
 
+type firstWriteBlockingSink struct {
+	started  chan struct{}
+	release  chan struct{}
+	flushErr error
+
+	once       sync.Once
+	mu         sync.Mutex
+	flushCount int
+}
+
+func newFirstWriteBlockingSink(flushErr error) *firstWriteBlockingSink {
+	return &firstWriteBlockingSink{
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+		flushErr: flushErr,
+	}
+}
+
+func (s *firstWriteBlockingSink) WriteBatch(ctx context.Context, events []Event) error {
+	block := false
+	s.once.Do(func() {
+		block = true
+		close(s.started)
+	})
+	if block {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (s *firstWriteBlockingSink) Flush(context.Context) error {
+	s.mu.Lock()
+	s.flushCount++
+	s.mu.Unlock()
+	return s.flushErr
+}
+
+func (s *firstWriteBlockingSink) Close() error {
+	return nil
+}
+
+func (s *firstWriteBlockingSink) flushes() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.flushCount
+}
+
 func TestStartRejectsMissingHarness(t *testing.T) {
 	if _, err := Start(Options{}); !errors.Is(err, ErrHarnessRequired) {
 		t.Fatalf("Start error = %v, want ErrHarnessRequired", err)
@@ -160,6 +211,66 @@ func TestFlushDrainsQueuedCaptures(t *testing.T) {
 	events, _, _ := sink.snapshot()
 	if len(events) != 3 {
 		t.Fatalf("events = %d, want 3", len(events))
+	}
+}
+
+func TestConcurrentFlushBlockedOnFullBufferIsAckedDuringShutdown(t *testing.T) {
+	want := errors.New("flush barrier ran")
+	sink := newFirstWriteBlockingSink(want)
+	tracer, err := Start(Options{Harness: "my-agent", Sink: sink, BufferSize: 1})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	if _, err := tracer.Observe(context.Background(), Capture{Action: "runner.started"}); err != nil {
+		t.Fatalf("Observe returned error: %v", err)
+	}
+	select {
+	case <-sink.started:
+	case <-time.After(time.Second):
+		t.Fatal("sink write did not start")
+	}
+	if _, err := tracer.Observe(context.Background(), Capture{Action: "runner.started"}); err != nil {
+		t.Fatalf("Observe returned error: %v", err)
+	}
+
+	flushDone := make(chan error, 1)
+	go func() {
+		flushDone <- tracer.Flush(context.Background())
+	}()
+	for deadline := time.After(time.Second); tracer.pendingSends.Load() == 0; {
+		select {
+		case <-deadline:
+			t.Fatal("Flush did not block on the full command buffer")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- tracer.Shutdown(context.Background())
+	}()
+	close(sink.release)
+
+	select {
+	case err := <-flushDone:
+		if !errors.Is(err, want) {
+			t.Fatalf("Flush error = %v, want %v", err, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Flush was not acked during shutdown")
+	}
+	select {
+	case err := <-shutdownDone:
+		if !errors.Is(err, want) {
+			t.Fatalf("Shutdown error = %v, want %v", err, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Shutdown did not finish")
+	}
+	if sink.flushes() == 0 {
+		t.Fatal("sink Flush was not called")
 	}
 }
 
