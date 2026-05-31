@@ -35,7 +35,11 @@ var updateCheckCmd = &cobra.Command{
 }
 
 func runUpdateCheck(cmd *cobra.Command, args []string) error {
-	ctx, cancel := context.WithTimeout(cmd.Context(), updateCheckTimeout)
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, updateCheckTimeout)
 	defer cancel()
 
 	result, err := newUpdateChecker(version.GetVersion()).Check(ctx)
