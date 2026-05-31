@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -71,8 +73,11 @@ func init() {
 }
 
 func runCIExec(cmd *cobra.Command, args []string) error {
-	if ciOpts.requireHarness == "" {
-		ciOpts.requireHarness = ciOpts.harness
+	runCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	requireHarness := ciOpts.requireHarness
+	if requireHarness == "" {
+		requireHarness = ciOpts.harness
 	}
 	session, err := beaconci.Provision(beaconci.Options{
 		BaseDir:          ciOpts.baseDir,
@@ -88,10 +93,10 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := session.Start(cmd.Context(), os.Stdout, os.Stderr); err != nil {
+	if err := session.Start(runCtx, os.Stdout, os.Stderr); err != nil {
 		return err
 	}
-	childExit, childErr := session.RunChild(cmd.Context(), args, os.Stdout, os.Stderr)
+	childExit, childErr := session.RunChild(runCtx, args, os.Stdout, os.Stderr)
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	stopErr := session.Stop(stopCtx)
 	cancel()
@@ -104,13 +109,19 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 	result := beaconci.Validate(beaconci.ValidationOptions{
 		LogPath:        session.LogPath,
 		MinEvents:      ciOpts.minEvents,
-		RequireHarness: ciOpts.requireHarness,
+		RequireHarness: requireHarness,
 	})
 	execResult := beaconci.ExecResult{
 		Session:         *session,
 		ChildExitCode:   childExit,
 		Validation:      result,
 		ArtifactMessage: fmt.Sprintf("Beacon CI artifacts: log=%s config=%s", session.LogPath, session.ConfigPath),
+	}
+	if !ciOpts.keepArtifacts && result.Status != "fail" && childExit == 0 && ciOpts.baseDir == "" && ciOpts.logPath == "" {
+		if err := os.RemoveAll(session.BaseDir); err != nil {
+			return err
+		}
+		execResult.ArtifactMessage = "Beacon CI artifacts cleaned"
 	}
 	if ciOpts.jsonOutput {
 		_ = json.NewEncoder(os.Stdout).Encode(execResult)

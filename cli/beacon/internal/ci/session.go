@@ -28,7 +28,8 @@ var (
 	resolveCollectorBinary = endpointcollector.ResolveBinary
 	writeCollectorConfig   = endpointcollector.WriteConfig
 	waitCollectorReady     = endpointcollector.WaitUntilReady
-	commandContext         = exec.CommandContext
+	collectorCommand       = exec.Command
+	childCommandContext    = exec.CommandContext
 )
 
 type Options struct {
@@ -55,10 +56,9 @@ type Session struct {
 	StartedAt       string          `json:"started_at"`
 	Run             *schema.RunInfo `json:"run,omitempty"`
 
-	cfg    endpointconfig.Config
-	cancel context.CancelFunc
-	cmd    *exec.Cmd
-	done   chan error
+	cfg  endpointconfig.Config
+	cmd  *exec.Cmd
+	done chan error
 }
 
 type ExecResult struct {
@@ -139,21 +139,21 @@ func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	if s == nil {
 		return errors.New("ci session is nil")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if stdout == nil {
 		stdout = io.Discard
 	}
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	cmd := commandContext(runCtx, s.CollectorBinary, "--config", s.ConfigPath)
+	cmd := collectorCommand(s.CollectorBinary, "--config", s.ConfigPath)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		cancel()
 		return err
 	}
-	s.cancel = cancel
 	s.cmd = cmd
 	s.done = make(chan error, 1)
 	go func() {
@@ -173,9 +173,6 @@ func (s *Session) Stop(ctx context.Context) error {
 	if s.cmd.Process != nil {
 		_ = terminateProcess(s.cmd.Process)
 	}
-	if s.cancel != nil {
-		s.cancel()
-	}
 	select {
 	case err := <-s.done:
 		if err != nil && !isExpectedStopError(err) {
@@ -194,7 +191,7 @@ func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io
 	if len(args) == 0 {
 		return 0, errors.New("child command is required after --")
 	}
-	cmd := commandContext(ctx, args[0], args[1:]...)
+	cmd := childCommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = s.WorkDir
 	cmd.Env = append(ClaudeEnv(os.Environ(), s.GRPCEndpoint, s.cfg.ContentRetention),
 		"BEACON_CI_BASE_DIR="+s.BaseDir,
