@@ -159,7 +159,12 @@ func (t *Tracer) Shutdown(ctx context.Context) error {
 	case err := <-ack:
 		return err
 	case <-t.done:
-		return nil
+		select {
+		case err := <-ack:
+			return err
+		default:
+			return nil
+		}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -190,7 +195,12 @@ func (t *Tracer) sendBarrier(ctx context.Context, kind tracerCommandKind) error 
 	case err := <-ack:
 		return err
 	case <-t.done:
-		return nil
+		select {
+		case err := <-ack:
+			return err
+		default:
+			return nil
+		}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -207,6 +217,26 @@ func (t *Tracer) run() {
 		case tracerCommandFlush:
 			command.ack <- t.opts.Sink.Flush(context.Background())
 		case tracerCommandStop:
+			// Drain captures that raced with stop (enqueued after stop but
+			// before accepting was set to false by the caller).
+		drain:
+			for {
+				select {
+				case cmd := <-t.commands:
+					switch cmd.kind {
+					case tracerCommandCapture:
+						if err := t.writeCapture(context.Background(), cmd.capture); err != nil {
+							t.recordError(err)
+						}
+					case tracerCommandFlush:
+						cmd.ack <- nil
+					case tracerCommandStop:
+						cmd.ack <- nil
+					}
+				default:
+					break drain
+				}
+			}
 			err := t.opts.Sink.Flush(context.Background())
 			if closeErr := t.opts.Sink.Close(); closeErr != nil {
 				err = errors.Join(err, closeErr)
