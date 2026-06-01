@@ -69,6 +69,44 @@ approval decision, repository, session, or message. Quick filters surface
 high-severity events, failures, approvals, MCP activity, file changes, and events
 that may need review.
 
+## Claude Code in CI
+
+Use `beacon ci exec` to collect Claude Code OpenTelemetry for a single CI job
+without installing a persistent endpoint service or changing
+`~/.claude/settings.json`:
+
+```bash
+./beacon ci exec -- claude --print "Summarize this repository in one sentence"
+```
+
+Beacon starts the bundled `beacon-otelcol` in the foreground, writes a
+job-scoped collector config under `$RUNNER_TEMP/beacon` when available, injects
+Claude telemetry environment variables into only the child process, validates
+that structured Beacon events reached the runtime JSONL log, and returns the
+Claude command's exit code when telemetry validation succeeds.
+
+Validate an existing CI artifact explicitly:
+
+```bash
+./beacon ci validate \
+  --log-path "$RUNNER_TEMP/beacon/runtime.jsonl" \
+  --min-events 1
+```
+
+Upload the log from GitHub Actions for customer-controlled retention:
+
+```yaml
+- name: Run Claude with Beacon telemetry
+  run: beacon ci exec -- claude --print "Summarize this repository"
+
+- name: Upload Beacon telemetry
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: beacon-runtime-log
+    path: ${{ runner.temp }}/beacon/runtime.jsonl
+```
+
 ## Wazuh
 
 ```bash

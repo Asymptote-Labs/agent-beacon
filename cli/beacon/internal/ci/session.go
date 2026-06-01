@@ -1,0 +1,347 @@
+package ci
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
+	"time"
+
+	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+)
+
+const (
+	DefaultHarness       = "claude"
+	DefaultValidationMin = 1
+)
+
+var (
+	resolveCollectorBinary = endpointcollector.ResolveBinary
+	writeCollectorConfig   = endpointcollector.WriteConfig
+	waitCollectorReady     = endpointcollector.WaitUntilReady
+	collectorCommand       = exec.Command
+	childCommandContext    = exec.CommandContext
+)
+
+type Options struct {
+	BaseDir          string
+	LogPath          string
+	WorkDir          string
+	CollectorPath    string
+	GRPCPort         int
+	HTTPPort         int
+	Harness          string
+	ContentRetention endpointconfig.ContentRetention
+	KeepArtifacts    bool
+}
+
+type Session struct {
+	BaseDir         string          `json:"base_dir"`
+	LogPath         string          `json:"log_path"`
+	ConfigPath      string          `json:"config_path"`
+	CollectorBinary string          `json:"collector_binary,omitempty"`
+	GRPCEndpoint    string          `json:"grpc_endpoint"`
+	HTTPEndpoint    string          `json:"http_endpoint"`
+	Harness         string          `json:"harness"`
+	WorkDir         string          `json:"work_dir,omitempty"`
+	StartedAt       string          `json:"started_at"`
+	Run             *schema.RunInfo `json:"run,omitempty"`
+
+	cfg       endpointconfig.Config
+	startedAt time.Time
+	cmd       *exec.Cmd
+	done      chan error
+}
+
+type ExecResult struct {
+	Session         Session          `json:"session"`
+	ChildExitCode   int              `json:"child_exit_code"`
+	Validation      ValidationResult `json:"validation"`
+	ArtifactMessage string           `json:"artifact_message,omitempty"`
+}
+
+func Provision(opts Options) (*Session, error) {
+	if err := validateHarness(opts.Harness); err != nil {
+		return nil, err
+	}
+	if opts.ContentRetention == "" {
+		opts.ContentRetention = endpointconfig.ContentRetentionFull
+	}
+	if err := endpointconfig.ValidateContentRetention(opts.ContentRetention); err != nil {
+		return nil, err
+	}
+	baseDir, err := resolveBaseDir(opts.BaseDir, opts.LogPath)
+	if err != nil {
+		return nil, err
+	}
+	logPath := opts.LogPath
+	if logPath == "" {
+		logPath = filepath.Join(baseDir, "runtime.jsonl")
+	} else if !filepath.IsAbs(logPath) {
+		logPath, err = filepath.Abs(logPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	grpcPort := opts.GRPCPort
+	if grpcPort == 0 {
+		grpcPort = endpointconfig.DefaultGRPCPort
+	}
+	httpPort := opts.HTTPPort
+	if httpPort == 0 {
+		httpPort = endpointconfig.DefaultHTTPPort
+	}
+	cfg := endpointconfig.Default(true, logPath)
+	cfg.Harnesses = []string{DefaultHarness}
+	cfg.ContentRetention = opts.ContentRetention
+	cfg.Collector.BinaryPath = opts.CollectorPath
+	cfg.Collector.ConfigPath = filepath.Join(baseDir, "otelcol.yaml")
+	cfg.Collector.SpoolPath = filepath.Join(baseDir, "spool", "otlp.jsonl")
+	cfg.Collector.GRPCPort = grpcPort
+	cfg.Collector.HTTPPort = httpPort
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	if err := writeCollectorConfig(cfg); err != nil {
+		return nil, err
+	}
+	binary, err := resolveCollectorBinary(opts.CollectorPath)
+	if err != nil {
+		return nil, err
+	}
+	startedAt := time.Now().UTC()
+	return &Session{
+		BaseDir:         baseDir,
+		LogPath:         logPath,
+		ConfigPath:      cfg.Collector.ConfigPath,
+		CollectorBinary: binary,
+		GRPCEndpoint:    fmt.Sprintf("http://127.0.0.1:%d", grpcPort),
+		HTTPEndpoint:    fmt.Sprintf("http://127.0.0.1:%d", httpPort),
+		Harness:         DefaultHarness,
+		WorkDir:         opts.WorkDir,
+		StartedAt:       startedAt.Format(time.RFC3339),
+		Run:             detectRunInfo(),
+		cfg:             cfg,
+		startedAt:       startedAt,
+	}, nil
+}
+
+func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
+	if s == nil {
+		return errors.New("ci session is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	cmd := collectorCommand(s.CollectorBinary, "--config", s.ConfigPath)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	s.cmd = cmd
+	s.done = make(chan error, 1)
+	go func() {
+		s.done <- cmd.Wait()
+	}()
+	readyCh := make(chan error, 1)
+	go func() {
+		readyCh <- waitCollectorReady(s.cfg, 10*time.Second)
+	}()
+	var readyErr error
+	select {
+	case readyErr = <-readyCh:
+	case <-ctx.Done():
+		readyErr = ctx.Err()
+	}
+	if readyErr != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		stopErr := s.Stop(cleanupCtx)
+		cleanupCancel()
+		if stopErr != nil {
+			return fmt.Errorf("%w; collector stop also failed: %v", readyErr, stopErr)
+		}
+		return readyErr
+	}
+	return nil
+}
+
+func (s *Session) Stop(ctx context.Context) error {
+	if s == nil || s.cmd == nil {
+		return nil
+	}
+	if s.cmd.Process != nil {
+		_ = terminateProcess(s.cmd.Process)
+	}
+	select {
+	case err := <-s.done:
+		if err != nil && !isExpectedStopError(err) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		if s.cmd.Process != nil {
+			_ = s.cmd.Process.Kill()
+		}
+		return ctx.Err()
+	}
+}
+
+func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	if len(args) == 0 {
+		return 0, errors.New("child command is required after --")
+	}
+	cmd := childCommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = s.WorkDir
+	cmd.Env = append(ClaudeEnv(os.Environ(), s.GRPCEndpoint, s.cfg.ContentRetention),
+		"BEACON_CI_BASE_DIR="+s.BaseDir,
+		"BEACON_CI_CONFIG_PATH="+s.ConfigPath,
+		"BEACON_CI_LOG_PATH="+s.LogPath,
+	)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	if err == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	return 0, err
+}
+
+func (s *Session) Config() endpointconfig.Config {
+	if s == nil {
+		return endpointconfig.Config{}
+	}
+	return s.cfg
+}
+
+func (s *Session) StartedAtTime() time.Time {
+	if s == nil {
+		return time.Time{}
+	}
+	if !s.startedAt.IsZero() {
+		return s.startedAt
+	}
+	startedAt, _ := time.Parse(time.RFC3339, s.StartedAt)
+	return startedAt
+}
+
+func validateHarness(harness string) error {
+	harness = strings.TrimSpace(harness)
+	if harness == "" || harness == DefaultHarness || harness == "claude_code" {
+		return nil
+	}
+	return fmt.Errorf("unsupported CI harness %q; only claude is supported", harness)
+}
+
+func resolveBaseDir(configured, logPath string) (string, error) {
+	if strings.TrimSpace(configured) != "" {
+		if err := os.MkdirAll(configured, 0755); err != nil {
+			return "", err
+		}
+		return filepath.Abs(configured)
+	}
+	if strings.TrimSpace(logPath) != "" {
+		base := filepath.Dir(logPath)
+		if err := os.MkdirAll(base, 0755); err != nil {
+			return "", err
+		}
+		return filepath.Abs(base)
+	}
+	if runnerTemp := strings.TrimSpace(os.Getenv("RUNNER_TEMP")); runnerTemp != "" {
+		base := filepath.Join(runnerTemp, "beacon")
+		if err := os.MkdirAll(base, 0755); err != nil {
+			return "", err
+		}
+		return filepath.Abs(base)
+	}
+	base := filepath.Join(os.TempDir(), "beacon")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Abs(base)
+}
+
+func DefaultLogPath() string {
+	if runnerTemp := strings.TrimSpace(os.Getenv("RUNNER_TEMP")); runnerTemp != "" {
+		return filepath.Join(runnerTemp, "beacon", "runtime.jsonl")
+	}
+	return filepath.Join(os.TempDir(), "beacon", "runtime.jsonl")
+}
+
+func detectRunInfo() *schema.RunInfo {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return &schema.RunInfo{
+			Provider:  "github_actions",
+			RunID:     os.Getenv("GITHUB_RUN_ID"),
+			Workflow:  os.Getenv("GITHUB_WORKFLOW"),
+			Commit:    os.Getenv("GITHUB_SHA"),
+			PR:        os.Getenv("GITHUB_REF"),
+			Actor:     os.Getenv("GITHUB_ACTOR"),
+			Ephemeral: true,
+		}
+	}
+	if os.Getenv("CI") != "" {
+		return &schema.RunInfo{Provider: "ci", Ephemeral: true}
+	}
+	return nil
+}
+
+func terminateProcess(process *os.Process) error {
+	if process == nil {
+		return nil
+	}
+	if runtime.GOOS == "windows" {
+		return process.Kill()
+	}
+	return process.Signal(syscall.SIGTERM)
+}
+
+func isExpectedStopError(err error) bool {
+	if err == nil {
+		return true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "signal: terminated") || strings.Contains(err.Error(), "killed")
+}
+
+func NewSessionEvent(action, message string, run *schema.RunInfo) schema.Event {
+	return schema.NewEvent(schema.NewEventOptions{
+		Action:       action,
+		Category:     "ci",
+		Severity:     schema.SeverityInfo,
+		AgentVersion: version.GetVersion(),
+		Harness:      schema.HarnessInfo{Name: DefaultHarness},
+		Message:      message,
+		Origin:       schema.OriginCI,
+		Run:          run,
+	})
+}
