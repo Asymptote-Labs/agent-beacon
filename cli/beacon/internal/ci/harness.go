@@ -14,6 +14,9 @@ func ClaudeEnv(base []string, endpoint string, retention endpointconfig.ContentR
 	env["OTEL_METRICS_EXPORTER"] = "otlp"
 	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
 	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint
+	delete(env, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+	delete(env, "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 	if retention == endpointconfig.ContentRetentionMetadata {
 		delete(env, "OTEL_LOG_USER_PROMPTS")
 	} else {

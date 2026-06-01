@@ -101,7 +101,7 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		return childErr
 	}
 	if stopErr != nil {
-		return stopErr
+		fmt.Fprintf(os.Stderr, "Warning: collector stop: %v\n", stopErr)
 	}
 	result := beaconci.Validate(beaconci.ValidationOptions{
 		LogPath:        session.LogPath,
@@ -117,9 +117,10 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 	}
 	if !ciOpts.keepArtifacts && result.Status != "fail" && childExit == 0 && ciOpts.baseDir == "" && ciOpts.logPath == "" {
 		if err := os.RemoveAll(session.BaseDir); err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "Warning: artifact cleanup: %v\n", err)
+		} else {
+			execResult.ArtifactMessage = "Beacon CI artifacts cleaned"
 		}
-		execResult.ArtifactMessage = "Beacon CI artifacts cleaned"
 	}
 	if ciOpts.jsonOutput {
 		_ = json.NewEncoder(os.Stdout).Encode(execResult)

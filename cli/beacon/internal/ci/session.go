@@ -86,6 +86,11 @@ func Provision(opts Options) (*Session, error) {
 	logPath := opts.LogPath
 	if logPath == "" {
 		logPath = filepath.Join(baseDir, "runtime.jsonl")
+	} else if !filepath.IsAbs(logPath) {
+		logPath, err = filepath.Abs(logPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	grpcPort := opts.GRPCPort
 	if grpcPort == 0 {
@@ -161,9 +166,21 @@ func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	go func() {
 		s.done <- cmd.Wait()
 	}()
-	if err := waitCollectorReady(s.cfg, 10*time.Second); err != nil {
-		_ = s.Stop(context.Background())
-		return err
+	readyCh := make(chan error, 1)
+	go func() {
+		readyCh <- waitCollectorReady(s.cfg, 10*time.Second)
+	}()
+	var readyErr error
+	select {
+	case readyErr = <-readyCh:
+	case <-ctx.Done():
+		readyErr = ctx.Err()
+	}
+	if readyErr != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.Stop(cleanupCtx)
+		cleanupCancel()
+		return readyErr
 	}
 	return nil
 }
@@ -260,7 +277,11 @@ func resolveBaseDir(configured, logPath string) (string, error) {
 		}
 		return filepath.Abs(base)
 	}
-	return os.MkdirTemp("", "beacon-ci-*")
+	base := filepath.Join(os.TempDir(), "beacon")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Abs(base)
 }
 
 func DefaultLogPath() string {
