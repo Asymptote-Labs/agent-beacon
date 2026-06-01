@@ -97,11 +97,11 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	stopErr := session.Stop(stopCtx)
 	cancel()
-	if childErr != nil {
-		return childErr
-	}
 	if stopErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: collector stop: %v\n", stopErr)
+	}
+	if childErr != nil {
+		return childErr
 	}
 	result := beaconci.Validate(beaconci.ValidationOptions{
 		LogPath:        session.LogPath,

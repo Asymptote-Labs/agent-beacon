@@ -178,8 +178,11 @@ func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	}
 	if readyErr != nil {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = s.Stop(cleanupCtx)
+		stopErr := s.Stop(cleanupCtx)
 		cleanupCancel()
+		if stopErr != nil {
+			return fmt.Errorf("%w; collector stop also failed: %v", readyErr, stopErr)
+		}
 		return readyErr
 	}
 	return nil
