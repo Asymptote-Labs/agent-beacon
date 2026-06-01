@@ -1,0 +1,90 @@
+name: Release Check
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          install-only: true
+
+      - name: Install OpenTelemetry Collector Builder
+        run: go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+
+      - name: Build collector distributions
+        run: bash collector-builder/build-release-collectors.sh
+
+      - name: Validate native collector binary
+        run: collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol --version
+
+      - name: Check GoReleaser config
+        working-directory: cli/beacon
+        env:
+          HOMEBREW_TAP_TOKEN: snapshot
+        run: goreleaser check
+
+      - name: Build snapshot release
+        working-directory: cli/beacon
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_TOKEN: snapshot
+        run: goreleaser release --snapshot --clean --parallelism 1
+
+      - name: Assert release archives
+        working-directory: cli/beacon
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          archives=(dist/*.tar.gz)
+          if [ "${#archives[@]}" -eq 0 ]; then
+            echo "no release archives produced"
+            exit 1
+          fi
+
+          linux_archive=""
+          for archive in "${archives[@]}"; do
+            echo "Checking $archive"
+            tar -tzf "$archive" | awk '
+              /(^|\/)beacon$/ { beacon = 1 }
+              /(^|\/)beacon-otelcol$/ { collector = 1 }
+              END {
+                if (!beacon || !collector) {
+                  print "archive is missing beacon or beacon-otelcol"
+                  exit 1
+                }
+              }
+            '
+
+            case "$archive" in
+              *linux_amd64.tar.gz)
+                linux_archive="$archive"
+                ;;
+            esac
+          done
+
+          if [ -z "$linux_archive" ]; then
+            echo "linux_amd64 archive not found"
+            exit 1
+          fi
+
+          extract_dir="$(mktemp -d)"
+          tar -xzf "$linux_archive" -C "$extract_dir"
+          "$extract_dir/beacon" version

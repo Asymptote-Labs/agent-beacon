@@ -23,6 +23,9 @@ jobs:
       - name: Test hooks
         working-directory: cli/beacon-hooks
         run: go test ./...
+      - name: Test collector exporter
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
       - name: Public CLI command tree smoke test
         working-directory: cli/beacon
         run: |
@@ -39,6 +42,33 @@ jobs:
               exit 1
             fi
           done
+
+  cross-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+            make_target: build-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            make_target: build-darwin-arm64
+          - goos: linux
+            goarch: amd64
+            make_target: build-linux-amd64
+          - goos: linux
+            goarch: arm64
+            make_target: build-linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Build Beacon for ${{ matrix.goos }}/${{ matrix.goarch }}
+        working-directory: cli/beacon
+        run: make ${{ matrix.make_target }}
 
   package-smoke:
     runs-on: macos-latest
