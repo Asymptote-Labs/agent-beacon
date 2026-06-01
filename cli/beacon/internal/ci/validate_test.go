@@ -75,6 +75,41 @@ func TestValidateFiltersEventsBeforeSince(t *testing.T) {
 	}
 }
 
+func TestValidateSinceIgnoresOldMalformedLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	// Write an old malformed line followed by a valid new event.
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("{not-json}\n"); err != nil {
+		t.Fatal(err)
+	}
+	event := NewSessionEvent("ci.test", "test event", nil)
+	event.Harness.Name = "claude_code"
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	result := Validate(ValidationOptions{
+		LogPath:        path,
+		MinEvents:      1,
+		RequireHarness: "claude",
+		Since:          time.Now().Add(-1 * time.Minute),
+	})
+	if result.Status != "ok" {
+		t.Fatalf("Validate status = %q, want ok; old malformed line should be ignored with Since filter; stages=%#v", result.Status, result.Stages)
+	}
+	if result.EventCount != 1 {
+		t.Fatalf("EventCount = %d, want 1", result.EventCount)
+	}
+}
+
 func writeEventLine(t *testing.T, path string, event schema.Event) {
 	t.Helper()
 	data, err := json.Marshal(event)

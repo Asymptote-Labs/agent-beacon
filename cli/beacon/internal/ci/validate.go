@@ -95,6 +95,7 @@ func readStructuredEvents(path string, since time.Time) ([]schema.Event, []strin
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	lineNo := 0
+	filtering := !since.IsZero()
 	for scanner.Scan() {
 		lineNo++
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -103,22 +104,21 @@ func readStructuredEvents(path string, since time.Time) ([]schema.Event, []strin
 		}
 		var event schema.Event
 		if err := json.Unmarshal(line, &event); err != nil {
+			if filtering {
+				continue
+			}
 			malformed = append(malformed, fmt.Sprintf("line %d: %v", lineNo, err))
 			continue
+		}
+		if filtering {
+			ts, err := time.Parse(time.RFC3339, event.Timestamp)
+			if err != nil || ts.Before(since) {
+				continue
+			}
 		}
 		if err := event.Validate(); err != nil {
 			malformed = append(malformed, fmt.Sprintf("line %d: %v", lineNo, err))
 			continue
-		}
-		if !since.IsZero() {
-			ts, err := time.Parse(time.RFC3339, event.Timestamp)
-			if err != nil {
-				malformed = append(malformed, fmt.Sprintf("line %d: timestamp is not RFC3339", lineNo))
-				continue
-			}
-			if ts.Before(since) {
-				continue
-			}
 		}
 		events = append(events, event)
 	}
