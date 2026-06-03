@@ -2,7 +2,7 @@
   <img src="images/beacon-hero.png" alt="Beacon" width="860">
 </p>
 
-<h1 align="center">Asymptote Lab's Beacon</h1>
+<h1 align="center">Asymptote Lab's Agent Beacon</h1>
 
 <p align="center">
   <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
@@ -31,9 +31,9 @@
   <a href="https://docs.asymptotelabs.ai/cli/command-reference">Commands</a>
 </p>
 
-## What Is Beacon?
+## What is Agent Beacon
 
-Beacon is [Asymptote's open-source endpoint agent](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for security and IT teams that
+Agent Beacon is [Asymptote's open-source endpoint agent](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for security and IT teams that
 need visibility into local AI agent activity.
 
 It runs locally, captures all agent activity (e.g. prompts, tool use, file edits, etc.) from
@@ -76,11 +76,12 @@ Agent Beacon supports the most popular enterprise coding agent harnesses (e.g.
 Claude Code, Codex, Cursor, etc.) and knowledge worker agent harnesses (e.g.
 Claude Cowork, OpenClaw).
 
-| Agent Harness | Support path |
+#### Coding Agent Harnesses
+
+| Agent harness | Support path |
 | --- | --- |
 | [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Beacon hook adapter |
 | [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OpenTelemetry configuration or Beacon hook adapter |
-| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OpenTelemetry setup |
 | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OpenTelemetry configuration |
 | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Beacon hook adapter |
 | [Devin](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Beacon hook adapter |
@@ -88,9 +89,15 @@ Claude Cowork, OpenClaw).
 | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OpenTelemetry configuration |
 | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OpenTelemetry (OTLP HTTP) |
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Beacon hook adapter |
-| [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP export |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Beacon hook adapter |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | VS Code Copilot OpenTelemetry and optional Beacon hook adapter |
+
+#### Knowledge Worker Agent Harnesses
+
+| Agent harness | Support path |
+| --- | --- |
+| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OpenTelemetry setup |
+| [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP export |
 
 ### Output Destinations
 
