@@ -10,6 +10,7 @@
   <a href="https://github.com/asymptote-labs/agent-beacon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/asymptote-labs/agent-beacon/ci.yml" alt="GitHub Workflow Status"></a>
   <a href="https://github.com/asymptote-labs/agent-beacon/blob/main/LICENSE"><img src="https://img.shields.io/github/license/asymptote-labs/agent-beacon" alt="MIT license"></a>
   <a href="https://docs.asymptotelabs.ai/cli"><img src="https://img.shields.io/badge/docs-asymptotelabs.ai-0369a1" alt="Docs"></a>
+  <a href="https://discord.gg/7DjzWWmc"><img src="https://img.shields.io/badge/discord-community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
@@ -18,6 +19,8 @@
 
 <p align="center">
   <a href="https://docs.asymptotelabs.ai/cli">Docs</a>
+  ·
+  <a href="https://discord.gg/7DjzWWmc">Discord</a>
   ·
   <a href="https://docs.asymptotelabs.ai/cli/installation">Install</a>
   ·
