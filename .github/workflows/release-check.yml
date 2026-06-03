@@ -31,7 +31,16 @@ jobs:
         run: bash collector-builder/build-release-collectors.sh
 
       - name: Validate native collector binary
-        run: collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol --version
+        shell: bash
+        run: |
+          set -euo pipefail
+          collector=collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol
+          test -x "$collector"
+          "$collector" components | awk '
+            /name: beaconjson/ { beaconjson = 1 }
+            /name: falcon_hec/ { falcon_hec = 1 }
+            END { exit !(beaconjson && falcon_hec) }
+          '
 
       - name: Check GoReleaser config
         working-directory: cli/beacon
