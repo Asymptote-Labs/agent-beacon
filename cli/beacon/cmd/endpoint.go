@@ -17,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/datadog"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/elastic"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/gcs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
@@ -192,6 +193,11 @@ var endpointRapid7Cmd = &cobra.Command{
 var endpointS3Cmd = &cobra.Command{
 	Use:   "s3",
 	Short: "Manage AWS S3 forwarding content",
+}
+
+var endpointGCSCmd = &cobra.Command{
+	Use:   "gcs",
+	Short: "Manage Google Cloud Storage forwarding content",
 }
 
 var endpointSentinelCmd = &cobra.Command{
@@ -641,6 +647,35 @@ var endpointS3ValidateCmd = &cobra.Command{
 	RunE:         runEndpointS3Validate,
 }
 
+var endpointGCSPrintConfigCmd = &cobra.Command{
+	Use:          "print-config",
+	Short:        "Print a Google Cloud Storage smoke-test uploader for Beacon endpoint events",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := loadOrDefaultConfig()
+		snippet, err := gcs.UploadSmokeTest(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
+	},
+}
+
+var endpointGCSInstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write Google Cloud Storage forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointGCSInstallPack,
+}
+
+var endpointGCSValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe a Google Cloud Storage validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointGCSValidate,
+}
+
 var endpointSentinelPrintConfigCmd = &cobra.Command{
 	Use:   "print-config",
 	Short: "Print a Sentinel DCR transform for Beacon endpoint events",
@@ -687,6 +722,7 @@ func init() {
 	endpointCmd.AddCommand(endpointSumoCmd)
 	endpointCmd.AddCommand(endpointRapid7Cmd)
 	endpointCmd.AddCommand(endpointS3Cmd)
+	endpointCmd.AddCommand(endpointGCSCmd)
 	endpointCmd.AddCommand(endpointSentinelCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
@@ -713,6 +749,9 @@ func init() {
 	endpointS3Cmd.AddCommand(endpointS3PrintConfigCmd)
 	endpointS3Cmd.AddCommand(endpointS3InstallPackCmd)
 	endpointS3Cmd.AddCommand(endpointS3ValidateCmd)
+	endpointGCSCmd.AddCommand(endpointGCSPrintConfigCmd)
+	endpointGCSCmd.AddCommand(endpointGCSInstallPackCmd)
+	endpointGCSCmd.AddCommand(endpointGCSValidateCmd)
 	endpointSentinelCmd.AddCommand(endpointSentinelPrintConfigCmd)
 	endpointSentinelCmd.AddCommand(endpointSentinelInstallPackCmd)
 	endpointSentinelCmd.AddCommand(endpointSentinelValidateCmd)
@@ -827,6 +866,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointS3InstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for AWS S3 content pack")
+	for _, c := range []*cobra.Command{endpointGCSPrintConfigCmd, endpointGCSInstallPackCmd, endpointGCSValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointGCSInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Google Cloud Storage content pack")
 	for _, c := range []*cobra.Command{endpointSentinelPrintConfigCmd, endpointSentinelInstallPackCmd, endpointSentinelValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -1302,6 +1347,32 @@ func runEndpointS3Validate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Expected S3 fields: vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl")
 	fmt.Println(`Confirm delivery with AWS CLI: aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/" --recursive`)
 	fmt.Println(`Inspect an object with AWS CLI: aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/date=<date>/<object>.jsonl.gz" - | gzip -dc | grep "Beacon endpoint S3 validation event"`)
+	return nil
+}
+
+func runEndpointGCSInstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = gcs.DefaultOutputDir
+	}
+	if err := gcs.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("Google Cloud Storage content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointGCSValidate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "gcs")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected GCS fields: vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl")
+	fmt.Println(`Confirm delivery with Google Cloud CLI: gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/**"`)
+	fmt.Println(`Inspect an object with Google Cloud CLI: gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"`)
 	return nil
 }
 

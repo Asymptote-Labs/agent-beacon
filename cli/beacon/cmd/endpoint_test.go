@@ -281,6 +281,30 @@ func TestEndpointS3CommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointGCSCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"gcs", "print-config"},
+		{"gcs", "install-pack"},
+		{"gcs", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("gcs command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("gcs command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointGCSInstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("gcs install-pack command missing --output flag")
+	}
+}
+
 func TestEndpointSentinelCommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
 		{"sentinel", "print-config"},
@@ -634,6 +658,14 @@ func TestSyntheticEventDestinations(t *testing.T) {
 	if s3Event.Message != "Beacon endpoint S3 validation event" {
 		t.Fatalf("s3 message = %q", s3Event.Message)
 	}
+
+	gcsEvent := syntheticEvent("gcs")
+	if gcsEvent.Destination.Type != "gcs" || gcsEvent.Destination.Mode != "google_cloud_storage_jsonl" {
+		t.Fatalf("gcs destination = %#v", gcsEvent.Destination)
+	}
+	if gcsEvent.Message != "Beacon endpoint GCS validation event" {
+		t.Fatalf("gcs message = %q", gcsEvent.Message)
+	}
 }
 
 func TestEndpointS3ValidatePrintsAWSCLIInspectionGuidance(t *testing.T) {
@@ -668,6 +700,41 @@ func TestEndpointS3ValidatePrintsAWSCLIInspectionGuidance(t *testing.T) {
 	}
 	if strings.Contains(output, "verified delivery") {
 		t.Fatalf("S3 validation output should not claim remote delivery verification: %s", output)
+	}
+}
+
+func TestEndpointGCSValidatePrintsGoogleCloudCLIInspectionGuidance(t *testing.T) {
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+	t.Cleanup(func() {
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointGCSValidate(endpointGCSValidateCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runEndpointGCSValidate returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Validation event written to",
+		"destination.type=gcs destination.mode=google_cloud_storage_jsonl",
+		"gcloud storage ls",
+		"gcloud storage cat",
+		"Beacon endpoint GCS validation event",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("GCS validation output missing %q: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "verified delivery") {
+		t.Fatalf("GCS validation output should not claim remote delivery verification: %s", output)
 	}
 }
 

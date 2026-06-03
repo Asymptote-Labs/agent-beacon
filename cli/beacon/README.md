@@ -155,6 +155,21 @@ Store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules,
 and encryption settings in AWS, Vector, or deployment tooling, not in Beacon
 endpoint configuration.
 
+## Google Cloud Storage
+
+```bash
+./beacon endpoint gcs print-config
+./beacon endpoint gcs install-pack --output ./beacon-gcs-pack
+./beacon endpoint gcs validate
+```
+
+The GCS pack keeps Beacon as a local JSONL producer and documents forwarding
+`runtime.jsonl` into a Google Cloud Storage bucket with a customer-managed
+Vector host agent. Store Google credentials, service accounts, workload
+identity, bucket IAM, lifecycle rules, retention policies, and encryption
+settings in Google Cloud, Vector, or deployment tooling, not in Beacon endpoint
+configuration.
+
 ## Microsoft Sentinel
 
 ```bash

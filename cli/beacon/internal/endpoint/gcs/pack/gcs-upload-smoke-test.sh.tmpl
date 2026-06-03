@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
+BEACON_GCS_PREFIX="${BEACON_GCS_PREFIX:-beacon/runtime}"
+
+if [ -z "${BEACON_GCS_BUCKET:-}" ]; then
+  echo "BEACON_GCS_BUCKET is required." >&2
+  exit 2
+fi
+
+if [ ! -r "$BEACON_LOG" ]; then
+  echo "Beacon runtime log is not readable: $BEACON_LOG" >&2
+  exit 2
+fi
+
+prefix="${BEACON_GCS_PREFIX%/}"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+uri="gs://${BEACON_GCS_BUCKET}/${prefix}/smoke-tests/beacon-runtime-${timestamp}.jsonl"
+
+if command -v gcloud >/dev/null 2>&1; then
+  gcloud storage cp "$BEACON_LOG" "$uri" --content-type="application/x-ndjson"
+elif command -v gsutil >/dev/null 2>&1; then
+  gsutil -h "Content-Type:application/x-ndjson" cp "$BEACON_LOG" "$uri"
+else
+  echo "gcloud or gsutil is required for this smoke test." >&2
+  exit 2
+fi
+
+echo "Uploaded one-shot Beacon log copy to $uri"
+echo "Google credentials were resolved by Application Default Credentials or gcloud/gsutil configuration."
+echo "This script is for validation only; use vector.toml for production forwarding."
