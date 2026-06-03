@@ -178,7 +178,8 @@ is not required unless a maintainer asks.
 
 If you are unsure whether a change fits Beacon's scope, open a GitHub issue or a
 draft pull request with the problem, proposed approach, and what you can verify
-locally.
+locally. You can also join the
+[Discord community](https://discord.gg/7DjzWWmc) for questions and discussion.
 
 ## Pull Request Checklist
 
