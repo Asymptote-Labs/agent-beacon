@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
+BEACON_S3_PREFIX="${BEACON_S3_PREFIX:-beacon/runtime}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+
+if [ -z "${BEACON_S3_BUCKET:-}" ]; then
+  echo "BEACON_S3_BUCKET is required." >&2
+  exit 2
+fi
+
+if ! command -v aws >/dev/null 2>&1; then
+  echo "aws CLI is required for this smoke test." >&2
+  exit 2
+fi
+
+if [ ! -r "$BEACON_LOG" ]; then
+  echo "Beacon runtime log is not readable: $BEACON_LOG" >&2
+  exit 2
+fi
+
+prefix="${BEACON_S3_PREFIX%/}"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+key="${prefix}/smoke-tests/beacon-runtime-${timestamp}.jsonl"
+
+aws s3 cp "$BEACON_LOG" "s3://${BEACON_S3_BUCKET}/${key}" \
+  --region "$AWS_REGION" \
+  --content-type "application/x-ndjson"
+
+echo "Uploaded one-shot Beacon log copy to s3://${BEACON_S3_BUCKET}/${key}"
+echo "AWS credentials were resolved by the standard AWS credential provider chain."
+echo "This script is for validation only; use vector.toml for production forwarding."

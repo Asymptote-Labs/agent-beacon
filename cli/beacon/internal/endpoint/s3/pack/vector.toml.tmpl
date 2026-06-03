@@ -1,0 +1,48 @@
+# Beacon Endpoint Agent -> AWS S3
+#
+# Run Vector as a customer-managed host agent. Keep AWS credentials, profiles,
+# instance roles, and bucket policy in AWS or deployment tooling, not in Beacon
+# config. This template relies on the standard AWS credential provider chain.
+
+data_dir = "/var/lib/vector/beacon-s3"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+read_from = "end"
+
+[transforms.beacon_json]
+type = "remap"
+inputs = ["beacon_runtime"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.beacon_s3]
+type = "aws_s3"
+inputs = ["beacon_json"]
+bucket = "${BEACON_S3_BUCKET}"
+region = "${AWS_REGION:-us-east-1}"
+key_prefix = "${BEACON_S3_PREFIX:-beacon/runtime}/date=%F/"
+filename_time_format = "%s"
+filename_append_uuid = true
+filename_extension = "jsonl.gz"
+compression = "gzip"
+content_encoding = "gzip"
+content_type = "application/x-ndjson"
+storage_class = "${BEACON_S3_STORAGE_CLASS:-STANDARD}"
+
+[sinks.beacon_s3.encoding]
+codec = "json"
+
+[sinks.beacon_s3.framing]
+method = "newline_delimited"
+
+[sinks.beacon_s3.batch]
+max_bytes = 10000000
+timeout_secs = 300
+
+[sinks.beacon_s3.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300

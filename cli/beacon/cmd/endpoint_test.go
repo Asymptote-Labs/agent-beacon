@@ -257,6 +257,30 @@ func TestEndpointRapid7CommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointS3CommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"s3", "print-config"},
+		{"s3", "install-pack"},
+		{"s3", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("s3 command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("s3 command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointS3InstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("s3 install-pack command missing --output flag")
+	}
+}
+
 func TestEndpointSentinelCommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
 		{"sentinel", "print-config"},
@@ -601,6 +625,49 @@ func TestSyntheticEventDestinations(t *testing.T) {
 	}
 	if rapid7Event.Message != "Beacon endpoint Rapid7 validation event" {
 		t.Fatalf("rapid7 message = %q", rapid7Event.Message)
+	}
+
+	s3Event := syntheticEvent("s3")
+	if s3Event.Destination.Type != "s3" || s3Event.Destination.Mode != "aws_s3_jsonl" {
+		t.Fatalf("s3 destination = %#v", s3Event.Destination)
+	}
+	if s3Event.Message != "Beacon endpoint S3 validation event" {
+		t.Fatalf("s3 message = %q", s3Event.Message)
+	}
+}
+
+func TestEndpointS3ValidatePrintsAWSCLIInspectionGuidance(t *testing.T) {
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+	t.Cleanup(func() {
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointS3Validate(endpointS3ValidateCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runEndpointS3Validate returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Validation event written to",
+		"destination.type=s3 destination.mode=aws_s3_jsonl",
+		"aws s3 ls",
+		"aws s3 cp",
+		"Beacon endpoint S3 validation event",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("S3 validation output missing %q: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "verified delivery") {
+		t.Fatalf("S3 validation output should not claim remote delivery verification: %s", output)
 	}
 }
 

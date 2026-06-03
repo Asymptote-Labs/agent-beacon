@@ -573,6 +573,9 @@ func syntheticEvent(destination string) schema.Event {
 	case "rapid7":
 		mode = "custom_logs_webhook_ndjson"
 		message = "Beacon endpoint Rapid7 validation event"
+	case "s3":
+		mode = "aws_s3_jsonl"
+		message = "Beacon endpoint S3 validation event"
 	case "sentinel":
 		mode = "azure_monitor_agent_custom_json_logs"
 		message = "Beacon endpoint Sentinel validation event"

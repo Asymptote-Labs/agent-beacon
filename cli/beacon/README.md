@@ -141,6 +141,20 @@ The Rapid7 pack keeps Beacon as a local JSONL producer and documents forwarding
 webhook URL in your customer-managed shipper or deployment tooling, not in
 Beacon endpoint configuration.
 
+## AWS S3
+
+```bash
+./beacon endpoint s3 print-config
+./beacon endpoint s3 install-pack --output ./beacon-s3-pack
+./beacon endpoint s3 validate
+```
+
+The S3 pack keeps Beacon as a local JSONL producer and documents forwarding
+`runtime.jsonl` into an AWS S3 bucket with a customer-managed Vector host agent.
+Store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules,
+and encryption settings in AWS, Vector, or deployment tooling, not in Beacon
+endpoint configuration.
+
 ## Microsoft Sentinel
 
 ```bash

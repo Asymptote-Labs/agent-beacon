@@ -24,6 +24,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/vscode"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/rapid7"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/s3"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sentinel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sumo"
@@ -186,6 +187,11 @@ var endpointSumoCmd = &cobra.Command{
 var endpointRapid7Cmd = &cobra.Command{
 	Use:   "rapid7",
 	Short: "Manage Rapid7 InsightIDR integration content",
+}
+
+var endpointS3Cmd = &cobra.Command{
+	Use:   "s3",
+	Short: "Manage AWS S3 forwarding content",
 }
 
 var endpointSentinelCmd = &cobra.Command{
@@ -606,6 +612,35 @@ var endpointRapid7ValidateCmd = &cobra.Command{
 	RunE:         runEndpointRapid7Validate,
 }
 
+var endpointS3PrintConfigCmd = &cobra.Command{
+	Use:          "print-config",
+	Short:        "Print an AWS CLI S3 smoke-test uploader for Beacon endpoint events",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := loadOrDefaultConfig()
+		snippet, err := s3.UploadSmokeTest(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
+	},
+}
+
+var endpointS3InstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write AWS S3 forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointS3InstallPack,
+}
+
+var endpointS3ValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe an AWS S3 validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointS3Validate,
+}
+
 var endpointSentinelPrintConfigCmd = &cobra.Command{
 	Use:   "print-config",
 	Short: "Print a Sentinel DCR transform for Beacon endpoint events",
@@ -651,6 +686,7 @@ func init() {
 	endpointCmd.AddCommand(endpointDatadogCmd)
 	endpointCmd.AddCommand(endpointSumoCmd)
 	endpointCmd.AddCommand(endpointRapid7Cmd)
+	endpointCmd.AddCommand(endpointS3Cmd)
 	endpointCmd.AddCommand(endpointSentinelCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
@@ -674,6 +710,9 @@ func init() {
 	endpointRapid7Cmd.AddCommand(endpointRapid7PrintConfigCmd)
 	endpointRapid7Cmd.AddCommand(endpointRapid7InstallPackCmd)
 	endpointRapid7Cmd.AddCommand(endpointRapid7ValidateCmd)
+	endpointS3Cmd.AddCommand(endpointS3PrintConfigCmd)
+	endpointS3Cmd.AddCommand(endpointS3InstallPackCmd)
+	endpointS3Cmd.AddCommand(endpointS3ValidateCmd)
 	endpointSentinelCmd.AddCommand(endpointSentinelPrintConfigCmd)
 	endpointSentinelCmd.AddCommand(endpointSentinelInstallPackCmd)
 	endpointSentinelCmd.AddCommand(endpointSentinelValidateCmd)
@@ -782,6 +821,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointRapid7InstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for Rapid7 InsightIDR content pack")
+	for _, c := range []*cobra.Command{endpointS3PrintConfigCmd, endpointS3InstallPackCmd, endpointS3ValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointS3InstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for AWS S3 content pack")
 	for _, c := range []*cobra.Command{endpointSentinelPrintConfigCmd, endpointSentinelInstallPackCmd, endpointSentinelValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -1231,6 +1276,32 @@ func runEndpointRapid7Validate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Validation event written to %s\n", path)
 	fmt.Println("Expected Rapid7 fields: vendor=beacon product=endpoint-agent destination.type=rapid7")
 	fmt.Println(`Expected validation query: "Beacon endpoint Rapid7 validation event"`)
+	return nil
+}
+
+func runEndpointS3InstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = s3.DefaultOutputDir
+	}
+	if err := s3.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("AWS S3 content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointS3Validate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "s3")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected S3 fields: vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl")
+	fmt.Println(`Confirm delivery with AWS CLI: aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/" --recursive`)
+	fmt.Println(`Inspect an object with AWS CLI: aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/date=<date>/<object>.jsonl.gz" - | gzip -dc | grep "Beacon endpoint S3 validation event"`)
 	return nil
 }
 
