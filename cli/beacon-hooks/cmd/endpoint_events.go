@@ -21,6 +21,9 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if platformFlag == "vscode" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"vscode": input})
 	}
+	if isCascadePlatform(platformFlag) {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"cascade": input})
+	}
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}
@@ -161,7 +164,7 @@ func actionForTool(hookEvent, toolName string) string {
 			return "file.modified"
 		}
 	}
-	if platformFlag == "devin" {
+	if isDevinLikePlatform(platformFlag) {
 		switch {
 		case strings.HasPrefix(lower, "mcp__"):
 			return "mcp.tool_invoked"

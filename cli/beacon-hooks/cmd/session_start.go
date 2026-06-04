@@ -32,7 +32,7 @@ func runSessionStart(cmd *cobra.Command, args []string) {
 
 	sessionID := resolveSessionID(input, platformFlag)
 	if sessionID == "" {
-		if platformFlag == "devin" {
+		if isDevinLikePlatform(platformFlag) {
 			logger := logging.NewLoggerForPlatform("session-start", platformFlag)
 			logger.Info("Session initialized", "platform", platformFlag)
 			emitHookEvent(logger, "session.started", "session", "info", "Agent session started", input, sessionFields("", input))

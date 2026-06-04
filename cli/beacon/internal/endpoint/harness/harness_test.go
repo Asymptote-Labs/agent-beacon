@@ -537,6 +537,9 @@ func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
 	if !h.Detected {
 		t.Fatalf("DiscoverDevin did not detect executable on PATH: %#v", h)
 	}
+	if h.Name != "devin-cli" || h.DisplayName != "Devin CLI" {
+		t.Fatalf("Devin harness identity = %s/%s, want devin-cli/Devin CLI", h.Name, h.DisplayName)
+	}
 	if h.ExecutablePath != devinPath {
 		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, devinPath)
 	}
@@ -545,6 +548,29 @@ func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
 	}
 	if h.ConfigPath != filepath.Join(home, ".config", "devin", "config.json") {
 		t.Fatalf("ConfigPath = %q, want user config path", h.ConfigPath)
+	}
+}
+
+func TestDiscoverDevinDesktopDetectsAppSupport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	appSupport := filepath.Join(home, "Library", "Application Support", "Devin")
+	if err := os.MkdirAll(appSupport, 0755); err != nil {
+		t.Fatalf("mkdir app support: %v", err)
+	}
+
+	h := DiscoverDevinDesktop()
+	if !h.Detected {
+		t.Fatalf("DiscoverDevinDesktop did not detect app support: %#v", h)
+	}
+	if h.Name != "devin-desktop" || h.DisplayName != "Devin Desktop" {
+		t.Fatalf("Desktop harness identity = %s/%s, want devin-desktop/Devin Desktop", h.Name, h.DisplayName)
+	}
+	if h.ExecutablePath != appSupport && h.ExecutablePath != "/Applications/Devin.app" {
+		t.Fatalf("ExecutablePath = %q, want app support or app path", h.ExecutablePath)
+	}
+	if h.ConfigPath != filepath.Join(home, ".codeium", "windsurf", "hooks.json") {
+		t.Fatalf("ConfigPath = %q, want Windsurf user hooks path", h.ConfigPath)
 	}
 }
 
@@ -559,6 +585,8 @@ func TestDevinStatusVariants(t *testing.T) {
 		{name: "no beacon hooks", body: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`, status: TelemetryDisabled},
 		{name: "enabled", body: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin pre-tool"}]}]}}`, status: TelemetryEnabled},
 		{name: "standalone enabled", body: `{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin pre-tool"}]}]}`, status: TelemetryEnabled},
+		{name: "devin cli enabled", body: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-cli pre-tool"}]}]}}`, status: TelemetryEnabled},
+		{name: "desktop does not satisfy cli", body: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop pre-tool"}]}]}}`, status: TelemetryDisabled},
 		{name: "beacon string outside hooks", body: `{"note":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin pre-tool"}`, status: TelemetryDisabled},
 	}
 
@@ -568,11 +596,23 @@ func TestDevinStatusVariants(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.body), 0600); err != nil {
 				t.Fatalf("write fixture: %v", err)
 			}
-			status, _ := devinStatus(path)
+			status, _ := devinStatus(path, "devin", "devin-cli")
 			if status != tt.status {
 				t.Fatalf("devinStatus = %q, want %q", status, tt.status)
 			}
 		})
+	}
+}
+
+func TestDevinDesktopStatusVariants(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop.json")
+	body := `{"hooks":{"post_write_code":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop post-tool"}]}}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	status, _ := windsurfCascadeStatus(path, "devin-desktop")
+	if status != TelemetryEnabled {
+		t.Fatalf("windsurfCascadeStatus desktop = %q, want enabled", status)
 	}
 }
 

@@ -12,9 +12,10 @@ type settingsHookGroup struct {
 }
 
 type settingsHookRef struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
-	Timeout int    `json:"timeout,omitempty"`
+	Type       string `json:"type,omitempty"`
+	Command    string `json:"command"`
+	Timeout    int    `json:"timeout,omitempty"`
+	ShowOutput *bool  `json:"show_output,omitempty"`
 }
 
 type settingsHooksFile struct {

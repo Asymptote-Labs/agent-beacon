@@ -199,8 +199,12 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint hooks install --harness grok
 ./beacon endpoint hooks status --harness grok
 
-./beacon endpoint hooks install --harness devin --level project
-./beacon endpoint hooks status --harness devin --level project
+./beacon endpoint hooks install --harness devin-cli --level project
+./beacon endpoint hooks status --harness devin-cli --level project
+./beacon endpoint hooks install --harness devin-desktop --level user
+./beacon endpoint hooks status --harness devin-desktop --level user
+
+./beacon endpoint install --harness claude,codex,devin-cli,devin-desktop
 
 ./beacon endpoint integrations claude-cowork setup --endpoint https://collector.example.com --open
 ./beacon endpoint integrations claude-cowork setup --ngrok --open
@@ -237,11 +241,24 @@ The Grok Build integration writes Beacon's owned local hook file at
 for project-level installs. Project hooks require trusting the project in Grok
 with `/hooks-trust` before they execute.
 
-The Devin integration writes Claude-compatible command hooks for Devin for
-Terminal. Project-level installs use `.devin/hooks.v1.json`; user-level installs
-use `~/.config/devin/config.json` under the `hooks` key. The hooks invoke
-Beacon's local Go hook binary and write normalized prompt, tool, command, file,
-approval, and session events to the configured runtime JSONL log.
+The Devin CLI integration writes Claude-compatible command hooks for Devin for
+Terminal. `devin` remains a legacy alias for `devin-cli`. Project-level installs
+use `.devin/hooks.v1.json`; user-level installs use
+`~/.config/devin/config.json` under the `hooks` key. The hooks invoke Beacon's
+local Go hook binary and write normalized prompt, tool, command, file, approval,
+and session events to the configured runtime JSONL log.
+
+Devin Desktop is exposed separately as `devin-desktop` and uses Devin
+Desktop-compatible Cascade/Windsurf hooks. User-level installs write
+`~/.codeium/windsurf/hooks.json`; project-level installs write
+`.windsurf/hooks.json`, which may also affect Windsurf/Cascade in that
+workspace. Beacon installs visibility-only hooks for prompt submission, file
+writes, command execution, MCP tool use, and file reads; the hooks do not block
+or enforce policy. After installation, generate a Devin Desktop event and check
+the Beacon runtime log to validate that the Desktop app executed the hook file.
+The main `beacon endpoint install --harness ...` path also handles hook-backed
+Devin targets, so `--harness claude,codex,devin-cli,devin-desktop` configures
+OTLP-backed Claude/Codex telemetry and Devin hook telemetry in one flow.
 
 Claude Cowork monitoring is configured in the Claude admin console at
 `https://claude.ai/admin-settings/cowork`. The OTLP endpoint must be reachable

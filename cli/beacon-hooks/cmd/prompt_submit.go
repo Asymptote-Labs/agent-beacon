@@ -42,7 +42,13 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 
 	logger.Debug("Prompt submit observed")
 	fields := sessionFields(sessionID, input)
+	if isCascadePlatform(platformFlag) {
+		fields = cascadeMetadataFields(sessionID, input)
+	}
 	prompt := getFirstStr(input, "prompt", "user_prompt", "userPrompt", "text", "promptText", "input")
+	if isCascadePlatform(platformFlag) {
+		prompt = cascadePrompt(input)
+	}
 	hasPrompt := prompt != ""
 	if hasPrompt && config.ContentRetentionMode() != config.ContentRetentionMetadata {
 		fields["prompt"] = map[string]interface{}{"text": prompt}

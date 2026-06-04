@@ -84,7 +84,8 @@ Claude Cowork, OpenClaw).
 | [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OpenTelemetry configuration or Beacon hook adapter |
 | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OpenTelemetry configuration |
 | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Beacon hook adapter |
-| [Devin](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Beacon hook adapter |
+| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Beacon hook adapter |
+| Devin Desktop | Beacon hook adapter via Cascade/Windsurf hooks |
 | [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | Local OpenTelemetry configuration and optional hook adapter |
 | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OpenTelemetry configuration |
 | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OpenTelemetry (OTLP HTTP) |
