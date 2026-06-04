@@ -148,6 +148,39 @@ which surfaces a broken telemetry pipeline. Pass `--require-telemetry=false` to
 downgrade that to a warning when you do not want telemetry health to gate the
 build.
 
+### Sidecar mode (start / stop)
+
+`ci exec` wraps the Claude invocation, which is ideal when you control the
+command. When Claude runs inside another action or a later step that you cannot
+wrap, use the sidecar lifecycle instead: `ci start` launches a background
+collector and exports the Claude telemetry environment variables (appending them
+to `$GITHUB_ENV` in GitHub Actions), and `ci stop` terminates the collector and
+validates the log.
+
+```yaml
+- name: Start Beacon telemetry
+  run: beacon ci start --forward splunk --forward-endpoint "$SPLUNK_HEC_URL"
+  env:
+    BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+
+# Any later step that runs Claude now emits OTLP to the sidecar, including
+# third-party actions you cannot wrap with `ci exec`.
+- uses: some-org/claude-code-action@v1
+  with:
+    prompt: "Review this pull request"
+
+- name: Stop Beacon telemetry
+  if: always()
+  run: beacon ci stop
+```
+
+`ci start` records a small session state file (default
+`$RUNNER_TEMP/beacon/session.json`, with no token) that `ci stop` reads to find
+and terminate the collector; pass `--state-file` if you relocate it. The
+forwarding token is read from the environment when the collector starts and is
+never written to the state file. Always run `ci stop` in an `if: always()` step
+so the collector is torn down even when an earlier step fails.
+
 ## Wazuh
 
 ```bash
