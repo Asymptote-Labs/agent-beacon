@@ -27,6 +27,9 @@ var ciOpts struct {
 	jsonOutput       bool
 	keepArtifacts    bool
 	minEvents        int
+	forward          string
+	forwardEndpoint  string
+	requireTelemetry bool
 }
 
 var ciCmd = &cobra.Command{
@@ -68,6 +71,9 @@ func init() {
 	ciExecCmd.Flags().IntVar(&ciOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
 	ciExecCmd.Flags().StringVar(&ciOpts.contentRetention, "content-retention", string(endpointconfig.ContentRetentionFull), "Content retention mode: metadata, redacted, or full")
 	ciExecCmd.Flags().BoolVar(&ciOpts.keepArtifacts, "keep-artifacts", true, "Keep CI runtime log and collector config after exit")
+	ciExecCmd.Flags().StringVar(&ciOpts.forward, "forward", "", "Optionally forward events to a customer-managed SIEM: splunk or falcon (token read from the environment)")
+	ciExecCmd.Flags().StringVar(&ciOpts.forwardEndpoint, "forward-endpoint", "", "SIEM HEC endpoint URL for --forward (token comes from BEACON_CI_*_HEC_TOKEN)")
+	ciExecCmd.Flags().BoolVar(&ciOpts.requireTelemetry, "require-telemetry", true, "Fail the command when telemetry validation fails; set false to warn only")
 	for _, name := range []string{"base-dir", "work-dir", "collector", "otlp-grpc-port", "otlp-http-port"} {
 		_ = ciExecCmd.Flags().MarkHidden(name)
 	}
@@ -86,6 +92,8 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		Harness:          ciOpts.harness,
 		ContentRetention: endpointconfig.ContentRetention(ciOpts.contentRetention),
 		KeepArtifacts:    ciOpts.keepArtifacts,
+		Forward:          ciOpts.forward,
+		ForwardEndpoint:  ciOpts.forwardEndpoint,
 	})
 	if err != nil {
 		return err
@@ -129,11 +137,14 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		fmt.Println(execResult.ArtifactMessage)
 	}
 	if result.Status == "fail" {
-		fmt.Fprintln(os.Stderr, "Beacon CI telemetry validation failed")
-		if childExit != 0 {
-			os.Exit(childExit)
+		if ciOpts.requireTelemetry {
+			fmt.Fprintln(os.Stderr, "Beacon CI telemetry validation failed")
+			if childExit != 0 {
+				os.Exit(childExit)
+			}
+			return fmt.Errorf("Beacon CI telemetry validation failed")
 		}
-		return fmt.Errorf("Beacon CI telemetry validation failed")
+		fmt.Fprintln(os.Stderr, "Warning: Beacon CI telemetry validation failed (continuing because --require-telemetry=false)")
 	}
 	if childExit != 0 {
 		os.Exit(childExit)
