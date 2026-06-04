@@ -316,12 +316,15 @@ func detectRunInfo() *schema.RunInfo {
 		} else {
 			info.Branch = os.Getenv("GITHUB_REF_NAME")
 		}
-		// GITHUB_REF is a non-PR ref (e.g. refs/heads/main) on push events, so
-		// only record PR fields when the trigger is actually a pull request.
+		// Only populate PR fields when the ref is actually a pull-request ref.
+		// pull_request_target sets GITHUB_REF to the base branch, not the
+		// merge ref, so we guard on the ref shape rather than just the event.
 		if isPullRequestEvent(eventName) {
 			ref := os.Getenv("GITHUB_REF")
-			info.PR = ref
-			info.PRNumber = parsePRNumber(ref)
+			if strings.HasPrefix(ref, "refs/pull/") {
+				info.PR = ref
+				info.PRNumber = parsePRNumber(ref)
+			}
 		}
 		return info
 	}

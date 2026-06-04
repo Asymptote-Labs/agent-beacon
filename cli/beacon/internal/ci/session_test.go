@@ -171,6 +171,26 @@ func TestDetectRunInfoPullRequest(t *testing.T) {
 	}
 }
 
+func TestDetectRunInfoPullRequestTargetOmitsPR(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_EVENT_NAME", "pull_request_target")
+	t.Setenv("GITHUB_HEAD_REF", "feature/telemetry")
+	t.Setenv("GITHUB_REF_NAME", "main")
+	t.Setenv("GITHUB_REF", "refs/heads/main")
+
+	info := detectRunInfo()
+	if info == nil {
+		t.Fatal("detectRunInfo returned nil in GitHub Actions")
+	}
+	if info.Branch != "feature/telemetry" {
+		t.Fatalf("Branch = %q, want PR head ref", info.Branch)
+	}
+	if info.PR != "" || info.PRNumber != "" {
+		t.Fatalf("pull_request_target with base-branch ref should not record PR fields: PR=%q PRNumber=%q", info.PR, info.PRNumber)
+	}
+}
+
 func TestDetectRunInfoPushOmitsPR(t *testing.T) {
 	t.Setenv("CI", "true")
 	t.Setenv("GITHUB_ACTIONS", "true")
