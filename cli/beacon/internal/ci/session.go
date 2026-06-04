@@ -42,6 +42,11 @@ type Options struct {
 	Harness          string
 	ContentRetention endpointconfig.ContentRetention
 	KeepArtifacts    bool
+	// Forward selects an optional SIEM forwarder ("splunk" or "falcon") for the
+	// ephemeral collector. ForwardEndpoint supplies the destination URL; the
+	// token is read from the environment only.
+	Forward         string
+	ForwardEndpoint string
 }
 
 type Session struct {
@@ -55,6 +60,10 @@ type Session struct {
 	WorkDir         string          `json:"work_dir,omitempty"`
 	StartedAt       string          `json:"started_at"`
 	Run             *schema.RunInfo `json:"run,omitempty"`
+	// Forward and ForwardEndpoint describe the optional SIEM egress. The token
+	// is never recorded here so it cannot leak into --json output.
+	Forward         string `json:"forward,omitempty"`
+	ForwardEndpoint string `json:"forward_endpoint,omitempty"`
 
 	cfg       endpointconfig.Config
 	startedAt time.Time
@@ -108,6 +117,19 @@ func Provision(opts Options) (*Session, error) {
 	cfg.Collector.SpoolPath = filepath.Join(baseDir, "spool", "otlp.jsonl")
 	cfg.Collector.GRPCPort = grpcPort
 	cfg.Collector.HTTPPort = httpPort
+	forward, err := normalizeForward(opts.Forward)
+	if err != nil {
+		return nil, err
+	}
+	var forwardEndpoint string
+	if forward != "" {
+		destinations, err := resolveForwardDestinations(forward, opts.ForwardEndpoint)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Destinations = destinations
+		forwardEndpoint = forwardEndpointOf(destinations)
+	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
 		return nil, err
 	}
@@ -137,6 +159,8 @@ func Provision(opts Options) (*Session, error) {
 		WorkDir:         opts.WorkDir,
 		StartedAt:       startedAt.Format(time.RFC3339),
 		Run:             detectRunInfo(),
+		Forward:         forward,
+		ForwardEndpoint: forwardEndpoint,
 		cfg:             cfg,
 		startedAt:       startedAt,
 	}, nil
@@ -215,11 +239,13 @@ func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io
 	}
 	cmd := childCommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = s.WorkDir
-	cmd.Env = append(ClaudeEnv(os.Environ(), s.GRPCEndpoint, s.cfg.ContentRetention),
+	env := append(ClaudeEnv(os.Environ(), s.GRPCEndpoint, s.cfg.ContentRetention),
 		"BEACON_CI_BASE_DIR="+s.BaseDir,
 		"BEACON_CI_CONFIG_PATH="+s.ConfigPath,
 		"BEACON_CI_LOG_PATH="+s.LogPath,
 	)
+	// The agent never needs the SIEM token; keep it out of the child process.
+	cmd.Env = stripEnv(env, forwardTokenEnv...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()

@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -246,6 +247,104 @@ func TestParsePRNumber(t *testing.T) {
 		if got := parsePRNumber(ref); got != want {
 			t.Fatalf("parsePRNumber(%q) = %q, want %q", ref, got, want)
 		}
+	}
+}
+
+func TestProvisionForwardWritesSecureExporterConfig(t *testing.T) {
+	runnerTemp := t.TempDir()
+	t.Setenv("RUNNER_TEMP", runnerTemp)
+	t.Setenv(EnvSplunkToken, "top-secret-token")
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	oldResolve := resolveCollectorBinary
+	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
+	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
+
+	session, err := Provision(Options{
+		CollectorPath:   collector,
+		Harness:         "claude",
+		Forward:         "splunk",
+		ForwardEndpoint: "https://splunk.example/services/collector",
+	})
+	if err != nil {
+		t.Fatalf("Provision returned error: %v", err)
+	}
+	if session.Forward != "splunk" || session.ForwardEndpoint != "https://splunk.example/services/collector" {
+		t.Fatalf("session forward fields = %q / %q", session.Forward, session.ForwardEndpoint)
+	}
+
+	data, err := os.ReadFile(session.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yaml := string(data)
+	if !strings.Contains(yaml, "splunk_hec:") {
+		t.Fatalf("collector config missing splunk_hec exporter:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "top-secret-token") {
+		t.Fatal("collector config missing forwarder token")
+	}
+
+	info, err := os.Stat(session.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("token-bearing config mode = %o, want 600", perm)
+	}
+
+	encoded, err := json.Marshal(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "top-secret-token") {
+		t.Fatalf("token leaked into session JSON:\n%s", encoded)
+	}
+}
+
+func TestProvisionForwardMissingTokenFails(t *testing.T) {
+	t.Setenv("RUNNER_TEMP", t.TempDir())
+	t.Setenv(EnvSplunkToken, "")
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	oldResolve := resolveCollectorBinary
+	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
+	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
+
+	_, err := Provision(Options{
+		CollectorPath:   collector,
+		Harness:         "claude",
+		Forward:         "splunk",
+		ForwardEndpoint: "https://splunk.example",
+	})
+	if err == nil {
+		t.Fatal("Provision should fail when the forwarding token is missing")
+	}
+}
+
+func TestRunChildStripsForwardToken(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "env.txt")
+	t.Setenv(EnvSplunkToken, "leak-me-not")
+	child := fakeExecutable(t, "child", "#!/bin/sh\nenv > \"$1\"\n")
+	session := &Session{
+		BaseDir:      dir,
+		ConfigPath:   filepath.Join(dir, "otelcol.yaml"),
+		LogPath:      filepath.Join(dir, "runtime.jsonl"),
+		GRPCEndpoint: "http://127.0.0.1:4317",
+		cfg:          endpointconfig.Default(true, filepath.Join(dir, "runtime.jsonl")),
+	}
+	if _, err := session.RunChild(context.Background(), []string{child, output}, nil, nil); err != nil {
+		t.Fatalf("RunChild returned error: %v", err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := string(data)
+	if strings.Contains(env, "leak-me-not") || strings.Contains(env, EnvSplunkToken+"=") {
+		t.Fatalf("child env exposed the SIEM token:\n%s", env)
+	}
+	if !strings.Contains(env, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
+		t.Fatalf("child env missing Claude telemetry vars:\n%s", env)
 	}
 }
 

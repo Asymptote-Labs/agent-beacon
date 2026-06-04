@@ -93,6 +93,11 @@ Validate an existing CI artifact explicitly:
   --min-events 1
 ```
 
+Captured events carry the GitHub Actions run context (`run.repository`,
+`run.branch`, `run.run_id`, `run.run_attempt`, `run.job`, `run.event_name`, and
+`run.pr_number` on pull-request events) so they can be correlated per-workflow
+and per-PR downstream.
+
 Upload the log from GitHub Actions for customer-controlled retention:
 
 ```yaml
@@ -106,6 +111,42 @@ Upload the log from GitHub Actions for customer-controlled retention:
     name: beacon-runtime-log
     path: ${{ runner.temp }}/beacon/runtime.jsonl
 ```
+
+Upload only the `runtime.jsonl` file (as above), not the whole
+`${{ runner.temp }}/beacon` directory: when forwarding is configured the
+job-scoped `otelcol.yaml` in that directory contains the SIEM token. Beacon
+writes that file with `0600` permissions, but excluding it from the artifact
+keeps the credential off the uploaded path entirely.
+
+### Forwarding to a customer-managed SIEM
+
+Because CI runners are ephemeral, the local JSONL is destroyed when the runner
+is torn down. In addition to (or instead of) uploading an artifact, `ci exec`
+can forward events from its ephemeral collector to a customer-managed Splunk or
+CrowdStrike Falcon LogScale HEC endpoint before teardown:
+
+```bash
+export BEACON_CI_SPLUNK_HEC_TOKEN="$SPLUNK_HEC_TOKEN"   # from CI secrets
+beacon ci exec \
+  --forward splunk \
+  --forward-endpoint "https://splunk.example:8088/services/collector" \
+  -- claude --print "Summarize this repository"
+```
+
+- The token is read from the environment only
+  (`BEACON_CI_SPLUNK_HEC_TOKEN` / `BEACON_CI_FALCON_HEC_TOKEN`) and is never
+  accepted as a flag, so it does not appear in CI process listings. The
+  endpoint may be passed via `--forward-endpoint` or
+  `BEACON_CI_SPLUNK_HEC_ENDPOINT` / `BEACON_CI_FALCON_HEC_ENDPOINT`.
+- Forwarding is best-effort: a SIEM delivery failure does not fail the job, and
+  Beacon still writes the local JSONL.
+- Beacon remains a local JSONL producer; egress goes only to infrastructure the
+  customer already operates.
+
+By default `ci exec` fails the step when no Beacon events reach the runtime log,
+which surfaces a broken telemetry pipeline. Pass `--require-telemetry=false` to
+downgrade that to a warning when you do not want telemetry health to gate the
+build.
 
 ## Wazuh
 
