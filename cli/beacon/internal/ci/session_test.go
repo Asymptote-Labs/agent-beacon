@@ -280,8 +280,11 @@ func TestProvisionForwardWritesSecureExporterConfig(t *testing.T) {
 	if !strings.Contains(yaml, "splunk_hec:") {
 		t.Fatalf("collector config missing splunk_hec exporter:\n%s", yaml)
 	}
-	if !strings.Contains(yaml, "top-secret-token") {
-		t.Fatal("collector config missing forwarder token")
+	if strings.Contains(yaml, "top-secret-token") {
+		t.Fatal("raw token must not appear in collector config on disk")
+	}
+	if !strings.Contains(yaml, "${env:"+EnvSplunkToken+"}") {
+		t.Fatalf("collector config should use env-var reference for token:\n%s", yaml)
 	}
 
 	info, err := os.Stat(session.ConfigPath)

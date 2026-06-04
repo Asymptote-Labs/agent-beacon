@@ -123,6 +123,20 @@ func stripEnv(env []string, keys ...string) []string {
 	return out
 }
 
+// replaceTokensWithEnvRefs replaces raw SIEM tokens in the config with
+// OTel Collector ${env:VAR} references so the secret is never written to disk.
+func replaceTokensWithEnvRefs(cfg *endpointconfig.Config) {
+	if cfg.Destinations == nil {
+		return
+	}
+	if splunk := cfg.Destinations.SplunkHEC; splunk != nil && splunk.Token != "" {
+		splunk.Token = "${env:" + EnvSplunkToken + "}"
+	}
+	if falcon := cfg.Destinations.FalconHEC; falcon != nil && falcon.Token != "" {
+		falcon.Token = "${env:" + EnvFalconToken + "}"
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {

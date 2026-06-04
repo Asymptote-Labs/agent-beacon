@@ -129,6 +129,10 @@ func Provision(opts Options) (*Session, error) {
 		}
 		cfg.Destinations = destinations
 		forwardEndpoint = forwardEndpointOf(destinations)
+		// Replace raw tokens with OTel Collector env-var references so the
+		// secret is never written to disk. The collector inherits the parent
+		// environment and can resolve them; the child has these vars stripped.
+		replaceTokensWithEnvRefs(&cfg)
 	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
 		return nil, err
