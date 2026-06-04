@@ -21,7 +21,8 @@ jobs:
           go-version-file: cli/beacon/go.mod
       - uses: goreleaser/goreleaser-action@v6
         with:
-          version: "~> v2"
+          # Keep formulas working until we intentionally migrate the tap to casks.
+          version: "v2.13.3"
           install-only: true
 
       - name: Install OpenTelemetry Collector Builder

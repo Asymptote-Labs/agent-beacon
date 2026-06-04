@@ -76,13 +76,13 @@ changelog:
     - title: Other
       order: 999
 
-homebrew_casks:
+brews:
   - name: beacon
     repository:
       owner: asymptote-labs
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Casks
+    directory: Formula
     homepage: https://asymptotelabs.ai
     description: "Open-source endpoint agent for local AI runtime telemetry"
     license: "MIT"
@@ -90,12 +90,14 @@ homebrew_casks:
       name: asymptote-bot
       email: bot@asymptotelabs.ai
     commit_msg_template: "Homebrew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    binaries:
-      - beacon
-      - beacon-otelcol
+    install: |
+      bin.install "beacon"
+      bin.install "beacon-otelcol"
     caveats: |
       To configure local endpoint telemetry, run:
         beacon endpoint install
+    test: |
+      system "#{bin}/beacon", "version"
 
 release:
   github:
