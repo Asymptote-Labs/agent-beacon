@@ -231,19 +231,33 @@ func runCIStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer logFile.Close()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
 	if _, err := session.StartDetached(logFile); err != nil {
 		return err
 	}
+
+	cleanup := func() { _ = session.StopDetached(5 * time.Second) }
+	go func() {
+		if _, ok := <-sigCh; ok {
+			cleanup()
+			os.Exit(1)
+		}
+	}()
+
 	statePath := ciOpts.stateFile
 	if statePath == "" {
 		statePath = filepath.Join(session.BaseDir, beaconci.StateFileName)
 	}
 	if err := session.WriteState(statePath); err != nil {
-		_ = session.StopDetached(5 * time.Second)
+		cleanup()
 		return err
 	}
 	if err := emitClaudeTelemetryEnv(session.GRPCEndpoint, retention); err != nil {
-		_ = session.StopDetached(5 * time.Second)
+		cleanup()
 		return err
 	}
 	if ciOpts.jsonOutput {
@@ -264,6 +278,8 @@ func runCIStop(cmd *cobra.Command, args []string) error {
 	if statePath == "" {
 		if ciOpts.baseDir != "" {
 			statePath = filepath.Join(ciOpts.baseDir, beaconci.StateFileName)
+		} else if ciOpts.logPath != "" {
+			statePath = filepath.Join(filepath.Dir(ciOpts.logPath), beaconci.StateFileName)
 		} else {
 			statePath = beaconci.DefaultStatePath()
 		}
