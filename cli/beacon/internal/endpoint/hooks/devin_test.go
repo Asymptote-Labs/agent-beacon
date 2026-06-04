@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,58 @@ func TestInstallDevinUserConfigPreservesUnrelatedKeys(t *testing.T) {
 	}
 }
 
+func TestInstallDevinUserConfigPreservesImportConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	existing := `{"theme":"dark","read_config_from":{"cursor":true,"windsurf":false,"claude":true}}`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installDevinCLIHooks(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installDevinCLIHooks returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("unmarshal config: %v\n%s", err, data)
+	}
+	readConfigFrom := config["read_config_from"].(map[string]interface{})
+	if readConfigFrom["claude"] != true {
+		t.Fatalf("read_config_from.claude = %#v, want preserved true", readConfigFrom["claude"])
+	}
+	if readConfigFrom["cursor"] != true || readConfigFrom["windsurf"] != false {
+		t.Fatalf("read_config_from did not preserve other values: %#v", readConfigFrom)
+	}
+	if config["theme"] != "dark" {
+		t.Fatalf("theme = %#v, want preserved dark", config["theme"])
+	}
+}
+
+func TestInstallDevinDesktopHooksUsesCascadeEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	if err := installDevinDesktopHooks(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installDevinDesktopHooks returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read hooks: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{"pre_user_prompt", "post_write_code", "post_run_command", "post_mcp_tool_use", "post_read_code", "--platform devin-desktop", "prompt-submit", "post-tool"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Devin Desktop hooks missing %q:\n%s", want, text)
+		}
+	}
+	for _, notWant := range []string{"PreToolUse", "PostToolUse", "SessionStart", "read_config_from"} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("Devin Desktop hooks should not contain %q:\n%s", notWant, text)
+		}
+	}
+}
+
 func TestInstallDevinHooksReplacesOldBeaconHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.v1.json")
 	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform devin post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}`
@@ -108,8 +161,8 @@ func TestInstallDevinCLIHooksReplacesLegacyHooksWithExplicitPlatform(t *testing.
 }
 
 func TestInstallDevinDesktopHooksDoesNotRemoveCLIHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hooks.v1.json")
-	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-cli post-tool"}]}]}`
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"hooks":{"post_write_code":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-cli post-tool"}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +208,8 @@ func TestRemoveDevinEndpointHooksPreservesOtherHooks(t *testing.T) {
 }
 
 func TestRemoveDevinDesktopEndpointHooksPreservesCLIHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hooks.v1.json")
-	existing := `{"SessionStart":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-cli session-start"}]},{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop session-start"}]}]}`
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"hooks":{"post_write_code":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-cli post-tool"},{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop post-tool"}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +281,11 @@ func TestDevinHookStatusDetectsInstalled(t *testing.T) {
 func TestDevinDesktopHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	path := filepath.Join(home, ".config", "devin", "config.json")
+	path := filepath.Join(home, ".codeium", "windsurf", "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop stop"}]}]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"hooks":{"post_write_code":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop post-tool"}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -242,5 +295,18 @@ func TestDevinDesktopHookStatusDetectsInstalled(t *testing.T) {
 	}
 	if status.ConfigPath != path {
 		t.Fatalf("ConfigPath = %q, want %q", status.ConfigPath, path)
+	}
+}
+
+func TestDevinDesktopConfigPathProjectLevel(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	target, err := devinDesktopConfigPath(LevelProject)
+	if err != nil {
+		t.Fatalf("devinDesktopConfigPath returned error: %v", err)
+	}
+	if got, want := target, filepath.Join(dir, ".windsurf", "hooks.json"); got != want {
+		t.Fatalf("project config path = %q, want %q", got, want)
 	}
 }

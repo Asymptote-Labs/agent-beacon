@@ -268,14 +268,17 @@ func DiscoverDevinDesktop() Harness {
 		h.Detected = true
 		h.ExecutablePath = appPath
 	}
-	userConfig := filepath.Join(home, ".config", "devin", "config.json")
-	projectConfig := filepath.Join(".devin", "hooks.v1.json")
+	userConfig := filepath.Join(home, ".codeium", "windsurf", "hooks.json")
+	projectConfig := filepath.Join(".windsurf", "hooks.json")
 	h.ConfigPath = userConfig
 	if fileExists(projectConfig) {
 		h.ConfigPath = projectConfig
 	}
+	if !h.Detected && (dirExists(filepath.Join(home, ".codeium", "windsurf")) || dirExists(".windsurf")) {
+		h.Detected = true
+	}
 	if fileExists(h.ConfigPath) {
-		status, msg := devinStatus(h.ConfigPath, "devin-desktop")
+		status, msg := windsurfCascadeStatus(h.ConfigPath, "devin-desktop")
 		h.TelemetryStatus = status
 		if status == TelemetryEnabled {
 			h.Message = msg + "; generate a Devin Desktop event and check the Beacon runtime log to validate hook execution"
@@ -284,7 +287,7 @@ func DiscoverDevinDesktop() Harness {
 		}
 	} else {
 		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Devin Desktop-compatible endpoint hooks were not found"
+		h.Message = "Devin Desktop Cascade/Windsurf hooks.json was not found"
 	}
 	return h
 }
@@ -555,6 +558,38 @@ func hasBeaconDevinHooks(data []byte, platforms ...string) (bool, error) {
 						}
 					}
 				}
+			}
+		}
+	}
+	return false, nil
+}
+
+func windsurfCascadeStatus(path string, platform string) (TelemetryStatus, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return TelemetryMissing, err.Error()
+	}
+	if hasHooks, err := hasBeaconWindsurfHooks(data, platform); err != nil {
+		return TelemetryMisconfigured, "Cascade/Windsurf hooks JSON is invalid"
+	} else if hasHooks {
+		return TelemetryEnabled, "Devin Desktop Cascade/Windsurf endpoint hooks are configured"
+	}
+	return TelemetryDisabled, "Cascade/Windsurf hooks exist but Devin Desktop endpoint hooks were not found"
+}
+
+func hasBeaconWindsurfHooks(data []byte, platform string) (bool, error) {
+	var root struct {
+		Hooks map[string][]struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false, err
+	}
+	for _, hooks := range root.Hooks {
+		for _, hook := range hooks {
+			if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(hook.Command, platform) {
+				return true, nil
 			}
 		}
 	}

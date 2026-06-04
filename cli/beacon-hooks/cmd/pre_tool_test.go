@@ -290,11 +290,15 @@ func TestRunPromptSubmitEmitsDevinDesktopPromptWithDesktopHarness(t *testing.T) 
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 	t.Setenv("BEACON_CONTENT_RETENTION", "full")
-	t.Setenv("DEVIN_PROJECT_DIR", "/repo")
 
 	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"hook_event_name": "UserPromptSubmit",
-		"prompt":          "summarize token=desktop-secret",
+		"agent_action_name": "pre_user_prompt",
+		"trajectory_id":     "cascade-session",
+		"execution_id":      "cascade-turn",
+		"tool_info": map[string]interface{}{
+			"user_prompt":    "summarize token=desktop-secret",
+			"workspace_path": "/repo",
+		},
 	})
 	if len(out) != 0 {
 		t.Fatalf("devin desktop prompt response = %#v, want empty response", out)
@@ -307,8 +311,40 @@ func TestRunPromptSubmitEmitsDevinDesktopPromptWithDesktopHarness(t *testing.T) 
 	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin-desktop" {
 		t.Fatalf("harness = %q, want devin-desktop", harness)
 	}
+	session := event["session"].(map[string]interface{})
+	if session["id"] != "cascade-session" || session["execution_id"] != "cascade-turn" {
+		t.Fatalf("session = %#v, want Cascade trajectory and execution IDs", session)
+	}
 	if got := event["repository"]; got != "/repo" {
-		t.Fatalf("repository = %q, want DEVIN_PROJECT_DIR", got)
+		t.Fatalf("repository = %q, want Cascade workspace path", got)
+	}
+}
+
+func TestRunPromptSubmitOmitsDevinDesktopPromptForMetadataRetention(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin-desktop"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"agent_action_name": "pre_user_prompt",
+		"trajectory_id":     "cascade-session",
+		"tool_info": map[string]interface{}{
+			"user_prompt": "summarize token=desktop-secret",
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("devin desktop prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if _, ok := event["prompt"]; ok {
+		t.Fatalf("metadata retention should omit prompt: %#v", event["prompt"])
+	}
+	content := event["content"].(map[string]interface{})
+	if content["included"] != false {
+		t.Fatalf("content = %#v, want included=false", content)
 	}
 }
 

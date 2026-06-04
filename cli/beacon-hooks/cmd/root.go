@@ -21,7 +21,7 @@ Use --platform to specify the calling platform (default: claude).`,
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "claude", "Platform context: claude, antigravity, copilot, cursor, vscode, devin, factory, grok, or opencode")
+	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "claude", "Platform context: claude, antigravity, copilot, cursor, vscode, devin, devin-cli, devin-desktop, factory, grok, or opencode")
 }
 
 // Execute runs the root command

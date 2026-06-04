@@ -21,6 +21,9 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if platformFlag == "vscode" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"vscode": input})
 	}
+	if isCascadePlatform(platformFlag) {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"cascade": input})
+	}
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}

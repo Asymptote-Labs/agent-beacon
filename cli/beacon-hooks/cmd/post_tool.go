@@ -25,10 +25,11 @@ func init() {
 
 // evaluationParams holds the platform-independent fields needed for local hook handling.
 type evaluationParams struct {
-	sessionID string
-	toolName  string
-	filePath  string
-	diffStr   string
+	sessionID   string
+	toolName    string
+	filePath    string
+	diffStr     string
+	extraFields map[string]interface{}
 }
 
 func runPostTool(cmd *cobra.Command, args []string) {
@@ -49,7 +50,14 @@ func runPostTool(cmd *cobra.Command, args []string) {
 
 	var params *evaluationParams
 
-	if platformFlag == "cursor" {
+	if isCascadePlatform(platformFlag) {
+		params = parseCascadeWriteInput(input, logger)
+		if params == nil {
+			emitCascadePostToolObserved(logger, input)
+			outputJSON(emptyResponse)
+			return
+		}
+	} else if platformFlag == "cursor" {
 		// Cursor fires two hook types through post-tool:
 		//   - afterFileEdit: has "edits" array and top-level "file_path" (no output supported)
 		//   - postToolUse: has "tool_name" and "tool_input" (supports additional_context/followup via stop)
@@ -187,12 +195,15 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 func recordLocalEdit(params *evaluationParams, logger *logging.Logger) {
 	logger.Info("File edit observed", "file_path", params.filePath, "tool_name", params.toolName)
 	fields := map[string]interface{}{}
+	for key, value := range params.extraFields {
+		fields[key] = value
+	}
 	for key, value := range diffFields(params.filePath, params.diffStr) {
 		fields[key] = value
 	}
-	fields["tool"] = map[string]interface{}{"name": params.toolName, "path": params.filePath}
+	fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": params.toolName, "path": params.filePath})
 	if params.sessionID != "" {
-		fields["session"] = map[string]interface{}{"id": params.sessionID}
+		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
@@ -310,6 +321,10 @@ func isFileEditTool(platform, toolName string) bool {
 	if isDevinLikePlatform(platform) {
 		lower := strings.ToLower(toolName)
 		return lower == "edit" || lower == "write"
+	}
+	if isCascadePlatform(platform) {
+		lower := strings.ToLower(toolName)
+		return lower == "post_write_code" || lower == "write_code"
 	}
 	if platform == "grok" {
 		lower := strings.ToLower(toolName)

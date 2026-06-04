@@ -29,7 +29,11 @@ func outputJSONAndExit(data map[string]interface{}) {
 var emptyResponse = map[string]interface{}{}
 
 func isDevinLikePlatform(platform string) bool {
-	return platform == "devin" || platform == "devin-cli" || platform == "devin-desktop"
+	return platform == "devin" || platform == "devin-cli"
+}
+
+func isCascadePlatform(platform string) bool {
+	return platform == "devin-desktop"
 }
 
 // getFirstStr returns the first non-empty string value from input for the given keys.
@@ -59,8 +63,10 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		return getFirstStr(input, "conversation_id")
 	case "vscode":
 		return getFirstStr(input, "sessionId", "session_id", "conversation_id", "gen_ai.conversation.id")
-	case "devin", "devin-cli", "devin-desktop":
+	case "devin", "devin-cli":
 		return getFirstStr(input, "session_id", "sessionId", "conversation_id")
+	case "devin-desktop":
+		return getFirstStr(input, "trajectory_id", "session_id", "sessionId", "conversation_id")
 	case "grok":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	case "opencode":
@@ -94,8 +100,12 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		sessionID = getFirstStr(input, "sessionId", "session_id", "conversation_id", "gen_ai.conversation.id")
 		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
 		return
-	case "devin", "devin-cli", "devin-desktop":
+	case "devin", "devin-cli":
 		sessionID = getFirstStr(input, "session_id", "sessionId", "conversation_id")
+		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
+		return
+	case "devin-desktop":
+		sessionID = getFirstStr(input, "trajectory_id", "session_id", "sessionId", "conversation_id")
 		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
 		return
 	case "grok":
@@ -176,6 +186,17 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 	if isDevinLikePlatform(platform) {
 		if cwd := getFirstStr(input, "cwd", "project_dir", "projectDir"); cwd != "" {
 			return cwd
+		}
+		return os.Getenv("DEVIN_PROJECT_DIR")
+	}
+	if isCascadePlatform(platform) {
+		if cwd := getFirstStr(input, "cwd", "workspace_path", "project_path"); cwd != "" {
+			return cwd
+		}
+		if info := cascadeToolInfo(input); info != nil {
+			if cwd := firstToolString(info, "cwd", "workspace_path", "project_path", "directory", "working_directory"); cwd != "" {
+				return cwd
+			}
 		}
 		return os.Getenv("DEVIN_PROJECT_DIR")
 	}

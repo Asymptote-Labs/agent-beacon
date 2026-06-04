@@ -201,13 +201,19 @@ func TestRunPostToolEmitsDevinDesktopFileModifiedEvent(t *testing.T) {
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 
 	out := runHookWithInput(t, runPostTool, map[string]interface{}{
-		"cwd":       "/repo",
-		"tool_name": "write",
-		"tool_input": map[string]interface{}{
-			"file_path": "/repo/main.go",
-			"content":   "new token=devin-secret",
+		"agent_action_name": "post_write_code",
+		"trajectory_id":     "cascade-session",
+		"execution_id":      "cascade-turn",
+		"tool_info": map[string]interface{}{
+			"file_path":      "/repo/main.go",
+			"workspace_path": "/repo",
+			"edits": []interface{}{
+				map[string]interface{}{
+					"old_string": "old",
+					"new_string": "new token=devin-secret",
+				},
+			},
 		},
-		"tool_response": map[string]interface{}{"success": true},
 	})
 	if len(out) != 0 {
 		t.Fatalf("post-tool response = %#v, want empty response", out)
@@ -220,10 +226,9 @@ func TestRunPostToolEmitsDevinDesktopFileModifiedEvent(t *testing.T) {
 	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin-desktop" {
 		t.Fatalf("harness = %q, want devin-desktop", harness)
 	}
-	if session, ok := event["session"].(map[string]interface{}); ok {
-		if _, hasID := session["id"]; hasID {
-			t.Fatalf("devin desktop file event should not include empty session id: %#v", session)
-		}
+	session := event["session"].(map[string]interface{})
+	if session["id"] != "cascade-session" || session["execution_id"] != "cascade-turn" {
+		t.Fatalf("session = %#v, want Cascade trajectory and execution IDs", session)
 	}
 	file := event["file"].(map[string]interface{})
 	if file["path"] != "/repo/main.go" {
@@ -231,6 +236,71 @@ func TestRunPostToolEmitsDevinDesktopFileModifiedEvent(t *testing.T) {
 	}
 	if _, ok := file["diff_hash"]; !ok {
 		t.Fatalf("file diff_hash missing: %#v", file)
+	}
+	if _, ok := event["raw"].(map[string]interface{})["cascade"]; !ok {
+		t.Fatalf("raw.cascade missing: %#v", event["raw"])
+	}
+}
+
+func TestRunPostToolEmitsDevinDesktopCascadeObservedEvents(t *testing.T) {
+	tests := []struct {
+		name       string
+		actionName string
+		toolInfo   map[string]interface{}
+		wantAction string
+		wantField  string
+	}{
+		{
+			name:       "command",
+			actionName: "post_run_command",
+			toolInfo:   map[string]interface{}{"command": "go test ./...", "workspace_path": "/repo"},
+			wantAction: "command.executed",
+			wantField:  "command",
+		},
+		{
+			name:       "mcp",
+			actionName: "post_mcp_tool_use",
+			toolInfo:   map[string]interface{}{"server_name": "linear", "tool_name": "issue-get", "workspace_path": "/repo"},
+			wantAction: "mcp.tool_invoked",
+			wantField:  "mcp",
+		},
+		{
+			name:       "read",
+			actionName: "post_read_code",
+			toolInfo:   map[string]interface{}{"file_path": "/repo/main.go", "workspace_path": "/repo"},
+			wantAction: "file.read",
+			wantField:  "file",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupHookConfigDirs(t)
+			platformFlag = "devin-desktop"
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+			out := runHookWithInput(t, runPostTool, map[string]interface{}{
+				"agent_action_name": tt.actionName,
+				"trajectory_id":     "cascade-session",
+				"execution_id":      "cascade-turn",
+				"tool_info":         tt.toolInfo,
+			})
+			if len(out) != 0 {
+				t.Fatalf("post-tool response = %#v, want empty response", out)
+			}
+
+			event := lastEndpointEvent(t, logPath)
+			if action := event["event"].(map[string]interface{})["action"]; action != tt.wantAction {
+				t.Fatalf("event.action = %q, want %q", action, tt.wantAction)
+			}
+			if _, ok := event[tt.wantField]; !ok {
+				t.Fatalf("event missing %q field: %#v", tt.wantField, event)
+			}
+			tool := event["tool"].(map[string]interface{})
+			if tool["execution_id"] != "cascade-turn" || tool["action"] != tt.actionName {
+				t.Fatalf("tool = %#v, want Cascade action and execution IDs", tool)
+			}
+		})
 	}
 }
 

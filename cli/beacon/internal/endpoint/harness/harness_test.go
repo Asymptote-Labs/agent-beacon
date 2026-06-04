@@ -569,6 +569,9 @@ func TestDiscoverDevinDesktopDetectsAppSupport(t *testing.T) {
 	if h.ExecutablePath != appSupport && h.ExecutablePath != "/Applications/Devin.app" {
 		t.Fatalf("ExecutablePath = %q, want app support or app path", h.ExecutablePath)
 	}
+	if h.ConfigPath != filepath.Join(home, ".codeium", "windsurf", "hooks.json") {
+		t.Fatalf("ConfigPath = %q, want Windsurf user hooks path", h.ConfigPath)
+	}
 }
 
 func TestDevinStatusVariants(t *testing.T) {
@@ -603,13 +606,13 @@ func TestDevinStatusVariants(t *testing.T) {
 
 func TestDevinDesktopStatusVariants(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop.json")
-	body := `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop pre-tool"}]}]}}`
+	body := `{"hooks":{"post_write_code":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop post-tool"}]}}`
 	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	status, _ := devinStatus(path, "devin-desktop")
+	status, _ := windsurfCascadeStatus(path, "devin-desktop")
 	if status != TelemetryEnabled {
-		t.Fatalf("devinStatus desktop = %q, want enabled", status)
+		t.Fatalf("windsurfCascadeStatus desktop = %q, want enabled", status)
 	}
 }
 

@@ -248,10 +248,14 @@ use `.devin/hooks.v1.json`; user-level installs use
 local Go hook binary and write normalized prompt, tool, command, file, approval,
 and session events to the configured runtime JSONL log.
 
-Devin Desktop is exposed separately as `devin-desktop` and uses the same
-Devin-compatible hook file format with `--platform devin-desktop` event
-attribution. After installation, generate a Devin Desktop event and check the
-Beacon runtime log to validate that the Desktop app executed the hook file.
+Devin Desktop is exposed separately as `devin-desktop` and uses Devin
+Desktop-compatible Cascade/Windsurf hooks. User-level installs write
+`~/.codeium/windsurf/hooks.json`; project-level installs write
+`.windsurf/hooks.json`, which may also affect Windsurf/Cascade in that
+workspace. Beacon installs visibility-only hooks for prompt submission, file
+writes, command execution, MCP tool use, and file reads; the hooks do not block
+or enforce policy. After installation, generate a Devin Desktop event and check
+the Beacon runtime log to validate that the Desktop app executed the hook file.
 The main `beacon endpoint install --harness ...` path also handles hook-backed
 Devin targets, so `--harness claude,codex,devin-cli,devin-desktop` configures
 OTLP-backed Claude/Codex telemetry and Devin hook telemetry in one flow.
