@@ -284,6 +284,34 @@ func TestRunPromptSubmitEmitsDevinPromptWithoutSession(t *testing.T) {
 	}
 }
 
+func TestRunPromptSubmitEmitsDevinDesktopPromptWithDesktopHarness(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin-desktop"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+	t.Setenv("DEVIN_PROJECT_DIR", "/repo")
+
+	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"hook_event_name": "UserPromptSubmit",
+		"prompt":          "summarize token=desktop-secret",
+	})
+	if len(out) != 0 {
+		t.Fatalf("devin desktop prompt response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+		t.Fatalf("event.action = %q, want prompt.submitted", action)
+	}
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin-desktop" {
+		t.Fatalf("harness = %q, want devin-desktop", harness)
+	}
+	if got := event["repository"]; got != "/repo" {
+		t.Fatalf("repository = %q, want DEVIN_PROJECT_DIR", got)
+	}
+}
+
 func TestRunPreToolEmitsDevinToolTelemetryWithoutApproval(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "devin"
@@ -310,6 +338,31 @@ func TestRunPreToolEmitsDevinToolTelemetryWithoutApproval(t *testing.T) {
 	}
 	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
 		t.Fatalf("command = %q, want git status", command)
+	}
+}
+
+func TestRunPermissionRequestApprovesDevinCLI(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin-cli"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
+		"tool_name": "exec",
+		"tool_input": map[string]interface{}{
+			"command": "git status",
+		},
+	})
+	if out["decision"] != "approve" {
+		t.Fatalf("devin-cli permission response = %#v, want approve", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin-cli" {
+		t.Fatalf("harness = %q, want devin-cli", harness)
+	}
+	if action := event["event"].(map[string]interface{})["action"]; action != "approval.allowed" {
+		t.Fatalf("event.action = %q, want approval.allowed", action)
 	}
 }
 

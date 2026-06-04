@@ -39,6 +39,53 @@ func TestSplitHarnessCSVAllowsCollectorOnly(t *testing.T) {
 	}
 }
 
+func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
+	otlp, hooks, err := splitEndpointTargets([]string{"claude", "codex", "devin", "devin-cli", "devin_desktop"})
+	if err != nil {
+		t.Fatalf("splitEndpointTargets returned error: %v", err)
+	}
+	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
+		t.Fatalf("otlp targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(hooks, ","), "devin-cli,devin-desktop"; got != want {
+		t.Fatalf("hook targets = %q, want %q", got, want)
+	}
+}
+
+func TestCanonicalHookTargetsNormalizesAliasesToSwitchNames(t *testing.T) {
+	got, err := canonicalHookTargets([]string{"claude_code", "vs_code", "droid", "devin", "devin_desktop", "antigravity_cli"})
+	if err != nil {
+		t.Fatalf("canonicalHookTargets returned error: %v", err)
+	}
+	want := []string{"claude", "vscode", "factory", "devin-cli", "devin-desktop", "antigravity"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("canonicalHookTargets = %#v, want %#v", got, want)
+	}
+}
+
+func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.userMode = true
+	endpointOpts.harnesses = "claude,devin,devin-cli,devin-desktop"
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.noStart = true
+
+	actions := plannedInstallActions(false)
+	counts := map[string]int{}
+	for _, action := range actions {
+		if action.Action == "configure_harness" {
+			counts[action.Target]++
+		}
+	}
+	if counts["claude"] != 1 || counts["devin-cli"] != 1 || counts["devin-desktop"] != 1 {
+		t.Fatalf("configure_harness counts = %#v, want claude/devin-cli/devin-desktop once", counts)
+	}
+	if counts["devin"] != 0 {
+		t.Fatalf("legacy devin alias should be deduped, counts=%#v", counts)
+	}
+}
+
 func TestEndpointDashboardCommandRegistered(t *testing.T) {
 	cmd, _, err := endpointCmd.Find([]string{"dashboard"})
 	if err != nil {

@@ -47,7 +47,7 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	logger.Debug("Stop hook called", "session_id", sessionID, "has_transcript", transcriptPath != "", "platform", platformFlag)
 	if sessionID == "" {
-		if platformFlag == "devin" {
+		if isDevinLikePlatform(platformFlag) {
 			logger.Info("stop completed")
 			emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields("", input))
 			outputJSON(emptyResponse)
@@ -88,7 +88,7 @@ func platformToTranscriptName(platform string) string {
 		return "vscode"
 	case "factory":
 		return "factory"
-	case "devin":
+	case "devin", "devin-cli", "devin-desktop":
 		return "devin"
 	default:
 		return "claude_code"
@@ -104,7 +104,7 @@ func extractMessages(transcriptPath, platform string) []map[string]interface{} {
 		return extractMessagesFromCursorTranscript(transcriptPath)
 	case "factory":
 		return extractMessagesFromFactoryTranscript(transcriptPath)
-	case "devin":
+	case "devin", "devin-cli", "devin-desktop":
 		return extractMessagesFromClaudeTranscript(transcriptPath)
 	default:
 		return extractMessagesFromClaudeTranscript(transcriptPath)

@@ -99,7 +99,7 @@ func GetStateDir(platform string) string {
 		return CursorDir
 	case "vscode":
 		return VSCodeDir
-	case "devin":
+	case "devin", "devin-cli", "devin-desktop":
 		return DevinDir
 	case "factory":
 		return FactoryDir

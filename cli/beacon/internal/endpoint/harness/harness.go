@@ -56,6 +56,7 @@ func DiscoverAll() []Harness {
 		DiscoverVSCode(),
 		DiscoverCursor(),
 		DiscoverDevin(),
+		DiscoverDevinDesktop(),
 		DiscoverClaudeCowork(),
 	}
 }
@@ -226,7 +227,7 @@ func DiscoverCursor() Harness {
 }
 
 func DiscoverDevin() Harness {
-	h := Harness{Name: "devin", DisplayName: "Devin", Capability: "hooks"}
+	h := Harness{Name: "devin-cli", DisplayName: "Devin CLI", Capability: "hooks"}
 	path, err := exec.LookPath("devin")
 	if err == nil {
 		h.Detected = true
@@ -244,12 +245,46 @@ func DiscoverDevin() Harness {
 		h.Detected = true
 	}
 	if fileExists(h.ConfigPath) {
-		status, msg := devinStatus(h.ConfigPath)
+		status, msg := devinStatus(h.ConfigPath, "devin", "devin-cli")
 		h.TelemetryStatus = status
 		h.Message = msg
 	} else {
 		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Devin endpoint hooks were not found"
+		h.Message = "Devin CLI endpoint hooks were not found"
+	}
+	return h
+}
+
+func DiscoverDevinDesktop() Harness {
+	h := Harness{Name: "devin-desktop", DisplayName: "Devin Desktop", Capability: "hooks"}
+	home, _ := os.UserHomeDir()
+	appSupport := filepath.Join(home, "Library", "Application Support", "Devin")
+	appPath := "/Applications/Devin.app"
+	if dirExists(appSupport) {
+		h.Detected = true
+		h.ExecutablePath = appSupport
+	}
+	if fileExists(filepath.Join(appPath, "Contents", "Info.plist")) {
+		h.Detected = true
+		h.ExecutablePath = appPath
+	}
+	userConfig := filepath.Join(home, ".config", "devin", "config.json")
+	projectConfig := filepath.Join(".devin", "hooks.v1.json")
+	h.ConfigPath = userConfig
+	if fileExists(projectConfig) {
+		h.ConfigPath = projectConfig
+	}
+	if fileExists(h.ConfigPath) {
+		status, msg := devinStatus(h.ConfigPath, "devin-desktop")
+		h.TelemetryStatus = status
+		if status == TelemetryEnabled {
+			h.Message = msg + "; generate a Devin Desktop event and check the Beacon runtime log to validate hook execution"
+		} else {
+			h.Message = msg
+		}
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Devin Desktop-compatible endpoint hooks were not found"
 	}
 	return h
 }
@@ -477,12 +512,12 @@ func factoryStatus(path string) (TelemetryStatus, string) {
 	return TelemetryEnabled, "Factory Droid telemetry is configured for local OTLP HTTP"
 }
 
-func devinStatus(path string) (TelemetryStatus, string) {
+func devinStatus(path string, platforms ...string) (TelemetryStatus, string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	if hasBeaconDevinHooks, err := hasBeaconDevinHooks(data); err != nil {
+	if hasBeaconDevinHooks, err := hasBeaconDevinHooks(data, platforms...); err != nil {
 		return TelemetryMisconfigured, "Devin hooks JSON is invalid"
 	} else if hasBeaconDevinHooks {
 		return TelemetryEnabled, "Devin endpoint hooks are configured"
@@ -490,7 +525,10 @@ func devinStatus(path string) (TelemetryStatus, string) {
 	return TelemetryDisabled, "Devin hooks exist but endpoint hooks were not found"
 }
 
-func hasBeaconDevinHooks(data []byte) (bool, error) {
+func hasBeaconDevinHooks(data []byte, platforms ...string) (bool, error) {
+	if len(platforms) == 0 {
+		platforms = []string{"devin"}
+	}
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
 		return false, err
@@ -510,13 +548,30 @@ func hasBeaconDevinHooks(data []byte) (bool, error) {
 	for _, groups := range hooks {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") && strings.Contains(hook.Command, "--platform devin") {
-					return true, nil
+				if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") {
+					for _, platform := range platforms {
+						if commandHasPlatform(hook.Command, platform) {
+							return true, nil
+						}
+					}
 				}
 			}
 		}
 	}
 	return false, nil
+}
+
+func commandHasPlatform(command, platform string) bool {
+	fields := strings.Fields(command)
+	for i, field := range fields {
+		if field == "--platform" && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], `"'`) == platform
+		}
+		if strings.HasPrefix(field, "--platform=") {
+			return strings.Trim(strings.TrimPrefix(field, "--platform="), `"'`) == platform
+		}
+	}
+	return false
 }
 
 func antigravityStatus(path string) (TelemetryStatus, string) {

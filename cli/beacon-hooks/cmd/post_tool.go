@@ -119,7 +119,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
-	if platformFlag == "antigravity" || platformFlag == "copilot" || platformFlag == "devin" || platformFlag == "grok" || platformFlag == "vscode" {
+	if platformFlag == "antigravity" || platformFlag == "copilot" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "vscode" {
 		sessionID = resolveSessionID(input, platformFlag)
 		toolName = getFirstStr(input, "toolName", "tool_name")
 		if platformFlag == "antigravity" {
@@ -157,7 +157,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	}
 	filePath = diff.NormalizePath(filePath)
 
-	if (sessionID == "" && platformFlag != "devin") || toolName == "" || filePath == "" {
+	if (sessionID == "" && !isDevinLikePlatform(platformFlag)) || toolName == "" || filePath == "" {
 		return nil
 	}
 
@@ -307,7 +307,7 @@ func isFileEditTool(platform, toolName string) bool {
 	if platform == "factory" {
 		return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit" || toolName == "Create"
 	}
-	if platform == "devin" {
+	if isDevinLikePlatform(platform) {
 		lower := strings.ToLower(toolName)
 		return lower == "edit" || lower == "write"
 	}

@@ -13,6 +13,12 @@ type DevinOptions struct {
 	UserMode bool
 }
 
+type DevinDesktopOptions struct {
+	Level    Level
+	LogPath  string
+	UserMode bool
+}
+
 type DevinStatus struct {
 	Installed  bool   `json:"installed"`
 	BinaryPath string `json:"binary_path,omitempty"`
@@ -38,11 +44,19 @@ type devinConfig struct {
 }
 
 var devinRuntime = hookRuntime{
-	displayName: "Devin",
+	displayName: "Devin CLI",
 	configPath:  devinConfigPath,
-	install:     installDevinHooks,
-	uninstall:   removeDevinEndpointHooks,
-	isInstalled: isDevinInstalledAt,
+	install:     installDevinCLIHooks,
+	uninstall:   removeDevinCLIEndpointHooks,
+	isInstalled: isDevinCLIInstalledAt,
+}
+
+var devinDesktopRuntime = hookRuntime{
+	displayName: "Devin Desktop",
+	configPath:  devinConfigPath,
+	install:     installDevinDesktopHooks,
+	uninstall:   removeDevinDesktopEndpointHooks,
+	isInstalled: isDevinDesktopInstalledAt,
 }
 
 func InstallDevin(opts DevinOptions) (DevinStatus, error) {
@@ -69,6 +83,26 @@ func IsDevinInstalled(opts DevinOptions) bool {
 	return isRuntimeInstalled(devinRuntime, RuntimeOptions(opts))
 }
 
+func InstallDevinDesktop(opts DevinDesktopOptions) (DevinStatus, error) {
+	status, err := installRuntimeHooks(devinDesktopRuntime, RuntimeOptions(opts))
+	if err != nil {
+		return DevinStatus{}, err
+	}
+	return devinStatusFromRuntime(status), nil
+}
+
+func UninstallDevinDesktop(opts DevinDesktopOptions) (DevinStatus, error) {
+	status, err := uninstallRuntimeHooks(devinDesktopRuntime, RuntimeOptions(opts))
+	if err != nil {
+		return DevinStatus{}, err
+	}
+	return devinStatusFromRuntime(status), nil
+}
+
+func DevinDesktopHookStatus(opts DevinDesktopOptions) DevinStatus {
+	return devinStatusFromRuntime(runtimeHookStatus(devinDesktopRuntime, RuntimeOptions(opts)))
+}
+
 func devinStatusFromRuntime(status runtimeStatus) DevinStatus {
 	return DevinStatus{
 		Installed:  status.Installed,
@@ -78,12 +112,24 @@ func devinStatusFromRuntime(status runtimeStatus) DevinStatus {
 	}
 }
 
+func installDevinCLIHooks(path, binaryPath, logPath, configPath string) error {
+	return installDevinHooksForPlatform(path, binaryPath, logPath, configPath, "devin-cli", []string{"devin", "devin-cli"})
+}
+
+func installDevinDesktopHooks(path, binaryPath, logPath, configPath string) error {
+	return installDevinHooksForPlatform(path, binaryPath, logPath, configPath, "devin-desktop", []string{"devin-desktop"})
+}
+
 func installDevinHooks(path, binaryPath, logPath, configPath string) error {
+	return installDevinHooksForPlatform(path, binaryPath, logPath, configPath, "devin", []string{"devin"})
+}
+
+func installDevinHooksForPlatform(path, binaryPath, logPath, configPath, platform string, replacePlatforms []string) error {
 	config, err := readDevinConfig(path)
 	if err != nil {
 		return err
 	}
-	prefix := endpointCommandPrefix("devin", binaryPath, logPath, configPath)
+	prefix := endpointCommandPrefix(platform, binaryPath, logPath, configPath)
 	endpointHooks := map[string]devinHookGroup{
 		"SessionStart":      {Hooks: []devinHookRef{{Type: "command", Command: prefix + " session-start"}}},
 		"UserPromptSubmit":  {Hooks: []devinHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}}},
@@ -94,7 +140,7 @@ func installDevinHooks(path, binaryPath, logPath, configPath string) error {
 		"SessionEnd":        {Hooks: []devinHookRef{{Type: "command", Command: prefix + " session-end"}}},
 	}
 	for eventName, group := range endpointHooks {
-		config.hooks[eventName] = mergeDevinEndpointHook(config.hooks[eventName], group)
+		config.hooks[eventName] = mergeDevinEndpointHook(config.hooks[eventName], group, replacePlatforms...)
 	}
 	data, err := config.marshal()
 	if err != nil {
@@ -157,10 +203,10 @@ func (config devinConfig) marshal() ([]byte, error) {
 	return json.MarshalIndent(out, "", "  ")
 }
 
-func mergeDevinEndpointHook(existing []devinHookGroup, group devinHookGroup) []devinHookGroup {
+func mergeDevinEndpointHook(existing []devinHookGroup, group devinHookGroup, platforms ...string) []devinHookGroup {
 	out := make([]devinHookGroup, 0, len(existing)+1)
 	for _, item := range existing {
-		filtered, changed := filterDevinEndpointHooks(item)
+		filtered, changed := filterDevinEndpointHooks(item, platforms...)
 		if !changed || len(filtered.Hooks) > 0 {
 			out = append(out, item)
 			if changed {
@@ -172,6 +218,18 @@ func mergeDevinEndpointHook(existing []devinHookGroup, group devinHookGroup) []d
 }
 
 func removeDevinEndpointHooks(path string) (bool, error) {
+	return removeDevinEndpointHooksForPlatforms(path, "devin")
+}
+
+func removeDevinCLIEndpointHooks(path string) (bool, error) {
+	return removeDevinEndpointHooksForPlatforms(path, "devin", "devin-cli")
+}
+
+func removeDevinDesktopEndpointHooks(path string) (bool, error) {
+	return removeDevinEndpointHooksForPlatforms(path, "devin-desktop")
+}
+
+func removeDevinEndpointHooksForPlatforms(path string, platforms ...string) (bool, error) {
 	config, err := readDevinConfig(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -183,7 +241,7 @@ func removeDevinEndpointHooks(path string) (bool, error) {
 	for eventName, groups := range config.hooks {
 		filtered := groups[:0]
 		for _, group := range groups {
-			withoutEndpointHooks, groupChanged := filterDevinEndpointHooks(group)
+			withoutEndpointHooks, groupChanged := filterDevinEndpointHooks(group, platforms...)
 			if groupChanged {
 				changed = true
 			}
@@ -211,21 +269,21 @@ func removeDevinEndpointHooks(path string) (bool, error) {
 	return true, os.WriteFile(path, out, 0600)
 }
 
-func isDevinEndpointHookGroup(group devinHookGroup) bool {
+func isDevinEndpointHookGroup(group devinHookGroup, platforms ...string) bool {
 	for _, hook := range group.Hooks {
-		if isEndpointHookCommand(hook.Command, "devin") {
+		if isDevinEndpointHookCommand(hook.Command, platforms...) {
 			return true
 		}
 	}
 	return false
 }
 
-func filterDevinEndpointHooks(group devinHookGroup) (devinHookGroup, bool) {
+func filterDevinEndpointHooks(group devinHookGroup, platforms ...string) (devinHookGroup, bool) {
 	filtered := group
 	filtered.Hooks = group.Hooks[:0]
 	changed := false
 	for _, hook := range group.Hooks {
-		if isEndpointHookCommand(hook.Command, "devin") {
+		if isDevinEndpointHookCommand(hook.Command, platforms...) {
 			changed = true
 			continue
 		}
@@ -235,15 +293,39 @@ func filterDevinEndpointHooks(group devinHookGroup) (devinHookGroup, bool) {
 }
 
 func isDevinInstalledAt(path string) bool {
+	return isDevinInstalledAtPlatforms(path, "devin")
+}
+
+func isDevinCLIInstalledAt(path string) bool {
+	return isDevinInstalledAtPlatforms(path, "devin", "devin-cli")
+}
+
+func isDevinDesktopInstalledAt(path string) bool {
+	return isDevinInstalledAtPlatforms(path, "devin-desktop")
+}
+
+func isDevinInstalledAtPlatforms(path string, platforms ...string) bool {
 	config, err := readDevinConfig(path)
 	if err != nil {
 		return false
 	}
 	for _, groups := range config.hooks {
 		for _, group := range groups {
-			if isDevinEndpointHookGroup(group) {
+			if isDevinEndpointHookGroup(group, platforms...) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func isDevinEndpointHookCommand(command string, platforms ...string) bool {
+	if len(platforms) == 0 {
+		platforms = []string{"devin"}
+	}
+	for _, platform := range platforms {
+		if isEndpointHookCommand(command, platform) {
+			return true
 		}
 	}
 	return false

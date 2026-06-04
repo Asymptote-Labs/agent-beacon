@@ -109,6 +109,10 @@ func runEndpointDoctor(cmd *cobra.Command, args []string) error {
 func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	effectiveCfg := loadConfigForMode(status.RuntimeLog.EffectiveUserMode, status.LogPath)
+	hookTargetNames, err := hookTargets()
+	if err != nil {
+		return err
+	}
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,
@@ -116,7 +120,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		LogPath:           status.LogPath,
 		ContentRetention:  effectiveCfg.ContentRetention,
 		Harnesses:         status.Harnesses,
-		Hooks:             hookStatusesWithConfig(hookTargets(), effectiveCfg),
+		Hooks:             hookStatusesWithConfig(hookTargetNames, effectiveCfg),
 		Destinations:      status.Destinations,
 		LastEventObserved: status.LastEvent != "",
 	}
@@ -141,7 +145,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Harness: %s detected=%t telemetry=%s\n", h.DisplayName, h.Detected, h.TelemetryStatus)
 	}
-	for _, name := range hookTargets() {
+	for _, name := range hookTargetNames {
 		if hook, ok := result.Hooks[name]; ok {
 			fmt.Printf("Hook: %s status=%s installed=%t\n", name, hook.Status, hook.Installed)
 		}
@@ -317,6 +321,7 @@ func plannedInstallActions(repair bool) []plannedAction {
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
+	otlpTargets, hookTargets, _ := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
 	actions := []plannedAction{}
 	if repair {
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "repair unloads existing endpoint service if present"})
@@ -326,8 +331,11 @@ func plannedInstallActions(repair bool) []plannedAction {
 		plannedAction{Action: "write_plist", Message: "launchd service definition"},
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
 	)
-	for _, h := range splitHarnessCSV(endpointOpts.harnesses) {
+	for _, h := range otlpTargets {
 		actions = append(actions, plannedAction{Action: "configure_harness", Target: h})
+	}
+	for _, h := range hookTargets {
+		actions = append(actions, plannedAction{Action: "configure_harness", Target: h, Message: "install endpoint hook integration"})
 	}
 	if !endpointOpts.noStart {
 		actions = append(actions, plannedAction{Action: "load_service", Message: "start endpoint collector service"})
@@ -365,11 +373,11 @@ func printPlannedActions(actions []plannedAction) error {
 	return nil
 }
 
-func hookTargets() []string {
+func hookTargets() ([]string, error) {
 	if endpointOpts.allTargets {
-		return []string{"cursor", "vscode", "factory", "opencode", "grok", "devin", "antigravity"}
+		return []string{"cursor", "vscode", "factory", "opencode", "grok", "devin-cli", "devin-desktop", "antigravity"}, nil
 	}
-	return splitCSV(endpointOpts.hookHarnesses)
+	return canonicalHookTargets(splitCSV(endpointOpts.hookHarnesses))
 }
 
 func hookStatuses(targets []string) map[string]hookTargetResult {
@@ -379,21 +387,25 @@ func hookStatuses(targets []string) map[string]hookTargetResult {
 
 func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[string]hookTargetResult {
 	statuses := map[string]hookTargetResult{}
-	for _, name := range targets {
+	canonical, err := canonicalHookTargets(targets)
+	if err != nil {
+		return statuses
+	}
+	for _, name := range canonical {
 		switch strings.TrimSpace(name) {
-		case "antigravity", "antigravity_cli":
+		case "antigravity":
 			status := endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
 		case "cursor":
 			status := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksJSONPath, Raw: status}
-		case "claude", "claude_code":
+		case "claude":
 			status := endpointhooks.ClaudeHookStatus(endpointhooks.ClaudeOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.SettingsPath, Raw: status}
-		case "vscode", "vs_code":
+		case "vscode":
 			status := endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
-		case "factory", "droid":
+		case "factory":
 			status := endpointhooks.FactoryHookStatus(endpointhooks.FactoryOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.SettingsPath, Raw: status}
 		case "opencode":
@@ -402,9 +414,12 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 		case "grok":
 			status := endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
-		case "devin":
+		case "devin-cli":
 			status := endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
-			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
+			statuses["devin-cli"] = hookTargetResult{Target: "devin-cli", Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
+		case "devin-desktop":
+			status := endpointhooks.DevinDesktopHookStatus(endpointhooks.DevinDesktopOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses["devin-desktop"] = hookTargetResult{Target: "devin-desktop", Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
 		}
 	}
 	return statuses

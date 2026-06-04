@@ -161,7 +161,7 @@ func actionForTool(hookEvent, toolName string) string {
 			return "file.modified"
 		}
 	}
-	if platformFlag == "devin" {
+	if isDevinLikePlatform(platformFlag) {
 		switch {
 		case strings.HasPrefix(lower, "mcp__"):
 			return "mcp.tool_invoked"

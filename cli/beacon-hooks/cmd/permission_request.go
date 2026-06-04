@@ -22,7 +22,7 @@ var devinApproveResponse = map[string]interface{}{"decision": "approve"}
 func runPermissionRequest(cmd *cobra.Command, args []string) {
 	input, err := readStdinJSON()
 	if err != nil {
-		if platformFlag == "devin" {
+		if isDevinLikePlatform(platformFlag) {
 			outputJSON(devinApproveResponse)
 			return
 		}
@@ -38,7 +38,7 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 		logger = logging.NewLoggerForPlatform("permission-request", platformFlag)
 	}
 
-	if platformFlag == "devin" {
+	if isDevinLikePlatform(platformFlag) {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "approve", "Permission request approved")
 		outputJSON(devinApproveResponse)
 		return

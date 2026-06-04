@@ -115,7 +115,7 @@ func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) str
 }
 
 func isEndpointHookCommand(command, platform string) bool {
-	hasPlatform := platform == "" || strings.Contains(command, "--platform "+platform)
+	hasPlatform := platform == "" || commandHasPlatform(command, platform)
 	hasBeaconBinary := strings.Contains(command, embedded.GetBinaryName())
 	hasLegacyBinary := strings.Contains(command, "asym-hooks")
 
@@ -126,6 +126,19 @@ func isEndpointHookCommand(command, platform string) bool {
 		return true
 	}
 	return hasLegacyBinary && hasPlatform
+}
+
+func commandHasPlatform(command, platform string) bool {
+	fields := strings.Fields(command)
+	for i, field := range fields {
+		if field == "--platform" && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], `"'`) == platform
+		}
+		if strings.HasPrefix(field, "--platform=") {
+			return strings.Trim(strings.TrimPrefix(field, "--platform="), `"'`) == platform
+		}
+	}
+	return false
 }
 
 func writeEndpointHookBinary(userMode bool) (string, error) {

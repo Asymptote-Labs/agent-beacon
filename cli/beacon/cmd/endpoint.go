@@ -935,212 +935,259 @@ func init() {
 }
 
 func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
+	targets, err := hookTargets()
+	if err != nil {
+		return err
+	}
 	if endpointOpts.dryRun {
 		actions := []plannedAction{}
-		for _, name := range hookTargets() {
+		for _, name := range targets {
 			actions = append(actions, plannedAction{Action: "configure_harness", Target: name, Message: "install endpoint hook integration"})
 		}
 		return printPlannedActions(actions)
 	}
 	cfg := loadOrDefaultConfig()
-	for _, name := range hookTargets() {
-		switch strings.TrimSpace(name) {
-		case "antigravity", "antigravity_cli":
-			status, err := endpointhooks.InstallAntigravity(endpointhooks.AntigravityOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Antigravity hooks installed: %s\n", status.ConfigPath)
-		case "cursor":
-			status, err := endpointhooks.InstallCursor(endpointhooks.CursorOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Cursor hooks installed: %s\n", status.HooksJSONPath)
-		case "claude", "claude_code":
-			status, err := endpointhooks.InstallClaude(endpointhooks.ClaudeOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Claude Code hooks installed: %s\n", status.SettingsPath)
-		case "vscode", "vs_code":
-			status, err := endpointhooks.InstallVSCode(endpointhooks.VSCodeOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("VS Code hooks installed: %s\n", status.HooksPath)
-		case "factory", "droid":
-			status, err := endpointhooks.InstallFactory(endpointhooks.FactoryOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Factory hooks installed: %s\n", status.SettingsPath)
-		case "opencode":
-			status, err := endpointhooks.InstallOpenCode(endpointhooks.OpenCodeOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("opencode plugin installed: %s\n", status.PluginPath)
-		case "grok":
-			status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Grok hooks installed: %s\n", status.HooksPath)
-			if strings.Contains(status.Message, "/hooks-trust") {
-				fmt.Println(status.Message)
-			}
-		case "devin":
-			status, err := endpointhooks.InstallDevin(endpointhooks.DevinOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Devin hooks installed: %s\n", status.ConfigPath)
-		case "":
-		default:
-			return fmt.Errorf("unsupported hook harness %q", name)
+	for _, name := range targets {
+		if err := installEndpointHookTarget(name, cfg); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
+	switch strings.TrimSpace(name) {
+	case "antigravity":
+		status, err := endpointhooks.InstallAntigravity(endpointhooks.AntigravityOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Antigravity hooks installed: %s\n", status.ConfigPath)
+	case "cursor":
+		status, err := endpointhooks.InstallCursor(endpointhooks.CursorOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Cursor hooks installed: %s\n", status.HooksJSONPath)
+	case "claude":
+		status, err := endpointhooks.InstallClaude(endpointhooks.ClaudeOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Claude Code hooks installed: %s\n", status.SettingsPath)
+	case "vscode":
+		status, err := endpointhooks.InstallVSCode(endpointhooks.VSCodeOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("VS Code hooks installed: %s\n", status.HooksPath)
+	case "factory":
+		status, err := endpointhooks.InstallFactory(endpointhooks.FactoryOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Factory hooks installed: %s\n", status.SettingsPath)
+	case "opencode":
+		status, err := endpointhooks.InstallOpenCode(endpointhooks.OpenCodeOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("opencode plugin installed: %s\n", status.PluginPath)
+	case "grok":
+		status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Grok hooks installed: %s\n", status.HooksPath)
+		if strings.Contains(status.Message, "/hooks-trust") {
+			fmt.Println(status.Message)
+		}
+	case "devin-cli":
+		status, err := endpointhooks.InstallDevin(endpointhooks.DevinOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Devin CLI hooks installed: %s\n", status.ConfigPath)
+	case "devin-desktop":
+		status, err := endpointhooks.InstallDevinDesktop(endpointhooks.DevinDesktopOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Devin Desktop hooks installed: %s\n", status.ConfigPath)
+		fmt.Println("Devin Desktop hook files are installed; generate a Desktop event and check the runtime log to validate execution.")
+	case "":
+	default:
+		return fmt.Errorf("unsupported hook harness %q", name)
 	}
 	return nil
 }
 
 func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {
+	targets, err := hookTargets()
+	if err != nil {
+		return err
+	}
 	if endpointOpts.dryRun {
 		actions := []plannedAction{}
-		for _, name := range hookTargets() {
+		for _, name := range targets {
 			actions = append(actions, plannedAction{Action: "remove_hook", Target: name, Message: "uninstall endpoint hook integration"})
 		}
 		return printPlannedActions(actions)
 	}
 	cfg := loadOrDefaultConfig()
-	for _, name := range hookTargets() {
-		switch strings.TrimSpace(name) {
-		case "antigravity", "antigravity_cli":
-			status, err := endpointhooks.UninstallAntigravity(endpointhooks.AntigravityOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "cursor":
-			status, err := endpointhooks.UninstallCursor(endpointhooks.CursorOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "claude", "claude_code":
-			status, err := endpointhooks.UninstallClaude(endpointhooks.ClaudeOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "vscode", "vs_code":
-			status, err := endpointhooks.UninstallVSCode(endpointhooks.VSCodeOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "factory", "droid":
-			status, err := endpointhooks.UninstallFactory(endpointhooks.FactoryOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "opencode":
-			status, err := endpointhooks.UninstallOpenCode(endpointhooks.OpenCodeOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "grok":
-			status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "devin":
-			status, err := endpointhooks.UninstallDevin(endpointhooks.DevinOptions{
-				Level:    endpointhooks.Level(endpointOpts.hookLevel),
-				LogPath:  cfg.LogPath,
-				UserMode: cfg.UserMode,
-			})
-			if err != nil {
-				return err
-			}
-			fmt.Println(status.Message)
-		case "":
-		default:
-			return fmt.Errorf("unsupported hook harness %q", name)
+	for _, name := range targets {
+		if err := uninstallEndpointHookTarget(name, cfg); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
+	switch strings.TrimSpace(name) {
+	case "antigravity":
+		status, err := endpointhooks.UninstallAntigravity(endpointhooks.AntigravityOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "cursor":
+		status, err := endpointhooks.UninstallCursor(endpointhooks.CursorOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "claude":
+		status, err := endpointhooks.UninstallClaude(endpointhooks.ClaudeOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "vscode":
+		status, err := endpointhooks.UninstallVSCode(endpointhooks.VSCodeOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "factory":
+		status, err := endpointhooks.UninstallFactory(endpointhooks.FactoryOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "opencode":
+		status, err := endpointhooks.UninstallOpenCode(endpointhooks.OpenCodeOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "grok":
+		status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "devin-cli":
+		status, err := endpointhooks.UninstallDevin(endpointhooks.DevinOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "devin-desktop":
+		status, err := endpointhooks.UninstallDevinDesktop(endpointhooks.DevinDesktopOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
+	case "":
+	default:
+		return fmt.Errorf("unsupported hook harness %q", name)
+	}
+	return nil
+}
+
 func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
+	targets, err := hookTargets()
+	if err != nil {
+		return err
+	}
 	cfg := loadOrDefaultConfig()
 	statuses := map[string]interface{}{}
-	for _, name := range hookTargets() {
+	for _, name := range targets {
 		switch strings.TrimSpace(name) {
-		case "antigravity", "antigravity_cli":
+		case "antigravity":
 			statuses["antigravity"] = endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
 				LogPath:  cfg.LogPath,
@@ -1152,19 +1199,19 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
-		case "claude", "claude_code":
+		case "claude":
 			statuses["claude"] = endpointhooks.ClaudeHookStatus(endpointhooks.ClaudeOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
-		case "vscode", "vs_code":
+		case "vscode":
 			statuses["vscode"] = endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
-		case "factory", "droid":
+		case "factory":
 			statuses["factory"] = endpointhooks.FactoryHookStatus(endpointhooks.FactoryOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
 				LogPath:  cfg.LogPath,
@@ -1182,8 +1229,14 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
-		case "devin":
-			statuses["devin"] = endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{
+		case "devin-cli":
+			statuses["devin-cli"] = endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+		case "devin-desktop":
+			statuses["devin-desktop"] = endpointhooks.DevinDesktopHookStatus(endpointhooks.DevinDesktopOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
@@ -1196,9 +1249,9 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(statuses)
 	}
-	for _, name := range hookTargets() {
+	for _, name := range targets {
 		switch strings.TrimSpace(name) {
-		case "antigravity", "antigravity_cli":
+		case "antigravity":
 			status := statuses["antigravity"].(endpointhooks.AntigravityStatus)
 			fmt.Printf("Antigravity hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
 			fmt.Println(status.Message)
@@ -1206,15 +1259,15 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			status := statuses["cursor"].(endpointhooks.CursorStatus)
 			fmt.Printf("Cursor hooks: installed=%t path=%s\n", status.Installed, status.HooksJSONPath)
 			fmt.Println(status.Message)
-		case "claude", "claude_code":
+		case "claude":
 			status := statuses["claude"].(endpointhooks.ClaudeStatus)
 			fmt.Printf("Claude Code hooks: installed=%t path=%s\n", status.Installed, status.SettingsPath)
 			fmt.Println(status.Message)
-		case "vscode", "vs_code":
+		case "vscode":
 			status := statuses["vscode"].(endpointhooks.VSCodeStatus)
 			fmt.Printf("VS Code hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
-		case "factory", "droid":
+		case "factory":
 			status := statuses["factory"].(endpointhooks.FactoryStatus)
 			fmt.Printf("Factory hooks: installed=%t path=%s\n", status.Installed, status.SettingsPath)
 			fmt.Println(status.Message)
@@ -1226,9 +1279,13 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			status := statuses["grok"].(endpointhooks.GrokStatus)
 			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
-		case "devin":
-			status := statuses["devin"].(endpointhooks.DevinStatus)
-			fmt.Printf("Devin hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
+		case "devin-cli":
+			status := statuses["devin-cli"].(endpointhooks.DevinStatus)
+			fmt.Printf("Devin CLI hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
+			fmt.Println(status.Message)
+		case "devin-desktop":
+			status := statuses["devin-desktop"].(endpointhooks.DevinStatus)
+			fmt.Printf("Devin Desktop hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
 			fmt.Println(status.Message)
 		}
 	}
@@ -1656,13 +1713,17 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
+	otlpHarnesses, hookHarnesses, err := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
+	if err != nil {
+		return err
+	}
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false))
 	}
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
-		Harnesses:             splitHarnessCSV(endpointOpts.harnesses),
+		Harnesses:             otlpHarnesses,
 		GRPCPort:              endpointOpts.grpcPort,
 		HTTPPort:              endpointOpts.httpPort,
 		CollectorPath:         endpointOpts.collectorPath,
@@ -1681,6 +1742,9 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Launch plist written to %s\n", result.PlistPath)
 	fmt.Printf("Install manifest written to %s\n", result.ManifestPath)
 	fmt.Printf("Runtime log: %s\n", result.LogPath)
+	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
+		return fmt.Errorf("endpoint install completed, but hook installation failed: %w", err)
+	}
 	return nil
 }
 
@@ -1791,13 +1855,17 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointRepair(cmd *cobra.Command, args []string) error {
+	otlpHarnesses, hookHarnesses, err := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
+	if err != nil {
+		return err
+	}
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(true))
 	}
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
-		Harnesses:             splitHarnessCSV(endpointOpts.harnesses),
+		Harnesses:             otlpHarnesses,
 		GRPCPort:              endpointOpts.grpcPort,
 		HTTPPort:              endpointOpts.httpPort,
 		CollectorPath:         endpointOpts.collectorPath,
@@ -1812,6 +1880,25 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
+	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
+		return fmt.Errorf("endpoint repair completed, but hook installation failed: %w", err)
+	}
+	return nil
+}
+
+func installHookTargetsFromEndpointInstall(targets []string) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	cfg := loadOrDefaultConfig()
+	if endpointOpts.logPath != "" {
+		cfg.LogPath = endpointOpts.logPath
+	}
+	for _, target := range targets {
+		if err := installEndpointHookTarget(target, cfg); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

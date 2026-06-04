@@ -194,6 +194,46 @@ func TestRunPostToolEmitsDevinFileModifiedEvent(t *testing.T) {
 	}
 }
 
+func TestRunPostToolEmitsDevinDesktopFileModifiedEvent(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin-desktop"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"cwd":       "/repo",
+		"tool_name": "write",
+		"tool_input": map[string]interface{}{
+			"file_path": "/repo/main.go",
+			"content":   "new token=devin-secret",
+		},
+		"tool_response": map[string]interface{}{"success": true},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin-desktop" {
+		t.Fatalf("harness = %q, want devin-desktop", harness)
+	}
+	if session, ok := event["session"].(map[string]interface{}); ok {
+		if _, hasID := session["id"]; hasID {
+			t.Fatalf("devin desktop file event should not include empty session id: %#v", session)
+		}
+	}
+	file := event["file"].(map[string]interface{})
+	if file["path"] != "/repo/main.go" {
+		t.Fatalf("file = %#v, want /repo/main.go", file)
+	}
+	if _, ok := file["diff_hash"]; !ok {
+		t.Fatalf("file diff_hash missing: %#v", file)
+	}
+}
+
 func TestRunPostToolEmitsFactoryFileModifiedEvent(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "factory"
