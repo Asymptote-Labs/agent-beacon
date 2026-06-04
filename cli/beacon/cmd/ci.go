@@ -90,9 +90,12 @@ func init() {
 	for _, cmd := range []*cobra.Command{ciExecCmd, ciValidateCmd, ciStopCmd} {
 		cmd.Flags().IntVar(&ciOpts.minEvents, "min-events", beaconci.DefaultValidationMin, "Minimum matching events required during validation")
 	}
+	// base-dir is used by exec, start, and stop to locate CI session artifacts.
+	for _, cmd := range []*cobra.Command{ciExecCmd, ciStartCmd, ciStopCmd} {
+		cmd.Flags().StringVar(&ciOpts.baseDir, "base-dir", "", "CI session base directory (defaults to $RUNNER_TEMP/beacon or a temp directory)")
+	}
 	// Collector provisioning flags shared by exec (foreground) and start (detached).
 	for _, cmd := range []*cobra.Command{ciExecCmd, ciStartCmd} {
-		cmd.Flags().StringVar(&ciOpts.baseDir, "base-dir", "", "CI session base directory (defaults to $RUNNER_TEMP/beacon or a temp directory)")
 		cmd.Flags().StringVar(&ciOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 		cmd.Flags().IntVar(&ciOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 		cmd.Flags().IntVar(&ciOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
@@ -114,6 +117,7 @@ func init() {
 	for _, name := range []string{"base-dir", "collector", "otlp-grpc-port", "otlp-http-port"} {
 		_ = ciStartCmd.Flags().MarkHidden(name)
 	}
+	_ = ciStopCmd.Flags().MarkHidden("base-dir")
 }
 
 func runCIExec(cmd *cobra.Command, args []string) error {
