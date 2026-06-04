@@ -61,11 +61,20 @@ type SessionInfo struct {
 }
 
 type RunInfo struct {
-	Provider  string `json:"provider,omitempty"`
-	RunID     string `json:"run_id,omitempty"`
-	Workflow  string `json:"workflow,omitempty"`
-	Commit    string `json:"commit,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
+	RunAttempt string `json:"run_attempt,omitempty"`
+	Workflow   string `json:"workflow,omitempty"`
+	Job        string `json:"job,omitempty"`
+	EventName  string `json:"event_name,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+	Repository string `json:"repository,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	// PR holds the raw pull-request ref (e.g. refs/pull/12/merge) and is only
+	// populated on pull-request events; it is left empty for non-PR refs such
+	// as push builds. PRNumber is the parsed pull-request number.
 	PR        string `json:"pr,omitempty"`
+	PRNumber  string `json:"pr_number,omitempty"`
 	Actor     string `json:"actor,omitempty"`
 	Ephemeral bool   `json:"ephemeral,omitempty"`
 }

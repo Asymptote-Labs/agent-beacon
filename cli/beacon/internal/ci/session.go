@@ -296,20 +296,63 @@ func DefaultLogPath() string {
 
 func detectRunInfo() *schema.RunInfo {
 	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		return &schema.RunInfo{
-			Provider:  "github_actions",
-			RunID:     os.Getenv("GITHUB_RUN_ID"),
-			Workflow:  os.Getenv("GITHUB_WORKFLOW"),
-			Commit:    os.Getenv("GITHUB_SHA"),
-			PR:        os.Getenv("GITHUB_REF"),
-			Actor:     os.Getenv("GITHUB_ACTOR"),
-			Ephemeral: true,
+		eventName := os.Getenv("GITHUB_EVENT_NAME")
+		info := &schema.RunInfo{
+			Provider:   "github_actions",
+			RunID:      os.Getenv("GITHUB_RUN_ID"),
+			RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT"),
+			Workflow:   os.Getenv("GITHUB_WORKFLOW"),
+			Job:        os.Getenv("GITHUB_JOB"),
+			EventName:  eventName,
+			Commit:     os.Getenv("GITHUB_SHA"),
+			Repository: os.Getenv("GITHUB_REPOSITORY"),
+			Actor:      os.Getenv("GITHUB_ACTOR"),
+			Ephemeral:  true,
 		}
+		// Prefer the pull-request head ref as the human-readable branch; fall
+		// back to the pushed ref's short name on non-PR events.
+		if head := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); head != "" {
+			info.Branch = head
+		} else {
+			info.Branch = os.Getenv("GITHUB_REF_NAME")
+		}
+		// GITHUB_REF is a non-PR ref (e.g. refs/heads/main) on push events, so
+		// only record PR fields when the trigger is actually a pull request.
+		if isPullRequestEvent(eventName) {
+			ref := os.Getenv("GITHUB_REF")
+			info.PR = ref
+			info.PRNumber = parsePRNumber(ref)
+		}
+		return info
 	}
 	if os.Getenv("CI") != "" {
 		return &schema.RunInfo{Provider: "ci", Ephemeral: true}
 	}
 	return nil
+}
+
+func isPullRequestEvent(eventName string) bool {
+	return eventName == "pull_request" || eventName == "pull_request_target"
+}
+
+// parsePRNumber extracts the pull-request number from a ref of the form
+// refs/pull/<number>/merge (or /head). It returns an empty string when the ref
+// is not a pull-request ref or the number is not purely numeric.
+func parsePRNumber(ref string) string {
+	const prefix = "refs/pull/"
+	if !strings.HasPrefix(ref, prefix) {
+		return ""
+	}
+	num, _, ok := strings.Cut(strings.TrimPrefix(ref, prefix), "/")
+	if !ok || num == "" {
+		return ""
+	}
+	for _, r := range num {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return num
 }
 
 func terminateProcess(process *os.Process) error {

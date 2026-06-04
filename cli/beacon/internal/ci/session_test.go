@@ -135,6 +135,100 @@ func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
 	}
 }
 
+func TestDetectRunInfoPullRequest(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
+	t.Setenv("GITHUB_RUN_ID", "123")
+	t.Setenv("GITHUB_RUN_ATTEMPT", "2")
+	t.Setenv("GITHUB_WORKFLOW", "ci")
+	t.Setenv("GITHUB_JOB", "telemetry")
+	t.Setenv("GITHUB_SHA", "deadbeef")
+	t.Setenv("GITHUB_REPOSITORY", "asymptote-labs/agent-beacon")
+	t.Setenv("GITHUB_ACTOR", "octocat")
+	t.Setenv("GITHUB_HEAD_REF", "feature/telemetry")
+	t.Setenv("GITHUB_REF_NAME", "12/merge")
+	t.Setenv("GITHUB_REF", "refs/pull/12/merge")
+
+	info := detectRunInfo()
+	if info == nil {
+		t.Fatal("detectRunInfo returned nil in GitHub Actions")
+	}
+	if info.Provider != "github_actions" {
+		t.Fatalf("Provider = %q, want github_actions", info.Provider)
+	}
+	if info.RunAttempt != "2" || info.Job != "telemetry" || info.EventName != "pull_request" {
+		t.Fatalf("unexpected run context: %+v", info)
+	}
+	if info.Repository != "asymptote-labs/agent-beacon" {
+		t.Fatalf("Repository = %q", info.Repository)
+	}
+	if info.Branch != "feature/telemetry" {
+		t.Fatalf("Branch = %q, want PR head ref", info.Branch)
+	}
+	if info.PR != "refs/pull/12/merge" || info.PRNumber != "12" {
+		t.Fatalf("PR = %q, PRNumber = %q", info.PR, info.PRNumber)
+	}
+}
+
+func TestDetectRunInfoPushOmitsPR(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_EVENT_NAME", "push")
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_REF_NAME", "main")
+	t.Setenv("GITHUB_REF", "refs/heads/main")
+
+	info := detectRunInfo()
+	if info == nil {
+		t.Fatal("detectRunInfo returned nil in GitHub Actions")
+	}
+	if info.Branch != "main" {
+		t.Fatalf("Branch = %q, want ref name on push", info.Branch)
+	}
+	if info.PR != "" || info.PRNumber != "" {
+		t.Fatalf("push build should not record PR fields: PR=%q PRNumber=%q", info.PR, info.PRNumber)
+	}
+}
+
+func TestDetectRunInfoGenericCIFallback(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("CI", "true")
+
+	info := detectRunInfo()
+	if info == nil {
+		t.Fatal("detectRunInfo returned nil for generic CI")
+	}
+	if info.Provider != "ci" || !info.Ephemeral {
+		t.Fatalf("unexpected generic CI run info: %+v", info)
+	}
+}
+
+func TestDetectRunInfoNotCI(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("CI", "")
+
+	if info := detectRunInfo(); info != nil {
+		t.Fatalf("detectRunInfo = %+v, want nil outside CI", info)
+	}
+}
+
+func TestParsePRNumber(t *testing.T) {
+	cases := map[string]string{
+		"refs/pull/12/merge": "12",
+		"refs/pull/7/head":   "7",
+		"refs/heads/main":    "",
+		"refs/pull//merge":   "",
+		"refs/pull/abc/head": "",
+		"":                   "",
+	}
+	for ref, want := range cases {
+		if got := parsePRNumber(ref); got != want {
+			t.Fatalf("parsePRNumber(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}
+
 func fakeExecutable(t *testing.T, name, script string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
