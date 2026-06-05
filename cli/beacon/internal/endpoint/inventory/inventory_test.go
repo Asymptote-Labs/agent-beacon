@@ -157,6 +157,100 @@ func TestMissingCandidatesAreReportedAsNotFound(t *testing.T) {
 	}
 }
 
+func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("SHELL", "/bin/bash")
+
+	result := Scan(Options{
+		ContentRetention: RedactionRedacted,
+		HomeDir:          home,
+		WorkingDir:       work,
+		Now:              fixedNow,
+	})
+
+	expected := []candidate{
+		{runtime: "claude_code", path: filepath.Join(home, ".claude", "settings.json"), scope: ScopeUser},
+		{runtime: "claude_code", path: filepath.Join(work, ".claude", "settings.json"), scope: ScopeProject},
+		{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged},
+		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "config.toml"), scope: ScopeUser},
+		{runtime: "cursor", path: filepath.Join(home, ".cursor", "mcp.json"), scope: ScopeUser},
+		{runtime: "cursor", path: filepath.Join(work, ".cursor", "mcp.json"), scope: ScopeProject},
+		{runtime: "cursor", path: filepath.Join(home, ".cursor", "hooks.json"), scope: ScopeUser},
+		{runtime: "cursor", path: filepath.Join(work, ".cursor", "hooks.json"), scope: ScopeProject},
+		{runtime: "gemini_cli", path: filepath.Join(home, ".gemini", "settings.json"), scope: ScopeUser},
+		{runtime: "antigravity_cli", path: filepath.Join(home, ".gemini", "config", "hooks.json"), scope: ScopeUser},
+		{runtime: "antigravity_cli", path: filepath.Join(work, ".agents", "hooks.json"), scope: ScopeProject},
+		{runtime: "vscode", path: vscodeUserSettingsPath(home), scope: ScopeUser},
+		{runtime: "vscode", path: filepath.Join(work, ".vscode", "settings.json"), scope: ScopeProject},
+		{runtime: "vscode", path: filepath.Join(home, ".copilot", "hooks", "beacon.json"), scope: ScopeUser},
+		{runtime: "vscode", path: filepath.Join(work, ".github", "hooks", "beacon.json"), scope: ScopeProject},
+		{runtime: "factory", path: filepath.Join(home, ".bash_profile"), scope: ScopeUser},
+		{runtime: "factory", path: filepath.Join(home, ".factory", "settings.json"), scope: ScopeUser},
+		{runtime: "factory", path: filepath.Join(work, ".factory", "settings.json"), scope: ScopeProject},
+		{runtime: "copilot_cli", path: filepath.Join(home, ".bash_profile"), scope: ScopeUser},
+		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser},
+		{runtime: "opencode", path: filepath.Join(work, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject},
+		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser},
+		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser},
+		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject},
+		{runtime: "devin-desktop", path: filepath.Join(home, ".codeium", "windsurf", "hooks.json"), scope: ScopeUser},
+		{runtime: "devin-desktop", path: filepath.Join(work, ".windsurf", "hooks.json"), scope: ScopeProject},
+		{runtime: "grok", path: filepath.Join(home, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeUser},
+		{runtime: "grok", path: filepath.Join(work, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeProject},
+	}
+	if got, want := len(result.Configs), len(expected); got != want {
+		t.Fatalf("config candidates = %d, want %d", got, want)
+	}
+	for _, item := range expected {
+		config := findConfig(result.Configs, item.runtime, item.path)
+		if config == nil {
+			t.Fatalf("missing candidate %s %s", item.runtime, item.path)
+		}
+		if config.Scope != item.scope {
+			t.Fatalf("%s %s scope = %s, want %s", item.runtime, item.path, config.Scope, item.scope)
+		}
+	}
+}
+
+func TestScanYAMLAndMetadataOnlyConfigs(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("SHELL", "/bin/zsh")
+	writeFile(t, filepath.Join(home, ".hermes", "config.yaml"), `
+mcpServers:
+  memory:
+    command: uvx
+    args:
+      - mcp-server-memory
+`)
+	writeFile(t, filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), `// beacon-managed-opencode-plugin:v1`)
+	writeFile(t, filepath.Join(home, ".zshrc"), `export OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`)
+
+	result := Scan(Options{
+		ContentRetention: RedactionRedacted,
+		HomeDir:          home,
+		WorkingDir:       work,
+		Now:              fixedNow,
+	})
+
+	assertServer(t, result.MCPServers, "hermes", "memory", TransportStdio, true, 1, 0, 0)
+	opencode := findConfig(result.Configs, "opencode", filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"))
+	if opencode == nil {
+		t.Fatal("opencode metadata-only config not found")
+	}
+	if opencode.ParserStatus != StatusOK || !opencode.BeaconManaged {
+		t.Fatalf("opencode status = %s managed=%t, want ok/managed", opencode.ParserStatus, opencode.BeaconManaged)
+	}
+	factoryProfile := findConfig(result.Configs, "factory", filepath.Join(home, ".zshrc"))
+	if factoryProfile == nil {
+		t.Fatal("factory shell profile config not found")
+	}
+	if factoryProfile.ParserStatus != StatusOK || !factoryProfile.BeaconManaged {
+		t.Fatalf("factory profile status = %s managed=%t, want ok/managed", factoryProfile.ParserStatus, factoryProfile.BeaconManaged)
+	}
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 5, 7, 0, 0, 0, time.UTC)
 }
@@ -197,4 +291,14 @@ func assertServer(t *testing.T, servers []MCPServer, runtime, name, transport st
 		}
 	}
 	t.Fatalf("server %s/%s not found in %#v", runtime, name, servers)
+}
+
+func findConfig(configs []Config, runtime, path string) *Config {
+	pathHash := hashString(path)
+	for i := range configs {
+		if configs[i].Runtime == runtime && configs[i].PathHash == pathHash {
+			return &configs[i]
+		}
+	}
+	return nil
 }
