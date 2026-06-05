@@ -11,6 +11,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
+	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 
 	"github.com/spf13/cobra"
 )
@@ -529,6 +530,60 @@ func TestRobustEndpointCommandsRegistered(t *testing.T) {
 		if cmd == nil {
 			t.Fatalf("command %v not registered", path)
 		}
+	}
+}
+
+func TestWriteInventoryEventsAppendsConfigInventory(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	cfg := endpointconfig.Default(true, logPath)
+	result := endpointinventory.Result{
+		Configs: []endpointinventory.Config{
+			{
+				Runtime:      "claude_code",
+				Path:         filepath.Join(t.TempDir(), ".claude", "settings.json"),
+				PathHash:     "sha256:path",
+				Scope:        endpointinventory.ScopeUser,
+				Exists:       true,
+				Readable:     true,
+				ParserStatus: endpointinventory.StatusOK,
+				Redaction:    endpointinventory.RedactionRedacted,
+			},
+			{
+				Runtime:      "cursor",
+				PathHash:     "sha256:missing",
+				Scope:        endpointinventory.ScopeUser,
+				Exists:       false,
+				ParserStatus: endpointinventory.StatusNotFound,
+				Redaction:    endpointinventory.RedactionRedacted,
+			},
+		},
+		MCPServers: []endpointinventory.MCPServer{
+			{
+				Runtime:        "claude_code",
+				ServerName:     "filesystem",
+				SourcePathHash: "sha256:path",
+				SourceScope:    endpointinventory.ScopeUser,
+				Transport:      endpointinventory.TransportStdio,
+				DefinitionHash: "sha256:def",
+				ParserStatus:   endpointinventory.StatusOK,
+				Redaction:      endpointinventory.RedactionRedacted,
+			},
+		},
+	}
+
+	if err := writeInventoryEvents(cfg, result); err != nil {
+		t.Fatalf("writeInventoryEvents returned error: %v", err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Count(text, "config.inventory") != 1 {
+		t.Fatalf("inventory events = %d, want 1; log=%s", strings.Count(text, "config.inventory"), text)
+	}
+	if !strings.Contains(text, "filesystem") {
+		t.Fatalf("inventory log missing MCP server summary: %s", text)
 	}
 }
 

@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace v0.0.0
+	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/spf13/cobra v1.8.1
 	gopkg.in/yaml.v3 v3.0.1
 )

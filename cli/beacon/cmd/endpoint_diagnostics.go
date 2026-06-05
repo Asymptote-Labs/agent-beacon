@@ -17,8 +17,10 @@ import (
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
+	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
@@ -38,6 +40,9 @@ type inventoryResult struct {
 	Hooks             map[string]hookTargetResult     `json:"hooks,omitempty"`
 	Destinations      lifecycle.DestinationStatus     `json:"destinations"`
 	LastEventObserved bool                            `json:"last_event_observed"`
+	Configs           []endpointinventory.Config      `json:"configs,omitempty"`
+	MCPServers        []endpointinventory.MCPServer   `json:"mcp_servers,omitempty"`
+	UserScope         endpointinventory.UserScope     `json:"user_scope"`
 }
 
 type hookTargetResult struct {
@@ -113,6 +118,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	configInventory := endpointinventory.Scan(endpointinventory.Options{ContentRetention: string(effectiveCfg.ContentRetention)})
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,
@@ -123,6 +129,14 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		Hooks:             hookStatusesWithConfig(hookTargetNames, effectiveCfg),
 		Destinations:      status.Destinations,
 		LastEventObserved: status.LastEvent != "",
+		Configs:           configInventory.Configs,
+		MCPServers:        configInventory.MCPServers,
+		UserScope:         configInventory.UserScope,
+	}
+	if endpointOpts.writeInventoryEvent {
+		if err := writeInventoryEvents(effectiveCfg, configInventory); err != nil {
+			return err
+		}
 	}
 	if endpointOpts.jsonOutput {
 		if !endpointOpts.allTargets {
@@ -150,7 +164,69 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Hook: %s status=%s installed=%t\n", name, hook.Status, hook.Installed)
 		}
 	}
+	for _, config := range result.Configs {
+		if !endpointOpts.allTargets && !config.Exists {
+			continue
+		}
+		path := config.Path
+		if path == "" {
+			path = config.PathHash
+		}
+		fmt.Printf("Config: %s scope=%s status=%s mcp_servers=%d path=%s\n", config.Runtime, config.Scope, config.ParserStatus, config.MCPServerCount, path)
+	}
+	for _, server := range result.MCPServers {
+		name := server.ServerName
+		if name == "" {
+			name = server.ServerNameHash
+		}
+		fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
+	}
 	return nil
+}
+
+func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Result) error {
+	for _, config := range result.Configs {
+		if !config.Exists {
+			continue
+		}
+		servers := mcpServersForConfig(result.MCPServers, config)
+		event := schema.NewEvent(schema.NewEventOptions{
+			Action:       "config.inventory",
+			Category:     "inventory",
+			Severity:     schema.SeverityInfo,
+			AgentVersion: version.GetVersion(),
+			Harness: schema.HarnessInfo{
+				Name:       config.Runtime,
+				ConfigPath: config.Path,
+			},
+			Message: fmt.Sprintf("%s config inventory observed", config.Runtime),
+		})
+		event.Content = &schema.ContentInfo{
+			Retention: string(cfg.ContentRetention),
+			Included:  true,
+			Redacted:  true,
+		}
+		event.Raw = map[string]interface{}{
+			"inventory": map[string]interface{}{
+				"config":      config,
+				"mcp_servers": servers,
+			},
+		}
+		if _, err := writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mcpServersForConfig(servers []endpointinventory.MCPServer, config endpointinventory.Config) []endpointinventory.MCPServer {
+	out := []endpointinventory.MCPServer{}
+	for _, server := range servers {
+		if server.Runtime == config.Runtime && server.SourcePathHash == config.PathHash {
+			out = append(out, server)
+		}
+	}
+	return out
 }
 
 func runEndpointTestEvent(cmd *cobra.Command, args []string) error {
