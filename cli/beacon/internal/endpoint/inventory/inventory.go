@@ -570,10 +570,16 @@ func beaconManaged(item candidate, data []byte) bool {
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	}
-	if item.runtime == "claude_code" || item.runtime == "codex_cli" || item.runtime == "gemini_cli" || item.runtime == "vscode" {
+	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {
 			return true
 		}
+	}
+	if item.runtime == "gemini_cli" && strings.Contains(text, "otlpEndpoint") && localEndpointText(text) {
+		return true
+	}
+	if item.runtime == "vscode" && strings.Contains(text, "github.copilot.chat.otel.otlpEndpoint") && localEndpointText(text) {
+		return true
 	}
 	if item.runtime == "factory" && strings.Contains(text, "OTEL_TELEMETRY_ENDPOINT") && localEndpointText(text) {
 		return true
