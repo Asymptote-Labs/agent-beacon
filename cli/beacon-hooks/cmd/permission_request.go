@@ -73,6 +73,8 @@ func emitHermesApproval(logger *logging.Logger, input map[string]interface{}, se
 		message = "Permission response observed"
 		if decision == "deny" || decision == "denied" || decision == "timeout" {
 			action = "approval.denied"
+		} else if decision == "unknown" {
+			action = "approval.requested"
 		}
 	}
 	fields := sessionFields(sessionID, input)
