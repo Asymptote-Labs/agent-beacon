@@ -1,0 +1,41 @@
+# Beacon Endpoint Agent -> AWS CloudWatch Logs
+#
+# Run Vector as a customer-managed host agent. Keep AWS credentials, profiles,
+# instance roles, log groups, retention, and encryption in AWS or deployment
+# tooling, not in Beacon config. This template relies on the standard AWS
+# credential provider chain.
+
+data_dir = "/var/lib/vector/beacon-cloudwatch"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+read_from = "end"
+
+[transforms.beacon_json]
+type = "remap"
+inputs = ["beacon_runtime"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.beacon_cloudwatch]
+type = "aws_cloudwatch_logs"
+inputs = ["beacon_json"]
+group_name = "${BEACON_CLOUDWATCH_LOG_GROUP}"
+stream_name = "${BEACON_CLOUDWATCH_LOG_STREAM_PREFIX:-beacon-runtime}/${HOSTNAME:-unknown-host}"
+region = "${AWS_REGION:-us-east-1}"
+create_missing_group = false
+create_missing_stream = true
+
+[sinks.beacon_cloudwatch.encoding]
+codec = "json"
+
+[sinks.beacon_cloudwatch.batch]
+max_events = 1000
+timeout_secs = 30
+
+[sinks.beacon_cloudwatch.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300

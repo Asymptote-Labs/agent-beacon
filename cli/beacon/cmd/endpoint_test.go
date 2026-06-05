@@ -329,6 +329,30 @@ func TestEndpointS3CommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointCloudWatchCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"cloudwatch", "print-config"},
+		{"cloudwatch", "install-pack"},
+		{"cloudwatch", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("cloudwatch command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("cloudwatch command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if endpointCloudWatchInstallPackCmd.Flags().Lookup("output") == nil {
+		t.Fatal("cloudwatch install-pack command missing --output flag")
+	}
+}
+
 func TestEndpointGCSCommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
 		{"gcs", "print-config"},
@@ -761,6 +785,14 @@ func TestSyntheticEventDestinations(t *testing.T) {
 		t.Fatalf("s3 message = %q", s3Event.Message)
 	}
 
+	cloudwatchEvent := syntheticEvent("cloudwatch")
+	if cloudwatchEvent.Destination.Type != "cloudwatch" || cloudwatchEvent.Destination.Mode != "aws_cloudwatch_logs" {
+		t.Fatalf("cloudwatch destination = %#v", cloudwatchEvent.Destination)
+	}
+	if cloudwatchEvent.Message != "Beacon endpoint AWS CloudWatch Logs validation event" {
+		t.Fatalf("cloudwatch message = %q", cloudwatchEvent.Message)
+	}
+
 	gcsEvent := syntheticEvent("gcs")
 	if gcsEvent.Destination.Type != "gcs" || gcsEvent.Destination.Mode != "google_cloud_storage_jsonl" {
 		t.Fatalf("gcs destination = %#v", gcsEvent.Destination)
@@ -802,6 +834,72 @@ func TestEndpointS3ValidatePrintsAWSCLIInspectionGuidance(t *testing.T) {
 	}
 	if strings.Contains(output, "verified delivery") {
 		t.Fatalf("S3 validation output should not claim remote delivery verification: %s", output)
+	}
+}
+
+func TestEndpointCloudWatchPrintConfigPrintsVectorConfig(t *testing.T) {
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+	t.Cleanup(func() {
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+
+	output, err := captureStdout(t, func() error {
+		return endpointCloudWatchPrintConfigCmd.RunE(endpointCloudWatchPrintConfigCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("endpoint cloudwatch print-config returned error: %v", err)
+	}
+	for _, want := range []string{
+		"aws_cloudwatch_logs",
+		"BEACON_CLOUDWATCH_LOG_GROUP",
+		"BEACON_CLOUDWATCH_LOG_STREAM_PREFIX",
+		endpointOpts.logPath,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("CloudWatch print-config output missing %q: %s", want, output)
+		}
+	}
+}
+
+func TestEndpointCloudWatchValidatePrintsAWSInspectionGuidance(t *testing.T) {
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+	t.Cleanup(func() {
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointCloudWatchValidate(endpointCloudWatchValidateCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runEndpointCloudWatchValidate returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Validation event written to",
+		"destination.type=cloudwatch destination.mode=aws_cloudwatch_logs",
+		"aws logs filter-log-events",
+		"CloudWatch Logs Insights query",
+		"Beacon endpoint AWS CloudWatch Logs validation event",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("CloudWatch validation output missing %q: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "verified delivery") {
+		t.Fatalf("CloudWatch validation output should not claim remote delivery verification: %s", output)
 	}
 }
 

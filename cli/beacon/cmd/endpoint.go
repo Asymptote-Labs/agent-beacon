@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/cloudwatch"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/datadog"
@@ -194,6 +195,11 @@ var endpointRapid7Cmd = &cobra.Command{
 var endpointS3Cmd = &cobra.Command{
 	Use:   "s3",
 	Short: "Manage AWS S3 forwarding content",
+}
+
+var endpointCloudWatchCmd = &cobra.Command{
+	Use:   "cloudwatch",
+	Short: "Manage AWS CloudWatch Logs forwarding content",
 }
 
 var endpointGCSCmd = &cobra.Command{
@@ -648,6 +654,35 @@ var endpointS3ValidateCmd = &cobra.Command{
 	RunE:         runEndpointS3Validate,
 }
 
+var endpointCloudWatchPrintConfigCmd = &cobra.Command{
+	Use:          "print-config",
+	Short:        "Print a Vector config for AWS CloudWatch Logs forwarding",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := loadOrDefaultConfig()
+		snippet, err := cloudwatch.ConfigSnippet(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(snippet)
+		return nil
+	},
+}
+
+var endpointCloudWatchInstallPackCmd = &cobra.Command{
+	Use:          "install-pack",
+	Short:        "Write AWS CloudWatch Logs forwarding content to a directory",
+	SilenceUsage: true,
+	RunE:         runEndpointCloudWatchInstallPack,
+}
+
+var endpointCloudWatchValidateCmd = &cobra.Command{
+	Use:          "validate",
+	Short:        "Write and describe an AWS CloudWatch Logs validation event",
+	SilenceUsage: true,
+	RunE:         runEndpointCloudWatchValidate,
+}
+
 var endpointGCSPrintConfigCmd = &cobra.Command{
 	Use:          "print-config",
 	Short:        "Print a Google Cloud Storage smoke-test uploader for Beacon endpoint events",
@@ -723,6 +758,7 @@ func init() {
 	endpointCmd.AddCommand(endpointSumoCmd)
 	endpointCmd.AddCommand(endpointRapid7Cmd)
 	endpointCmd.AddCommand(endpointS3Cmd)
+	endpointCmd.AddCommand(endpointCloudWatchCmd)
 	endpointCmd.AddCommand(endpointGCSCmd)
 	endpointCmd.AddCommand(endpointSentinelCmd)
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
@@ -750,6 +786,9 @@ func init() {
 	endpointS3Cmd.AddCommand(endpointS3PrintConfigCmd)
 	endpointS3Cmd.AddCommand(endpointS3InstallPackCmd)
 	endpointS3Cmd.AddCommand(endpointS3ValidateCmd)
+	endpointCloudWatchCmd.AddCommand(endpointCloudWatchPrintConfigCmd)
+	endpointCloudWatchCmd.AddCommand(endpointCloudWatchInstallPackCmd)
+	endpointCloudWatchCmd.AddCommand(endpointCloudWatchValidateCmd)
 	endpointGCSCmd.AddCommand(endpointGCSPrintConfigCmd)
 	endpointGCSCmd.AddCommand(endpointGCSInstallPackCmd)
 	endpointGCSCmd.AddCommand(endpointGCSValidateCmd)
@@ -869,6 +908,12 @@ func init() {
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointS3InstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for AWS S3 content pack")
+	for _, c := range []*cobra.Command{endpointCloudWatchPrintConfigCmd, endpointCloudWatchInstallPackCmd, endpointCloudWatchValidateCmd} {
+		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
+	}
+	endpointCloudWatchInstallPackCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for AWS CloudWatch Logs content pack")
 	for _, c := range []*cobra.Command{endpointGCSPrintConfigCmd, endpointGCSInstallPackCmd, endpointGCSValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
@@ -1438,6 +1483,32 @@ func runEndpointS3Validate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Expected S3 fields: vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl")
 	fmt.Println(`Confirm delivery with AWS CLI: aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/" --recursive`)
 	fmt.Println(`Inspect an object with AWS CLI: aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/date=<date>/<object>.jsonl.gz" - | gzip -dc | grep "Beacon endpoint S3 validation event"`)
+	return nil
+}
+
+func runEndpointCloudWatchInstallPack(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	outputDir := endpointOpts.outputDir
+	if outputDir == "" {
+		outputDir = cloudwatch.DefaultOutputDir
+	}
+	if err := cloudwatch.InstallPack(outputDir, cfg.LogPath); err != nil {
+		return err
+	}
+	fmt.Printf("AWS CloudWatch Logs content pack written to %s\n", outputDir)
+	return nil
+}
+
+func runEndpointCloudWatchValidate(cmd *cobra.Command, args []string) error {
+	cfg := loadOrDefaultConfig()
+	path, err := writeValidationEvent(cfg, "cloudwatch")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Validation event written to %s\n", path)
+	fmt.Println("Expected AWS CloudWatch Logs fields: vendor=beacon product=endpoint-agent destination.type=cloudwatch destination.mode=aws_cloudwatch_logs")
+	fmt.Println(`Confirm delivery with AWS CLI: aws logs filter-log-events --log-group-name "$BEACON_CLOUDWATCH_LOG_GROUP" --filter-pattern '"Beacon endpoint AWS CloudWatch Logs validation event"' --region "$AWS_REGION"`)
+	fmt.Println(`CloudWatch Logs Insights query: fields @timestamp, vendor, product, destination.type, destination.mode, message | filter message like /Beacon endpoint AWS CloudWatch Logs validation event/ | sort @timestamp desc | limit 20`)
 	return nil
 }
 

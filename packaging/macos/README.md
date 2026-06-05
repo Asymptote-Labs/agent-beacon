@@ -115,6 +115,23 @@ not in Beacon endpoint configuration. For production forwarding, use a tailing
 shipper that checkpoints offsets, batches JSONL records, and avoids repeatedly
 uploading the whole file.
 
+For AWS CloudWatch Logs, keep Beacon as the local JSONL producer and deploy a
+customer-managed Vector host agent that tails
+`/var/log/beacon-agent/runtime.jsonl` into a CloudWatch Logs log group. Generate
+Beacon's AWS CloudWatch Logs content pack for setup guidance, a Vector config,
+sample events, and validation search guidance:
+
+```bash
+/opt/beacon/bin/beacon endpoint cloudwatch install-pack --system --output ./beacon-cloudwatch-pack
+/opt/beacon/bin/beacon endpoint cloudwatch validate --system
+```
+
+Provide `BEACON_CLOUDWATCH_LOG_GROUP`, optional
+`BEACON_CLOUDWATCH_LOG_STREAM_PREFIX`, `AWS_REGION`, and AWS
+credential-provider settings through the Vector service environment, host
+identity, MDM, or secret tooling. Keep AWS credentials, IAM roles, log group
+retention, and encryption outside Beacon endpoint configuration.
+
 Environment variables take precedence, followed by MDM script parameters:
 
 ```text

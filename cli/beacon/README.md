@@ -196,6 +196,20 @@ Store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules,
 and encryption settings in AWS, Vector, or deployment tooling, not in Beacon
 endpoint configuration.
 
+## AWS CloudWatch Logs
+
+```bash
+./beacon endpoint cloudwatch print-config
+./beacon endpoint cloudwatch install-pack --output ./beacon-cloudwatch-pack
+./beacon endpoint cloudwatch validate
+```
+
+The AWS CloudWatch Logs pack keeps Beacon as a local JSONL producer and
+documents forwarding `runtime.jsonl` into a CloudWatch Logs log group with a
+customer-managed Vector host agent. Store AWS credentials, profiles, IAM roles,
+log group retention, stream naming, and encryption settings in AWS, Vector, or
+deployment tooling, not in Beacon endpoint configuration.
+
 ## Google Cloud Storage
 
 ```bash

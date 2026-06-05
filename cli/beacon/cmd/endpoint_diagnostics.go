@@ -703,6 +703,9 @@ func syntheticEvent(destination string) schema.Event {
 	case "s3":
 		mode = "aws_s3_jsonl"
 		message = "Beacon endpoint S3 validation event"
+	case "cloudwatch":
+		mode = "aws_cloudwatch_logs"
+		message = "Beacon endpoint AWS CloudWatch Logs validation event"
 	case "gcs":
 		mode = "google_cloud_storage_jsonl"
 		message = "Beacon endpoint GCS validation event"
