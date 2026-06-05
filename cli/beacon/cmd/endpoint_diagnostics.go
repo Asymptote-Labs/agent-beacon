@@ -11,15 +11,18 @@ import (
 
 	"github.com/spf13/cobra"
 
+	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
+	endpointintegrations "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -27,6 +30,8 @@ import (
 type doctorResult struct {
 	Status      string              `json:"status"`
 	Checks      []diagnostics.Check `json:"checks"`
+	Fixes       []plannedAction     `json:"fixes,omitempty"`
+	Skipped     []plannedAction     `json:"skipped,omitempty"`
 	GeneratedAt string              `json:"generated_at"`
 }
 
@@ -71,26 +76,75 @@ type plannedAction struct {
 
 func runEndpointDoctor(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
-	checks := append([]diagnostics.Check{}, status.Diagnostics...)
-	checks = append(checks,
-		collectorCheck(status),
-		serviceCheck(status),
-		lastEventCheck(status),
-	)
+	result := buildDoctorResult(status, time.Now())
+	if endpointOpts.fix {
+		fixPlan := planDoctorFixes(result, status)
+		result.Fixes = fixPlan.Fixes
+		result.Skipped = fixPlan.Skipped
+		if err := applyDoctorFixes(fixPlan, status); err != nil {
+			return err
+		}
+		status = lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
+		result = buildDoctorResult(status, time.Now())
+		result.Fixes = fixPlan.Fixes
+		result.Skipped = fixPlan.Skipped
+	}
+	if err := printDoctorResult(result); err != nil {
+		return err
+	}
+	if result.Status == diagnostics.StatusFail {
+		return fmt.Errorf("endpoint health checks failed")
+	}
+	return nil
+}
+
+func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorResult {
+	checks := []diagnostics.Check{
+		configValidationCheck(status.RuntimeLog.EffectiveUserMode),
+	}
+	checks = append(checks, actionableChecks(status.Diagnostics, status.RuntimeLog)...)
+	checks = append(checks, collectorCheck(status), serviceCheck(status), lastEventCheck(status))
 	for _, h := range status.Harnesses {
-		checks = append(checks, harnessCheck(h))
+		checks = append(checks, harnessCheck(h, status.LogPath))
 	}
 	result := doctorResult{
 		Status:      aggregateCheckStatus(checks),
 		Checks:      checks,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		GeneratedAt: generatedAt.UTC().Format(time.RFC3339),
 	}
+	return result
+}
+
+func printDoctorResult(result doctorResult) error {
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}
 	fmt.Printf("Beacon endpoint doctor: %s\n", result.Status)
+	printDoctorChecks(result.Checks, diagnostics.StatusFail)
+	printDoctorChecks(result.Checks, diagnostics.StatusWarn)
+	if len(result.Fixes) > 0 {
+		fmt.Println("Applied fixes:")
+		for _, fix := range result.Fixes {
+			printPlannedAction(fix)
+		}
+	}
+	if len(result.Skipped) > 0 {
+		fmt.Println("Skipped fixes:")
+		for _, skipped := range result.Skipped {
+			printPlannedAction(skipped)
+		}
+	}
+	failures, warnings := checkCounts(result.Checks)
+	fmt.Printf("Summary: %d failure(s), %d warning(s)\n", failures, warnings)
+	if result.Status == diagnostics.StatusOK {
+		fmt.Println("All endpoint health checks passed.")
+	}
+	return nil
+}
+
+func printDoctorChecks(checks []diagnostics.Check, status string) {
 	for _, check := range checks {
-		if check.Status == "ok" {
+		if check.Status != status {
 			continue
 		}
 		fmt.Printf("%s: %s", check.Name, check.Status)
@@ -100,15 +154,11 @@ func runEndpointDoctor(cmd *cobra.Command, args []string) error {
 		if check.Message != "" {
 			fmt.Printf(" (%s)", check.Message)
 		}
+		if check.Action != "" {
+			fmt.Printf(" action=%q", check.Action)
+		}
 		fmt.Println()
 	}
-	if result.Status == "ok" {
-		fmt.Println("All endpoint health checks passed.")
-	}
-	if result.Status == "fail" {
-		return fmt.Errorf("endpoint health checks failed")
-	}
-	return nil
 }
 
 func runEndpointInventory(cmd *cobra.Command, args []string) error {
@@ -459,16 +509,20 @@ func printPlannedActions(actions []plannedAction) error {
 		return json.NewEncoder(os.Stdout).Encode(actions)
 	}
 	for _, action := range actions {
-		fmt.Printf("%s", action.Action)
-		if action.Target != "" {
-			fmt.Printf(" %s", action.Target)
-		}
-		if action.Message != "" {
-			fmt.Printf(" (%s)", action.Message)
-		}
-		fmt.Println()
+		printPlannedAction(action)
 	}
 	return nil
+}
+
+func printPlannedAction(action plannedAction) {
+	fmt.Printf("%s", action.Action)
+	if action.Target != "" {
+		fmt.Printf(" %s", action.Target)
+	}
+	if action.Message != "" {
+		fmt.Printf(" (%s)", action.Message)
+	}
+	fmt.Println()
 }
 
 func hookTargets() ([]string, error) {
@@ -544,51 +598,265 @@ func targetStatus(installed bool) string {
 	return "not_installed"
 }
 
-func aggregateCheckStatus(checks []diagnostics.Check) string {
-	out := "ok"
-	for _, check := range checks {
-		if check.Status == "fail" {
-			return "fail"
+func configValidationCheck(userMode bool) diagnostics.Check {
+	path := endpointconfig.ConfigPath(userMode)
+	if _, err := endpointconfig.Load(userMode); err != nil {
+		action := doctorInstallCommand(userMode)
+		if !os.IsNotExist(err) {
+			action = "fix the endpoint config JSON or run " + doctorRepairCommand(userMode)
 		}
-		if check.Status == "warn" {
-			out = "warn"
+		return diagnostics.Check{
+			Name:     "config_valid",
+			Target:   path,
+			Status:   diagnostics.StatusFail,
+			Severity: diagnostics.SeverityHigh,
+			Message:  err.Error(),
+			Evidence: "config_load_failed",
+			Action:   action,
+		}
+	}
+	return diagnostics.Check{
+		Name:     "config_valid",
+		Target:   path,
+		Status:   diagnostics.StatusOK,
+		Severity: diagnostics.SeverityInfo,
+		Message:  "endpoint config is valid",
+		Evidence: "config_load_succeeded",
+	}
+}
+
+func actionableChecks(checks []diagnostics.Check, runtimeLog lifecycle.RuntimeLogSource) []diagnostics.Check {
+	out := make([]diagnostics.Check, 0, len(checks))
+	for _, check := range checks {
+		if check.Action == "" {
+			check.Action = actionForCheck(check, runtimeLog)
+		}
+		out = append(out, check)
+	}
+	return out
+}
+
+func actionForCheck(check diagnostics.Check, runtimeLog lifecycle.RuntimeLogSource) string {
+	switch check.Name {
+	case "config", "collector_config", "launchd_plist", "collector_health":
+		return doctorRepairCommand(runtimeLog.EffectiveUserMode)
+	case "runtime_log", "runtime_log_permissions":
+		return "beacon endpoint doctor --fix"
+	case "runtime_log_source":
+		if runtimeLog.RequestedUserMode && !runtimeLog.EffectiveUserMode {
+			return "stop the system collector or run beacon endpoint install --user"
+		}
+		return "review the requested and effective runtime log paths"
+	}
+	return ""
+}
+
+func aggregateCheckStatus(checks []diagnostics.Check) string {
+	out := diagnostics.StatusOK
+	for _, check := range checks {
+		if check.Status == diagnostics.StatusFail {
+			return diagnostics.StatusFail
+		}
+		if check.Status == diagnostics.StatusWarn {
+			out = diagnostics.StatusWarn
 		}
 	}
 	return out
 }
 
 func collectorCheck(status lifecycle.Status) diagnostics.Check {
-	if status.Collector.GRPCReady || status.Collector.HTTPReady {
-		return diagnostics.Check{Name: "collector_reachability", Target: status.ConfigPath, Status: "ok", Severity: "info", Message: status.Collector.Message, Evidence: "collector_ready"}
+	if status.Collector.BinaryPath == "" {
+		return diagnostics.Check{Name: "collector_reachability", Target: status.ConfigPath, Status: diagnostics.StatusFail, Severity: diagnostics.SeverityHigh, Message: status.Collector.Message, Evidence: "collector_binary_missing", Action: doctorRepairCommand(status.RuntimeLog.EffectiveUserMode)}
 	}
-	return diagnostics.Check{Name: "collector_reachability", Target: status.ConfigPath, Status: "fail", Severity: "high", Message: status.Collector.Message, Evidence: "collector_not_ready"}
+	if status.Collector.GRPCReady && status.Collector.HTTPReady {
+		return diagnostics.Check{Name: "collector_reachability", Target: status.ConfigPath, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: status.Collector.Message, Evidence: "collector_ready"}
+	}
+	if status.Collector.GRPCReady || status.Collector.HTTPReady {
+		return diagnostics.Check{Name: "collector_reachability", Target: status.ConfigPath, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityMedium, Message: "only one OTLP receiver is listening", Evidence: "collector_partially_ready", Action: doctorRepairCommand(status.RuntimeLog.EffectiveUserMode)}
+	}
+	return diagnostics.Check{Name: "collector_reachability", Target: status.ConfigPath, Status: diagnostics.StatusFail, Severity: diagnostics.SeverityHigh, Message: status.Collector.Message, Evidence: "collector_not_ready", Action: doctorRepairCommand(status.RuntimeLog.EffectiveUserMode)}
 }
 
 func serviceCheck(status lifecycle.Status) diagnostics.Check {
 	if status.Service.Running {
-		return diagnostics.Check{Name: "service", Status: "ok", Severity: "info", Message: status.Service.Message, Evidence: "service_running"}
+		return diagnostics.Check{Name: "service", Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: status.Service.Message, Evidence: "service_running"}
 	}
 	if status.Service.Loaded {
-		return diagnostics.Check{Name: "service", Status: "warn", Severity: "medium", Message: status.Service.Message, Evidence: "service_loaded_not_running"}
+		return diagnostics.Check{Name: "service", Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityMedium, Message: status.Service.Message, Evidence: "service_loaded_not_running", Action: doctorRepairCommand(status.RuntimeLog.EffectiveUserMode)}
 	}
-	return diagnostics.Check{Name: "service", Status: "warn", Severity: "medium", Message: status.Service.Message, Evidence: "service_not_loaded"}
+	return diagnostics.Check{Name: "service", Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityMedium, Message: status.Service.Message, Evidence: "service_not_loaded", Action: doctorRepairCommand(status.RuntimeLog.EffectiveUserMode)}
 }
 
 func lastEventCheck(status lifecycle.Status) diagnostics.Check {
 	if status.LastEvent != "" {
-		return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: "ok", Severity: "info", Message: "runtime log has events", Evidence: "last_event_present"}
+		return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: "runtime log has events", Evidence: "last_event_present"}
 	}
-	return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: "warn", Severity: "low", Message: "runtime log has no events yet", Evidence: "last_event_missing"}
+	return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityLow, Message: "runtime log has no events yet", Evidence: "last_event_missing", Action: "beacon endpoint test-event"}
 }
 
-func harnessCheck(h harness.Harness) diagnostics.Check {
+func harnessCheck(h harness.Harness, logPath string) diagnostics.Check {
 	if !h.Detected {
-		return diagnostics.Check{Name: "harness", Target: h.Name, Status: "ok", Severity: "info", Message: "not installed", Evidence: "not_installed"}
+		return diagnostics.Check{Name: "harness", Target: h.Name, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: "not installed", Evidence: "not_installed"}
 	}
 	if h.TelemetryStatus == harness.TelemetryEnabled {
-		return diagnostics.Check{Name: "harness", Target: h.Name, Status: "ok", Severity: "info", Message: h.Message, Evidence: "configured"}
+		if !harnessEventObserved(logPath, h.Name) {
+			return diagnostics.Check{Name: "harness_observed", Target: h.Name, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityLow, Message: "telemetry is configured but no matching event has been observed yet", Evidence: "configured_not_observed", Action: "run " + h.DisplayName + " or beacon endpoint test-event"}
+		}
+		return diagnostics.Check{Name: "harness", Target: h.Name, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: h.Message, Evidence: "configured"}
 	}
-	return diagnostics.Check{Name: "harness", Target: h.Name, Status: "warn", Severity: "medium", Message: h.Message, Evidence: string(h.TelemetryStatus)}
+	return diagnostics.Check{Name: "harness", Target: h.Name, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityMedium, Message: h.Message, Evidence: string(h.TelemetryStatus), Action: harnessAction(h)}
+}
+
+func harnessEventObserved(logPath, name string) bool {
+	return endpointintegrations.HasRecentHarnessEvent(logPath, name)
+}
+
+func harnessAction(h harness.Harness) string {
+	switch h.Capability {
+	case "hooks", "plugin":
+		return "beacon endpoint hooks install --harness " + h.Name
+	case "otel_env", "otel_config":
+		return doctorRepairCommand(endpointUserMode())
+	case "admin_otel":
+		return "beacon endpoint integrations claude-cowork setup"
+	}
+	return ""
+}
+
+func checkCounts(checks []diagnostics.Check) (int, int) {
+	failures := 0
+	warnings := 0
+	for _, check := range checks {
+		switch check.Status {
+		case diagnostics.StatusFail:
+			failures++
+		case diagnostics.StatusWarn:
+			warnings++
+		}
+	}
+	return failures, warnings
+}
+
+func doctorRepairCommand(userMode bool) string {
+	if userMode {
+		return "beacon endpoint repair --user"
+	}
+	return "sudo beacon endpoint repair --system"
+}
+
+func doctorInstallCommand(userMode bool) string {
+	if userMode {
+		return "beacon endpoint install --user"
+	}
+	return "sudo beacon endpoint install --system"
+}
+
+type doctorFixPlan struct {
+	Fixes   []plannedAction
+	Skipped []plannedAction
+}
+
+func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan {
+	plan := doctorFixPlan{}
+	addFix := func(action plannedAction) {
+		for _, existing := range plan.Fixes {
+			if existing.Action == action.Action && existing.Target == action.Target {
+				return
+			}
+		}
+		plan.Fixes = append(plan.Fixes, action)
+	}
+	addSkip := func(action plannedAction) {
+		for _, existing := range plan.Skipped {
+			if existing.Action == action.Action && existing.Target == action.Target {
+				return
+			}
+		}
+		plan.Skipped = append(plan.Skipped, action)
+	}
+
+	configUsable := true
+	for _, check := range result.Checks {
+		if check.Name == "config_valid" && check.Status == diagnostics.StatusFail {
+			configUsable = false
+			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "endpoint config could not be repaired safely: " + check.Message})
+		}
+	}
+
+	for _, check := range result.Checks {
+		if check.Status == diagnostics.StatusOK {
+			continue
+		}
+		switch check.Name {
+		case "runtime_log", "runtime_log_permissions", "last_event":
+			if check.Evidence == "missing_optional_file" || check.Evidence == "runtime_log_missing" {
+				addFix(plannedAction{Action: "create_runtime_log", Target: status.LogPath, Message: "create runtime log file and parent directory"})
+			} else if check.Evidence == "last_event_missing" {
+				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
+			}
+		case "collector_config", "launchd_plist", "collector_health", "collector_reachability", "service":
+			if configUsable {
+				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and launchd service"})
+			} else {
+				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "skipped because endpoint config is invalid"})
+			}
+		case "config", "config_valid":
+			if check.Status == diagnostics.StatusFail {
+				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "review endpoint config or run " + doctorInstallCommand(status.RuntimeLog.EffectiveUserMode)})
+			}
+		case "harness":
+			message := "review harness configuration manually"
+			if check.Action != "" {
+				message = "run " + check.Action
+			}
+			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: message})
+		case "runtime_log_source":
+			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: check.Action})
+		}
+	}
+	return plan
+}
+
+func applyDoctorFixes(plan doctorFixPlan, status lifecycle.Status) error {
+	for _, action := range plan.Fixes {
+		switch action.Action {
+		case "create_runtime_log":
+			if err := ensureLogFile(action.Target); err != nil {
+				return err
+			}
+		case "repair_collector_service":
+			if err := repairCollectorServiceFromStatus(status); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func repairCollectorServiceFromStatus(status lifecycle.Status) error {
+	userMode := status.RuntimeLog.EffectiveUserMode
+	cfg, err := endpointconfig.Load(userMode)
+	if err != nil {
+		return err
+	}
+	if endpointOpts.logPath != "" {
+		cfg.LogPath = endpointOpts.logPath
+	}
+	binary, err := endpointcollector.ResolveBinary(cfg.Collector.BinaryPath)
+	if err != nil {
+		return err
+	}
+	if err := endpointcollector.WriteConfig(cfg); err != nil {
+		return err
+	}
+	manager := service.Manager{UserMode: userMode}
+	if _, err := manager.WritePlist(binary, cfg.Collector.ConfigPath); err != nil {
+		return err
+	}
+	if err := manager.Load(); err != nil {
+		return err
+	}
+	return endpointcollector.WaitUntilReady(cfg, 10*time.Second)
 }
 
 func checkLogWritable(cfg endpointconfig.Config) diagnostics.Check {

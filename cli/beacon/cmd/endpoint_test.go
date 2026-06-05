@@ -12,6 +12,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 
 	"github.com/spf13/cobra"
 )
@@ -643,6 +644,14 @@ func TestRobustCLIFlagsRegistered(t *testing.T) {
 	if endpointBundleDiagnosticsCmd.Flags().Lookup("include-raw-events") == nil {
 		t.Fatal("bundle-diagnostics missing --include-raw-events")
 	}
+	for _, cmd := range []*cobra.Command{endpointDoctorCmd, topLevelDoctorCmd} {
+		if cmd.Flags().Lookup("fix") == nil {
+			t.Fatalf("%s missing --fix", cmd.Use)
+		}
+		if cmd.Flags().Lookup("dry-run") != nil {
+			t.Fatalf("%s should not register --dry-run", cmd.Use)
+		}
+	}
 }
 
 func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
@@ -699,6 +708,117 @@ func TestAggregateCheckStatus(t *testing.T) {
 	}
 	if got := aggregateCheckStatus([]diagnostics.Check{{Status: "warn"}, {Status: "fail"}}); got != "fail" {
 		t.Fatalf("fail aggregate = %q", got)
+	}
+}
+
+func TestConfigValidationCheckReportsInvalidConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := endpointconfig.ConfigPath(true)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{not-json"), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	check := configValidationCheck(true)
+	if check.Status != diagnostics.StatusFail {
+		t.Fatalf("config validation status = %#v, want fail", check)
+	}
+	if !strings.Contains(check.Action, "fix the endpoint config JSON") {
+		t.Fatalf("config validation action = %q", check.Action)
+	}
+}
+
+func TestActionableChecksUsesRequestedRuntimeLogMode(t *testing.T) {
+	checks := actionableChecks([]diagnostics.Check{{
+		Name:   "runtime_log_source",
+		Status: diagnostics.StatusWarn,
+	}}, lifecycle.RuntimeLogSource{
+		RequestedUserMode: true,
+		EffectiveUserMode: false,
+	})
+	if len(checks) != 1 {
+		t.Fatalf("actionableChecks returned %d checks", len(checks))
+	}
+	if !strings.Contains(checks[0].Action, "stop the system collector") {
+		t.Fatalf("runtime log source action = %q", checks[0].Action)
+	}
+}
+
+func TestPrintDoctorResultIncludesActionsAndSummary(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.jsonOutput = false
+	result := doctorResult{
+		Status: diagnostics.StatusWarn,
+		Checks: []diagnostics.Check{
+			{Name: "ok_check", Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo},
+			{Name: "warn_check", Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityLow, Message: "needs attention", Action: "beacon endpoint test-event"},
+		},
+		GeneratedAt: "2026-06-05T12:00:00Z",
+	}
+
+	output, err := captureStdout(t, func() error { return printDoctorResult(result) })
+	if err != nil {
+		t.Fatalf("printDoctorResult returned error: %v", err)
+	}
+	if !strings.Contains(output, `action="beacon endpoint test-event"`) {
+		t.Fatalf("doctor output missing action: %s", output)
+	}
+	if !strings.Contains(output, "Summary: 0 failure(s), 1 warning(s)") {
+		t.Fatalf("doctor output missing summary: %s", output)
+	}
+}
+
+func TestPlanDoctorFixesAllowsRuntimeLogCreationAndSkipsInvalidConfig(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	status := lifecycle.Status{
+		LogPath:    logPath,
+		RuntimeLog: lifecycle.RuntimeLogSource{EffectiveUserMode: true},
+	}
+	result := doctorResult{
+		Checks: []diagnostics.Check{
+			{Name: "config_valid", Target: "/tmp/config.json", Status: diagnostics.StatusFail, Message: "invalid json"},
+			{Name: "runtime_log_permissions", Target: logPath, Status: diagnostics.StatusWarn, Evidence: "runtime_log_missing"},
+			{Name: "collector_reachability", Status: diagnostics.StatusFail},
+		},
+	}
+
+	plan := planDoctorFixes(result, status)
+	if len(plan.Fixes) != 1 || plan.Fixes[0].Action != "create_runtime_log" {
+		t.Fatalf("fix plan = %#v, want runtime log creation only", plan)
+	}
+	foundSkip := false
+	for _, skipped := range plan.Skipped {
+		if skipped.Action == "repair_collector_service" {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Fatalf("fix plan did not skip endpoint repair for invalid config: %#v", plan)
+	}
+}
+
+func TestPlanDoctorFixesDoesNotTreatMissingEventAsAppliedFix(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	status := lifecycle.Status{
+		LogPath:    logPath,
+		RuntimeLog: lifecycle.RuntimeLogSource{EffectiveUserMode: true},
+	}
+	result := doctorResult{
+		Checks: []diagnostics.Check{
+			{Name: "last_event", Target: logPath, Status: diagnostics.StatusWarn, Evidence: "last_event_missing"},
+		},
+	}
+
+	plan := planDoctorFixes(result, status)
+	if len(plan.Fixes) != 0 {
+		t.Fatalf("missing last event should not be applied as a fix: %#v", plan)
+	}
+	if len(plan.Skipped) != 1 || !strings.Contains(plan.Skipped[0].Message, "test-event") {
+		t.Fatalf("missing last event should suggest test-event: %#v", plan)
 	}
 }
 

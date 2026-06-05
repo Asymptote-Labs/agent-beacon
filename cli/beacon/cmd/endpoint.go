@@ -52,6 +52,7 @@ var endpointOpts struct {
 	keepConfig               bool
 	noStart                  bool
 	dryRun                   bool
+	fix                      bool
 	allTargets               bool
 	coworkHeaders            string
 	coworkEndpoint           string
@@ -852,10 +853,12 @@ func init() {
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Discover all supported runtime targets")
 	endpointStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	endpointDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
+	endpointDoctorCmd.Flags().BoolVar(&endpointOpts.fix, "fix", false, "Apply safe endpoint doctor remediations")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append config inventory events to the endpoint runtime log")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
+	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.fix, "fix", false, "Apply safe endpoint doctor remediations")
 	topLevelStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")

@@ -18,7 +18,19 @@ type Check struct {
 	Severity string `json:"severity"`
 	Message  string `json:"message,omitempty"`
 	Evidence string `json:"evidence,omitempty"`
+	Action   string `json:"action,omitempty"`
 }
+
+const (
+	StatusOK   = "ok"
+	StatusWarn = "warn"
+	StatusFail = "fail"
+
+	SeverityInfo   = "info"
+	SeverityLow    = "low"
+	SeverityMedium = "medium"
+	SeverityHigh   = "high"
+)
 
 func Run(cfg endpointconfig.Config) []Check {
 	checks := []Check{
@@ -37,18 +49,18 @@ func Run(cfg endpointconfig.Config) []Check {
 func checkCollectorHealth(cfg endpointconfig.Config) Check {
 	status := collector.CheckStatus(cfg)
 	if status.HealthReady {
-		return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: "ok", Severity: "info", Message: "collector health check is ready", Evidence: "health_check_ready"}
+		return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: StatusOK, Severity: SeverityInfo, Message: "collector health check is ready", Evidence: "health_check_ready"}
 	}
 	message := status.Message
 	if message == "" {
 		message = "collector health check is not ready"
 	}
-	return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: "warn", Severity: "medium", Message: message, Evidence: "health_check_unavailable"}
+	return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: StatusWarn, Severity: SeverityMedium, Message: message, Evidence: "health_check_unavailable"}
 }
 
 func HasFailures(checks []Check) bool {
 	for _, check := range checks {
-		if check.Status == "fail" {
+		if check.Status == StatusFail {
 			return true
 		}
 	}
@@ -59,29 +71,29 @@ func checkFile(name, path string, required bool) Check {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) && !required {
-			return Check{Name: name, Target: path, Status: "warn", Severity: "low", Message: fmt.Sprintf("%s does not exist yet", path), Evidence: "missing_optional_file"}
+			return Check{Name: name, Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("%s does not exist yet", path), Evidence: "missing_optional_file"}
 		}
-		return Check{Name: name, Target: path, Status: "fail", Severity: "medium", Message: err.Error(), Evidence: "stat_failed"}
+		return Check{Name: name, Target: path, Status: StatusFail, Severity: SeverityMedium, Message: err.Error(), Evidence: "stat_failed"}
 	}
 	if info.IsDir() {
-		return Check{Name: name, Target: path, Status: "fail", Severity: "medium", Message: path + " is a directory", Evidence: "target_is_directory"}
+		return Check{Name: name, Target: path, Status: StatusFail, Severity: SeverityMedium, Message: path + " is a directory", Evidence: "target_is_directory"}
 	}
-	return Check{Name: name, Target: path, Status: "ok", Severity: "info", Message: path, Evidence: "file_exists"}
+	return Check{Name: name, Target: path, Status: StatusOK, Severity: SeverityInfo, Message: path, Evidence: "file_exists"}
 }
 
 func checkLogPermissions(path string) Check {
 	info, err := os.Stat(path)
 	if err != nil {
-		return Check{Name: "runtime_log_permissions", Target: path, Status: "warn", Severity: "low", Message: "runtime log not created yet", Evidence: "runtime_log_missing"}
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: "runtime log not created yet", Evidence: "runtime_log_missing"}
 	}
 	mode := info.Mode().Perm()
 	if mode&0022 != 0 {
-		return Check{Name: "runtime_log_permissions", Target: path, Status: "fail", Severity: "high", Message: fmt.Sprintf("runtime log is group/world writable: %o", mode), Evidence: "group_or_world_writable"}
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh, Message: fmt.Sprintf("runtime log is group/world writable: %o", mode), Evidence: "group_or_world_writable"}
 	}
 	if mode&0044 == 0 {
-		return Check{Name: "runtime_log_permissions", Target: path, Status: "warn", Severity: "low", Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
 	}
-	return Check{Name: "runtime_log_permissions", Target: path, Status: "ok", Severity: "info", Message: fmt.Sprintf("mode %o", mode), Evidence: fmt.Sprintf("mode_%o", mode)}
+	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo, Message: fmt.Sprintf("mode %o", mode), Evidence: fmt.Sprintf("mode_%o", mode)}
 }
 
 func launchPlistPath(userMode bool) string {
