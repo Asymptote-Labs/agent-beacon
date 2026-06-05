@@ -375,7 +375,7 @@ func printPlannedActions(actions []plannedAction) error {
 
 func hookTargets() ([]string, error) {
 	if endpointOpts.allTargets {
-		return []string{"cursor", "vscode", "factory", "opencode", "grok", "devin-cli", "devin-desktop", "antigravity"}, nil
+		return []string{"cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}, nil
 	}
 	return canonicalHookTargets(splitCSV(endpointOpts.hookHarnesses))
 }
@@ -414,6 +414,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 		case "grok":
 			status := endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
+		case "hermes":
+			status := endpointhooks.HermesHookStatus(endpointhooks.HermesOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
 		case "devin-cli":
 			status := endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses["devin-cli"] = hookTargetResult{Target: "devin-cli", Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}

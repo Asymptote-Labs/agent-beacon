@@ -90,6 +90,7 @@ Claude Cowork, OpenClaw).
 | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OpenTelemetry configuration |
 | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OpenTelemetry (OTLP HTTP) |
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Beacon hook adapter |
+| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks) | Beacon hook adapter via Hermes shell hooks |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Beacon hook adapter |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | VS Code Copilot OpenTelemetry and optional Beacon hook adapter |
 

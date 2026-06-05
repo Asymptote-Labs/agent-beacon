@@ -40,24 +40,24 @@ func TestSplitHarnessCSVAllowsCollectorOnly(t *testing.T) {
 }
 
 func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
-	otlp, hooks, err := splitEndpointTargets([]string{"claude", "codex", "devin", "devin-cli", "devin_desktop"})
+	otlp, hooks, err := splitEndpointTargets([]string{"claude", "codex", "devin", "devin-cli", "devin_desktop", "hermes-agent"})
 	if err != nil {
 		t.Fatalf("splitEndpointTargets returned error: %v", err)
 	}
 	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
 		t.Fatalf("otlp targets = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(hooks, ","), "devin-cli,devin-desktop"; got != want {
+	if got, want := strings.Join(hooks, ","), "devin-cli,devin-desktop,hermes"; got != want {
 		t.Fatalf("hook targets = %q, want %q", got, want)
 	}
 }
 
 func TestCanonicalHookTargetsNormalizesAliasesToSwitchNames(t *testing.T) {
-	got, err := canonicalHookTargets([]string{"claude_code", "vs_code", "droid", "devin", "devin_desktop", "antigravity_cli"})
+	got, err := canonicalHookTargets([]string{"claude_code", "vs_code", "droid", "devin", "devin_desktop", "antigravity_cli", "hermes-agent"})
 	if err != nil {
 		t.Fatalf("canonicalHookTargets returned error: %v", err)
 	}
-	want := []string{"claude", "vscode", "factory", "devin-cli", "devin-desktop", "antigravity"}
+	want := []string{"claude", "vscode", "factory", "devin-cli", "devin-desktop", "antigravity", "hermes"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("canonicalHookTargets = %#v, want %#v", got, want)
 	}

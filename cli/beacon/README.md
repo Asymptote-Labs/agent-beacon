@@ -240,6 +240,9 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint hooks install --harness grok
 ./beacon endpoint hooks status --harness grok
 
+./beacon endpoint hooks install --harness hermes
+./beacon endpoint hooks status --harness hermes
+
 ./beacon endpoint hooks install --harness devin-cli --level project
 ./beacon endpoint hooks status --harness devin-cli --level project
 ./beacon endpoint hooks install --harness devin-desktop --level user
@@ -281,6 +284,12 @@ The Grok Build integration writes Beacon's owned local hook file at
 `~/.grok/hooks/beacon-endpoint.json` for user-level installs or `.grok/hooks/beacon-endpoint.json`
 for project-level installs. Project hooks require trusting the project in Grok
 with `/hooks-trust` before they execute.
+
+The Hermes Agent integration writes shell-hook entries into
+`~/.hermes/config.yaml`. Hermes prompts for first-use consent for each
+`(event, command)` pair; for non-interactive gateway, cron, or CI runs, set
+`HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure
+`hooks_auto_accept: true` in the Hermes config.
 
 The Devin CLI integration writes Claude-compatible command hooks for Devin for
 Terminal. `devin` remains a legacy alias for `devin-cli`. Project-level installs

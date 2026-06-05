@@ -127,7 +127,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	var sessionID, toolName string
 	var toolInput, toolResponse map[string]interface{}
 
-	if platformFlag == "antigravity" || platformFlag == "copilot" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "vscode" {
+	if platformFlag == "antigravity" || platformFlag == "copilot" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" {
 		sessionID = resolveSessionID(input, platformFlag)
 		toolName = getFirstStr(input, "toolName", "tool_name")
 		if platformFlag == "antigravity" {
@@ -262,6 +262,16 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 	if m, ok := input["toolResult"].(map[string]interface{}); ok {
 		return m
 	}
+	if platformFlag == "hermes" {
+		if extra := hermesExtra(input); extra != nil {
+			if result, ok := extra["result"].(map[string]interface{}); ok {
+				return result
+			}
+			if result, ok := extra["result"].(string); ok && result != "" {
+				return map[string]interface{}{"result": result}
+			}
+		}
+	}
 	// If tool_response is a plain string, wrap it for downstream compatibility
 	if respStr, ok := input["tool_response"].(string); ok && respStr != "" {
 		return map[string]interface{}{"result": respStr}
@@ -329,6 +339,13 @@ func isFileEditTool(platform, toolName string) bool {
 	if platform == "grok" {
 		lower := strings.ToLower(toolName)
 		return lower == "search_replace" || lower == "write_file" || strings.Contains(lower, "edit") || strings.Contains(lower, "write")
+	}
+	if platform == "hermes" {
+		lower := strings.ToLower(toolName)
+		return strings.Contains(lower, "edit") ||
+			strings.Contains(lower, "write") ||
+			strings.Contains(lower, "create") ||
+			strings.Contains(lower, "patch")
 	}
 	if platform == "antigravity" {
 		lower := strings.ToLower(toolName)

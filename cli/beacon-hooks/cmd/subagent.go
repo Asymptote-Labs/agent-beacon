@@ -41,9 +41,27 @@ func runSubagentLifecycle(action, message string) {
 		logger = logging.NewLoggerForPlatform("subagent", platformFlag)
 	}
 	fields := sessionFields(sessionID, input)
-	fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"subagent": map[string]interface{}{
+	subagent := map[string]interface{}{
 		"id":   getFirstStr(input, "agent_id", "agentId"),
 		"type": getFirstStr(input, "agent_type", "agentType"),
+	}
+	if platformFlag == "hermes" {
+		if extra := hermesExtra(input); extra != nil {
+			subagent = mergeNested(subagent, map[string]interface{}{
+				"role":        firstToolString(extra, "child_role"),
+				"status":      firstToolString(extra, "child_status"),
+				"summary":     firstToolString(extra, "child_summary"),
+				"duration_ms": extra["duration_ms"],
+			})
+		}
+	}
+	fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"subagent": map[string]interface{}{
+		"id":          subagent["id"],
+		"type":        subagent["type"],
+		"role":        subagent["role"],
+		"status":      subagent["status"],
+		"summary":     subagent["summary"],
+		"duration_ms": subagent["duration_ms"],
 	}})
 	emitHookEvent(logger, action, "session", "info", message, input, fields)
 	outputJSON(emptyResponse)

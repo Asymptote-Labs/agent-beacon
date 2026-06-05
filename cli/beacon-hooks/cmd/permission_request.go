@@ -43,7 +43,47 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 		outputJSON(devinApproveResponse)
 		return
 	}
+	if platformFlag == "hermes" {
+		emitHermesApproval(logger, input, sessionID)
+		outputJSON(emptyResponse)
+		return
+	}
 
 	emitPreToolDecision(logger, input, sessionID, "approval.requested", "requested", "Permission request observed")
 	outputJSON(emptyResponse)
+}
+
+func emitHermesApproval(logger *logging.Logger, input map[string]interface{}, sessionID string) {
+	command := hermesFirstString(input, "command")
+	description := hermesFirstString(input, "description", "reason")
+	choice := hermesFirstString(input, "choice", "decision")
+	hookEvent := getFirstStr(input, "hook_event_name", "hookEventName")
+	if hookEvent == "" {
+		hookEvent = hermesFirstString(input, "hook_event_name", "hookEventName")
+	}
+	decision := "requested"
+	action := "approval.requested"
+	message := "Permission request observed"
+	if hookEvent == "post_approval_response" || choice != "" {
+		decision = choice
+		if decision == "" {
+			decision = "unknown"
+		}
+		action = "approval.allowed"
+		message = "Permission response observed"
+		if decision == "deny" || decision == "denied" || decision == "timeout" {
+			action = "approval.denied"
+		}
+	}
+	fields := sessionFields(sessionID, input)
+	if command != "" {
+		fields["command"] = map[string]interface{}{"command": command}
+		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": "terminal", "command": command})
+	}
+	fields["approval"] = map[string]interface{}{
+		"required": true,
+		"decision": decision,
+		"reason":   description,
+	}
+	emitHookEvent(logger, action, "approval", "info", message, input, fields)
 }

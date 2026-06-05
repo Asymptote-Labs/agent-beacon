@@ -262,6 +262,36 @@ func TestDiscoverCodexDetectsExecutableOnPath(t *testing.T) {
 	}
 }
 
+func TestHermesStatusDetectsBeaconHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`hooks:
+  pre_tool_call:
+    - matcher: .*
+      command: env BEACON_ENDPOINT_MODE=1 beacon-hooks --platform hermes pre-tool
+  post_tool_call:
+    - command: echo keep
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, message := hermesStatus(path)
+	if status != TelemetryEnabled {
+		t.Fatalf("hermesStatus = %q (%s), want enabled", status, message)
+	}
+}
+
+func TestHermesStatusReportsInvalidYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("hooks:\n  pre_tool_call: ["), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, _ := hermesStatus(path)
+	if status != TelemetryMisconfigured {
+		t.Fatalf("hermesStatus = %q, want misconfigured", status)
+	}
+}
+
 func TestCodexStatusVariants(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {

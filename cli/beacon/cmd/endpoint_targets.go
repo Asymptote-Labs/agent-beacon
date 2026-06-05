@@ -41,6 +41,8 @@ func normalizeEndpointTarget(name string) (endpointTarget, bool) {
 		return endpointTarget{Name: "opencode", Kind: endpointTargetHook}, true
 	case "grok":
 		return endpointTarget{Name: "grok", Kind: endpointTargetHook}, true
+	case "hermes", "hermes-agent":
+		return endpointTarget{Name: "hermes", Kind: endpointTargetHook}, true
 	case "antigravity", "antigravity-cli":
 		return endpointTarget{Name: "antigravity", Kind: endpointTargetHook}, true
 	case "devin", "devin-cli":
@@ -118,6 +120,8 @@ func normalizeHookTarget(name string) (string, bool) {
 		return "opencode", true
 	case "grok":
 		return "grok", true
+	case "hermes", "hermes-agent":
+		return "hermes", true
 	case "devin", "devin-cli":
 		return "devin-cli", true
 	case "devin-desktop":

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type TelemetryStatus string
@@ -52,6 +54,7 @@ func DiscoverAll() []Harness {
 		DiscoverAntigravity(),
 		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
+		DiscoverHermes(),
 		DiscoverFactory(),
 		DiscoverVSCode(),
 		DiscoverCursor(),
@@ -193,6 +196,30 @@ func DiscoverOpenCode() Harness {
 	} else {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Beacon opencode plugin was not found"
+	}
+	return h
+}
+
+func DiscoverHermes() Harness {
+	h := Harness{Name: "hermes", DisplayName: "Hermes Agent", Capability: "hooks"}
+	path, err := exec.LookPath("hermes")
+	if err == nil {
+		h.Detected = true
+		h.ExecutablePath = path
+		h.Version = commandVersion(path)
+	}
+	home, _ := os.UserHomeDir()
+	h.ConfigPath = filepath.Join(home, ".hermes", "config.yaml")
+	if !h.Detected && dirExists(filepath.Join(home, ".hermes")) {
+		h.Detected = true
+	}
+	if fileExists(h.ConfigPath) {
+		status, msg := hermesStatus(h.ConfigPath)
+		h.TelemetryStatus = status
+		h.Message = msg
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Hermes config.yaml was not found"
 	}
 	return h
 }
@@ -589,6 +616,43 @@ func hasBeaconWindsurfHooks(data []byte, platform string) (bool, error) {
 	for _, hooks := range root.Hooks {
 		for _, hook := range hooks {
 			if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(hook.Command, platform) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func hermesStatus(path string) (TelemetryStatus, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return TelemetryMissing, err.Error()
+	}
+	hasHooks, err := hasBeaconHermesHooks(data)
+	if err != nil {
+		return TelemetryMisconfigured, "Hermes config.yaml is invalid"
+	}
+	if hasHooks {
+		return TelemetryEnabled, "Hermes Agent endpoint hooks are configured"
+	}
+	return TelemetryDisabled, "Hermes config exists but endpoint hooks were not found"
+}
+
+func hasBeaconHermesHooks(data []byte) (bool, error) {
+	var root struct {
+		Hooks map[string][]struct {
+			Command string `yaml:"command"`
+		} `yaml:"hooks"`
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return false, err
+	}
+	for _, refs := range root.Hooks {
+		for _, ref := range refs {
+			if strings.Contains(ref.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(ref.Command, "hermes") {
 				return true, nil
 			}
 		}

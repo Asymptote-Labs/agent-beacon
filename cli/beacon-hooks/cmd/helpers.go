@@ -69,6 +69,8 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		return getFirstStr(input, "trajectory_id", "session_id", "sessionId", "conversation_id")
 	case "grok":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
+	case "hermes":
+		return getFirstStr(input, "session_id", "sessionId", "task_id")
 	case "opencode":
 		return getFirstStr(input, "session_id", "sessionID")
 	default:
@@ -110,6 +112,10 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		return
 	case "grok":
 		sessionID = getFirstStr(input, "sessionId", "session_id", "sessionID")
+		return
+	case "hermes":
+		sessionID = getFirstStr(input, "session_id", "sessionId", "task_id")
+		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
 		return
 	case "opencode":
 		sessionID = getFirstStr(input, "session_id", "sessionID")
@@ -206,6 +212,34 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 		}
 		return os.Getenv("GROK_WORKSPACE_ROOT")
 	}
+	if platform == "hermes" {
+		if cwd := getFirstStr(input, "cwd", "working_directory", "workingDirectory"); cwd != "" {
+			return cwd
+		}
+		if extra := hermesExtra(input); extra != nil {
+			if cwd := firstToolString(extra, "cwd", "working_directory", "workingDirectory"); cwd != "" {
+				return cwd
+			}
+		}
+		return os.Getenv("HERMES_WORKSPACE_ROOT")
+	}
 	cwd, _ := input["cwd"].(string)
 	return cwd
+}
+
+func hermesExtra(input map[string]interface{}) map[string]interface{} {
+	if extra, ok := input["extra"].(map[string]interface{}); ok {
+		return extra
+	}
+	return nil
+}
+
+func hermesFirstString(input map[string]interface{}, keys ...string) string {
+	if value := getFirstStr(input, keys...); value != "" {
+		return value
+	}
+	if extra := hermesExtra(input); extra != nil {
+		return firstToolString(extra, keys...)
+	}
+	return ""
 }

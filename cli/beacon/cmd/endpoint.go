@@ -1030,6 +1030,17 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		if strings.Contains(status.Message, "/hooks-trust") {
 			fmt.Println(status.Message)
 		}
+	case "hermes":
+		status, err := endpointhooks.InstallHermes(endpointhooks.HermesOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Hermes Agent hooks installed: %s\n", status.ConfigPath)
+		fmt.Println("Hermes may prompt to trust new shell hooks on first use; use HERMES_ACCEPT_HOOKS=1 or hooks_auto_accept: true for non-TTY runs.")
 	case "devin-cli":
 		status, err := endpointhooks.InstallDevin(endpointhooks.DevinOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -1151,6 +1162,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "hermes":
+		status, err := endpointhooks.UninstallHermes(endpointhooks.HermesOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "devin-cli":
 		status, err := endpointhooks.UninstallDevin(endpointhooks.DevinOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -1229,6 +1250,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "hermes":
+			statuses["hermes"] = endpointhooks.HermesHookStatus(endpointhooks.HermesOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "devin-cli":
 			statuses["devin-cli"] = endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -1278,6 +1305,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
 			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "hermes":
+			status := statuses["hermes"].(endpointhooks.HermesStatus)
+			fmt.Printf("Hermes Agent hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
 			fmt.Println(status.Message)
 		case "devin-cli":
 			status := statuses["devin-cli"].(endpointhooks.DevinStatus)

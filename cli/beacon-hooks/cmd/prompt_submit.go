@@ -46,6 +46,9 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 		fields = cascadeMetadataFields(sessionID, input)
 	}
 	prompt := getFirstStr(input, "prompt", "user_prompt", "userPrompt", "text", "promptText", "input")
+	if platformFlag == "hermes" {
+		prompt = hermesFirstString(input, "user_message", "prompt", "input", "text")
+	}
 	if isCascadePlatform(platformFlag) {
 		prompt = cascadePrompt(input)
 	}

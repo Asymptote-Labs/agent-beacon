@@ -747,6 +747,7 @@ func setupHookConfigDirs(t *testing.T) {
 	origDevinDir := hookconfig.DevinDir
 	origFactoryDir := hookconfig.FactoryDir
 	origGrokDir := hookconfig.GrokDir
+	origHermesDir := hookconfig.HermesDir
 	origOpenCodeDir := hookconfig.OpenCodeDir
 	origPlatform := platformFlag
 	hookconfig.BeaconDir = tmp
@@ -758,6 +759,7 @@ func setupHookConfigDirs(t *testing.T) {
 	hookconfig.DevinDir = filepath.Join(tmp, "devin")
 	hookconfig.FactoryDir = filepath.Join(tmp, "factory")
 	hookconfig.GrokDir = filepath.Join(tmp, "grok")
+	hookconfig.HermesDir = filepath.Join(tmp, "hermes")
 	hookconfig.OpenCodeDir = filepath.Join(tmp, "opencode")
 	t.Cleanup(func() {
 		hookconfig.BeaconDir = origBeaconDir
@@ -769,6 +771,7 @@ func setupHookConfigDirs(t *testing.T) {
 		hookconfig.DevinDir = origDevinDir
 		hookconfig.FactoryDir = origFactoryDir
 		hookconfig.GrokDir = origGrokDir
+		hookconfig.HermesDir = origHermesDir
 		hookconfig.OpenCodeDir = origOpenCodeDir
 		platformFlag = origPlatform
 	})
