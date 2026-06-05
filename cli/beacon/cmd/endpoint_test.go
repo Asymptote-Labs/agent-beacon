@@ -2,17 +2,20 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 
 	"github.com/spf13/cobra"
 )
@@ -129,6 +132,124 @@ func TestFalconHECOptionsDefaultIsNil(t *testing.T) {
 	endpointOpts.falconSourcetype = endpointconfig.DefaultFalconSourcetype
 	if got := falconHECOptions(); got != nil {
 		t.Fatalf("falconHECOptions() = %#v, want nil", got)
+	}
+}
+
+func TestRepairCollectorServiceRollsBackWhenReadinessFails(t *testing.T) {
+	oldOpts := endpointOpts
+	oldLoadConfig := repairLoadEndpointConfig
+	oldSaveConfig := repairSaveEndpointConfig
+	oldResolveBinary := repairResolveCollectorBinary
+	oldWriteConfig := repairWriteCollectorConfig
+	oldWaitReady := repairWaitCollectorReady
+	oldNewManager := newRepairServiceManager
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		repairLoadEndpointConfig = oldLoadConfig
+		repairSaveEndpointConfig = oldSaveConfig
+		repairResolveCollectorBinary = oldResolveBinary
+		repairWriteCollectorConfig = oldWriteConfig
+		repairWaitCollectorReady = oldWaitReady
+		newRepairServiceManager = oldNewManager
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	collectorConfigPath := filepath.Join(home, "otelcol.yaml")
+	plistPath := filepath.Join(home, "agent.plist")
+	cfg := endpointconfig.Config{
+		UserMode:         true,
+		LogPath:          filepath.Join(home, "old-runtime.jsonl"),
+		ContentRetention: endpointconfig.ContentRetentionFull,
+		Collector: endpointconfig.Collector{
+			ConfigPath: collectorConfigPath,
+			SpoolPath:  filepath.Join(home, "spool", "otlp.jsonl"),
+			GRPCPort:   endpointconfig.DefaultGRPCPort,
+			HTTPPort:   endpointconfig.DefaultHTTPPort,
+		},
+	}
+	if _, err := endpointconfig.Save(cfg); err != nil {
+		t.Fatalf("save original config: %v", err)
+	}
+	if err := os.WriteFile(collectorConfigPath, []byte("old collector config"), 0644); err != nil {
+		t.Fatalf("write original collector config: %v", err)
+	}
+	if err := os.WriteFile(plistPath, []byte("old plist"), 0644); err != nil {
+		t.Fatalf("write original plist: %v", err)
+	}
+	originalConfig, err := os.ReadFile(endpointconfig.ConfigPath(true))
+	if err != nil {
+		t.Fatalf("read original config: %v", err)
+	}
+
+	fakeManager := &fakeRepairServiceManager{plistPath: plistPath}
+	newRepairServiceManager = func(userMode bool) repairServiceManager {
+		if !userMode {
+			t.Fatal("repair should use effective user mode")
+		}
+		return fakeManager
+	}
+	repairResolveCollectorBinary = func(configured string) (string, error) {
+		return filepath.Join(home, "beacon-otelcol"), nil
+	}
+	repairWriteCollectorConfig = func(cfg endpointconfig.Config) error {
+		return os.WriteFile(cfg.Collector.ConfigPath, []byte("new collector config"), 0644)
+	}
+	repairWaitCollectorReady = func(cfg endpointconfig.Config, timeout time.Duration) error {
+		return errors.New("collector did not become ready before timeout")
+	}
+	endpointOpts.logPath = filepath.Join(home, "new-runtime.jsonl")
+
+	err = repairCollectorServiceFromStatus(lifecycle.Status{
+		RuntimeLog: lifecycle.RuntimeLogSource{EffectiveUserMode: true},
+		Service:    service.Status{Loaded: true, Running: true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "collector did not become ready") {
+		t.Fatalf("repairCollectorServiceFromStatus error = %v, want readiness failure", err)
+	}
+	if fakeManager.loads != 2 {
+		t.Fatalf("Load calls = %d, want repair load plus rollback reload", fakeManager.loads)
+	}
+	if fakeManager.unloads != 1 {
+		t.Fatalf("Unload calls = %d, want rollback unload", fakeManager.unloads)
+	}
+	assertFileContent(t, endpointconfig.ConfigPath(true), string(originalConfig))
+	assertFileContent(t, collectorConfigPath, "old collector config")
+	assertFileContent(t, plistPath, "old plist")
+}
+
+type fakeRepairServiceManager struct {
+	plistPath string
+	loads     int
+	unloads   int
+}
+
+func (m *fakeRepairServiceManager) PlistPath() (string, error) {
+	return m.plistPath, nil
+}
+
+func (m *fakeRepairServiceManager) WritePlist(program, configPath string) (string, error) {
+	return m.plistPath, os.WriteFile(m.plistPath, []byte("new plist"), 0644)
+}
+
+func (m *fakeRepairServiceManager) Load() error {
+	m.loads++
+	return nil
+}
+
+func (m *fakeRepairServiceManager) Unload() error {
+	m.unloads++
+	return nil
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("%s = %q, want %q", path, string(data), want)
 	}
 }
 
@@ -819,6 +940,33 @@ func TestPlanDoctorFixesDoesNotTreatMissingEventAsAppliedFix(t *testing.T) {
 	}
 	if len(plan.Skipped) != 1 || !strings.Contains(plan.Skipped[0].Message, "test-event") {
 		t.Fatalf("missing last event should suggest test-event: %#v", plan)
+	}
+}
+
+func TestApplyDoctorFixesContinuesAfterCollectorRepairFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
+	status := lifecycle.Status{
+		LogPath:    logPath,
+		RuntimeLog: lifecycle.RuntimeLogSource{EffectiveUserMode: true},
+	}
+	plan := doctorFixPlan{
+		Fixes: []plannedAction{
+			{Action: "repair_collector_service", Target: filepath.Join(home, "missing-config.json")},
+			{Action: "create_runtime_log", Target: logPath},
+		},
+	}
+
+	err := applyDoctorFixes(plan, status)
+	if err == nil {
+		t.Fatal("applyDoctorFixes returned nil, want collector repair error")
+	}
+	if !strings.Contains(err.Error(), "repair_collector_service") {
+		t.Fatalf("applyDoctorFixes error = %q, want repair action context", err)
+	}
+	if _, statErr := os.Stat(logPath); statErr != nil {
+		t.Fatalf("runtime log was not created after collector repair failure: %v", statErr)
 	}
 }
 
