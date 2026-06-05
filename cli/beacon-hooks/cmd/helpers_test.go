@@ -51,6 +51,53 @@ func TestResolveSessionID_Cursor(t *testing.T) {
 			platform: "copilot",
 			want:     "ff2d7803-5799-4f18-83f0-3633b2c11809",
 		},
+		{
+			name: "hermes uses top-level session_id",
+			input: map[string]interface{}{
+				"session_id": "hermes-sess-1",
+			},
+			platform: "hermes",
+			want:     "hermes-sess-1",
+		},
+		{
+			name: "hermes uses session_key",
+			input: map[string]interface{}{
+				"session_key": "hermes-key-1",
+			},
+			platform: "hermes",
+			want:     "hermes-key-1",
+		},
+		{
+			name: "hermes reads session_id from extra",
+			input: map[string]interface{}{
+				"extra": map[string]interface{}{
+					"session_id": "hermes-extra-sess",
+				},
+			},
+			platform: "hermes",
+			want:     "hermes-extra-sess",
+		},
+		{
+			name: "hermes reads session_key from extra",
+			input: map[string]interface{}{
+				"extra": map[string]interface{}{
+					"session_key": "hermes-extra-key",
+				},
+			},
+			platform: "hermes",
+			want:     "hermes-extra-key",
+		},
+		{
+			name: "hermes top-level session_id takes precedence over extra",
+			input: map[string]interface{}{
+				"session_id": "top-level",
+				"extra": map[string]interface{}{
+					"session_id": "from-extra",
+				},
+			},
+			platform: "hermes",
+			want:     "top-level",
+		},
 	}
 
 	for _, tt := range tests {

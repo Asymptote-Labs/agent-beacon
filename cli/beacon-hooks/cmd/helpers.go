@@ -70,7 +70,7 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	case "grok":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	case "hermes":
-		return getFirstStr(input, "session_id", "sessionId", "task_id")
+		return hermesFirstString(input, "session_id", "sessionId", "session_key", "task_id")
 	case "opencode":
 		return getFirstStr(input, "session_id", "sessionID")
 	default:
@@ -114,8 +114,8 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		sessionID = getFirstStr(input, "sessionId", "session_id", "sessionID")
 		return
 	case "hermes":
-		sessionID = getFirstStr(input, "session_id", "sessionId", "task_id")
-		transcriptPath = getFirstStr(input, "transcript_path", "transcriptPath")
+		sessionID = hermesFirstString(input, "session_id", "sessionId", "session_key", "task_id")
+		transcriptPath = hermesFirstString(input, "transcript_path", "transcriptPath")
 		return
 	case "opencode":
 		sessionID = getFirstStr(input, "session_id", "sessionID")
