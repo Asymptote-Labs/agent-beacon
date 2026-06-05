@@ -147,6 +147,24 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 				}
 			}
 			result.Harnesses = filtered
+
+			filteredConfigs := []endpointinventory.Config{}
+			existingPaths := map[string]bool{}
+			for _, c := range result.Configs {
+				if c.Exists {
+					filteredConfigs = append(filteredConfigs, c)
+					existingPaths[c.PathHash] = true
+				}
+			}
+			result.Configs = filteredConfigs
+
+			filteredServers := []endpointinventory.MCPServer{}
+			for _, s := range result.MCPServers {
+				if existingPaths[s.SourcePathHash] {
+					filteredServers = append(filteredServers, s)
+				}
+			}
+			result.MCPServers = filteredServers
 		}
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}
