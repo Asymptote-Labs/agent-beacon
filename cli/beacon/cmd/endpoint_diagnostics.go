@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -81,16 +82,25 @@ func runEndpointDoctor(cmd *cobra.Command, args []string) error {
 		fixPlan := planDoctorFixes(result, status)
 		result.Fixes = fixPlan.Fixes
 		result.Skipped = fixPlan.Skipped
+		var fixErr error
 		if err := applyDoctorFixes(fixPlan, status); err != nil {
+			fixErr = err
+		} else {
+			status = lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
+			result = buildDoctorResult(status, time.Now())
+			result.Fixes = fixPlan.Fixes
+			result.Skipped = fixPlan.Skipped
+		}
+		if err := printDoctorResult(result); err != nil {
 			return err
 		}
-		status = lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
-		result = buildDoctorResult(status, time.Now())
-		result.Fixes = fixPlan.Fixes
-		result.Skipped = fixPlan.Skipped
-	}
-	if err := printDoctorResult(result); err != nil {
-		return err
+		if fixErr != nil {
+			return fixErr
+		}
+	} else {
+		if err := printDoctorResult(result); err != nil {
+			return err
+		}
 	}
 	if result.Status == diagnostics.StatusFail {
 		return fmt.Errorf("endpoint health checks failed")
@@ -795,7 +805,9 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
 			}
 		case "collector_config", "launchd_plist", "collector_health", "collector_reachability", "service":
-			if configUsable {
+			if runtime.GOOS != "darwin" {
+				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "launchd service repair is only available on macOS"})
+			} else if configUsable {
 				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and launchd service"})
 			} else {
 				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "skipped because endpoint config is invalid"})
