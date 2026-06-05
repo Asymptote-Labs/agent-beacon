@@ -581,8 +581,10 @@ func beaconManaged(item candidate, data []byte) bool {
 	if item.runtime == "vscode" && strings.Contains(text, "github.copilot.chat.otel.otlpEndpoint") && localEndpointText(text) {
 		return true
 	}
-	if item.runtime == "factory" && strings.Contains(text, "OTEL_TELEMETRY_ENDPOINT") && localEndpointText(text) {
-		return true
+	if item.runtime == "factory" {
+		if ep := shellExportValue(text, "OTEL_TELEMETRY_ENDPOINT"); ep != "" && localEndpointText(ep) {
+			return true
+		}
 	}
 	if item.runtime == "copilot_cli" && copilotOTELEnabled(text) {
 		return true
