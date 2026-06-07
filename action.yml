@@ -1,5 +1,5 @@
-name: "Beacon CI telemetry for Claude Code"
-description: "Capture Claude Code CI telemetry to Beacon JSONL, artifacts, or customer-managed SIEMs."
+name: "Agent Beacon CI Telemetry"
+description: "Capture Claude Code CI telemetry to Agent Beacon JSONL, artifacts, or customer-managed destinations."
 author: "Asymptote Labs"
 branding:
   icon: "radio"
