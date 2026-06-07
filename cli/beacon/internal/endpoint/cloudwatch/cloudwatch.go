@@ -2,7 +2,6 @@ package cloudwatch
 
 import (
 	"embed"
-	"fmt"
 	"io/fs"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
@@ -16,85 +15,40 @@ const (
 	DefaultOutputDir = "beacon-cloudwatch-pack"
 )
 
-type File struct {
-	Name            string
-	Content         string
-	TemplateLogPath bool
-	JSONEscape      bool
+const configAsset = "pack/vector.toml.tmpl"
+
+// File is the installable pack-file type, shared with siempack.
+type File = siempack.File
+
+var pack = siempack.Pack{
+	Label:            "cloudwatch",
+	FS:               packFS,
+	DefaultLogPath:   DefaultLogPath,
+	DefaultOutputDir: DefaultOutputDir,
+	Assets: []siempack.Asset{
+		{Source: "pack/README.md", Name: "README.md"},
+		{Source: "pack/sample-event.jsonl", Name: "sample-event.jsonl"},
+		{Source: configAsset, Name: "vector.toml", TemplateLogPath: true},
+	},
 }
 
-func readAsset(path string) (string, error) {
-	data, err := siempack.ReadFile(packFS, path)
-	if err != nil {
-		return "", fmt.Errorf("cloudwatch pack asset %q: %w", path, err)
-	}
-	return data, nil
-}
+// mustRead returns the embedded asset at path or panics. Retained for test use.
+func mustRead(path string) string { return pack.MustRead(path) }
 
-func mustRead(path string) string {
-	s, err := readAsset(path)
-	if err != nil {
-		panic(err.Error())
-	}
-	return s
-}
+// filesFromFS builds the file list from the supplied FS; tests use it to inject
+// read-error conditions.
+func filesFromFS(fsys fs.FS) ([]File, error) { return pack.WithFS(fsys).Files() }
 
+// configSnippetFromFS renders the Vector config using the supplied FS.
 func configSnippetFromFS(fsys fs.FS, logPath string) (string, error) {
-	if logPath == "" {
-		logPath = DefaultLogPath
-	}
-	content, err := siempack.ReadFile(fsys, "pack/vector.toml.tmpl")
-	if err != nil {
-		return "", fmt.Errorf("cloudwatch pack asset %q: %w", "pack/vector.toml.tmpl", err)
-	}
-	return siempack.RenderLogPath(content, logPath), nil
-}
-
-func filesFromFS(fsys fs.FS) ([]File, error) {
-	readme, err := siempack.ReadFile(fsys, "pack/README.md")
-	if err != nil {
-		return nil, fmt.Errorf("cloudwatch pack asset %q: %w", "pack/README.md", err)
-	}
-	sample, err := siempack.ReadFile(fsys, "pack/sample-event.jsonl")
-	if err != nil {
-		return nil, fmt.Errorf("cloudwatch pack asset %q: %w", "pack/sample-event.jsonl", err)
-	}
-	vector, err := siempack.ReadFile(fsys, "pack/vector.toml.tmpl")
-	if err != nil {
-		return nil, fmt.Errorf("cloudwatch pack asset %q: %w", "pack/vector.toml.tmpl", err)
-	}
-	return []File{
-		{Name: "README.md", Content: readme},
-		{Name: "sample-event.jsonl", Content: sample},
-		{Name: "vector.toml", Content: vector, TemplateLogPath: true},
-	}, nil
+	return pack.WithFS(fsys).Render(configAsset, logPath)
 }
 
 // ConfigSnippet returns a rendered Vector configuration for AWS CloudWatch Logs.
-func ConfigSnippet(logPath string) (string, error) {
-	return configSnippetFromFS(packFS, logPath)
-}
+func ConfigSnippet(logPath string) (string, error) { return pack.Render(configAsset, logPath) }
 
 // Files returns all pack files, propagating any embedded asset read error.
-func Files() ([]File, error) {
-	return filesFromFS(packFS)
-}
+func Files() ([]File, error) { return pack.Files() }
 
 // InstallPack writes the AWS CloudWatch Logs pack files to outputDir with logPath substituted.
-func InstallPack(outputDir, logPath string) error {
-	if outputDir == "" {
-		outputDir = DefaultOutputDir
-	}
-	if logPath == "" {
-		logPath = DefaultLogPath
-	}
-	files, err := filesFromFS(packFS)
-	if err != nil {
-		return err
-	}
-	sfiles := make([]siempack.File, 0, len(files))
-	for _, file := range files {
-		sfiles = append(sfiles, siempack.File(file))
-	}
-	return siempack.Install(outputDir, sfiles, logPath)
-}
+func InstallPack(outputDir, logPath string) error { return pack.Install(outputDir, logPath) }
