@@ -93,10 +93,11 @@ Validate an existing CI artifact explicitly:
   --min-events 1
 ```
 
-Captured events carry the GitHub Actions run context (`run.repository`,
-`run.branch`, `run.run_id`, `run.run_attempt`, `run.job`, `run.event_name`, and
-`run.pr_number` on pull-request events) so they can be correlated per-workflow
-and per-PR downstream.
+Captured events carry the GitHub Actions run context (`origin`, `run.provider`,
+`run.repository`, `run.branch`, `run.run_id`, `run.run_attempt`, `run.workflow`,
+`run.job`, `run.event_name`, `run.commit`, `run.actor`, and `run.pr_number` on
+pull-request events) so they can be correlated per-workflow and per-PR
+downstream.
 
 Upload the log from GitHub Actions for customer-controlled retention:
 
@@ -113,10 +114,10 @@ Upload the log from GitHub Actions for customer-controlled retention:
 ```
 
 Upload only the `runtime.jsonl` file (as above), not the whole
-`${{ runner.temp }}/beacon` directory: when forwarding is configured the
-job-scoped `otelcol.yaml` in that directory contains the SIEM token. Beacon
-writes that file with `0600` permissions, but excluding it from the artifact
-keeps the credential off the uploaded path entirely.
+`${{ runner.temp }}/beacon` directory. When forwarding is configured, Beacon
+keeps the SIEM token in the runner environment and writes only collector
+environment references into `otelcol.yaml`; excluding the collector config from
+artifacts still avoids exposing forwarding endpoints or local collector details.
 
 ### Forwarding to a customer-managed SIEM
 

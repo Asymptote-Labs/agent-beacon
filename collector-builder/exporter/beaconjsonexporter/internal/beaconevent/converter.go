@@ -3,9 +3,11 @@ package beaconevent
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -394,6 +396,7 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 }
 
 func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
+	populateRunContext(event, attrs)
 	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
@@ -445,6 +448,33 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 		}
 	}
 	event.Content = &ContentInfo{Retention: c.opts.ContentRetention, Included: c.opts.ContentRetention != "metadata", Redacted: c.opts.ContentRetention == "redacted"}
+}
+
+func populateRunContext(event *Event, attrs map[string]interface{}) {
+	if FirstString(attrs, asymptotetrace.AttributeOrigin) == string(asymptotetrace.OriginCI) {
+		event.Origin = asymptotetrace.OriginCI
+	}
+	run := RunInfo{
+		Provider:   FirstString(attrs, asymptotetrace.AttributeRunProvider),
+		RunID:      FirstString(attrs, asymptotetrace.AttributeRunID),
+		RunAttempt: FirstString(attrs, asymptotetrace.AttributeRunAttempt),
+		Workflow:   FirstString(attrs, asymptotetrace.AttributeRunWorkflow),
+		Job:        FirstString(attrs, asymptotetrace.AttributeRunJob),
+		EventName:  FirstString(attrs, asymptotetrace.AttributeRunEventName),
+		Commit:     FirstString(attrs, asymptotetrace.AttributeRunCommit),
+		Repository: FirstString(attrs, asymptotetrace.AttributeRunRepository),
+		Branch:     FirstString(attrs, asymptotetrace.AttributeRunBranch),
+		PR:         FirstString(attrs, asymptotetrace.AttributeRunPR),
+		PRNumber:   FirstString(attrs, asymptotetrace.AttributeRunPRNumber),
+		Actor:      FirstString(attrs, asymptotetrace.AttributeRunActor),
+	}
+	if ephemeral, ok := BoolAttr(attrs, asymptotetrace.AttributeRunEphemeral); ok {
+		run.Ephemeral = ephemeral
+	}
+	if run.Provider == "" && run.RunID == "" && run.RunAttempt == "" && run.Workflow == "" && run.Job == "" && run.EventName == "" && run.Commit == "" && run.Repository == "" && run.Branch == "" && run.PR == "" && run.PRNumber == "" && run.Actor == "" && !run.Ephemeral {
+		return
+	}
+	event.Run = &run
 }
 
 func (c Converter) RawPayload(attrs map[string]interface{}, extra map[string]interface{}) map[string]interface{} {
@@ -517,6 +547,21 @@ func Int64Attr(attrs map[string]interface{}, keys ...string) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func BoolAttr(attrs map[string]interface{}, keys ...string) (bool, bool) {
+	for _, key := range keys {
+		switch typed := attrs[key].(type) {
+		case bool:
+			return typed, true
+		case string:
+			value, err := strconv.ParseBool(strings.TrimSpace(typed))
+			if err == nil {
+				return value, true
+			}
+		}
+	}
+	return false, false
 }
 
 func Timestamp(ts time.Time) time.Time {

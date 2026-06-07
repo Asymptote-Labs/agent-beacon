@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -165,6 +166,74 @@ func TestConsumeLogsWritesBeaconJSONL(t *testing.T) {
 	}
 	if event.Command == nil || event.Command.Command != "kubectl get pods" {
 		t.Fatalf("command missing from event: %#v", event.Command)
+	}
+}
+
+func TestConsumeLogsMapsCIRunResourceAttributes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:             path,
+		MaxEventBytes:    defaultMaxEventBytes,
+		RotateBytes:      defaultRotateBytes,
+		RedactSecrets:    true,
+		ContentRetention: "metadata",
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	resourceAttrs := rl.Resource().Attributes()
+	resourceAttrs.PutStr("service.name", "claude-code")
+	resourceAttrs.PutStr("repository", "local/repo")
+	resourceAttrs.PutStr("branch", "local-branch")
+	resourceAttrs.PutStr(asymptotetrace.AttributeOrigin, string(asymptotetrace.OriginCI))
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunProvider, "github_actions")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunID, "123")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunAttempt, "2")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunWorkflow, "CI / build, smoke")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunJob, "telemetry")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunEventName, "pull_request")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunCommit, "deadbeef")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunRepository, "asymptote-labs/agent-beacon")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunBranch, "feature/ci telemetry")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunPR, "refs/pull/12/merge")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunPRNumber, "12")
+	resourceAttrs.PutStr(asymptotetrace.AttributeRunActor, "octocat")
+	resourceAttrs.PutBool(asymptotetrace.AttributeRunEphemeral, true)
+	rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Body().SetStr("ci telemetry event")
+	rec.Attributes().PutStr("beacon.event.action", "tool.invoked")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Origin != asymptotetrace.OriginCI {
+		t.Fatalf("Origin = %q, want ci", event.Origin)
+	}
+	if event.Run == nil {
+		t.Fatal("Run missing from event")
+	}
+	if event.Run.Provider != "github_actions" || event.Run.RunID != "123" || event.Run.Workflow != "CI / build, smoke" || !event.Run.Ephemeral {
+		t.Fatalf("unexpected run context: %#v", event.Run)
+	}
+	if event.Run.Repository != "asymptote-labs/agent-beacon" || event.Run.Branch != "feature/ci telemetry" {
+		t.Fatalf("run repository/branch = %q/%q", event.Run.Repository, event.Run.Branch)
+	}
+	if event.Repository != "local/repo" || event.Branch != "local-branch" {
+		t.Fatalf("top-level repository/branch = %q/%q", event.Repository, event.Branch)
+	}
+	if event.Run.PR != "refs/pull/12/merge" || event.Run.PRNumber != "12" || event.Run.Actor != "octocat" {
+		t.Fatalf("pull request context missing: %#v", event.Run)
 	}
 }
 
