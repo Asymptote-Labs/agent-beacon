@@ -136,6 +136,10 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 			if ciOpts.jsonOutput {
 				_ = json.NewEncoder(os.Stdout).Encode(execResult)
 			}
+			fmt.Fprintf(os.Stderr, "Beacon CI upload failed: %v\n", uploadErr)
+			if childExit != 0 {
+				os.Exit(childExit)
+			}
 			return fmt.Errorf("Beacon CI upload failed: %w", uploadErr)
 		}
 		if len(uploadResults) > 0 {
