@@ -119,6 +119,24 @@ keeps the SIEM token in the runner environment and writes only collector
 environment references into `otelcol.yaml`; excluding the collector config from
 artifacts still avoids exposing forwarding endpoints or local collector details.
 
+The JSONL artifact is the universal CI export contract. Existing destination
+packs can consume the same file after it is downloaded or copied into the
+customer-managed forwarder path:
+
+| Destination | CI export path |
+| --- | --- |
+| Wazuh | Download the artifact and tail it with the Wazuh localfile pack. |
+| Elastic | Download the artifact and ingest it with Filebeat or Elastic Agent pack assets. |
+| Datadog | Download the artifact and tail it with the Datadog Agent log collection pack. |
+| Sumo Logic | Download the artifact for Vector-based forwarding, or use `--upload` when object storage is the handoff point. |
+| Rapid7 | Download the artifact for Vector/webhook forwarding. |
+| S3 | Use direct `--upload s3` in CI, or upload/download the artifact manually. |
+| CloudWatch Logs | Download the artifact and forward with the Vector CloudWatch pack. |
+| GCS | Use direct `--upload gcs` in CI, or upload/download the artifact manually. |
+| Sentinel | Download the artifact and ingest with the Azure Monitor Agent/DCR pack. |
+| Splunk | Use direct `--forward splunk`, or ingest the JSONL artifact with an existing Splunk pipeline. |
+| Falcon LogScale | Use direct `--forward falcon`, or ingest the JSONL artifact with an existing pipeline. |
+
 ### Forwarding to a customer-managed SIEM
 
 Because CI runners are ephemeral, the local JSONL is destroyed when the runner
@@ -143,6 +161,31 @@ beacon ci exec \
   Beacon still writes the local JSONL.
 - Beacon remains a local JSONL producer; egress goes only to infrastructure the
   customer already operates.
+
+### Uploading CI JSONL to object storage
+
+For CI runners that should hand off telemetry through object storage, `ci exec`
+can upload the completed `runtime.jsonl` after telemetry validation:
+
+```bash
+export BEACON_CI_S3_BUCKET="my-beacon-telemetry"
+export BEACON_CI_S3_PREFIX="github-actions"
+beacon ci exec --upload s3 -- claude --print "Summarize this repository"
+```
+
+```bash
+export BEACON_CI_GCS_BUCKET="my-beacon-telemetry"
+export BEACON_CI_GCS_PREFIX="github-actions"
+beacon ci exec --upload gcs -- claude --print "Summarize this repository"
+```
+
+- S3 upload uses `aws s3 cp` and the standard AWS credential provider chain.
+- GCS upload uses `gcloud storage cp` when available, falling back to `gsutil cp`.
+- Beacon strips common AWS and Google credential environment variables from the
+  child agent process, while keeping them available to the post-run uploader.
+- Object keys default to
+  `<prefix>/<repository>/<run_id>/<run_attempt>/runtime.jsonl` in GitHub Actions,
+  with a timestamp fallback outside GitHub Actions.
 
 By default `ci exec` fails the step when no Beacon events reach the runtime log,
 which surfaces a broken telemetry pipeline. Pass `--require-telemetry=false` to
@@ -180,6 +223,25 @@ jobs:
           command: claude --print "Summarize this repository"
           forward: splunk
           forward-endpoint: https://splunk.example:8088/services/collector
+```
+
+To upload the completed JSONL artifact to object storage, configure cloud
+credentials at the job level and set `upload`:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
+    aws-region: us-east-1
+
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.39
+  env:
+    BEACON_CI_S3_BUCKET: my-beacon-telemetry
+    BEACON_CI_S3_PREFIX: github-actions
+  with:
+    command: claude --print "Summarize this repository"
+    upload: s3
 ```
 
 See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-actions/claude-code-telemetry.yml)

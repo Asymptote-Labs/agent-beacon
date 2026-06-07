@@ -47,6 +47,7 @@ type Options struct {
 	// token is read from the environment only.
 	Forward         string
 	ForwardEndpoint string
+	Uploads         []string
 }
 
 type Session struct {
@@ -62,8 +63,9 @@ type Session struct {
 	Run             *schema.RunInfo `json:"run,omitempty"`
 	// Forward and ForwardEndpoint describe the optional SIEM egress. The token
 	// is never recorded here so it cannot leak into --json output.
-	Forward         string `json:"forward,omitempty"`
-	ForwardEndpoint string `json:"forward_endpoint,omitempty"`
+	Forward         string              `json:"forward,omitempty"`
+	ForwardEndpoint string              `json:"forward_endpoint,omitempty"`
+	Uploads         []UploadDestination `json:"uploads,omitempty"`
 
 	cfg       endpointconfig.Config
 	startedAt time.Time
@@ -75,6 +77,7 @@ type ExecResult struct {
 	Session         Session          `json:"session"`
 	ChildExitCode   int              `json:"child_exit_code"`
 	Validation      ValidationResult `json:"validation"`
+	Uploads         []UploadResult   `json:"uploads,omitempty"`
 	ArtifactMessage string           `json:"artifact_message,omitempty"`
 }
 
@@ -134,6 +137,12 @@ func Provision(opts Options) (*Session, error) {
 		// environment and can resolve them; the child has these vars stripped.
 		replaceTokensWithEnvRefs(&cfg)
 	}
+	startedAt := time.Now().UTC()
+	run := detectRunInfo()
+	uploads, err := resolveUploadDestinations(opts.Uploads, run, logPath, startedAt)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
 		return nil, err
 	}
@@ -151,7 +160,6 @@ func Provision(opts Options) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	startedAt := time.Now().UTC()
 	return &Session{
 		BaseDir:         baseDir,
 		LogPath:         logPath,
@@ -162,9 +170,10 @@ func Provision(opts Options) (*Session, error) {
 		Harness:         DefaultHarness,
 		WorkDir:         opts.WorkDir,
 		StartedAt:       startedAt.Format(time.RFC3339),
-		Run:             detectRunInfo(),
+		Run:             run,
 		Forward:         forward,
 		ForwardEndpoint: forwardEndpoint,
+		Uploads:         uploads,
 		cfg:             cfg,
 		startedAt:       startedAt,
 	}, nil
@@ -248,8 +257,12 @@ func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io
 		"BEACON_CI_CONFIG_PATH="+s.ConfigPath,
 		"BEACON_CI_LOG_PATH="+s.LogPath,
 	)
-	// The agent never needs the SIEM token; keep it out of the child process.
-	cmd.Env = stripEnv(env, forwardTokenEnv...)
+	// The agent never needs destination credentials; keep them out of the child process.
+	stripKeys := append([]string{}, forwardTokenEnv...)
+	if len(s.Uploads) > 0 {
+		stripKeys = append(stripKeys, uploadCredentialEnv...)
+	}
+	cmd.Env = stripEnv(env, stripKeys...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()

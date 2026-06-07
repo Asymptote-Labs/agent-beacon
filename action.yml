@@ -53,8 +53,15 @@ inputs:
     description: "SIEM HEC endpoint URL for the selected --forward provider."
     required: false
     default: ""
+  upload:
+    description: >-
+      Optional post-run artifact upload destinations: 's3', 'gcs', or a
+      comma-separated list. Configure provider credentials at the job level
+      using the normal AWS or Google Cloud CI mechanisms.
+    required: false
+    default: ""
   upload-artifact:
-    description: "Upload the runtime JSONL log as a workflow artifact."
+    description: "Upload the runtime JSONL log as the universal workflow artifact."
     required: false
     default: "true"
   artifact-name:
@@ -145,6 +152,7 @@ runs:
         INPUT_REQUIRE_TELEMETRY: ${{ inputs.require-telemetry }}
         INPUT_FORWARD: ${{ inputs.forward }}
         INPUT_FORWARD_ENDPOINT: ${{ inputs.forward-endpoint }}
+        INPUT_UPLOAD: ${{ inputs.upload }}
       run: |
         set -euo pipefail
 
@@ -164,6 +172,15 @@ runs:
           if [ -n "${INPUT_FORWARD_ENDPOINT}" ]; then
             args+=(--forward-endpoint "${INPUT_FORWARD_ENDPOINT}")
           fi
+        fi
+        if [ -n "${INPUT_UPLOAD}" ]; then
+          IFS=',' read -ra upload_values <<< "${INPUT_UPLOAD}"
+          for upload in "${upload_values[@]}"; do
+            upload="${upload//[[:space:]]/}"
+            if [ -n "${upload}" ]; then
+              args+=(--upload "${upload}")
+            fi
+          done
         fi
 
         # INPUT_COMMAND is passed through the environment (not interpolated into
