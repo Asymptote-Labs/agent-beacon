@@ -64,6 +64,8 @@ type Session struct {
 	// is never recorded here so it cannot leak into --json output.
 	Forward         string `json:"forward,omitempty"`
 	ForwardEndpoint string `json:"forward_endpoint,omitempty"`
+	// PID is the detached collector process id for sidecar sessions (ci start).
+	PID int `json:"pid,omitempty"`
 
 	cfg       endpointconfig.Config
 	startedAt time.Time

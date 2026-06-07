@@ -1,0 +1,55 @@
+# Reference workflow for capturing Claude Code telemetry in CI using Beacon's
+# sidecar lifecycle (beacon ci start / stop). Use this when Claude runs inside
+# another action or a later step that you cannot wrap with `beacon ci exec`.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a
+# reference only and does not run in this repository.
+
+name: Claude Code telemetry (sidecar)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  claude-telemetry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the Beacon CLI however you distribute it (release download,
+      # Homebrew, etc.) so `beacon` is on PATH for the start/stop steps.
+      - name: Install Beacon
+        run: |
+          curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.39/beacon_0.0.39_linux_amd64.tar.gz \
+            | tar -xz -C /usr/local/bin beacon beacon-otelcol
+
+      # Start the background collector and export the Claude OTLP env vars to
+      # $GITHUB_ENV so every later step in this job emits to it. The SIEM token
+      # is read from the environment here and never written to the state file.
+      - name: Start Beacon telemetry
+        run: beacon ci start --forward splunk --forward-endpoint "${SPLUNK_HEC_URL}"
+        env:
+          SPLUNK_HEC_URL: https://splunk.example:8088/services/collector
+          BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+
+      # Any step that runs Claude now emits telemetry to the sidecar, including
+      # third-party actions. Replace this with your real Claude step.
+      - name: Run Claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: claude --print "Summarize the changes in this pull request"
+
+      # Always stop and validate so the collector is torn down even if an
+      # earlier step failed.
+      - name: Stop Beacon telemetry
+        if: always()
+        run: beacon ci stop
+
+      - name: Upload Beacon telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beacon-runtime-log
+          path: ${{ runner.temp }}/beacon/runtime.jsonl
+          if-no-files-found: warn
