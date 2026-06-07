@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ var ciOpts struct {
 	minEvents        int
 	forward          string
 	forwardEndpoint  string
+	uploads          []string
 	requireTelemetry bool
 }
 
@@ -73,6 +75,7 @@ func init() {
 	ciExecCmd.Flags().BoolVar(&ciOpts.keepArtifacts, "keep-artifacts", true, "Keep CI runtime log and collector config after exit")
 	ciExecCmd.Flags().StringVar(&ciOpts.forward, "forward", "", "Optionally forward events to a customer-managed SIEM: splunk or falcon (token read from the environment)")
 	ciExecCmd.Flags().StringVar(&ciOpts.forwardEndpoint, "forward-endpoint", "", "SIEM HEC endpoint URL for --forward (token comes from BEACON_CI_*_HEC_TOKEN)")
+	ciExecCmd.Flags().StringArrayVar(&ciOpts.uploads, "upload", nil, "Upload final CI runtime JSONL after validation: s3 or gcs (repeatable)")
 	ciExecCmd.Flags().BoolVar(&ciOpts.requireTelemetry, "require-telemetry", true, "Fail the command when telemetry validation fails; set false to warn only")
 	for _, name := range []string{"base-dir", "work-dir", "collector", "otlp-grpc-port", "otlp-http-port"} {
 		_ = ciExecCmd.Flags().MarkHidden(name)
@@ -94,6 +97,7 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		KeepArtifacts:    ciOpts.keepArtifacts,
 		Forward:          ciOpts.forward,
 		ForwardEndpoint:  ciOpts.forwardEndpoint,
+		Uploads:          ciOpts.uploads,
 	})
 	if err != nil {
 		return err
@@ -123,6 +127,25 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		Validation:      result,
 		ArtifactMessage: fmt.Sprintf("Beacon CI artifacts: log=%s config=%s", session.LogPath, session.ConfigPath),
 	}
+	if (result.Status != "fail" || !ciOpts.requireTelemetry) && len(session.Uploads) > 0 {
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		uploadResults, uploadErr := session.UploadArtifacts(uploadCtx)
+		uploadCancel()
+		execResult.Uploads = uploadResults
+		if uploadErr != nil {
+			if ciOpts.jsonOutput {
+				_ = json.NewEncoder(os.Stdout).Encode(execResult)
+			}
+			fmt.Fprintf(os.Stderr, "Beacon CI upload failed: %v\n", uploadErr)
+			if childExit != 0 {
+				os.Exit(childExit)
+			}
+			return fmt.Errorf("Beacon CI upload failed: %w", uploadErr)
+		}
+		if len(uploadResults) > 0 {
+			execResult.ArtifactMessage += fmt.Sprintf(" uploads=%s", uploadTargets(uploadResults))
+		}
+	}
 	if !ciOpts.keepArtifacts && result.Status != "fail" && childExit == 0 && ciOpts.baseDir == "" && ciOpts.logPath == "" {
 		if err := os.RemoveAll(session.BaseDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: artifact cleanup: %v\n", err)
@@ -150,6 +173,16 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		os.Exit(childExit)
 	}
 	return nil
+}
+
+func uploadTargets(results []beaconci.UploadResult) string {
+	targets := make([]string, 0, len(results))
+	for _, result := range results {
+		if result.Target != "" {
+			targets = append(targets, result.Target)
+		}
+	}
+	return strings.Join(targets, ",")
 }
 
 func runCIValidate(cmd *cobra.Command, args []string) error {

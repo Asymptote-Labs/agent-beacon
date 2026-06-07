@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestCICommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
@@ -24,7 +28,7 @@ func TestCICommandsRegistered(t *testing.T) {
 			t.Fatalf("ci validate missing --%s", name)
 		}
 	}
-	for _, name := range []string{"content-retention", "keep-artifacts"} {
+	for _, name := range []string{"content-retention", "keep-artifacts", "upload"} {
 		if ciExecCmd.Flags().Lookup(name) == nil {
 			t.Fatalf("ci exec missing --%s", name)
 		}
@@ -39,6 +43,19 @@ func TestCICommandsRegistered(t *testing.T) {
 		}
 		if !flag.Hidden {
 			t.Fatalf("ci exec --%s should be hidden", name)
+		}
+	}
+}
+
+func TestCIActionExposesUploadInput(t *testing.T) {
+	data, err := os.ReadFile("../../../action.yml")
+	if err != nil {
+		t.Fatalf("read action.yml: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{"  upload:", "INPUT_UPLOAD", "--upload"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("action.yml missing %q", want)
 		}
 	}
 }

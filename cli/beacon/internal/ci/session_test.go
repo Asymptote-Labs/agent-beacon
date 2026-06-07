@@ -392,6 +392,42 @@ func TestRunChildStripsForwardToken(t *testing.T) {
 	}
 }
 
+func TestRunChildStripsUploadCredentialsWhenUploadConfigured(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "env.txt")
+	t.Setenv("AWS_ACCESS_KEY_ID", "aws-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	t.Setenv("AWS_SESSION_TOKEN", "aws-session")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/tmp/google-creds.json")
+	child := fakeExecutable(t, "child", "#!/bin/sh\nenv > \"$1\"\n")
+	session := &Session{
+		BaseDir:      dir,
+		ConfigPath:   filepath.Join(dir, "otelcol.yaml"),
+		LogPath:      filepath.Join(dir, "runtime.jsonl"),
+		GRPCEndpoint: "http://127.0.0.1:4317",
+		Uploads: []UploadDestination{
+			{Provider: UploadS3, URI: "s3://bucket/key"},
+		},
+		cfg: endpointconfig.Default(true, filepath.Join(dir, "runtime.jsonl")),
+	}
+	if _, err := session.RunChild(context.Background(), []string{child, output}, nil, nil); err != nil {
+		t.Fatalf("RunChild returned error: %v", err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := string(data)
+	for _, leaked := range []string{"AWS_ACCESS_KEY_ID=", "AWS_SECRET_ACCESS_KEY=", "AWS_SESSION_TOKEN=", "GOOGLE_APPLICATION_CREDENTIALS=", "aws-secret", "/tmp/google-creds.json"} {
+		if strings.Contains(env, leaked) {
+			t.Fatalf("child env exposed upload credential %q:\n%s", leaked, env)
+		}
+	}
+	if !strings.Contains(env, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
+		t.Fatalf("child env missing Claude telemetry vars:\n%s", env)
+	}
+}
+
 func fakeExecutable(t *testing.T, name, script string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)

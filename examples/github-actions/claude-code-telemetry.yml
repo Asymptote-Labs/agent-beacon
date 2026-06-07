@@ -1,6 +1,6 @@
 # Reference workflow for capturing Claude Code telemetry in CI with the
 # Beacon composite action. Copy this into .github/workflows/ in your own
-# repository and adjust the command and forwarding settings.
+# repository and adjust the command, artifact, forwarding, or upload settings.
 #
 # This file lives under examples/ (not .github/workflows/) so it is a
 # reference only and does not run in this repository.
@@ -14,10 +14,13 @@ on:
 jobs:
   claude-telemetry:
     runs-on: ubuntu-latest
-    # Set the SIEM token at the job level (from a secret) so the ephemeral
-    # collector can resolve it. Omit this block if you only upload an artifact.
+    # Set destination config at the job level so Beacon can use it without
+    # exposing secrets to the Claude child process. Omit this block if you only
+    # upload the default GitHub artifact.
     env:
       BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+      BEACON_CI_S3_BUCKET: ${{ vars.BEACON_CI_S3_BUCKET }}
+      BEACON_CI_S3_PREFIX: github-actions
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +28,12 @@ jobs:
       # only wraps the invocation with Beacon telemetry capture.
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
+
+      # Optional: configure cloud credentials before using upload: s3.
+      # - uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
+      #     aws-region: us-east-1
 
       - name: Run Claude with Beacon telemetry
         uses: asymptote-labs/agent-beacon@v0.0.39
@@ -36,5 +45,8 @@ jobs:
           # Requires a Beacon release that includes ci exec --forward.
           forward: splunk
           forward-endpoint: https://splunk.example:8088/services/collector
+          # Optional: upload the completed runtime JSONL to object storage.
+          # Supported values: s3, gcs, or s3,gcs.
+          # upload: s3
           # The runtime log is uploaded as an artifact by default.
           upload-artifact: "true"
