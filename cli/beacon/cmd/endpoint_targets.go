@@ -17,41 +17,89 @@ type endpointTarget struct {
 	Kind endpointTargetKind
 }
 
-func normalizeEndpointTarget(name string) (endpointTarget, bool) {
+// harnessTarget is one row of the supported-harness registry. It is the single
+// source of truth for both normalizers:
+//
+//   - endpointAliases map a spelling to the harness in the combined endpoint
+//     namespace, classified by endpointKind (OTLP vs hook).
+//   - hookAliases map a spelling to the harness in the hook-only namespace.
+//
+// The two alias sets differ on purpose: in the hook-only namespace some OTLP
+// spellings are reinterpreted as their hook variant (for example "claude" and
+// "vscode"), and OTLP-only harnesses are not hook-addressable at all.
+type harnessTarget struct {
+	name            string
+	endpointKind    endpointTargetKind
+	endpointAliases []string
+	hookAliases     []string
+}
+
+// harnessTargets lists every supported runtime. Adding a harness is one row;
+// the lookup tables below are derived from it.
+var harnessTargets = []harnessTarget{
+	{name: "claude", endpointKind: endpointTargetOTLP, endpointAliases: []string{"claude", "claude-code"}, hookAliases: []string{"claude", "claude-code"}},
+	{name: "claude", endpointKind: endpointTargetHook, endpointAliases: []string{"claude-hooks"}, hookAliases: []string{"claude-hooks"}},
+	{name: "codex", endpointKind: endpointTargetOTLP, endpointAliases: []string{"codex", "codex-cli"}},
+	{name: "gemini", endpointKind: endpointTargetOTLP, endpointAliases: []string{"gemini", "gemini-cli"}},
+	{name: "vscode", endpointKind: endpointTargetOTLP, endpointAliases: []string{"vscode", "vs-code", "vscode-copilot"}, hookAliases: []string{"vscode", "vs-code"}},
+	{name: "cursor", endpointKind: endpointTargetHook, endpointAliases: []string{"cursor"}, hookAliases: []string{"cursor"}},
+	{name: "factory", endpointKind: endpointTargetHook, endpointAliases: []string{"factory", "droid"}, hookAliases: []string{"factory", "droid"}},
+	{name: "opencode", endpointKind: endpointTargetHook, endpointAliases: []string{"opencode"}, hookAliases: []string{"opencode"}},
+	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
+	{name: "hermes", endpointKind: endpointTargetHook, endpointAliases: []string{"hermes", "hermes-agent"}, hookAliases: []string{"hermes", "hermes-agent"}},
+	{name: "antigravity", endpointKind: endpointTargetHook, endpointAliases: []string{"antigravity", "antigravity-cli"}, hookAliases: []string{"antigravity", "antigravity-cli"}},
+	{name: "devin-cli", endpointKind: endpointTargetHook, endpointAliases: []string{"devin", "devin-cli"}, hookAliases: []string{"devin", "devin-cli"}},
+	{name: "devin-desktop", endpointKind: endpointTargetHook, endpointAliases: []string{"devin-desktop"}, hookAliases: []string{"devin-desktop"}},
+}
+
+var (
+	endpointTargetLookup = buildEndpointTargetLookup()
+	hookTargetLookup     = buildHookTargetLookup()
+)
+
+func buildEndpointTargetLookup() map[string]endpointTarget {
+	m := make(map[string]endpointTarget)
+	for _, t := range harnessTargets {
+		for _, alias := range t.endpointAliases {
+			m[alias] = endpointTarget{Name: t.name, Kind: t.endpointKind}
+		}
+	}
+	return m
+}
+
+func buildHookTargetLookup() map[string]string {
+	m := make(map[string]string)
+	for _, t := range harnessTargets {
+		for _, alias := range t.hookAliases {
+			m[alias] = t.name
+		}
+	}
+	return m
+}
+
+// normalizeHarnessKey canonicalizes a user-supplied harness spelling: trimmed,
+// lowercased, with underscores treated as hyphens.
+func normalizeHarnessKey(name string) string {
 	key := strings.ToLower(strings.TrimSpace(name))
-	key = strings.ReplaceAll(key, "_", "-")
-	switch key {
-	case "":
-		return endpointTarget{}, false
-	case "claude", "claude-code":
-		return endpointTarget{Name: "claude", Kind: endpointTargetOTLP}, true
-	case "codex", "codex-cli":
-		return endpointTarget{Name: "codex", Kind: endpointTargetOTLP}, true
-	case "gemini", "gemini-cli":
-		return endpointTarget{Name: "gemini", Kind: endpointTargetOTLP}, true
-	case "vscode", "vs-code", "vscode-copilot":
-		return endpointTarget{Name: "vscode", Kind: endpointTargetOTLP}, true
-	case "cursor":
-		return endpointTarget{Name: "cursor", Kind: endpointTargetHook}, true
-	case "claude-hooks":
-		return endpointTarget{Name: "claude", Kind: endpointTargetHook}, true
-	case "factory", "droid":
-		return endpointTarget{Name: "factory", Kind: endpointTargetHook}, true
-	case "opencode":
-		return endpointTarget{Name: "opencode", Kind: endpointTargetHook}, true
-	case "grok":
-		return endpointTarget{Name: "grok", Kind: endpointTargetHook}, true
-	case "hermes", "hermes-agent":
-		return endpointTarget{Name: "hermes", Kind: endpointTargetHook}, true
-	case "antigravity", "antigravity-cli":
-		return endpointTarget{Name: "antigravity", Kind: endpointTargetHook}, true
-	case "devin", "devin-cli":
-		return endpointTarget{Name: "devin-cli", Kind: endpointTargetHook}, true
-	case "devin-desktop":
-		return endpointTarget{Name: "devin-desktop", Kind: endpointTargetHook}, true
-	default:
+	return strings.ReplaceAll(key, "_", "-")
+}
+
+func normalizeEndpointTarget(name string) (endpointTarget, bool) {
+	key := normalizeHarnessKey(name)
+	if key == "" {
 		return endpointTarget{}, false
 	}
+	target, ok := endpointTargetLookup[key]
+	return target, ok
+}
+
+func normalizeHookTarget(name string) (string, bool) {
+	key := normalizeHarnessKey(name)
+	if key == "" {
+		return "", false
+	}
+	target, ok := hookTargetLookup[key]
+	return target, ok
 }
 
 func splitEndpointTargets(values []string) (otlp []string, hooks []string, err error) {
@@ -98,38 +146,4 @@ func canonicalHookTargets(values []string) ([]string, error) {
 		}
 	}
 	return targets, nil
-}
-
-func normalizeHookTarget(name string) (string, bool) {
-	key := strings.ToLower(strings.TrimSpace(name))
-	key = strings.ReplaceAll(key, "_", "-")
-	switch key {
-	case "":
-		return "", false
-	case "antigravity", "antigravity-cli":
-		return "antigravity", true
-	case "cursor":
-		return "cursor", true
-	case "claude", "claude-code":
-		return "claude", true
-	case "vscode", "vs-code":
-		return "vscode", true
-	case "factory", "droid":
-		return "factory", true
-	case "opencode":
-		return "opencode", true
-	case "grok":
-		return "grok", true
-	case "hermes", "hermes-agent":
-		return "hermes", true
-	case "devin", "devin-cli":
-		return "devin-cli", true
-	case "devin-desktop":
-		return "devin-desktop", true
-	default:
-		if target, ok := normalizeEndpointTarget(key); ok && target.Kind == endpointTargetHook {
-			return target.Name, true
-		}
-		return "", false
-	}
 }
