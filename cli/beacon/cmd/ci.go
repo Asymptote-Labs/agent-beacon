@@ -127,7 +127,7 @@ func runCIExec(cmd *cobra.Command, args []string) error {
 		Validation:      result,
 		ArtifactMessage: fmt.Sprintf("Beacon CI artifacts: log=%s config=%s", session.LogPath, session.ConfigPath),
 	}
-	if result.Status != "fail" && len(session.Uploads) > 0 {
+	if (result.Status != "fail" || !ciOpts.requireTelemetry) && len(session.Uploads) > 0 {
 		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		uploadResults, uploadErr := session.UploadArtifacts(uploadCtx)
 		uploadCancel()
