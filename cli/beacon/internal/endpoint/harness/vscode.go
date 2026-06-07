@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -28,11 +27,7 @@ func DiscoverVSCode() Harness {
 
 func discoverVSCode(expectedEndpoint string) Harness {
 	h := Harness{Name: VSCodeName, DisplayName: "VS Code", Capability: "otel_hooks"}
-	if path, err := exec.LookPath("code"); err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "code")
 	settingsPath, err := VSCodeUserSettingsPath()
 	if err == nil {
 		h.ConfigPath = settingsPath

@@ -4,19 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 func DiscoverGemini() Harness {
 	h := Harness{Name: "gemini_cli", DisplayName: "Gemini CLI", Capability: "otel_config"}
-	path, err := exec.LookPath("gemini")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "gemini")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = filepath.Join(home, ".gemini", "settings.json")
 	if fileExists(h.ConfigPath) {

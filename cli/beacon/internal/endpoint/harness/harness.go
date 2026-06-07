@@ -66,15 +66,7 @@ func DiscoverAll() []Harness {
 
 func DiscoverAntigravity() Harness {
 	h := Harness{Name: "antigravity_cli", DisplayName: "Antigravity CLI", Capability: "hooks"}
-	for _, name := range []string{"antigravity", "antigravity-cli"} {
-		path, err := exec.LookPath(name)
-		if err == nil {
-			h.Detected = true
-			h.ExecutablePath = path
-			h.Version = commandVersion(path)
-			break
-		}
-	}
+	detectExecutable(&h, "antigravity", "antigravity-cli")
 	home, _ := os.UserHomeDir()
 	userConfig := filepath.Join(home, ".gemini", "config", "hooks.json")
 	projectConfig := filepath.Join(".agents", "hooks.json")
@@ -98,12 +90,7 @@ func DiscoverAntigravity() Harness {
 
 func DiscoverClaude() Harness {
 	h := Harness{Name: "claude_code", DisplayName: "Claude Code", Capability: "otel_env"}
-	path, err := exec.LookPath("claude")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "claude")
 	home, _ := os.UserHomeDir()
 	userConfig := filepath.Join(home, ".claude", "settings.json")
 	managedConfig := "/Library/Application Support/ClaudeCode/managed-settings.json"
@@ -130,12 +117,7 @@ func DiscoverClaude() Harness {
 
 func DiscoverCodex() Harness {
 	h := Harness{Name: "codex_cli", DisplayName: "Codex CLI", Capability: "otel_config"}
-	path, err := exec.LookPath("codex")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "codex")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = filepath.Join(home, ".codex", "config.toml")
 	if fileExists(h.ConfigPath) {
@@ -151,12 +133,7 @@ func DiscoverCodex() Harness {
 
 func DiscoverFactory() Harness {
 	h := Harness{Name: "factory", DisplayName: "Factory Droid", Capability: "otel_env"}
-	path, err := exec.LookPath("droid")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "droid")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = factoryProfilePath(home)
 	if fileExists(h.ConfigPath) {
@@ -172,12 +149,7 @@ func DiscoverFactory() Harness {
 
 func DiscoverOpenCode() Harness {
 	h := Harness{Name: "opencode", DisplayName: "opencode", Capability: "plugin"}
-	path, err := exec.LookPath("opencode")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "opencode")
 	home, _ := os.UserHomeDir()
 	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")
 	h.ConfigPath = pluginPath
@@ -202,12 +174,7 @@ func DiscoverOpenCode() Harness {
 
 func DiscoverHermes() Harness {
 	h := Harness{Name: "hermes", DisplayName: "Hermes Agent", Capability: "hooks"}
-	path, err := exec.LookPath("hermes")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "hermes")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = filepath.Join(home, ".hermes", "config.yaml")
 	if !h.Detected && dirExists(filepath.Join(home, ".hermes")) {
@@ -226,12 +193,7 @@ func DiscoverHermes() Harness {
 
 func DiscoverCursor() Harness {
 	h := Harness{Name: "cursor", DisplayName: "Cursor", Capability: "hooks"}
-	path, err := exec.LookPath("cursor")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "cursor")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = filepath.Join(home, ".cursor", "hooks.json")
 	if !h.Detected && dirExists(filepath.Join(home, ".cursor")) {
@@ -255,12 +217,7 @@ func DiscoverCursor() Harness {
 
 func DiscoverDevin() Harness {
 	h := Harness{Name: "devin-cli", DisplayName: "Devin CLI", Capability: "hooks"}
-	path, err := exec.LookPath("devin")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "devin")
 	home, _ := os.UserHomeDir()
 	userConfig := filepath.Join(home, ".config", "devin", "config.json")
 	projectConfig := filepath.Join(".devin", "hooks.v1.json")
@@ -722,6 +679,21 @@ func factoryProfilePath(home string) string {
 		return filepath.Join(home, ".bash_profile")
 	default:
 		return filepath.Join(home, ".profile")
+	}
+}
+
+// detectExecutable looks up each candidate command name on PATH and, on the
+// first match, marks the harness detected and records its executable path and
+// version. Names are tried in order.
+func detectExecutable(h *Harness, names ...string) {
+	for _, name := range names {
+		path, err := exec.LookPath(name)
+		if err == nil {
+			h.Detected = true
+			h.ExecutablePath = path
+			h.Version = commandVersion(path)
+			return
+		}
 	}
 }
 

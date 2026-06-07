@@ -3,7 +3,6 @@ package harness
 import (
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -14,12 +13,7 @@ func DiscoverCopilotCLI() Harness {
 
 func discoverCopilotCLI(expectedEndpoint string) Harness {
 	h := Harness{Name: "copilot_cli", DisplayName: "GitHub Copilot CLI", Capability: "otel_env"}
-	path, err := exec.LookPath("copilot")
-	if err == nil {
-		h.Detected = true
-		h.ExecutablePath = path
-		h.Version = commandVersion(path)
-	}
+	detectExecutable(&h, "copilot")
 	home, _ := os.UserHomeDir()
 	if !h.Detected && fileExists(filepath.Join(home, ".copilot", "config.json")) {
 		h.Detected = true
