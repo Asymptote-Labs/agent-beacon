@@ -1,0 +1,45 @@
+# Reference workflow for testing Agent Beacon CI Telemetry with direct GCS
+# upload. Copy this file to .github/workflows/ in a test repository and update
+# the bucket, workload identity provider, service account, and action ref.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a reference
+# only and does not run in this repository.
+
+name: Test Agent Beacon GCS upload
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  beacon-gcs-upload:
+    runs-on: ubuntu-latest
+    env:
+      BEACON_CI_GCS_BUCKET: ${{ vars.BEACON_CI_GCS_BUCKET }}
+      BEACON_CI_GCS_PREFIX: github-actions/test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Agent Beacon with GCS upload
+        uses: asymptote-labs/agent-beacon@v0.0.45
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          command: claude --print "Say hello from Agent Beacon CI telemetry"
+          upload: gcs
+          upload-artifact: "true"
