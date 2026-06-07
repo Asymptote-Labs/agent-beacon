@@ -148,6 +148,42 @@ which surfaces a broken telemetry pipeline. Pass `--require-telemetry=false` to
 downgrade that to a warning when you do not want telemetry health to gate the
 build.
 
+### GitHub Action
+
+A composite action wraps binary resolution, `ci exec`, and artifact upload so a
+workflow can capture Claude Code telemetry in a few lines:
+
+```yaml
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.39
+  with:
+    command: claude --print "Summarize the changes in this pull request"
+```
+
+The action downloads a pinned Beacon release and verifies it against the
+release `checksums.txt` before running (override the tag with `version`, or
+point at a vendored binary with `binary-path` for air-gapped runners). It
+uploads the runtime JSONL log as an artifact by default. To forward to a
+customer-managed SIEM, set `forward`/`forward-endpoint` and provide the token
+through a job- or workflow-level environment variable from a secret:
+
+```yaml
+jobs:
+  claude-telemetry:
+    runs-on: ubuntu-latest
+    env:
+      BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+    steps:
+      - uses: asymptote-labs/agent-beacon@v0.0.39
+        with:
+          command: claude --print "Summarize this repository"
+          forward: splunk
+          forward-endpoint: https://splunk.example:8088/services/collector
+```
+
+See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-actions/claude-code-telemetry.yml)
+for a complete reference workflow.
+
 ## Wazuh
 
 ```bash

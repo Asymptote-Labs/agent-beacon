@@ -1,0 +1,179 @@
+name: "Beacon CI telemetry for Claude Code"
+description: >-
+  Run Claude Code in CI with Beacon endpoint telemetry captured to a local
+  JSONL log, with optional artifact upload or customer-managed SIEM forwarding.
+author: "Asymptote Labs"
+branding:
+  icon: "radio"
+  color: "purple"
+
+inputs:
+  command:
+    description: >-
+      The Claude Code command to run, e.g. claude --print "Summarize this repo".
+      Executed via bash -c so the configured telemetry environment reaches it.
+    required: true
+  version:
+    description: >-
+      Beacon CLI release tag to download (e.g. v0.0.39). Defaults to a version
+      pinned by this action. SIEM forwarding requires a release that includes
+      the ci exec --forward feature.
+    required: false
+    default: ""
+  binary-path:
+    description: >-
+      Path to an existing beacon binary. When set, the download and checksum
+      verification are skipped. Use for air-gapped or self-hosted runners. The
+      beacon-otelcol collector must sit beside it.
+    required: false
+    default: ""
+  content-retention:
+    description: "Content retention mode: full, metadata, or redacted."
+    required: false
+    default: "full"
+  min-events:
+    description: "Minimum Beacon events required for telemetry validation to pass."
+    required: false
+    default: "1"
+  require-telemetry:
+    description: >-
+      Fail the step when telemetry validation fails. Set to 'false' to downgrade
+      a telemetry-pipeline failure to a warning so it does not gate the build.
+    required: false
+    default: "true"
+  forward:
+    description: >-
+      Optional SIEM forwarder: 'splunk' or 'falcon'. Leave empty to disable.
+      The token must be supplied via the BEACON_CI_SPLUNK_HEC_TOKEN or
+      BEACON_CI_FALCON_HEC_TOKEN environment variable (set it at the job or
+      workflow level from a secret), never as an input.
+    required: false
+    default: ""
+  forward-endpoint:
+    description: "SIEM HEC endpoint URL for the selected --forward provider."
+    required: false
+    default: ""
+  upload-artifact:
+    description: "Upload the runtime JSONL log as a workflow artifact."
+    required: false
+    default: "true"
+  artifact-name:
+    description: "Name for the uploaded telemetry artifact."
+    required: false
+    default: "beacon-runtime-log"
+
+outputs:
+  log-path:
+    description: "Path to the Beacon runtime JSONL log."
+    value: ${{ steps.exec.outputs.log-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve Beacon binary
+      id: resolve
+      shell: bash
+      env:
+        # A specific tag is pinned here rather than resolving "latest" so runs
+        # are reproducible and the downloaded archive can be checksum-verified.
+        DEFAULT_BEACON_VERSION: "v0.0.39"
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BINARY_PATH: ${{ inputs.binary-path }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "${INPUT_BINARY_PATH}" ]; then
+          if [ ! -x "${INPUT_BINARY_PATH}" ]; then
+            echo "::error::binary-path '${INPUT_BINARY_PATH}' is not an executable file"
+            exit 1
+          fi
+          echo "beacon-bin=${INPUT_BINARY_PATH}" >> "$GITHUB_OUTPUT"
+          echo "Using provided beacon binary: ${INPUT_BINARY_PATH}"
+          exit 0
+        fi
+
+        version="${INPUT_VERSION:-$DEFAULT_BEACON_VERSION}"
+        case "$(uname -s)" in
+          Linux)  os="linux" ;;
+          Darwin) os="darwin" ;;
+          *) echo "::error::unsupported operating system $(uname -s)"; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+          x86_64|amd64)  arch="amd64" ;;
+          arm64|aarch64) arch="arm64" ;;
+          *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+        esac
+
+        ver_no_v="${version#v}"
+        archive="beacon_${ver_no_v}_${os}_${arch}.tar.gz"
+        base="https://github.com/asymptote-labs/agent-beacon/releases/download/${version}"
+        workdir="$(mktemp -d)"
+
+        echo "Downloading ${archive} (${version})"
+        curl -fsSL "${base}/${archive}" -o "${workdir}/${archive}"
+        curl -fsSL "${base}/checksums.txt" -o "${workdir}/checksums.txt"
+
+        # Verify the archive against the release checksums before extracting.
+        expected="$(grep " ${archive}\$" "${workdir}/checksums.txt" | awk '{print $1}')"
+        if [ -z "${expected}" ]; then
+          echo "::error::no checksum entry for ${archive} in checksums.txt"
+          exit 1
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          actual="$(sha256sum "${workdir}/${archive}" | awk '{print $1}')"
+        else
+          actual="$(shasum -a 256 "${workdir}/${archive}" | awk '{print $1}')"
+        fi
+        if [ "${expected}" != "${actual}" ]; then
+          echo "::error::checksum mismatch for ${archive}: expected ${expected}, got ${actual}"
+          exit 1
+        fi
+
+        tar -xzf "${workdir}/${archive}" -C "${workdir}"
+        chmod +x "${workdir}/beacon" "${workdir}/beacon-otelcol" 2>/dev/null || true
+        echo "beacon-bin=${workdir}/beacon" >> "$GITHUB_OUTPUT"
+        echo "Verified and extracted beacon ${version} to ${workdir}"
+
+    - name: Run Claude with Beacon telemetry
+      id: exec
+      shell: bash
+      env:
+        BEACON_BIN: ${{ steps.resolve.outputs.beacon-bin }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_CONTENT_RETENTION: ${{ inputs.content-retention }}
+        INPUT_MIN_EVENTS: ${{ inputs.min-events }}
+        INPUT_REQUIRE_TELEMETRY: ${{ inputs.require-telemetry }}
+        INPUT_FORWARD: ${{ inputs.forward }}
+        INPUT_FORWARD_ENDPOINT: ${{ inputs.forward-endpoint }}
+      run: |
+        set -euo pipefail
+
+        log_dir="${RUNNER_TEMP:-$(mktemp -d)}/beacon"
+        mkdir -p "${log_dir}"
+        log_path="${log_dir}/runtime.jsonl"
+        echo "log-path=${log_path}" >> "$GITHUB_OUTPUT"
+
+        args=(ci exec
+          --log-path "${log_path}"
+          --content-retention "${INPUT_CONTENT_RETENTION}"
+          --min-events "${INPUT_MIN_EVENTS}"
+          "--require-telemetry=${INPUT_REQUIRE_TELEMETRY}"
+        )
+        if [ -n "${INPUT_FORWARD}" ]; then
+          args+=(--forward "${INPUT_FORWARD}")
+          if [ -n "${INPUT_FORWARD_ENDPOINT}" ]; then
+            args+=(--forward-endpoint "${INPUT_FORWARD_ENDPOINT}")
+          fi
+        fi
+
+        # INPUT_COMMAND is passed through the environment (not interpolated into
+        # this script) so workflow inputs cannot inject shell commands.
+        "${BEACON_BIN}" "${args[@]}" -- bash -c "${INPUT_COMMAND}"
+
+    - name: Upload Beacon telemetry
+      if: ${{ always() && inputs.upload-artifact == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.exec.outputs.log-path }}
+        if-no-files-found: warn
