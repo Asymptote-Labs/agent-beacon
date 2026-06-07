@@ -28,6 +28,23 @@ const (
 	OriginCI    = asymptotetrace.OriginCI
 )
 
+const (
+	AttributeOrigin        = asymptotetrace.AttributeOrigin
+	AttributeRunProvider   = asymptotetrace.AttributeRunProvider
+	AttributeRunID         = asymptotetrace.AttributeRunID
+	AttributeRunAttempt    = asymptotetrace.AttributeRunAttempt
+	AttributeRunWorkflow   = asymptotetrace.AttributeRunWorkflow
+	AttributeRunJob        = asymptotetrace.AttributeRunJob
+	AttributeRunEventName  = asymptotetrace.AttributeRunEventName
+	AttributeRunCommit     = asymptotetrace.AttributeRunCommit
+	AttributeRunRepository = asymptotetrace.AttributeRunRepository
+	AttributeRunBranch     = asymptotetrace.AttributeRunBranch
+	AttributeRunPR         = asymptotetrace.AttributeRunPR
+	AttributeRunPRNumber   = asymptotetrace.AttributeRunPRNumber
+	AttributeRunActor      = asymptotetrace.AttributeRunActor
+	AttributeRunEphemeral  = asymptotetrace.AttributeRunEphemeral
+)
+
 type EventInfo = asymptotetrace.EventInfo
 type EndpointInfo = asymptotetrace.EndpointInfo
 type UserInfo = asymptotetrace.UserInfo

@@ -31,6 +31,23 @@ const (
 	OriginCI    Origin = "ci"
 )
 
+const (
+	AttributeOrigin        = "beacon.origin"
+	AttributeRunProvider   = "beacon.run.provider"
+	AttributeRunID         = "beacon.run.run_id"
+	AttributeRunAttempt    = "beacon.run.run_attempt"
+	AttributeRunWorkflow   = "beacon.run.workflow"
+	AttributeRunJob        = "beacon.run.job"
+	AttributeRunEventName  = "beacon.run.event_name"
+	AttributeRunCommit     = "beacon.run.commit"
+	AttributeRunRepository = "beacon.run.repository"
+	AttributeRunBranch     = "beacon.run.branch"
+	AttributeRunPR         = "beacon.run.pr"
+	AttributeRunPRNumber   = "beacon.run.pr_number"
+	AttributeRunActor      = "beacon.run.actor"
+	AttributeRunEphemeral  = "beacon.run.ephemeral"
+)
+
 type EventInfo struct {
 	Kind     string `json:"kind"`
 	Action   string `json:"action"`

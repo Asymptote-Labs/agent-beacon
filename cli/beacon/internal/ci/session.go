@@ -243,7 +243,7 @@ func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io
 	}
 	cmd := childCommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = s.WorkDir
-	env := append(ClaudeEnv(os.Environ(), s.GRPCEndpoint, s.cfg.ContentRetention),
+	env := append(WithCIResourceAttributes(ClaudeEnv(os.Environ(), s.GRPCEndpoint, s.cfg.ContentRetention), s.Run),
 		"BEACON_CI_BASE_DIR="+s.BaseDir,
 		"BEACON_CI_CONFIG_PATH="+s.ConfigPath,
 		"BEACON_CI_LOG_PATH="+s.LogPath,

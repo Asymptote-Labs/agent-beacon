@@ -11,6 +11,7 @@ import (
 	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
 
 func TestProvisionUsesRunnerTempAndWritesCollectorConfig(t *testing.T) {
@@ -102,12 +103,25 @@ func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
 	dir := t.TempDir()
 	output := filepath.Join(dir, "env.txt")
 	child := fakeExecutable(t, "child", "#!/bin/sh\nenv > \"$1\"\n")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "service.name=custom")
 	session := &Session{
 		BaseDir:      dir,
 		ConfigPath:   filepath.Join(dir, "otelcol.yaml"),
 		LogPath:      filepath.Join(dir, "runtime.jsonl"),
 		GRPCEndpoint: "http://127.0.0.1:4317",
 		cfg:          endpointconfig.Default(true, filepath.Join(dir, "runtime.jsonl")),
+		Run: &schema.RunInfo{
+			Provider:   "github_actions",
+			RunID:      "123",
+			RunAttempt: "2",
+			Workflow:   "CI / build, smoke",
+			Job:        "telemetry",
+			EventName:  "pull_request",
+			Repository: "asymptote-labs/agent-beacon",
+			Branch:     "feature/ci telemetry",
+			PRNumber:   "12",
+			Ephemeral:  true,
+		},
 	}
 	exitCode, err := session.RunChild(context.Background(), []string{child, output}, nil, nil)
 	if err != nil {
@@ -134,6 +148,33 @@ func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
 			t.Fatalf("child env missing %q:\n%s", want, env)
 		}
 	}
+	resourceAttrs := envVarValue(env, "OTEL_RESOURCE_ATTRIBUTES")
+	for _, want := range []string{
+		"service.name=custom",
+		"beacon.origin=ci",
+		"beacon.run.provider=github_actions",
+		"beacon.run.run_id=123",
+		"beacon.run.workflow=CI%20%2F%20build%2C%20smoke",
+		"beacon.run.branch=feature%2Fci%20telemetry",
+		"beacon.run.ephemeral=true",
+	} {
+		if !strings.Contains(resourceAttrs, want) {
+			t.Fatalf("OTEL_RESOURCE_ATTRIBUTES missing %q: %q", want, resourceAttrs)
+		}
+	}
+	if !strings.HasPrefix(resourceAttrs, "service.name=custom,beacon.origin=ci,") {
+		t.Fatalf("OTEL_RESOURCE_ATTRIBUTES should preserve existing attributes first: %q", resourceAttrs)
+	}
+}
+
+func envVarValue(env, key string) string {
+	prefix := key + "="
+	for _, line := range strings.Split(env, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	return ""
 }
 
 func TestDetectRunInfoPullRequest(t *testing.T) {
