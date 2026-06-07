@@ -1,7 +1,5 @@
 name: "Beacon CI telemetry for Claude Code"
-description: >-
-  Run Claude Code in CI with Beacon endpoint telemetry captured to a local
-  JSONL log, with optional artifact upload or customer-managed SIEM forwarding.
+description: "Capture Claude Code CI telemetry to Beacon JSONL, artifacts, or customer-managed SIEMs."
 author: "Asymptote Labs"
 branding:
   icon: "radio"
