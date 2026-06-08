@@ -19,5 +19,4 @@ source
     Repository = tostring(RawEvent.repository),
     Branch = tostring(RawEvent.branch),
     Message = tostring(RawEvent.message),
-    ContentRetention = tostring(RawEvent.content.retention),
     RawData = RawEvent
