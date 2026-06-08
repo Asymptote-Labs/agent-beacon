@@ -1,4 +1,4 @@
-package asymptotetrace
+package asymptoteobserve
 
 import "errors"
 

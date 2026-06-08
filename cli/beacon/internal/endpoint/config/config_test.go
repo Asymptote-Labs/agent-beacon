@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -67,13 +66,6 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if len(loaded.EventCategories) != 2 || loaded.EventCategories[1] != "session" {
 		t.Fatalf("EventCategories did not round-trip: %#v", loaded.EventCategories)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read saved config: %v", err)
-	}
-	if strings.Contains(string(data), "content_retention") {
-		t.Fatalf("saved config unexpectedly contains legacy content_retention: %s", string(data))
 	}
 }
 
@@ -172,36 +164,6 @@ func TestSaveRejectsIncompleteFalconHEC(t *testing.T) {
 
 	if _, err := Save(cfg); err == nil {
 		t.Fatal("expected missing Falcon token error")
-	}
-}
-
-func TestLoadIgnoresLegacyContentRetention(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := filepath.Join(home, UserConfigPath)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(`{"user_mode":true,"content_retention":"metadata"}`), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	loaded, err := Load(true)
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if !loaded.UserMode {
-		t.Fatal("UserMode = false, want true")
-	}
-	if _, err := Save(loaded); err != nil {
-		t.Fatalf("Save returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read saved config: %v", err)
-	}
-	if strings.Contains(string(data), "content_retention") {
-		t.Fatalf("saved config unexpectedly preserved legacy content_retention: %s", string(data))
 	}
 }
 

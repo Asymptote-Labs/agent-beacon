@@ -1,4 +1,4 @@
-package asymptotetrace
+package asymptoteobserve
 
 import (
 	"encoding/json"
@@ -116,6 +116,12 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	if event.Prompt != nil {
 		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, true)
 	}
+	if event.MCP != nil {
+		event.MCP = sanitizeTyped(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+	}
+	if event.GenAI != nil {
+		event.GenAI = sanitizeTyped(event.GenAI, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+	}
 	if event.Raw != nil {
 		event.Raw = SanitizeMap(event.Raw, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
@@ -123,4 +129,32 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 		event.Truncated = true
 	}
 	return event
+}
+
+func sanitizeTyped[T any](input *T, opts PrivacyOptions) *T {
+	if input == nil {
+		return nil
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		out := *input
+		return &out
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		out := *input
+		return &out
+	}
+	raw = SanitizeMap(raw, opts)
+	data, err = json.Marshal(raw)
+	if err != nil {
+		out := *input
+		return &out
+	}
+	var out T
+	if err := json.Unmarshal(data, &out); err != nil {
+		fallback := *input
+		return &fallback
+	}
+	return &out
 }

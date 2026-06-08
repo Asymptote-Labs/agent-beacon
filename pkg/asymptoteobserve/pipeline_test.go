@@ -1,4 +1,4 @@
-package asymptotetrace
+package asymptoteobserve
 
 import (
 	"context"
@@ -195,9 +195,6 @@ func TestPipelineWithoutPrivacyPassesEventsThrough(t *testing.T) {
 	if rawText := stringify(events[0].Raw); !strings.Contains(rawText, "visible-without-privacy") {
 		t.Fatalf("event was unexpectedly sanitized without privacy: %s", rawText)
 	}
-	if events[0].Content != nil {
-		t.Fatalf("content metadata was unexpectedly set without privacy: %#v", events[0].Content)
-	}
 }
 
 func TestPipelinePrivacyRunsBeforeAdditionalProcessors(t *testing.T) {
@@ -223,7 +220,7 @@ func TestPipelinePrivacyRunsBeforeAdditionalProcessors(t *testing.T) {
 	}
 }
 
-func TestPipelinePrivacyDoesNotSetContentMetadata(t *testing.T) {
+func TestPipelinePrivacyKeepsRawTelemetry(t *testing.T) {
 	sink := &captureEventSink{}
 	pipeline := NewPipeline(PipelineOptions{
 		Source:  staticSource{NewEnvelopeRecord(testEnvelope())},
@@ -237,9 +234,6 @@ func TestPipelinePrivacyDoesNotSetContentMetadata(t *testing.T) {
 	events, _, _ := sink.snapshot()
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
-	}
-	if events[0].Content != nil {
-		t.Fatalf("privacy unexpectedly set content metadata: %#v", events[0].Content)
 	}
 	if events[0].Raw["prompt"] != "summarize" {
 		t.Fatalf("privacy unexpectedly removed raw: %#v", events[0].Raw)

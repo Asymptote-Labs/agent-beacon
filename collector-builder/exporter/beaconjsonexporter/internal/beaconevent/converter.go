@@ -3,11 +3,13 @@ package beaconevent
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -393,6 +395,7 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 
 func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	populateRunContext(event, attrs)
+	event.GenAI = GenAIFromAttrs(attrs)
 	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
@@ -402,10 +405,10 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 			WorkingDirectory: FirstString(attrs, "cwd", "working_directory", "process.command_args.cwd", "workspace"),
 		}
 	}
-	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || FirstString(attrs, "tool.command", "command", "function_args") != "" {
+	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || FirstString(attrs, "tool.command", "command", "function_args", "gen_ai.tool.call.arguments") != "" {
 		event.Tool = &ToolInfo{
 			Name:    name,
-			Command: FirstString(attrs, "tool.command", "command", "process.command_line", "function_args"),
+			Command: FirstString(attrs, "tool.command", "command", "process.command_line", "function_args", "gen_ai.tool.call.arguments"),
 			Path:    FirstString(attrs, "tool.path", "file.path", "file_path"),
 		}
 	}
@@ -425,11 +428,8 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 			event.Command.DurationMS = duration
 		}
 	}
-	if server := FirstString(attrs, "mcp.server.name", "mcp.server", "gen_ai.mcp.server", "mcp_server_name"); server != "" || FirstString(attrs, "mcp.tool.name") != "" || FirstString(attrs, "tool_type") == "mcp" {
-		event.MCP = &MCPInfo{
-			Server: server,
-			Tool:   FirstString(attrs, "mcp.tool.name", "tool.name", "function_name"),
-		}
+	if mcp := MCPFromAttrs(attrs); mcp != nil {
+		event.MCP = mcp
 	}
 	if decision := FirstString(attrs, "approval.decision", "policy.decision", "decision"); decision != "" {
 		event.Approval = &ApprovalInfo{
@@ -439,31 +439,248 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 		}
 	}
 	if event.Event.Category == "prompt" {
-		if text := FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request"); text != "" {
+		if text := FirstNonEmpty(FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request"), FirstMessageText(event.GenAI)); text != "" {
 			event.Prompt = &PromptInfo{Text: text}
 		}
 	}
 }
 
+func GenAIFromAttrs(attrs map[string]interface{}) *GenAIInfo {
+	genai := &GenAIInfo{}
+	if description := FirstString(attrs, "gen_ai.agent.description"); description != "" || FirstString(attrs, "gen_ai.agent.id", "gen_ai.agent.name", "gen_ai.agent.version") != "" {
+		genai.Agent = &GenAIAgentInfo{
+			Description: description,
+			ID:          FirstString(attrs, "gen_ai.agent.id"),
+			Name:        FirstString(attrs, "gen_ai.agent.name"),
+			Version:     FirstString(attrs, "gen_ai.agent.version"),
+		}
+	}
+	if id := FirstString(attrs, "gen_ai.conversation.id"); id != "" {
+		genai.Conversation = &GenAIConversationInfo{ID: id}
+	}
+	if id := FirstString(attrs, "gen_ai.data_source.id"); id != "" {
+		genai.DataSource = &GenAIDataSourceInfo{ID: id}
+	}
+	if count, ok := IntAttr(attrs, "gen_ai.embeddings.dimension.count"); ok {
+		genai.Embeddings = &GenAIEmbeddingsInfo{DimensionCount: &count}
+	}
+	if explanation := FirstString(attrs, "gen_ai.evaluation.explanation"); explanation != "" || FirstString(attrs, "gen_ai.evaluation.name", "gen_ai.evaluation.score.label") != "" || HasAttr(attrs, "gen_ai.evaluation.score.value") {
+		genai.Evaluation = &GenAIEvaluationInfo{
+			Explanation: explanation,
+			Name:        FirstString(attrs, "gen_ai.evaluation.name"),
+		}
+		if label := FirstString(attrs, "gen_ai.evaluation.score.label"); label != "" || HasAttr(attrs, "gen_ai.evaluation.score.value") {
+			genai.Evaluation.Score = &GenAIEvaluationScoreInfo{Label: label}
+			if value, ok := FloatAttr(attrs, "gen_ai.evaluation.score.value"); ok {
+				genai.Evaluation.Score.Value = &value
+			}
+		}
+	}
+	if messages, ok := AnyAttr(attrs, "gen_ai.input.messages"); ok {
+		genai.Input = &GenAIInputInfo{Messages: messages}
+	} else if messages := LegacyMessages(attrs, "gen_ai.prompt.", "user"); len(messages) > 0 {
+		genai.Input = &GenAIInputInfo{Messages: messages}
+	} else if messages, ok := AnyAttr(attrs, "llm.prompts", "gen_ai.prompts"); ok {
+		genai.Input = &GenAIInputInfo{Messages: messages}
+	}
+	if name := FirstString(attrs, "gen_ai.operation.name"); name != "" {
+		genai.Operation = &GenAIOperationInfo{Name: name}
+	}
+	if messages, ok := AnyAttr(attrs, "gen_ai.output.messages"); ok {
+		genai.Output = &GenAIOutputInfo{Messages: messages, Type: FirstString(attrs, "gen_ai.output.type")}
+	} else if messages := LegacyMessages(attrs, "gen_ai.completion.", "assistant"); len(messages) > 0 {
+		genai.Output = &GenAIOutputInfo{Messages: messages, Type: FirstString(attrs, "gen_ai.output.type")}
+	} else if messages, ok := AnyAttr(attrs, "llm.completions", "gen_ai.completions"); ok {
+		genai.Output = &GenAIOutputInfo{Messages: messages, Type: FirstString(attrs, "gen_ai.output.type")}
+	} else if outputType := FirstString(attrs, "gen_ai.output.type"); outputType != "" {
+		genai.Output = &GenAIOutputInfo{Type: outputType}
+	}
+	if name := FirstString(attrs, "gen_ai.prompt.name"); name != "" {
+		genai.Prompt = &GenAIPromptInfo{Name: name}
+	}
+	if name := FirstString(attrs, "gen_ai.provider.name", "gen_ai.system"); name != "" {
+		genai.Provider = &GenAIProviderInfo{Name: name}
+	}
+	if request := GenAIRequestFromAttrs(attrs); request != nil {
+		genai.Request = request
+	}
+	if response := GenAIResponseFromAttrs(attrs); response != nil {
+		genai.Response = response
+	}
+	if documents, ok := AnyAttr(attrs, "gen_ai.retrieval.documents"); ok {
+		genai.Retrieval = &GenAIRetrievalInfo{Documents: documents, QueryText: FirstString(attrs, "gen_ai.retrieval.query.text")}
+	} else if query := FirstString(attrs, "gen_ai.retrieval.query.text"); query != "" {
+		genai.Retrieval = &GenAIRetrievalInfo{QueryText: query}
+	}
+	if instructions, ok := AnyAttr(attrs, "gen_ai.system_instructions"); ok {
+		genai.SystemInstructions = instructions
+	}
+	if tokenType := FirstString(attrs, "gen_ai.token.type"); tokenType != "" {
+		genai.Token = &GenAITokenInfo{Type: tokenType}
+	}
+	if tool := GenAIToolFromAttrs(attrs); tool != nil {
+		genai.Tool = tool
+	}
+	if usage := GenAIUsageFromAttrs(attrs); usage != nil {
+		genai.Usage = usage
+	}
+	if name := FirstString(attrs, "gen_ai.workflow.name"); name != "" {
+		genai.Workflow = &GenAIWorkflowInfo{Name: name}
+	}
+	if IsZeroJSON(genai) {
+		return nil
+	}
+	return genai
+}
+
+func GenAIRequestFromAttrs(attrs map[string]interface{}) *GenAIRequestInfo {
+	request := &GenAIRequestInfo{
+		Model:           FirstString(attrs, "gen_ai.request.model", "llm.request.model"),
+		EncodingFormats: StringSliceAttr(attrs, "gen_ai.request.encoding_formats"),
+		StopSequences:   StringSliceAttr(attrs, "gen_ai.request.stop_sequences"),
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.request.choice.count"); ok {
+		request.ChoiceCount = &value
+	}
+	if value, ok := FloatAttr(attrs, "gen_ai.request.frequency_penalty"); ok {
+		request.FrequencyPenalty = &value
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.request.max_tokens", "llm.request.max_tokens"); ok {
+		request.MaxTokens = &value
+	}
+	if value, ok := FloatAttr(attrs, "gen_ai.request.presence_penalty"); ok {
+		request.PresencePenalty = &value
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.request.seed"); ok {
+		request.Seed = &value
+	}
+	if value, ok := BoolAttr(attrs, "gen_ai.request.stream"); ok {
+		request.Stream = &value
+	}
+	if value, ok := FloatAttr(attrs, "gen_ai.request.temperature", "llm.request.temperature"); ok {
+		request.Temperature = &value
+	}
+	if value, ok := FloatAttr(attrs, "gen_ai.request.top_k"); ok {
+		request.TopK = &value
+	}
+	if value, ok := FloatAttr(attrs, "gen_ai.request.top_p"); ok {
+		request.TopP = &value
+	}
+	if IsZeroJSON(request) {
+		return nil
+	}
+	return request
+}
+
+func GenAIResponseFromAttrs(attrs map[string]interface{}) *GenAIResponseInfo {
+	response := &GenAIResponseInfo{
+		FinishReasons: StringSliceAttr(attrs, "gen_ai.response.finish_reasons"),
+		ID:            FirstString(attrs, "gen_ai.response.id"),
+		Model:         FirstString(attrs, "gen_ai.response.model", "llm.response.model"),
+	}
+	if value, ok := FloatAttr(attrs, "gen_ai.response.time_to_first_chunk"); ok {
+		response.TimeToFirstChunk = &value
+	}
+	if IsZeroJSON(response) {
+		return nil
+	}
+	return response
+}
+
+func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
+	tool := &GenAIToolInfo{
+		Description: FirstString(attrs, "gen_ai.tool.description"),
+		Name:        FirstString(attrs, "gen_ai.tool.name", "tool.name"),
+		Type:        FirstString(attrs, "gen_ai.tool.type"),
+	}
+	if definitions, ok := AnyAttr(attrs, "gen_ai.tool.definitions"); ok {
+		tool.Definitions = definitions
+	}
+	if args, ok := AnyAttr(attrs, "gen_ai.tool.call.arguments", "function_args", "arguments"); ok {
+		tool.Call = &GenAIToolCallInfo{Arguments: args, ID: FirstString(attrs, "gen_ai.tool.call.id")}
+	} else if id := FirstString(attrs, "gen_ai.tool.call.id"); id != "" {
+		tool.Call = &GenAIToolCallInfo{ID: id}
+	}
+	if result, ok := AnyAttr(attrs, "gen_ai.tool.call.result"); ok {
+		if tool.Call == nil {
+			tool.Call = &GenAIToolCallInfo{}
+		}
+		tool.Call.Result = result
+	}
+	if IsZeroJSON(tool) {
+		return nil
+	}
+	return tool
+}
+
+func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
+	usage := &GenAIUsageInfo{}
+	if value, ok := IntAttr(attrs, "gen_ai.usage.cache_creation.input_tokens"); ok {
+		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.usage.cache_read.input_tokens"); ok {
+		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.usage.input_tokens", "llm.usage.prompt_tokens", "gen_ai.usage.prompt_tokens"); ok {
+		usage.InputTokens = &value
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.usage.output_tokens", "llm.usage.completion_tokens", "gen_ai.usage.completion_tokens"); ok {
+		usage.OutputTokens = &value
+	}
+	if value, ok := IntAttr(attrs, "gen_ai.usage.reasoning.output_tokens"); ok {
+		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
+	}
+	if IsZeroJSON(usage) {
+		return nil
+	}
+	return usage
+}
+
+func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
+	server := FirstString(attrs, "mcp.server.name", "mcp.server", "gen_ai.mcp.server", "mcp_server_name")
+	tool := FirstString(attrs, "mcp.tool.name", "tool.name", "function_name")
+	method := FirstString(attrs, "mcp.method.name")
+	protocol := FirstString(attrs, "mcp.protocol.version")
+	resource := FirstString(attrs, "mcp.resource.uri")
+	session := FirstString(attrs, "mcp.session.id")
+	if server == "" && tool == "" && method == "" && protocol == "" && resource == "" && session == "" && FirstString(attrs, "tool_type") != "mcp" {
+		return nil
+	}
+	out := &MCPInfo{Server: server, Tool: tool}
+	if method != "" {
+		out.Method = &MCPMethodInfo{Name: method}
+	}
+	if protocol != "" {
+		out.Protocol = &MCPProtocolInfo{Version: protocol}
+	}
+	if resource != "" {
+		out.Resource = &MCPResourceInfo{URI: resource}
+	}
+	if session != "" {
+		out.Session = &MCPSessionInfo{ID: session}
+	}
+	return out
+}
+
 func populateRunContext(event *Event, attrs map[string]interface{}) {
-	if FirstString(attrs, asymptotetrace.AttributeOrigin) == string(asymptotetrace.OriginCI) {
-		event.Origin = asymptotetrace.OriginCI
+	if FirstString(attrs, asymptoteobserve.AttributeOrigin) == string(asymptoteobserve.OriginCI) {
+		event.Origin = asymptoteobserve.OriginCI
 	}
 	run := RunInfo{
-		Provider:   FirstString(attrs, asymptotetrace.AttributeRunProvider),
-		RunID:      FirstString(attrs, asymptotetrace.AttributeRunID),
-		RunAttempt: FirstString(attrs, asymptotetrace.AttributeRunAttempt),
-		Workflow:   FirstString(attrs, asymptotetrace.AttributeRunWorkflow),
-		Job:        FirstString(attrs, asymptotetrace.AttributeRunJob),
-		EventName:  FirstString(attrs, asymptotetrace.AttributeRunEventName),
-		Commit:     FirstString(attrs, asymptotetrace.AttributeRunCommit),
-		Repository: FirstString(attrs, asymptotetrace.AttributeRunRepository),
-		Branch:     FirstString(attrs, asymptotetrace.AttributeRunBranch),
-		PR:         FirstString(attrs, asymptotetrace.AttributeRunPR),
-		PRNumber:   FirstString(attrs, asymptotetrace.AttributeRunPRNumber),
-		Actor:      FirstString(attrs, asymptotetrace.AttributeRunActor),
+		Provider:   FirstString(attrs, asymptoteobserve.AttributeRunProvider),
+		RunID:      FirstString(attrs, asymptoteobserve.AttributeRunID),
+		RunAttempt: FirstString(attrs, asymptoteobserve.AttributeRunAttempt),
+		Workflow:   FirstString(attrs, asymptoteobserve.AttributeRunWorkflow),
+		Job:        FirstString(attrs, asymptoteobserve.AttributeRunJob),
+		EventName:  FirstString(attrs, asymptoteobserve.AttributeRunEventName),
+		Commit:     FirstString(attrs, asymptoteobserve.AttributeRunCommit),
+		Repository: FirstString(attrs, asymptoteobserve.AttributeRunRepository),
+		Branch:     FirstString(attrs, asymptoteobserve.AttributeRunBranch),
+		PR:         FirstString(attrs, asymptoteobserve.AttributeRunPR),
+		PRNumber:   FirstString(attrs, asymptoteobserve.AttributeRunPRNumber),
+		Actor:      FirstString(attrs, asymptoteobserve.AttributeRunActor),
 	}
-	if ephemeral, ok := BoolAttr(attrs, asymptotetrace.AttributeRunEphemeral); ok {
+	if ephemeral, ok := BoolAttr(attrs, asymptoteobserve.AttributeRunEphemeral); ok {
 		run.Ephemeral = ephemeral
 	}
 	if run.Provider == "" && run.RunID == "" && run.RunAttempt == "" && run.Workflow == "" && run.Job == "" && run.EventName == "" && run.Commit == "" && run.Repository == "" && run.Branch == "" && run.PR == "" && run.PRNumber == "" && run.Actor == "" && !run.Ephemeral {
@@ -512,6 +729,11 @@ func FirstString(attrs map[string]interface{}, keys ...string) string {
 	return ""
 }
 
+func HasAttr(attrs map[string]interface{}, key string) bool {
+	_, ok := attrs[key]
+	return ok
+}
+
 func FirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -535,6 +757,32 @@ func Int64Attr(attrs map[string]interface{}, keys ...string) (int64, bool) {
 			return typed, true
 		case float64:
 			return int64(typed), true
+		case string:
+			value, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+			if err == nil {
+				return value, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func FloatAttr(attrs map[string]interface{}, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		switch typed := attrs[key].(type) {
+		case float32:
+			return float64(typed), true
+		case float64:
+			return typed, true
+		case int:
+			return float64(typed), true
+		case int64:
+			return float64(typed), true
+		case string:
+			value, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+			if err == nil {
+				return value, true
+			}
 		}
 	}
 	return 0, false
@@ -553,6 +801,161 @@ func BoolAttr(attrs map[string]interface{}, keys ...string) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+func StringSliceAttr(attrs map[string]interface{}, keys ...string) []string {
+	for _, key := range keys {
+		value, ok := attrs[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case []string:
+			return typed
+		case []interface{}:
+			out := make([]string, 0, len(typed))
+			for _, item := range typed {
+				if str := strings.TrimSpace(fmt.Sprint(item)); str != "" && str != "<nil>" {
+					out = append(out, str)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		case string:
+			trimmed := strings.TrimSpace(typed)
+			if trimmed == "" {
+				continue
+			}
+			var parsed []string
+			if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+				return parsed
+			}
+			if strings.Contains(trimmed, ",") {
+				parts := strings.Split(trimmed, ",")
+				out := make([]string, 0, len(parts))
+				for _, part := range parts {
+					if part = strings.TrimSpace(part); part != "" {
+						out = append(out, part)
+					}
+				}
+				if len(out) > 0 {
+					return out
+				}
+			}
+			return []string{trimmed}
+		}
+	}
+	return nil
+}
+
+func AnyAttr(attrs map[string]interface{}, keys ...string) (interface{}, bool) {
+	for _, key := range keys {
+		value, ok := attrs[key]
+		if !ok || value == nil {
+			continue
+		}
+		if str, ok := value.(string); ok {
+			trimmed := strings.TrimSpace(str)
+			if trimmed == "" {
+				continue
+			}
+			if decoded, ok := DecodeJSONValue(trimmed); ok {
+				return decoded, true
+			}
+			return trimmed, true
+		}
+		return value, true
+	}
+	return nil, false
+}
+
+func DecodeJSONValue(value string) (interface{}, bool) {
+	if value == "" {
+		return nil, false
+	}
+	first := value[0]
+	if first != '{' && first != '[' && first != '"' {
+		return nil, false
+	}
+	var decoded interface{}
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return nil, false
+	}
+	return decoded, true
+}
+
+func LegacyMessages(attrs map[string]interface{}, prefix, role string) []interface{} {
+	type messagePart struct {
+		index int
+		text  string
+	}
+	var parts []messagePart
+	for key, value := range attrs {
+		if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, ".content") {
+			continue
+		}
+		indexText := strings.TrimSuffix(strings.TrimPrefix(key, prefix), ".content")
+		index, err := strconv.Atoi(indexText)
+		if err != nil {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "" || text == "<nil>" {
+			continue
+		}
+		parts = append(parts, messagePart{index: index, text: text})
+	}
+	sort.Slice(parts, func(i, j int) bool { return parts[i].index < parts[j].index })
+	out := make([]interface{}, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, map[string]interface{}{
+			"role": role,
+			"parts": []interface{}{
+				map[string]interface{}{"type": "text", "content": part.text},
+			},
+		})
+	}
+	return out
+}
+
+func FirstMessageText(genai *GenAIInfo) string {
+	if genai == nil || genai.Input == nil || genai.Input.Messages == nil {
+		return ""
+	}
+	return firstTextFromAny(genai.Input.Messages)
+}
+
+func firstTextFromAny(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []interface{}:
+		for _, item := range typed {
+			if text := firstTextFromAny(item); text != "" {
+				return text
+			}
+		}
+	case map[string]interface{}:
+		if content, ok := typed["content"]; ok {
+			return strings.TrimSpace(fmt.Sprint(content))
+		}
+		if parts, ok := typed["parts"]; ok {
+			return firstTextFromAny(parts)
+		}
+		if messages, ok := typed["messages"]; ok {
+			return firstTextFromAny(messages)
+		}
+	}
+	return ""
+}
+
+func IsZeroJSON(value interface{}) bool {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return false
+	}
+	return string(data) == "{}"
 }
 
 func Timestamp(ts time.Time) time.Time {
@@ -633,16 +1036,26 @@ func NormalizeHarnessName(name string) string {
 func InferAction(attrs map[string]interface{}, fallback string) string {
 	tool := strings.ToLower(FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"))
 	operation := strings.ToLower(FirstString(attrs, "gen_ai.operation.name"))
+	mcpMethod := strings.ToLower(FirstString(attrs, "mcp.method.name"))
 	harness := HarnessName(attrs, fallback)
 	text := strings.ToLower(strings.Join([]string{
 		fallback,
 		tool,
 		operation,
+		mcpMethod,
 		FirstString(attrs, "event.name", "codex.op", "rpc.method"),
 	}, " "))
 	switch {
 	case harness == "copilot_cli" || harness == "vscode_copilot":
 		return CopilotAction(attrs, operation, text)
+	case mcpMethod == "tools/call":
+		return "mcp.tool_invoked"
+	case mcpMethod == "resources/read" && IsFileURI(FirstString(attrs, "mcp.resource.uri")):
+		return "file.read"
+	case operation == "execute_tool" || FirstString(attrs, "gen_ai.tool.call.id", "gen_ai.tool.call.arguments") != "":
+		return "tool.invoked"
+	case (operation == "chat" || operation == "generate_content" || operation == "text_completion") && HasPromptLikeContent(attrs):
+		return "prompt.submitted"
 	case strings.Contains(text, "gemini_cli.user_prompt"):
 		return "prompt.submitted"
 	case strings.Contains(text, "gemini_cli.tool_call"):
@@ -664,6 +1077,21 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 	default:
 		return "tool.invoked"
 	}
+}
+
+func IsFileURI(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "file"
+}
+
+func HasPromptLikeContent(attrs map[string]interface{}) bool {
+	if FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request") != "" {
+		return true
+	}
+	if _, ok := AnyAttr(attrs, "gen_ai.input.messages"); ok {
+		return true
+	}
+	return len(LegacyMessages(attrs, "gen_ai.prompt.", "user")) > 0
 }
 
 func CopilotAction(attrs map[string]interface{}, operation, text string) string {

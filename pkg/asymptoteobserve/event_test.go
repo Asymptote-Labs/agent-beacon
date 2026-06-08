@@ -1,4 +1,4 @@
-package asymptotetrace
+package asymptoteobserve
 
 import (
 	"encoding/json"
@@ -37,22 +37,15 @@ func TestNewEventSetsRequiredInvariants(t *testing.T) {
 	}
 	event.File = &FileInfo{Path: "main.go", Operation: "modify"}
 	event.Command = &CommandInfo{Command: "go test ./..."}
-	event.MCP = &MCPInfo{Server: "github", Tool: "get_issue"}
+	event.MCP = &MCPInfo{Server: "github", Tool: "get_issue", Method: &MCPMethodInfo{Name: "tools/call"}}
 	event.Prompt = &PromptInfo{Text: "Summarize this file"}
+	event.GenAI = &GenAIInfo{
+		Provider: &GenAIProviderInfo{Name: "openai"},
+		Request:  &GenAIRequestInfo{Model: "gpt-4o"},
+		Usage:    &GenAIUsageInfo{InputTokens: intPtr(10), OutputTokens: intPtr(20)},
+	}
 	if err := event.Validate(); err != nil {
 		t.Fatalf("Validate rejected optional telemetry fields: %v", err)
-	}
-}
-
-func TestValidateToleratesHistoricalContentField(t *testing.T) {
-	event := NewEvent(NewEventOptions{
-		Action:  "tool.invoked",
-		Harness: HarnessInfo{Name: "cursor"},
-	})
-	event.Content = &ContentInfo{Retention: "metadata", Included: false}
-
-	if err := event.Validate(); err != nil {
-		t.Fatalf("Validate rejected historical content field: %v", err)
 	}
 }
 
@@ -74,6 +67,10 @@ func TestValidateOriginValues(t *testing.T) {
 	if err := event.Validate(); err == nil || !strings.Contains(err.Error(), "origin must be local, cloud, or ci") {
 		t.Fatalf("Validate error = %v, want origin error", err)
 	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestRunAndOriginAreOmittedWhenUnset(t *testing.T) {

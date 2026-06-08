@@ -3,60 +3,86 @@ package beaconevent
 import (
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
-	Vendor        = asymptotetrace.Vendor
-	Product       = asymptotetrace.Product
-	SchemaVersion = asymptotetrace.SchemaVersion
+	Vendor        = asymptoteobserve.Vendor
+	Product       = asymptoteobserve.Product
+	SchemaVersion = asymptoteobserve.SchemaVersion
 )
 
-type EventInfo = asymptotetrace.EventInfo
-type EndpointInfo = asymptotetrace.EndpointInfo
-type UserInfo = asymptotetrace.UserInfo
-type HarnessInfo = asymptotetrace.HarnessInfo
-type SessionInfo = asymptotetrace.SessionInfo
-type RunInfo = asymptotetrace.RunInfo
-type ToolInfo = asymptotetrace.ToolInfo
-type FileInfo = asymptotetrace.FileInfo
-type CommandInfo = asymptotetrace.CommandInfo
-type MCPInfo = asymptotetrace.MCPInfo
-type ApprovalInfo = asymptotetrace.ApprovalInfo
-type PolicyInfo = asymptotetrace.PolicyInfo
-type PromptInfo = asymptotetrace.PromptInfo
-type ContentInfo = asymptotetrace.ContentInfo
+type EventInfo = asymptoteobserve.EventInfo
+type EndpointInfo = asymptoteobserve.EndpointInfo
+type UserInfo = asymptoteobserve.UserInfo
+type HarnessInfo = asymptoteobserve.HarnessInfo
+type SessionInfo = asymptoteobserve.SessionInfo
+type RunInfo = asymptoteobserve.RunInfo
+type ToolInfo = asymptoteobserve.ToolInfo
+type FileInfo = asymptoteobserve.FileInfo
+type CommandInfo = asymptoteobserve.CommandInfo
+type MCPInfo = asymptoteobserve.MCPInfo
+type MCPMethodInfo = asymptoteobserve.MCPMethodInfo
+type MCPProtocolInfo = asymptoteobserve.MCPProtocolInfo
+type MCPResourceInfo = asymptoteobserve.MCPResourceInfo
+type MCPSessionInfo = asymptoteobserve.MCPSessionInfo
+type ApprovalInfo = asymptoteobserve.ApprovalInfo
+type PolicyInfo = asymptoteobserve.PolicyInfo
+type PromptInfo = asymptoteobserve.PromptInfo
+type GenAIInfo = asymptoteobserve.GenAIInfo
+type GenAIAgentInfo = asymptoteobserve.GenAIAgentInfo
+type GenAIConversationInfo = asymptoteobserve.GenAIConversationInfo
+type GenAIDataSourceInfo = asymptoteobserve.GenAIDataSourceInfo
+type GenAIEmbeddingsInfo = asymptoteobserve.GenAIEmbeddingsInfo
+type GenAIEvaluationInfo = asymptoteobserve.GenAIEvaluationInfo
+type GenAIEvaluationScoreInfo = asymptoteobserve.GenAIEvaluationScoreInfo
+type GenAIInputInfo = asymptoteobserve.GenAIInputInfo
+type GenAIOperationInfo = asymptoteobserve.GenAIOperationInfo
+type GenAIOutputInfo = asymptoteobserve.GenAIOutputInfo
+type GenAIPromptInfo = asymptoteobserve.GenAIPromptInfo
+type GenAIProviderInfo = asymptoteobserve.GenAIProviderInfo
+type GenAIRequestInfo = asymptoteobserve.GenAIRequestInfo
+type GenAIResponseInfo = asymptoteobserve.GenAIResponseInfo
+type GenAIRetrievalInfo = asymptoteobserve.GenAIRetrievalInfo
+type GenAITokenInfo = asymptoteobserve.GenAITokenInfo
+type GenAIToolInfo = asymptoteobserve.GenAIToolInfo
+type GenAIToolCallInfo = asymptoteobserve.GenAIToolCallInfo
+type GenAIUsageInfo = asymptoteobserve.GenAIUsageInfo
+type GenAIUsageCacheCreationInfo = asymptoteobserve.GenAIUsageCacheCreationInfo
+type GenAIUsageCacheReadInfo = asymptoteobserve.GenAIUsageCacheReadInfo
+type GenAIUsageReasoningInfo = asymptoteobserve.GenAIUsageReasoningInfo
+type GenAIWorkflowInfo = asymptoteobserve.GenAIWorkflowInfo
 
 type Event struct {
-	ObservedAt    time.Time                       `json:"-"`
-	Timestamp     string                          `json:"timestamp"`
-	Vendor        string                          `json:"vendor"`
-	Product       string                          `json:"product"`
-	SchemaVersion string                          `json:"schema_version"`
-	Event         EventInfo                       `json:"event"`
-	Severity      string                          `json:"severity"`
-	Endpoint      EndpointInfo                    `json:"endpoint"`
-	User          UserInfo                        `json:"user,omitempty"`
-	Harness       HarnessInfo                     `json:"harness"`
-	Origin        asymptotetrace.Origin           `json:"origin,omitempty"`
-	Run           *RunInfo                        `json:"run,omitempty"`
-	Session       *SessionInfo                    `json:"session,omitempty"`
-	Tool          *ToolInfo                       `json:"tool,omitempty"`
-	File          *FileInfo                       `json:"file,omitempty"`
-	Command       *CommandInfo                    `json:"command,omitempty"`
-	MCP           *MCPInfo                        `json:"mcp,omitempty"`
-	Approval      *ApprovalInfo                   `json:"approval,omitempty"`
-	Policy        *PolicyInfo                     `json:"policy,omitempty"`
-	Prompt        *PromptInfo                     `json:"prompt,omitempty"`
-	Content       *ContentInfo                    `json:"content,omitempty"`
-	Destination   *asymptotetrace.DestinationInfo `json:"destination,omitempty"`
-	Health        *asymptotetrace.HealthInfo      `json:"health,omitempty"`
-	Model         string                          `json:"model,omitempty"`
-	Repository    string                          `json:"repository,omitempty"`
-	Branch        string                          `json:"branch,omitempty"`
-	Message       string                          `json:"message,omitempty"`
-	Raw           map[string]interface{}          `json:"raw,omitempty"`
-	Truncated     bool                            `json:"field_truncated,omitempty"`
+	ObservedAt    time.Time                         `json:"-"`
+	Timestamp     string                            `json:"timestamp"`
+	Vendor        string                            `json:"vendor"`
+	Product       string                            `json:"product"`
+	SchemaVersion string                            `json:"schema_version"`
+	Event         EventInfo                         `json:"event"`
+	Severity      string                            `json:"severity"`
+	Endpoint      EndpointInfo                      `json:"endpoint"`
+	User          UserInfo                          `json:"user,omitempty"`
+	Harness       HarnessInfo                       `json:"harness"`
+	Origin        asymptoteobserve.Origin           `json:"origin,omitempty"`
+	Run           *RunInfo                          `json:"run,omitempty"`
+	Session       *SessionInfo                      `json:"session,omitempty"`
+	Tool          *ToolInfo                         `json:"tool,omitempty"`
+	File          *FileInfo                         `json:"file,omitempty"`
+	Command       *CommandInfo                      `json:"command,omitempty"`
+	MCP           *MCPInfo                          `json:"mcp,omitempty"`
+	Approval      *ApprovalInfo                     `json:"approval,omitempty"`
+	Policy        *PolicyInfo                       `json:"policy,omitempty"`
+	Prompt        *PromptInfo                       `json:"prompt,omitempty"`
+	Destination   *asymptoteobserve.DestinationInfo `json:"destination,omitempty"`
+	Health        *asymptoteobserve.HealthInfo      `json:"health,omitempty"`
+	GenAI         *GenAIInfo                        `json:"gen_ai,omitempty"`
+	Model         string                            `json:"model,omitempty"`
+	Repository    string                            `json:"repository,omitempty"`
+	Branch        string                            `json:"branch,omitempty"`
+	Message       string                            `json:"message,omitempty"`
+	Raw           map[string]interface{}            `json:"raw,omitempty"`
+	Truncated     bool                              `json:"field_truncated,omitempty"`
 }
 
 func NewEvent(action, category, severity, harnessName string, ts time.Time) Event {
@@ -69,10 +95,10 @@ func NewEvent(action, category, severity, harnessName string, ts time.Time) Even
 	if harnessName == "" {
 		harnessName = "unknown"
 	}
-	base := asymptotetrace.NewEvent(asymptotetrace.NewEventOptions{
+	base := asymptoteobserve.NewEvent(asymptoteobserve.NewEventOptions{
 		Action:   action,
 		Category: category,
-		Severity: asymptotetrace.Severity(severity),
+		Severity: asymptoteobserve.Severity(severity),
 		Harness:  HarnessInfo{Name: harnessName},
 	})
 	return Event{

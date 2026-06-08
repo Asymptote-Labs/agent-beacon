@@ -9,11 +9,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
 
-func TestSearchReturnsHistoricalContentSummary(t *testing.T) {
+func TestSearchReturnsTruncationSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	event := testEvent("2026-05-13T01:00:00Z", "claude", "prompt.submitted", "prompt")
 	event.Prompt = &schema.PromptInfo{Text: "summarize local MCP use"}
-	event.Content = &schema.ContentInfo{Retention: "metadata", Included: false}
+	event.Truncated = true
 	writeLog(t, path, event)
 
 	result, err := Search(Query{LogPath: path, Harness: "claude", Limit: 10})
@@ -27,11 +27,11 @@ func TestSearchReturnsHistoricalContentSummary(t *testing.T) {
 	if got.ID == "" || got.Action != "prompt.submitted" || got.Harness != "claude" {
 		t.Fatalf("unexpected event summary: %#v", got)
 	}
-	if got.Content == nil || got.Content.Retention != "metadata" {
-		t.Fatalf("content summary = %#v, want historical content metadata", got.Content)
+	if got.Content == nil || !got.Content.FieldTruncated {
+		t.Fatalf("content summary = %#v, want field truncation marker", got.Content)
 	}
-	if len(got.Caveats) != 0 {
-		t.Fatalf("unexpected retention caveat for historical content metadata: %#v", got.Caveats)
+	if len(got.Caveats) != 1 || got.Caveats[0] != "content was truncated" {
+		t.Fatalf("truncation caveat = %#v, want content was truncated", got.Caveats)
 	}
 }
 

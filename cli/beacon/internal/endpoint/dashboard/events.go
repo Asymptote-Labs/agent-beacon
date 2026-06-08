@@ -464,18 +464,6 @@ func searchFields(record EventRecord) []string {
 	if event.Prompt != nil {
 		fields = append(fields, event.Prompt.Text)
 	}
-	if event.Content != nil {
-		fields = append(fields, event.Content.Retention)
-		if event.Content.Included {
-			fields = append(fields, "content included")
-		}
-		if event.Content.Redacted {
-			fields = append(fields, "redacted")
-		}
-		if event.Content.Truncated {
-			fields = append(fields, "truncated")
-		}
-	}
 	if event.Destination != nil {
 		fields = append(fields, event.Destination.Type, event.Destination.Mode, event.Destination.Status)
 	}

@@ -453,9 +453,7 @@ function artifactCell(event) {
 function retentionCell(record) {
   const event = record.event || {};
   const labels = [];
-  if (event.content?.retention) labels.push(badge(event.content.retention, "badge-muted"));
-  if (event.content?.truncated || event.field_truncated) labels.push(badge("truncated", "badge-warn"));
-  if (event.content?.redacted) labels.push(badge("redacted", "badge-warn"));
+  if (event.field_truncated) labels.push(badge("truncated", "badge-warn"));
   return labels.join(" ") || badge("default", "badge-muted");
 }
 
@@ -475,7 +473,6 @@ function detailSummary(record) {
     ["Artifact", event.prompt?.text ? "" : primaryArtifact(event)],
     ["Approval", event.approval ? [event.approval.decision, event.approval.reason].filter(Boolean).join(": ") : ""],
     ["Policy", event.policy ? [event.policy.decision, event.policy.name, event.policy.reason].filter(Boolean).join(": ") : ""],
-    ["Content", event.content ? `${event.content.retention}${event.content.redacted ? ", redacted" : ""}${event.content.truncated ? ", truncated" : ""}` : ""],
   ].filter(([, value]) => value);
   return rows
     .map(([label, value]) => {

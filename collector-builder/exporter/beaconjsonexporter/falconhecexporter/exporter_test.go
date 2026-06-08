@@ -48,15 +48,14 @@ func TestConsumeLogsSendsBearerHECPayload(t *testing.T) {
 	defer server.Close()
 
 	exp, err := newExporter(&Config{
-		Endpoint:         server.URL,
-		Token:            "ingest-token",
-		Source:           "beacon-endpoint-agent",
-		Sourcetype:       "json",
-		Index:            "beacon-repo",
-		Timeout:          time.Second,
-		QueueSettings:    createDefaultConfig().QueueSettings,
-		RetrySettings:    createDefaultConfig().RetrySettings,
-		ContentRetention: "full",
+		Endpoint:      server.URL,
+		Token:         "ingest-token",
+		Source:        "beacon-endpoint-agent",
+		Sourcetype:    "json",
+		Index:         "beacon-repo",
+		Timeout:       time.Second,
+		QueueSettings: createDefaultConfig().QueueSettings,
+		RetrySettings: createDefaultConfig().RetrySettings,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -124,12 +123,11 @@ func TestConsumeLogsReturnsErrorForNonSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 	exp, err := newExporter(&Config{
-		Endpoint:         server.URL,
-		Token:            "bad-token",
-		Timeout:          time.Second,
-		QueueSettings:    createDefaultConfig().QueueSettings,
-		RetrySettings:    configNoRetry(),
-		ContentRetention: "metadata",
+		Endpoint:      server.URL,
+		Token:         "bad-token",
+		Timeout:       time.Second,
+		QueueSettings: createDefaultConfig().QueueSettings,
+		RetrySettings: configNoRetry(),
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)

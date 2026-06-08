@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type jsonlWriter struct {
@@ -28,7 +28,7 @@ func (w jsonlWriter) append(event beaconEvent) error {
 	}
 	if len(data) > w.maxEventBytes {
 		event.Raw = nil
-		event.Message = asymptotetrace.TruncateString(event.Message, 1024)
+		event.Message = asymptoteobserve.TruncateString(event.Message, 1024)
 		event.Truncated = true
 		data, err = json.Marshal(event)
 		if err != nil {
@@ -45,22 +45,28 @@ func (w jsonlWriter) append(event beaconEvent) error {
 }
 
 func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
-	event.Message = w.cleanString(event.Message, asymptotetrace.DefaultStringLimit)
+	event.Message = w.cleanString(event.Message, asymptoteobserve.DefaultStringLimit)
 	if event.Tool != nil {
-		event.Tool.Command = w.cleanString(event.Tool.Command, asymptotetrace.DefaultStringLimit)
-		event.Tool.Path = asymptotetrace.TruncateString(event.Tool.Path, asymptotetrace.DefaultRawStringLimit)
+		event.Tool.Command = w.cleanString(event.Tool.Command, asymptoteobserve.DefaultStringLimit)
+		event.Tool.Path = asymptoteobserve.TruncateString(event.Tool.Path, asymptoteobserve.DefaultRawStringLimit)
 	}
 	if event.Command != nil {
-		event.Command.Command = w.cleanString(event.Command.Command, asymptotetrace.DefaultStringLimit)
+		event.Command.Command = w.cleanString(event.Command.Command, asymptoteobserve.DefaultStringLimit)
 	}
 	if event.Approval != nil {
-		event.Approval.Reason = w.cleanString(event.Approval.Reason, asymptotetrace.DefaultStringLimit)
+		event.Approval.Reason = w.cleanString(event.Approval.Reason, asymptoteobserve.DefaultStringLimit)
 	}
 	if event.Policy != nil {
-		event.Policy.Reason = w.cleanString(event.Policy.Reason, asymptotetrace.DefaultStringLimit)
+		event.Policy.Reason = w.cleanString(event.Policy.Reason, asymptoteobserve.DefaultStringLimit)
 	}
 	if event.Prompt != nil {
-		event.Prompt.Text = w.cleanString(event.Prompt.Text, asymptotetrace.DefaultStringLimit)
+		event.Prompt.Text = w.cleanString(event.Prompt.Text, asymptoteobserve.DefaultStringLimit)
+	}
+	if event.MCP != nil {
+		event.MCP = sanitizeTyped(event.MCP, w.sanitizeMap)
+	}
+	if event.GenAI != nil {
+		event.GenAI = sanitizeTyped(event.GenAI, w.sanitizeMap)
 	}
 	if event.Raw != nil {
 		event.Raw = w.sanitizeMap(event.Raw)
@@ -72,21 +78,49 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 }
 
 func (w jsonlWriter) sanitizeMap(input map[string]interface{}) map[string]interface{} {
-	return asymptotetrace.SanitizeMap(input, asymptotetrace.PrivacyOptions{
+	return asymptoteobserve.SanitizeMap(input, asymptoteobserve.PrivacyOptions{
 		RedactSecrets: w.redactSecrets,
-		StringLimit:   asymptotetrace.DefaultRawStringLimit,
+		StringLimit:   asymptoteobserve.DefaultRawStringLimit,
 	})
 }
 
 func (w jsonlWriter) sanitizeSlice(input []interface{}) []interface{} {
-	return asymptotetrace.SanitizeSlice(input, asymptotetrace.PrivacyOptions{
+	return asymptoteobserve.SanitizeSlice(input, asymptoteobserve.PrivacyOptions{
 		RedactSecrets: w.redactSecrets,
-		StringLimit:   asymptotetrace.DefaultRawStringLimit,
+		StringLimit:   asymptoteobserve.DefaultRawStringLimit,
 	})
 }
 
 func (w jsonlWriter) cleanString(value string, limit int) string {
-	return asymptotetrace.CleanString(value, limit, w.redactSecrets)
+	return asymptoteobserve.CleanString(value, limit, w.redactSecrets)
+}
+
+func sanitizeTyped[T any](input *T, sanitize func(map[string]interface{}) map[string]interface{}) *T {
+	if input == nil {
+		return nil
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		out := *input
+		return &out
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		out := *input
+		return &out
+	}
+	raw = sanitize(raw)
+	data, err = json.Marshal(raw)
+	if err != nil {
+		out := *input
+		return &out
+	}
+	var out T
+	if err := json.Unmarshal(data, &out); err != nil {
+		fallback := *input
+		return &fallback
+	}
+	return &out
 }
 
 // Keep this rotation contract mirrored with the endpoint CLI and hook writer.

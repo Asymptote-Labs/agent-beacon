@@ -530,7 +530,7 @@ func TestRepairPreservesExistingConfigWhenReinstallFails(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	const originalConfig = `{"user_mode":true,"log_path":"original","collector":{"config_path":"original","grpc_port":4317,"http_port":4318},"content_retention":"full"}`
+	const originalConfig = `{"user_mode":true,"log_path":"original","collector":{"config_path":"original","grpc_port":4317,"http_port":4318}}`
 	if err := os.WriteFile(configPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatalf("write original config: %v", err)
 	}

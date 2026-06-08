@@ -12,20 +12,18 @@ import (
 const defaultTimeout = 10 * time.Second
 
 type Config struct {
-	Endpoint           string                     `mapstructure:"endpoint"`
-	Token              string                     `mapstructure:"token"`
-	Source             string                     `mapstructure:"source"`
-	Sourcetype         string                     `mapstructure:"sourcetype"`
-	Index              string                     `mapstructure:"index"`
-	InsecureSkipVerify bool                       `mapstructure:"insecure_skip_verify"`
-	CAFile             string                     `mapstructure:"ca_file"`
-	Timeout            time.Duration              `mapstructure:"timeout"`
-	QueueSettings      exporterhelper.QueueConfig `mapstructure:"sending_queue"`
-	RetrySettings      configretry.BackOffConfig  `mapstructure:"retry_on_failure"`
-	// Deprecated no-op retained so older generated collector configs still load.
-	ContentRetention      string `mapstructure:"content_retention"`
-	IncludeRuntimeMetrics bool   `mapstructure:"include_runtime_metrics"`
-	IncludeCodexSpans     bool   `mapstructure:"include_codex_spans"`
+	Endpoint              string                     `mapstructure:"endpoint"`
+	Token                 string                     `mapstructure:"token"`
+	Source                string                     `mapstructure:"source"`
+	Sourcetype            string                     `mapstructure:"sourcetype"`
+	Index                 string                     `mapstructure:"index"`
+	InsecureSkipVerify    bool                       `mapstructure:"insecure_skip_verify"`
+	CAFile                string                     `mapstructure:"ca_file"`
+	Timeout               time.Duration              `mapstructure:"timeout"`
+	QueueSettings         exporterhelper.QueueConfig `mapstructure:"sending_queue"`
+	RetrySettings         configretry.BackOffConfig  `mapstructure:"retry_on_failure"`
+	IncludeRuntimeMetrics bool                       `mapstructure:"include_runtime_metrics"`
+	IncludeCodexSpans     bool                       `mapstructure:"include_codex_spans"`
 }
 
 func createDefaultConfig() *Config {

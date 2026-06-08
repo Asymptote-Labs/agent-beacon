@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -139,7 +139,7 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 		"harness": map[string]interface{}{
 			"name": l.platform,
 		},
-		"message": asymptotetrace.CleanString(message, asymptotetrace.DefaultStringLimit, true),
+		"message": asymptoteobserve.CleanString(message, asymptoteobserve.DefaultStringLimit, true),
 	}
 	if l.sessionID != "" {
 		event["session"] = map[string]interface{}{"id": l.sessionID}
@@ -182,25 +182,25 @@ func endpointLogPath() string {
 }
 
 func redactEndpointString(value string) string {
-	return asymptotetrace.RedactString(value)
+	return asymptoteobserve.RedactString(value)
 }
 
 func sanitizeEndpointMap(input map[string]interface{}) map[string]interface{} {
-	return asymptotetrace.SanitizeMap(input, asymptotetrace.PrivacyOptions{
+	return asymptoteobserve.SanitizeMap(input, asymptoteobserve.PrivacyOptions{
 		RedactSecrets: true,
-		StringLimit:   asymptotetrace.DefaultStringLimit,
+		StringLimit:   asymptoteobserve.DefaultStringLimit,
 	})
 }
 
 func sanitizeEndpointSlice(input []interface{}) []interface{} {
-	return asymptotetrace.SanitizeSlice(input, asymptotetrace.PrivacyOptions{
+	return asymptoteobserve.SanitizeSlice(input, asymptoteobserve.PrivacyOptions{
 		RedactSecrets: true,
-		StringLimit:   asymptotetrace.DefaultStringLimit,
+		StringLimit:   asymptoteobserve.DefaultStringLimit,
 	})
 }
 
 func truncateEndpoint(value string, limit int) string {
-	return asymptotetrace.TruncateString(value, limit)
+	return asymptoteobserve.TruncateString(value, limit)
 }
 
 // Keep this rotation contract mirrored with the endpoint CLI and beaconjson exporter.

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
 
 const DefaultLimit = 100
@@ -382,21 +381,15 @@ func summarizeRecord(record dashboard.EventRecord) EventSummary {
 	if event.Policy != nil {
 		summary.Policy = &PolicySummary{ID: event.Policy.ID, Name: event.Policy.Name, Decision: event.Policy.Decision, Enforcement: event.Policy.Enforcement, Reason: event.Policy.Reason}
 	}
-	if event.Content != nil || event.Truncated {
-		summary.Content = contentSummary(event.Content, event.Truncated)
+	if event.Truncated {
+		summary.Content = contentSummary(event.Truncated)
 		summary.Caveats = append(summary.Caveats, contentCaveats(summary.Content)...)
 	}
 	return summary
 }
 
-func contentSummary(content *schema.ContentInfo, fieldTruncated bool) *ContentSummary {
+func contentSummary(fieldTruncated bool) *ContentSummary {
 	summary := &ContentSummary{FieldTruncated: fieldTruncated}
-	if content != nil {
-		summary.Retention = content.Retention
-		summary.Included = content.Included
-		summary.Redacted = content.Redacted
-		summary.Truncated = content.Truncated
-	}
 	return summary
 }
 

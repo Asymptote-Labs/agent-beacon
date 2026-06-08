@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -65,7 +65,7 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	}
 	if len(data) > opts.MaxBytes {
 		event.Raw = nil
-		event.Message = asymptotetrace.TruncateString(event.Message, 1024)
+		event.Message = asymptoteobserve.TruncateString(event.Message, 1024)
 		event.Truncated = true
 		data, err = json.Marshal(event)
 		if err != nil {
@@ -100,7 +100,7 @@ func LastLine(path string) (string, error) {
 }
 
 func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
-	return asymptotetrace.SanitizeEvent(event, maxBytes)
+	return asymptoteobserve.SanitizeEvent(event, maxBytes)
 }
 
 func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {

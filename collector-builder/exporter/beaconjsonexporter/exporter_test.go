@@ -3,6 +3,7 @@ package beaconjsonexporter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptotetrace"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -28,13 +29,6 @@ func TestConfigValidateRequiresPath(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigLeavesLegacyRetentionUnset(t *testing.T) {
-	cfg := createDefaultConfig()
-	if cfg.ContentRetention != "" {
-		t.Fatalf("ContentRetention = %q, want empty legacy no-op", cfg.ContentRetention)
-	}
-}
-
 func TestDefaultConfigUsesBoundedRotation(t *testing.T) {
 	cfg := createDefaultConfig()
 	if cfg.RotateBytes != defaultRotateBytes {
@@ -42,22 +36,6 @@ func TestDefaultConfigUsesBoundedRotation(t *testing.T) {
 	}
 	if cfg.RotateArchives != defaultRotateArchives {
 		t.Fatalf("RotateArchives = %d, want %d", cfg.RotateArchives, defaultRotateArchives)
-	}
-}
-
-func TestNewExporterAcceptsEmptyLegacyRetention(t *testing.T) {
-	cfg := &Config{
-		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
-		MaxEventBytes: defaultMaxEventBytes,
-		RotateBytes:   defaultRotateBytes,
-		RedactSecrets: true,
-	}
-	exp, err := newExporter(cfg, exporter.Settings{})
-	if err != nil {
-		t.Fatalf("newExporter returned error: %v", err)
-	}
-	if exp.cfg.ContentRetention != "" {
-		t.Fatalf("ContentRetention = %q, want empty legacy no-op", exp.cfg.ContentRetention)
 	}
 }
 
@@ -120,11 +98,10 @@ func TestJSONLWriterRotatesAndPrunesArchives(t *testing.T) {
 func TestConsumeLogsWritesBeaconJSONL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "redacted",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -172,11 +149,10 @@ func TestConsumeLogsWritesBeaconJSONL(t *testing.T) {
 func TestConsumeLogsMapsCIRunResourceAttributes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -188,20 +164,20 @@ func TestConsumeLogsMapsCIRunResourceAttributes(t *testing.T) {
 	resourceAttrs.PutStr("service.name", "claude-code")
 	resourceAttrs.PutStr("repository", "local/repo")
 	resourceAttrs.PutStr("branch", "local-branch")
-	resourceAttrs.PutStr(asymptotetrace.AttributeOrigin, string(asymptotetrace.OriginCI))
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunProvider, "github_actions")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunID, "123")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunAttempt, "2")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunWorkflow, "CI / build, smoke")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunJob, "telemetry")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunEventName, "pull_request")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunCommit, "deadbeef")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunRepository, "asymptote-labs/agent-beacon")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunBranch, "feature/ci telemetry")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunPR, "refs/pull/12/merge")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunPRNumber, "12")
-	resourceAttrs.PutStr(asymptotetrace.AttributeRunActor, "octocat")
-	resourceAttrs.PutBool(asymptotetrace.AttributeRunEphemeral, true)
+	resourceAttrs.PutStr(asymptoteobserve.AttributeOrigin, string(asymptoteobserve.OriginCI))
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunProvider, "github_actions")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunID, "123")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunAttempt, "2")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunWorkflow, "CI / build, smoke")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunJob, "telemetry")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunEventName, "pull_request")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunCommit, "deadbeef")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunRepository, "asymptote-labs/agent-beacon")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunBranch, "feature/ci telemetry")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunPR, "refs/pull/12/merge")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunPRNumber, "12")
+	resourceAttrs.PutStr(asymptoteobserve.AttributeRunActor, "octocat")
+	resourceAttrs.PutBool(asymptoteobserve.AttributeRunEphemeral, true)
 	rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
 	rec.Body().SetStr("ci telemetry event")
 	rec.Attributes().PutStr("beacon.event.action", "tool.invoked")
@@ -217,7 +193,7 @@ func TestConsumeLogsMapsCIRunResourceAttributes(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
 		t.Fatalf("unmarshal event: %v", err)
 	}
-	if event.Origin != asymptotetrace.OriginCI {
+	if event.Origin != asymptoteobserve.OriginCI {
 		t.Fatalf("Origin = %q, want ci", event.Origin)
 	}
 	if event.Run == nil {
@@ -237,14 +213,13 @@ func TestConsumeLogsMapsCIRunResourceAttributes(t *testing.T) {
 	}
 }
 
-func TestConsumeLogsMapsPromptForFullRetention(t *testing.T) {
+func TestConsumeLogsMapsPrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "full",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -274,13 +249,12 @@ func TestConsumeLogsMapsPromptForFullRetention(t *testing.T) {
 	}
 }
 
-func TestLegacyMetadataRetentionDoesNotOmitTypedPrompt(t *testing.T) {
+func TestEventFromLogKeepsTypedPrompt(t *testing.T) {
 	exp, err := newExporter(&Config{
-		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -299,8 +273,157 @@ func TestLegacyMetadataRetentionDoesNotOmitTypedPrompt(t *testing.T) {
 	if event.Prompt == nil || event.Prompt.Text != "summarize this file" {
 		t.Fatalf("legacy metadata retention should not omit prompt: %#v", event.Prompt)
 	}
-	if event.Content != nil {
-		t.Fatalf("legacy metadata retention should not emit content marker: %#v", event.Content)
+}
+
+func TestConsumeLogsMapsOTelGenAIAttributes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := plog.NewLogs()
+	rec := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Attributes().PutStr("service.name", "otel")
+	rec.Attributes().PutStr("gen_ai.operation.name", "chat")
+	rec.Attributes().PutStr("gen_ai.provider.name", "openai")
+	rec.Attributes().PutStr("gen_ai.conversation.id", "conv-1")
+	rec.Attributes().PutStr("gen_ai.request.model", "gpt-4o")
+	rec.Attributes().PutInt("gen_ai.request.max_tokens", 100)
+	rec.Attributes().PutDouble("gen_ai.request.temperature", 0.2)
+	rec.Attributes().PutStr("gen_ai.response.id", "chatcmpl-1")
+	rec.Attributes().PutStr("gen_ai.response.model", "gpt-4o-2026")
+	rec.Attributes().PutInt("gen_ai.usage.input_tokens", 12)
+	rec.Attributes().PutInt("gen_ai.usage.output_tokens", 34)
+	rec.Attributes().PutStr("gen_ai.input.messages", `[{"role":"user","parts":[{"type":"text","content":"summarize token=genai-secret"}]}]`)
+	reasons := rec.Attributes().PutEmptySlice("gen_ai.response.finish_reasons")
+	reasons.AppendEmpty().SetStr("stop")
+
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime log: %v", err)
+	}
+	if strings.Contains(string(data), "genai-secret") {
+		t.Fatalf("GenAI content was not redacted: %s", string(data))
+	}
+	var event beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.GenAI == nil || event.GenAI.Provider == nil || event.GenAI.Provider.Name != "openai" {
+		t.Fatalf("provider missing from GenAI: %#v", event.GenAI)
+	}
+	if event.GenAI.Request == nil || event.GenAI.Request.Model != "gpt-4o" || event.GenAI.Request.MaxTokens == nil || *event.GenAI.Request.MaxTokens != 100 {
+		t.Fatalf("request missing from GenAI: %#v", event.GenAI.Request)
+	}
+	if event.GenAI.Response == nil || event.GenAI.Response.ID != "chatcmpl-1" || len(event.GenAI.Response.FinishReasons) != 1 || event.GenAI.Response.FinishReasons[0] != "stop" {
+		t.Fatalf("response missing from GenAI: %#v", event.GenAI.Response)
+	}
+	if event.GenAI.Usage == nil || event.GenAI.Usage.InputTokens == nil || *event.GenAI.Usage.InputTokens != 12 || event.GenAI.Usage.OutputTokens == nil || *event.GenAI.Usage.OutputTokens != 34 {
+		t.Fatalf("usage missing from GenAI: %#v", event.GenAI.Usage)
+	}
+	if event.Session == nil || event.Session.ID != "conv-1" {
+		t.Fatalf("conversation not promoted to session: %#v", event.Session)
+	}
+	if event.Model != "gpt-4o" {
+		t.Fatalf("model = %q, want request model", event.Model)
+	}
+	if event.Prompt == nil || !strings.Contains(event.Prompt.Text, "[REDACTED]") {
+		t.Fatalf("prompt was not populated and redacted: %#v", event.Prompt)
+	}
+}
+
+func TestEventFromLogMapsLegacyOpenLLMetryMessages(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	rec := plog.NewLogs().ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Attributes().PutStr("gen_ai.operation.name", "chat")
+	rec.Attributes().PutStr("gen_ai.prompt.0.content", "hello")
+	rec.Attributes().PutStr("gen_ai.completion.0.content", "hi there")
+	rec.Attributes().PutStr("llm.usage.prompt_tokens", "3")
+	rec.Attributes().PutStr("llm.usage.completion_tokens", "4")
+
+	event := exp.eventFromLog(nil, rec)
+	if event.GenAI == nil || event.GenAI.Input == nil || event.GenAI.Output == nil {
+		t.Fatalf("legacy messages not mapped: %#v", event.GenAI)
+	}
+	if text := testFirstTextFromAny(event.GenAI.Input.Messages); text != "hello" {
+		t.Fatalf("input message text = %q, want hello", text)
+	}
+	if text := testFirstTextFromAny(event.GenAI.Output.Messages); text != "hi there" {
+		t.Fatalf("output message text = %q, want hi there", text)
+	}
+	if event.GenAI.Usage == nil || event.GenAI.Usage.InputTokens == nil || *event.GenAI.Usage.InputTokens != 3 || event.GenAI.Usage.OutputTokens == nil || *event.GenAI.Usage.OutputTokens != 4 {
+		t.Fatalf("legacy token usage not mapped: %#v", event.GenAI.Usage)
+	}
+}
+
+func testFirstTextFromAny(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []interface{}:
+		for _, item := range typed {
+			if text := testFirstTextFromAny(item); text != "" {
+				return text
+			}
+		}
+	case map[string]interface{}:
+		if content, ok := typed["content"]; ok {
+			return strings.TrimSpace(fmt.Sprint(content))
+		}
+		if parts, ok := typed["parts"]; ok {
+			return testFirstTextFromAny(parts)
+		}
+	}
+	return ""
+}
+
+func TestEventFromLogMapsOTelMCPAttributes(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	rec := plog.NewLogs().ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Attributes().PutStr("mcp.method.name", "resources/read")
+	rec.Attributes().PutStr("mcp.protocol.version", "2025-06-18")
+	rec.Attributes().PutStr("mcp.resource.uri", "file:///tmp/report.md")
+	rec.Attributes().PutStr("mcp.session.id", "mcp-session-1")
+	rec.Attributes().PutStr("mcp.server.name", "filesystem")
+	rec.Attributes().PutStr("mcp.tool.name", "read_file")
+
+	event := exp.eventFromLog(nil, rec)
+	if event.Event.Action != "file.read" || event.Event.Category != "file" {
+		t.Fatalf("MCP resource action/category = %#v, want file.read/file", event.Event)
+	}
+	if event.MCP == nil || event.MCP.Method == nil || event.MCP.Method.Name != "resources/read" || event.MCP.Protocol == nil || event.MCP.Protocol.Version != "2025-06-18" {
+		t.Fatalf("MCP method/protocol missing: %#v", event.MCP)
+	}
+	if event.MCP.Resource == nil || event.MCP.Resource.URI != "file:///tmp/report.md" || event.MCP.Session == nil || event.MCP.Session.ID != "mcp-session-1" {
+		t.Fatalf("MCP resource/session missing: %#v", event.MCP)
+	}
+	if event.MCP.Server != "filesystem" || event.MCP.Tool != "read_file" {
+		t.Fatalf("Beacon MCP server/tool missing: %#v", event.MCP)
 	}
 }
 
@@ -327,11 +450,10 @@ func TestEventCategoryInfersFromAction(t *testing.T) {
 
 func TestEventFromMetricDefaultsToObservedAction(t *testing.T) {
 	exp, err := newExporter(&Config{
-		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -359,11 +481,10 @@ func TestEventFromMetricDefaultsToObservedAction(t *testing.T) {
 func TestConsumeMetricsDropsRuntimeMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "full",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -400,7 +521,6 @@ func TestConsumeMetricsIncludesRuntimeMetricsWhenConfigured(t *testing.T) {
 		MaxEventBytes:         defaultMaxEventBytes,
 		RotateBytes:           defaultRotateBytes,
 		RedactSecrets:         true,
-		ContentRetention:      "full",
 		IncludeRuntimeMetrics: true,
 	}, exporter.Settings{})
 	if err != nil {
@@ -426,11 +546,10 @@ func TestConsumeMetricsIncludesRuntimeMetricsWhenConfigured(t *testing.T) {
 func TestConsumeMetricsDropsOpenClawMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -499,7 +618,6 @@ func TestConsumeMetricsIncludesOpenClawMetricsWhenConfigured(t *testing.T) {
 		MaxEventBytes:         defaultMaxEventBytes,
 		RotateBytes:           defaultRotateBytes,
 		RedactSecrets:         true,
-		ContentRetention:      "metadata",
 		IncludeRuntimeMetrics: true,
 	}, exporter.Settings{})
 	if err != nil {
@@ -538,11 +656,10 @@ func TestConsumeMetricsIncludesOpenClawMetricsWhenConfigured(t *testing.T) {
 func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -575,11 +692,10 @@ func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 func TestConsumeMetricsDropsCopilotMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -642,7 +758,6 @@ func TestConsumeMetricsIncludesCopilotOperationalMetricsWhenConfigured(t *testin
 		MaxEventBytes:         defaultMaxEventBytes,
 		RotateBytes:           defaultRotateBytes,
 		RedactSecrets:         true,
-		ContentRetention:      "metadata",
 		IncludeRuntimeMetrics: true,
 	}, exporter.Settings{})
 	if err != nil {
@@ -696,11 +811,10 @@ func TestInferActionMapsCodexOpAttributeToPrompt(t *testing.T) {
 func TestConsumeTracesDropsCodexUserInputSpan(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "full",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -731,7 +845,6 @@ func TestConsumeTracesIncludesCodexSpansWhenConfigured(t *testing.T) {
 		MaxEventBytes:     defaultMaxEventBytes,
 		RotateBytes:       defaultRotateBytes,
 		RedactSecrets:     true,
-		ContentRetention:  "full",
 		IncludeCodexSpans: true,
 	}, exporter.Settings{})
 	if err != nil {
@@ -768,11 +881,10 @@ func TestConsumeTracesIncludesCodexSpansWhenConfigured(t *testing.T) {
 func TestConsumeLogsMapsCodexSemanticEventsAndDropsTransportNoise(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "full",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -869,13 +981,12 @@ func TestCodexToolResultExtractsShellCommand(t *testing.T) {
 	}
 }
 
-func TestLegacyMetadataRetentionDoesNotOmitCodexPromptMessage(t *testing.T) {
+func TestCodexPromptMessageKeepsTypedPrompt(t *testing.T) {
 	exp, err := newExporter(&Config{
-		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -893,19 +1004,15 @@ func TestLegacyMetadataRetentionDoesNotOmitCodexPromptMessage(t *testing.T) {
 	if strings.Contains(event.Message, "codex-secret") {
 		t.Fatalf("message leaked unredacted prompt secret: %q", event.Message)
 	}
-	if event.Content != nil {
-		t.Fatalf("legacy metadata retention should not emit content marker: %#v", event.Content)
-	}
 }
 
 func TestConsumeLogsMapsGeminiPrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "full",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -948,11 +1055,10 @@ func TestConsumeLogsMapsGeminiPrompt(t *testing.T) {
 func TestConsumeLogsMapsGeminiMCPTool(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -997,11 +1103,10 @@ func TestConsumeLogsMapsGeminiMCPTool(t *testing.T) {
 
 func TestConsumeLogsMapsGeminiFileOperation(t *testing.T) {
 	exp, err := newExporter(&Config{
-		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1033,11 +1138,10 @@ func TestInferActionMapsGeminiApprovalEvents(t *testing.T) {
 
 func TestLegacyMetadataRetentionKeepsRawAttributes(t *testing.T) {
 	exp, err := newExporter(&Config{
-		Path:             filepath.Join(t.TempDir(), "runtime.jsonl"),
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1074,11 +1178,10 @@ func TestCodexInternalSpanFilter(t *testing.T) {
 func TestConsumeTracesDropsCodexInternalSpans(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1219,11 +1322,10 @@ func TestCopilotSpanActions(t *testing.T) {
 func TestVSCodeCopilotDropsNoisySpansByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1260,11 +1362,10 @@ func TestVSCodeCopilotDropsNoisySpansByDefault(t *testing.T) {
 func TestVSCodeCopilotDropsNoisyMetricsByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1291,11 +1392,10 @@ func TestVSCodeCopilotDropsNoisyMetricsByDefault(t *testing.T) {
 func TestVSCodeCopilotKeepsActivityLogs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1325,11 +1425,10 @@ func TestVSCodeCopilotKeepsActivityLogs(t *testing.T) {
 func TestVSCodeCopilotDropsRepeatedSessionStartLogs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "metadata",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
@@ -1359,11 +1458,10 @@ func TestVSCodeCopilotDropsRepeatedSessionStartLogs(t *testing.T) {
 func TestVSCodeCopilotInvokeAgentUserRequestBecomesPrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
-		Path:             path,
-		MaxEventBytes:    defaultMaxEventBytes,
-		RotateBytes:      defaultRotateBytes,
-		RedactSecrets:    true,
-		ContentRetention: "full",
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
 	}, exporter.Settings{})
 	if err != nil {
 		t.Fatalf("newExporter returned error: %v", err)
