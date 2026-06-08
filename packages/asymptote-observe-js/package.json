@@ -41,6 +41,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist",
+    "pack:smoke": "node scripts/smoke-pack.mjs",
     "pack:dry-run": "npm pack --dry-run",
     "prepack": "npm run build",
     "test": "vitest run",

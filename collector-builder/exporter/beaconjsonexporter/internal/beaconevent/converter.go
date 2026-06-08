@@ -1094,6 +1094,8 @@ func NormalizeHarnessName(name string) string {
 		return ""
 	case strings.Contains(lower, "cowork") || strings.Contains(lower, "co-work"):
 		return "claude_cowork"
+	case strings.Contains(lower, "claude_agent_sdk") || strings.Contains(lower, "claude-agent-sdk") || strings.Contains(lower, "claude agent sdk"):
+		return "claude_agent_sdk"
 	case strings.Contains(lower, "claude_code") || strings.Contains(lower, "claude-code") || strings.Contains(lower, "claude code") || strings.HasPrefix(lower, "claude_code."):
 		return "claude_code"
 	case lower == "claude" || strings.Contains(lower, "claude"):

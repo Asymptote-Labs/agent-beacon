@@ -9,19 +9,7 @@ import (
 )
 
 func TestEventsFromTracesNormalizesObserveSDKSpan(t *testing.T) {
-	traces := ptrace.NewTraces()
-	resourceSpans := traces.ResourceSpans().AppendEmpty()
-	resourceAttrs := resourceSpans.Resource().Attributes()
-	resourceAttrs.PutStr("beacon.origin", "cloud")
-	resourceAttrs.PutStr("beacon.harness.name", "asymptote_observe")
-	resourceAttrs.PutStr("service.name", "agent-api")
-
-	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
-	scopeSpans.Scope().SetName("asymptote-observe")
-	span := scopeSpans.Spans().AppendEmpty()
-	span.SetName("agent.plan")
-	span.SetKind(ptrace.SpanKindClient)
-	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
+	span, traces := newObserveSDKTraceSpan("agent.plan")
 	attrs := span.Attributes()
 	attrs.PutStr("beacon.event.action", "prompt.submitted")
 	attrs.PutStr("beacon.event.category", "prompt")
@@ -64,4 +52,82 @@ func TestEventsFromTracesNormalizesObserveSDKSpan(t *testing.T) {
 	if event.GenAI.Usage.OutputTokens == nil || *event.GenAI.Usage.OutputTokens != 34 {
 		t.Fatalf("gen_ai usage output = %#v, want 34", event.GenAI.Usage)
 	}
+}
+
+func TestEventsFromTracesNormalizesVercelAISDKSpan(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("ai.generateText")
+	attrs := span.Attributes()
+	attrs.PutStr("beacon.harness.name", "vercel_ai_sdk")
+	attrs.PutStr("beacon.event.action", "prompt.submitted")
+	attrs.PutStr("beacon.event.category", "prompt")
+	attrs.PutStr("gen_ai.provider.name", "anthropic")
+	attrs.PutStr("gen_ai.operation.name", "chat")
+	attrs.PutStr("gen_ai.request.model", "claude-3-5-sonnet")
+	attrs.PutBool("gen_ai.request.stream", true)
+	attrs.PutInt("gen_ai.usage.input_tokens", 42)
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.Harness.Name != "vercel_ai_sdk" {
+		t.Fatalf("harness = %q, want vercel_ai_sdk", event.Harness.Name)
+	}
+	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+		t.Fatalf("event = %#v, want prompt.submitted prompt", event.Event)
+	}
+	if event.GenAI == nil || event.GenAI.Provider == nil || event.GenAI.Provider.Name != "anthropic" {
+		t.Fatalf("gen_ai provider = %#v, want anthropic", event.GenAI)
+	}
+	if event.GenAI.Request == nil || event.GenAI.Request.Model != "claude-3-5-sonnet" {
+		t.Fatalf("gen_ai request = %#v, want model", event.GenAI.Request)
+	}
+	if event.GenAI.Request.Stream == nil || !*event.GenAI.Request.Stream {
+		t.Fatalf("gen_ai stream = %#v, want true", event.GenAI.Request)
+	}
+	if event.GenAI.Usage == nil || event.GenAI.Usage.InputTokens == nil || *event.GenAI.Usage.InputTokens != 42 {
+		t.Fatalf("gen_ai usage input = %#v, want 42", event.GenAI.Usage)
+	}
+}
+
+func TestEventsFromTracesNormalizesClaudeAgentSDKSpan(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("claude_agent_sdk.query")
+	attrs := span.Attributes()
+	attrs.PutStr("beacon.harness.name", "claude_agent_sdk")
+	attrs.PutStr("beacon.event.action", "prompt.submitted")
+	attrs.PutStr("beacon.event.category", "prompt")
+	attrs.PutStr("beacon.prompt.text", "review this pull request")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.Harness.Name != "claude_agent_sdk" {
+		t.Fatalf("harness = %q, want claude_agent_sdk", event.Harness.Name)
+	}
+	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+		t.Fatalf("event = %#v, want prompt.submitted prompt", event.Event)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "review this pull request" {
+		t.Fatalf("prompt = %#v, want captured prompt text", event.Prompt)
+	}
+}
+
+func newObserveSDKTraceSpan(name string) (ptrace.Span, ptrace.Traces) {
+	traces := ptrace.NewTraces()
+	resourceSpans := traces.ResourceSpans().AppendEmpty()
+	resourceAttrs := resourceSpans.Resource().Attributes()
+	resourceAttrs.PutStr("beacon.origin", "cloud")
+	resourceAttrs.PutStr("beacon.harness.name", "asymptote_observe")
+	resourceAttrs.PutStr("service.name", "agent-api")
+
+	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
+	scopeSpans.Scope().SetName("asymptote-observe")
+	span := scopeSpans.Spans().AppendEmpty()
+	span.SetName(name)
+	span.SetKind(ptrace.SpanKindClient)
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
+	return span, traces
 }

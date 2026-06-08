@@ -9,11 +9,15 @@ on:
 jobs:
   typescript-sdk:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: packages/asymptote-observe-js/package-lock.json
       - name: Install SDK dependencies
@@ -31,6 +35,9 @@ jobs:
       - name: Validate SDK package contents
         working-directory: packages/asymptote-observe-js
         run: npm run pack:dry-run
+      - name: Smoke install SDK package
+        working-directory: packages/asymptote-observe-js
+        run: npm run pack:smoke
 
   go-test:
     runs-on: macos-latest

@@ -1,5 +1,6 @@
 import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -64,15 +65,8 @@ describe("resolveExporterConfig", () => {
     expect(config.headers.authorization).toBeUndefined();
   });
 
-  it("normalizes explicit OTLP traces endpoints to the Observe path", () => {
-    const config = resolveExporterConfig({ otlpEndpoint: "http://127.0.0.1:4318/v1/traces" });
-
-    expect(config.mode).toBe("otlp");
-    expect(config.observeUrl).toBe("http://127.0.0.1:4318/v1/observe");
-  });
-
-  it("normalizes generic OTLP endpoint env when it includes the traces path", () => {
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4318/v1/traces/";
+  it("keeps explicit Observe endpoints unchanged after trimming trailing slashes", () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4318/v1/observe/";
 
     const config = resolveExporterConfig();
 
@@ -137,6 +131,7 @@ describe("Asymptote Observe SDK", () => {
     expect(spans[0].attributes[ATTR_BEACON_EVENT_ACTION]).toBe("tool.invoked");
     expect(spans[0].attributes["asymptote.observe.input.count"]).toBe(1);
     expect(spans[0].attributes["asymptote.observe.output.type"]).toBe("string");
+    expect(spans[0].resource.attributes["telemetry.sdk.version"]).toBe(packageVersion());
   });
 
   it("respects observe input/output suppression", async () => {
@@ -320,6 +315,11 @@ function clearEnv(): void {
   for (const key of envKeys) {
     delete process.env[key];
   }
+}
+
+function packageVersion(): string {
+  const packageJSON = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  return packageJSON.version;
 }
 
 async function fakeGenerateText(options: { experimental_telemetry?: { isEnabled?: boolean; tracer?: ReturnType<typeof getTracer> } }): Promise<void> {

@@ -22,6 +22,9 @@ import {
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AnthropicInstrumentation,
   type AnthropicInstrumentationConfig,
@@ -44,10 +47,9 @@ export * from "./constants.js";
 
 const DEFAULT_HOSTED_BASE_URL = "https://api.asymptotelabs.ai";
 const DEFAULT_OBSERVE_PATH = "/v1/observe";
-const DEFAULT_OTLP_TRACES_PATH = "/v1/traces";
 const DEFAULT_TRACER_NAME = "asymptote-observe";
 const DEFAULT_SERVICE_NAME = "asymptote-observe-app";
-const SDK_VERSION = "0.0.0";
+const SDK_VERSION = readSDKVersion();
 const CLAUDE_AGENT_QUERY_WRAPPED = Symbol.for("@asymptote-labs/observe.claude-agent-query-wrapped");
 
 export type ExportMode = "hosted" | "otlp" | "custom";
@@ -379,10 +381,20 @@ function observeURL(endpoint: string): string {
   if (trimmed.endsWith(DEFAULT_OBSERVE_PATH)) {
     return trimmed;
   }
-  if (trimmed.endsWith(DEFAULT_OTLP_TRACES_PATH)) {
-    return `${trimmed.slice(0, -DEFAULT_OTLP_TRACES_PATH.length)}${DEFAULT_OBSERVE_PATH}`;
-  }
   return `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+}
+
+function readSDKVersion(): string {
+  try {
+    const packageJSONPath = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    const packageJSON = JSON.parse(readFileSync(packageJSONPath, "utf8")) as { version?: unknown };
+    if (typeof packageJSON.version === "string" && packageJSON.version.trim() !== "") {
+      return packageJSON.version;
+    }
+  } catch {
+    // Keep tracing usable in unusual bundler/test environments where package.json is unavailable.
+  }
+  return "0.0.0";
 }
 
 function patchOpenLLMetryModules(modules: InstrumentModules): void {
