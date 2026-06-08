@@ -745,7 +745,15 @@ func FirstNonEmpty(values ...string) string {
 
 func IntAttr(attrs map[string]interface{}, keys ...string) (int, bool) {
 	value, ok := Int64Attr(attrs, keys...)
-	return int(value), ok
+	if !ok {
+		return 0, false
+	}
+	maxInt := int64(^uint(0) >> 1)
+	minInt := -maxInt - 1
+	if value < minInt || value > maxInt {
+		return 0, false
+	}
+	return int(value), true
 }
 
 func Int64Attr(attrs map[string]interface{}, keys ...string) (int64, bool) {
