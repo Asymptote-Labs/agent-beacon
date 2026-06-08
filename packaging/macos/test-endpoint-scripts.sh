@@ -14,7 +14,14 @@ sh -n "$INSTALL_SCRIPT"
 sh -n "$UNINSTALL_SCRIPT"
 sh -n "$PKG_BUILD_SCRIPT"
 for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/jamf/scripts/*.sh "$ROOT_DIR"/packaging/macos/jamf/extension-attributes/*.sh "$ROOT_DIR"/packaging/macos/fleet/scripts/*.sh; do
-  sh -n "$script"
+  case "$script" in
+    */repair-falcon-claude-hooks.sh)
+      bash -n "$script"
+      ;;
+    *)
+      sh -n "$script"
+      ;;
+  esac
 done
 
 STUB_BIN="$TMP_DIR/beacon-stub"
