@@ -70,7 +70,7 @@ if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" =
   "$BEACON_BIN" endpoint config validate --system
   "$BEACON_BIN" endpoint status --system --json
   launchctl print system/com.beacon.endpoint.collector || true
-  exit 0
+  exit 1
 fi
 
 HOME_DIR="$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
