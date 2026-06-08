@@ -22,8 +22,8 @@ if [ ! -x "$FORWARDER_SCRIPT" ]; then
   exit 1
 fi
 
-echo "Repairing endpoint and Claude hooks without collector-based Falcon forwarding..."
-"$REPAIR_SCRIPT" _ _ _ "" "" "" "" "$OTLP_GRPC_PORT" "$OTLP_HTTP_PORT" ""
-
 echo "Installing Falcon Vector runtime-log forwarder..."
 "$FORWARDER_SCRIPT" _ _ _ "$FALCON_HEC_ENDPOINT" "$FALCON_HEC_TOKEN" "$FALCON_SOURCE" "$FALCON_SOURCETYPE" "$FALCON_INDEX"
+
+echo "Repairing endpoint and Claude hooks without collector-based Falcon forwarding..."
+"$REPAIR_SCRIPT" _ _ _ "" "" "" "" "$OTLP_GRPC_PORT" "$OTLP_HTTP_PORT" ""

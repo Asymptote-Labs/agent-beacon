@@ -328,3 +328,30 @@ case "$FALCON_VECTOR_STATE" in
     exit 1
     ;;
 esac
+
+FAKE_REPAIR="$TMP_DIR/fake-repair-fails.sh"
+FAKE_FORWARDER="$TMP_DIR/fake-forwarder-runs.sh"
+FORWARDER_MARKER="$TMP_DIR/forwarder-ran"
+cat >"$FAKE_REPAIR" <<'STUB'
+#!/bin/sh
+exit 7
+STUB
+cat >"$FAKE_FORWARDER" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$FORWARDER_MARKER"
+STUB
+chmod +x "$FAKE_REPAIR" "$FAKE_FORWARDER"
+
+BEACON_REPAIR_HOOKS_SCRIPT="$FAKE_REPAIR" \
+BEACON_FALCON_VECTOR_SCRIPT="$FAKE_FORWARDER" \
+BEACON_FALCON_HEC_ENDPOINT="https://falcon.example/services/collector" \
+BEACON_FALCON_HEC_TOKEN="falcon-token" \
+FORWARDER_MARKER="$FORWARDER_MARKER" \
+"$ROOT_DIR/packaging/macos/jamf/scripts/repair-falcon-claude-hooks-vector.sh" >/dev/null 2>&1 && {
+  echo "combined Falcon Vector repair should return the failing repair status" >&2
+  exit 1
+}
+if [ ! -f "$FORWARDER_MARKER" ]; then
+  echo "combined Falcon Vector repair should run forwarder before failing repair" >&2
+  exit 1
+fi
