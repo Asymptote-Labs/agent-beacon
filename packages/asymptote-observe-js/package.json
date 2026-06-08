@@ -48,7 +48,6 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.102.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
     "@opentelemetry/instrumentation": "^0.218.0",
@@ -60,6 +59,7 @@
     "@traceloop/instrumentation-openai": "^0.27.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
     "@types/node": "^25.9.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
