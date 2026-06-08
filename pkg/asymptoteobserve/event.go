@@ -434,7 +434,7 @@ func (e Event) Validate() error {
 			return errors.New("origin must be local, cloud, or ci")
 		}
 	}
-	if e.Content != nil {
+	if e.Content != nil && e.Content.Retention != "" {
 		switch e.Content.Retention {
 		case ContentRetentionMetadata, ContentRetentionRedacted, ContentRetentionFull:
 		default:

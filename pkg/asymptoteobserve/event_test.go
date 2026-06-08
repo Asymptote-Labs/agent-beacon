@@ -50,6 +50,17 @@ func TestNewEventSetsRequiredInvariants(t *testing.T) {
 	}
 }
 
+func TestValidateContentEmptyRetentionAccepted(t *testing.T) {
+	event := NewEvent(NewEventOptions{
+		Action:  "tool.invoked",
+		Harness: HarnessInfo{Name: "cursor"},
+	})
+	event.Content = &ContentInfo{Retention: "", Included: false}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("Validate rejected empty content.retention: %v", err)
+	}
+}
+
 func TestValidateContentRetentionValuesForCompatibility(t *testing.T) {
 	for _, retention := range []string{ContentRetentionMetadata, ContentRetentionRedacted, ContentRetentionFull} {
 		t.Run(retention, func(t *testing.T) {
