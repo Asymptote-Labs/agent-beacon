@@ -143,6 +143,14 @@ Use `BEACON_FALCON_INDEX` only with LogScale organization or system
 multi-repository ingest tokens. Repository-scoped ingest tokens already choose
 the target repository.
 
+The packaged Jamf samples also include
+`/opt/beacon/jamf/scripts/repair-falcon-claude-hooks.sh` for pilots that need a
+single policy to repair the system endpoint, configure Falcon LogScale HEC,
+prepare the shared runtime log for user-run hooks, reinstall Claude Code hooks
+for the console user, and run a manual hook smoke test. It accepts Falcon HEC
+settings as Jamf parameters 4-7, OTLP ports as parameters 8-9, and an optional
+Falcon repository/index as parameter 10.
+
 Upload Extension Attributes from
 `packaging/macos/jamf/extension-attributes` and build Smart Groups for missing,
 unhealthy, stale, or misconfigured endpoints. Scope `repair.sh` to those Smart

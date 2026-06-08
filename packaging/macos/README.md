@@ -303,6 +303,24 @@ policy for hook telemetry. Set
 integrations; the helper writes hook events to
 `/var/log/beacon-agent/runtime.jsonl` by default.
 
+Use `/opt/beacon/jamf/scripts/repair-falcon-claude-hooks.sh` when a Jamf policy
+needs to repair the system endpoint, configure Falcon LogScale HEC forwarding,
+prepare `/var/log/beacon-agent/runtime.jsonl` for user-run hooks, reinstall
+Claude Code hooks for the interactive console user, and run a manual Claude hook
+smoke test in one step.
+
+`repair-falcon-claude-hooks.sh` Jamf script parameters:
+
+```text
+Parameter 4: Falcon LogScale HEC endpoint
+Parameter 5: Falcon LogScale HEC token
+Parameter 6: Falcon source, default beacon-endpoint-agent
+Parameter 7: Falcon sourcetype, default json
+Parameter 8: OTLP gRPC port, default 4317
+Parameter 9: OTLP HTTP port, default 4318
+Parameter 10: Falcon repository/index
+```
+
 ### Jamf Extension Attributes
 
 Upload scripts from `packaging/macos/jamf/extension-attributes` to inventory:
