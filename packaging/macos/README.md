@@ -316,8 +316,8 @@ Parameter 4: Falcon LogScale HEC endpoint
 Parameter 5: Falcon LogScale HEC token
 Parameter 6: Falcon source, default beacon-endpoint-agent
 Parameter 7: Falcon sourcetype, default json
-Parameter 8: OTLP gRPC port, default 5317
-Parameter 9: OTLP HTTP port, default 5318
+Parameter 8: OTLP gRPC port, default 4317
+Parameter 9: OTLP HTTP port, default 4318
 Parameter 10: Falcon repository/index
 ```
 

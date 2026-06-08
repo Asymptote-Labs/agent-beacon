@@ -12,8 +12,8 @@ FALCON_HEC_ENDPOINT="${4:-}"
 FALCON_HEC_TOKEN="${5:-}"
 FALCON_SOURCE="${6:-beacon-endpoint-agent}"
 FALCON_SOURCETYPE="${7:-json}"
-OTLP_GRPC_PORT="${8:-5317}"
-OTLP_HTTP_PORT="${9:-5318}"
+OTLP_GRPC_PORT="${8:-4317}"
+OTLP_HTTP_PORT="${9:-4318}"
 FALCON_INDEX="${10:-}"
 
 if [ ! -x "$BEACON_BIN" ]; then
@@ -69,7 +69,7 @@ if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" =
   echo "No interactive console user found; skipping Claude hook install." >&2
   "$BEACON_BIN" endpoint config validate --system
   "$BEACON_BIN" endpoint status --system --json
-  launchctl print system/com.beacon.endpoint.collector
+  launchctl print system/com.beacon.endpoint.collector || true
   exit 0
 fi
 
