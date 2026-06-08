@@ -34,6 +34,15 @@ type destinationCharCase struct {
 func destinationCharCases() []destinationCharCase {
 	return []destinationCharCase{
 		{
+			group:        "falcon",
+			installLabel: "CrowdStrike Falcon content pack written to ",
+			validateWant: []string{
+				"Expected Falcon fields: vendor=beacon product=endpoint-agent destination.type=falcon destination.mode=crowdstrike_hec",
+				`Expected validation query: source = "beacon-endpoint-agent" "Beacon endpoint Falcon validation event"`,
+				`Hook-only query: source = "beacon-endpoint-agent" "hook-only unique marker"`,
+			},
+		},
+		{
 			group:        "wazuh",
 			installLabel: "Wazuh content pack written to ",
 			validateWant: []string{

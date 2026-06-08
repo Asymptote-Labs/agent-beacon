@@ -22,6 +22,12 @@ if command -v launchctl >/dev/null 2>&1; then
   launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.collector.plist >/dev/null 2>&1 || {
     launchctl print system/com.beacon.endpoint.collector >/dev/null 2>&1 || exit 1
   }
+  if [ -f /Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist ]; then
+    launchctl bootout system/com.beacon.endpoint.falcon-forwarder >/dev/null 2>&1 || true
+    launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist >/dev/null 2>&1 || {
+      launchctl print system/com.beacon.endpoint.falcon-forwarder >/dev/null 2>&1 || exit 1
+    }
+  fi
 fi
 
 exit 0

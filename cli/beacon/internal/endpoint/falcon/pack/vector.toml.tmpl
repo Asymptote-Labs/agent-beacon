@@ -1,0 +1,60 @@
+# Beacon Endpoint Agent -> CrowdStrike Falcon HEC
+#
+# Run Vector as a managed host agent. Keep the CrowdStrike endpoint and token in
+# the Vector service environment or MDM secret tooling, not in Beacon endpoint
+# configuration.
+
+data_dir = "/Library/Application Support/Beacon/Forwarders/vector-data/falcon"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+read_from = "${BEACON_VECTOR_READ_FROM:-end}"
+
+[transforms.beacon_json]
+type = "remap"
+inputs = ["beacon_runtime"]
+source = '''
+event = parse_json!(.message)
+ts = parse_timestamp(event.timestamp, format: "%+") ?? now()
+event."@timestamp" = format_timestamp!(ts, format: "%+")
+
+payload = {
+  "time": to_unix_timestamp(ts),
+  "event": event,
+  "source": get_env_var("BEACON_FALCON_SOURCE") ?? "beacon-endpoint-agent",
+  "sourcetype": get_env_var("BEACON_FALCON_SOURCETYPE") ?? "json",
+}
+
+index = get_env_var("BEACON_FALCON_INDEX") ?? ""
+if index != "" {
+  payload.index = index
+}
+
+. = payload
+'''
+
+[sinks.falcon_hec]
+type = "http"
+inputs = ["beacon_json"]
+uri = "${BEACON_FALCON_HEC_ENDPOINT}"
+method = "post"
+
+[sinks.falcon_hec.encoding]
+codec = "json"
+
+[sinks.falcon_hec.framing]
+method = "newline_delimited"
+
+[sinks.falcon_hec.batch]
+max_events = 500
+timeout_secs = 5
+
+[sinks.falcon_hec.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300
+
+[sinks.falcon_hec.request.headers]
+Authorization = "Bearer ${BEACON_FALCON_HEC_TOKEN}"
+Content-Type = "text/plain; charset=utf-8"

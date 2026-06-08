@@ -265,3 +265,66 @@ case "$UNINSTALL_ARGS" in
     exit 1
     ;;
 esac
+
+FAKE_VECTOR="$TMP_DIR/vector"
+cat >"$FAKE_VECTOR" <<'STUB'
+#!/bin/sh
+case "$1" in
+  --version)
+    echo "vector 0.56.0"
+    ;;
+  *)
+    echo "unexpected vector args: $*" >&2
+    exit 1
+    ;;
+esac
+STUB
+chmod +x "$FAKE_VECTOR"
+
+FORWARDER_BASE="$TMP_DIR/forwarders"
+LAUNCHDAEMONS_DIR="$TMP_DIR/launchdaemons"
+mkdir -p "$LAUNCHDAEMONS_DIR"
+BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+BEACON_FALCON_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/run-falcon-forwarder.sh" \
+BEACON_FORWARDER_BASE_DIR="$FORWARDER_BASE" \
+BEACON_LAUNCHDAEMONS_DIR="$LAUNCHDAEMONS_DIR" \
+BEACON_NO_START="1" \
+"$ROOT_DIR/packaging/macos/jamf/scripts/install-falcon-vector-forwarder.sh" _ _ _ "https://falcon.example/services/collector" "falcon-token" "beacon-source" "json" "beacon-index" "$TMP_DIR/runtime.jsonl,/Users/*/.beacon/endpoint/logs/runtime.jsonl" "end" >/dev/null
+
+if [ ! -f "$FORWARDER_BASE/falcon-vector.toml" ]; then
+  echo "Falcon Vector config was not written" >&2
+  exit 1
+fi
+if [ ! -f "$FORWARDER_BASE/falcon-vector.env" ]; then
+  echo "Falcon Vector env was not written" >&2
+  exit 1
+fi
+if [ ! -f "$LAUNCHDAEMONS_DIR/com.beacon.endpoint.falcon-forwarder.plist" ]; then
+  echo "Falcon Vector plist was not written" >&2
+  exit 1
+fi
+if ! grep -q 'https://falcon.example/services/collector' "$FORWARDER_BASE/falcon-vector.env"; then
+  echo "Falcon Vector env missing endpoint" >&2
+  exit 1
+fi
+if grep -q 'falcon-token' "$FORWARDER_BASE/falcon-vector.toml"; then
+  echo "Falcon Vector config should not contain token" >&2
+  exit 1
+fi
+if ! grep -q 'sinks.falcon_hec' "$FORWARDER_BASE/falcon-vector.toml"; then
+  echo "Falcon Vector config missing sink" >&2
+  exit 1
+fi
+if ! grep -q 'RunAtLoad' "$LAUNCHDAEMONS_DIR/com.beacon.endpoint.falcon-forwarder.plist"; then
+  echo "Falcon Vector plist missing RunAtLoad" >&2
+  exit 1
+fi
+
+FALCON_VECTOR_STATE="$(BEACON_FORWARDER_BASE_DIR="$FORWARDER_BASE" BEACON_LAUNCHDAEMONS_DIR="$LAUNCHDAEMONS_DIR" "$ROOT_DIR/packaging/macos/jamf/extension-attributes/falcon-vector-forwarding-configured.sh")"
+case "$FALCON_VECTOR_STATE" in
+  "<result>configured</result>") ;;
+  *)
+    echo "unexpected Falcon Vector configured extension attribute result: $FALCON_VECTOR_STATE" >&2
+    exit 1
+    ;;
+esac
