@@ -132,6 +132,25 @@ credential-provider settings through the Vector service environment, host
 identity, MDM, or secret tooling. Keep AWS credentials, IAM roles, log group
 retention, and encryption outside Beacon endpoint configuration.
 
+For CrowdStrike Falcon, use Beacon as the local JSONL producer and deploy Vector
+to tail hook-written or OTLP-written `runtime.jsonl` events into the Falcon HEC
+connector. Generate Beacon's Falcon content pack for setup guidance, a Vector
+config, a direct HEC smoke test, sample events, and validation search guidance:
+
+```bash
+/opt/beacon/bin/beacon endpoint falcon install-pack --system --output ./beacon-falcon-pack
+/opt/beacon/bin/beacon endpoint falcon validate --system
+```
+
+For Jamf-managed hook-only Claude deployments, the Beacon package can include a
+Vector binary at `/opt/beacon/bin/vector` and run
+`/opt/beacon/jamf/scripts/install-falcon-vector-forwarder.sh`. Provide the exact
+CrowdStrike connector URL shown by Falcon, for example
+`https://<tenant>.ingest.<region>.crowdstrike.com/services/collector` for
+Next-Gen SIEM HEC connectors or `/api/v1/ingest/hec` for LogScale-style HEC
+endpoints. The script stores the token in a root-owned forwarder environment
+file and starts `com.beacon.endpoint.falcon-forwarder`.
+
 Environment variables take precedence, followed by MDM script parameters:
 
 ```text
@@ -321,6 +340,44 @@ Parameter 9: OTLP HTTP port, default 4318
 Parameter 10: Falcon repository/index
 ```
 
+Use `/opt/beacon/jamf/scripts/install-falcon-vector-forwarder.sh` when a Jamf
+policy should install only the Vector runtime-log forwarder. This is the
+recommended path when Claude events are produced by user-level hooks and the
+customer's managed Claude OTLP settings bypass Beacon's local collector.
+
+`install-falcon-vector-forwarder.sh` Jamf script parameters:
+
+```text
+Parameter 4: Falcon HEC endpoint, exact connector URL
+Parameter 5: Falcon HEC token
+Parameter 6: Falcon source, default beacon-endpoint-agent
+Parameter 7: Falcon sourcetype, default json
+Parameter 8: Falcon repository/index
+Parameter 9: Runtime log paths, default /var/log/beacon-agent/runtime.jsonl,/Users/*/.beacon/endpoint/logs/runtime.jsonl
+Parameter 10: Vector read_from, default end
+```
+
+Use `/opt/beacon/jamf/scripts/repair-falcon-claude-hooks-vector.sh` when one
+policy should repair Beacon, prepare `/var/log/beacon-agent/runtime.jsonl`,
+install Claude hooks for the console user, and install the Falcon Vector
+forwarder without relying on collector-based Falcon forwarding.
+
+The managed forwarder writes:
+
+```text
+/Library/Application Support/Beacon/Forwarders/falcon-vector.toml
+/Library/Application Support/Beacon/Forwarders/falcon-vector.env
+/Library/Application Support/Beacon/Forwarders/vector-data/falcon
+/Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist
+```
+
+Validate hook-only forwarding by generating a unique Claude prompt and searching
+Falcon for:
+
+```text
+source = "beacon-endpoint-agent" "hook-only unique marker"
+```
+
 ### Jamf Extension Attributes
 
 Upload scripts from `packaging/macos/jamf/extension-attributes` to inventory:
@@ -331,6 +388,8 @@ Upload scripts from `packaging/macos/jamf/extension-attributes` to inventory:
 - Configured harnesses
 - Runtime log writability
 - Splunk HEC forwarding state
+- Falcon Vector forwarder health
+- Falcon Vector forwarding configured state
 
 Suggested Smart Groups:
 

@@ -44,13 +44,15 @@ if [ -n "$FALCON_HEC_TOKEN" ]; then
   ARGS+=(--falcon-hec-token "$FALCON_HEC_TOKEN")
 fi
 
-ARGS+=(
-  --falcon-source "$FALCON_SOURCE"
-  --falcon-sourcetype "$FALCON_SOURCETYPE"
-)
-
 if [ -n "$FALCON_INDEX" ]; then
   ARGS+=(--falcon-index "$FALCON_INDEX")
+fi
+
+if [ -n "$FALCON_HEC_ENDPOINT" ] || [ -n "$FALCON_HEC_TOKEN" ] || [ -n "$FALCON_INDEX" ]; then
+  ARGS+=(
+    --falcon-source "$FALCON_SOURCE"
+    --falcon-sourcetype "$FALCON_SOURCETYPE"
+  )
 fi
 
 echo "Repairing Beacon system endpoint..."

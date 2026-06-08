@@ -1,0 +1,46 @@
+#!/bin/sh
+set -eu
+
+BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
+BEACON_FALCON_SOURCE="${BEACON_FALCON_SOURCE:-beacon-endpoint-agent}"
+BEACON_FALCON_SOURCETYPE="${BEACON_FALCON_SOURCETYPE:-json}"
+
+if [ -z "${BEACON_FALCON_HEC_ENDPOINT:-}" ]; then
+  echo "BEACON_FALCON_HEC_ENDPOINT is required" >&2
+  exit 1
+fi
+
+if [ -z "${BEACON_FALCON_HEC_TOKEN:-}" ]; then
+  echo "BEACON_FALCON_HEC_TOKEN is required" >&2
+  exit 1
+fi
+
+if [ ! -e "$BEACON_LOG" ]; then
+  echo "warning: Beacon runtime log does not exist yet: $BEACON_LOG" >&2
+fi
+
+payload="$(mktemp)"
+response="$(mktemp)"
+trap 'rm -f "$payload" "$response"' EXIT INT TERM
+
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$payload" <<EOF
+{"time":$(date +%s),"event":{"timestamp":"$now","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"telemetry.enabled","category":"telemetry"},"severity":"info","destination":{"type":"falcon","mode":"crowdstrike_hec","status":"configured"},"message":"Beacon endpoint Falcon smoke-test event","@timestamp":"$now"},"source":"$BEACON_FALCON_SOURCE","sourcetype":"$BEACON_FALCON_SOURCETYPE"}
+EOF
+
+status="$(curl -sS -o "$response" -w '%{http_code}' \
+  -X POST "$BEACON_FALCON_HEC_ENDPOINT" \
+  -H "Authorization: Bearer $BEACON_FALCON_HEC_TOKEN" \
+  -H "Content-Type: text/plain; charset=utf-8" \
+  --data-binary @"$payload")"
+
+echo "Falcon HEC status: $status"
+sed -n '1,10p' "$response"
+
+case "$status" in
+  2*) ;;
+  *)
+    echo "Falcon HEC smoke test failed" >&2
+    exit 1
+    ;;
+esac

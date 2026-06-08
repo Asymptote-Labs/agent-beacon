@@ -9,6 +9,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/datadog"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/elastic"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/falcon"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/gcs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/rapid7"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/s3"
@@ -73,6 +74,31 @@ type destValidate struct {
 // affect help or generated docs (cobra sorts commands), but is kept stable for
 // readability.
 var siemDestinations = []siemDestination{
+	{
+		name:  "falcon",
+		short: "Manage CrowdStrike Falcon forwarding content",
+		printConfig: &destPrintConfig{
+			short:  "Print a Vector config for CrowdStrike Falcon forwarding",
+			render: func(cfg endpointconfig.Config) (string, error) { return falcon.ConfigSnippet(cfg.LogPath) },
+		},
+		installPack: &destInstallPack{
+			short:            "Write CrowdStrike Falcon Vector forwarding content to a directory",
+			defaultOutputDir: falcon.DefaultOutputDir,
+			successLabel:     "CrowdStrike Falcon content pack written to ",
+			outputFlagHelp:   "Output directory for CrowdStrike Falcon content pack",
+			install:          falcon.InstallPack,
+		},
+		validate: &destValidate{
+			short:   "Write and describe a CrowdStrike Falcon validation event",
+			mode:    "crowdstrike_hec",
+			message: "Beacon endpoint Falcon validation event",
+			print: func(cfg endpointconfig.Config) {
+				fmt.Println("Expected Falcon fields: vendor=beacon product=endpoint-agent destination.type=falcon destination.mode=crowdstrike_hec")
+				fmt.Println(`Expected validation query: source = "beacon-endpoint-agent" "Beacon endpoint Falcon validation event"`)
+				fmt.Println(`Hook-only query: source = "beacon-endpoint-agent" "hook-only unique marker"`)
+			},
+		},
+	},
 	{
 		name:  "wazuh",
 		short: "Manage Wazuh integration content",

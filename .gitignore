@@ -41,6 +41,7 @@ cli/beacon-hooks/*.exe
 !cli/beacon/internal/endpoint/cloudwatch/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/gcs/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/sentinel/pack/sample-event.jsonl
+!cli/beacon/internal/endpoint/falcon/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/gcs/pack/sample-event.jsonl
 *.log
 

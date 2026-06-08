@@ -13,6 +13,7 @@ PKG_NAME="${PKG_NAME:-BeaconEndpointAgent}"
 BEACON_BIN="${BEACON_BIN:-$ROOT_DIR/cli/beacon/beacon}"
 COLLECTOR_TARGET="${BEACON_COLLECTOR_TARGET:-$(go env GOOS)_$(go env GOARCH)}"
 COLLECTOR_BIN="${BEACON_COLLECTOR:-$ROOT_DIR/collector-builder/dist/beacon-otelcol/$COLLECTOR_TARGET/beacon-otelcol}"
+VECTOR_BIN="${BEACON_VECTOR_BIN:-${VECTOR_BIN:-}}"
 PKG_ROOT="$WORK_DIR/pkgroot"
 PKG_SCRIPTS="$WORK_DIR/scripts"
 PKG_PATH="$OUT_DIR/$PKG_NAME-$VERSION.pkg"
@@ -43,8 +44,17 @@ copy_file "$BEACON_BIN" "$PKG_ROOT/opt/beacon/bin/beacon"
 copy_file "$COLLECTOR_BIN" "$PKG_ROOT/opt/beacon/bin/beacon-otelcol"
 copy_file "$ROOT_DIR/packaging/macos/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh"
 copy_file "$ROOT_DIR/packaging/macos/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
+copy_file "$ROOT_DIR/packaging/macos/run-falcon-forwarder.sh" "$PKG_ROOT/opt/beacon/scripts/run-falcon-forwarder.sh"
 copy_file "$ROOT_DIR/packaging/macos/scripts/postinstall" "$PKG_SCRIPTS/postinstall"
 copy_file "$ROOT_DIR/packaging/macos/scripts/preinstall" "$PKG_SCRIPTS/preinstall"
+
+if [ -n "$VECTOR_BIN" ]; then
+  if [ ! -x "$VECTOR_BIN" ]; then
+    echo "Vector binary not found or not executable: $VECTOR_BIN" >&2
+    exit 1
+  fi
+  copy_file "$VECTOR_BIN" "$PKG_ROOT/opt/beacon/bin/vector"
+fi
 
 if command -v ditto >/dev/null 2>&1; then
   ditto --norsrc --noextattr --noqtn "$ROOT_DIR/packaging/macos/jamf" "$PKG_ROOT/opt/beacon/jamf"
@@ -66,13 +76,16 @@ fi
 find "$PKG_ROOT" -name '._*' -delete
 
 chmod 755 "$PKG_ROOT/opt/beacon/bin/beacon" "$PKG_ROOT/opt/beacon/bin/beacon-otelcol"
-chmod 755 "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
+if [ -n "$VECTOR_BIN" ]; then
+  chmod 755 "$PKG_ROOT/opt/beacon/bin/vector"
+fi
+chmod 755 "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/run-falcon-forwarder.sh"
 find "$PKG_ROOT/opt/beacon/jamf" -type f -name '*.sh' -exec chmod 755 {} \;
 find "$PKG_ROOT/opt/beacon/fleet" -type f -name '*.sh' -exec chmod 755 {} \;
 chmod 755 "$PKG_SCRIPTS/postinstall" "$PKG_SCRIPTS/preinstall"
 find "$PKG_ROOT" -name '._*' -delete
 if command -v xattr >/dev/null 2>&1; then
-  xattr -cr "$PKG_ROOT" "$PKG_SCRIPTS" 2>/dev/null || true
+  find "$PKG_ROOT" "$PKG_SCRIPTS" -exec xattr -c {} \; 2>/dev/null || true
 fi
 if command -v dot_clean >/dev/null 2>&1; then
   dot_clean -m "$PKG_ROOT" "$PKG_SCRIPTS" 2>/dev/null || true
