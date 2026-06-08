@@ -63,6 +63,13 @@ func TestDefaultConfigUsesBoundedRotation(t *testing.T) {
 	}
 }
 
+func TestIntAttrRejectsOutOfRangeString(t *testing.T) {
+	attrs := map[string]interface{}{"value": "9223372036854775808"}
+	if got, ok := intAttr(attrs, "value"); ok {
+		t.Fatalf("intAttr() = %d, true; want false for out-of-range value", got)
+	}
+}
+
 func TestNewExporterNormalizesRotationDefaults(t *testing.T) {
 	cfg := &Config{
 		Path:           filepath.Join(t.TempDir(), "runtime.jsonl"),
@@ -299,6 +306,34 @@ func TestEventFromLogKeepsTypedPrompt(t *testing.T) {
 	}
 }
 
+func TestEventFromLogDoesNotPromoteEmptyGenAIToolArgumentsToTool(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	rec := plog.NewLogs().ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Body().SetStr("chat gpt-4o")
+	rec.Attributes().PutStr("service.name", "openai")
+	rec.Attributes().PutStr("gen_ai.operation.name", "chat")
+	rec.Attributes().PutStr("gen_ai.input.messages", `[{"content":"hello"}]`)
+	rec.Attributes().PutEmptyMap("gen_ai.tool.call.arguments")
+	rec.Attributes().PutStr("gen_ai.tool.call.id", "{}")
+	rec.Attributes().PutStr("gen_ai.request.model", "gpt-4o")
+
+	event := exp.eventFromLog(nil, rec)
+	if event.Event.Action != "prompt.submitted" {
+		t.Fatalf("action = %q, want prompt.submitted", event.Event.Action)
+	}
+	if event.Tool != nil {
+		t.Fatalf("empty structured tool arguments should not create top-level tool: %#v", event.Tool)
+	}
+}
+
 func TestConsumeLogsMapsOTelGenAIAttributes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
@@ -439,6 +474,9 @@ func TestEventFromLogMapsOTelMCPAttributes(t *testing.T) {
 	event := exp.eventFromLog(nil, rec)
 	if event.Event.Action != "file.read" || event.Event.Category != "file" {
 		t.Fatalf("MCP resource action/category = %#v, want file.read/file", event.Event)
+	}
+	if event.File == nil || event.File.Path != "/tmp/report.md" || event.File.Operation != "read" {
+		t.Fatalf("MCP resource file mapping missing: %#v", event.File)
 	}
 	if event.MCP == nil || event.MCP.Method == nil || event.MCP.Method.Name != "resources/read" || event.MCP.Protocol == nil || event.MCP.Protocol.Version != "2025-06-18" {
 		t.Fatalf("MCP method/protocol missing: %#v", event.MCP)
@@ -829,6 +867,86 @@ func TestInferActionMapsCodexOpAttributeToPrompt(t *testing.T) {
 	}
 	if got := inferAction(attrs, "op.dispatch"); got != "prompt.submitted" {
 		t.Fatalf("inferAction() = %q, want prompt.submitted", got)
+	}
+}
+
+func TestInferActionMapsGenAIChatWithEmptyToolArgumentsToPrompt(t *testing.T) {
+	attrs := map[string]interface{}{
+		"gen_ai.operation.name":      "chat",
+		"gen_ai.input.messages":      []interface{}{map[string]interface{}{"content": "hello"}},
+		"gen_ai.tool.call.arguments": map[string]interface{}{},
+		"gen_ai.tool.call.id":        "{}",
+		"gen_ai.request.model":       "gpt-4o",
+		"service.name":               "openai",
+	}
+	if got := inferAction(attrs, "chat gpt-4o"); got != "prompt.submitted" {
+		t.Fatalf("inferAction() = %q, want prompt.submitted", got)
+	}
+}
+
+func TestInferActionDoesNotMapEmptyGenAIInputMessagesToPrompt(t *testing.T) {
+	cases := map[string]interface{}{
+		"empty map":          map[string]interface{}{},
+		"empty array":        []interface{}{},
+		"json empty map":     "{}",
+		"json empty array":   "[]",
+		"null string":        "null",
+		"nil placeholder":    "<nil>",
+		"blank content":      []interface{}{map[string]interface{}{"content": "   "}},
+		"non-text content":   []interface{}{map[string]interface{}{"content": false}},
+		"empty nested parts": []interface{}{map[string]interface{}{"parts": []interface{}{map[string]interface{}{"content": "\t"}}}},
+	}
+
+	for name, messages := range cases {
+		t.Run(name, func(t *testing.T) {
+			attrs := map[string]interface{}{
+				"gen_ai.operation.name": "chat",
+				"gen_ai.input.messages": messages,
+				"gen_ai.request.model":  "gpt-4o",
+				"service.name":          "openai",
+			}
+			if got := inferAction(attrs, "chat gpt-4o"); got == "prompt.submitted" {
+				t.Fatalf("inferAction() = %q, want non-prompt action", got)
+			}
+		})
+	}
+}
+
+func TestInferActionDoesNotMapEmptyGenAIPromptToPrompt(t *testing.T) {
+	for _, prompt := range []interface{}{"{}", "[]", "null", "<nil>", map[string]interface{}{}, []interface{}{}} {
+		attrs := map[string]interface{}{
+			"gen_ai.operation.name": "chat",
+			"gen_ai.prompt":         prompt,
+			"gen_ai.request.model":  "gpt-4o",
+			"service.name":          "openai",
+		}
+		if got := inferAction(attrs, "chat gpt-4o"); got == "prompt.submitted" {
+			t.Fatalf("inferAction(%#v) = %q, want non-prompt action", prompt, got)
+		}
+	}
+}
+
+func TestInferActionMapsGenAIGenerateContentWithStructuredToolArgumentsToPrompt(t *testing.T) {
+	attrs := map[string]interface{}{
+		"gen_ai.operation.name":      "generate_content",
+		"gen_ai.prompt":              "summarize this file",
+		"gen_ai.tool.call.arguments": map[string]interface{}{"path": "README.md"},
+		"gen_ai.request.model":       "gemini-2.5-pro",
+		"service.name":               "genai-client",
+	}
+	if got := inferAction(attrs, "generate_content"); got != "prompt.submitted" {
+		t.Fatalf("inferAction() = %q, want prompt.submitted", got)
+	}
+}
+
+func TestInferActionMapsMeaningfulToolCallArgumentsToTool(t *testing.T) {
+	attrs := map[string]interface{}{
+		"gen_ai.tool.call.arguments": map[string]interface{}{"path": "README.md"},
+		"gen_ai.request.model":       "gpt-4o",
+		"service.name":               "openai",
+	}
+	if got := inferAction(attrs, "tool call"); got != "tool.invoked" {
+		t.Fatalf("inferAction() = %q, want tool.invoked", got)
 	}
 }
 

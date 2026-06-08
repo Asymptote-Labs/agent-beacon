@@ -405,17 +405,25 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 			WorkingDirectory: FirstString(attrs, "cwd", "working_directory", "process.command_args.cwd", "workspace"),
 		}
 	}
-	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || FirstString(attrs, "tool.command", "command", "function_args", "gen_ai.tool.call.arguments") != "" {
+	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || ToolCommandString(attrs) != "" {
 		event.Tool = &ToolInfo{
 			Name:    name,
-			Command: FirstString(attrs, "tool.command", "command", "process.command_line", "function_args", "gen_ai.tool.call.arguments"),
+			Command: FirstNonEmpty(ToolCommandString(attrs), FirstString(attrs, "process.command_line")),
 			Path:    FirstString(attrs, "tool.path", "file.path", "file_path"),
 		}
 	}
-	if path := FirstString(attrs, "file.path", "file_path", "code.filepath"); path != "" {
+	path := FirstString(attrs, "file.path", "file_path", "code.filepath")
+	operation := FirstString(attrs, "file.operation", "operation")
+	if path == "" {
+		path = FilePathFromURI(FirstString(attrs, "mcp.resource.uri"))
+		if path != "" && operation == "" && event.Event.Action == "file.read" {
+			operation = "read"
+		}
+	}
+	if path != "" {
 		event.File = &FileInfo{
 			Path:      path,
-			Operation: FirstString(attrs, "file.operation", "operation"),
+			Operation: operation,
 			Language:  FirstString(attrs, "code.language", "language"),
 		}
 	}
@@ -439,7 +447,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 		}
 	}
 	if event.Event.Category == "prompt" {
-		if text := FirstNonEmpty(FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request"), FirstMessageText(event.GenAI)); text != "" {
+		if text := FirstNonEmpty(FirstTextAttr(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request"), FirstMessageText(event.GenAI)); text != "" {
 			event.Prompt = &PromptInfo{Text: text}
 		}
 	}
@@ -729,6 +737,37 @@ func FirstString(attrs map[string]interface{}, keys ...string) string {
 	return ""
 }
 
+func ToolCommandString(attrs map[string]interface{}) string {
+	if command := FirstString(attrs, "tool.command", "command", "function_args"); command != "" {
+		return command
+	}
+	return FirstStringAttr(attrs, "gen_ai.tool.call.arguments")
+}
+
+func FirstStringAttr(attrs map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := attrs[key]; ok {
+			if str, ok := value.(string); ok {
+				if trimmed := strings.TrimSpace(str); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func FirstTextAttr(attrs map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := attrs[key]; ok {
+			if text := firstTextFromAny(value); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
 func HasAttr(attrs map[string]interface{}, key string) bool {
 	_, ok := attrs[key]
 	return ok
@@ -744,16 +783,36 @@ func FirstNonEmpty(values ...string) string {
 }
 
 func IntAttr(attrs map[string]interface{}, keys ...string) (int, bool) {
-	value, ok := Int64Attr(attrs, keys...)
-	if !ok {
-		return 0, false
+	for _, key := range keys {
+		switch typed := attrs[key].(type) {
+		case int:
+			return typed, true
+		case int64:
+			if !FitsInInt(typed) {
+				continue
+			}
+			return int(typed), true
+		case float64:
+			value := int64(typed)
+			if !FitsInInt(value) {
+				continue
+			}
+			return int(value), true
+		case string:
+			value, err := strconv.Atoi(strings.TrimSpace(typed))
+			if err == nil {
+				return value, true
+			}
+		}
 	}
-	maxInt := int64(^uint(0) >> 1)
-	minInt := -maxInt - 1
-	if value < minInt || value > maxInt {
-		return 0, false
+	return 0, false
+}
+
+func FitsInInt(value int64) bool {
+	if strconv.IntSize == 32 {
+		return value >= -1<<31 && value <= 1<<31-1
 	}
-	return int(value), true
+	return true
 }
 
 func Int64Attr(attrs map[string]interface{}, keys ...string) (int64, bool) {
@@ -937,7 +996,7 @@ func FirstMessageText(genai *GenAIInfo) string {
 func firstTextFromAny(value interface{}) string {
 	switch typed := value.(type) {
 	case string:
-		return typed
+		return meaningfulText(typed)
 	case []interface{}:
 		for _, item := range typed {
 			if text := firstTextFromAny(item); text != "" {
@@ -946,7 +1005,9 @@ func firstTextFromAny(value interface{}) string {
 		}
 	case map[string]interface{}:
 		if content, ok := typed["content"]; ok {
-			return strings.TrimSpace(fmt.Sprint(content))
+			if text := firstTextFromAny(content); text != "" {
+				return text
+			}
 		}
 		if parts, ok := typed["parts"]; ok {
 			return firstTextFromAny(parts)
@@ -956,6 +1017,16 @@ func firstTextFromAny(value interface{}) string {
 		}
 	}
 	return ""
+}
+
+func meaningfulText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch strings.ToLower(trimmed) {
+	case "", "<nil>", "{}", "[]", "null":
+		return ""
+	default:
+		return trimmed
+	}
 }
 
 func IsZeroJSON(value interface{}) bool {
@@ -1060,10 +1131,12 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 		return "mcp.tool_invoked"
 	case mcpMethod == "resources/read" && IsFileURI(FirstString(attrs, "mcp.resource.uri")):
 		return "file.read"
-	case operation == "execute_tool" || FirstString(attrs, "gen_ai.tool.call.id", "gen_ai.tool.call.arguments") != "":
+	case operation == "execute_tool":
 		return "tool.invoked"
 	case (operation == "chat" || operation == "generate_content" || operation == "text_completion") && HasPromptLikeContent(attrs):
 		return "prompt.submitted"
+	case HasToolCall(attrs):
+		return "tool.invoked"
 	case strings.Contains(text, "gemini_cli.user_prompt"):
 		return "prompt.submitted"
 	case strings.Contains(text, "gemini_cli.tool_call"):
@@ -1087,13 +1160,56 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 	}
 }
 
+func HasToolCall(attrs map[string]interface{}) bool {
+	if IsMeaningfulValue(attrs["gen_ai.tool.call.id"]) {
+		return true
+	}
+	return IsMeaningfulValue(attrs["gen_ai.tool.call.arguments"])
+}
+
+func IsMeaningfulValue(value interface{}) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		return trimmed != "" && trimmed != "<nil>" && trimmed != "{}" && trimmed != "[]" && trimmed != "null"
+	case map[string]interface{}:
+		for _, item := range typed {
+			if IsMeaningfulValue(item) {
+				return true
+			}
+		}
+		return false
+	case []interface{}:
+		for _, item := range typed {
+			if IsMeaningfulValue(item) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
+}
+
 func IsFileURI(value string) bool {
+	return FilePathFromURI(value) != ""
+}
+
+func FilePathFromURI(value string) string {
 	parsed, err := url.Parse(value)
-	return err == nil && parsed.Scheme == "file"
+	if err != nil || parsed.Scheme != "file" {
+		return ""
+	}
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		return "//" + parsed.Host + parsed.Path
+	}
+	return parsed.Path
 }
 
 func HasPromptLikeContent(attrs map[string]interface{}) bool {
-	if FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request") != "" {
+	if FirstTextAttr(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request") != "" {
 		return true
 	}
 	if v, ok := AnyAttr(attrs, "gen_ai.input.messages"); ok && firstTextFromAny(v) != "" {
