@@ -1096,7 +1096,7 @@ func HasPromptLikeContent(attrs map[string]interface{}) bool {
 	if FirstString(attrs, "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request") != "" {
 		return true
 	}
-	if _, ok := AnyAttr(attrs, "gen_ai.input.messages"); ok {
+	if v, ok := AnyAttr(attrs, "gen_ai.input.messages"); ok && firstTextFromAny(v) != "" {
 		return true
 	}
 	return len(LegacyMessages(attrs, "gen_ai.prompt.", "user")) > 0
