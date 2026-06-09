@@ -161,7 +161,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        log_dir="${RUNNER_TEMP:-$(mktemp -d)}/beacon"
+        log_dir="${BEACON_CI_BASE_DIR:-${RUNNER_TEMP:-$(mktemp -d)}/beacon}"
         mkdir -p "${log_dir}"
         echo "base-dir=${log_dir}" >> "$GITHUB_OUTPUT"
         echo "log-path=${log_dir}/runtime.jsonl" >> "$GITHUB_OUTPUT"

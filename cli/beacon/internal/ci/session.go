@@ -305,7 +305,21 @@ func (s *Session) StopDetached(ctx context.Context) error {
 		return err
 	}
 	if runtime.GOOS == "windows" {
-		return nil
+		done := make(chan error, 1)
+		go func() {
+			_, err := process.Wait()
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err != nil && !isExpectedStopError(err) {
+				return err
+			}
+			return nil
+		case <-ctx.Done():
+			_ = process.Kill()
+			return ctx.Err()
+		}
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()

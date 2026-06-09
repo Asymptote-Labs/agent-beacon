@@ -306,7 +306,7 @@ func uploadTargets(results []beaconci.UploadResult) string {
 	return strings.Join(targets, ",")
 }
 
-func writeGitHubEnv(path string, values map[string]string) error {
+func writeGitHubEnv(path string, values map[string]string) (err error) {
 	if strings.TrimSpace(path) == "" {
 		path = os.Getenv("GITHUB_ENV")
 	}
@@ -317,7 +317,11 @@ func writeGitHubEnv(path string, values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 	for key, value := range values {
 		if strings.TrimSpace(key) == "" {
 			continue
