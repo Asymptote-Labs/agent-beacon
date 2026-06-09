@@ -1,13 +1,13 @@
 {
-  "name": "@asymptote-labs/observe",
+  "name": "@asymptote/sdk",
   "version": "0.0.0",
-  "description": "Asymptote Observe TypeScript SDK for Beacon-compatible agent telemetry",
+  "description": "Asymptote TypeScript SDK for Observe agent telemetry",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/asymptote-labs/agent-beacon.git",
-    "directory": "packages/asymptote-observe-js"
+    "directory": "packages/asymptote-sdk-js"
   },
   "keywords": [
     "asymptote",

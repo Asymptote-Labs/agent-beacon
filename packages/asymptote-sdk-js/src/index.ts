@@ -47,10 +47,10 @@ export * from "./constants.js";
 
 const DEFAULT_HOSTED_BASE_URL = "https://api.asymptotelabs.ai";
 const DEFAULT_OBSERVE_PATH = "/v1/observe";
-const DEFAULT_TRACER_NAME = "asymptote-observe";
-const DEFAULT_SERVICE_NAME = "asymptote-observe-app";
+const DEFAULT_TRACER_NAME = "asymptote-sdk";
+const DEFAULT_SERVICE_NAME = "asymptote-app";
 const SDK_VERSION = readSDKVersion();
-const CLAUDE_AGENT_QUERY_WRAPPED = Symbol.for("@asymptote-labs/observe.claude-agent-query-wrapped");
+const CLAUDE_AGENT_QUERY_WRAPPED = Symbol.for("@asymptote/sdk.claude-agent-query-wrapped");
 
 export type ExportMode = "hosted" | "otlp" | "custom";
 
@@ -119,7 +119,7 @@ type ClaudeAgentQueryFunction<T extends (...args: any[]) => any = (...args: any[
 
 let state: SDKState | undefined;
 
-export class AsymptoteObserve {
+export class Observe {
   static initialize(options: InitializeOptions = {}): void {
     initialize(options);
   }
@@ -191,7 +191,7 @@ export function initialize(options: InitializeOptions = {}): void {
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME,
-      "telemetry.sdk.name": "asymptote-observe-js",
+      "telemetry.sdk.name": "asymptote-sdk-js",
       "telemetry.sdk.version": SDK_VERSION,
       [ATTR_BEACON_ORIGIN]: "cloud",
       [ATTR_BEACON_HARNESS_NAME]: "asymptote_observe",
@@ -252,7 +252,7 @@ export function observe<T extends (...args: any[]) => any>(options: ObserveOptio
 
 export function patch(modules: InstrumentModules): void {
   if (!modules || Object.keys(modules).length === 0) {
-    throw new Error("AsymptoteObserve.patch requires at least one module");
+    throw new Error("Observe.patch requires at least one module");
   }
   patchOpenLLMetryModules(modules);
   patchClaudeAgentSDK(modules.claudeAgentSDK ?? modules.claudeAgentSdk);
@@ -345,14 +345,14 @@ export function isInitialized(): boolean {
 }
 
 export function resolveExporterConfig(options: InitializeOptions = {}): ResolvedExporterConfig {
-  const explicitEndpoint = options.otlpEndpoint ?? process.env.ASYMPTOTE_OBSERVE_ENDPOINT ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-  const apiKey = options.apiKey ?? process.env.ASYMPTOTE_OBSERVE_API_KEY;
-  const baseUrl = options.baseUrl ?? process.env.ASYMPTOTE_OBSERVE_BASE_URL ?? DEFAULT_HOSTED_BASE_URL;
+  const explicitEndpoint = options.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const apiKey = options.apiKey ?? process.env.ASYMPTOTE_API_KEY;
+  const baseUrl = options.baseUrl ?? process.env.ASYMPTOTE_BASE_URL ?? DEFAULT_HOSTED_BASE_URL;
   const skipDefault = !!(options.disableDefaultExporter || options.spanExporter);
   const mode: ExportMode = skipDefault ? "custom" : explicitEndpoint ? "otlp" : apiKey ? "hosted" : "custom";
 
   if (mode === "custom" && !skipDefault && !explicitEndpoint) {
-    throw new Error("Asymptote Observe requires ASYMPTOTE_OBSERVE_API_KEY for hosted ingest or OTEL_EXPORTER_OTLP_ENDPOINT for explicit OTLP export");
+    throw new Error("Asymptote SDK requires ASYMPTOTE_API_KEY for hosted ingest or OTEL_EXPORTER_OTLP_ENDPOINT for explicit OTLP export");
   }
 
   const observeUrl = skipDefault ? undefined : explicitEndpoint ? observeURL(explicitEndpoint) : observeURL(baseUrl);

@@ -9,7 +9,7 @@ Beacon Endpoint Agent is a local-only endpoint telemetry agent for AI runtimes. 
 - `cli/beacon`: public `beacon` CLI and endpoint runtime.
 - `cli/beacon-hooks`: hook adapter invoked by Cursor and other supported runtimes.
 - `collector-builder`: OpenTelemetry Collector distribution and Beacon JSONL exporter.
-- `packages/asymptote-observe-js`: TypeScript SDK for cloud agent telemetry that exports Beacon-compatible OpenTelemetry spans.
+- `packages/asymptote-sdk-js`: TypeScript SDK for cloud agent telemetry that exports Beacon-compatible OpenTelemetry spans.
 - `packaging`: macOS packaging and deployment assets.
 
 Do not recreate or depend on removed `asymptote` mirror trees. Keep new work focused on the Beacon paths above.
@@ -88,7 +88,7 @@ go test ./...
 Run TypeScript SDK checks:
 
 ```bash
-cd packages/asymptote-observe-js
+cd packages/asymptote-sdk-js
 npm test
 npm run check
 npm run build
@@ -129,7 +129,7 @@ Run the release gates before publishing:
 cd cli/beacon && go test ./...
 cd ../beacon-hooks && go test ./...
 cd ../../collector-builder/exporter/beaconjsonexporter && go test ./...
-cd ../../../packages/asymptote-observe-js && npm test && npm run check && npm run build && npm run pack:dry-run
+cd ../../../packages/asymptote-sdk-js && npm test && npm run check && npm run build && npm run pack:dry-run
 cd ../..
 sh packaging/macos/test-endpoint-scripts.sh
 ```

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - observe-js-v*
+      - sdk-js-v*
 
 permissions:
   contents: read
@@ -20,22 +20,22 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
-          cache-dependency-path: packages/asymptote-observe-js/package-lock.json
+          cache-dependency-path: packages/asymptote-sdk-js/package-lock.json
       - name: Install SDK dependencies
-        working-directory: packages/asymptote-observe-js
+        working-directory: packages/asymptote-sdk-js
         run: npm ci
       - name: Test SDK
-        working-directory: packages/asymptote-observe-js
+        working-directory: packages/asymptote-sdk-js
         run: npm test
       - name: Type-check SDK
-        working-directory: packages/asymptote-observe-js
+        working-directory: packages/asymptote-sdk-js
         run: npm run check
       - name: Build SDK
-        working-directory: packages/asymptote-observe-js
+        working-directory: packages/asymptote-sdk-js
         run: npm run build
       - name: Smoke install SDK package
-        working-directory: packages/asymptote-observe-js
+        working-directory: packages/asymptote-sdk-js
         run: npm run pack:smoke
       - name: Publish SDK to npm
-        working-directory: packages/asymptote-observe-js
+        working-directory: packages/asymptote-sdk-js
         run: npm publish --access public --provenance

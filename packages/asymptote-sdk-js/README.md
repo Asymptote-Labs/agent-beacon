@@ -1,20 +1,21 @@
-# Asymptote Observe TypeScript SDK
+# Asymptote TypeScript SDK
 
-Asymptote Observe instruments cloud-hosted agent apps and exports OpenTelemetry
-spans that remain compatible with Beacon's normalized JSONL event schema.
+The Asymptote SDK instruments cloud-hosted agent apps through the `Observe`
+module and exports OpenTelemetry spans that remain compatible with Beacon's
+normalized JSONL event schema.
 
 ## Hosted Asymptote Observe
 
 ```bash
-npm install @asymptote-labs/observe
-export ASYMPTOTE_OBSERVE_API_KEY=...
+npm install @asymptote/sdk
+export ASYMPTOTE_API_KEY=...
 ```
 
 ```typescript
-import { AsymptoteObserve } from "@asymptote-labs/observe";
+import { Observe } from "@asymptote/sdk";
 
-AsymptoteObserve.initialize({
-  apiKey: process.env.ASYMPTOTE_OBSERVE_API_KEY,
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
 });
 ```
 
@@ -23,8 +24,8 @@ Hosted Observe contract:
 - Transport: OpenTelemetry over HTTP.
 - Default base URL: `https://api.asymptotelabs.ai`.
 - Observe path: `/v1/observe` is appended when the endpoint does not already include it.
-- Auth: `authorization: Bearer <ASYMPTOTE_OBSERVE_API_KEY>`.
-- Override base URL with `ASYMPTOTE_OBSERVE_BASE_URL` or `initialize({ baseUrl })`.
+- Auth: `authorization: Bearer <ASYMPTOTE_API_KEY>`.
+- Override base URL with `ASYMPTOTE_BASE_URL` or `initialize({ baseUrl })`.
 
 The TypeScript SDK preserves this hosted contract, but this repository does not
 implement the managed ingest service. Use `baseUrl` with a local stub in tests.
@@ -32,10 +33,10 @@ implement the managed ingest service. Use `baseUrl` with a local stub in tests.
 ## Local Or Customer-Managed Observe Export
 
 ```typescript
-import { AsymptoteObserve } from "@asymptote-labs/observe";
+import { Observe } from "@asymptote/sdk";
 
-AsymptoteObserve.initialize({
-  otlpEndpoint: process.env.ASYMPTOTE_OBSERVE_ENDPOINT,
+Observe.initialize({
+  otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });
 ```
 
@@ -46,9 +47,8 @@ attributes documented in `docs/asymptote-observe-sdk.md`.
 Endpoint precedence:
 
 1. `initialize({ otlpEndpoint })`
-2. `ASYMPTOTE_OBSERVE_ENDPOINT`
-3. `OTEL_EXPORTER_OTLP_ENDPOINT`
-4. hosted `baseUrl` when an API key is present
+2. `OTEL_EXPORTER_OTLP_ENDPOINT`
+3. hosted `baseUrl` when an API key is present
 
 Beacon endpoint installs remain local-first and never require hosted credentials.
 
@@ -59,10 +59,10 @@ as early as possible, then use existing OpenLLMetry instrumentations for common
 provider SDKs.
 
 ```typescript
-import { AsymptoteObserve } from "@asymptote-labs/observe";
+import { Observe } from "@asymptote/sdk";
 
-AsymptoteObserve.initialize({
-  apiKey: process.env.ASYMPTOTE_OBSERVE_API_KEY,
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
 });
 ```
 
@@ -70,8 +70,8 @@ By default the SDK enables OpenAI and Anthropic OpenLLMetry instrumentations.
 Disable or configure them if needed:
 
 ```typescript
-AsymptoteObserve.initialize({
-  apiKey: process.env.ASYMPTOTE_OBSERVE_API_KEY,
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
   instrumentationOptions: {
     openAI: { traceContent: true },
     anthropic: false,
@@ -80,7 +80,7 @@ AsymptoteObserve.initialize({
 ```
 
 If your app already owns OpenTelemetry setup, use
-`AsymptoteObserve.instrumentations()` with that provider instead of calling
+`Observe.instrumentations()` with that provider instead of calling
 `initialize()` twice.
 
 ## Vercel AI SDK
@@ -88,12 +88,12 @@ If your app already owns OpenTelemetry setup, use
 ```typescript
 import { registerTelemetry } from "ai";
 import { OpenTelemetry } from "@ai-sdk/otel";
-import { AsymptoteObserve } from "@asymptote-labs/observe";
+import { Observe } from "@asymptote/sdk";
 
-AsymptoteObserve.initialize();
+Observe.initialize();
 
 registerTelemetry(new OpenTelemetry({
-  tracer: AsymptoteObserve.getTracer(),
+  tracer: Observe.getTracer(),
 }));
 ```
 
@@ -101,11 +101,11 @@ registerTelemetry(new OpenTelemetry({
 
 ```typescript
 import { query as originalQuery } from "@anthropic-ai/claude-agent-sdk";
-import { AsymptoteObserve } from "@asymptote-labs/observe";
+import { Observe } from "@asymptote/sdk";
 
-AsymptoteObserve.initialize();
+Observe.initialize();
 
-const query = AsymptoteObserve.wrapClaudeAgentQuery(originalQuery);
+const query = Observe.wrapClaudeAgentQuery(originalQuery);
 ```
 
 For the first SDK release, prefer provider-level Anthropic/OpenLLMetry
@@ -115,7 +115,7 @@ SDK hooks are deferred until those paths leave important telemetry gaps.
 ## Custom Agent Steps
 
 ```typescript
-const plan = AsymptoteObserve.observe(
+const plan = Observe.observe(
   {
     name: "agent.plan",
     attributes: {
@@ -129,14 +129,14 @@ const plan = AsymptoteObserve.observe(
 );
 ```
 
-Call `AsymptoteObserve.flush()` before short-lived scripts exit, or
-`AsymptoteObserve.shutdown()` when the process owns the provider lifecycle.
+Call `Observe.flush()` before short-lived scripts exit, or
+`Observe.shutdown()` when the process owns the provider lifecycle.
 
 ## Beta Support Matrix
 
 - OpenAI SDK: OpenLLMetry instrumentation enabled by default.
 - Anthropic SDK: OpenLLMetry instrumentation enabled by default.
-- Vercel AI SDK: register `@ai-sdk/otel` with `AsymptoteObserve.getTracer()`.
+- Vercel AI SDK: register `@ai-sdk/otel` with `Observe.getTracer()`.
 - Claude Agent SDK: wrap query functions with `wrapClaudeAgentQuery()` or use `observe()`.
 - Custom orchestration: wrap functions with `observe()`.
 - Custom Claude hook and OpenAI Agents tracing adapters are intentionally deferred.

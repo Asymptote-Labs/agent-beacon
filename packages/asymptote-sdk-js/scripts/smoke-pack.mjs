@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const tempRoot = mkdtempSync(join(tmpdir(), "asymptote-observe-pack-"));
+const tempRoot = mkdtempSync(join(tmpdir(), "asymptote-sdk-pack-"));
 let tarballPath;
 
 try {
@@ -35,7 +35,7 @@ try {
     [
       "--input-type=module",
       "--eval",
-      "import { AsymptoteObserve, observe } from '@asymptote-labs/observe'; if (typeof AsymptoteObserve.initialize !== 'function' || typeof observe !== 'function') throw new Error('missing SDK exports');",
+      "import { Observe, observe } from '@asymptote/sdk'; if (typeof Observe.initialize !== 'function' || typeof observe !== 'function') throw new Error('missing SDK exports');",
     ],
     {
       cwd: tempRoot,

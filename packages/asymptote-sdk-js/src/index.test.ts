@@ -10,7 +10,7 @@ import {
   ATTR_BEACON_HARNESS_NAME,
   ATTR_BEACON_ORIGIN,
   ATTR_BEACON_PROMPT_TEXT,
-  AsymptoteObserve,
+  Observe,
   flush,
   getTracer,
   initialize,
@@ -23,9 +23,8 @@ import {
 } from "./index.js";
 
 const envKeys = [
-  "ASYMPTOTE_OBSERVE_API_KEY",
-  "ASYMPTOTE_OBSERVE_BASE_URL",
-  "ASYMPTOTE_OBSERVE_ENDPOINT",
+  "ASYMPTOTE_API_KEY",
+  "ASYMPTOTE_BASE_URL",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
 ];
 
@@ -47,14 +46,25 @@ describe("resolveExporterConfig", () => {
   });
 
   it("resolves hosted config from env", () => {
-    process.env.ASYMPTOTE_OBSERVE_API_KEY = "env-key";
-    process.env.ASYMPTOTE_OBSERVE_BASE_URL = "https://observe.example";
+    process.env.ASYMPTOTE_API_KEY = "env-key";
+    process.env.ASYMPTOTE_BASE_URL = "https://observe.example";
 
     const config = resolveExporterConfig();
 
     expect(config.mode).toBe("hosted");
     expect(config.observeUrl).toBe("https://observe.example/v1/observe");
     expect(config.headers.authorization).toBe("Bearer env-key");
+  });
+
+  it("prefers explicit api key and base URL over env", () => {
+    process.env.ASYMPTOTE_API_KEY = "env-key";
+    process.env.ASYMPTOTE_BASE_URL = "https://observe.example";
+
+    const config = resolveExporterConfig({ apiKey: "option-key", baseUrl: "https://option.example" });
+
+    expect(config.mode).toBe("hosted");
+    expect(config.observeUrl).toBe("https://option.example/v1/observe");
+    expect(config.headers.authorization).toBe("Bearer option-key");
   });
 
   it("resolves explicit Observe endpoint config without api key", () => {
@@ -74,18 +84,17 @@ describe("resolveExporterConfig", () => {
     expect(config.observeUrl).toBe("http://127.0.0.1:4318/v1/observe");
   });
 
-  it("prefers Observe endpoint env over generic OTLP endpoint env", () => {
+  it("prefers explicit OTLP endpoint option over generic OTLP endpoint env", () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4318";
-    process.env.ASYMPTOTE_OBSERVE_ENDPOINT = "http://127.0.0.1:9999/v1/observe";
 
-    const config = resolveExporterConfig();
+    const config = resolveExporterConfig({ otlpEndpoint: "http://127.0.0.1:9999/v1/observe" });
 
     expect(config.mode).toBe("otlp");
     expect(config.observeUrl).toBe("http://127.0.0.1:9999/v1/observe");
   });
 
   it("throws when neither hosted credentials nor explicit OTLP are configured", () => {
-    expect(() => resolveExporterConfig()).toThrow(/ASYMPTOTE_OBSERVE_API_KEY/);
+    expect(() => resolveExporterConfig()).toThrow(/ASYMPTOTE_API_KEY/);
   });
 
   it("allows custom mode when default exporter is disabled", () => {
@@ -254,7 +263,7 @@ describe("Asymptote Observe SDK", () => {
     await fakeGenerateText({
       experimental_telemetry: {
         isEnabled: true,
-        tracer: AsymptoteObserve.getTracer(),
+        tracer: Observe.getTracer(),
       },
     });
     await flush();
