@@ -69,7 +69,7 @@ func Validate(opts ValidationOptions) ValidationResult {
 	result.EventCount = len(filtered)
 	if result.EventCount < opts.MinEvents {
 		target := opts.LogPath
-		if opts.RequireHarness != "" {
+		if strings.TrimSpace(opts.RequireHarness) != "" {
 			target = opts.RequireHarness
 		}
 		result.Stages = append(result.Stages, ValidationStage{Name: "event_count", Target: target, Status: "fail", Severity: "high", Message: fmt.Sprintf("observed %d events, want at least %d", result.EventCount, opts.MinEvents), Evidence: fmt.Sprintf("events=%d", result.EventCount)})
@@ -77,8 +77,8 @@ func Validate(opts ValidationOptions) ValidationResult {
 		return result
 	}
 	result.Stages = append(result.Stages, ValidationStage{Name: "event_count", Target: opts.LogPath, Status: "ok", Severity: "info", Message: fmt.Sprintf("observed %d events", result.EventCount), Evidence: fmt.Sprintf("events=%d", result.EventCount)})
-	if opts.RequireHarness != "" {
-		result.Stages = append(result.Stages, ValidationStage{Name: "harness_events", Target: opts.RequireHarness, Status: "ok", Severity: "info", Message: "required harness events observed"})
+	if strings.TrimSpace(opts.RequireHarness) != "" {
+		result.Stages = append(result.Stages, ValidationStage{Name: "harness_events", Target: opts.RequireHarness, Status: "ok", Severity: "info", Message: harnessValidationMessage(opts.RequireHarness)})
 	}
 	result.Status = aggregateValidationStatus(result.Stages)
 	return result
@@ -129,28 +129,50 @@ func readStructuredEvents(path string, since time.Time) ([]schema.Event, []strin
 }
 
 func filterHarness(events []schema.Event, harness string) []schema.Event {
-	harness = strings.TrimSpace(harness)
-	if harness == "" {
+	required := validationHarnesses(harness)
+	if len(required) == 0 {
 		return events
 	}
 	var out []schema.Event
 	for _, event := range events {
-		if harnessMatches(event.Harness.Name, harness) {
-			out = append(out, event)
+		for _, want := range required {
+			if harnessMatches(event.Harness.Name, want) {
+				out = append(out, event)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func validationHarnesses(harness string) []string {
+	var out []string
+	for _, part := range strings.Split(harness, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
 		}
 	}
 	return out
 }
 
 func harnessMatches(got, want string) bool {
-	switch want {
-	case "claude":
+	got = strings.TrimSpace(got)
+	switch strings.TrimSpace(want) {
+	case "claude", "claude_code":
 		return got == "claude" || got == "claude_code"
-	case "claude_code":
-		return got == "claude" || got == "claude_code"
+	case "codex", "codex_cli":
+		return got == "codex" || got == "codex_cli"
 	default:
 		return got == want
 	}
+}
+
+func harnessValidationMessage(harness string) string {
+	if len(validationHarnesses(harness)) > 1 {
+		return "required harness events observed for at least one configured harness"
+	}
+	return "required harness events observed"
 }
 
 func aggregateValidationStatus(stages []ValidationStage) string {

@@ -67,7 +67,7 @@ func TestProvisionUsesLogPathDirectoryAsBaseDir(t *testing.T) {
 }
 
 func TestProvisionRejectsUnsupportedHarness(t *testing.T) {
-	if _, err := Provision(Options{Harness: "codex"}); err == nil {
+	if _, err := Provision(Options{Harness: "unknown"}); err == nil {
 		t.Fatal("Provision accepted unsupported harness")
 	}
 }
@@ -96,6 +96,56 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	defer cancel()
 	if err := session.Stop(ctx); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
+	}
+}
+
+func TestStartDetachedWritesStateAndExports(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fake uses POSIX signal semantics")
+	}
+	dir := t.TempDir()
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n")
+	oldWait := waitCollectorReady
+	waitCollectorReady = func(endpointconfig.Config, time.Duration) error { return nil }
+	t.Cleanup(func() { waitCollectorReady = oldWait })
+
+	session := &Session{
+		BaseDir:         dir,
+		LogPath:         filepath.Join(dir, "runtime.jsonl"),
+		ConfigPath:      filepath.Join(dir, "otelcol.yaml"),
+		CollectorBinary: collector,
+		GRPCEndpoint:    "http://127.0.0.1:4317",
+		Harness:         "claude,codex",
+		cfg:             endpointconfig.Default(true, filepath.Join(dir, "runtime.jsonl")),
+	}
+	if err := os.WriteFile(session.ConfigPath, []byte("receivers: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(dir, "session.json")
+	result, err := session.StartDetached(context.Background(), statePath, nil, nil)
+	if err != nil {
+		t.Fatalf("StartDetached returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = session.Stop(ctx)
+	})
+	if result.Exports["BEACON_CI_STATE_PATH"] != statePath {
+		t.Fatalf("BEACON_CI_STATE_PATH = %q, want %q", result.Exports["BEACON_CI_STATE_PATH"], statePath)
+	}
+	if result.Exports["CODEX_HOME"] != filepath.Join(dir, "codex-home") {
+		t.Fatalf("CODEX_HOME = %q", result.Exports["CODEX_HOME"])
+	}
+	loaded, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+	if loaded.CollectorPID == 0 || loaded.StatePath != statePath {
+		t.Fatalf("loaded state missing pid/path: %+v", loaded)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "codex-home", "config.toml")); err != nil {
+		t.Fatalf("codex config missing: %v", err)
 	}
 }
 

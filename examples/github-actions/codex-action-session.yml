@@ -1,0 +1,44 @@
+# Reference workflow for wrapping OpenAI's customizable Codex Action with a
+# Beacon CI telemetry session.
+
+name: Beacon Codex Action telemetry
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codex-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Beacon telemetry
+        id: beacon
+        uses: asymptote-labs/agent-beacon@vNEXT
+        with:
+          mode: start
+          version: vNEXT
+          harnesses: codex
+
+      - name: Run Codex Action
+        uses: openai/codex-action@main
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          codex-home: ${{ steps.beacon.outputs.codex-home }}
+          prompt: "Summarize this pull request and list one potential risk. Do not modify files."
+          sandbox: read-only
+          safety-strategy: read-only
+
+      - name: Finish Beacon telemetry
+        if: always()
+        uses: asymptote-labs/agent-beacon@vNEXT
+        with:
+          mode: finish
+          version: vNEXT
+          min-events: "1"
+          upload-artifact: "true"
+          artifact-name: beacon-codex-action-runtime-log

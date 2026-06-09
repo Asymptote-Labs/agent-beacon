@@ -1,0 +1,66 @@
+name: Beacon CI session smoke
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - .github/workflows/ci-session-smoke.yml
+      - cli/beacon/**
+      - collector-builder/exporter/beaconjsonexporter/**
+      - examples/github-actions/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  claude-session-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      - name: Build branch Beacon CLI
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/beacon-session-smoke
+          cd cli/beacon
+          go build -o /tmp/beacon-session-smoke/beacon .
+
+      - name: Download released Beacon collector
+        run: |
+          set -euo pipefail
+          archive=/tmp/beacon-session-smoke/beacon.tgz
+          curl -fsSL \
+            https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.49/beacon_0.0.49_linux_amd64.tar.gz \
+            -o "$archive"
+          tar -xzf "$archive" -C /tmp/beacon-session-smoke beacon-otelcol
+          chmod +x /tmp/beacon-session-smoke/beacon /tmp/beacon-session-smoke/beacon-otelcol
+
+      - name: Start Beacon telemetry
+        uses: ./
+        with:
+          mode: start
+          binary-path: /tmp/beacon-session-smoke/beacon
+          harnesses: claude
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Claude smoke
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: 'claude --print "Say exactly: beacon session smoke"'
+
+      - name: Finish Beacon telemetry
+        if: always()
+        uses: ./
+        with:
+          mode: finish
+          binary-path: /tmp/beacon-session-smoke/beacon
+          min-events: "1"
+          upload-artifact: "true"
+          artifact-name: beacon-ci-session-smoke

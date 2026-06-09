@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +21,6 @@ import (
 )
 
 const (
-	DefaultHarness       = "claude"
 	DefaultValidationMin = 1
 )
 
@@ -33,14 +33,15 @@ var (
 )
 
 type Options struct {
-	BaseDir       string
-	LogPath       string
-	WorkDir       string
-	CollectorPath string
-	GRPCPort      int
-	HTTPPort      int
-	Harness       string
-	KeepArtifacts bool
+	BaseDir           string
+	LogPath           string
+	WorkDir           string
+	CollectorPath     string
+	GRPCPort          int
+	HTTPPort          int
+	Harness           string
+	KeepArtifacts     bool
+	IncludeCodexSpans bool
 	// Forward selects an optional SIEM forwarder ("splunk" or "falcon") for the
 	// ephemeral collector. ForwardEndpoint supplies the destination URL; the
 	// token is read from the environment only.
@@ -57,19 +58,38 @@ type Session struct {
 	GRPCEndpoint    string          `json:"grpc_endpoint"`
 	HTTPEndpoint    string          `json:"http_endpoint"`
 	Harness         string          `json:"harness"`
+	Harnesses       []string        `json:"harnesses,omitempty"`
 	WorkDir         string          `json:"work_dir,omitempty"`
 	StartedAt       string          `json:"started_at"`
+	StatePath       string          `json:"state_path,omitempty"`
+	CollectorPID    int             `json:"collector_pid,omitempty"`
 	Run             *schema.RunInfo `json:"run,omitempty"`
 	// Forward and ForwardEndpoint describe the optional SIEM egress. The token
 	// is never recorded here so it cannot leak into --json output.
 	Forward         string              `json:"forward,omitempty"`
 	ForwardEndpoint string              `json:"forward_endpoint,omitempty"`
 	Uploads         []UploadDestination `json:"uploads,omitempty"`
+	Env             map[string]string   `json:"env,omitempty"`
+	Paths           map[string]string   `json:"paths,omitempty"`
 
 	cfg       endpointconfig.Config
 	startedAt time.Time
 	cmd       *exec.Cmd
 	done      chan error
+}
+
+type StartResult struct {
+	Session         Session           `json:"session"`
+	Exports         map[string]string `json:"exports,omitempty"`
+	StatePath       string            `json:"state_path,omitempty"`
+	ArtifactMessage string            `json:"artifact_message,omitempty"`
+}
+
+type FinishResult struct {
+	Session         Session          `json:"session"`
+	Validation      ValidationResult `json:"validation"`
+	Uploads         []UploadResult   `json:"uploads,omitempty"`
+	ArtifactMessage string           `json:"artifact_message,omitempty"`
 }
 
 type ExecResult struct {
@@ -81,7 +101,8 @@ type ExecResult struct {
 }
 
 func Provision(opts Options) (*Session, error) {
-	if err := validateHarness(opts.Harness); err != nil {
+	harnesses, err := NormalizeHarnesses(opts.Harness, DefaultHarness)
+	if err != nil {
 		return nil, err
 	}
 	baseDir, err := resolveBaseDir(opts.BaseDir, opts.LogPath)
@@ -106,12 +127,13 @@ func Provision(opts Options) (*Session, error) {
 		httpPort = endpointconfig.DefaultHTTPPort
 	}
 	cfg := endpointconfig.Default(true, logPath)
-	cfg.Harnesses = []string{DefaultHarness}
+	cfg.Harnesses = harnesses
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.ConfigPath = filepath.Join(baseDir, "otelcol.yaml")
 	cfg.Collector.SpoolPath = filepath.Join(baseDir, "spool", "otlp.jsonl")
 	cfg.Collector.GRPCPort = grpcPort
 	cfg.Collector.HTTPPort = httpPort
+	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
 	forward, err := normalizeForward(opts.Forward)
 	if err != nil {
 		return nil, err
@@ -152,6 +174,10 @@ func Provision(opts Options) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	harnessCfg, err := BuildHarnessConfig(os.Environ(), HarnessesString(harnesses), fmt.Sprintf("http://127.0.0.1:%d", grpcPort), baseDir, run)
+	if err != nil {
+		return nil, err
+	}
 	return &Session{
 		BaseDir:         baseDir,
 		LogPath:         logPath,
@@ -159,13 +185,16 @@ func Provision(opts Options) (*Session, error) {
 		CollectorBinary: binary,
 		GRPCEndpoint:    fmt.Sprintf("http://127.0.0.1:%d", grpcPort),
 		HTTPEndpoint:    fmt.Sprintf("http://127.0.0.1:%d", httpPort),
-		Harness:         DefaultHarness,
+		Harness:         HarnessesString(harnesses),
+		Harnesses:       harnesses,
 		WorkDir:         opts.WorkDir,
 		StartedAt:       startedAt.Format(time.RFC3339),
 		Run:             run,
 		Forward:         forward,
 		ForwardEndpoint: forwardEndpoint,
 		Uploads:         uploads,
+		Env:             harnessCfg.Env,
+		Paths:           harnessCfg.Paths,
 		cfg:             cfg,
 		startedAt:       startedAt,
 	}, nil
@@ -189,6 +218,9 @@ func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if cmd.Process != nil {
+		s.CollectorPID = cmd.Process.Pid
 	}
 	s.cmd = cmd
 	s.done = make(chan error, 1)
@@ -217,6 +249,28 @@ func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func (s *Session) StartDetached(ctx context.Context, statePath string, stdout, stderr io.Writer) (StartResult, error) {
+	if err := s.Start(ctx, stdout, stderr); err != nil {
+		return StartResult{}, err
+	}
+	if statePath == "" {
+		statePath = DefaultStatePath()
+	}
+	s.StatePath = statePath
+	if err := s.SaveState(statePath); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.Stop(cleanupCtx)
+		cancel()
+		return StartResult{}, err
+	}
+	return StartResult{
+		Session:         *s,
+		Exports:         s.Exports(),
+		StatePath:       statePath,
+		ArtifactMessage: fmt.Sprintf("Beacon CI session started: log=%s config=%s state=%s", s.LogPath, s.ConfigPath, statePath),
+	}, nil
+}
+
 func (s *Session) Stop(ctx context.Context) error {
 	if s == nil || s.cmd == nil {
 		return nil
@@ -238,17 +292,47 @@ func (s *Session) Stop(ctx context.Context) error {
 	}
 }
 
+func (s *Session) StopDetached(ctx context.Context) error {
+	if s == nil || s.CollectorPID == 0 {
+		return nil
+	}
+	process, err := os.FindProcess(s.CollectorPID)
+	if err != nil {
+		return err
+	}
+	if err := terminateProcess(process); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if !processAlive(process) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			_ = process.Kill()
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
 	if len(args) == 0 {
 		return 0, errors.New("child command is required after --")
 	}
 	cmd := childCommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = s.WorkDir
-	env := append(WithCIResourceAttributes(ClaudeEnv(os.Environ(), s.GRPCEndpoint), s.Run),
-		"BEACON_CI_BASE_DIR="+s.BaseDir,
-		"BEACON_CI_CONFIG_PATH="+s.ConfigPath,
-		"BEACON_CI_LOG_PATH="+s.LogPath,
-	)
+	childEnv := envMap(os.Environ())
+	for key, value := range s.Exports() {
+		if key == "OTEL_RESOURCE_ATTRIBUTES" && strings.TrimSpace(childEnv[key]) != "" && strings.TrimSpace(value) != "" {
+			childEnv[key] = childEnv[key] + "," + value
+			continue
+		}
+		childEnv[key] = value
+	}
+	env := flattenEnv(childEnv)
 	// The agent never needs destination credentials; keep them out of the child process.
 	stripKeys := append([]string{}, forwardTokenEnv...)
 	if len(s.Uploads) > 0 {
@@ -268,6 +352,71 @@ func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io
 	return 0, err
 }
 
+func (s *Session) Exports() map[string]string {
+	out := map[string]string{}
+	if s != nil {
+		if len(s.Env) == 0 {
+			harness := s.Harness
+			if strings.TrimSpace(harness) == "" {
+				harness = DefaultHarness
+			}
+			cfg, err := BuildHarnessConfig(nil, harness, s.GRPCEndpoint, s.BaseDir, s.Run)
+			if err == nil {
+				s.Env = cfg.Env
+				s.Paths = cfg.Paths
+			}
+		}
+		for key, value := range s.Env {
+			out[key] = value
+		}
+		out["BEACON_CI_BASE_DIR"] = s.BaseDir
+		out["BEACON_CI_CONFIG_PATH"] = s.ConfigPath
+		out["BEACON_CI_LOG_PATH"] = s.LogPath
+		if s.StatePath != "" {
+			out["BEACON_CI_STATE_PATH"] = s.StatePath
+		} else {
+			out["BEACON_CI_STATE_PATH"] = DefaultStatePath()
+		}
+		if codexHome := s.Paths["codex_home"]; codexHome != "" {
+			out["CODEX_HOME"] = codexHome
+		}
+	}
+	return out
+}
+
+func (s *Session) SaveState(path string) error {
+	if s == nil {
+		return errors.New("ci session is nil")
+	}
+	if path == "" {
+		path = DefaultStatePath()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+func LoadState(path string) (*Session, error) {
+	if path == "" {
+		path = DefaultStatePath()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, err
+	}
+	session.startedAt = session.StartedAtTime()
+	return &session, nil
+}
+
 func (s *Session) Config() endpointconfig.Config {
 	if s == nil {
 		return endpointconfig.Config{}
@@ -284,14 +433,6 @@ func (s *Session) StartedAtTime() time.Time {
 	}
 	startedAt, _ := time.Parse(time.RFC3339, s.StartedAt)
 	return startedAt
-}
-
-func validateHarness(harness string) error {
-	harness = strings.TrimSpace(harness)
-	if harness == "" || harness == DefaultHarness || harness == "claude_code" {
-		return nil
-	}
-	return fmt.Errorf("unsupported CI harness %q; only claude is supported", harness)
 }
 
 func resolveBaseDir(configured, logPath string) (string, error) {
@@ -320,6 +461,13 @@ func resolveBaseDir(configured, logPath string) (string, error) {
 		return "", err
 	}
 	return filepath.Abs(base)
+}
+
+func DefaultStatePath() string {
+	if runnerTemp := strings.TrimSpace(os.Getenv("RUNNER_TEMP")); runnerTemp != "" {
+		return filepath.Join(runnerTemp, "beacon", "session.json")
+	}
+	return filepath.Join(os.TempDir(), "beacon", "session.json")
 }
 
 func DefaultLogPath() string {
@@ -401,6 +549,17 @@ func terminateProcess(process *os.Process) error {
 		return process.Kill()
 	}
 	return process.Signal(syscall.SIGTERM)
+}
+
+func processAlive(process *os.Process) bool {
+	if process == nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	err := process.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 func isExpectedStopError(err error) bool {

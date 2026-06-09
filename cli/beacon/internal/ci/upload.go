@@ -84,6 +84,13 @@ func resolveUploadDestinations(providers []string, run *schema.RunInfo, logPath 
 	return destinations, nil
 }
 
+func ResolveUploadDestinationsForSession(providers []string, session *Session) ([]UploadDestination, error) {
+	if session == nil {
+		return nil, fmt.Errorf("ci session is nil")
+	}
+	return resolveUploadDestinations(providers, session.Run, session.LogPath, session.StartedAtTime())
+}
+
 func normalizeUploads(values []string) ([]string, error) {
 	seen := map[string]struct{}{}
 	var providers []string
