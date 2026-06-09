@@ -216,6 +216,7 @@ func (s *Session) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	cmd := collectorCommand(s.CollectorBinary, "--config", s.ConfigPath)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Env = stripEnv(os.Environ(), "RUNNER_TRACKING_ID")
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -303,6 +304,9 @@ func (s *Session) StopDetached(ctx context.Context) error {
 	if err := terminateProcess(process); err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -326,10 +330,6 @@ func (s *Session) RunChild(ctx context.Context, args []string, stdout, stderr io
 	cmd.Dir = s.WorkDir
 	childEnv := envMap(os.Environ())
 	for key, value := range s.Exports() {
-		if key == "OTEL_RESOURCE_ATTRIBUTES" && strings.TrimSpace(childEnv[key]) != "" && strings.TrimSpace(value) != "" {
-			childEnv[key] = childEnv[key] + "," + value
-			continue
-		}
 		childEnv[key] = value
 	}
 	env := flattenEnv(childEnv)
@@ -360,7 +360,7 @@ func (s *Session) Exports() map[string]string {
 			if strings.TrimSpace(harness) == "" {
 				harness = DefaultHarness
 			}
-			cfg, err := BuildHarnessConfig(nil, harness, s.GRPCEndpoint, s.BaseDir, s.Run)
+			cfg, err := BuildHarnessConfig(os.Environ(), harness, s.GRPCEndpoint, s.BaseDir, s.Run)
 			if err == nil {
 				s.Env = cfg.Env
 				s.Paths = cfg.Paths

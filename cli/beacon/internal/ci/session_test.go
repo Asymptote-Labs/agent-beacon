@@ -76,7 +76,8 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fake uses POSIX signal semantics")
 	}
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n")
+	t.Setenv("RUNNER_TRACKING_ID", "github-actions-tracker")
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\nenv > \"$2.env\"\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n")
 	oldWait := waitCollectorReady
 	waitCollectorReady = func(endpointconfig.Config, time.Duration) error { return nil }
 	t.Cleanup(func() { waitCollectorReady = oldWait })
@@ -91,6 +92,21 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	}
 	if err := session.Start(context.Background(), nil, nil); err != nil {
 		t.Fatalf("Start returned error: %v", err)
+	}
+	var data []byte
+	for i := 0; i < 20; i++ {
+		var err error
+		data, err = os.ReadFile(session.ConfigPath + ".env")
+		if err == nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if len(data) == 0 {
+		t.Fatalf("collector did not write env file")
+	}
+	if strings.Contains(string(data), "RUNNER_TRACKING_ID=") {
+		t.Fatalf("collector env should not inherit RUNNER_TRACKING_ID:\n%s", data)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -214,6 +230,9 @@ func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
 	}
 	if !strings.HasPrefix(resourceAttrs, "service.name=custom,beacon.origin=ci,") {
 		t.Fatalf("OTEL_RESOURCE_ATTRIBUTES should preserve existing attributes first: %q", resourceAttrs)
+	}
+	if strings.Count(resourceAttrs, "service.name=custom") != 1 {
+		t.Fatalf("OTEL_RESOURCE_ATTRIBUTES duplicated existing attributes: %q", resourceAttrs)
 	}
 }
 
