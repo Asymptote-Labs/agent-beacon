@@ -244,6 +244,42 @@ func TestConsumeLogsMapsCIRunResourceAttributes(t *testing.T) {
 	}
 }
 
+func TestEventFromLogMapsCIRunRecordAttributes(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	rec := plog.NewLogRecord()
+	rec.Body().SetStr("codex.user_prompt")
+	attrs := rec.Attributes()
+	attrs.PutStr("service.name", "codex_github_action")
+	attrs.PutStr("event.name", "codex.user_prompt")
+	attrs.PutStr(asymptoteobserve.AttributeOrigin, string(asymptoteobserve.OriginCI))
+	attrs.PutStr(asymptoteobserve.AttributeRunProvider, "github_actions")
+	attrs.PutStr(asymptoteobserve.AttributeRunRepository, "Asymptote-Labs%2Fagent-beacon")
+	attrs.PutStr(asymptoteobserve.AttributeRunBranch, "beacon-ci-session-mode")
+	attrs.PutStr(asymptoteobserve.AttributeRunPR, "refs%2Fpull%2F133%2Fmerge")
+	attrs.PutStr(asymptoteobserve.AttributeRunPRNumber, "133")
+	attrs.PutStr(asymptoteobserve.AttributeRunWorkflow, "Beacon%20Codex%20Action%20telemetry")
+	attrs.PutBool(asymptoteobserve.AttributeRunEphemeral, true)
+
+	event := exp.eventFromLog(nil, rec)
+	if event.Origin != asymptoteobserve.OriginCI {
+		t.Fatalf("Origin = %q, want ci", event.Origin)
+	}
+	if event.Run == nil {
+		t.Fatal("Run missing from event")
+	}
+	if event.Run.Repository != "Asymptote-Labs/agent-beacon" || event.Run.PR != "refs/pull/133/merge" || event.Run.Workflow != "Beacon Codex Action telemetry" {
+		t.Fatalf("run attributes were not promoted and decoded: %#v", event.Run)
+	}
+}
+
 func TestConsumeLogsMapsPrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{

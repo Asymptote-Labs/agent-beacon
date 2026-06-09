@@ -69,21 +69,34 @@ approval decision, repository, session, or message. Quick filters surface
 high-severity events, failures, approvals, MCP activity, file changes, and events
 that may need review.
 
-## Claude Code in CI
+## Agent Telemetry in CI
 
-Use `beacon ci exec` to collect Claude Code OpenTelemetry for a single CI job
-without installing a persistent endpoint service or changing
-`~/.claude/settings.json`:
+Use `beacon ci exec` to collect Claude Code or Codex OpenTelemetry for a single
+CI command without installing a persistent endpoint service or changing local
+developer configuration:
 
 ```bash
 ./beacon ci exec -- claude --print "Summarize this repository in one sentence"
 ```
 
+For actions or workflows that launch an agent internally, use CI session mode:
+
+```bash
+./beacon ci start --harness claude,codex
+# run one or more agent CI steps here
+./beacon ci finish --min-events 1
+```
+
 Beacon starts the bundled `beacon-otelcol` in the foreground, writes a
-job-scoped collector config under `$RUNNER_TEMP/beacon` when available, injects
-Claude telemetry environment variables into only the child process, validates
-that structured Beacon events reached the runtime JSONL log, and returns the
-Claude command's exit code when telemetry validation succeeds.
+job-scoped collector config under `$RUNNER_TEMP/beacon`, configures supported
+agent harnesses to export OTLP to the local collector, validates that structured
+Beacon events reached the runtime JSONL log, and writes normalized JSONL for
+artifact upload or customer-managed forwarding.
+
+`ci exec` injects telemetry only into its child process. `ci start` writes
+session exports to `$GITHUB_ENV` when run through the composite action, which
+lets later `uses:` actions inherit Claude Code environment variables or a
+generated Codex `CODEX_HOME`.
 
 Validate an existing CI artifact explicitly:
 
@@ -194,22 +207,65 @@ build.
 
 ### GitHub Action
 
-A composite action wraps binary resolution, `ci exec`, and artifact upload so a
-workflow can capture Claude Code telemetry in a few lines:
+A composite action wraps binary resolution, `ci exec`, session
+`start`/`finish`, and artifact upload. For a direct command, use the default
+`exec` mode:
 
 ```yaml
 - name: Run Claude with Beacon telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.39
+  uses: asymptote-labs/agent-beacon@<tag>
   with:
     command: claude --print "Summarize the changes in this pull request"
 ```
 
 The action downloads a pinned Beacon release and verifies it against the
-release `checksums.txt` before running (override the tag with `version`, or
-point at a vendored binary with `binary-path` for air-gapped runners). It
-uploads the runtime JSONL log as an artifact by default. To forward to a
-customer-managed SIEM, set `forward`/`forward-endpoint` and provide the token
-through a job- or workflow-level environment variable from a secret:
+release `checksums.txt` before running. When the action is invoked from a
+version tag, that tag is used as the default Beacon CLI release; set `version`
+explicitly or use `binary-path` when testing from a branch or local checkout.
+It uploads the runtime JSONL log as an artifact by default.
+
+To wrap a third-party agent action, split the action into `start` and `finish`
+steps:
+
+```yaml
+- name: Start Beacon telemetry
+  uses: asymptote-labs/agent-beacon@<tag>
+  with:
+    mode: start
+    harnesses: claude,codex
+
+- name: Run agent review action
+  uses: vendor/agent-review-action@main
+
+- name: Finish Beacon telemetry
+  if: always()
+  uses: asymptote-labs/agent-beacon@<tag>
+  with:
+    mode: finish
+    min-events: "1"
+```
+
+For Codex-based actions that accept a custom home directory, pass the generated
+Codex home output:
+
+```yaml
+- name: Start Beacon telemetry
+  id: beacon
+  uses: asymptote-labs/agent-beacon@<tag>
+  with:
+    mode: start
+    harnesses: codex
+
+- uses: openai/codex-action@main
+  with:
+    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    codex-home: ${{ steps.beacon.outputs.codex-home }}
+    prompt: "Review this pull request"
+```
+
+To forward to a customer-managed SIEM, set `forward`/`forward-endpoint` on
+`exec` or `start` and provide the token through a job- or workflow-level
+environment variable from a secret:
 
 ```yaml
 jobs:
@@ -218,7 +274,7 @@ jobs:
     env:
       BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
     steps:
-      - uses: asymptote-labs/agent-beacon@v0.0.39
+      - uses: asymptote-labs/agent-beacon@<tag>
         with:
           command: claude --print "Summarize this repository"
           forward: splunk
@@ -235,7 +291,7 @@ credentials at the job level and set `upload`:
     aws-region: us-east-1
 
 - name: Run Claude with Beacon telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.39
+  uses: asymptote-labs/agent-beacon@<tag>
   env:
     BEACON_CI_S3_BUCKET: my-beacon-telemetry
     BEACON_CI_S3_PREFIX: github-actions
@@ -244,8 +300,10 @@ credentials at the job level and set `upload`:
     upload: s3
 ```
 
-See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-actions/claude-code-telemetry.yml)
-for a complete reference workflow.
+See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-actions/claude-code-telemetry.yml),
+[`examples/github-actions/claude-security-review-session.yml`](../../examples/github-actions/claude-security-review-session.yml),
+and [`examples/github-actions/codex-action-session.yml`](../../examples/github-actions/codex-action-session.yml)
+for complete reference workflows.
 
 ## Wazuh
 

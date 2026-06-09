@@ -1,16 +1,26 @@
 name: "Agent Beacon CI Telemetry"
-description: "Capture Claude Code CI telemetry to Agent Beacon JSONL, artifacts, or customer-managed destinations."
+description: "Capture agent CI telemetry to Agent Beacon JSONL, artifacts, or customer-managed destinations."
 author: "Asymptote Labs"
 branding:
   icon: "radio"
   color: "purple"
 
 inputs:
+  mode:
+    description: "How to run Beacon CI telemetry: 'exec' (default), 'start', or 'finish'."
+    required: false
+    default: "exec"
   command:
     description: >-
       The Claude Code command to run, e.g. claude --print "Summarize this repo".
       Executed via bash -c so the configured telemetry environment reaches it.
-    required: true
+      Required when mode is 'exec'.
+    required: false
+    default: ""
+  harnesses:
+    description: "Comma-separated agent harnesses to configure, e.g. claude,codex."
+    required: false
+    default: ""
   version:
     description: >-
       Beacon CLI release tag to download (e.g. v0.0.39). Defaults to a version
@@ -66,7 +76,13 @@ inputs:
 outputs:
   log-path:
     description: "Path to the Beacon runtime JSONL log."
-    value: ${{ steps.exec.outputs.log-path }}
+    value: ${{ steps.paths.outputs.log-path }}
+  state-path:
+    description: "Path to the Beacon CI session state file."
+    value: ${{ steps.paths.outputs.state-path }}
+  codex-home:
+    description: "Path to Beacon's generated Codex home directory."
+    value: ${{ steps.paths.outputs.codex-home }}
 
 runs:
   using: "composite"
@@ -77,7 +93,8 @@ runs:
       env:
         # A specific tag is pinned here rather than resolving "latest" so runs
         # are reproducible and the downloaded archive can be checksum-verified.
-        DEFAULT_BEACON_VERSION: "v0.0.39"
+        DEFAULT_BEACON_VERSION: "v0.0.49"
+        ACTION_REF: ${{ github.action_ref }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_BINARY_PATH: ${{ inputs.binary-path }}
       run: |
@@ -93,7 +110,11 @@ runs:
           exit 0
         fi
 
-        version="${INPUT_VERSION:-$DEFAULT_BEACON_VERSION}"
+        version="${INPUT_VERSION:-${ACTION_REF:-$DEFAULT_BEACON_VERSION}}"
+        if [ "${version#v}" = "${version}" ]; then
+          echo "::error::Beacon release version '${version}' is not a version tag. Set the version input or binary-path when using a branch/local action ref."
+          exit 1
+        fi
         case "$(uname -s)" in
           Linux)  os="linux" ;;
           Darwin) os="darwin" ;;
@@ -135,30 +156,48 @@ runs:
         echo "beacon-bin=${workdir}/beacon" >> "$GITHUB_OUTPUT"
         echo "Verified and extracted beacon ${version} to ${workdir}"
 
-    - name: Run Claude with Beacon telemetry
+    - name: Resolve Beacon paths
+      id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        log_dir="${BEACON_CI_BASE_DIR:-${RUNNER_TEMP:-$(mktemp -d)}/beacon}"
+        mkdir -p "${log_dir}"
+        echo "base-dir=${log_dir}" >> "$GITHUB_OUTPUT"
+        echo "log-path=${log_dir}/runtime.jsonl" >> "$GITHUB_OUTPUT"
+        echo "state-path=${log_dir}/session.json" >> "$GITHUB_OUTPUT"
+        echo "codex-home=${log_dir}/codex-home" >> "$GITHUB_OUTPUT"
+
+    - name: Run command with Beacon telemetry
       id: exec
+      if: ${{ inputs.mode == 'exec' }}
       shell: bash
       env:
         BEACON_BIN: ${{ steps.resolve.outputs.beacon-bin }}
+        INPUT_HARNESSES: ${{ inputs.harnesses }}
         INPUT_COMMAND: ${{ inputs.command }}
         INPUT_MIN_EVENTS: ${{ inputs.min-events }}
         INPUT_REQUIRE_TELEMETRY: ${{ inputs.require-telemetry }}
         INPUT_FORWARD: ${{ inputs.forward }}
         INPUT_FORWARD_ENDPOINT: ${{ inputs.forward-endpoint }}
         INPUT_UPLOAD: ${{ inputs.upload }}
+        LOG_PATH: ${{ steps.paths.outputs.log-path }}
       run: |
         set -euo pipefail
 
-        log_dir="${RUNNER_TEMP:-$(mktemp -d)}/beacon"
-        mkdir -p "${log_dir}"
-        log_path="${log_dir}/runtime.jsonl"
-        echo "log-path=${log_path}" >> "$GITHUB_OUTPUT"
+        if [ -z "${INPUT_COMMAND}" ]; then
+          echo "::error::input 'command' is required when mode is 'exec'"
+          exit 1
+        fi
 
         args=(ci exec
-          --log-path "${log_path}"
+          --log-path "${LOG_PATH}"
           --min-events "${INPUT_MIN_EVENTS}"
           "--require-telemetry=${INPUT_REQUIRE_TELEMETRY}"
         )
+        if [ -n "${INPUT_HARNESSES}" ]; then
+          args+=(--harness "${INPUT_HARNESSES}")
+        fi
         if [ -n "${INPUT_FORWARD}" ]; then
           args+=(--forward "${INPUT_FORWARD}")
           if [ -n "${INPUT_FORWARD_ENDPOINT}" ]; then
@@ -179,10 +218,66 @@ runs:
         # this script) so workflow inputs cannot inject shell commands.
         "${BEACON_BIN}" "${args[@]}" -- bash -c "${INPUT_COMMAND}"
 
+    - name: Start Beacon telemetry session
+      id: start
+      if: ${{ inputs.mode == 'start' }}
+      shell: bash
+      env:
+        BEACON_BIN: ${{ steps.resolve.outputs.beacon-bin }}
+        INPUT_HARNESSES: ${{ inputs.harnesses }}
+        INPUT_FORWARD: ${{ inputs.forward }}
+        INPUT_FORWARD_ENDPOINT: ${{ inputs.forward-endpoint }}
+        LOG_PATH: ${{ steps.paths.outputs.log-path }}
+        STATE_PATH: ${{ steps.paths.outputs.state-path }}
+      run: |
+        set -euo pipefail
+        harnesses="${INPUT_HARNESSES:-claude,codex}"
+        args=(ci start
+          --log-path "${LOG_PATH}"
+          --state-path "${STATE_PATH}"
+          --github-env "${GITHUB_ENV}"
+          --harness "${harnesses}"
+        )
+        if [ -n "${INPUT_FORWARD}" ]; then
+          args+=(--forward "${INPUT_FORWARD}")
+          if [ -n "${INPUT_FORWARD_ENDPOINT}" ]; then
+            args+=(--forward-endpoint "${INPUT_FORWARD_ENDPOINT}")
+          fi
+        fi
+        "${BEACON_BIN}" "${args[@]}"
+
+    - name: Finish Beacon telemetry session
+      id: finish
+      if: ${{ always() && inputs.mode == 'finish' }}
+      shell: bash
+      env:
+        BEACON_BIN: ${{ steps.resolve.outputs.beacon-bin }}
+        INPUT_MIN_EVENTS: ${{ inputs.min-events }}
+        INPUT_REQUIRE_TELEMETRY: ${{ inputs.require-telemetry }}
+        INPUT_UPLOAD: ${{ inputs.upload }}
+        STATE_PATH: ${{ steps.paths.outputs.state-path }}
+      run: |
+        set -euo pipefail
+        args=(ci finish
+          --state-path "${STATE_PATH}"
+          --min-events "${INPUT_MIN_EVENTS}"
+          "--require-telemetry=${INPUT_REQUIRE_TELEMETRY}"
+        )
+        if [ -n "${INPUT_UPLOAD}" ]; then
+          IFS=',' read -ra upload_values <<< "${INPUT_UPLOAD}"
+          for upload in "${upload_values[@]}"; do
+            upload="${upload//[[:space:]]/}"
+            if [ -n "${upload}" ]; then
+              args+=(--upload "${upload}")
+            fi
+          done
+        fi
+        "${BEACON_BIN}" "${args[@]}"
+
     - name: Upload Beacon telemetry
-      if: ${{ always() && inputs.upload-artifact == 'true' }}
+      if: ${{ always() && inputs.upload-artifact == 'true' && inputs.mode != 'start' }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.artifact-name }}
-        path: ${{ steps.exec.outputs.log-path }}
+        path: ${{ steps.paths.outputs.log-path }}
         if-no-files-found: warn

@@ -671,7 +671,7 @@ func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 }
 
 func populateRunContext(event *Event, attrs map[string]interface{}) {
-	switch FirstString(attrs, asymptoteobserve.AttributeOrigin) {
+	switch RunString(attrs, asymptoteobserve.AttributeOrigin) {
 	case string(asymptoteobserve.OriginLocal):
 		event.Origin = asymptoteobserve.OriginLocal
 	case string(asymptoteobserve.OriginCloud):
@@ -680,18 +680,18 @@ func populateRunContext(event *Event, attrs map[string]interface{}) {
 		event.Origin = asymptoteobserve.OriginCI
 	}
 	run := RunInfo{
-		Provider:   FirstString(attrs, asymptoteobserve.AttributeRunProvider),
-		RunID:      FirstString(attrs, asymptoteobserve.AttributeRunID),
-		RunAttempt: FirstString(attrs, asymptoteobserve.AttributeRunAttempt),
-		Workflow:   FirstString(attrs, asymptoteobserve.AttributeRunWorkflow),
-		Job:        FirstString(attrs, asymptoteobserve.AttributeRunJob),
-		EventName:  FirstString(attrs, asymptoteobserve.AttributeRunEventName),
-		Commit:     FirstString(attrs, asymptoteobserve.AttributeRunCommit),
-		Repository: FirstString(attrs, asymptoteobserve.AttributeRunRepository),
-		Branch:     FirstString(attrs, asymptoteobserve.AttributeRunBranch),
-		PR:         FirstString(attrs, asymptoteobserve.AttributeRunPR),
-		PRNumber:   FirstString(attrs, asymptoteobserve.AttributeRunPRNumber),
-		Actor:      FirstString(attrs, asymptoteobserve.AttributeRunActor),
+		Provider:   RunString(attrs, asymptoteobserve.AttributeRunProvider),
+		RunID:      RunString(attrs, asymptoteobserve.AttributeRunID),
+		RunAttempt: RunString(attrs, asymptoteobserve.AttributeRunAttempt),
+		Workflow:   RunString(attrs, asymptoteobserve.AttributeRunWorkflow),
+		Job:        RunString(attrs, asymptoteobserve.AttributeRunJob),
+		EventName:  RunString(attrs, asymptoteobserve.AttributeRunEventName),
+		Commit:     RunString(attrs, asymptoteobserve.AttributeRunCommit),
+		Repository: RunString(attrs, asymptoteobserve.AttributeRunRepository),
+		Branch:     RunString(attrs, asymptoteobserve.AttributeRunBranch),
+		PR:         RunString(attrs, asymptoteobserve.AttributeRunPR),
+		PRNumber:   RunString(attrs, asymptoteobserve.AttributeRunPRNumber),
+		Actor:      RunString(attrs, asymptoteobserve.AttributeRunActor),
 	}
 	if ephemeral, ok := BoolAttr(attrs, asymptoteobserve.AttributeRunEphemeral); ok {
 		run.Ephemeral = ephemeral
@@ -740,6 +740,18 @@ func FirstString(attrs map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func RunString(attrs map[string]interface{}, keys ...string) string {
+	value := FirstString(attrs, keys...)
+	if value == "" {
+		return ""
+	}
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
 }
 
 func ToolCommandString(attrs map[string]interface{}) string {

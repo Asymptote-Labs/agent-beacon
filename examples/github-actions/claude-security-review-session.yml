@@ -1,0 +1,45 @@
+# Reference workflow for wrapping Anthropic's Claude Code Security Review
+# action with a Beacon CI telemetry session.
+# Replace <tag> with the Beacon release tag you want to run.
+
+name: Beacon Claude Security Review telemetry
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  security-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Start Beacon telemetry
+        uses: asymptote-labs/agent-beacon@<tag>
+        with:
+          mode: start
+          harnesses: claude
+
+      - name: Run Claude Code Security Review
+        uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          comment-pr: false
+          upload-results: true
+          claudecode-timeout: "10"
+
+      - name: Finish Beacon telemetry
+        if: always()
+        uses: asymptote-labs/agent-beacon@<tag>
+        with:
+          mode: finish
+          min-events: "1"
+          upload-artifact: "true"
+          artifact-name: beacon-claude-security-review-runtime-log
