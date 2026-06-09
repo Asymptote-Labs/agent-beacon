@@ -94,6 +94,7 @@ runs:
         # A specific tag is pinned here rather than resolving "latest" so runs
         # are reproducible and the downloaded archive can be checksum-verified.
         DEFAULT_BEACON_VERSION: "v0.0.49"
+        ACTION_REF: ${{ github.action_ref }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_BINARY_PATH: ${{ inputs.binary-path }}
       run: |
@@ -109,7 +110,11 @@ runs:
           exit 0
         fi
 
-        version="${INPUT_VERSION:-$DEFAULT_BEACON_VERSION}"
+        version="${INPUT_VERSION:-${ACTION_REF:-$DEFAULT_BEACON_VERSION}}"
+        if [ "${version#v}" = "${version}" ]; then
+          echo "::error::Beacon release version '${version}' is not a version tag. Set the version input or binary-path when using a branch/local action ref."
+          exit 1
+        fi
         case "$(uname -s)" in
           Linux)  os="linux" ;;
           Darwin) os="darwin" ;;

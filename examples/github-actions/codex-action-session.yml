@@ -1,5 +1,6 @@
 # Reference workflow for wrapping OpenAI's customizable Codex Action with a
 # Beacon CI telemetry session.
+# Replace <tag> with the Beacon release tag you want to run.
 
 name: Beacon Codex Action telemetry
 
@@ -18,10 +19,9 @@ jobs:
 
       - name: Start Beacon telemetry
         id: beacon
-        uses: asymptote-labs/agent-beacon@vNEXT
+        uses: asymptote-labs/agent-beacon@<tag>
         with:
           mode: start
-          version: vNEXT
           harnesses: codex
 
       - name: Run Codex Action
@@ -35,10 +35,9 @@ jobs:
 
       - name: Finish Beacon telemetry
         if: always()
-        uses: asymptote-labs/agent-beacon@vNEXT
+        uses: asymptote-labs/agent-beacon@<tag>
         with:
           mode: finish
-          version: vNEXT
           min-events: "1"
           upload-artifact: "true"
           artifact-name: beacon-codex-action-runtime-log

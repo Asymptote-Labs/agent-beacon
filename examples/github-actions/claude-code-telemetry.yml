@@ -4,6 +4,7 @@
 #
 # This file lives under examples/ (not .github/workflows/) so it is a
 # reference only and does not run in this repository.
+# Replace <tag> with the Beacon release tag you want to run.
 
 name: Claude Code telemetry
 
@@ -36,7 +37,7 @@ jobs:
       #     aws-region: us-east-1
 
       - name: Run Claude with Beacon telemetry
-        uses: asymptote-labs/agent-beacon@v0.0.39
+        uses: asymptote-labs/agent-beacon@<tag>
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:

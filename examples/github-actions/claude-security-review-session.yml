@@ -1,5 +1,6 @@
 # Reference workflow for wrapping Anthropic's Claude Code Security Review
 # action with a Beacon CI telemetry session.
+# Replace <tag> with the Beacon release tag you want to run.
 
 name: Beacon Claude Security Review telemetry
 
@@ -21,10 +22,9 @@ jobs:
           fetch-depth: 2
 
       - name: Start Beacon telemetry
-        uses: asymptote-labs/agent-beacon@vNEXT
+        uses: asymptote-labs/agent-beacon@<tag>
         with:
           mode: start
-          version: vNEXT
           harnesses: claude
 
       - name: Run Claude Code Security Review
@@ -37,10 +37,9 @@ jobs:
 
       - name: Finish Beacon telemetry
         if: always()
-        uses: asymptote-labs/agent-beacon@vNEXT
+        uses: asymptote-labs/agent-beacon@<tag>
         with:
           mode: finish
-          version: vNEXT
           min-events: "1"
           upload-artifact: "true"
           artifact-name: beacon-claude-security-review-runtime-log
