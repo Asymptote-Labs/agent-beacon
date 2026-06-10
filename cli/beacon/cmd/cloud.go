@@ -158,9 +158,13 @@ tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin
 chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks 2>/dev/null || true
 
 mkdir -p .claude
+cat >> .git/info/exclude <<'EOF'
+.claude/settings.local.json
+.claude/settings.json
+EOF
 /tmp/beacon/bin/beacon cloud claude-web print-hooks \
   --binary-path /tmp/beacon/bin/beacon-hooks \
-  --log-path /tmp/beacon/runtime.jsonl > .claude/settings.json
+  --log-path /tmp/beacon/runtime.jsonl > .claude/settings.local.json
 `, version)
 }
 

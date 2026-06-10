@@ -40,6 +40,22 @@ func TestRenderClaudeWebHooks(t *testing.T) {
 	}
 }
 
+func TestRenderClaudeWebSetupUsesLocalSettings(t *testing.T) {
+	got := renderClaudeWebSetup("v0.0.50")
+	for _, want := range []string{
+		`BEACON_VERSION="v0.0.50"`,
+		`.claude/settings.local.json`,
+		`.git/info/exclude`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered setup missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `> .claude/settings.json`) {
+		t.Fatalf("rendered setup should not write settings.json:\n%s", got)
+	}
+}
+
 func TestGCSSetupCommands(t *testing.T) {
 	commands := gcsSetupCommands("asymptote-code", "bucket", "us-central1", "uploader@asymptote-code.iam.gserviceaccount.com", "uploader")
 	got := shellCommand(commands[len(commands)-1]...)
