@@ -27,6 +27,7 @@ var cloudOpts struct {
 	printOnly      bool
 	apply          bool
 	printEnv       bool
+	safeHooks      bool
 }
 
 var cloudCmd = &cobra.Command{
@@ -84,6 +85,7 @@ var cloudCursorPrintHooksCmd = &cobra.Command{
 		rendered, err := endpointhooks.RenderCursorCloudHooks(endpointhooks.CursorCloudOptions{
 			BinaryPath: cloudOpts.binaryPath,
 			LogPath:    defaultCloudLogPath(cloudOpts.logPath),
+			SafeHooks:  cloudOpts.safeHooks,
 		})
 		if err != nil {
 			return err
@@ -111,6 +113,7 @@ var cloudCursorInstallHooksCmd = &cobra.Command{
 		return endpointhooks.InstallCursorCloudHooksJSON(path, endpointhooks.CursorCloudOptions{
 			BinaryPath: cloudOpts.binaryPath,
 			LogPath:    defaultCloudLogPath(cloudOpts.logPath),
+			SafeHooks:  cloudOpts.safeHooks,
 		})
 	},
 }
@@ -157,9 +160,11 @@ func init() {
 	cloudClaudeWebPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
 	cloudCursorPrintHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
 	cloudCursorPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
+	cloudCursorPrintHooksCmd.Flags().BoolVar(&cloudOpts.safeHooks, "safe-hooks", false, "Skip Cursor cloud shell/edit-specific hooks while testing telemetry forwarding")
 	cloudCursorInstallHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
 	cloudCursorInstallHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
 	cloudCursorInstallHooksCmd.Flags().StringVar(&cloudOpts.hooksJSONPath, "hooks-json", filepath.Join(".cursor", "hooks.json"), "Path to the project-level Cursor hooks.json")
+	cloudCursorInstallHooksCmd.Flags().BoolVar(&cloudOpts.safeHooks, "safe-hooks", false, "Skip Cursor cloud shell/edit-specific hooks while testing telemetry forwarding")
 	cloudCursorPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
 
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.project, "project", "", "Google Cloud project ID")

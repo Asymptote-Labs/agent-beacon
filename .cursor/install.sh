@@ -63,11 +63,24 @@ fi
 
 chmod +x "$BEACON_BIN_DIR/beacon" "$BEACON_BIN_DIR/beacon-hooks"
 
+if [ ! -d "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/.git" ]; then
+  echo "Beacon Cursor Cloud setup could not find a git repository at REPO_ROOT=$REPO_ROOT" >&2
+  echo "Set BEACON_CLOUD_REPO_DIR or CURSOR_PROJECT_DIR to the cloned repository root." >&2
+  exit 1
+fi
+
 mkdir -p "$REPO_ROOT/.cursor"
-"$BEACON_BIN_DIR/beacon" cloud cursor install-hooks \
-  --binary-path "$BEACON_BIN_DIR/beacon-hooks" \
-  --log-path "$BEACON_LOG_PATH" \
+hook_args=(
+  cloud cursor install-hooks
+  --binary-path "$BEACON_BIN_DIR/beacon-hooks"
+  --log-path "$BEACON_LOG_PATH"
   --hooks-json "$REPO_ROOT/.cursor/hooks.json"
+)
+if [ "${BEACON_CURSOR_CLOUD_FULL_HOOKS:-0}" != "1" ]; then
+  hook_args+=(--safe-hooks)
+fi
+
+"$BEACON_BIN_DIR/beacon" "${hook_args[@]}"
 
 echo ".cursor/hooks.json" >> "$REPO_ROOT/.git/info/exclude" 2>/dev/null || true
 echo "Beacon Cursor Cloud hooks installed at $REPO_ROOT/.cursor/hooks.json"
