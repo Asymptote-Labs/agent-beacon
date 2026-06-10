@@ -103,6 +103,46 @@ func TestEndpointEventPrefersCloudUserHash(t *testing.T) {
 	}
 }
 
+func TestEndpointEventUsesStableFallbackCloudRunID(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "shuttle-state.json")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_RUN_PROVIDER", "claude_code_web")
+	t.Setenv("BEACON_CLOUD_GCS_BUCKET", "bucket")
+	t.Setenv("BEACON_CLOUD_GCS_CREDENTIALS_B64", "credentials")
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", statePath)
+
+	logger := NewLoggerForPlatform("session-start", "claude")
+	if err := logger.EndpointEvent("session.started", "session", "info", "Session started", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+	if err := logger.EndpointEvent("tool.completed", "tool", "info", "Done", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read endpoint log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	var first, second map[string]interface{}
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("unmarshal first event: %v", err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatalf("unmarshal second event: %v", err)
+	}
+	firstRunID := first["run"].(map[string]interface{})["run_id"]
+	secondRunID := second["run"].(map[string]interface{})["run_id"]
+	if firstRunID == "" || firstRunID != secondRunID {
+		t.Fatalf("fallback run IDs = %q and %q, want same non-empty value", firstRunID, secondRunID)
+	}
+}
+
 func TestEndpointEventRotatesRuntimeLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := os.WriteFile(logPath, []byte("old log contents"), 0644); err != nil {

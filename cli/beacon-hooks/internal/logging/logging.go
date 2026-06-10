@@ -164,6 +164,8 @@ func cloudRunFields() map[string]interface{} {
 	}
 	if runID := firstEnv("BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"); runID != "" {
 		run["run_id"] = runID
+	} else if runID := fallbackCloudRunID(); runID != "" {
+		run["run_id"] = runID
 	}
 	if attempt := firstEnv("BEACON_RUN_ATTEMPT"); attempt != "" {
 		run["run_attempt"] = attempt
@@ -210,6 +212,30 @@ func firstEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func fallbackCloudRunID() string {
+	if firstEnv("BEACON_ORIGIN") != "cloud" {
+		return ""
+	}
+	if firstEnv("BEACON_CLOUD_GCS_BUCKET") == "" || firstEnv("BEACON_CLOUD_GCS_CREDENTIALS_B64") == "" {
+		return ""
+	}
+	statePath := firstEnv("BEACON_CLOUD_SHUTTLE_STATE")
+	if statePath == "" {
+		statePath = "/tmp/beacon/shuttle-state.json"
+	}
+	path := statePath + ".run-id"
+	if data, err := os.ReadFile(path); err == nil {
+		if value := strings.TrimSpace(string(data)); value != "" {
+			return value
+		}
+	}
+	value := fmt.Sprintf("manual-%d", time.Now().UTC().UnixNano())
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+		_ = os.WriteFile(path, []byte(value+"\n"), 0644)
+	}
+	return value
 }
 
 func writeEndpointJSON(path string, event map[string]interface{}) error {
