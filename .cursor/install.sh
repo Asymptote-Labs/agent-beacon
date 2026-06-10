@@ -72,6 +72,7 @@ if [ ! -f "$REPO_ROOT/.cursor/hooks.json" ]; then
   echo "Beacon Cursor Cloud project hooks were not found at $REPO_ROOT/.cursor/hooks.json" >&2
   echo "Commit .cursor/hooks.json before starting Cursor Cloud Agents." >&2
   echo "Generate it with: beacon cloud cursor print-hooks --binary-path $BEACON_BIN_DIR/beacon-hooks --log-path $BEACON_HOME/runtime.jsonl > .cursor/hooks.json" >&2
+  exit 1
 fi
 
 echo "Beacon Cursor Cloud binaries installed in $BEACON_BIN_DIR"
