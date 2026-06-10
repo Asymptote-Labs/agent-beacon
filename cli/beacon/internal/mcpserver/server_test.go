@@ -74,6 +74,24 @@ func TestExpectedToolsRegistered(t *testing.T) {
 	}
 }
 
+func TestValidateTransport(t *testing.T) {
+	for _, tc := range []struct {
+		transport string
+		wantErr   bool
+	}{
+		{"", false},
+		{TransportStdio, false},
+		{TransportHTTP, false},
+		{"sse", true},
+		{"grpc", true},
+	} {
+		err := ValidateTransport(tc.transport)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("ValidateTransport(%q) error = %v, wantErr %v", tc.transport, err, tc.wantErr)
+		}
+	}
+}
+
 func writeTestLog(t *testing.T, path string, events ...schema.Event) {
 	t.Helper()
 	var data []byte
