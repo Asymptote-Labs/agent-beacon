@@ -84,6 +84,7 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	seedCursorCloudRunID(input)
 	recordLocalEdit(params, logger)
 	maybeUploadCursorCloudTelemetry(logger)
 	outputJSON(emptyResponse)
@@ -354,10 +355,10 @@ func emitCursorPostHookObserved(logger *logging.Logger, input map[string]interfa
 		return true
 	case "postToolUse":
 		toolName := strings.ToLower(getFirstStr(input, "tool_name", "toolName"))
-		if toolName == "shell" || strings.Contains(toolName, "terminal") {
-			// Only suppress when afterShellExecution is also registered (cloud setups).
-			// Desktop/project installs wire shell activity only through postToolUse.
-			if isCursorCloudMode() {
+		if isCursorCloudMode() {
+			// Cloud setups also register dedicated read/shell hooks, so avoid
+			// emitting a second generic postToolUse event for the same action.
+			if toolName == "read" || toolName == "shell" || strings.Contains(toolName, "terminal") {
 				return true
 			}
 		}

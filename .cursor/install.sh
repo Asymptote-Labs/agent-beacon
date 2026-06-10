@@ -76,7 +76,7 @@ hook_args=(
   --log-path "$BEACON_LOG_PATH"
   --hooks-json "$REPO_ROOT/.cursor/hooks.json"
 )
-if [ "${BEACON_CURSOR_CLOUD_FULL_HOOKS:-0}" != "1" ]; then
+if [ "${BEACON_CURSOR_CLOUD_SAFE_HOOKS:-0}" = "1" ]; then
   hook_args+=(--safe-hooks)
 fi
 

@@ -62,6 +62,7 @@ func TestRunPreToolEmitsCursorBeforeShellExecution(t *testing.T) {
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 	t.Setenv("BEACON_ORIGIN", "cloud")
 	t.Setenv("BEACON_RUN_PROVIDER", "cursor_cloud")
+	t.Setenv("BEACON_RUN_ID", "")
 
 	out := runHookWithInput(t, runPreTool, map[string]interface{}{
 		"conversation_id": "conv-shell",
@@ -87,6 +88,9 @@ func TestRunPreToolEmitsCursorBeforeShellExecution(t *testing.T) {
 	}
 	if provider := event["run"].(map[string]interface{})["provider"]; provider != "cursor_cloud" {
 		t.Fatalf("run.provider = %q, want cursor_cloud", provider)
+	}
+	if runID := event["run"].(map[string]interface{})["run_id"]; runID != "conv-shell" {
+		t.Fatalf("run.run_id = %q, want conv-shell", runID)
 	}
 }
 
