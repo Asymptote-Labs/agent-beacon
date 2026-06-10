@@ -34,6 +34,7 @@ type CursorOptions struct {
 type CursorCloudOptions struct {
 	BinaryPath string
 	LogPath    string
+	SafeHooks  bool
 }
 
 type CursorStatus struct {
@@ -146,20 +147,13 @@ func CursorCloudHookRefs(opts CursorCloudOptions) map[string][]HookRef {
 		opts.LogPath = "/tmp/beacon/runtime.jsonl"
 	}
 	prefix := cursorCloudCommandPrefix(opts.BinaryPath, opts.LogPath)
-	return map[string][]HookRef{
+	refs := map[string][]HookRef{
 		"preToolUse":         {{Command: prefix + " pre-tool"}},
 		"postToolUse":        {{Command: prefix + " post-tool"}},
 		"postToolUseFailure": {{Command: prefix + " post-tool"}},
-		"beforeShellExecution": {
-			{Command: prefix + " pre-tool"},
-		},
-		"afterShellExecution": {
-			{Command: prefix + " post-tool"},
-		},
 		"beforeReadFile": {
 			{Command: prefix + " pre-tool"},
 		},
-		"afterFileEdit": {{Command: prefix + " post-tool"}},
 		"subagentStart": {
 			{Command: prefix + " subagent-start"},
 		},
@@ -170,6 +164,12 @@ func CursorCloudHookRefs(opts CursorCloudOptions) map[string][]HookRef {
 			{Command: prefix + " cursor-event"},
 		},
 	}
+	if !opts.SafeHooks {
+		refs["beforeShellExecution"] = []HookRef{{Command: prefix + " pre-tool"}}
+		refs["afterShellExecution"] = []HookRef{{Command: prefix + " post-tool"}}
+		refs["afterFileEdit"] = []HookRef{{Command: prefix + " post-tool"}}
+	}
+	return refs
 }
 
 func cursorCloudCommandPrefix(binaryPath, logPath string) string {

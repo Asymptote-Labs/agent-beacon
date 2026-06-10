@@ -72,7 +72,9 @@ For Cursor Cloud Agents, keep the repository-owned setup in `.cursor/`:
 
 The install script builds the current branch by default, or downloads a release
 when `BEACON_VERSION` is set, then merges Beacon commands into
-`.cursor/hooks.json` during environment setup.
+`.cursor/hooks.json` during environment setup. It defaults to safe hook coverage
+while testing forwarding and skips shell/edit-specific hooks; set
+`BEACON_CURSOR_CLOUD_FULL_HOOKS=1` to enable the full Cursor Cloud hook set.
 
 For Claude Code on the web, generate the setup script for a Beacon release and
 paste it into the provider's cloud setup field:

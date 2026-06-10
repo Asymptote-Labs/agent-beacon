@@ -61,6 +61,33 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 	}
 }
 
+func TestRenderCursorCloudSafeHooks(t *testing.T) {
+	got, err := endpointhooks.RenderCursorCloudHooks(endpointhooks.CursorCloudOptions{
+		BinaryPath: "/tmp/beacon/bin/beacon-hooks",
+		LogPath:    "/tmp/beacon/runtime.jsonl",
+		SafeHooks:  true,
+	})
+	if err != nil {
+		t.Fatalf("render cursor cloud hooks: %v", err)
+	}
+	for _, want := range []string{
+		`"beforeReadFile"`,
+		`"preToolUse"`,
+		`"postToolUse"`,
+		`"subagentStart"`,
+		`"preCompact"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered safe hooks missing %q:\n%s", want, got)
+		}
+	}
+	for _, skipped := range []string{`"beforeShellExecution"`, `"afterShellExecution"`, `"afterFileEdit"`} {
+		if strings.Contains(got, skipped) {
+			t.Fatalf("rendered safe hooks should not contain %q:\n%s", skipped, got)
+		}
+	}
+}
+
 func TestRenderCursorCloudSetupInstallsHooks(t *testing.T) {
 	got := renderCursorCloudSetup("v0.0.50")
 	for _, want := range []string{
