@@ -36,6 +36,7 @@ func runSessionEnd(cmd *cobra.Command, args []string) {
 		logger := logging.NewSessionLogger("session-end", platformFlag, sessionID)
 		logger.Info("Session ended", "session_id", sessionID, "platform", platformFlag)
 		emitHookEvent(logger, "session.ended", "session", "info", "Agent session ended", input, sessionFields(sessionID, input))
+		uploadCloudTelemetry(logger, true)
 
 		logFile := config.GetSessionLogFile(platformFlag, sessionID)
 		if err := os.Remove(logFile); err != nil && !os.IsNotExist(err) {
@@ -44,6 +45,7 @@ func runSessionEnd(cmd *cobra.Command, args []string) {
 	} else if isDevinLikePlatform(platformFlag) {
 		platformLogger.Info("Session ended", "platform", platformFlag)
 		emitHookEvent(platformLogger, "session.ended", "session", "info", "Agent session ended", input, sessionFields("", input))
+		uploadCloudTelemetry(platformLogger, true)
 	}
 
 	cleaned := state.CleanupStaleForPlatform(platformFlag)

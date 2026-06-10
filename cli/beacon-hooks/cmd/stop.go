@@ -50,9 +50,11 @@ func runStop(cmd *cobra.Command, args []string) {
 		if isDevinLikePlatform(platformFlag) {
 			logger.Info("stop completed")
 			emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields("", input))
+			uploadCloudTelemetry(logger, true)
 			outputJSON(emptyResponse)
 			return
 		}
+		uploadCloudTelemetry(logger, true)
 		outputJSONAndExit(emptyResponse)
 		return
 	}
@@ -74,6 +76,7 @@ func runStop(cmd *cobra.Command, args []string) {
 	elapsed := time.Since(start)
 	logger.Info("stop completed", "duration_ms", elapsed.Milliseconds())
 	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+	uploadCloudTelemetry(logger, true)
 	outputJSONAndExit(emptyResponse)
 }
 

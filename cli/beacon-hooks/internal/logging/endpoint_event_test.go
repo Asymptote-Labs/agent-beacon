@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,44 @@ func TestEndpointEventStillWritesStructuredTelemetry(t *testing.T) {
 
 	if data, err := os.ReadFile(logPath); err != nil || len(data) == 0 {
 		t.Fatalf("expected structured endpoint event, len=%d err=%v", len(data), err)
+	}
+}
+
+func TestEndpointEventAddsCloudRunMetadataFromEnvironment(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_RUN_PROVIDER", "claude_code_web")
+	t.Setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "cse_123")
+	t.Setenv("BEACON_RUN_REPOSITORY", "asymptote-labs/agent-beacon")
+	t.Setenv("BEACON_RUN_BRANCH", "main")
+	t.Setenv("BEACON_RUN_ACTOR", "alice@example.com")
+	t.Setenv("BEACON_RUN_EPHEMERAL", "true")
+	t.Setenv("BEACON_CLOUD_USER_ID_HASH", "user-hash")
+
+	logger := NewLoggerForPlatform("session-start", "claude")
+	if err := logger.EndpointEvent("session.started", "session", "info", "Session started", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read endpoint log: %v", err)
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if got := event["origin"]; got != "cloud" {
+		t.Fatalf("origin = %q, want cloud", got)
+	}
+	run := event["run"].(map[string]interface{})
+	if run["provider"] != "claude_code_web" || run["run_id"] != "cse_123" || run["repository"] != "asymptote-labs/agent-beacon" || run["branch"] != "main" || run["actor"] != "alice@example.com" || run["ephemeral"] != true {
+		t.Fatalf("run metadata = %#v", run)
+	}
+	user := event["user"].(map[string]interface{})
+	if user["uid"] != "user-hash" {
+		t.Fatalf("user uid = %q, want user-hash", user["uid"])
 	}
 }
 

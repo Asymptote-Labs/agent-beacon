@@ -42,11 +42,30 @@ builds:
         # hooks.bin instead of serving a stale copy from cache.
         - cmd: bash -c 'cd ../beacon-hooks && GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
           output: true
+  - id: beacon-hooks
+    main: ../beacon-hooks
+    binary: beacon-hooks
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -a
+    ldflags:
+      - -s -w
+      - -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds:
+      - beacon
+      - beacon-hooks
     files:
       - README*
       - src: release-collectors/{{ .Os }}_{{ .Arch }}/beacon-otelcol
@@ -92,6 +111,7 @@ brews:
     commit_msg_template: "Homebrew formula update for {{ .ProjectName }} version {{ .Tag }}"
     install: |
       bin.install "beacon"
+      bin.install "beacon-hooks"
       bin.install "beacon-otelcol"
     caveats: |
       To configure local endpoint telemetry, run:

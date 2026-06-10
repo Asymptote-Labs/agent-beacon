@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
@@ -38,6 +41,15 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	}
 	if err := logger.EndpointEvent(action, category, severity, message, fields); err != nil {
 		logger.Error("Failed to write endpoint event", "error", err.Error(), "action", action)
+	}
+	uploadCloudTelemetry(logger, false)
+}
+
+func uploadCloudTelemetry(logger *logging.Logger, force bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := cloudshuttle.MaybeUpload(ctx, force); err != nil {
+		logger.Warn("Cloud telemetry upload failed", "error", err.Error(), "force", force)
 	}
 }
 
