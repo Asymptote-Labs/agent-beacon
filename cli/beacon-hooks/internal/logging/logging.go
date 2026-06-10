@@ -121,7 +121,7 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 	user := map[string]interface{}{
 		"name": os.Getenv("USER"),
 	}
-	if uid := firstEnv("BEACON_CLOUD_USER_ID", "BEACON_CLOUD_USER_ID_HASH"); uid != "" {
+	if uid := firstEnv("BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"); uid != "" {
 		user["uid"] = uid
 	}
 	event := map[string]interface{}{

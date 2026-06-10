@@ -79,6 +79,30 @@ func TestEndpointEventAddsCloudRunMetadataFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestEndpointEventPrefersCloudUserHash(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CLOUD_USER_ID", "raw-user")
+	t.Setenv("BEACON_CLOUD_USER_ID_HASH", "hashed-user")
+
+	logger := NewLoggerForPlatform("session-start", "claude")
+	if err := logger.EndpointEvent("session.started", "session", "info", "Session started", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read endpoint log: %v", err)
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	user := event["user"].(map[string]interface{})
+	if user["uid"] != "hashed-user" {
+		t.Fatalf("user uid = %q, want hashed-user", user["uid"])
+	}
+}
+
 func TestEndpointEventRotatesRuntimeLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := os.WriteFile(logPath, []byte("old log contents"), 0644); err != nil {

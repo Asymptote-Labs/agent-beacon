@@ -190,7 +190,7 @@ func uploadDue(cfg Config, currentSize int64, now time.Time) bool {
 	}
 	st, err := readState(cfg.StatePath)
 	if err != nil {
-		return true
+		return false
 	}
 	if currentSize != st.LastSize {
 		// Still respect interval to avoid uploading on every hook during active runs.

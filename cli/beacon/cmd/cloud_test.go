@@ -71,3 +71,18 @@ func TestGCSSetupCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestGCSSetupClassifiesNotFoundOutput(t *testing.T) {
+	for _, text := range []string{
+		"ERROR: bucket not found",
+		"HTTPError 400: Service account example does not exist.",
+		"One or more URLs matched no objects.",
+	} {
+		if !isNotFoundOutput(text) {
+			t.Fatalf("isNotFoundOutput(%q) = false, want true", text)
+		}
+	}
+	if isNotFoundOutput("ERROR: permission denied") {
+		t.Fatal("permission denied should not be treated as not found")
+	}
+}

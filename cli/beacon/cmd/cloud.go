@@ -202,10 +202,17 @@ func runCloudGCSSetup(cmd *cobra.Command, args []string) error {
 	if !cloudOpts.apply {
 		return nil
 	}
-	for _, command := range commands {
-		if err := runGCloud(command...); err != nil {
-			return err
-		}
+	if err := runGCloud("gcloud", "services", "enable", "storage.googleapis.com", "iam.googleapis.com", "--project", cloudOpts.project); err != nil {
+		return err
+	}
+	if err := ensureGCSBucket(cloudOpts.project, cloudOpts.bucket, cloudOpts.location); err != nil {
+		return err
+	}
+	if err := ensureServiceAccount(cloudOpts.project, email, serviceAccountID(cloudOpts.serviceAccount)); err != nil {
+		return err
+	}
+	if err := runGCloud("gcloud", "storage", "buckets", "add-iam-policy-binding", "gs://"+cloudOpts.bucket, "--member", "serviceAccount:"+email, "--role", "roles/storage.objectUser"); err != nil {
+		return err
 	}
 	if cloudOpts.printEnv {
 		keyPath, cleanup, err := createServiceAccountKey(cloudOpts.project, email)
@@ -236,21 +243,6 @@ func gcsSetupCommands(project, bucket, location, email, accountID string) [][]st
 }
 
 func runGCloud(args ...string) error {
-	// Some setup commands are idempotent checks followed by creates. If a describe
-	// succeeds, the matching create may fail with AlreadyExists; ignore only that
-	// common case so reruns remain simple for self-serve trials.
-	if len(args) >= 5 && args[0] == "gcloud" && args[2] == "buckets" && args[3] == "describe" {
-		if err := exec.Command(args[0], args[1:]...).Run(); err == nil {
-			return nil
-		}
-		return nil
-	}
-	if len(args) >= 5 && args[0] == "gcloud" && args[1] == "iam" && args[2] == "service-accounts" && args[3] == "describe" {
-		if err := exec.Command(args[0], args[1:]...).Run(); err == nil {
-			return nil
-		}
-		return nil
-	}
 	output, err := runGCloudCommand(args...)
 	if err != nil {
 		text := strings.TrimSpace(string(output))
@@ -283,11 +275,43 @@ func runGCloudCommand(args ...string) ([]byte, error) {
 	return exec.Command(args[0], args[1:]...).CombinedOutput()
 }
 
+func ensureGCSBucket(project, bucket, location string) error {
+	describe := []string{"gcloud", "storage", "buckets", "describe", "gs://" + bucket, "--project", project}
+	output, err := runGCloudCommand(describe...)
+	if err == nil {
+		return nil
+	}
+	if !isNotFoundOutput(string(output)) {
+		return fmt.Errorf("%s failed: %w\n%s", shellCommand(describe...), err, strings.TrimSpace(string(output)))
+	}
+	return runGCloud("gcloud", "storage", "buckets", "create", "gs://"+bucket, "--project", project, "--location", location, "--uniform-bucket-level-access")
+}
+
+func ensureServiceAccount(project, email, accountID string) error {
+	describe := []string{"gcloud", "iam", "service-accounts", "describe", email, "--project", project}
+	output, err := runGCloudCommand(describe...)
+	if err == nil {
+		return nil
+	}
+	if !isNotFoundOutput(string(output)) {
+		return fmt.Errorf("%s failed: %w\n%s", shellCommand(describe...), err, strings.TrimSpace(string(output)))
+	}
+	return runGCloud("gcloud", "iam", "service-accounts", "create", accountID, "--project", project, "--display-name", "Beacon cloud trace uploader")
+}
+
 func isAlreadyExistsOutput(text string) bool {
 	lower := strings.ToLower(text)
 	return strings.Contains(lower, "already exists") ||
 		strings.Contains(lower, "already own it") ||
 		strings.Contains(lower, "alreadyexists")
+}
+
+func isNotFoundOutput(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "does not exist") ||
+		strings.Contains(lower, "matched no") ||
+		strings.Contains(lower, "no urls matched")
 }
 
 func isGCSBucketIAMBinding(args []string) bool {
