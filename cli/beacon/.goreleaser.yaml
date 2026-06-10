@@ -118,6 +118,7 @@ brews:
         beacon endpoint install
     test: |
       system "#{bin}/beacon", "version"
+      system "#{bin}/beacon-hooks", "version"
 
 release:
   github:
