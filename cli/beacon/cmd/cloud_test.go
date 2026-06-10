@@ -28,8 +28,12 @@ func TestRenderClaudeWebHooks(t *testing.T) {
 		`"UserPromptSubmit"`,
 		`"PreToolUse"`,
 		`"PostToolUse"`,
+		`"PostToolUseFailure"`,
 		`"Stop"`,
 		`"SessionEnd"`,
+		`"SubagentStart"`,
+		`"SubagentStop"`,
+		`"PermissionRequest"`,
 		`BEACON_ENDPOINT_MODE=1`,
 		`BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl`,
 		`/tmp/beacon/bin/beacon-hooks --platform claude`,
@@ -53,6 +57,9 @@ func TestRenderClaudeWebSetupUsesLocalSettings(t *testing.T) {
 	}
 	if strings.Contains(got, `> .claude/settings.json`) {
 		t.Fatalf("rendered setup should not write settings.json:\n%s", got)
+	}
+	if strings.Contains(got, `/tmp/beacon/logs`) {
+		t.Fatalf("rendered setup should not reference unused logs directory:\n%s", got)
 	}
 }
 

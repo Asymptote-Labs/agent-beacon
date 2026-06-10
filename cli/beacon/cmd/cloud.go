@@ -141,7 +141,7 @@ func renderClaudeWebHooks(binaryPath, logPath string) string {
 
 func renderClaudeWebSetup(version string) string {
 	return fmt.Sprintf(`set -euo pipefail
-mkdir -p /tmp/beacon/bin /tmp/beacon/logs
+mkdir -p /tmp/beacon/bin
 
 BEACON_VERSION=%q
 OS="linux"
