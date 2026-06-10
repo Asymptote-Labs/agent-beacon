@@ -58,13 +58,10 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 	if err := ResetFromEnv(); err != nil {
 		t.Fatalf("ResetFromEnv returned error: %v", err)
 	}
-	for _, path := range []string{logPath, logPath + ".lock", statePath + ".run-id"} {
+	for _, path := range []string{logPath, logPath + ".lock", statePath, statePath + ".run-id"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists, stat err=%v", path, err)
 		}
-	}
-	if _, err := os.Stat(statePath); err != nil {
-		t.Fatalf("state path should be recreated to throttle first periodic upload: %v", err)
 	}
 }
 

@@ -42,9 +42,6 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if err := logger.EndpointEvent(action, category, severity, message, fields); err != nil {
 		logger.Error("Failed to write endpoint event", "error", err.Error(), "action", action)
 	}
-	if !isFinalUploadAction(action) {
-		uploadCloudTelemetry(logger, false)
-	}
 }
 
 func uploadCloudTelemetry(logger *logging.Logger, force bool) {
@@ -52,15 +49,6 @@ func uploadCloudTelemetry(logger *logging.Logger, force bool) {
 	defer cancel()
 	if err := cloudshuttle.MaybeUpload(ctx, force); err != nil {
 		logger.Warn("Cloud telemetry upload failed", "error", err.Error(), "force", force)
-	}
-}
-
-func isFinalUploadAction(action string) bool {
-	switch action {
-	case "tool.completed", "session.ended":
-		return true
-	default:
-		return false
 	}
 }
 

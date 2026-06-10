@@ -113,14 +113,6 @@ func ResetFromEnv() error {
 			return err
 		}
 	}
-	if cfg.Interval > 0 {
-		if err := writeState(cfg.StatePath, state{
-			LastUpload: time.Now().UTC().Format(time.RFC3339),
-			LastSize:   0,
-		}); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -190,7 +182,7 @@ func uploadDue(cfg Config, currentSize int64, now time.Time) bool {
 	}
 	st, err := readState(cfg.StatePath)
 	if err != nil {
-		return false
+		return true
 	}
 	if currentSize != st.LastSize {
 		// Still respect interval to avoid uploading on every hook during active runs.
