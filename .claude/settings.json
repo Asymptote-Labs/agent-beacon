@@ -1,0 +1,110 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude permission-request",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude post-tool",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude post-tool",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude pre-tool",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Edit|Write|MultiEdit|Read|Glob|Grep|WebFetch|WebSearch|Agent|mcp__.*"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude session-end",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude session-start",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude stop",
+            "timeout": 45,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude subagent-start",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude subagent-stop",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform claude prompt-submit",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
