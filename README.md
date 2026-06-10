@@ -33,12 +33,6 @@
 
 ## What is Agent Beacon
 
-<div align="center">
-  <a href="https://www.loom.com/share/b39038879dc24b10af9e603ad4e03fb6?t=0s">
-    <img src="https://cdn.loom.com/sessions/thumbnails/b39038879dc24b10af9e603ad4e03fb6-with-play.gif" alt="Watch the Agent Beacon overview" width="860">
-  </a>
-</div>
-
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for AI agents wherever they run: locally, in CI, or in the cloud.
 
 Beacon started with local endpoint telemetry for security and IT teams that need visibility into AI agent activity on employee machines. It now captures supported runtime activity across local agents, CI agents, and cloud agents, then normalizes that activity into events your team can inspect, retain, and forward under your control.

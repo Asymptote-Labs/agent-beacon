@@ -97,7 +97,7 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		var err error
 		data, err = os.ReadFile(session.ConfigPath + ".env")
-		if err == nil {
+		if err == nil && len(data) > 0 {
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
