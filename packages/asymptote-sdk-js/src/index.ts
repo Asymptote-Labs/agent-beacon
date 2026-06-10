@@ -394,7 +394,7 @@ function readSDKVersion(): string {
   } catch {
     // Keep tracing usable in unusual bundler/test environments where package.json is unavailable.
   }
-  return "0.0.0";
+  return "0.1.0";
 }
 
 function patchOpenLLMetryModules(modules: InstrumentModules): void {

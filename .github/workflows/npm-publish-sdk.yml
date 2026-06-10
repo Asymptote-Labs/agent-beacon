@@ -6,6 +6,10 @@ on:
     tags:
       - sdk-js-v*
 
+concurrency:
+  group: npm-publish-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
@@ -19,11 +23,33 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: npm
-          cache-dependency-path: packages/asymptote-sdk-js/package-lock.json
+      - name: Verify npm supports trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm_version="$(npm --version)"
+          echo "npm ${npm_version}"
+          IFS=. read -r npm_major npm_minor _ <<<"${npm_version}"
+          if [ "${npm_major}" -lt 11 ] || { [ "${npm_major}" -eq 11 ] && [ "${npm_minor}" -lt 5 ]; }; then
+            echo "npm ${npm_version} does not support trusted publishing"
+            exit 1
+          fi
       - name: Install SDK dependencies
         working-directory: packages/asymptote-sdk-js
         run: npm ci
+      - name: Verify tag matches SDK version
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: packages/asymptote-sdk-js
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#sdk-js-v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg_version" ]; then
+            echo "Tag version ($tag) does not match package.json version ($pkg_version)"
+            exit 1
+          fi
       - name: Test SDK
         working-directory: packages/asymptote-sdk-js
         run: npm test
@@ -38,4 +64,4 @@ jobs:
         run: npm run pack:smoke
       - name: Publish SDK to npm
         working-directory: packages/asymptote-sdk-js
-        run: npm publish --access public --provenance
+        run: npm publish

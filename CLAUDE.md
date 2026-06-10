@@ -215,6 +215,46 @@ Clean up the temporary worktree after verification:
 git worktree remove --force .tmp/release-<tag>
 ```
 
+### TypeScript SDK Release
+
+Publish `@asymptote/sdk` from GitHub Actions instead of a local shell when
+possible so npm provenance remains enabled.
+
+Before tagging:
+
+```bash
+cd packages/asymptote-sdk-js
+npm test
+npm run check
+npm run pack:dry-run
+```
+
+Publish with an annotated SDK tag that matches `package.json` exactly:
+
+```bash
+git tag -a sdk-js-v<version> -m "sdk-js-v<version>"
+git push origin sdk-js-v<version>
+gh run list --workflow npm-publish-sdk.yml --limit 5
+```
+
+The `.github/workflows/npm-publish-sdk.yml` workflow validates that the pushed
+`sdk-js-v<version>` tag matches `packages/asymptote-sdk-js/package.json`, reruns
+the SDK checks, and publishes to npm with provenance.
+
+Trusted publishing must be configured in npm for this repository/workflow before
+the first CI publish. If trusted publishing is unavailable and the maintainer
+explicitly requests a local fallback, disable provenance for that one publish
+instead of changing the package defaults.
+
+Use these npm trusted publisher values:
+
+- Package: `@asymptote/sdk`
+- Publisher: GitHub Actions
+- Organization or owner: `asymptote-labs`
+- Repository: `agent-beacon`
+- Workflow filename: `npm-publish-sdk.yml`
+- Environment: leave unset unless the workflow is updated to declare one
+
 ## Implementation Notes
 
 - Prefer deterministic tests that use `t.TempDir()`, `t.Setenv("HOME", ...)`, fake binaries, and free local ports.
