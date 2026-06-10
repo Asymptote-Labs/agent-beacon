@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Unified endpoint telemetry for AI agents.</strong>
+  <strong>Unified endpoint telemetry for AI agents, wherever they run.</strong>
 </p>
 
 <p align="center">
@@ -33,16 +33,12 @@
 
 ## What is Agent Beacon
 
-Agent Beacon is [Asymptote's open-source endpoint agent](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for security and IT teams that
-need visibility into local AI agent activity.
+Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for AI agents wherever they run: locally, in CI, or in the cloud.
 
-It runs locally, captures all agent activity (e.g. prompts, tool use, file edits, etc.) from
-all the [major local agent harnesses](#agent-runtimes), then
-normalizes that activity into endpoint events your team can inspect and retain
-locally.
+Beacon started with local endpoint telemetry for security and IT teams that need visibility into AI agent activity on employee machines. It now captures supported runtime activity across local agents, CI agents, and cloud agents, then normalizes that activity into events your team can inspect, retain, and forward under your control.
 
 Beacon is built to be easy to deploy for Security and IT teams through
-[MDM deployment](#mdm-deployment) and to
+[MDM deployment](#mdm-deployment), CI workflows, and cloud-agent setup paths, and to
 emit agent harness telemetry logs to
 [all the major enterprise-grade SIEMs](#siem--output-destinations).
 
@@ -50,15 +46,16 @@ Learn more in the [Agent Beacon Documentation](https://docs.asymptotelabs.ai).
 
 ## High-Level Architecture
 
-Beacon keeps collection, processing, and inspection local to the endpoint while
-leaving forwarding under customer control.
+Beacon keeps endpoint collection, processing, and inspection local by default,
+while extending the same normalized event model to CI and cloud-agent telemetry
+paths under customer control.
 
 <p align="center">
   <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
 </p>
 
-- **Agent runtime layer:** Local hooks and OpenTelemetry sources capture
-  supported activity from AI agent harnesses on the endpoint.
+- **Agent runtime layer:** Hooks, OpenTelemetry sources, CI wrappers, and SDKs
+  capture supported activity from AI agent harnesses wherever they run.
 - **Beacon endpoint layer:** Local processing normalizes events, applies
   retention and redaction settings, and writes durable endpoint telemetry.
 - **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
@@ -66,51 +63,58 @@ leaving forwarding under customer control.
 
 ## Supported Surfaces
 
-Beacon captures supported agent harness activity locally and writes normalized
-endpoint events that teams can inspect in place or forward into customer-managed
-security pipelines.
+Beacon captures supported agent harness activity across local endpoints, CI
+jobs, and cloud-agent surfaces, then writes normalized events that teams can
+inspect in place or forward into customer-managed security pipelines.
 
 ### Agent Runtimes
 
-Agent Beacon supports the most popular enterprise coding agent harnesses (e.g.
-Claude Code, Codex, Cursor, etc.) and knowledge worker agent harnesses (e.g.
-Claude Cowork, OpenClaw).
+Agent Beacon supports the most popular enterprise agent harnesses across local,
+CI, and cloud surfaces.
 
-#### Coding Agent Harnesses
+#### Local Agents
 
-| Agent harness | Support path |
-| --- | --- |
-| [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Beacon hook adapter |
-| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OpenTelemetry configuration, Beacon hook adapter, or Claude Code web cloud hooks with GCS upload |
-| [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OpenTelemetry configuration |
-| [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Beacon hook adapter |
-| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Beacon hook adapter |
-| [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Beacon hook adapter via Cascade/Windsurf hooks |
-| [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | Local OpenTelemetry configuration and optional hook adapter |
-| [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OpenTelemetry configuration |
-| [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OpenTelemetry (OTLP HTTP) |
-| [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Beacon hook adapter |
-| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Beacon hook adapter |
-| [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | VS Code Copilot OpenTelemetry and optional Beacon hook adapter |
+##### Coding Agent Harnesses
 
-#### Cloud Agent Harnesses
+| Agent harness | Collection path | Telemetry coverage |
+| --- | --- | --- |
+| [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
+| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, lifecycle, subagent, and permission telemetry where emitted through OTLP or hooks |
+| [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OTLP logs | Session, prompt, approval, and tool-result activity from Codex semantic logs |
+| [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
+| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
+| [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
+| [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
+| [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
+| [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
+| [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
+| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
+| [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
-Beacon can capture Claude Code on the web sessions by installing ephemeral
-project-level hooks inside the cloud sandbox and uploading the per-session
-`runtime.jsonl` snapshot to customer-managed Google Cloud Storage. Use
-`beacon cloud gcs setup` to create a scoped GCS uploader service account and
-print the Claude web environment variables, then use
-`beacon cloud claude-web print-setup --version <tag>` as the Claude environment
-setup script. The setup script writes `.claude/settings.local.json` inside the
-cloud clone only, so generated hook configuration stays out of commits.
+##### Knowledge Worker Agent Harnesses
 
-#### Knowledge Worker Agent Harnesses
+| Agent harness | Collection path | Telemetry coverage |
+| --- | --- | --- |
+| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
+| [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
+| [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
-| Agent harness | Support path |
-| --- | --- |
-| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OpenTelemetry setup |
-| [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Beacon hook adapter via Hermes shell hooks |
-| [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP export |
+#### CI Agents
+
+| Harness | Collection path | Telemetry coverage |
+| --- | --- | --- |
+| CI agent telemetry | Temporary local collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish` | Supported agent prompt, tool, command, file, and run context where emitted during the job |
+
+#### Cloud Agents
+
+| Cloud surface | Collection path | Telemetry coverage |
+| --- | --- | --- |
+| Claude Code Cloud Agents | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| Cursor Cloud Agents | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
+| Anthropic | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
+| Claude Agent SDK | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
+| OpenAI | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
+| Vercel AI SDK | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
 
 ### Output Destinations
 
