@@ -35,6 +35,34 @@ Add optional Splunk HEC forwarding during install or repair:
 The local JSONL runtime log remains enabled when Splunk forwarding is
 configured.
 
+## Cloud Agent Telemetry
+
+Use `beacon cloud` helpers to configure provider-managed cloud agent sandboxes.
+The first supported path is Claude Code on the web forwarding Beacon JSONL to
+customer-managed GCS:
+
+```bash
+./beacon cloud gcs setup \
+  --project "$GCP_PROJECT" \
+  --bucket "$BEACON_CLOUD_GCS_BUCKET" \
+  --prefix "$BEACON_CLOUD_GCS_PREFIX" \
+  --service-account beacon-cloud-trace-uploader \
+  --apply \
+  --print-env
+```
+
+Then generate the Claude web setup script for a Beacon release:
+
+```bash
+./beacon cloud claude-web print-setup --version vX.Y.Z
+```
+
+The setup script installs `beacon-hooks` into the cloud sandbox, writes
+`.claude/settings.local.json` inside the sandbox clone, and uploads the
+per-session `/tmp/beacon/runtime.jsonl` snapshot to GCS. See
+[`../../examples/cloud-agents/claude-web-gcs.md`](../../examples/cloud-agents/claude-web-gcs.md)
+for the end-to-end walkthrough.
+
 Add optional Falcon LogScale HEC forwarding during install or repair:
 
 ```bash

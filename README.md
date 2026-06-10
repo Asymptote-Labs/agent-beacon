@@ -81,7 +81,7 @@ Claude Cowork, OpenClaw).
 | Agent harness | Support path |
 | --- | --- |
 | [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Beacon hook adapter |
-| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OpenTelemetry configuration or Beacon hook adapter |
+| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OpenTelemetry configuration, Beacon hook adapter, or Claude Code web cloud hooks with GCS upload |
 | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OpenTelemetry configuration |
 | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Beacon hook adapter |
 | [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Beacon hook adapter |
@@ -92,6 +92,14 @@ Claude Cowork, OpenClaw).
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Beacon hook adapter |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Beacon hook adapter |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | VS Code Copilot OpenTelemetry and optional Beacon hook adapter |
+
+#### Cloud Agent Harnesses
+
+Beacon can capture Claude Code on the web sessions by installing ephemeral
+project-level hooks inside the cloud sandbox and uploading the per-session
+`runtime.jsonl` snapshot to customer-managed Google Cloud Storage. Start with
+the self-serve walkthrough in
+[`examples/cloud-agents/claude-web-gcs.md`](examples/cloud-agents/claude-web-gcs.md).
 
 #### Knowledge Worker Agent Harnesses
 
