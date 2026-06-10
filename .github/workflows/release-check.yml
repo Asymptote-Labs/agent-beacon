@@ -74,10 +74,11 @@ jobs:
             echo "Checking $archive"
             tar -tzf "$archive" | awk '
               /(^|\/)beacon$/ { beacon = 1 }
+              /(^|\/)beacon-hooks$/ { hooks = 1 }
               /(^|\/)beacon-otelcol$/ { collector = 1 }
               END {
-                if (!beacon || !collector) {
-                  print "archive is missing beacon or beacon-otelcol"
+                if (!beacon || !hooks || !collector) {
+                  print "archive is missing beacon, beacon-hooks, or beacon-otelcol"
                   exit 1
                 }
               }
@@ -98,3 +99,4 @@ jobs:
           extract_dir="$(mktemp -d)"
           tar -xzf "$linux_archive" -C "$extract_dir"
           "$extract_dir/beacon" version
+          "$extract_dir/beacon-hooks" version
