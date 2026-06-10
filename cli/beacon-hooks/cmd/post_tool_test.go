@@ -114,6 +114,61 @@ func TestRunPostToolEmitsCursorAfterShellExecution(t *testing.T) {
 	}
 }
 
+func TestRunPostToolSuppressesCursorCloudReadPostToolDuplicate(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_RUN_PROVIDER", "cursor_cloud")
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-read",
+		"hook_event_name": "postToolUse",
+		"tool_name":       "Read",
+		"tool_input": map[string]interface{}{
+			"path": "/repo/README.md",
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+	assertNoEndpointLog(t, logPath)
+}
+
+func TestRunPostToolSeedsCursorCloudRunIDForAfterFileEdit(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_RUN_PROVIDER", "cursor_cloud")
+	t.Setenv("BEACON_RUN_ID", "")
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-edit",
+		"hook_event_name": "afterFileEdit",
+		"file_path":       "/repo/main.go",
+		"edits": []interface{}{
+			map[string]interface{}{
+				"old_string": "package main\n",
+				"new_string": "package main\n\nfunc main() {}\n",
+			},
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	if runID := event["run"].(map[string]interface{})["run_id"]; runID != "conv-edit" {
+		t.Fatalf("run.run_id = %q, want conv-edit", runID)
+	}
+}
+
 func TestRunPostToolEmitsCursorPostToolFailure(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"

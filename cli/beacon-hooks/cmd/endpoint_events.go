@@ -18,6 +18,7 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if fields == nil {
 		fields = map[string]interface{}{}
 	}
+	seedCursorCloudRunID(input)
 	if platformFlag == "grok" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"grok": input})
 	}
@@ -56,6 +57,15 @@ func uploadCloudTelemetry(logger *logging.Logger, force bool) {
 func isCursorCloudMode() bool {
 	return strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" &&
 		strings.TrimSpace(os.Getenv("BEACON_RUN_PROVIDER")) == "cursor_cloud"
+}
+
+func seedCursorCloudRunID(input map[string]interface{}) {
+	if platformFlag != "cursor" || !isCursorCloudMode() || strings.TrimSpace(os.Getenv("BEACON_RUN_ID")) != "" {
+		return
+	}
+	if runID := getFirstStr(input, "conversation_id", "parent_conversation_id"); runID != "" {
+		_ = os.Setenv("BEACON_RUN_ID", runID)
+	}
 }
 
 func maybeUploadCursorCloudTelemetry(logger *logging.Logger) {

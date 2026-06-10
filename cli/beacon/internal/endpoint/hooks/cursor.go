@@ -148,7 +148,7 @@ func CursorCloudHookRefs(opts CursorCloudOptions) map[string][]HookRef {
 	}
 	prefix := cursorCloudCommandPrefix(opts.BinaryPath, opts.LogPath)
 	refs := map[string][]HookRef{
-		"preToolUse":         {{Command: prefix + " pre-tool"}},
+		"preToolUse":         {{Command: prefix + " pre-tool", Matcher: "Write|Edit|MultiEdit|Delete|Grep|Glob|MCP|Task"}},
 		"postToolUse":        {{Command: prefix + " post-tool"}},
 		"postToolUseFailure": {{Command: prefix + " post-tool"}},
 		"beforeReadFile": {

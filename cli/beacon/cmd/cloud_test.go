@@ -46,6 +46,7 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 		`"subagentStart"`,
 		`"subagentStop"`,
 		`"preCompact"`,
+		`"matcher": "Write|Edit|MultiEdit|Delete|Grep|Glob|MCP|Task"`,
 		`BEACON_ORIGIN=cloud`,
 		`BEACON_RUN_PROVIDER=cursor_cloud`,
 		`'/tmp/beacon/bin/beacon-hooks' --platform cursor`,
