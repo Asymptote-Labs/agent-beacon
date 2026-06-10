@@ -58,7 +58,7 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "runtime.jsonl")
 	statePath := filepath.Join(dir, "state.json")
-	for _, path := range []string{logPath, logPath + ".lock", statePath, statePath + ".run-id"} {
+	for _, path := range []string{logPath, logPath + ".lock", statePath} {
 		if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
 			t.Fatalf("write %s: %v", path, err)
 		}
@@ -70,7 +70,7 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 	if err := ResetFromEnv(); err != nil {
 		t.Fatalf("ResetFromEnv returned error: %v", err)
 	}
-	for _, path := range []string{logPath, logPath + ".lock", statePath, statePath + ".run-id"} {
+	for _, path := range []string{logPath, logPath + ".lock", statePath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists, stat err=%v", path, err)
 		}
@@ -142,23 +142,25 @@ func TestUploadSendsJSONLToGCS(t *testing.T) {
 	}
 }
 
-func TestStableFallbackRunIDReusesGeneratedValue(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "shuttle-state.json")
-	first := stableFallbackRunID(statePath)
-	second := stableFallbackRunID(statePath)
-	if first == "" || second == "" || first != second {
-		t.Fatalf("fallback run id not stable: first=%q second=%q", first, second)
+func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "cse_env")
+	if got := resolveRunID(); got != "cse_env" {
+		t.Fatalf("resolveRunID = %q, want cse_env", got)
 	}
 }
 
-func TestResolveRunIDPrefersEnvironmentWithoutFallbackSideEffect(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "shuttle-state.json")
-	t.Setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "cse_env")
-	if got := resolveRunID(statePath); got != "cse_env" {
-		t.Fatalf("resolveRunID = %q, want cse_env", got)
+func TestUploadNoopsWithoutRunID(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
 	}
-	if _, err := os.Stat(statePath + ".run-id"); !os.IsNotExist(err) {
-		t.Fatalf("fallback run-id file should not be created when env run id exists: %v", err)
+	cfg := Config{
+		LogPath:        logPath,
+		Bucket:         "bucket",
+		CredentialsB64: "invalid-but-should-not-be-read",
+	}
+	if err := Upload(context.Background(), cfg, true); err != nil {
+		t.Fatalf("Upload returned error: %v", err)
 	}
 }
 

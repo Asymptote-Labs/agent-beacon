@@ -74,7 +74,7 @@ func ConfigFromEnv() Config {
 		Prefix:         strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/"),
 		CredentialsB64: strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_CREDENTIALS_B64")),
 		Provider:       firstEnvDefault("claude_code_web", "BEACON_RUN_PROVIDER"),
-		RunID:          resolveRunID(statePath),
+		RunID:          resolveRunID(),
 		UserID:         firstEnvDefault("unknown", "BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"),
 		Repository:     firstEnv("BEACON_RUN_REPOSITORY"),
 		GCSEndpoint:    firstEnvDefault(defaultGCSEndpoint, "BEACON_CLOUD_GCS_ENDPOINT"),
@@ -93,7 +93,7 @@ func ResetFromEnv() error {
 	if err := preserveExistingLog(cfg); err != nil {
 		return err
 	}
-	for _, path := range []string{cfg.LogPath + ".lock", cfg.StatePath, cfg.StatePath + ".run-id"} {
+	for _, path := range []string{cfg.LogPath + ".lock", cfg.StatePath} {
 		if path == "" {
 			continue
 		}
@@ -106,6 +106,9 @@ func ResetFromEnv() error {
 
 func Upload(ctx context.Context, cfg Config, force bool) error {
 	if strings.TrimSpace(cfg.Bucket) == "" || strings.TrimSpace(cfg.CredentialsB64) == "" {
+		return nil
+	}
+	if strings.TrimSpace(cfg.RunID) == "" {
 		return nil
 	}
 	if cfg.LogPath == "" {
@@ -388,25 +391,8 @@ func preserveExistingLog(cfg Config) error {
 	return nil
 }
 
-func resolveRunID(statePath string) string {
-	if runID := firstEnv("BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"); runID != "" {
-		return runID
-	}
-	return stableFallbackRunID(statePath)
-}
-
-func stableFallbackRunID(statePath string) string {
-	path := statePath + ".run-id"
-	if data, err := os.ReadFile(path); err == nil {
-		if value := strings.TrimSpace(string(data)); value != "" {
-			return value
-		}
-	}
-	value := fmt.Sprintf("manual-%d", time.Now().UTC().UnixNano())
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err == nil {
-		_ = os.WriteFile(path, []byte(value+"\n"), 0644)
-	}
-	return value
+func resolveRunID() string {
+	return firstEnv("BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID")
 }
 
 func cleanKeyParts(value string) []string {
