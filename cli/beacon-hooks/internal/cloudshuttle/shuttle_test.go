@@ -118,6 +118,15 @@ func TestUploadRespectsInterval(t *testing.T) {
 	}
 }
 
+func TestStableFallbackRunIDReusesGeneratedValue(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "shuttle-state.json")
+	first := stableFallbackRunID(statePath)
+	second := stableFallbackRunID(statePath)
+	if first == "" || second == "" || first != second {
+		t.Fatalf("fallback run id not stable: first=%q second=%q", first, second)
+	}
+}
+
 func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

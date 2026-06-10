@@ -9,7 +9,7 @@ The flow is local-only inside the cloud sandbox until upload time:
 1. Claude Code on the web starts a cloud VM and clones the repository.
 2. The Claude environment setup script installs Beacon hook tooling into
    `/tmp/beacon/bin`.
-3. Project-level `.claude/settings.json` is generated inside the sandbox clone.
+3. Project-level `.claude/settings.local.json` is generated inside the sandbox clone.
 4. Hooks write Beacon JSONL to `/tmp/beacon/runtime.jsonl`.
 5. Beacon periodically uploads the latest snapshot to GCS.
 
@@ -88,10 +88,10 @@ chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks
 mkdir -p .claude
 /tmp/beacon/bin/beacon cloud claude-web print-hooks \
   --binary-path /tmp/beacon/bin/beacon-hooks \
-  --log-path /tmp/beacon/runtime.jsonl > .claude/settings.json
+  --log-path /tmp/beacon/runtime.jsonl > .claude/settings.local.json
 ```
 
-The generated `.claude/settings.json` lives only in the cloud sandbox clone
+The generated `.claude/settings.local.json` lives only in the cloud sandbox clone
 unless the agent explicitly commits it.
 
 ## 3. Run and Verify
@@ -109,6 +109,10 @@ gcloud storage ls "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provide
 gcloud storage cp "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=claude_code_web/**/runtime.jsonl" /tmp/beacon-cloud-runtime.jsonl
 head -20 /tmp/beacon-cloud-runtime.jsonl
 ```
+
+Uploaded objects use a text content type so the GCS console and authenticated
+object URLs can display the JSONL directly instead of forcing an NDJSON
+download.
 
 Expected fields include `vendor=beacon`, `product=endpoint-agent`,
 `schema_version=1.0`, `origin=cloud`, `harness.name=claude`,

@@ -31,7 +31,7 @@ const (
 	defaultStatePath   = "/tmp/beacon/shuttle-state.json"
 	defaultTokenURI    = "https://oauth2.googleapis.com/token"
 	defaultGCSEndpoint = "https://storage.googleapis.com"
-	contentTypeJSONL   = "application/x-ndjson"
+	contentTypeJSONL   = "text/plain; charset=utf-8"
 )
 
 var httpClient = http.DefaultClient
@@ -76,15 +76,16 @@ func ConfigFromEnv() Config {
 			interval = parsed
 		}
 	}
+	statePath := firstEnvDefault(defaultStatePath, "BEACON_CLOUD_SHUTTLE_STATE")
 	return Config{
 		LogPath:        firstEnvDefault(defaultLogPath, "BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"),
-		StatePath:      firstEnvDefault(defaultStatePath, "BEACON_CLOUD_SHUTTLE_STATE"),
+		StatePath:      statePath,
 		Bucket:         strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_BUCKET")),
 		Prefix:         strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/"),
 		CredentialsB64: strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_CREDENTIALS_B64")),
 		Interval:       interval,
 		Provider:       firstEnvDefault("claude_code_web", "BEACON_RUN_PROVIDER"),
-		RunID:          firstEnvDefault(fmt.Sprintf("manual-%d", time.Now().UTC().UnixNano()), "BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"),
+		RunID:          firstEnvDefault(stableFallbackRunID(statePath), "BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"),
 		UserID:         firstEnvDefault("unknown", "BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"),
 		Repository:     firstEnv("BEACON_RUN_REPOSITORY"),
 		GCSEndpoint:    firstEnvDefault(defaultGCSEndpoint, "BEACON_CLOUD_GCS_ENDPOINT"),
@@ -362,6 +363,20 @@ func writeState(path string, st state) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+func stableFallbackRunID(statePath string) string {
+	path := statePath + ".run-id"
+	if data, err := os.ReadFile(path); err == nil {
+		if value := strings.TrimSpace(string(data)); value != "" {
+			return value
+		}
+	}
+	value := fmt.Sprintf("manual-%d", time.Now().UTC().UnixNano())
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+		_ = os.WriteFile(path, []byte(value+"\n"), 0644)
+	}
+	return value
 }
 
 func cleanKeyParts(value string) []string {
