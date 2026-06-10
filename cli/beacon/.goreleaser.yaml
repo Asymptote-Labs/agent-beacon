@@ -43,7 +43,8 @@ builds:
         - cmd: bash -c 'cd ../beacon-hooks && GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
           output: true
   - id: beacon-hooks
-    main: ../beacon-hooks
+    dir: ../beacon-hooks
+    main: .
     binary: beacon-hooks
     env:
       - CGO_ENABLED=0
