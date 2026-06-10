@@ -95,7 +95,7 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		}
 		return
 	case "cursor":
-		sessionID = getFirstStr(input, "conversation_id")
+		sessionID = getFirstStr(input, "conversation_id", "parent_conversation_id")
 		transcriptPath = getFirstStr(input, "transcript_path")
 		return
 	case "vscode":

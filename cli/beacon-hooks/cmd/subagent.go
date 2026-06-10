@@ -77,6 +77,7 @@ func runSubagentLifecycle(action, message string) {
 		"description":         subagent["description"],
 		"parent_conversation": subagent["parent_conversation"],
 		"tool_call_id":        subagent["tool_call_id"],
+		"model":               subagent["model"],
 		"duration_ms":         subagent["duration_ms"],
 		"message_count":       subagent["message_count"],
 		"tool_call_count":     subagent["tool_call_count"],
