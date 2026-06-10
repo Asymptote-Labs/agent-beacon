@@ -1,0 +1,5 @@
+{
+  "image": "ubuntu-22.04",
+  "install": "./.cursor/install.sh",
+  "start": "./.cursor/start.sh"
+}

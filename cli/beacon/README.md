@@ -62,19 +62,30 @@ BEACON_RUN_EPHEMERAL=true
 BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
 ```
 
-Then generate the setup script for a Beacon release and paste it into the
-provider's cloud setup field:
+For Cursor Cloud Agents, keep the repository-owned setup in `.cursor/`:
+
+```text
+.cursor/environment.json
+.cursor/install.sh
+.cursor/start.sh
+```
+
+The install script builds the current branch by default, or downloads a release
+when `BEACON_VERSION` is set, then merges Beacon commands into
+`.cursor/hooks.json` during environment setup.
+
+For Claude Code on the web, generate the setup script for a Beacon release and
+paste it into the provider's cloud setup field:
 
 ```bash
 ./beacon cloud claude-web print-setup --version vX.Y.Z
-./beacon cloud cursor print-setup --version vX.Y.Z
 ```
 
 The setup script installs `beacon-hooks` into the cloud sandbox and uploads a
 browser-viewable `/tmp/beacon/runtime.jsonl` snapshot to GCS. Claude web writes
-`.claude/settings.local.json` inside the sandbox clone. Cursor cloud merges
-Beacon commands into project-level `.cursor/hooks.json` because Cursor cloud
-only runs repository project hooks.
+`.claude/settings.local.json` inside the sandbox clone. Cursor cloud uses
+`.cursor/environment.json` to install Beacon and generate project-level
+`.cursor/hooks.json` because Cursor cloud only runs repository project hooks.
 
 ```text
 <prefix>/provider=claude_code_web/user_id=<id>/run_id=<claude-session-id>/runtime.jsonl
