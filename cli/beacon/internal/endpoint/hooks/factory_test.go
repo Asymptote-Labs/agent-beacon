@@ -3,6 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -229,6 +230,9 @@ func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 }
 
 func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("embedded hooks binary is darwin-only; skipping on", runtime.GOOS)
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 

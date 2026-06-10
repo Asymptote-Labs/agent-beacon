@@ -37,7 +37,11 @@ func TestVSCodeUserSettingsPathByOS(t *testing.T) {
 func TestConfigureVSCodePreservesSettingsAndDisablesContentCaptureByDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	path := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path, err := VSCodeUserSettingsPath()
+	if err != nil {
+		t.Fatalf("VSCodeUserSettingsPath: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
