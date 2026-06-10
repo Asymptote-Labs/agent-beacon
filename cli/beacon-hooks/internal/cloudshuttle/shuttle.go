@@ -163,9 +163,6 @@ func uploadDue(cfg Config, currentSize int64, now time.Time) bool {
 	if err != nil {
 		return true
 	}
-	if currentSize != st.LastSize {
-		// Still respect interval to avoid uploading on every hook during active runs.
-	}
 	if st.LastUpload == "" {
 		return true
 	}
