@@ -696,10 +696,25 @@ func populateRunContext(event *Event, attrs map[string]interface{}) {
 	if ephemeral, ok := BoolAttr(attrs, asymptoteobserve.AttributeRunEphemeral); ok {
 		run.Ephemeral = ephemeral
 	}
+	if run.Provider == "codex_cloud" && run.RunID == "" {
+		run.RunID = codexCloudRunID(attrs)
+	}
 	if run.Provider == "" && run.RunID == "" && run.RunAttempt == "" && run.Workflow == "" && run.Job == "" && run.EventName == "" && run.Commit == "" && run.Repository == "" && run.Branch == "" && run.PR == "" && run.PRNumber == "" && run.Actor == "" && !run.Ephemeral {
 		return
 	}
 	event.Run = &run
+}
+
+func codexCloudRunID(attrs map[string]interface{}) string {
+	return RunString(attrs,
+		"session_id",
+		"session.id",
+		"conversation.id",
+		"conversation_id",
+		"gen_ai.conversation.id",
+		"codex.session_id",
+		"codex.conversation_id",
+	)
 }
 
 func (c Converter) RawPayload(attrs map[string]interface{}, extra map[string]interface{}) map[string]interface{} {

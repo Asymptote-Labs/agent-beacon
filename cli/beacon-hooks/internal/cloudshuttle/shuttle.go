@@ -67,14 +67,15 @@ type tokenResponse struct {
 
 func ConfigFromEnv() Config {
 	statePath := firstEnvDefault(defaultStatePath, "BEACON_CLOUD_SHUTTLE_STATE")
+	logPath := firstEnvDefault(defaultLogPath, "BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG")
 	return Config{
-		LogPath:        firstEnvDefault(defaultLogPath, "BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"),
+		LogPath:        logPath,
 		StatePath:      statePath,
 		Bucket:         strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_BUCKET")),
 		Prefix:         strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/"),
 		CredentialsB64: strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_CREDENTIALS_B64")),
 		Provider:       firstEnvDefault("claude_code_web", "BEACON_RUN_PROVIDER"),
-		RunID:          resolveRunID(),
+		RunID:          resolveRunIDFromLog(logPath),
 		UserID:         firstEnvDefault("unknown", "BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"),
 		Repository:     firstEnv("BEACON_RUN_REPOSITORY"),
 		GCSEndpoint:    firstEnvDefault(defaultGCSEndpoint, "BEACON_CLOUD_GCS_ENDPOINT"),
@@ -83,6 +84,30 @@ func ConfigFromEnv() Config {
 
 func MaybeUpload(ctx context.Context, force bool) error {
 	return Upload(ctx, ConfigFromEnv(), force)
+}
+
+func Watch(ctx context.Context, interval time.Duration) error {
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	if err := MaybeUpload(ctx, false); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
+			return ctx.Err()
+		case <-ticker.C:
+			if err := MaybeUpload(ctx, false); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func ResetFromEnv() error {
@@ -131,7 +156,9 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		return nil
 	}
 	if !force {
-		return nil
+		if st, err := readState(cfg.StatePath); err == nil && st.LastSize == info.Size() && st.LastObject == ObjectName(cfg) {
+			return nil
+		}
 	}
 	snapshot, cleanup, err := snapshotLog(cfg.LogPath)
 	if err != nil {
@@ -392,7 +419,74 @@ func preserveExistingLog(cfg Config) error {
 }
 
 func resolveRunID() string {
-	return firstEnv("BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID")
+	return firstEnv("BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "BEACON_CODEX_SESSION_ID")
+}
+
+func resolveRunIDFromLog(logPath string) string {
+	if runID := resolveRunID(); runID != "" {
+		return runID
+	}
+	return runIDFromRuntimeLog(logPath)
+}
+
+func runIDFromRuntimeLog(logPath string) string {
+	if strings.TrimSpace(logPath) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	var fallback string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+		if id := nestedString(event, "run", "run_id"); id != "" {
+			return id
+		}
+		if fallback == "" {
+			fallback = firstNestedString(event,
+				[]string{"session", "id"},
+				[]string{"gen_ai", "conversation", "id"},
+				[]string{"raw", "attributes", "session_id"},
+				[]string{"raw", "attributes", "conversation.id"},
+				[]string{"raw", "attributes", "conversation_id"},
+				[]string{"raw", "attributes", "gen_ai.conversation.id"},
+			)
+		}
+	}
+	return fallback
+}
+
+func firstNestedString(values map[string]interface{}, paths ...[]string) string {
+	for _, path := range paths {
+		if value := nestedString(values, path...); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nestedString(values map[string]interface{}, path ...string) string {
+	var current interface{} = values
+	for _, key := range path {
+		next, ok := current.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		current = next[key]
+	}
+	str, ok := current.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(str)
 }
 
 func cleanKeyParts(value string) []string {

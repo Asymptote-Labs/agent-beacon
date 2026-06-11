@@ -44,6 +44,11 @@ var cloudCursorCmd = &cobra.Command{
 	Short: "Generate Cursor cloud agent telemetry setup",
 }
 
+var cloudCodexCmd = &cobra.Command{
+	Use:   "codex",
+	Short: "Generate Codex cloud agent telemetry setup",
+}
+
 var cloudClaudeWebPrintHooksCmd = &cobra.Command{
 	Use:          "print-hooks",
 	Short:        "Print project-level Claude hook settings for a cloud sandbox",
@@ -107,6 +112,32 @@ var cloudCursorPrintSetupCmd = &cobra.Command{
 	},
 }
 
+var cloudCodexPrintHooksCmd = &cobra.Command{
+	Use:          "print-hooks",
+	Short:        "Print user-level Codex hook settings for a cloud sandbox",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(cloudOpts.binaryPath) == "" {
+			return fmt.Errorf("--binary-path is required")
+		}
+		fmt.Print(renderCodexCloudHooks(cloudOpts.binaryPath, defaultCloudLogPath(cloudOpts.logPath)))
+		return nil
+	},
+}
+
+var cloudCodexPrintSetupCmd = &cobra.Command{
+	Use:          "print-setup",
+	Short:        "Print a Codex cloud agent telemetry setup script",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(cloudOpts.version) == "" {
+			return fmt.Errorf("--version is required")
+		}
+		fmt.Print(renderCodexCloudSetup(cloudOpts.version))
+		return nil
+	},
+}
+
 var cloudGCSCmd = &cobra.Command{
 	Use:   "gcs",
 	Short: "Configure GCS forwarding for cloud agent telemetry",
@@ -123,11 +154,14 @@ func init() {
 	rootCmd.AddCommand(cloudCmd)
 	cloudCmd.AddCommand(cloudClaudeWebCmd)
 	cloudCmd.AddCommand(cloudCursorCmd)
+	cloudCmd.AddCommand(cloudCodexCmd)
 	cloudCmd.AddCommand(cloudGCSCmd)
 	cloudClaudeWebCmd.AddCommand(cloudClaudeWebPrintHooksCmd)
 	cloudClaudeWebCmd.AddCommand(cloudClaudeWebPrintSetupCmd)
 	cloudCursorCmd.AddCommand(cloudCursorPrintHooksCmd)
 	cloudCursorCmd.AddCommand(cloudCursorPrintSetupCmd)
+	cloudCodexCmd.AddCommand(cloudCodexPrintHooksCmd)
+	cloudCodexCmd.AddCommand(cloudCodexPrintSetupCmd)
 	cloudGCSCmd.AddCommand(cloudGCSSetupCmd)
 
 	cloudClaudeWebPrintHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
@@ -137,6 +171,9 @@ func init() {
 	cloudCursorPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
 	cloudCursorPrintHooksCmd.Flags().BoolVar(&cloudOpts.safeHooks, "safe-hooks", false, "Skip Cursor cloud shell/edit-specific hooks while testing telemetry forwarding")
 	cloudCursorPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
+	cloudCodexPrintHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
+	cloudCodexPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
+	cloudCodexPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
 
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.project, "project", "", "Google Cloud project ID")
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.bucket, "bucket", "", "GCS bucket for cloud agent telemetry")
@@ -187,6 +224,28 @@ func renderClaudeWebHooks(binaryPath, logPath string) string {
 		},
 		"SessionEnd": {
 			{"hooks": []map[string]interface{}{{"type": "command", "command": prefix + " session-end"}}},
+		},
+	}
+	out := map[string]interface{}{"hooks": hooks}
+	data, _ := json.MarshalIndent(out, "", "  ")
+	return string(data) + "\n"
+}
+
+func renderCodexCloudHooks(binaryPath, logPath string) string {
+	prefix := fmt.Sprintf(
+		"BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=%s %s --platform codex",
+		shellQuote(logPath),
+		shellQuote(binaryPath),
+	)
+	hooks := map[string][]map[string]interface{}{
+		"SessionStart": {
+			{"matcher": "startup|resume|clear|compact", "hooks": []map[string]interface{}{{"type": "command", "command": prefix + " cloud-reset", "timeout": 30}}},
+		},
+		"UserPromptSubmit": {
+			{"hooks": []map[string]interface{}{{"type": "command", "command": prefix + " codex-prompt-submit", "timeout": 30}}},
+		},
+		"Stop": {
+			{"hooks": []map[string]interface{}{{"type": "command", "command": prefix + " cloud-upload", "timeout": 45}}},
 		},
 	}
 	out := map[string]interface{}{"hooks": hooks}
@@ -258,6 +317,162 @@ chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks 2>/dev/null || true
 echo "Beacon binaries installed in /tmp/beacon/bin"
 echo "Commit a project-level .cursor/hooks.json before starting Cursor Cloud Agents:"
 echo "  beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json"
+`, version)
+}
+
+func renderCodexCloudSetup(version string) string {
+	return fmt.Sprintf(`set -euo pipefail
+mkdir -p /tmp/beacon/bin /tmp/beacon/logs "$HOME/.codex"
+
+BEACON_VERSION=%q
+OS="linux"
+case "$(uname -m)" in
+  x86_64|amd64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+esac
+
+ARCHIVE="beacon_${BEACON_VERSION#v}_${OS}_${ARCH}.tar.gz"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/${BEACON_VERSION}"
+curl -fsSL "${BASE}/${ARCHIVE}" -o "/tmp/beacon/${ARCHIVE}"
+tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin
+chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks /tmp/beacon/bin/beacon-otelcol 2>/dev/null || true
+
+cat > /tmp/beacon/otelcol.yaml <<'EOF'
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+  batch:
+    timeout: 5s
+    send_batch_size: 128
+
+exporters:
+  beaconjson:
+    path: "/tmp/beacon/runtime.jsonl"
+    max_event_bytes: 65536
+    rotate_bytes: 10485760
+    rotate_archives: 5
+    redact_secrets: true
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+service:
+  telemetry:
+    metrics:
+      level: none
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [beaconjson]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [beaconjson]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [beaconjson]
+EOF
+
+if [ -f /tmp/beacon/otelcol.pid ] && kill -0 "$(cat /tmp/beacon/otelcol.pid)" 2>/dev/null; then
+  echo "Beacon collector already running with pid $(cat /tmp/beacon/otelcol.pid)"
+else
+  nohup /tmp/beacon/bin/beacon-otelcol --config /tmp/beacon/otelcol.yaml > /tmp/beacon/logs/otelcol.log 2>&1 &
+  echo "$!" > /tmp/beacon/otelcol.pid
+fi
+
+/tmp/beacon/bin/beacon cloud codex print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > "$HOME/.codex/hooks.json"
+
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path.home() / ".codex" / "config.toml"
+existing = path.read_text() if path.exists() else ""
+lines = existing.splitlines()
+out = []
+in_otel = False
+wrote = False
+block = [
+    "[otel]",
+    'environment = "cloud"',
+    'exporter = "otlp-grpc"',
+    'log_user_prompt = true',
+    "",
+    '[otel.exporter."otlp-grpc"]',
+    'endpoint = "http://127.0.0.1:4317"',
+    "",
+]
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        is_otel = stripped == "[otel]" or stripped.startswith("[otel.")
+        if in_otel and not is_otel and not wrote:
+            out.extend(block)
+            wrote = True
+        in_otel = is_otel
+        if not in_otel:
+            out.append(line)
+        continue
+    if in_otel:
+        continue
+    out.append(line)
+if in_otel and not wrote:
+    out.extend(block)
+    wrote = True
+if not wrote:
+    if existing.strip():
+        out.append("")
+    out.extend(block)
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text("\n".join(out).rstrip() + "\n")
+PY
+
+cat > /tmp/beacon/codex-env.sh <<'EOF'
+beacon_cloud_attrs() {
+  attrs="beacon.origin=${BEACON_ORIGIN:-cloud},beacon.run.provider=${BEACON_RUN_PROVIDER:-codex_cloud},beacon.run.ephemeral=${BEACON_RUN_EPHEMERAL:-true}"
+  if [ -n "${BEACON_RUN_ID:-}" ]; then attrs="${attrs},beacon.run.run_id=${BEACON_RUN_ID}"; fi
+  if [ -n "${BEACON_RUN_REPOSITORY:-}" ]; then attrs="${attrs},beacon.run.repository=${BEACON_RUN_REPOSITORY}"; fi
+  if [ -n "${BEACON_RUN_BRANCH:-}" ]; then attrs="${attrs},beacon.run.branch=${BEACON_RUN_BRANCH}"; fi
+  if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
+    export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES},${attrs}"
+  else
+    export OTEL_RESOURCE_ATTRIBUTES="${attrs}"
+  fi
+  export BEACON_ORIGIN="${BEACON_ORIGIN:-cloud}"
+  export BEACON_RUN_PROVIDER="${BEACON_RUN_PROVIDER:-codex_cloud}"
+  export BEACON_RUN_EPHEMERAL="${BEACON_RUN_EPHEMERAL:-true}"
+  export BEACON_ENDPOINT_LOG="${BEACON_ENDPOINT_LOG:-/tmp/beacon/runtime.jsonl}"
+}
+beacon_cloud_attrs
+EOF
+
+if ! grep -q "/tmp/beacon/codex-env.sh" "$HOME/.bashrc" 2>/dev/null; then
+  printf '\n# Beacon Codex cloud telemetry\n[ -f /tmp/beacon/codex-env.sh ] && . /tmp/beacon/codex-env.sh\n' >> "$HOME/.bashrc"
+fi
+
+nohup /tmp/beacon/bin/beacon-hooks --platform codex cloud-watch > /tmp/beacon/logs/cloud-watch.log 2>&1 &
+echo "$!" > /tmp/beacon/cloud-watch.pid
+
+echo "Beacon Codex cloud telemetry configured:"
+echo "  collector: /tmp/beacon/otelcol.yaml"
+echo "  runtime log: /tmp/beacon/runtime.jsonl"
+echo "  Codex config: $HOME/.codex/config.toml"
+echo "  Codex hooks: $HOME/.codex/hooks.json"
 `, version)
 }
 

@@ -14,7 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestObjectNamePartitionsByProviderUserRepoAndRun(t *testing.T) {
@@ -39,6 +41,19 @@ func TestObjectNameUsesCursorCloudProvider(t *testing.T) {
 		RunID:    "manual-123",
 	})
 	want := "agent-traces/provider=cursor_cloud/user_id=user-1/run_id=manual-123/runtime.jsonl"
+	if got != want {
+		t.Fatalf("ObjectName = %q, want %q", got, want)
+	}
+}
+
+func TestObjectNameUsesCodexCloudProvider(t *testing.T) {
+	got := ObjectName(Config{
+		Prefix:   "agent-traces",
+		Provider: "codex_cloud",
+		UserID:   "user-1",
+		RunID:    "codex-session",
+	})
+	want := "agent-traces/provider=codex_cloud/user_id=user-1/run_id=codex-session/runtime.jsonl"
 	if got != want {
 		t.Fatalf("ObjectName = %q, want %q", got, want)
 	}
@@ -149,6 +164,79 @@ func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
 	}
 }
 
+func TestResolveRunIDFromRuntimeLogUsesCodexSession(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte(`{"session":{"id":"codex-session"}}
+`), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	if got := resolveRunIDFromLog(logPath); got != "codex-session" {
+		t.Fatalf("resolveRunIDFromLog = %q, want codex-session", got)
+	}
+}
+
+func TestUploadSkipsUnchangedLogWhenNotForced(t *testing.T) {
+	key := mustRSAKey(t)
+	var uploads atomic.Int64
+	server := fakeGCSServer(t, key, &uploads, nil)
+	defer server.Close()
+
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"ok\"}\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	cfg := testUploadConfig(t, key, server.URL, logPath)
+	if err := Upload(context.Background(), cfg, false); err != nil {
+		t.Fatalf("first Upload returned error: %v", err)
+	}
+	if err := Upload(context.Background(), cfg, false); err != nil {
+		t.Fatalf("second Upload returned error: %v", err)
+	}
+	if got := uploads.Load(); got != 1 {
+		t.Fatalf("uploads after unchanged log = %d, want 1", got)
+	}
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"ok\"}\n{\"event\":\"next\"}\n"), 0644); err != nil {
+		t.Fatalf("append log: %v", err)
+	}
+	if err := Upload(context.Background(), cfg, false); err != nil {
+		t.Fatalf("third Upload returned error: %v", err)
+	}
+	if got := uploads.Load(); got != 2 {
+		t.Fatalf("uploads after changed log = %d, want 2", got)
+	}
+}
+
+func TestWatchUploadsInitialLog(t *testing.T) {
+	key := mustRSAKey(t)
+	var uploads atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := fakeGCSServer(t, key, &uploads, nil)
+	defer server.Close()
+
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"ok\"}\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	cfg := testUploadConfig(t, key, server.URL, logPath)
+	t.Setenv("BEACON_ENDPOINT_LOG", cfg.LogPath)
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", cfg.StatePath)
+	t.Setenv("BEACON_CLOUD_GCS_BUCKET", cfg.Bucket)
+	t.Setenv("BEACON_CLOUD_GCS_PREFIX", cfg.Prefix)
+	t.Setenv("BEACON_CLOUD_GCS_CREDENTIALS_B64", cfg.CredentialsB64)
+	t.Setenv("BEACON_RUN_PROVIDER", cfg.Provider)
+	t.Setenv("BEACON_RUN_ID", cfg.RunID)
+	t.Setenv("BEACON_CLOUD_GCS_ENDPOINT", cfg.GCSEndpoint)
+
+	time.AfterFunc(20*time.Millisecond, cancel)
+	if err := Watch(ctx, time.Hour); err != nil {
+		t.Fatalf("Watch returned error: %v", err)
+	}
+	if got := uploads.Load(); got != 1 {
+		t.Fatalf("uploads = %d, want 1", got)
+	}
+}
+
 func TestUploadNoopsWithoutRunID(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
@@ -162,6 +250,51 @@ func TestUploadNoopsWithoutRunID(t *testing.T) {
 	if err := Upload(context.Background(), cfg, true); err != nil {
 		t.Fatalf("Upload returned error: %v", err)
 	}
+}
+
+func testUploadConfig(t *testing.T, key *rsa.PrivateKey, endpoint, logPath string) Config {
+	t.Helper()
+	creds := serviceAccount{
+		ClientEmail: "beacon@example.iam.gserviceaccount.com",
+		PrivateKey:  pemKey(t, key),
+		TokenURI:    endpoint + "/token",
+	}
+	credsJSON, err := json.Marshal(creds)
+	if err != nil {
+		t.Fatalf("marshal creds: %v", err)
+	}
+	return Config{
+		LogPath:        logPath,
+		StatePath:      filepath.Join(t.TempDir(), "state.json"),
+		Bucket:         "bucket",
+		Prefix:         "prefix",
+		CredentialsB64: base64.StdEncoding.EncodeToString(credsJSON),
+		Provider:       "codex_cloud",
+		UserID:         "user",
+		RunID:          "run",
+		GCSEndpoint:    endpoint,
+	}
+}
+
+func fakeGCSServer(t *testing.T, key *rsa.PrivateKey, uploads *atomic.Int64, afterUpload func()) *httptest.Server {
+	t.Helper()
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"access_token": "test-token", "token_type": "Bearer", "expires_in": 3600})
+		default:
+			defer func() {
+				if afterUpload != nil {
+					go afterUpload()
+				}
+			}()
+			uploads.Add(1)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	_ = key
+	return server
 }
 
 func mustRSAKey(t *testing.T) *rsa.PrivateKey {

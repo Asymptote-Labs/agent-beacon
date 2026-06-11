@@ -13,6 +13,8 @@ func TestCloudCommandsRegistered(t *testing.T) {
 		{"cloud", "claude-web", "print-setup"},
 		{"cloud", "cursor", "print-hooks"},
 		{"cloud", "cursor", "print-setup"},
+		{"cloud", "codex", "print-hooks"},
+		{"cloud", "codex", "print-setup"},
 		{"cloud", "gcs", "setup"},
 	} {
 		cmd, _, err := rootCmd.Find(path)
@@ -21,6 +23,52 @@ func TestCloudCommandsRegistered(t *testing.T) {
 		}
 		if cmd == nil || cmd.Use != path[len(path)-1] {
 			t.Fatalf("cloud command %v not registered: %#v", path, cmd)
+		}
+	}
+}
+
+func TestRenderCodexCloudHooks(t *testing.T) {
+	got := renderCodexCloudHooks("/tmp/beacon/bin/beacon-hooks", "/tmp/beacon/runtime.jsonl")
+	for _, want := range []string{
+		`"SessionStart"`,
+		`"UserPromptSubmit"`,
+		`"Stop"`,
+		`BEACON_ORIGIN=cloud`,
+		`BEACON_RUN_PROVIDER=codex_cloud`,
+		`BEACON_RUN_EPHEMERAL=true`,
+		`BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl`,
+		`/tmp/beacon/bin/beacon-hooks --platform codex cloud-reset`,
+		`/tmp/beacon/bin/beacon-hooks --platform codex codex-prompt-submit`,
+		`/tmp/beacon/bin/beacon-hooks --platform codex cloud-upload`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered Codex hooks missing %q:\n%s", want, got)
+		}
+	}
+	for _, skipped := range []string{`"PreToolUse"`, `"PostToolUse"`} {
+		if strings.Contains(got, skipped) {
+			t.Fatalf("rendered Codex hooks should not contain %q:\n%s", skipped, got)
+		}
+	}
+}
+
+func TestRenderCodexCloudSetupConfiguresCollectorAndPromptLogging(t *testing.T) {
+	got := renderCodexCloudSetup("v0.0.60")
+	for _, want := range []string{
+		`BEACON_VERSION="v0.0.60"`,
+		`chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks /tmp/beacon/bin/beacon-otelcol`,
+		`/tmp/beacon/bin/beacon-otelcol --config /tmp/beacon/otelcol.yaml`,
+		`path: "/tmp/beacon/runtime.jsonl"`,
+		`beacon cloud codex print-hooks`,
+		`exporter = "otlp-grpc"`,
+		`log_user_prompt = true`,
+		`environment = "cloud"`,
+		`[otel.exporter."otlp-grpc"]`,
+		`beacon.run.provider=${BEACON_RUN_PROVIDER:-codex_cloud}`,
+		`beacon-hooks --platform codex cloud-watch`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered Codex setup missing %q:\n%s", want, got)
 		}
 	}
 }

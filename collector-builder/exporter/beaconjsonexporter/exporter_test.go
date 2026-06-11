@@ -280,6 +280,45 @@ func TestEventFromLogMapsCIRunRecordAttributes(t *testing.T) {
 	}
 }
 
+func TestEventFromLogMapsCodexCloudPromptRunContext(t *testing.T) {
+	exp, err := newExporter(&Config{
+		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+	rec := plog.NewLogRecord()
+	rec.Body().SetStr("codex.user_prompt")
+	attrs := rec.Attributes()
+	attrs.PutStr("service.name", "codex-cli")
+	attrs.PutStr("event.name", "codex.user_prompt")
+	attrs.PutStr("session_id", "codex-session")
+	attrs.PutStr("prompt", "summarize token=codex-secret")
+	attrs.PutStr(asymptoteobserve.AttributeOrigin, string(asymptoteobserve.OriginCloud))
+	attrs.PutStr(asymptoteobserve.AttributeRunProvider, "codex_cloud")
+	attrs.PutBool(asymptoteobserve.AttributeRunEphemeral, true)
+
+	event := exp.eventFromLog(nil, rec)
+	if event.Origin != asymptoteobserve.OriginCloud {
+		t.Fatalf("Origin = %q, want cloud", event.Origin)
+	}
+	if event.Harness.Name != "codex_cli" {
+		t.Fatalf("Harness.Name = %q, want codex_cli", event.Harness.Name)
+	}
+	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+		t.Fatalf("event = %#v, want prompt.submitted prompt", event.Event)
+	}
+	if event.Run == nil || event.Run.Provider != "codex_cloud" || event.Run.RunID != "codex-session" || !event.Run.Ephemeral {
+		t.Fatalf("run context = %#v, want codex_cloud session", event.Run)
+	}
+	if event.Prompt == nil || event.Prompt.Text != "summarize token=codex-secret" {
+		t.Fatalf("prompt = %#v, want retained prompt before writer redaction", event.Prompt)
+	}
+}
+
 func TestConsumeLogsMapsPrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
