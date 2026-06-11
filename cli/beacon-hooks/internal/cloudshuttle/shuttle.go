@@ -90,12 +90,15 @@ func Watch(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = 15 * time.Second
 	}
-	if err := MaybeUpload(ctx, false); err != nil {
-		return err
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		if err := MaybeUpload(ctx, false); err != nil && ctx.Err() != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
+			return ctx.Err()
+		}
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.Canceled) {
@@ -103,9 +106,6 @@ func Watch(ctx context.Context, interval time.Duration) error {
 			}
 			return ctx.Err()
 		case <-ticker.C:
-			if err := MaybeUpload(ctx, false); err != nil {
-				return err
-			}
 		}
 	}
 }

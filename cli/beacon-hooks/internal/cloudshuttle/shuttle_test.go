@@ -237,6 +237,36 @@ func TestWatchUploadsInitialLog(t *testing.T) {
 	}
 }
 
+func TestWatchContinuesAfterUploadError(t *testing.T) {
+	key := mustRSAKey(t)
+	var uploads atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := fakeFlakyGCSServer(t, key, &uploads, cancel)
+	defer server.Close()
+
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"ok\"}\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	cfg := testUploadConfig(t, key, server.URL, logPath)
+	t.Setenv("BEACON_ENDPOINT_LOG", cfg.LogPath)
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", cfg.StatePath)
+	t.Setenv("BEACON_CLOUD_GCS_BUCKET", cfg.Bucket)
+	t.Setenv("BEACON_CLOUD_GCS_PREFIX", cfg.Prefix)
+	t.Setenv("BEACON_CLOUD_GCS_CREDENTIALS_B64", cfg.CredentialsB64)
+	t.Setenv("BEACON_RUN_PROVIDER", cfg.Provider)
+	t.Setenv("BEACON_RUN_ID", cfg.RunID)
+	t.Setenv("BEACON_CLOUD_GCS_ENDPOINT", cfg.GCSEndpoint)
+
+	if err := Watch(ctx, 5*time.Millisecond); err != nil {
+		t.Fatalf("Watch returned error: %v", err)
+	}
+	if got := uploads.Load(); got < 2 {
+		t.Fatalf("uploads = %d, want retry after initial failure", got)
+	}
+}
+
 func TestUploadNoopsWithoutRunID(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
@@ -291,6 +321,29 @@ func fakeGCSServer(t *testing.T, key *rsa.PrivateKey, uploads *atomic.Int64, aft
 			}()
 			uploads.Add(1)
 			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	_ = key
+	return server
+}
+
+func fakeFlakyGCSServer(t *testing.T, key *rsa.PrivateKey, uploads *atomic.Int64, cancel func()) *httptest.Server {
+	t.Helper()
+	var failed atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"access_token": "test-token", "token_type": "Bearer", "expires_in": 3600})
+		default:
+			count := uploads.Add(1)
+			if !failed.Swap(true) {
+				http.Error(w, "temporary error", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			if count >= 2 {
+				time.AfterFunc(5*time.Millisecond, cancel)
+			}
 		}
 	}))
 	_ = key

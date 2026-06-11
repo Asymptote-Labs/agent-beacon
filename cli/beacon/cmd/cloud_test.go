@@ -65,6 +65,7 @@ func TestRenderCodexCloudSetupConfiguresCollectorAndPromptLogging(t *testing.T) 
 		`environment = "cloud"`,
 		`[otel.exporter."otlp-grpc"]`,
 		`beacon.run.provider=${BEACON_RUN_PROVIDER:-codex_cloud}`,
+		`. /tmp/beacon/codex-env.sh`,
 		`beacon-hooks --platform codex cloud-watch`,
 	} {
 		if !strings.Contains(got, want) {

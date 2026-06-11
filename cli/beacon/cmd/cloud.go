@@ -465,6 +465,7 @@ if ! grep -q "/tmp/beacon/codex-env.sh" "$HOME/.bashrc" 2>/dev/null; then
   printf '\n# Beacon Codex cloud telemetry\n[ -f /tmp/beacon/codex-env.sh ] && . /tmp/beacon/codex-env.sh\n' >> "$HOME/.bashrc"
 fi
 
+. /tmp/beacon/codex-env.sh
 nohup /tmp/beacon/bin/beacon-hooks --platform codex cloud-watch > /tmp/beacon/logs/cloud-watch.log 2>&1 &
 echo "$!" > /tmp/beacon/cloud-watch.pid
 
