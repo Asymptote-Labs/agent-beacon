@@ -623,19 +623,19 @@ func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 
 func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 	usage := &GenAIUsageInfo{}
-	if value, ok := IntAttr(attrs, "gen_ai.usage.cache_creation.input_tokens"); ok {
+	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_creation.input_tokens"); ok {
 		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
 	}
-	if value, ok := IntAttr(attrs, "gen_ai.usage.cache_read.input_tokens"); ok {
+	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_read.input_tokens"); ok {
 		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
 	}
-	if value, ok := IntAttr(attrs, "gen_ai.usage.input_tokens", "llm.usage.prompt_tokens", "gen_ai.usage.prompt_tokens"); ok {
+	if value, ok := Int64Attr(attrs, "gen_ai.usage.input_tokens", "llm.usage.prompt_tokens", "gen_ai.usage.prompt_tokens"); ok {
 		usage.InputTokens = &value
 	}
-	if value, ok := IntAttr(attrs, "gen_ai.usage.output_tokens", "llm.usage.completion_tokens", "gen_ai.usage.completion_tokens"); ok {
+	if value, ok := Int64Attr(attrs, "gen_ai.usage.output_tokens", "llm.usage.completion_tokens", "gen_ai.usage.completion_tokens"); ok {
 		usage.OutputTokens = &value
 	}
-	if value, ok := IntAttr(attrs, "gen_ai.usage.reasoning.output_tokens"); ok {
+	if value, ok := Int64Attr(attrs, "gen_ai.usage.reasoning.output_tokens"); ok {
 		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
 	}
 	if IsZeroJSON(usage) {

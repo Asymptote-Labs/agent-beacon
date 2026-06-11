@@ -261,7 +261,8 @@ Use these npm trusted publisher values:
 - Avoid tests that require root, real `launchctl` service changes, Wazuh, a live collector, or external network access.
 - For macOS-only behavior, gate tests with `runtime.GOOS == "darwin"` or assert the non-Darwin contract explicitly.
 - Keep endpoint event schema fields stable: `vendor`, `product`, `schema_version`, required event fields, and Wazuh-compatible JSONL output are release contracts.
-- Preserve optional event fields for agent-native metadata (`session`, `tool`, `file`, `command`, `mcp`, `approval`, `content`, `model`, `repository`, and `branch`) without changing existing required field semantics.
+- Preserve optional event fields for agent-native metadata (`session`, `trace`, `tool`, `file`, `command`, `mcp`, `approval`, `content`, `model`, `repository`, and `branch`) without changing existing required field semantics.
+- Keep `gen_ai.usage` as the single canonical token-usage representation: normalize all runtime token telemetry (span attributes, metric datapoints, legacy `llm.usage.*` aliases) into it, mirror OTel GenAI semconv JSON names exactly, and never add parallel or per-harness token fields. `gen_ai.usage.cost_usd` carries runtime-reported cost only; do not derive cost from local pricing tables.
 - When adding a new signal, include stable identifiers/counts/hashes alongside any retained raw content, and route raw fields through redaction, sanitization, truncation, and event-size controls.
 - Keep the dashboard read-only. It should inspect local status and JSONL events but must not mutate endpoint configuration or telemetry.
 - Keep the release readiness guidance in `README.md` up to date when install, packaging, collector, or dashboard behavior changes.

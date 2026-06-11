@@ -1,12 +1,39 @@
 package beaconevent
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
+
+// Guards against the exporter Event mirror struct drifting from the shared
+// asymptoteobserve schema: new optional fields must survive JSON marshaling.
+func TestEventMirrorSerializesTraceAndUsageCost(t *testing.T) {
+	event := NewEvent("token.usage", "metric", "info", "claude_code", time.Unix(1700000000, 0).UTC())
+	event.Trace = &TraceInfo{ID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", ParentSpanID: "fedcba9876543210"}
+	cost := 0.0123
+	input := int64(120)
+	event.GenAI = &GenAIInfo{Usage: &GenAIUsageInfo{InputTokens: &input, CostUSD: &cost}}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`"trace":{"id":"0123456789abcdef0123456789abcdef","span_id":"0123456789abcdef","parent_span_id":"fedcba9876543210"}`,
+		`"cost_usd":0.0123`,
+		`"input_tokens":120`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("JSON missing %s: %s", want, text)
+		}
+	}
+}
 
 func TestEventsFromTracesNormalizesObserveSDKSpan(t *testing.T) {
 	span, traces := newObserveSDKTraceSpan("agent.plan")
