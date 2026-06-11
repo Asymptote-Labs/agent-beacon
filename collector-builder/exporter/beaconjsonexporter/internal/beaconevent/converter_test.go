@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
@@ -139,6 +140,66 @@ func TestEventsFromTracesNormalizesClaudeAgentSDKSpan(t *testing.T) {
 	}
 	if event.Prompt == nil || event.Prompt.Text != "review this pull request" {
 		t.Fatalf("prompt = %#v, want captured prompt text", event.Prompt)
+	}
+}
+
+func TestEventFromSpanCapturesTraceIdentity(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("agent.step")
+	span.SetTraceID(pcommon.TraceID([16]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}))
+	span.SetSpanID(pcommon.SpanID([8]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}))
+	span.SetParentSpanID(pcommon.SpanID([8]byte{0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10}))
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	trace := events[0].Trace
+	if trace == nil {
+		t.Fatalf("trace identity missing: %#v", events[0])
+	}
+	if trace.ID != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("trace.id = %q, want hex trace id", trace.ID)
+	}
+	if trace.SpanID != "0123456789abcdef" {
+		t.Fatalf("trace.span_id = %q, want hex span id", trace.SpanID)
+	}
+	if trace.ParentSpanID != "fedcba9876543210" {
+		t.Fatalf("trace.parent_span_id = %q, want hex parent span id", trace.ParentSpanID)
+	}
+}
+
+func TestEventFromSpanOmitsTraceWhenUnset(t *testing.T) {
+	_, traces := newObserveSDKTraceSpan("agent.step")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Trace != nil {
+		t.Fatalf("trace = %#v, want nil for span without trace identity", events[0].Trace)
+	}
+}
+
+func TestEventFromLogCapturesTraceContext(t *testing.T) {
+	logs := plog.NewLogs()
+	resourceLogs := logs.ResourceLogs().AppendEmpty()
+	scopeLogs := resourceLogs.ScopeLogs().AppendEmpty()
+	record := scopeLogs.LogRecords().AppendEmpty()
+	record.Body().SetStr("model call completed")
+	record.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
+	record.SetTraceID(pcommon.TraceID([16]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}))
+	record.SetSpanID(pcommon.SpanID([8]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}))
+
+	events := NewConverter(Options{}).EventsFromLogs(logs)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	trace := events[0].Trace
+	if trace == nil || trace.ID != "0123456789abcdef0123456789abcdef" || trace.SpanID != "0123456789abcdef" {
+		t.Fatalf("trace = %#v, want log trace context", trace)
+	}
+	if trace.ParentSpanID != "" {
+		t.Fatalf("trace.parent_span_id = %q, want empty for logs", trace.ParentSpanID)
 	}
 }
 

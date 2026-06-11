@@ -261,6 +261,12 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "category")), Severity(record.SeverityText(), record.SeverityNumber().String()), HarnessName(attrs, message), ts)
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
+	if !record.TraceID().IsEmpty() {
+		event.Trace = &TraceInfo{ID: record.TraceID().String()}
+		if !record.SpanID().IsEmpty() {
+			event.Trace.SpanID = record.SpanID().String()
+		}
+	}
 	event.Raw = c.RawPayload(attrs, map[string]interface{}{
 		"otel_signal": "logs",
 		"severity":    record.SeverityText(),
@@ -279,6 +285,15 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "tool")), SpanSeverity(span.Status().Code().String()), HarnessName(attrs, message, span.Name()), Timestamp(span.StartTimestamp().AsTime()))
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
+	if !span.TraceID().IsEmpty() {
+		event.Trace = &TraceInfo{ID: span.TraceID().String()}
+		if !span.SpanID().IsEmpty() {
+			event.Trace.SpanID = span.SpanID().String()
+		}
+		if !span.ParentSpanID().IsEmpty() {
+			event.Trace.ParentSpanID = span.ParentSpanID().String()
+		}
+	}
 	event.Raw = c.RawPayload(attrs, map[string]interface{}{
 		"otel_signal": "traces",
 		"span_name":   span.Name(),
