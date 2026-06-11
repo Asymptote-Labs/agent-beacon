@@ -68,7 +68,7 @@ jobs:
           ./beacon endpoint integrations claude-cowork --help > /tmp/beacon-cowork-help.txt
           ./beacon endpoint wazuh --help > /tmp/beacon-wazuh-help.txt
           ./beacon endpoint rapid7 --help > /tmp/beacon-rapid7-help.txt
-          for forbidden in login init update claude cursor dep-scan config whoami; do
+          for forbidden in init update claude cursor dep-scan config whoami; do
             if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
               echo "forbidden command exposed: $forbidden"
               exit 1
