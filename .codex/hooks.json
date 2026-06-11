@@ -1,0 +1,74 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform codex permission-request",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform codex post-tool",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform codex pre-tool",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform codex cloud-reset",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform codex cloud-upload",
+            "timeout": 45,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=codex_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl /tmp/beacon/bin/beacon-hooks --platform codex codex-prompt-submit",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -241,6 +241,15 @@ func renderCodexCloudHooks(binaryPath, logPath string) string {
 		"SessionStart": {
 			{"matcher": "startup|resume|clear|compact", "hooks": []map[string]interface{}{{"type": "command", "command": prefix + " cloud-reset", "timeout": 30}}},
 		},
+		"PreToolUse": {
+			{"matcher": "*", "hooks": []map[string]interface{}{{"type": "command", "command": prefix + " pre-tool", "timeout": 30}}},
+		},
+		"PermissionRequest": {
+			{"matcher": "*", "hooks": []map[string]interface{}{{"type": "command", "command": prefix + " permission-request", "timeout": 30}}},
+		},
+		"PostToolUse": {
+			{"matcher": "*", "hooks": []map[string]interface{}{{"type": "command", "command": prefix + " post-tool", "timeout": 30}}},
+		},
 		"UserPromptSubmit": {
 			{"hooks": []map[string]interface{}{{"type": "command", "command": prefix + " codex-prompt-submit", "timeout": 30}}},
 		},
@@ -322,7 +331,8 @@ echo "  beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hoo
 
 func renderCodexCloudSetup(version string) string {
 	return fmt.Sprintf(`set -euo pipefail
-mkdir -p /tmp/beacon/bin /tmp/beacon/logs "$HOME/.codex"
+CODEX_CONFIG_DIR="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p /tmp/beacon/bin /tmp/beacon/logs "$CODEX_CONFIG_DIR"
 
 BEACON_VERSION=%q
 OS="linux"
@@ -394,14 +404,14 @@ else
   echo "$!" > /tmp/beacon/otelcol.pid
 fi
 
-/tmp/beacon/bin/beacon cloud codex print-hooks \
-  --binary-path /tmp/beacon/bin/beacon-hooks \
-  --log-path /tmp/beacon/runtime.jsonl > "$HOME/.codex/hooks.json"
+echo "Codex hooks must be committed before starting Codex Cloud Agents:"
+echo "  beacon cloud codex print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json"
 
 python3 - <<'PY'
+import os
 from pathlib import Path
 
-path = Path.home() / ".codex" / "config.toml"
+path = Path(os.environ.get("CODEX_CONFIG_DIR", str(Path.home() / ".codex"))) / "config.toml"
 existing = path.read_text() if path.exists() else ""
 lines = existing.splitlines()
 out = []
@@ -472,8 +482,8 @@ echo "$!" > /tmp/beacon/cloud-watch.pid
 echo "Beacon Codex cloud telemetry configured:"
 echo "  collector: /tmp/beacon/otelcol.yaml"
 echo "  runtime log: /tmp/beacon/runtime.jsonl"
-echo "  Codex config: $HOME/.codex/config.toml"
-echo "  Codex hooks: $HOME/.codex/hooks.json"
+echo "  Codex config: $CODEX_CONFIG_DIR/config.toml"
+echo "  Commit .codex/hooks.json before starting cloud tasks"
 `, version)
 }
 

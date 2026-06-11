@@ -109,6 +109,9 @@ func preToolResponse() map[string]interface{} {
 	if platformFlag == "claude" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" {
 		return emptyResponse
 	}
+	if platformFlag == "codex" {
+		return emptyResponse
+	}
 	return allowResponse
 }
 

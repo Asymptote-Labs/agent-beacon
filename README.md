@@ -130,19 +130,25 @@ beacon cloud cursor print-hooks \
 ```
 
 Codex Cloud Agents use user-level Codex configuration in the cloud sandbox.
-Generate the setup script locally, paste it into the Codex cloud environment
-setup step, and configure the Beacon cloud GCS environment variables:
+Generate and commit project-level Codex hooks before starting cloud tasks, then
+paste the setup script into the Codex cloud environment setup step and configure
+the Beacon cloud GCS environment variables:
 
 ```bash
+mkdir -p .codex
+beacon cloud codex print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json
 beacon cloud codex print-setup --version vX.Y.Z
 ```
 
 The Codex setup script installs Beacon binaries under `/tmp/beacon/bin`, starts
 the local `beacon-otelcol` collector, writes `~/.codex/config.toml` with
-`log_user_prompt = true`, installs user-level Codex hooks in
-`~/.codex/hooks.json`, and uploads `/tmp/beacon/runtime.jsonl` snapshots to GCS.
-Codex agent internet access must allow `oauth2.googleapis.com`,
-`storage.googleapis.com`, `github.com`, and `*.githubusercontent.com`.
+`log_user_prompt = true` for follow-up runs where Codex reloads user config, and
+uploads `/tmp/beacon/runtime.jsonl` snapshots to GCS. Committed hooks provide
+the reliable first-turn prompt/tool/approval telemetry path. Codex agent
+internet access must allow `oauth2.googleapis.com`, `storage.googleapis.com`,
+`github.com`, and `*.githubusercontent.com`.
 
 ### Output Destinations
 

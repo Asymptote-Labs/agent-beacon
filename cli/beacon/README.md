@@ -86,17 +86,25 @@ paste it into the provider's cloud setup field:
 ```
 
 For Codex Cloud Agents, generate the setup script for a Beacon release and
-paste it into the Codex cloud environment setup script:
+paste it into the Codex cloud environment setup script. Also generate and commit
+project-level Codex hooks before starting cloud tasks:
 
 ```bash
+mkdir -p .codex
+./beacon cloud codex print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json
 ./beacon cloud codex print-setup --version vX.Y.Z
 ```
 
 The Codex setup script installs `beacon`, `beacon-hooks`, and `beacon-otelcol`
 under `/tmp/beacon/bin`, starts a loopback OpenTelemetry collector, writes
-`~/.codex/config.toml` with `log_user_prompt = true`, writes user-level Codex
-hooks to `~/.codex/hooks.json`, and starts a periodic GCS uploader. Codex cloud
-agent internet access must allow `oauth2.googleapis.com`,
+`~/.codex/config.toml` with `log_user_prompt = true` for follow-up runs where
+Codex reloads user config, and starts a periodic GCS uploader. Committed
+`.codex/hooks.json` provides reliable first-turn prompt, tool, approval, and
+stop telemetry because setup-time user config writes may be too late for the
+current Codex agent process. Codex cloud agent internet access must allow
+`oauth2.googleapis.com`,
 `storage.googleapis.com`, `github.com`, and `*.githubusercontent.com`.
 
 The setup script installs `beacon-hooks` into the cloud sandbox and uploads a
@@ -104,8 +112,8 @@ browser-viewable `/tmp/beacon/runtime.jsonl` snapshot to GCS. Claude web writes
 `.claude/settings.local.json` inside the sandbox clone. Cursor cloud uses
 committed project-level `.cursor/hooks.json` because Cursor cloud may load hooks
 before the setup script creates files in the VM. Codex cloud uses native Codex
-OTel as the primary telemetry source and hooks for prompt upload/lifecycle
-resilience.
+hooks as the reliable self-serve telemetry source; Codex native OTel is enabled
+where user-level config is reloaded by the runtime.
 
 ```text
 <prefix>/provider=claude_code_web/user_id=<id>/run_id=<claude-session-id>/runtime.jsonl

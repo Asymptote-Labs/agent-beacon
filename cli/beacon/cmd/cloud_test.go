@@ -31,6 +31,9 @@ func TestRenderCodexCloudHooks(t *testing.T) {
 	got := renderCodexCloudHooks("/tmp/beacon/bin/beacon-hooks", "/tmp/beacon/runtime.jsonl")
 	for _, want := range []string{
 		`"SessionStart"`,
+		`"PreToolUse"`,
+		`"PermissionRequest"`,
+		`"PostToolUse"`,
 		`"UserPromptSubmit"`,
 		`"Stop"`,
 		`BEACON_ORIGIN=cloud`,
@@ -38,16 +41,14 @@ func TestRenderCodexCloudHooks(t *testing.T) {
 		`BEACON_RUN_EPHEMERAL=true`,
 		`BEACON_ENDPOINT_LOG=/tmp/beacon/runtime.jsonl`,
 		`/tmp/beacon/bin/beacon-hooks --platform codex cloud-reset`,
+		`/tmp/beacon/bin/beacon-hooks --platform codex pre-tool`,
+		`/tmp/beacon/bin/beacon-hooks --platform codex permission-request`,
+		`/tmp/beacon/bin/beacon-hooks --platform codex post-tool`,
 		`/tmp/beacon/bin/beacon-hooks --platform codex codex-prompt-submit`,
 		`/tmp/beacon/bin/beacon-hooks --platform codex cloud-upload`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered Codex hooks missing %q:\n%s", want, got)
-		}
-	}
-	for _, skipped := range []string{`"PreToolUse"`, `"PostToolUse"`} {
-		if strings.Contains(got, skipped) {
-			t.Fatalf("rendered Codex hooks should not contain %q:\n%s", skipped, got)
 		}
 	}
 }
@@ -56,10 +57,11 @@ func TestRenderCodexCloudSetupConfiguresCollectorAndPromptLogging(t *testing.T) 
 	got := renderCodexCloudSetup("v0.0.60")
 	for _, want := range []string{
 		`BEACON_VERSION="v0.0.60"`,
+		`CODEX_CONFIG_DIR="${CODEX_HOME:-$HOME/.codex}"`,
 		`chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks /tmp/beacon/bin/beacon-otelcol`,
 		`/tmp/beacon/bin/beacon-otelcol --config /tmp/beacon/otelcol.yaml`,
 		`path: "/tmp/beacon/runtime.jsonl"`,
-		`beacon cloud codex print-hooks`,
+		`beacon cloud codex print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json`,
 		`exporter = "otlp-grpc"`,
 		`log_user_prompt = true`,
 		`environment = "cloud"`,
@@ -67,6 +69,7 @@ func TestRenderCodexCloudSetupConfiguresCollectorAndPromptLogging(t *testing.T) 
 		`beacon.run.provider=${BEACON_RUN_PROVIDER:-codex_cloud}`,
 		`. /tmp/beacon/codex-env.sh`,
 		`beacon-hooks --platform codex cloud-watch`,
+		`Commit .codex/hooks.json before starting cloud tasks`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered Codex setup missing %q:\n%s", want, got)

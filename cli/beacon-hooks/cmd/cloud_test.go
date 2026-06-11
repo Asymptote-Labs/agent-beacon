@@ -77,3 +77,32 @@ func TestRunCodexPromptSubmitEmitsCloudPromptEvent(t *testing.T) {
 		t.Fatalf("prompt.text = %q, want redacted prompt", prompt)
 	}
 }
+
+func TestRunCodexPreToolObservesWithoutDecisionResponse(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "codex"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_RUN_PROVIDER", "codex_cloud")
+	t.Setenv("BEACON_RUN_EPHEMERAL", "true")
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"session_id": "codex-session",
+		"tool_name":  "Bash",
+		"tool_input": map[string]interface{}{
+			"command": "pwd && ls",
+		},
+	})
+	if len(out) != 0 {
+		t.Fatalf("codex pre-tool response = %#v, want empty", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "approval.allowed" {
+		t.Fatalf("event.action = %q, want approval.allowed", action)
+	}
+	if command := event["command"].(map[string]interface{})["command"]; command != "pwd && ls" {
+		t.Fatalf("command = %q, want pwd && ls", command)
+	}
+}
