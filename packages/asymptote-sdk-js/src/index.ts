@@ -41,6 +41,8 @@ import {
   ATTR_BEACON_HARNESS_NAME,
   ATTR_BEACON_ORIGIN,
   ATTR_BEACON_PROMPT_TEXT,
+  ATTR_BEACON_SESSION_ID,
+  ATTR_BEACON_SESSION_WORKING_DIRECTORY,
 } from "./constants.js";
 
 export * from "./constants.js";
@@ -134,6 +136,10 @@ export class Observe {
 
   static patch(modules: InstrumentModules): void {
     patch(modules);
+  }
+
+  static sessionAttributes(sessionId: string, workingDirectory?: string): Attributes {
+    return sessionAttributes(sessionId, workingDirectory);
   }
 
   static instrumentations(options: AsymptoteInstrumentationOptions = {}): Instrumentation[] {
@@ -248,6 +254,24 @@ export function observe<T extends (...args: any[]) => any>(options: ObserveOptio
       }
     });
   } as T;
+}
+
+/**
+ * Builds the span or resource attributes that attribute telemetry to one
+ * agent session for Beacon token usage rollups. Pass the result to
+ * `observe({ attributes: ... })`, `startActiveSpan`, or
+ * `initialize({ resourceAttributes: ... })` so every span in the session
+ * carries the same session identity.
+ */
+export function sessionAttributes(sessionId: string, workingDirectory?: string): Attributes {
+  const attributes: Attributes = {
+    [ATTR_BEACON_SESSION_ID]: sessionId,
+    "gen_ai.conversation.id": sessionId,
+  };
+  if (workingDirectory) {
+    attributes[ATTR_BEACON_SESSION_WORKING_DIRECTORY] = workingDirectory;
+  }
+  return attributes;
 }
 
 export function patch(modules: InstrumentModules): void {
