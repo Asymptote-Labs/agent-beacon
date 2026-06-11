@@ -58,10 +58,12 @@ func TestRenderCodexCloudSetupConfiguresCollectorAndPromptLogging(t *testing.T) 
 	for _, want := range []string{
 		`BEACON_VERSION="v0.0.60"`,
 		`CODEX_CONFIG_DIR="${CODEX_HOME:-$HOME/.codex}"`,
+		`CODEX_CONFIG_DIRS="$CODEX_CONFIG_DIRS /opt/codex"`,
 		`chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks /tmp/beacon/bin/beacon-otelcol`,
 		`/tmp/beacon/bin/beacon-otelcol --config /tmp/beacon/otelcol.yaml`,
 		`path: "/tmp/beacon/runtime.jsonl"`,
 		`beacon cloud codex print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json`,
+		`cp /tmp/beacon/codex-hooks.json "$dir/hooks.json"`,
 		`exporter = "otlp-grpc"`,
 		`log_user_prompt = true`,
 		`environment = "cloud"`,

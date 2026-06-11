@@ -332,7 +332,17 @@ echo "  beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hoo
 func renderCodexCloudSetup(version string) string {
 	return fmt.Sprintf(`set -euo pipefail
 CODEX_CONFIG_DIR="${CODEX_HOME:-$HOME/.codex}"
-mkdir -p /tmp/beacon/bin /tmp/beacon/logs "$CODEX_CONFIG_DIR"
+CODEX_CONFIG_DIRS="$CODEX_CONFIG_DIR"
+if [ "$CODEX_CONFIG_DIR" != "$HOME/.codex" ]; then
+  CODEX_CONFIG_DIRS="$CODEX_CONFIG_DIRS $HOME/.codex"
+fi
+if [ "$CODEX_CONFIG_DIR" != "/opt/codex" ]; then
+  CODEX_CONFIG_DIRS="$CODEX_CONFIG_DIRS /opt/codex"
+fi
+mkdir -p /tmp/beacon/bin /tmp/beacon/logs
+for dir in $CODEX_CONFIG_DIRS; do
+  mkdir -p "$dir"
+done
 
 BEACON_VERSION=%q
 OS="linux"
@@ -406,17 +416,19 @@ fi
 
 echo "Codex hooks must be committed before starting Codex Cloud Agents:"
 echo "  beacon cloud codex print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json"
+/tmp/beacon/bin/beacon cloud codex print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > /tmp/beacon/codex-hooks.json
+for dir in $CODEX_CONFIG_DIRS; do
+  cp /tmp/beacon/codex-hooks.json "$dir/hooks.json"
+done
+if [ -d .codex ]; then
+  cp /tmp/beacon/codex-hooks.json .codex/hooks.json
+fi
 
-python3 - <<'PY'
+python3 - "$CODEX_CONFIG_DIRS" <<'PY'
 import os
+import sys
 from pathlib import Path
 
-path = Path(os.environ.get("CODEX_CONFIG_DIR", str(Path.home() / ".codex"))) / "config.toml"
-existing = path.read_text() if path.exists() else ""
-lines = existing.splitlines()
-out = []
-in_otel = False
-wrote = False
 block = [
     "[otel]",
     'environment = "cloud"',
@@ -427,29 +439,36 @@ block = [
     'endpoint = "http://127.0.0.1:4317"',
     "",
 ]
-for line in lines:
-    stripped = line.strip()
-    if stripped.startswith("[") and stripped.endswith("]"):
-        is_otel = stripped == "[otel]" or stripped.startswith("[otel.")
-        if in_otel and not is_otel and not wrote:
-            out.extend(block)
-            wrote = True
-        in_otel = is_otel
-        if not in_otel:
-            out.append(line)
-        continue
-    if in_otel:
-        continue
-    out.append(line)
-if in_otel and not wrote:
-    out.extend(block)
-    wrote = True
-if not wrote:
-    if existing.strip():
-        out.append("")
-    out.extend(block)
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text("\n".join(out).rstrip() + "\n")
+for config_dir in sys.argv[1].split():
+    path = Path(config_dir) / "config.toml"
+    existing = path.read_text() if path.exists() else ""
+    lines = existing.splitlines()
+    out = []
+    in_otel = False
+    wrote = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            is_otel = stripped == "[otel]" or stripped.startswith("[otel.")
+            if in_otel and not is_otel and not wrote:
+                out.extend(block)
+                wrote = True
+            in_otel = is_otel
+            if not in_otel:
+                out.append(line)
+            continue
+        if in_otel:
+            continue
+        out.append(line)
+    if in_otel and not wrote:
+        out.extend(block)
+        wrote = True
+    if not wrote:
+        if existing.strip():
+            out.append("")
+        out.extend(block)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out).rstrip() + "\n")
 PY
 
 cat > /tmp/beacon/codex-env.sh <<'EOF'
@@ -482,7 +501,7 @@ echo "$!" > /tmp/beacon/cloud-watch.pid
 echo "Beacon Codex cloud telemetry configured:"
 echo "  collector: /tmp/beacon/otelcol.yaml"
 echo "  runtime log: /tmp/beacon/runtime.jsonl"
-echo "  Codex config: $CODEX_CONFIG_DIR/config.toml"
+echo "  Codex config dirs: $CODEX_CONFIG_DIRS"
 echo "  Commit .codex/hooks.json before starting cloud tasks"
 `, version)
 }
