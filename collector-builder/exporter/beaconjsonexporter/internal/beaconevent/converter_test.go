@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
@@ -200,6 +201,190 @@ func TestEventFromLogCapturesTraceContext(t *testing.T) {
 	}
 	if trace.ParentSpanID != "" {
 		t.Fatalf("trace.parent_span_id = %q, want empty for logs", trace.ParentSpanID)
+	}
+}
+
+func TestEventsFromMetricsExpandsClaudeCodeTokenUsageDataPoints(t *testing.T) {
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("service.name", "claude-code")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("claude_code.token.usage")
+	metric.SetUnit("tokens")
+	sum := metric.SetEmptySum()
+	sum.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	sum.SetIsMonotonic(true)
+
+	ts := pcommon.NewTimestampFromTime(time.Unix(1700000100, 0).UTC())
+	for tokenType, value := range map[string]int64{
+		"input":         120,
+		"output":        45,
+		"cacheRead":     90,
+		"cacheCreation": 30,
+	} {
+		dp := sum.DataPoints().AppendEmpty()
+		dp.SetTimestamp(ts)
+		dp.SetIntValue(value)
+		dp.Attributes().PutStr("type", tokenType)
+		dp.Attributes().PutStr("model", "claude-sonnet-4-5")
+		dp.Attributes().PutStr("session.id", "session-123")
+	}
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events (one per datapoint), got %d", len(events))
+	}
+	got := map[string]int64{}
+	for _, event := range events {
+		if event.Event.Action != "token.usage" || event.Event.Category != "metric" {
+			t.Fatalf("event = %#v, want token.usage metric", event.Event)
+		}
+		if event.Harness.Name != "claude_code" {
+			t.Fatalf("harness = %q, want claude_code", event.Harness.Name)
+		}
+		if event.Model != "claude-sonnet-4-5" {
+			t.Fatalf("model = %q, want datapoint model attribute", event.Model)
+		}
+		if event.Session == nil || event.Session.ID != "session-123" {
+			t.Fatalf("session = %#v, want datapoint session attribute", event.Session)
+		}
+		if !event.ObservedAt.Equal(time.Unix(1700000100, 0).UTC()) {
+			t.Fatalf("timestamp = %v, want datapoint timestamp", event.ObservedAt)
+		}
+		if event.Raw["metric_temporality"] != "Delta" || event.Raw["metric_monotonic"] != true {
+			t.Fatalf("raw temporality = %#v, want Delta monotonic", event.Raw)
+		}
+		usage := event.GenAI.Usage
+		if usage == nil {
+			t.Fatalf("usage missing on event: %#v", event.GenAI)
+		}
+		switch {
+		case usage.InputTokens != nil:
+			got["input"] = *usage.InputTokens
+		case usage.OutputTokens != nil:
+			got["output"] = *usage.OutputTokens
+		case usage.CacheRead != nil && usage.CacheRead.InputTokens != nil:
+			got["cacheRead"] = *usage.CacheRead.InputTokens
+		case usage.CacheCreation != nil && usage.CacheCreation.InputTokens != nil:
+			got["cacheCreation"] = *usage.CacheCreation.InputTokens
+		default:
+			t.Fatalf("usage has no recognized token field: %#v", usage)
+		}
+	}
+	want := map[string]int64{"input": 120, "output": 45, "cacheRead": 90, "cacheCreation": 30}
+	for tokenType, value := range want {
+		if got[tokenType] != value {
+			t.Fatalf("token usage %s = %d, want %d (all: %#v)", tokenType, got[tokenType], value, got)
+		}
+	}
+}
+
+func TestEventsFromMetricsCapturesCostUsage(t *testing.T) {
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("service.name", "claude-code")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("claude_code.cost.usage")
+	metric.SetUnit("USD")
+	sum := metric.SetEmptySum()
+	sum.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	dp := sum.DataPoints().AppendEmpty()
+	dp.SetDoubleValue(0.42)
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000200, 0).UTC()))
+	dp.Attributes().PutStr("model", "claude-sonnet-4-5")
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.Event.Action != "cost.usage" {
+		t.Fatalf("action = %q, want cost.usage", event.Event.Action)
+	}
+	if event.GenAI == nil || event.GenAI.Usage == nil || event.GenAI.Usage.CostUSD == nil || *event.GenAI.Usage.CostUSD != 0.42 {
+		t.Fatalf("usage = %#v, want cost_usd 0.42", event.GenAI)
+	}
+	if event.Model != "claude-sonnet-4-5" {
+		t.Fatalf("model = %q, want datapoint model attribute", event.Model)
+	}
+	if event.Raw["metric_value"] != 0.42 || event.Raw["metric_unit"] != "USD" {
+		t.Fatalf("raw payload = %#v, want metric_value and unit", event.Raw)
+	}
+}
+
+func TestEventsFromMetricsCapturesTokenUsageHistogram(t *testing.T) {
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("beacon.harness.name", "asymptote_observe")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("gen_ai.client.token.usage")
+	histogram := metric.SetEmptyHistogram()
+	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	dp := histogram.DataPoints().AppendEmpty()
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000300, 0).UTC()))
+	dp.SetCount(3)
+	dp.SetSum(456)
+	dp.Attributes().PutStr("gen_ai.token.type", "output")
+	dp.Attributes().PutStr("gen_ai.request.model", "gpt-4o-mini")
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.GenAI == nil || event.GenAI.Usage == nil || event.GenAI.Usage.OutputTokens == nil || *event.GenAI.Usage.OutputTokens != 456 {
+		t.Fatalf("usage = %#v, want output 456", event.GenAI)
+	}
+	if event.Model != "gpt-4o-mini" {
+		t.Fatalf("model = %q, want gpt-4o-mini", event.Model)
+	}
+	if event.Raw["metric_count"] != int64(3) {
+		t.Fatalf("raw metric_count = %#v, want 3", event.Raw["metric_count"])
+	}
+}
+
+func TestEventsFromMetricsUnknownTokenTypeKeepsRawValueOnly(t *testing.T) {
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("service.name", "claude-code")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("claude_code.token.usage")
+	sum := metric.SetEmptySum()
+	sum.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	dp := sum.DataPoints().AppendEmpty()
+	dp.SetIntValue(7)
+	dp.Attributes().PutStr("type", "speculative")
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	usage := event.GenAI.Usage
+	if usage != nil && (usage.InputTokens != nil || usage.OutputTokens != nil || usage.CacheRead != nil || usage.CacheCreation != nil || usage.Reasoning != nil) {
+		t.Fatalf("unknown token type populated usage: %#v", usage)
+	}
+	if event.GenAI.Token == nil || event.GenAI.Token.Type != "speculative" {
+		t.Fatalf("token type = %#v, want speculative recorded", event.GenAI.Token)
+	}
+	if event.Raw["metric_value"] != float64(7) {
+		t.Fatalf("raw metric_value = %#v, want 7", event.Raw["metric_value"])
+	}
+}
+
+func TestEventsFromMetricTokenUsageWithoutDataPointsFallsBack(t *testing.T) {
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("service.name", "claude-code")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("claude_code.token.usage")
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 fallback event, got %d", len(events))
+	}
+	if events[0].Event.Action != "metric.observed" {
+		t.Fatalf("action = %q, want metric.observed fallback", events[0].Event.Action)
 	}
 }
 

@@ -3,6 +3,7 @@ package beaconevent
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -106,7 +107,7 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 				if ShouldDropMetric(resourceAttrs, metric.Name(), c.opts.IncludeRuntimeMetrics) {
 					continue
 				}
-				events = append(events, c.EventFromMetric(resourceAttrs, metric))
+				events = append(events, c.EventsFromMetric(resourceAttrs, metric)...)
 			}
 		}
 	}
@@ -406,6 +407,148 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 		"metric_unit":        metric.Unit(),
 	})
 	return event
+}
+
+// IsTokenUsageMetric reports whether a metric carries token counts as
+// datapoint values, such as Claude Code's claude_code.token.usage counter or
+// the semconv gen_ai.client.token.usage histogram. Matching is deliberately
+// tight so unrelated metrics keep the generic metric.observed conversion.
+func IsTokenUsageMetric(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	return normalized == "gen_ai.client.token.usage" || strings.HasSuffix(normalized, ".token.usage")
+}
+
+// IsCostUsageMetric reports whether a metric carries runtime-reported cost as
+// datapoint values, such as Claude Code's claude_code.cost.usage counter.
+func IsCostUsageMetric(name string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(name)), ".cost.usage")
+}
+
+// EventsFromMetric expands token and cost usage metrics into one event per
+// datapoint so values and datapoint attributes (token type, model, session)
+// survive into JSONL. Other metrics, and usage metrics without datapoints,
+// keep the single metric.observed event.
+func (c Converter) EventsFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) []Event {
+	if IsTokenUsageMetric(metric.Name()) || IsCostUsageMetric(metric.Name()) {
+		if events := c.eventsFromUsageMetric(resourceAttrs, metric); len(events) > 0 {
+			return events
+		}
+	}
+	return []Event{c.EventFromMetric(resourceAttrs, metric)}
+}
+
+func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) []Event {
+	var events []Event
+	switch metric.Type() {
+	case pmetric.MetricTypeSum:
+		sum := metric.Sum()
+		extra := map[string]interface{}{
+			"metric_type":        metric.Type().String(),
+			"metric_temporality": sum.AggregationTemporality().String(),
+			"metric_monotonic":   sum.IsMonotonic(),
+		}
+		for i := 0; i < sum.DataPoints().Len(); i++ {
+			dp := sum.DataPoints().At(i)
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp), extra))
+		}
+	case pmetric.MetricTypeGauge:
+		gauge := metric.Gauge()
+		extra := map[string]interface{}{"metric_type": metric.Type().String()}
+		for i := 0; i < gauge.DataPoints().Len(); i++ {
+			dp := gauge.DataPoints().At(i)
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp), extra))
+		}
+	case pmetric.MetricTypeHistogram:
+		histogram := metric.Histogram()
+		for i := 0; i < histogram.DataPoints().Len(); i++ {
+			dp := histogram.DataPoints().At(i)
+			if !dp.HasSum() {
+				continue
+			}
+			extra := map[string]interface{}{
+				"metric_type":        metric.Type().String(),
+				"metric_temporality": histogram.AggregationTemporality().String(),
+				"metric_count":       int64(dp.Count()),
+			}
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), dp.Sum(), extra))
+		}
+	}
+	return events
+}
+
+func numberDataPointValue(dp pmetric.NumberDataPoint) float64 {
+	if dp.ValueType() == pmetric.NumberDataPointValueTypeInt {
+		return float64(dp.IntValue())
+	}
+	return dp.DoubleValue()
+}
+
+func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{}, metric pmetric.Metric, dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64, extra map[string]interface{}) Event {
+	attrs := MergeMaps(resourceAttrs, AttrsToMap(dpAttrs))
+	action := "token.usage"
+	if IsCostUsageMetric(metric.Name()) {
+		action = "cost.usage"
+	}
+	event := NewEvent(action, "metric", "info", HarnessName(attrs, metric.Name()), Timestamp(ts.AsTime()))
+	event.Message = metric.Name()
+	c.PopulateCommon(&event, attrs)
+	if action == "cost.usage" {
+		cost := value
+		if event.GenAI == nil {
+			event.GenAI = &GenAIInfo{}
+		}
+		if event.GenAI.Usage == nil {
+			event.GenAI.Usage = &GenAIUsageInfo{}
+		}
+		event.GenAI.Usage.CostUSD = &cost
+	} else {
+		ApplyTokenUsage(&event, FirstString(attrs, "type", "gen_ai.token.type"), int64(math.Round(value)))
+	}
+	rawExtra := map[string]interface{}{
+		"otel_signal":        "metrics",
+		"metric_name":        metric.Name(),
+		"metric_description": metric.Description(),
+		"metric_unit":        metric.Unit(),
+		"metric_value":       value,
+	}
+	for k, v := range extra {
+		rawExtra[k] = v
+	}
+	event.Raw = c.RawPayload(attrs, rawExtra)
+	return event
+}
+
+// ApplyTokenUsage merges a typed token count into the event's canonical
+// gen_ai.usage struct. Claude Code's cacheRead/cacheCreation token types
+// extend the semconv input/output enum. Unknown types only record the type
+// so the raw value stays inspectable without polluting usage totals.
+func ApplyTokenUsage(event *Event, tokenType string, value int64) {
+	if event.GenAI == nil {
+		event.GenAI = &GenAIInfo{}
+	}
+	if event.GenAI.Usage == nil {
+		event.GenAI.Usage = &GenAIUsageInfo{}
+	}
+	usage := event.GenAI.Usage
+	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(tokenType)), "_", "") {
+	case "input", "prompt":
+		usage.InputTokens = &value
+	case "output", "completion":
+		usage.OutputTokens = &value
+	case "cacheread":
+		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
+	case "cachecreation":
+		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
+	case "reasoning":
+		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
+	default:
+		if event.GenAI.Token == nil && tokenType != "" {
+			event.GenAI.Token = &GenAITokenInfo{Type: tokenType}
+		}
+	}
+	if tokenType != "" && event.GenAI.Token == nil {
+		event.GenAI.Token = &GenAITokenInfo{Type: tokenType}
+	}
 }
 
 func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
