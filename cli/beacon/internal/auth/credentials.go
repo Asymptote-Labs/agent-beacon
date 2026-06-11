@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,9 @@ func CredentialsPath() (string, error) {
 func SaveCredentials(creds *Credentials) error {
 	if creds == nil {
 		return fmt.Errorf("credentials are required")
+	}
+	if err := creds.validateRequiredFields(); err != nil {
+		return err
 	}
 	if _, err := EnsureConfigDir(); err != nil {
 		return fmt.Errorf("failed to create auth directory: %w", err)
@@ -110,7 +114,20 @@ func IsLoggedIn() bool {
 	if err != nil || creds == nil {
 		return false
 	}
-	return !creds.IsExpired()
+	return creds.validateRequiredFields() == nil && !creds.IsExpired()
+}
+
+func (c *Credentials) validateRequiredFields() error {
+	if c == nil {
+		return fmt.Errorf("credentials are required")
+	}
+	if strings.TrimSpace(c.Token) == "" {
+		return fmt.Errorf("credentials token is required")
+	}
+	if strings.TrimSpace(c.UserID) == "" {
+		return fmt.Errorf("credentials user ID is required")
+	}
+	return nil
 }
 
 func (c *Credentials) IsExpired() bool {

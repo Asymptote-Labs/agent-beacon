@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+const (
+	callbackReadTimeout       = 10 * time.Second
+	defaultExchangeTimeout    = 30 * time.Second
+	callbackWriteTimeoutSlack = 5 * time.Second
+)
+
 type CallbackResult struct {
 	Token       string
 	TokenPrefix string
@@ -47,7 +53,8 @@ type CallbackServer struct {
 	listener     net.Listener
 	server       *http.Server
 	resultCh     chan *CallbackResult
-	once         sync.Once
+	mu           sync.Mutex
+	completed    bool
 	state        string
 	codeVerifier string
 	dashboardURL string
@@ -60,7 +67,7 @@ func NewCallbackServer(expectedState, codeVerifier, dashboardURL string, httpCli
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{Timeout: defaultExchangeTimeout}
 	}
 	cs := &CallbackServer{
 		port:         listener.Addr().(*net.TCPAddr).Port,
@@ -75,11 +82,19 @@ func NewCallbackServer(expectedState, codeVerifier, dashboardURL string, httpCli
 	mux.HandleFunc("/callback", cs.handleCallback)
 	cs.server = &http.Server{
 		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadHeaderTimeout: callbackReadTimeout,
+		ReadTimeout:       callbackReadTimeout,
+		WriteTimeout:      callbackWriteTimeout(httpClient),
 	}
 	return cs, nil
+}
+
+func callbackWriteTimeout(httpClient *http.Client) time.Duration {
+	exchangeTimeout := defaultExchangeTimeout
+	if httpClient != nil && httpClient.Timeout > exchangeTimeout {
+		exchangeTimeout = httpClient.Timeout
+	}
+	return exchangeTimeout + callbackWriteTimeoutSlack
 }
 
 func (cs *CallbackServer) Port() int {
@@ -110,47 +125,65 @@ func (cs *CallbackServer) Shutdown() error {
 }
 
 func (cs *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
-	cs.once.Do(func() {
-		query := r.URL.Query()
-		if errMsg := query.Get("error"); errMsg != "" {
-			cs.resultCh <- &CallbackResult{Error: errMsg}
-			cs.sendResponse(w, false, errMsg)
-			return
-		}
-		state := query.Get("state")
-		if state != cs.state {
-			cs.resultCh <- &CallbackResult{Error: "state mismatch - possible CSRF attack"}
-			cs.sendResponse(w, false, "Security error: state mismatch")
-			return
-		}
-		exchangeCode := query.Get("exchange_code")
-		if exchangeCode == "" {
-			cs.resultCh <- &CallbackResult{Error: "no exchange code received"}
-			cs.sendResponse(w, false, "No exchange code received")
-			return
-		}
-		tokenResp, err := cs.exchangeCodeForToken(r.Context(), exchangeCode, state, cs.codeVerifier)
-		if err != nil {
-			message := fmt.Sprintf("failed to exchange code: %v", err)
-			cs.resultCh <- &CallbackResult{Error: message}
-			cs.sendResponse(w, false, message)
-			return
-		}
-		result := &CallbackResult{
-			Token:       tokenResp.Token,
-			TokenPrefix: tokenResp.TokenPrefix,
-			UserID:      tokenResp.UserID,
-			Email:       tokenResp.Email,
-			OrgID:       tokenResp.OrgID,
-			OrgName:     tokenResp.OrgName,
-			State:       state,
-		}
-		if tokenResp.ExpiresAt != nil {
-			result.ExpiresAt = *tokenResp.ExpiresAt
-		}
-		cs.resultCh <- result
-		cs.sendResponse(w, true, "")
-	})
+	query := r.URL.Query()
+	state := query.Get("state")
+	if state != cs.state {
+		cs.sendResponse(w, false, "Security error: state mismatch")
+		return
+	}
+	if errMsg := query.Get("error"); errMsg != "" {
+		cs.finishCallback(w, &CallbackResult{Error: errMsg}, false, errMsg)
+		return
+	}
+	exchangeCode := query.Get("exchange_code")
+	if exchangeCode == "" {
+		cs.sendResponse(w, false, "No exchange code received")
+		return
+	}
+	if !cs.reserveCompletion() {
+		cs.sendResponse(w, false, "Authentication callback already handled")
+		return
+	}
+	tokenResp, err := cs.exchangeCodeForToken(r.Context(), exchangeCode, state, cs.codeVerifier)
+	if err != nil {
+		message := fmt.Sprintf("failed to exchange code: %v", err)
+		cs.resultCh <- &CallbackResult{Error: message}
+		cs.sendResponse(w, false, message)
+		return
+	}
+	result := &CallbackResult{
+		Token:       tokenResp.Token,
+		TokenPrefix: tokenResp.TokenPrefix,
+		UserID:      tokenResp.UserID,
+		Email:       tokenResp.Email,
+		OrgID:       tokenResp.OrgID,
+		OrgName:     tokenResp.OrgName,
+		State:       state,
+	}
+	if tokenResp.ExpiresAt != nil {
+		result.ExpiresAt = *tokenResp.ExpiresAt
+	}
+	cs.resultCh <- result
+	cs.sendResponse(w, true, "")
+}
+
+func (cs *CallbackServer) finishCallback(w http.ResponseWriter, result *CallbackResult, success bool, errorMsg string) {
+	if !cs.reserveCompletion() {
+		cs.sendResponse(w, false, "Authentication callback already handled")
+		return
+	}
+	cs.resultCh <- result
+	cs.sendResponse(w, success, errorMsg)
+}
+
+func (cs *CallbackServer) reserveCompletion() bool {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.completed {
+		return false
+	}
+	cs.completed = true
+	return true
 }
 
 func (cs *CallbackServer) exchangeCodeForToken(ctx context.Context, exchangeCode, state, codeVerifier string) (*exchangeCodeResponse, error) {

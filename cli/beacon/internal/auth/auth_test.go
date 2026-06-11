@@ -105,6 +105,31 @@ func TestIsLoggedInRejectsExpiredCredentials(t *testing.T) {
 	}
 }
 
+func TestIsLoggedInRejectsIncompleteCredentials(t *testing.T) {
+	for name, contents := range map[string]string{
+		"missing token":   `{"token":"","user_id":"user-1"}`,
+		"missing user ID": `{"token":"secret-token","user_id":""}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			if _, err := EnsureConfigDir(); err != nil {
+				t.Fatalf("EnsureConfigDir returned error: %v", err)
+			}
+			path, err := CredentialsPath()
+			if err != nil {
+				t.Fatalf("CredentialsPath returned error: %v", err)
+			}
+			if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+				t.Fatalf("write credentials: %v", err)
+			}
+			if IsLoggedIn() {
+				t.Fatal("IsLoggedIn = true, want false for incomplete credentials")
+			}
+		})
+	}
+}
+
 func TestCallbackServerExchangesCodeForToken(t *testing.T) {
 	var gotRequest exchangeCodeRequest
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,36 +182,138 @@ func TestCallbackServerExchangesCodeForToken(t *testing.T) {
 	}
 }
 
-func TestCallbackServerRejectsStateMismatch(t *testing.T) {
-	backendCalled := false
+func TestCallbackServerWriteTimeoutAllowsDefaultExchangeTimeout(t *testing.T) {
+	server, err := NewCallbackServer("state-123", "verifier-123", "https://dashboard.example", nil)
+	if err != nil {
+		t.Fatalf("NewCallbackServer returned error: %v", err)
+	}
+	defer func() { _ = server.Shutdown() }()
+
+	if server.httpClient.Timeout != defaultExchangeTimeout {
+		t.Fatalf("default exchange timeout = %s, want %s", server.httpClient.Timeout, defaultExchangeTimeout)
+	}
+	if server.server.WriteTimeout <= server.httpClient.Timeout {
+		t.Fatalf("callback write timeout = %s, want greater than exchange timeout %s", server.server.WriteTimeout, server.httpClient.Timeout)
+	}
+}
+
+func TestLoginRejectsIncompleteExchangeResponse(t *testing.T) {
+	for name, tc := range map[string]struct {
+		responseBody string
+		wantErr      string
+	}{
+		"missing token": {
+			responseBody: `{"token":"","token_prefix":"asym_123","user_id":"user-1","email":"user@example.test"}`,
+			wantErr:      "credentials token is required",
+		},
+		"missing user ID": {
+			responseBody: `{"token":"secret-token","token_prefix":"asym_123","user_id":"","email":"user@example.test"}`,
+			wantErr:      "credentials user ID is required",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.responseBody))
+			}))
+			defer backend.Close()
+
+			callbackErr := make(chan error, 1)
+			openBrowser := func(authURL string) error {
+				u, err := url.Parse(authURL)
+				if err != nil {
+					return err
+				}
+				callbackURL := url.URL{
+					Scheme:   "http",
+					Host:     "127.0.0.1:" + u.Query().Get("port"),
+					Path:     "/callback",
+					RawQuery: "exchange_code=code-123&state=" + url.QueryEscape(u.Query().Get("state")),
+				}
+				go func() {
+					resp, err := http.Get(callbackURL.String())
+					if err == nil {
+						_ = resp.Body.Close()
+					}
+					callbackErr <- err
+				}()
+				return nil
+			}
+
+			creds, err := Login(LoginOptions{
+				DashboardURL: backend.URL,
+				HTTPClient:   backend.Client(),
+				OpenBrowser:  openBrowser,
+				Timeout:      2 * time.Second,
+			})
+			if err == nil {
+				t.Fatal("Login error = nil, want error")
+			}
+			if creds != nil {
+				t.Fatalf("Login credentials = %#v, want nil", creds)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Login error = %q, want to contain %q", err, tc.wantErr)
+			}
+			if err := <-callbackErr; err != nil {
+				t.Fatalf("callback request failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestCallbackServerIgnoresInvalidCallbacksBeforeValidRedirect(t *testing.T) {
+	backendCalls := 0
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		backendCalled = true
-		t.Fatal("backend should not be called on state mismatch")
+		backendCalls++
+		if r.URL.Path != "/api/cli/auth/exchange" {
+			t.Fatalf("exchange path = %q, want /api/cli/auth/exchange", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"secret-token","token_prefix":"asym_123","user_id":"user-1","email":"user@example.test","org_id":"org-1","org_name":"Example Org"}`))
 	}))
 	defer backend.Close()
 
-	server, err := NewCallbackServer("expected-state", "verifier", backend.URL, backend.Client())
+	server, err := NewCallbackServer("expected-state", "verifier-123", backend.URL, backend.Client())
 	if err != nil {
 		t.Fatalf("NewCallbackServer returned error: %v", err)
 	}
 	defer func() { _ = server.Shutdown() }()
 	server.Start()
 
-	go func() {
-		resp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(server.Port()) + "/callback?exchange_code=code&state=wrong-state")
+	baseURL := "http://127.0.0.1:" + strconv.Itoa(server.Port()) + "/callback"
+	for _, rawURL := range []string{
+		baseURL + "?exchange_code=code&state=wrong-state",
+		baseURL + "?state=expected-state",
+		baseURL + "?error=access_denied",
+	} {
+		resp, err := http.Get(rawURL)
 		if err == nil {
 			_ = resp.Body.Close()
 		}
-	}()
+	}
+	if backendCalls != 0 {
+		t.Fatalf("backend calls after invalid callbacks = %d, want 0", backendCalls)
+	}
+
+	resp, err := http.Get(baseURL + "?exchange_code=code-123&state=expected-state")
+	if err != nil {
+		t.Fatalf("valid callback request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
 	result, err := server.Wait(2 * time.Second)
 	if err != nil {
 		t.Fatalf("Wait returned error: %v", err)
 	}
-	if !strings.Contains(result.Error, "state mismatch") {
-		t.Fatalf("result error = %q, want state mismatch", result.Error)
+	if result.Error != "" {
+		t.Fatalf("callback result error = %q", result.Error)
 	}
-	if backendCalled {
-		t.Fatal("backend was called on state mismatch")
+	if result.Token != "secret-token" || result.State != "expected-state" {
+		t.Fatalf("unexpected callback result: %#v", result)
+	}
+	if backendCalls != 1 {
+		t.Fatalf("backend calls = %d, want 1", backendCalls)
 	}
 }
 

@@ -80,7 +80,7 @@ func Login(opts LoginOptions) (*Credentials, error) {
 			}
 		}
 	}
-	return &Credentials{
+	creds := &Credentials{
 		Token:       result.Token,
 		TokenPrefix: result.TokenPrefix,
 		ExpiresAt:   expiresAt,
@@ -88,7 +88,11 @@ func Login(opts LoginOptions) (*Credentials, error) {
 		Email:       result.Email,
 		OrgID:       result.OrgID,
 		OrgName:     result.OrgName,
-	}, nil
+	}
+	if err := creds.validateRequiredFields(); err != nil {
+		return nil, fmt.Errorf("invalid authentication response: %w", err)
+	}
+	return creds, nil
 }
 
 func ResolveDashboardURL(flagValue string) string {
