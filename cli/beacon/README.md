@@ -38,8 +38,8 @@ configured.
 ## Cloud Agent Telemetry
 
 Use `beacon cloud` helpers to configure provider-managed cloud agent sandboxes.
-Claude Code on the web and Cursor cloud agents can forward Beacon JSONL to
-customer-managed GCS:
+Claude Code on the web, Cursor cloud agents, and Codex cloud agents can forward
+Beacon JSONL to customer-managed GCS:
 
 ```bash
 ./beacon cloud gcs setup \
@@ -57,24 +57,26 @@ values into the cloud agent environment. Also set:
 
 ```bash
 BEACON_ORIGIN=cloud
-BEACON_RUN_PROVIDER=claude_code_web # or cursor_cloud
+BEACON_RUN_PROVIDER=claude_code_web # or cursor_cloud or codex_cloud
 BEACON_RUN_EPHEMERAL=true
 BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
 ```
 
-For Cursor Cloud Agents, keep the repository-owned setup in `.cursor/`:
+For Cursor Cloud Agents, generate and commit repository-owned project hooks
+before starting cloud tasks:
 
-```text
-.cursor/environment.json
-.cursor/install.sh
-.cursor/start.sh
+```bash
+mkdir -p .cursor
+./beacon cloud cursor print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json
 ```
 
-The install script builds the current branch by default, or downloads a release
-when `BEACON_VERSION` is set, then merges Beacon commands into
-`.cursor/hooks.json` during environment setup. It defaults to safe hook coverage
-while testing forwarding and skips shell/edit-specific hooks; set
-`BEACON_CURSOR_CLOUD_FULL_HOOKS=1` to enable the full Cursor Cloud hook set.
+Then paste the setup script into the Cursor cloud environment setup step:
+
+```bash
+./beacon cloud cursor print-setup --version vX.Y.Z
+```
 
 For Claude Code on the web, generate the setup script for a Beacon release and
 paste it into the provider's cloud setup field:
@@ -83,24 +85,60 @@ paste it into the provider's cloud setup field:
 ./beacon cloud claude-web print-setup --version vX.Y.Z
 ```
 
+For Codex Cloud Agents, generate the setup script for a Beacon release and
+paste it into the Codex cloud environment setup script. Also generate and commit
+project-level Codex hooks before starting cloud tasks:
+
+```bash
+mkdir -p .codex
+./beacon cloud codex print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .codex/hooks.json
+./beacon cloud codex print-setup --version vX.Y.Z
+```
+
+The Codex setup script installs `beacon`, `beacon-hooks`, and `beacon-otelcol`
+under `/tmp/beacon/bin`, starts a loopback OpenTelemetry collector, writes
+`~/.codex/config.toml` with `log_user_prompt = true` for follow-up runs where
+Codex reloads user config, and starts a periodic GCS uploader. Committed
+`.codex/hooks.json` provides reliable first-turn prompt, tool, approval, and
+stop telemetry because setup-time user config writes may be too late for the
+current Codex agent process. Codex cloud agent internet access must allow
+`oauth2.googleapis.com`,
+`storage.googleapis.com`, `github.com`, and `*.githubusercontent.com`.
+
 The setup script installs `beacon-hooks` into the cloud sandbox and uploads a
 browser-viewable `/tmp/beacon/runtime.jsonl` snapshot to GCS. Claude web writes
 `.claude/settings.local.json` inside the sandbox clone. Cursor cloud uses
-`.cursor/environment.json` to install Beacon and generate project-level
-`.cursor/hooks.json` because Cursor cloud only runs repository project hooks.
+committed project-level `.cursor/hooks.json` because Cursor cloud may load hooks
+before the setup script creates files in the VM. Codex cloud uses native Codex
+hooks as the reliable self-serve telemetry source; Codex native OTel is enabled
+where user-level config is reloaded by the runtime.
 
 ```text
 <prefix>/provider=claude_code_web/user_id=<id>/run_id=<claude-session-id>/runtime.jsonl
 <prefix>/provider=cursor_cloud/user_id=<id>/run_id=<generated-or-explicit-run-id>/runtime.jsonl
+<prefix>/provider=codex_cloud/user_id=<id>/run_id=<codex-session-id>/runtime.jsonl
 ```
 
 Cloud network access must allow `oauth2.googleapis.com` and
 `storage.googleapis.com`. Cursor cloud currently supports command hooks for tool
 activity, shell execution, file reads and edits, subagents, and compaction
 events; it does not currently run session start, session end, prompt submit, or
-stop hooks in cloud agents. If you are testing unreleased Beacon changes, clone
-and build the feature branch in the setup script instead of using
+stop hooks in cloud agents. Codex cloud records retained user prompt text for
+prompt monitoring through `log_user_prompt = true`, subject to Beacon redaction
+and event-size limits. If you are testing unreleased Beacon changes, clone and
+build the feature branch in the setup script instead of using
 `print-setup --version`.
+
+Manual Codex cloud verification:
+
+```bash
+gcloud storage ls --recursive "gs://${BEACON_CLOUD_GCS_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/"
+gcloud storage cat "gs://${BEACON_CLOUD_GCS_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=codex_cloud/user_id=<id>/run_id=<run-id>/runtime.jsonl" | head
+gcloud storage cat "gs://${BEACON_CLOUD_GCS_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=codex_cloud/user_id=<id>/run_id=<run-id>/runtime.jsonl" \
+  | rg '"action":"prompt.submitted"|"action":"command.executed"|"action":"tool.invoked"|"provider":"codex_cloud"'
+```
 
 Add optional Falcon LogScale HEC forwarding during install or repair:
 
