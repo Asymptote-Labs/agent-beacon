@@ -456,7 +456,9 @@ func buildSessionDetail(events []*usageEvent, sessionID string) *SessionDetail {
 	detail := &SessionDetail{SessionID: sessionID}
 	var ordered []*usageEvent
 	for _, ue := range events {
-		if ue.session != sessionID {
+		// Match case-insensitively to stay consistent with the case-insensitive
+		// session query the token callers use to select events.
+		if !strings.EqualFold(ue.session, sessionID) {
 			continue
 		}
 		detail.Usage.add(ue.usage)

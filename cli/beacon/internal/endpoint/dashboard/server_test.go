@@ -212,6 +212,38 @@ func TestTokensEndpointSessionFilterIsExact(t *testing.T) {
 	}
 }
 
+// TestTokensEndpointSessionFilterIsCaseInsensitive guards the token session
+// filter against case mismatches: the event query matches sessions
+// case-insensitively, so the post-filter and drilldown must too, or a
+// differently-cased filter value returns zero usage for matching events.
+func TestTokensEndpointSessionFilterIsCaseInsensitive(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"linux"},"harness":{"name":"claude_code"},"session":{"id":"Session-ABC"},"model":"claude-sonnet-4-5","gen_ai":{"usage":{"input_tokens":123}},"message":"claude_code.token.usage","raw":{"metric_name":"claude_code.token.usage","metric_temporality":"Delta"}}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tokens?session=session-abc", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var report tokens.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal tokens report: %v", err)
+	}
+	if report.Totals.InputTokens != 123 {
+		t.Fatalf("totals = %d, want 123 for case-insensitive session match", report.Totals.InputTokens)
+	}
+	if report.SessionDetail == nil || report.SessionDetail.Usage.InputTokens != 123 {
+		t.Fatalf("session detail = %#v, want case-insensitive match", report.SessionDetail)
+	}
+}
+
 func TestStaticDashboardPagesServe(t *testing.T) {
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {

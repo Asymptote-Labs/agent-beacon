@@ -75,9 +75,10 @@ func runEndpointTokens(cmd *cobra.Command, args []string) error {
 	runID := strings.TrimSpace(endpointTokensOpts.runID)
 	events := make([]schema.Event, 0, len(result.Events))
 	for _, record := range result.Events {
-		// Exact session match keeps totals/grouping consistent with the
-		// per-step drilldown, which matches the session id exactly.
-		if session != "" && (record.Event.Session == nil || record.Event.Session.ID != session) {
+		// Match the session case-insensitively (consistent with the
+		// case-insensitive event query) so totals/grouping stay aligned with
+		// the per-step drilldown.
+		if session != "" && (record.Event.Session == nil || !strings.EqualFold(record.Event.Session.ID, session)) {
 			continue
 		}
 		if runID != "" {
