@@ -767,9 +767,10 @@ func TestConsumeMetricsDropsCodexMetricsByDefault(t *testing.T) {
 	rm := metrics.ResourceMetrics().AppendEmpty()
 	rm.Resource().Attributes().PutStr("service.name", "codex-cli")
 	sm := rm.ScopeMetrics().AppendEmpty()
+	// codex.turn.token_usage is intentionally excluded: it is the one codex.*
+	// metric kept for gen_ai.usage normalization (see the beaconevent tests).
 	for _, name := range []string{
 		"codex.turn.memory",
-		"codex.turn.token_usage",
 		"codex.websocket.event.duration_ms",
 		"codex.remote_models.load_cache.duration_ms",
 		"codex.tool.call.duration_ms",

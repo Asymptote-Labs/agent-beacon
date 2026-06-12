@@ -437,6 +437,12 @@ func codexOTELBlock(endpoint string, logUserPrompt bool) []string {
 		"",
 		"[otel.exporter.\"otlp-grpc\"]",
 		fmt.Sprintf("endpoint = %q", endpoint),
+		"",
+		// metrics_exporter is a separate Codex setting from the log/event
+		// exporter above; without it Codex exports logs but no metrics, so the
+		// codex.turn.token_usage histogram never reaches the collector.
+		"[otel.metrics_exporter.\"otlp-grpc\"]",
+		fmt.Sprintf("endpoint = %q", endpoint),
 	}
 }
 

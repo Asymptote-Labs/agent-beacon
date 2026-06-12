@@ -429,6 +429,69 @@ func TestEventsFromMetricsCapturesTokenUsageHistogram(t *testing.T) {
 	}
 }
 
+func TestEventsFromMetricsNormalizesCodexTurnTokenUsage(t *testing.T) {
+	// Codex reports per-turn usage only on the codex.turn.token_usage histogram,
+	// split by a token_type dimension. It must survive the codex.* metric drop
+	// and normalize into gen_ai.usage; the "total" rollup must not add usage.
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("beacon.harness.name", "codex_cli")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("codex.turn.token_usage")
+	histogram := metric.SetEmptyHistogram()
+	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	// Codex's input (120) is inclusive of cached_input (90), and total = input +
+	// output. The normalized input_tokens must drop to the uncached portion (30)
+	// so input_tokens + cache_read == input and totals don't double-count cache.
+	tokenTypes := map[string]float64{
+		"input":            120,
+		"cached_input":     90,
+		"output":           45,
+		"reasoning_output": 30,
+		"total":            165,
+	}
+	for tokenType, value := range tokenTypes {
+		dp := histogram.DataPoints().AppendEmpty()
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000400, 0).UTC()))
+		dp.SetCount(1)
+		dp.SetSum(value)
+		dp.Attributes().PutStr("token_type", tokenType)
+	}
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != len(tokenTypes) {
+		t.Fatalf("expected %d events (one per token_type), got %d", len(tokenTypes), len(events))
+	}
+	var input, cacheRead, output, reasoning int64
+	for _, event := range events {
+		if event.Event.Action != "token.usage" || event.Harness.Name != "codex_cli" {
+			t.Fatalf("event = %#v, want codex token.usage", event.Event)
+		}
+		usage := event.GenAI.Usage
+		if usage == nil {
+			continue
+		}
+		if usage.InputTokens != nil {
+			input += *usage.InputTokens
+		}
+		if usage.OutputTokens != nil {
+			output += *usage.OutputTokens
+		}
+		if usage.CacheRead != nil && usage.CacheRead.InputTokens != nil {
+			cacheRead += *usage.CacheRead.InputTokens
+		}
+		if usage.Reasoning != nil && usage.Reasoning.OutputTokens != nil {
+			reasoning += *usage.Reasoning.OutputTokens
+		}
+	}
+	if input != 30 || cacheRead != 90 || output != 45 || reasoning != 30 {
+		t.Fatalf("normalized usage = input %d, cache_read %d, output %d, reasoning %d (want 30/90/45/30)", input, cacheRead, output, reasoning)
+	}
+	if input+cacheRead != 120 {
+		t.Fatalf("input_tokens + cache_read = %d, want 120 (= Codex input, no double-count)", input+cacheRead)
+	}
+}
+
 func TestEventsFromMetricsUnknownTokenTypeKeepsRawValueOnly(t *testing.T) {
 	metrics := pmetric.NewMetrics()
 	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()

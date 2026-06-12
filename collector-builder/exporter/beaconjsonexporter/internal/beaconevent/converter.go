@@ -192,6 +192,12 @@ func shouldDropCodexMetric(resourceAttrs map[string]interface{}, name string) bo
 		return false
 	}
 	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "codex.turn.token_usage" {
+		// Codex reports per-turn token usage only on this metric, so keep it for
+		// gen_ai.usage normalization. Other codex.* metrics (including the memory
+		// *.token_usage phases) stay dropped as high-volume runtime noise.
+		return false
+	}
 	return strings.HasPrefix(normalized, "codex.")
 }
 
@@ -415,7 +421,9 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 // tight so unrelated metrics keep the generic metric.observed conversion.
 func IsTokenUsageMetric(name string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(name))
-	return normalized == "gen_ai.client.token.usage" || strings.HasSuffix(normalized, ".token.usage")
+	return normalized == "gen_ai.client.token.usage" ||
+		normalized == "codex.turn.token_usage" ||
+		strings.HasSuffix(normalized, ".token.usage")
 }
 
 // IsCostUsageMetric reports whether a metric carries runtime-reported cost as
@@ -439,6 +447,23 @@ func (c Converter) EventsFromMetric(resourceAttrs map[string]interface{}, metric
 
 func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) []Event {
 	var events []Event
+	// Codex reports input tokens inclusive of the cached_input subset (input =
+	// uncached + cached, and total = input + output). Beacon's gen_ai.usage keeps
+	// input_tokens and cache_read disjoint like Claude Code, so reduce input by
+	// the per-turn cached_input before normalizing; otherwise totals double-count
+	// cached prompt tokens. Returns nil (no-op) for every other usage metric.
+	cachedInputByTurn := codexCachedInputByTimestamp(metric)
+	adjustValue := func(dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64) float64 {
+		if cachedInputByTurn == nil {
+			return value
+		}
+		if tt := FirstString(AttrsToMap(dpAttrs), "token_type"); strings.EqualFold(tt, "input") {
+			if value -= cachedInputByTurn[ts.AsTime().UnixNano()]; value < 0 {
+				value = 0
+			}
+		}
+		return value
+	}
 	switch metric.Type() {
 	case pmetric.MetricTypeSum:
 		sum := metric.Sum()
@@ -449,14 +474,14 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 		}
 		for i := 0; i < sum.DataPoints().Len(); i++ {
 			dp := sum.DataPoints().At(i)
-			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp), extra))
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp)), extra))
 		}
 	case pmetric.MetricTypeGauge:
 		gauge := metric.Gauge()
 		extra := map[string]interface{}{"metric_type": metric.Type().String()}
 		for i := 0; i < gauge.DataPoints().Len(); i++ {
 			dp := gauge.DataPoints().At(i)
-			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp), extra))
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp)), extra))
 		}
 	case pmetric.MetricTypeHistogram:
 		histogram := metric.Histogram()
@@ -470,10 +495,36 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 				"metric_temporality": histogram.AggregationTemporality().String(),
 				"metric_count":       int64(dp.Count()),
 			}
-			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), dp.Sum(), extra))
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), dp.Sum()), extra))
 		}
 	}
 	return events
+}
+
+// codexCachedInputByTimestamp sums each turn's cached_input datapoints from the
+// codex.turn.token_usage histogram, keyed by datapoint timestamp, so the input
+// datapoint can be reduced to its uncached portion (Codex's input is inclusive
+// of cached_input). Returns nil for any other metric so the generic usage path
+// is unaffected.
+func codexCachedInputByTimestamp(metric pmetric.Metric) map[int64]float64 {
+	if !strings.EqualFold(strings.TrimSpace(metric.Name()), "codex.turn.token_usage") {
+		return nil
+	}
+	if metric.Type() != pmetric.MetricTypeHistogram {
+		return nil
+	}
+	out := map[int64]float64{}
+	dps := metric.Histogram().DataPoints()
+	for i := 0; i < dps.Len(); i++ {
+		dp := dps.At(i)
+		if !dp.HasSum() {
+			continue
+		}
+		if tt := FirstString(AttrsToMap(dp.Attributes()), "token_type"); strings.EqualFold(tt, "cached_input") {
+			out[dp.Timestamp().AsTime().UnixNano()] += dp.Sum()
+		}
+	}
+	return out
 }
 
 func numberDataPointValue(dp pmetric.NumberDataPoint) float64 {
@@ -509,7 +560,7 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 		}
 		event.GenAI.Usage.CostUSD = &cost
 	} else {
-		ApplyTokenUsage(&event, FirstString(attrs, "type", "gen_ai.token.type"), int64(math.Round(value)))
+		ApplyTokenUsage(&event, FirstString(attrs, "type", "token_type", "gen_ai.token.type"), int64(math.Round(value)))
 	}
 	rawExtra := map[string]interface{}{
 		"otel_signal":        "metrics",
@@ -526,9 +577,11 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 }
 
 // ApplyTokenUsage merges a typed token count into the event's canonical
-// gen_ai.usage struct. Claude Code's cacheRead/cacheCreation token types
-// extend the semconv input/output enum. Unknown types only record the type
-// so the raw value stays inspectable without polluting usage totals.
+// gen_ai.usage struct. Claude Code's cacheRead/cacheCreation and Codex's
+// cachedInput/reasoningOutput token types extend the semconv input/output enum.
+// Codex's "total" rollup type is left unmapped so it never sums on top of the
+// per-type counts. Unknown types only record the type so the raw value stays
+// inspectable without polluting usage totals.
 func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 	if event.GenAI == nil {
 		event.GenAI = &GenAIInfo{}
@@ -542,11 +595,11 @@ func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 		usage.InputTokens = &value
 	case "output", "completion":
 		usage.OutputTokens = &value
-	case "cacheread":
+	case "cacheread", "cachedinput":
 		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
 	case "cachecreation":
 		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
-	case "reasoning":
+	case "reasoning", "reasoningoutput":
 		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
 	default:
 		if event.GenAI.Token == nil && tokenType != "" {

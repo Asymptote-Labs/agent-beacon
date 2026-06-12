@@ -176,14 +176,18 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 		"log_user_prompt = true",
 		"[otel.exporter.\"otlp-grpc\"]",
 		"endpoint = \"http://127.0.0.1:4317\"",
+		// metrics_exporter is required for the codex.turn.token_usage metric that
+		// backs Codex token/cost attribution.
+		"[otel.metrics_exporter.\"otlp-grpc\"]",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("codex config missing %q:\n%s", want, text)
 		}
 	}
+	// Traces stay disabled: Codex spans are high-volume and opt-in via
+	// --include-codex-spans, and are not needed for token usage.
 	for _, noisy := range []string{
 		"[otel.trace_exporter.\"otlp-grpc\"]",
-		"[otel.metrics_exporter.\"otlp-grpc\"]",
 	} {
 		if strings.Contains(text, noisy) {
 			t.Fatalf("codex config should not enable noisy exporter %q:\n%s", noisy, text)
