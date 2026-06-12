@@ -145,6 +145,73 @@ func TestTokensEndpointDedupesCumulativeSameSecondDatapoints(t *testing.T) {
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
 
+// TestTokensEndpointDedupesManySameSecondDatapoints uses more than nine
+// cumulative datapoints in the same second so line numbers reach two digits.
+// ReadEvents breaks same-timestamp ties on lexicographic line IDs (line-9 >
+// line-10), so the token path must reorder by numeric append order or the
+// cumulative dedup scrambles and inflates totals.
+func TestTokensEndpointDedupesManySameSecondDatapoints(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	var lines []string
+	for k := int64(1); k <= 12; k++ {
+		// Cumulative input k*100 -> per-interval delta of 100 each -> 1200 total.
+		lines = append(lines, `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"linux"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"model":"claude-sonnet-4-5","gen_ai":{"usage":{"input_tokens":`+itoa(k*100)+`}},"message":"claude_code.token.usage","raw":{"metric_name":"claude_code.token.usage","metric_temporality":"Cumulative"}}`)
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tokens", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var report tokens.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal tokens report: %v", err)
+	}
+	if report.Totals.InputTokens != 1200 {
+		t.Fatalf("cumulative input tokens = %d, want 1200", report.Totals.InputTokens)
+	}
+}
+
+// TestTokensEndpointSessionFilterIsExact guards against substring session
+// matching: filtering session-1 must not fold in session-10's usage.
+func TestTokensEndpointSessionFilterIsExact(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	mk := func(session string, input int64) string {
+		return `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"linux"},"harness":{"name":"claude_code"},"session":{"id":"` + session + `"},"model":"claude-sonnet-4-5","gen_ai":{"usage":{"input_tokens":` + itoa(input) + `}},"message":"claude_code.token.usage","raw":{"metric_name":"claude_code.token.usage","metric_temporality":"Delta"}}`
+	}
+	lines := []string{mk("session-1", 100), mk("session-10", 999)}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tokens?session=session-1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var report tokens.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal tokens report: %v", err)
+	}
+	if report.Totals.InputTokens != 100 {
+		t.Fatalf("session-1 totals = %d, want 100 (session-10 must not fold in)", report.Totals.InputTokens)
+	}
+	if report.SessionDetail == nil || report.SessionDetail.Usage.InputTokens != 100 {
+		t.Fatalf("session detail = %#v, want exact session-1 usage", report.SessionDetail)
+	}
+}
+
 func TestStaticDashboardPagesServe(t *testing.T) {
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {

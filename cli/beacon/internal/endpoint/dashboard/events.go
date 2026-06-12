@@ -83,6 +83,27 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	return result, nil
 }
 
+// SortRecordsAppendOrder orders records oldest-first in log append order: by
+// timestamp, then older archives before the live log, then by numeric line.
+// Token aggregation needs this because runtime timestamps are second-resolution
+// (a batch of cumulative datapoints shares a timestamp) and the cumulative
+// dedup relies on append order; the newest-first ReadEvents sort breaks ties on
+// lexicographic line IDs, which mis-orders line-9 vs line-10 within a second.
+func SortRecordsAppendOrder(records []EventRecord) {
+	sort.SliceStable(records, func(i, j int) bool {
+		if !records[i].Parsed.Equal(records[j].Parsed) {
+			return records[i].Parsed.Before(records[j].Parsed)
+		}
+		ai, li, _ := parseRecordID(records[i].ID)
+		aj, lj, _ := parseRecordID(records[j].ID)
+		if ai != aj {
+			// Higher archive index is an older rotation, so it comes first.
+			return ai > aj
+		}
+		return li < lj
+	})
+}
+
 func readEventsFromSource(source eventSource, query EventQuery, result *EventResult, limit int) error {
 	file, err := os.Open(source.path)
 	if err != nil {

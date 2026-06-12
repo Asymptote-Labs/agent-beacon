@@ -117,6 +117,19 @@ func TestAggregateAttributesCIRuns(t *testing.T) {
 	}
 }
 
+func TestAggregateRunKeyWithoutProvider(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(7)
+			e.Run = &schema.RunInfo{RunID: "run-abc"} // provider empty
+		}),
+	}
+	report := Aggregate(events, Options{})
+	if len(report.ByRun) != 1 || report.ByRun[0].Key != "run-abc" {
+		t.Fatalf("by_run = %#v, want bare run id without leading slash", report.ByRun)
+	}
+}
+
 func TestAggregateBuildsSessionStepTree(t *testing.T) {
 	spanEvent := func(ts, span, parent string, input int64) schema.Event {
 		return usageEventFixture(ts, "asymptote_observe", "s1", "gpt-4o-mini", func(e *schema.Event) {

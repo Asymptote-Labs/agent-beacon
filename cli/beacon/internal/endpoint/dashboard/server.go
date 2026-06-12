@@ -103,12 +103,19 @@ func Handler(opts Options) (http.Handler, error) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		// ReadEvents returns events newest-first; feed Aggregate oldest-first so
-		// cumulative metric series resolve in chronological (append) order even
-		// when a batch of datapoints shares the same second-resolution timestamp.
+		// Feed Aggregate in chronological (append) order so cumulative metric
+		// series resolve correctly when a batch of datapoints shares the same
+		// second-resolution timestamp.
+		SortRecordsAppendOrder(result.Events)
+		session := strings.TrimSpace(query.Session)
 		events := make([]schema.Event, 0, len(result.Events))
-		for i := len(result.Events) - 1; i >= 0; i-- {
-			events = append(events, result.Events[i].Event)
+		for _, record := range result.Events {
+			// Exact session match keeps totals/grouping consistent with the
+			// per-step drilldown, which matches the session id exactly.
+			if session != "" && (record.Event.Session == nil || record.Event.Session.ID != session) {
+				continue
+			}
+			events = append(events, record.Event)
 		}
 		writeJSON(w, tokens.Aggregate(events, tokenOptions(r)))
 	})

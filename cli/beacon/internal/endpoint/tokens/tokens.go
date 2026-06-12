@@ -209,8 +209,15 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 		if event.Session != nil {
 			ue.session = event.Session.ID
 		}
-		if event.Run != nil && (event.Run.Provider != "" || event.Run.RunID != "") {
-			ue.run = strings.TrimSuffix(event.Run.Provider+"/"+event.Run.RunID, "/")
+		if event.Run != nil {
+			switch {
+			case event.Run.Provider != "" && event.Run.RunID != "":
+				ue.run = event.Run.Provider + "/" + event.Run.RunID
+			case event.Run.Provider != "":
+				ue.run = event.Run.Provider
+			default:
+				ue.run = event.Run.RunID
+			}
 		}
 		if event.Trace != nil {
 			ue.traceID = event.Trace.ID

@@ -67,13 +67,20 @@ func runEndpointTokens(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// ReadEvents returns events newest-first; feed Aggregate oldest-first so
-	// cumulative metric series resolve in chronological (append) order even
-	// when a batch of datapoints shares the same second-resolution timestamp.
+	// Feed Aggregate in chronological (append) order so cumulative metric
+	// series resolve correctly when a batch of datapoints shares the same
+	// second-resolution timestamp.
+	dashboard.SortRecordsAppendOrder(result.Events)
+	session := strings.TrimSpace(endpointTokensOpts.session)
+	runID := strings.TrimSpace(endpointTokensOpts.runID)
 	events := make([]schema.Event, 0, len(result.Events))
-	for i := len(result.Events) - 1; i >= 0; i-- {
-		record := result.Events[i]
-		if runID := strings.TrimSpace(endpointTokensOpts.runID); runID != "" {
+	for _, record := range result.Events {
+		// Exact session match keeps totals/grouping consistent with the
+		// per-step drilldown, which matches the session id exactly.
+		if session != "" && (record.Event.Session == nil || record.Event.Session.ID != session) {
+			continue
+		}
+		if runID != "" {
 			if record.Event.Run == nil || record.Event.Run.RunID != runID {
 				continue
 			}
