@@ -73,6 +73,65 @@ func TestAggregateSumsDeltaUsageAcrossGroups(t *testing.T) {
 	}
 }
 
+func TestAggregateDedupesDualChannelUsage(t *testing.T) {
+	// Claude Code reports each request's usage on both a claude_code.api_request
+	// log record (no metric_name) and the claude_code.token.usage metric, under
+	// the base and 1M-context model names respectively. Counting both doubles
+	// every token field; cost rides only on claude_code.cost.usage.
+	metric := func(name string, mutate func(*schema.Event)) schema.Event {
+		return usageEventFixture("2026-06-11T10:00:05Z", "claude_code", "s1", "claude-opus-4-6[1m]", func(e *schema.Event) {
+			mutate(e)
+			e.Raw = map[string]interface{}{"metric_name": name, "metric_temporality": "Delta"}
+		})
+	}
+	events := []schema.Event{
+		// Log/span channel: full per-request usage, base model name, no cost.
+		usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", "claude-opus-4-6", func(e *schema.Event) {
+			e.Event.Action = "tool.invoked"
+			e.Message = "claude_code.api_request"
+			e.GenAI.Usage.InputTokens = int64Ptr(11)
+			e.GenAI.Usage.OutputTokens = int64Ptr(826)
+			e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(119393)}
+			e.GenAI.Usage.CacheCreation = &schema.GenAIUsageCacheCreationInfo{InputTokens: int64Ptr(15751)}
+		}),
+		// Metric channel: same tokens, field-split (must be suppressed) plus cost (must survive).
+		metric("claude_code.token.usage", func(e *schema.Event) { e.GenAI.Usage.InputTokens = int64Ptr(11) }),
+		metric("claude_code.token.usage", func(e *schema.Event) { e.GenAI.Usage.OutputTokens = int64Ptr(826) }),
+		metric("claude_code.token.usage", func(e *schema.Event) {
+			e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(119393)}
+		}),
+		metric("claude_code.token.usage", func(e *schema.Event) {
+			e.GenAI.Usage.CacheCreation = &schema.GenAIUsageCacheCreationInfo{InputTokens: int64Ptr(15751)}
+		}),
+		metric("claude_code.cost.usage", func(e *schema.Event) { e.GenAI.Usage.CostUSD = float64Ptr(0.1788) }),
+		// Metrics-only scope (no log/span channel): must be left untouched.
+		usageEventFixture("2026-06-11T10:01:00Z", "codex", "s2", "gpt-5", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(500)
+			e.Raw = map[string]interface{}{"metric_name": "gen_ai.client.token.usage", "metric_temporality": "Delta"}
+		}),
+	}
+
+	report := Aggregate(events, Options{})
+	if got := report.Totals; got.InputTokens != 511 || got.OutputTokens != 826 ||
+		got.CacheReadInputTokens != 119393 || got.CacheCreationInputTokens != 15751 || got.CostUSD != 0.1788 {
+		t.Fatalf("totals double-counted or dropped: %#v", got)
+	}
+	// Base model name carries the deduped tokens; the [1m] metric name carries cost only.
+	byModel := map[string]Usage{}
+	for _, g := range report.ByModel {
+		byModel[g.Key] = g.Usage
+	}
+	if base := byModel["claude-opus-4-6"]; base.InputTokens != 11 || base.OutputTokens != 826 || base.CacheReadInputTokens != 119393 {
+		t.Fatalf("base model tokens = %#v", base)
+	}
+	if oneM := byModel["claude-opus-4-6[1m]"]; oneM.TotalTokens() != 0 || oneM.CostUSD != 0.1788 {
+		t.Fatalf("[1m] model should carry cost only, got %#v", oneM)
+	}
+	if codex := byModel["gpt-5"]; codex.InputTokens != 500 {
+		t.Fatalf("metrics-only scope was dropped: %#v", codex)
+	}
+}
+
 func TestAggregateDedupesCumulativeSeries(t *testing.T) {
 	cumulative := func(ts string, value int64) schema.Event {
 		return usageEventFixture(ts, "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {

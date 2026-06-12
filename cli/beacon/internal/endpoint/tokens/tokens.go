@@ -150,6 +150,7 @@ func Aggregate(events []schema.Event, opts Options) Report {
 	}
 	report := Report{TotalEvents: len(events)}
 	usageEvents := collectUsageEvents(events)
+	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
 
 	byModel := map[string]*Usage{}
@@ -243,6 +244,77 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 				ue.cumulative = true
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
+		}
+		out = append(out, ue)
+	}
+	return out
+}
+
+// dedupeOverlappingChannels removes double-counted usage when a runtime reports
+// the same tokens through two OTel channels. Claude Code emits each request's
+// usage on both a claude_code.api_request log record and the
+// claude_code.token.usage metric, so ingesting both doubles every token field.
+//
+// The log/span channel (events without a metric_name) is the token source of
+// truth: it carries full per-request usage under the base model name. For each
+// (harness, session) scope, any usage field that channel reports is zeroed on
+// the scope's metric-channel events. Fields the log channel never reports
+// (Claude Code reports cost only on claude_code.cost.usage) survive on the
+// metric channel, so cost still lands exactly once. Runtimes that emit only
+// metrics have no log/span channel in scope and are left untouched.
+func dedupeOverlappingChannels(events []*usageEvent) []*usageEvent {
+	type fieldSet struct {
+		input, output, cacheRead, cacheCreation, reasoning, cost bool
+	}
+	scopeKey := func(ue *usageEvent) string { return ue.harness + "\x00" + ue.session }
+	logFields := map[string]*fieldSet{}
+	for _, ue := range events {
+		if ue.metricName != "" {
+			continue
+		}
+		fs := logFields[scopeKey(ue)]
+		if fs == nil {
+			fs = &fieldSet{}
+			logFields[scopeKey(ue)] = fs
+		}
+		fs.input = fs.input || ue.usage.InputTokens != 0
+		fs.output = fs.output || ue.usage.OutputTokens != 0
+		fs.cacheRead = fs.cacheRead || ue.usage.CacheReadInputTokens != 0
+		fs.cacheCreation = fs.cacheCreation || ue.usage.CacheCreationInputTokens != 0
+		fs.reasoning = fs.reasoning || ue.usage.ReasoningOutputTokens != 0
+		fs.cost = fs.cost || ue.usage.CostUSD != 0
+	}
+	if len(logFields) == 0 {
+		return events
+	}
+	out := events[:0]
+	for _, ue := range events {
+		if ue.metricName != "" {
+			if fs := logFields[scopeKey(ue)]; fs != nil {
+				if fs.input {
+					ue.usage.InputTokens = 0
+				}
+				if fs.output {
+					ue.usage.OutputTokens = 0
+				}
+				if fs.cacheRead {
+					ue.usage.CacheReadInputTokens = 0
+				}
+				if fs.cacheCreation {
+					ue.usage.CacheCreationInputTokens = 0
+				}
+				if fs.reasoning {
+					ue.usage.ReasoningOutputTokens = 0
+				}
+				if fs.cost {
+					ue.usage.CostUSD = 0
+				}
+				// Drop a metric event left with no usage so it neither inflates
+				// event counts nor seeds an empty cumulative series.
+				if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 {
+					continue
+				}
+			}
 		}
 		out = append(out, ue)
 	}
