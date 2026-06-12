@@ -210,14 +210,7 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 			ue.session = event.Session.ID
 		}
 		if event.Run != nil {
-			switch {
-			case event.Run.Provider != "" && event.Run.RunID != "":
-				ue.run = event.Run.Provider + "/" + event.Run.RunID
-			case event.Run.Provider != "":
-				ue.run = event.Run.Provider
-			default:
-				ue.run = event.Run.RunID
-			}
+			ue.run = RunKey(event.Run.Provider, event.Run.RunID)
 		}
 		if event.Trace != nil {
 			ue.traceID = event.Trace.ID
@@ -327,6 +320,21 @@ func setUsageField(u *Usage, field string, value float64) {
 		u.CacheCreationInputTokens = int64(value)
 	case "reasoning_output_tokens":
 		u.ReasoningOutputTokens = int64(value)
+	}
+}
+
+// RunKey builds the CI run grouping key from a run's provider and id, joined as
+// "provider/run_id". It falls back to whichever part is set so an empty
+// provider never yields a leading slash. The same key labels the BY RUN rollup
+// and is accepted by the --run-id filter.
+func RunKey(provider, runID string) string {
+	switch {
+	case provider != "" && runID != "":
+		return provider + "/" + runID
+	case provider != "":
+		return provider
+	default:
+		return runID
 	}
 }
 

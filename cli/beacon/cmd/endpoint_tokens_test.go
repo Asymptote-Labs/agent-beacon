@@ -104,6 +104,25 @@ func TestEndpointTokensJSONReport(t *testing.T) {
 	}
 }
 
+func TestEndpointTokensRunIDFilterAcceptsBareAndCompositeKeys(t *testing.T) {
+	logPath := writeTokensFixtureLog(t)
+	// The BY RUN rollup labels this run "github_actions/777"; both that
+	// composite key and the bare run id must select the run's usage.
+	for _, runID := range []string{"777", "github_actions/777"} {
+		output := runTokensCommand(t, "--log-path", logPath, "--json", "--run-id", runID)
+		var report tokens.Report
+		if err := json.Unmarshal([]byte(output), &report); err != nil {
+			t.Fatalf("unmarshal JSON report for %q: %v\n%s", runID, err, output)
+		}
+		if len(report.ByRun) != 1 || report.ByRun[0].Key != "github_actions/777" {
+			t.Fatalf("--run-id %q by_run = %#v, want the github_actions/777 run", runID, report.ByRun)
+		}
+		if report.Totals.CostUSD != 0.5 {
+			t.Fatalf("--run-id %q totals = %#v, want the run's cost", runID, report.Totals)
+		}
+	}
+}
+
 func TestEndpointTokensEmptyLogSucceeds(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	output := runTokensCommand(t, "--log-path", logPath)

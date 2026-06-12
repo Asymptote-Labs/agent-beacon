@@ -81,7 +81,10 @@ func runEndpointTokens(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		if runID != "" {
-			if record.Event.Run == nil || record.Event.Run.RunID != runID {
+			// Accept either the bare run id or the composite provider/run_id
+			// key shown in the BY RUN rollup.
+			run := record.Event.Run
+			if run == nil || (run.RunID != runID && tokens.RunKey(run.Provider, run.RunID) != runID) {
 				continue
 			}
 		}
