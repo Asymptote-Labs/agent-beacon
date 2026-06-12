@@ -40,7 +40,7 @@ Beacon started with local endpoint telemetry for security and IT teams that need
 Beacon is built to be easy to deploy for Security and IT teams through
 [MDM deployment](#mdm-deployment), CI workflows, and cloud-agent setup paths, and to
 emit agent harness telemetry logs to
-all the [major enterprise-grade SIEMs](#siem--output-destinations).
+all the [major enterprise-grade SIEMs](https://github.com/Asymptote-Labs/agent-beacon#output-destinations).
 
 Learn more in the [Agent Beacon Documentation](https://docs.asymptotelabs.ai).
 
@@ -59,7 +59,7 @@ paths under customer control.
 - **Beacon endpoint layer:** Local processing normalizes events, applies
   retention and redaction settings, and writes durable endpoint telemetry.
 - **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
-  or forward records into all the [major enterprise-grade SIEMs](#siem--output-destinations).
+  or forward records into all the [major enterprise-grade SIEMs](https://github.com/Asymptote-Labs/agent-beacon#output-destinations).
 
 ## Supported Surfaces
 
