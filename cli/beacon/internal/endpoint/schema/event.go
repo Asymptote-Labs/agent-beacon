@@ -48,6 +48,7 @@ type EndpointInfo = asymptoteobserve.EndpointInfo
 type UserInfo = asymptoteobserve.UserInfo
 type HarnessInfo = asymptoteobserve.HarnessInfo
 type SessionInfo = asymptoteobserve.SessionInfo
+type TraceInfo = asymptoteobserve.TraceInfo
 type RunInfo = asymptoteobserve.RunInfo
 type ToolInfo = asymptoteobserve.ToolInfo
 type FileInfo = asymptoteobserve.FileInfo

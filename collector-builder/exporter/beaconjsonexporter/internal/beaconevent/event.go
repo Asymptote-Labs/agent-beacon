@@ -17,6 +17,7 @@ type EndpointInfo = asymptoteobserve.EndpointInfo
 type UserInfo = asymptoteobserve.UserInfo
 type HarnessInfo = asymptoteobserve.HarnessInfo
 type SessionInfo = asymptoteobserve.SessionInfo
+type TraceInfo = asymptoteobserve.TraceInfo
 type RunInfo = asymptoteobserve.RunInfo
 type ToolInfo = asymptoteobserve.ToolInfo
 type FileInfo = asymptoteobserve.FileInfo
@@ -68,6 +69,7 @@ type Event struct {
 	Origin        asymptoteobserve.Origin           `json:"origin,omitempty"`
 	Run           *RunInfo                          `json:"run,omitempty"`
 	Session       *SessionInfo                      `json:"session,omitempty"`
+	Trace         *TraceInfo                        `json:"trace,omitempty"`
 	Tool          *ToolInfo                         `json:"tool,omitempty"`
 	File          *FileInfo                         `json:"file,omitempty"`
 	Command       *CommandInfo                      `json:"command,omitempty"`

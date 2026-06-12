@@ -77,6 +77,12 @@ type SessionInfo struct {
 	WorkingDirectory string `json:"working_directory,omitempty"`
 }
 
+type TraceInfo struct {
+	ID           string `json:"id,omitempty"`
+	SpanID       string `json:"span_id,omitempty"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
+}
+
 type RunInfo struct {
 	Provider   string `json:"provider,omitempty"`
 	RunID      string `json:"run_id,omitempty"`
@@ -269,22 +275,27 @@ type GenAIToolInfo struct {
 }
 
 type GenAIUsageCacheCreationInfo struct {
-	InputTokens *int `json:"input_tokens,omitempty"`
+	InputTokens *int64 `json:"input_tokens,omitempty"`
 }
 
 type GenAIUsageCacheReadInfo struct {
-	InputTokens *int `json:"input_tokens,omitempty"`
+	InputTokens *int64 `json:"input_tokens,omitempty"`
 }
 
 type GenAIUsageReasoningInfo struct {
-	OutputTokens *int `json:"output_tokens,omitempty"`
+	OutputTokens *int64 `json:"output_tokens,omitempty"`
 }
 
+// GenAIUsageInfo mirrors the OpenTelemetry GenAI semconv usage attribute
+// names. Token counts are int64 to match OTLP integer values. CostUSD has no
+// semconv equivalent; it carries runtime-reported USD cost only (for example
+// Claude Code's cost metric) and is never derived from local pricing tables.
 type GenAIUsageInfo struct {
 	CacheCreation *GenAIUsageCacheCreationInfo `json:"cache_creation,omitempty"`
 	CacheRead     *GenAIUsageCacheReadInfo     `json:"cache_read,omitempty"`
-	InputTokens   *int                         `json:"input_tokens,omitempty"`
-	OutputTokens  *int                         `json:"output_tokens,omitempty"`
+	CostUSD       *float64                     `json:"cost_usd,omitempty"`
+	InputTokens   *int64                       `json:"input_tokens,omitempty"`
+	OutputTokens  *int64                       `json:"output_tokens,omitempty"`
 	Reasoning     *GenAIUsageReasoningInfo     `json:"reasoning,omitempty"`
 }
 
@@ -338,6 +349,7 @@ type Event struct {
 	Origin        Origin                 `json:"origin,omitempty"`
 	Run           *RunInfo               `json:"run,omitempty"`
 	Session       *SessionInfo           `json:"session,omitempty"`
+	Trace         *TraceInfo             `json:"trace,omitempty"`
 	Tool          *ToolInfo              `json:"tool,omitempty"`
 	File          *FileInfo              `json:"file,omitempty"`
 	Command       *CommandInfo           `json:"command,omitempty"`

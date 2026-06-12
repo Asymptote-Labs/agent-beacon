@@ -43,7 +43,7 @@ func TestNewEventSetsRequiredInvariants(t *testing.T) {
 	event.GenAI = &GenAIInfo{
 		Provider: &GenAIProviderInfo{Name: "openai"},
 		Request:  &GenAIRequestInfo{Model: "gpt-4o"},
-		Usage:    &GenAIUsageInfo{InputTokens: intPtr(10), OutputTokens: intPtr(20)},
+		Usage:    &GenAIUsageInfo{InputTokens: int64Ptr(10), OutputTokens: int64Ptr(20)},
 	}
 	if err := event.Validate(); err != nil {
 		t.Fatalf("Validate rejected optional telemetry fields: %v", err)
@@ -97,8 +97,63 @@ func TestValidateOriginValues(t *testing.T) {
 	}
 }
 
-func intPtr(value int) *int {
+func int64Ptr(value int64) *int64 {
 	return &value
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
+}
+
+func TestTraceAndUsageCostSerializeWithSemconvNames(t *testing.T) {
+	event := NewEvent(NewEventOptions{Action: "token.usage", Harness: HarnessInfo{Name: "claude_code"}})
+	event.Trace = &TraceInfo{ID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef", ParentSpanID: "fedcba9876543210"}
+	event.GenAI = &GenAIInfo{
+		Usage: &GenAIUsageInfo{
+			InputTokens:   int64Ptr(120),
+			OutputTokens:  int64Ptr(45),
+			CacheCreation: &GenAIUsageCacheCreationInfo{InputTokens: int64Ptr(30)},
+			CacheRead:     &GenAIUsageCacheReadInfo{InputTokens: int64Ptr(90)},
+			Reasoning:     &GenAIUsageReasoningInfo{OutputTokens: int64Ptr(15)},
+			CostUSD:       float64Ptr(0.0123),
+		},
+	}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("Validate rejected trace and usage fields: %v", err)
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`"trace":{"id":"0123456789abcdef0123456789abcdef","span_id":"0123456789abcdef","parent_span_id":"fedcba9876543210"}`,
+		`"input_tokens":120`,
+		`"output_tokens":45`,
+		`"cache_creation":{"input_tokens":30}`,
+		`"cache_read":{"input_tokens":90}`,
+		`"reasoning":{"output_tokens":15}`,
+		`"cost_usd":0.0123`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("JSON missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestTraceAndUsageCostOmittedWhenUnset(t *testing.T) {
+	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})
+	event.GenAI = &GenAIInfo{Usage: &GenAIUsageInfo{InputTokens: int64Ptr(1)}}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	text := string(data)
+	for _, field := range []string{`"trace"`, `"cost_usd"`} {
+		if strings.Contains(text, field) {
+			t.Fatalf("unset additive field %s leaked into JSON: %s", field, text)
+		}
+	}
 }
 
 func TestRunAndOriginAreOmittedWhenUnset(t *testing.T) {

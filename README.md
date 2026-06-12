@@ -182,7 +182,15 @@ through standard MDM workflows.
 Beacon includes a local, read-only dashboard for validating endpoint activity
 without a hosted backend. The overview screen summarizes recent runtime events
 and collection status, while log search helps teams inspect normalized event
-records during rollout, testing, and investigations.
+records during rollout, testing, and investigations. The token usage screen
+breaks captured token telemetry down by model, session (with per-step
+drilldown), CI run, and harness, including context-window utilization and
+runtime-reported cost.
+
+For scripted or CI reporting, `beacon endpoint tokens` prints the same token
+usage rollups as text or JSON from any runtime JSONL log, for example
+`beacon endpoint tokens --log-path "$BEACON_CI_LOG_PATH" --json` after a CI
+session.
 
 Beacon writes endpoint activity to a stable local `runtime.jsonl` file. The
 active file rotates at 10 MiB with five numbered local archives, keeping the

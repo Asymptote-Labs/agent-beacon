@@ -18,6 +18,7 @@ import {
   isInitialized,
   observe,
   resolveExporterConfig,
+  sessionAttributes,
   shutdown,
   wrapClaudeAgentQuery,
 } from "./index.js";
@@ -102,6 +103,27 @@ describe("resolveExporterConfig", () => {
 
     expect(config.mode).toBe("custom");
     expect(config.observeUrl).toBeUndefined();
+  });
+});
+
+describe("sessionAttributes", () => {
+  it("builds beacon and gen_ai session identity attributes", () => {
+    expect(sessionAttributes("session-42")).toEqual({
+      "beacon.session.id": "session-42",
+      "gen_ai.conversation.id": "session-42",
+    });
+  });
+
+  it("includes the working directory when provided", () => {
+    expect(sessionAttributes("session-42", "/srv/agent")).toEqual({
+      "beacon.session.id": "session-42",
+      "gen_ai.conversation.id": "session-42",
+      "beacon.session.working_directory": "/srv/agent",
+    });
+  });
+
+  it("is exposed on the Observe facade", () => {
+    expect(Observe.sessionAttributes("session-42")).toEqual(sessionAttributes("session-42"));
   });
 });
 

@@ -20,6 +20,24 @@ Required behavior:
 - Redact common secrets and cap event size before writing.
 - Emit health failure events when write failures occur.
 
+Token and cost usage metrics:
+
+- Metrics named `gen_ai.client.token.usage` or ending in `.token.usage` or
+  `.cost.usage` (for example `claude_code.token.usage` and
+  `claude_code.cost.usage`) expand to one event per datapoint so the value,
+  token type, model, and session attributes survive into JSONL.
+- Token datapoints normalize into the canonical `gen_ai.usage` struct using
+  the `type`/`gen_ai.token.type` attribute (`input`, `output`, `cacheRead`,
+  `cacheCreation`, `reasoning`); cost datapoints map to
+  `gen_ai.usage.cost_usd`. Unknown token types keep the raw value in
+  `raw.metric_value` only.
+- Datapoint events use the datapoint timestamp and record
+  `raw.metric_temporality`, `raw.metric_monotonic`, `raw.metric_value`, and
+  (for histograms) `raw.metric_count` so downstream aggregation can dedupe
+  cumulative series.
+- All other metrics, and usage metrics without datapoints, keep the single
+  `metric.observed` event.
+
 Noise controls:
 
 - Generic process/runtime metrics are dropped by default unless

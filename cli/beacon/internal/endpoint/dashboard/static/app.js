@@ -12,6 +12,7 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const isOverviewPage = document.body.dataset.page === "overview";
+const isTokensPage = document.body.dataset.page === "tokens";
 const formFields = [
   "q",
   "harness",
@@ -714,7 +715,157 @@ function clearSearch() {
   clearFields();
 }
 
-$("#refresh")?.addEventListener("click", () => load().catch(console.error));
+async function loadTokens() {
+  const params = new URLSearchParams(window.location.search);
+  const tokenParams = new URLSearchParams({ bucket: "1h" });
+  const session = (params.get("session") || "").trim();
+  if (session) tokenParams.set("session", session);
+  try {
+    const [status, report] = await Promise.all([
+      getJSON("/api/status"),
+      getJSON(`/api/tokens?${tokenParams.toString()}`),
+    ]);
+    state.status = status;
+    state.error = null;
+    renderTokensPage(report, session);
+  } catch (err) {
+    state.error = err;
+    setText("#token-meta", `Failed to load token usage: ${err.message}`);
+  }
+}
+
+function renderTokensPage(report, session) {
+  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
+  setText("#token-meta", `${report.events_with_usage} of ${report.total_events} events carry usage`);
+  renderTokenCards(report.totals || {});
+  renderUtilizationRows(report.utilization || []);
+  renderUsageGroupRows("#token-models", report.by_model || [], "model");
+  renderUsageGroupRows("#token-sessions", report.by_session || [], "session");
+  renderUsageGroupRows("#token-runs", report.by_run || []);
+  renderUsageGroupRows("#token-harnesses", report.by_harness || []);
+  renderSessionDetail(report.session_detail, session);
+}
+
+function renderTokenCards(totals) {
+  if (!$("#token-cards")) return;
+  const cards = [
+    { label: "Input Tokens", value: formatTokens(totals.input_tokens) },
+    { label: "Output Tokens", value: formatTokens(totals.output_tokens) },
+    { label: "Cache Read", value: formatTokens(totals.cache_read_input_tokens) },
+    { label: "Cache Creation", value: formatTokens(totals.cache_creation_input_tokens) },
+    { label: "Reasoning", value: formatTokens(totals.reasoning_output_tokens) },
+    { label: "Cost (USD)", value: totals.cost_usd ? totals.cost_usd.toFixed(4) : "-", hint: "runtime-reported only" },
+  ];
+  $("#token-cards").innerHTML = cards
+    .map((card) => `
+      <div class="card">
+        <span class="muted">${escapeHTML(card.label)}</span>
+        <span class="value">${escapeHTML(card.value)}</span>
+        ${card.hint ? `<span class="muted">${escapeHTML(card.hint)}</span>` : ""}
+      </div>
+    `)
+    .join("");
+}
+
+function renderUtilizationRows(utilization) {
+  const tbody = $("#token-utilization");
+  if (!tbody) return;
+  if (!utilization.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No usage with input tokens captured yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = utilization
+    .map((item) => `
+      <tr>
+        <td class="mono">${escapeHTML(item.model)}</td>
+        <td>${item.context_window ? formatTokens(item.context_window) : `<span class="muted">unknown</span>`}</td>
+        <td>${escapeHTML(item.calls)}</td>
+        <td>${formatTokens(item.max_input_tokens)}</td>
+        <td>${formatRatio(item.max_ratio, item.context_window)}</td>
+        <td>${formatRatio(item.p95_ratio, item.context_window)}</td>
+        <td>${item.near_limit_calls ? badge(`${item.near_limit_calls} near limit`, "badge-warn") : ""}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function renderUsageGroupRows(selector, groups, filterKey) {
+  const tbody = $(selector);
+  if (!tbody) return;
+  if (!groups.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">No usage captured yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = groups
+    .map((group) => `
+      <tr ${filterKey === "session" ? `class="row-link" data-token-session="${escapeHTML(group.key)}"` : ""}>
+        <td class="mono">${escapeHTML(group.key)}</td>
+        ${usageCells(group.usage)}
+      </tr>
+    `)
+    .join("");
+  $$(`${selector} [data-token-session]`).forEach((row) => {
+    row.addEventListener("click", () => {
+      const params = new URLSearchParams(window.location.search);
+      params.set("session", row.dataset.tokenSession);
+      window.location.search = params.toString();
+    });
+  });
+}
+
+function renderSessionDetail(detail, session) {
+  const panel = $("#token-session-panel");
+  if (!panel) return;
+  if (!detail || !session) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  setText("#token-session-title", `Session ${detail.session_id}`);
+  const rows = [];
+  const walk = (steps, depth) => {
+    for (const step of steps || []) {
+      const label = step.name || step.action || step.span_id || "step";
+      rows.push(`
+        <tr>
+          <td><span class="mono">${"&nbsp;".repeat(depth * 4)}${escapeHTML(label)}</span></td>
+          <td class="mono">${escapeHTML(step.model || "")}</td>
+          ${usageCells(step.usage, { events: false })}
+        </tr>
+      `);
+      walk(step.children, depth + 1);
+    }
+  };
+  walk(detail.steps, 0);
+  $("#token-session-detail").innerHTML = rows.length
+    ? rows.join("")
+    : `<tr><td colspan="8" class="muted">No usage-bearing steps in this session.</td></tr>`;
+}
+
+function usageCells(usage = {}, { events = true } = {}) {
+  const cells = [
+    formatTokens(usage.input_tokens),
+    formatTokens(usage.output_tokens),
+    formatTokens(usage.cache_read_input_tokens),
+    formatTokens(usage.cache_creation_input_tokens),
+    formatTokens(usage.reasoning_output_tokens),
+    usage.cost_usd ? usage.cost_usd.toFixed(4) : "-",
+  ];
+  if (events) cells.push(String(usage.events ?? 0));
+  return cells.map((value) => `<td>${escapeHTML(value)}</td>`).join("");
+}
+
+function formatTokens(value) {
+  if (!value) return "0";
+  return Number(value).toLocaleString();
+}
+
+function formatRatio(ratio, contextWindow) {
+  if (!contextWindow) return "-";
+  return `${(ratio * 100).toFixed(1)}%`;
+}
+
+$("#refresh")?.addEventListener("click", () => (isTokensPage ? loadTokens() : load()).catch(console.error));
 $("#filters")?.addEventListener("submit", (event) => {
   event.preventDefault();
   load({ updateLocation: true }).catch(console.error);
@@ -726,9 +877,14 @@ $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
 
-hydrateFiltersFromURL();
-load().catch(console.error);
-setInterval(() => load({ mode: "poll" }).catch(console.error), 10000);
+if (isTokensPage) {
+  loadTokens().catch(console.error);
+  setInterval(() => loadTokens().catch(console.error), 15000);
+} else {
+  hydrateFiltersFromURL();
+  load().catch(console.error);
+  setInterval(() => load({ mode: "poll" }).catch(console.error), 10000);
+}
 
 function setText(selector, value) {
   const element = $(selector);

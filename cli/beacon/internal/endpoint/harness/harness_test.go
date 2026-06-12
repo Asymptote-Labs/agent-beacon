@@ -66,9 +66,10 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 		"CLAUDE_CODE_ENABLE_TELEMETRY": "1",
 		"OTEL_LOGS_EXPORTER":           "otlp",
 		"OTEL_METRICS_EXPORTER":        "otlp",
-		"OTEL_EXPORTER_OTLP_PROTOCOL":  "grpc",
-		"OTEL_EXPORTER_OTLP_ENDPOINT":  "http://127.0.0.1:4317",
-		"OTEL_LOG_USER_PROMPTS":        "1",
+		"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "delta",
+		"OTEL_EXPORTER_OTLP_PROTOCOL":                       "grpc",
+		"OTEL_EXPORTER_OTLP_ENDPOINT":                       "http://127.0.0.1:4317",
+		"OTEL_LOG_USER_PROMPTS":                             "1",
 	} {
 		if got := env[key]; got != want {
 			t.Fatalf("env[%s] = %q, want %q; env=%#v", key, got, want, env)

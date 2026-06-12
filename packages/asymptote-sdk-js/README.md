@@ -132,6 +132,31 @@ const plan = Observe.observe(
 Call `Observe.flush()` before short-lived scripts exit, or
 `Observe.shutdown()` when the process owns the provider lifecycle.
 
+## Token Usage Attribution
+
+The OpenLLMetry instrumentations record `gen_ai.usage.*` token counts on every
+supported model call, and the Beacon collector normalizes them into endpoint
+JSONL for the token usage dashboard and `beacon endpoint tokens` reports. Two
+notes:
+
+- Streaming responses report usage only after the stream is fully consumed;
+  abandoning a stream early can drop the final usage record for that call.
+- `traceContent` only controls prompt/completion text capture. Numeric token
+  usage is always recorded.
+
+To attribute usage to one agent session across spans, attach
+`Observe.sessionAttributes(sessionId)` to your spans or resource attributes:
+
+```typescript
+const handle = Observe.observe(
+  {
+    name: "agent.handle_request",
+    attributes: Observe.sessionAttributes(conversationId),
+  },
+  async (input: string) => runAgent(input),
+);
+```
+
 ## Beta Support Matrix
 
 - OpenAI SDK: OpenLLMetry instrumentation enabled by default.

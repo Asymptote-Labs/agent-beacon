@@ -616,3 +616,11 @@ pre {
     padding: 1rem;
   }
 }
+
+.row-link {
+  cursor: pointer;
+}
+
+.row-link:hover {
+  background: rgba(125, 211, 252, 0.08);
+}

@@ -306,6 +306,9 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
 	env["OTEL_LOGS_EXPORTER"] = "otlp"
 	env["OTEL_METRICS_EXPORTER"] = "otlp"
+	// Delta temporality keeps token usage counters per-interval so downstream
+	// aggregation can sum datapoints without deduping cumulative series.
+	env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "delta"
 	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
 	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = opts.Endpoint
 	env["OTEL_LOG_USER_PROMPTS"] = "1"

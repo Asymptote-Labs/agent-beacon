@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beacon Endpoint Token Usage</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="tokens">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-only</p>
+        <h1>Beacon Endpoint Token Usage</h1>
+      </div>
+      <nav class="nav-toggle" aria-label="Dashboard navigation">
+        <a href="/">Log Search</a>
+        <a href="/overview.html">Security Overview</a>
+        <a class="active" href="/tokens.html" aria-current="page">Token Usage</a>
+      </nav>
+      <button id="refresh">Refresh</button>
+    </header>
+
+    <main>
+      <section class="panel status-panel">
+        <div>
+          <h2>Endpoint</h2>
+          <p id="log-path" class="muted">Loading runtime log...</p>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head overview-head">
+          <div>
+            <h2>Token Totals</h2>
+            <p class="muted">Prompt, completion, cache, reasoning, and runtime-reported cost across all captured telemetry.</p>
+          </div>
+          <div id="token-meta" class="muted"></div>
+        </div>
+        <div class="cards" id="token-cards"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Context Window Utilization</h2>
+        <p class="muted">Input plus cache tokens per call against each model's context window. Unknown models show raw input tokens.</p>
+        <table>
+          <thead>
+            <tr><th>Model</th><th>Window</th><th>Calls</th><th>Max Input</th><th>Max</th><th>P95</th><th>Near Limit</th></tr>
+          </thead>
+          <tbody id="token-utilization"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>By Model</h2>
+        <table>
+          <thead>
+            <tr><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+          </thead>
+          <tbody id="token-models"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>By Session</h2>
+        <p class="muted">Select a session to inspect per-step usage.</p>
+        <table>
+          <thead>
+            <tr><th>Session</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+          </thead>
+          <tbody id="token-sessions"></tbody>
+        </table>
+      </section>
+
+      <section class="panel" id="token-session-panel" hidden>
+        <h2 id="token-session-title">Session Detail</h2>
+        <table>
+          <thead>
+            <tr><th>Step</th><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th></tr>
+          </thead>
+          <tbody id="token-session-detail"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>By CI Run</h2>
+        <table>
+          <thead>
+            <tr><th>Run</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+          </thead>
+          <tbody id="token-runs"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>By Harness</h2>
+        <table>
+          <thead>
+            <tr><th>Harness</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+          </thead>
+          <tbody id="token-harnesses"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

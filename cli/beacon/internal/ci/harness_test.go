@@ -12,6 +12,7 @@ func TestClaudeEnvIncludesPromptLogging(t *testing.T) {
 	for _, want := range []string{
 		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
 		"OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317",
+		"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta",
 		"OTEL_LOG_USER_PROMPTS=1",
 	} {
 		if !strings.Contains(env, want) {

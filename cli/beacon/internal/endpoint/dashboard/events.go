@@ -42,6 +42,7 @@ type EventQuery struct {
 	Category   string
 	Repository string
 	Session    string
+	Trace      string
 	File       string
 	Command    string
 	MCP        string
@@ -80,6 +81,27 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	result.Returned = len(result.Events)
 	result.Truncated = result.TotalMatched > len(result.Events)
 	return result, nil
+}
+
+// SortRecordsAppendOrder orders records oldest-first in log append order: by
+// timestamp, then older archives before the live log, then by numeric line.
+// Token aggregation needs this because runtime timestamps are second-resolution
+// (a batch of cumulative datapoints shares a timestamp) and the cumulative
+// dedup relies on append order; the newest-first ReadEvents sort breaks ties on
+// lexicographic line IDs, which mis-orders line-9 vs line-10 within a second.
+func SortRecordsAppendOrder(records []EventRecord) {
+	sort.SliceStable(records, func(i, j int) bool {
+		if !records[i].Parsed.Equal(records[j].Parsed) {
+			return records[i].Parsed.Before(records[j].Parsed)
+		}
+		ai, li, _ := parseRecordID(records[i].ID)
+		aj, lj, _ := parseRecordID(records[j].ID)
+		if ai != aj {
+			// Higher archive index is an older rotation, so it comes first.
+			return ai > aj
+		}
+		return li < lj
+	})
 }
 
 func readEventsFromSource(source eventSource, query EventQuery, result *EventResult, limit int) error {
@@ -317,6 +339,11 @@ func matchesQuery(record EventRecord, query EventQuery) bool {
 			return false
 		}
 	}
+	if query.Trace != "" {
+		if event.Trace == nil || (!containsFold(event.Trace.ID, query.Trace) && !containsFold(event.Trace.SpanID, query.Trace) && !containsFold(event.Trace.ParentSpanID, query.Trace)) {
+			return false
+		}
+	}
 	if query.File != "" {
 		if event.File == nil || !containsFold(event.File.Path, query.File) {
 			return false
@@ -440,6 +467,9 @@ func searchFields(record EventRecord) []string {
 	if event.Session != nil {
 		fields = append(fields, event.Session.ID, event.Session.WorkingDirectory)
 	}
+	if event.Trace != nil {
+		fields = append(fields, event.Trace.ID, event.Trace.SpanID, event.Trace.ParentSpanID)
+	}
 	if event.Tool != nil {
 		fields = append(fields, event.Tool.Name, event.Tool.Command, event.Tool.Path)
 	}
@@ -503,6 +533,7 @@ func activeFilters(query EventQuery) map[string]string {
 	add("category", query.Category)
 	add("repository", query.Repository)
 	add("session", query.Session)
+	add("trace", query.Trace)
 	add("file", query.File)
 	add("command", query.Command)
 	add("mcp", query.MCP)
