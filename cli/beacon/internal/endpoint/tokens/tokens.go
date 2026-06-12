@@ -5,6 +5,7 @@
 package tokens
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -129,6 +130,7 @@ type usageEvent struct {
 	usage        Usage
 	cumulative   bool
 	metricName   string
+	attrsKey     string
 	seriesField  string
 	seriesValue  float64
 }
@@ -151,6 +153,10 @@ func Aggregate(events []schema.Event, opts Options) Report {
 	report := Report{TotalEvents: len(events)}
 	usageEvents := collectUsageEvents(events)
 	resolveCumulativeSeries(usageEvents)
+	// Cumulative resolution can zero out a datapoint that merely repeated the
+	// previous reading (no new tokens in that interval). Drop those so event
+	// counts reflect events that actually carry usage.
+	usageEvents = dropZeroUsage(usageEvents)
 
 	byModel := map[string]*Usage{}
 	bySession := map[string]*Usage{}
@@ -185,6 +191,21 @@ func Aggregate(events []schema.Event, opts Options) Report {
 		report.SessionDetail = buildSessionDetail(usageEvents, session)
 	}
 	return report
+}
+
+// dropZeroUsage removes usage events whose token and cost contributions are all
+// zero, mirroring the pre-resolution filter in collectUsageEvents. This keeps
+// plateau datapoints (a cumulative reading that did not change) from inflating
+// events_with_usage and per-group event counts.
+func dropZeroUsage(events []*usageEvent) []*usageEvent {
+	out := events[:0]
+	for _, ue := range events {
+		if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 {
+			continue
+		}
+		out = append(out, ue)
+	}
+	return out
 }
 
 func collectUsageEvents(events []schema.Event) []*usageEvent {
@@ -243,15 +264,35 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 				ue.cumulative = true
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
+			// Fingerprint the datapoint's full attribute set so cumulative
+			// series with the same harness/model/metric but different
+			// attributes (including a missing session.id) are not chained
+			// together when diffed into deltas.
+			if attrs, ok := event.Raw["attributes"].(map[string]interface{}); ok {
+				ue.attrsKey = attributesFingerprint(attrs)
+			}
 		}
 		out = append(out, ue)
 	}
 	return out
 }
 
+// attributesFingerprint returns a stable identity for a datapoint's attribute
+// set. encoding/json sorts map keys, so the marshaled form is deterministic and
+// two datapoints from the same counter series (identical attributes, differing
+// only in value, which is not part of the attributes) share a fingerprint.
+func attributesFingerprint(attrs map[string]interface{}) string {
+	data, err := json.Marshal(attrs)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // resolveCumulativeSeries rewrites cumulative metric contributions into
 // per-interval deltas. Each cumulative series is identified by harness,
-// session, model, metric name, and the single usage field the datapoint set.
+// session, model, metric name, the full datapoint attribute set, and the single
+// usage field the datapoint set.
 func resolveCumulativeSeries(events []*usageEvent) {
 	series := map[string][]*usageEvent{}
 	for _, ue := range events {
@@ -264,7 +305,7 @@ func resolveCumulativeSeries(events []*usageEvent) {
 		}
 		ue.seriesField = field
 		ue.seriesValue = value
-		key := strings.Join([]string{ue.harness, ue.session, ue.model, ue.metricName, field}, "\x00")
+		key := strings.Join([]string{ue.harness, ue.session, ue.model, ue.metricName, ue.attrsKey, field}, "\x00")
 		series[key] = append(series[key], ue)
 	}
 	for _, points := range series {

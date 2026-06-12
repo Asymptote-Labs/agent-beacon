@@ -117,6 +117,59 @@ func TestAggregateAttributesCIRuns(t *testing.T) {
 	}
 }
 
+func cumulativeEvent(ts, session string, value int64, attrs map[string]interface{}) schema.Event {
+	return schema.Event{
+		Timestamp: ts,
+		Event:     schema.EventInfo{Kind: "agent_runtime", Action: "token.usage", Category: "metric"},
+		Harness:   schema.HarnessInfo{Name: "claude_code"},
+		Model:     "claude-sonnet-4-5",
+		Session:   &schema.SessionInfo{ID: session},
+		GenAI:     &schema.GenAIInfo{Usage: &schema.GenAIUsageInfo{InputTokens: int64Ptr(value)}},
+		Raw: map[string]interface{}{
+			"metric_name":        "claude_code.token.usage",
+			"metric_temporality": "Cumulative",
+			"attributes":         attrs,
+		},
+	}
+}
+
+func TestAggregateCumulativeSeriesSplitByAttributesWithoutSession(t *testing.T) {
+	// Two cumulative input series with no session.id, distinguished only by a
+	// datapoint attribute (query_source). They must not be chained into one
+	// series. Interleaved order makes a merged diff visibly wrong.
+	main := map[string]interface{}{"type": "input", "query_source": "main"}
+	sub := map[string]interface{}{"type": "input", "query_source": "subagent"}
+	events := []schema.Event{
+		cumulativeEvent("2026-06-11T10:00:00Z", "", 100, main), // main delta 100
+		cumulativeEvent("2026-06-11T10:00:01Z", "", 50, sub),   // sub delta 50
+		cumulativeEvent("2026-06-11T10:00:02Z", "", 300, main), // main delta 200
+		cumulativeEvent("2026-06-11T10:00:03Z", "", 120, sub),  // sub delta 70
+	}
+	report := Aggregate(events, Options{})
+	if report.Totals.InputTokens != 420 {
+		t.Fatalf("input tokens = %d, want 420 (merged series would over-count)", report.Totals.InputTokens)
+	}
+}
+
+func TestAggregatePlateauCumulativeEventsDoNotInflateCounts(t *testing.T) {
+	attrs := map[string]interface{}{"type": "input"}
+	events := []schema.Event{
+		cumulativeEvent("2026-06-11T10:00:00Z", "s1", 100, attrs), // delta 100
+		cumulativeEvent("2026-06-11T10:00:01Z", "s1", 100, attrs), // delta 0 (plateau)
+		cumulativeEvent("2026-06-11T10:00:02Z", "s1", 200, attrs), // delta 100
+	}
+	report := Aggregate(events, Options{})
+	if report.Totals.InputTokens != 200 {
+		t.Fatalf("input tokens = %d, want 200", report.Totals.InputTokens)
+	}
+	if report.EventsWithUsage != 2 {
+		t.Fatalf("events_with_usage = %d, want 2 (plateau event must not count)", report.EventsWithUsage)
+	}
+	if report.Totals.Events != 2 {
+		t.Fatalf("totals.events = %d, want 2", report.Totals.Events)
+	}
+}
+
 func TestAggregateRunKeyWithoutProvider(t *testing.T) {
 	events := []schema.Event{
 		usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {
