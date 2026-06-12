@@ -39,11 +39,12 @@ func Upload(ctx context.Context, opts Options) Result {
 		_ = opts.Store.Save(state)
 		return Result{State: state}
 	}
+	state.LastError = ""
 
 	uploaded := false
 	for _, batch := range batches {
-		state.RejectedCount += batch.Rejected
 		if len(batch.Events) == 0 {
+			state.RejectedCount += batch.Rejected
 			state.FileOffsets[batch.Cursor.LogPath] = batch.Cursor.Offset
 			continue
 		}
@@ -59,7 +60,7 @@ func Upload(ctx context.Context, opts Options) Result {
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
 		state.AcceptedCount += response.Accepted
-		state.RejectedCount += response.Rejected
+		state.RejectedCount += batch.Rejected + response.Rejected
 		state.LastUploadAt = now
 		state.LastEventAt = now
 		state.LastCursor = batch.Cursor

@@ -57,9 +57,19 @@ func (c Client) UploadBatch(ctx context.Context, token string, reqBody uploadReq
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return uploadResponse{}, fmt.Errorf("ingest upload failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
+	if strings.TrimSpace(string(respBody)) == "" {
+		return uploadResponse{}, fmt.Errorf("ingest upload response was empty")
+	}
 	var parsed uploadResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil && len(respBody) > 0 {
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return uploadResponse{}, fmt.Errorf("ingest upload response was invalid: %w", err)
+	}
+	if parsed.Accepted < 0 || parsed.Rejected < 0 {
+		return uploadResponse{}, fmt.Errorf("ingest upload response had negative event counts")
+	}
+	accounted := parsed.Accepted + parsed.Rejected
+	if accounted != len(reqBody.Events) {
+		return uploadResponse{}, fmt.Errorf("ingest upload response accounted for %d events, want %d", accounted, len(reqBody.Events))
 	}
 	return parsed, nil
 }
