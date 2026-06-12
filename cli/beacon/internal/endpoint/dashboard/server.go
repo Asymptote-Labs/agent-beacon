@@ -103,9 +103,12 @@ func Handler(opts Options) (http.Handler, error) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		// ReadEvents returns events newest-first; feed Aggregate oldest-first so
+		// cumulative metric series resolve in chronological (append) order even
+		// when a batch of datapoints shares the same second-resolution timestamp.
 		events := make([]schema.Event, 0, len(result.Events))
-		for _, record := range result.Events {
-			events = append(events, record.Event)
+		for i := len(result.Events) - 1; i >= 0; i-- {
+			events = append(events, result.Events[i].Event)
 		}
 		writeJSON(w, tokens.Aggregate(events, tokenOptions(r)))
 	})

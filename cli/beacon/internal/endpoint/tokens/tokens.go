@@ -138,6 +138,12 @@ type usageEvent struct {
 // harness, session, model, metric name, and usage field; counter resets fall
 // back to the raw value) so totals never double-count. Delta metrics and
 // span-level usage sum directly.
+//
+// Events should be supplied in chronological (log append) order. Runtime
+// timestamps are second-resolution, so a batch of cumulative datapoints from
+// one export commonly shares a timestamp; cumulative deduping then relies on
+// slice order to recover the emission sequence. Passing events newest-first
+// makes each cumulative step-down look like a counter reset and inflates totals.
 func Aggregate(events []schema.Event, opts Options) Report {
 	if opts.NearLimitRatio <= 0 {
 		opts.NearLimitRatio = defaultNearLimitRatio

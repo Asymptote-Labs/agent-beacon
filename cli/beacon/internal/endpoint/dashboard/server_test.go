@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -100,6 +101,49 @@ func TestTokensEndpointAggregatesUsage(t *testing.T) {
 		t.Fatalf("session step = %#v", report.SessionDetail.Steps[0])
 	}
 }
+
+// TestTokensEndpointDedupesCumulativeSameSecondDatapoints reproduces a real
+// Claude Code export: a batch of cumulative token.usage datapoints written to
+// the log within the same second. ReadEvents returns events newest-first, so
+// the token endpoint must still feed Aggregate in chronological order or the
+// cumulative dedup misreads each step-down as a counter reset and sums the raw
+// cumulative values instead of the per-interval deltas.
+func TestTokensEndpointDedupesCumulativeSameSecondDatapoints(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	mk := func(ts string, cumulative int64) string {
+		return `{"timestamp":"` + ts + `","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"linux"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"model":"claude-sonnet-4-5","gen_ai":{"usage":{"input_tokens":` +
+			itoa(cumulative) + `}},"message":"claude_code.token.usage","raw":{"metric_name":"claude_code.token.usage","metric_temporality":"Cumulative"}}`
+	}
+	// Append order is chronological; all three share the same second.
+	lines := []string{
+		mk("2026-06-11T10:00:00Z", 1200),
+		mk("2026-06-11T10:00:00Z", 2700),
+		mk("2026-06-11T10:00:00Z", 4500),
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tokens", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var report tokens.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal tokens report: %v", err)
+	}
+	// Deltas 1200, 1500, 1800 -> 4500. Raw (broken) sum would be 8400.
+	if report.Totals.InputTokens != 4500 {
+		t.Fatalf("cumulative input tokens = %d, want 4500 (raw over-count is 8400)", report.Totals.InputTokens)
+	}
+}
+
+func itoa(v int64) string { return strconv.FormatInt(v, 10) }
 
 func TestStaticDashboardPagesServe(t *testing.T) {
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
