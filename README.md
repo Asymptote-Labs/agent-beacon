@@ -40,7 +40,7 @@ Beacon started with local endpoint telemetry for security and IT teams that need
 Beacon is built to be easy to deploy for Security and IT teams through
 [MDM deployment](#mdm-deployment), CI workflows, and cloud-agent setup paths, and to
 emit agent harness telemetry logs to
-[all the major enterprise-grade SIEMs](#siem--output-destinations).
+all the [major enterprise-grade SIEMs](#siem--output-destinations).
 
 Learn more in the [Agent Beacon Documentation](https://docs.asymptotelabs.ai).
 
@@ -59,7 +59,7 @@ paths under customer control.
 - **Beacon endpoint layer:** Local processing normalizes events, applies
   retention and redaction settings, and writes durable endpoint telemetry.
 - **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
-  or forward records into all the major enterprise-grade SIEMs.
+  or forward records into all the [major enterprise-grade SIEMs](#siem--output-destinations).
 
 ## Supported Surfaces
 
@@ -109,24 +109,12 @@ CI, and cloud surfaces.
 
 | Cloud surface | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
-| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
 | [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
+| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
 | [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
 | [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
-
-Cursor Cloud Agents load project hooks from `.cursor/hooks.json` at task start.
-For reliable Cursor Cloud telemetry, commit the generated project hooks to the
-target repository and use the cloud setup script only to install Beacon binaries
-under `/tmp/beacon/bin`. Generate the project hook file locally with:
-
-```bash
-mkdir -p .cursor
-beacon cloud cursor print-hooks \
-  --binary-path /tmp/beacon/bin/beacon-hooks \
-  --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json
-```
 
 ### Output Destinations
 
