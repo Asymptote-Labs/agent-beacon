@@ -93,6 +93,9 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 	if err != nil {
 		return FindingsResponse{}, fmt.Errorf("load rules: %w", err)
 	}
+	if len(loaded) == 0 {
+		return FindingsResponse{}, fmt.Errorf("no rules to run (store is empty and baseline missing)")
+	}
 	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
 	for _, lr := range loaded {
 		c, err := threatrules.Compile(lr.Rule)

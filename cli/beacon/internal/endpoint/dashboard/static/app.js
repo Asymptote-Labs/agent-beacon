@@ -7,6 +7,7 @@ const state = {
   error: null,
   currentQuery: "",
   newEventCount: 0,
+  lastDetectionHashScroll: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -900,6 +901,22 @@ function renderDetections(resp) {
       </tr>
     `)
     .join("");
+  scrollDetectionHashIntoView();
+}
+
+function scrollDetectionHashIntoView({ force = false } = {}) {
+  if (!isDetectionsPage || !window.location.hash) return;
+  let targetID = window.location.hash.slice(1);
+  try {
+    targetID = decodeURIComponent(targetID);
+  } catch (_) {
+    // Use the raw hash when the browser exposes a malformed escape sequence.
+  }
+  if (!targetID || (!force && state.lastDetectionHashScroll === targetID)) return;
+  const target = document.getElementById(targetID);
+  if (!target) return;
+  target.scrollIntoView({ block: "start" });
+  state.lastDetectionHashScroll = targetID;
 }
 
 async function loadFindings() {
@@ -978,6 +995,7 @@ $("#filters")?.addEventListener("submit", (event) => {
 $("#clear-search")?.addEventListener("click", clearSearch);
 $("#close-drawer")?.addEventListener("click", closeDrawer);
 $("#new-events")?.addEventListener("click", showNewEvents);
+window.addEventListener("hashchange", () => scrollDetectionHashIntoView({ force: true }));
 $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });

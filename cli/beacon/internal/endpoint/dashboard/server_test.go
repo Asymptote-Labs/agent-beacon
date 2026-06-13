@@ -319,6 +319,17 @@ func TestFindingsEndpointReturnsHitsLinkedToRules(t *testing.T) {
 	}
 }
 
+func TestRunScanRejectsEmptyRuleSet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, err := RunScan(true, filepath.Join(t.TempDir(), "runtime.jsonl"), t.TempDir(), "", "")
+	if err == nil {
+		t.Fatal("expected empty rule set to be rejected")
+	}
+	if !strings.Contains(err.Error(), "no rules to run") {
+		t.Fatalf("error = %q, want no rules to run", err)
+	}
+}
+
 func TestStaticDashboardPagesServe(t *testing.T) {
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {
