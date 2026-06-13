@@ -1,0 +1,74 @@
+id: shell-escape-via-interactive-tool
+version: 1
+title: Shell escape via an interactive tool (GTFObins-style)
+description: >
+  A command uses a known shell-escape idiom — spawning a shell through awk
+  BEGIN{system()}, perl exec/system of a shell, python pty.spawn, an editor
+  (vim -c :!/:shell), find -exec sh, a tar checkpoint action, or ssh ProxyCommand. In
+  a sandboxed or restricted-shell context these break out to arbitrary command
+  execution. Inspired by the ATR privilege-escalation "shell escape" category
+  (GTFObins); OWASP LLM06.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0050
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)\\bawk\\b.*BEGIN\\s*\\{\\s*system\\s*\\(") ||
+    e.command.command.matches("(?i)\\bperl\\b\\s+-e\\b.*\\b(system|exec)\\b.*(/bin/)?(ba|z)?sh") ||
+    e.command.command.matches("(?i)\\bpython[0-9.]*\\b.*\\bpty\\.spawn\\s*\\(") ||
+    e.command.command.matches("(?i)\\b(vim|vi|view|nvim)\\b\\s+-c\\s+[\"']?:\\s*(!|shell|py\\b)") ||
+    e.command.command.matches("(?i)\\bfind\\b.*-exec\\s+(/bin/|/usr/bin/)?(ba|z)?sh\\b") ||
+    e.command.command.matches("(?i)\\btar\\b.*--checkpoint-action=exec") ||
+    e.command.command.matches("(?i)\\bssh\\b.*-o\\s+ProxyCommand=")
+  )
+
+emit:
+  reason: "Shell escape via an interactive tool (GTFObins-style)"
+
+tests:
+  - name: awk_system
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "awk 'BEGIN{system(\"/bin/sh\")}'" }
+        session: { id: s1 }
+  - name: python_pty_spawn
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c 'import pty; pty.spawn(\"/bin/bash\")'" }
+        session: { id: s1 }
+  - name: find_exec_sh
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "find . -name x -exec /bin/sh \\; " }
+        session: { id: s1 }
+  - name: ssh_proxycommand
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -o ProxyCommand=';sh 0<&2 1>&2' host" }
+        session: { id: s1 }
+  - name: ordinary_python
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c 'import json; print(json.dumps({}))'" }
+        session: { id: s1 }
+  - name: ordinary_find
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "find . -name '*.go' -exec gofmt -w {} ;" }
+        session: { id: s1 }
+  - name: ordinary_awk
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "awk '{print $1}' access.log" }
+        session: { id: s1 }
