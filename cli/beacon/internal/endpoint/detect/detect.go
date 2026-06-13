@@ -210,14 +210,65 @@ func InstallFiles(userMode bool, src string, force bool) ([]Installed, error) {
 		todo = append(todo, pending{id: rule.ID, dest: filepath.Join(store, rule.ID+ruleFileSuffix), data: data})
 	}
 
+	tmpDir, err := os.MkdirTemp(store, ".install-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	for _, p := range todo {
+		tmpPath := filepath.Join(tmpDir, p.id+ruleFileSuffix)
+		if err := os.WriteFile(tmpPath, p.data, 0o644); err != nil {
+			return nil, err
+		}
+	}
+
 	installed := make([]Installed, 0, len(todo))
 	for _, p := range todo {
-		if err := os.WriteFile(p.dest, p.data, 0o644); err != nil {
+		tmpPath := filepath.Join(tmpDir, p.id+ruleFileSuffix)
+		backupPath, err := moveExistingRuleAside(p.dest, tmpDir, p.id)
+		if err != nil {
+			rollbackInstall(installed, tmpDir)
+			return nil, err
+		}
+		if err := os.Rename(tmpPath, p.dest); err != nil {
+			if backupPath != "" {
+				_ = os.Rename(backupPath, p.dest)
+			}
+			rollbackInstall(installed, tmpDir)
 			return nil, err
 		}
 		installed = append(installed, Installed{ID: p.id, Path: p.dest})
 	}
 	return installed, nil
+}
+
+func moveExistingRuleAside(dest, tmpDir, id string) (string, error) {
+	info, err := os.Lstat(dest)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s exists and is a directory", dest)
+	}
+	backupPath := filepath.Join(tmpDir, id+".backup")
+	if err := os.Rename(dest, backupPath); err != nil {
+		return "", err
+	}
+	return backupPath, nil
+}
+
+func rollbackInstall(installed []Installed, tmpDir string) {
+	for i := len(installed) - 1; i >= 0; i-- {
+		backupPath := filepath.Join(tmpDir, installed[i].ID+".backup")
+		_ = os.Remove(installed[i].Path)
+		if _, err := os.Stat(backupPath); err == nil {
+			_ = os.Rename(backupPath, installed[i].Path)
+		}
+	}
 }
 
 // Remove deletes a rule by id from the store. Returns the removed path. The id

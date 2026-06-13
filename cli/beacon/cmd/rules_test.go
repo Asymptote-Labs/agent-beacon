@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,32 +105,83 @@ func makeTarGz(t *testing.T, entries map[string]string) []byte {
 	return buf.Bytes()
 }
 
-func TestExtractRuleTarballNeutralizesTraversal(t *testing.T) {
+func TestExtractRuleTarballRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
-	// One legit entry, one path-traversal entry, and a nested-dir entry.
 	data := makeTarGz(t, map[string]string{
 		"ok.rule.yaml":                   "id: ok",
 		"../../../../tmp/evil.rule.yaml": "id: evil",
-		"pack/sub/nested.rule.yaml":      "id: nested",
-		"notes.txt":                      "ignored",
+	})
+	err := extractRuleTarball(bytes.NewReader(data), dir)
+	if err == nil || !strings.Contains(err.Error(), "path traversal") {
+		t.Fatalf("expected path-traversal rejection, got: %v", err)
+	}
+	// The traversal target must NOT exist outside the dest dir.
+	escaped := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(dir)))), "tmp", "evil.rule.yaml")
+	if _, statErr := os.Stat(escaped); statErr == nil {
+		t.Fatalf("traversal entry escaped the destination: %s", escaped)
+	}
+}
+
+func TestExtractRuleTarballExtractsCleanEntries(t *testing.T) {
+	dir := t.TempDir()
+	// A top-level rule, a nested-dir rule, and a non-rule file.
+	data := makeTarGz(t, map[string]string{
+		"ok.rule.yaml":              "id: ok",
+		"pack/sub/nested.rule.yaml": "id: nested",
+		"notes.txt":                 "ignored",
 	})
 	if err := extractRuleTarball(bytes.NewReader(data), dir); err != nil {
 		t.Fatalf("extract: %v", err)
 	}
-	// All .rule.yaml entries land flattened inside dir; nothing escapes.
-	for _, name := range []string{"ok.rule.yaml", "evil.rule.yaml", "nested.rule.yaml"} {
+	// Rule entries are flattened into dir; archive directory structure is dropped.
+	for _, name := range []string{"ok.rule.yaml", "nested.rule.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("expected %s inside dest dir: %v", name, err)
 		}
 	}
-	// The traversal target must NOT exist outside the dest dir.
-	escaped := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(dir)))), "tmp", "evil.rule.yaml")
-	if _, err := os.Stat(escaped); err == nil {
-		t.Fatalf("traversal entry escaped the destination: %s", escaped)
-	}
 	// Non-rule files are ignored.
 	if _, err := os.Stat(filepath.Join(dir, "notes.txt")); err == nil {
 		t.Errorf("notes.txt should not be extracted")
+	}
+}
+
+func TestRulesPullAcceptsURLWithQuery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prev := rulesOpts
+	rulesOpts.userMode, rulesOpts.systemMode, rulesOpts.force = true, false, false
+	t.Cleanup(func() { rulesOpts = prev })
+
+	pack := makeTarGz(t, map[string]string{"cli-test-rule.rule.yaml": validRuleYAML})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(pack)
+	}))
+	t.Cleanup(srv.Close)
+
+	// The path is a valid pack; the query string must not defeat suffix detection.
+	cmd, buf := newCmd()
+	if err := runRulesPull(cmd, []string{srv.URL + "/pack.tar.gz?version=1&token=abc"}); err != nil {
+		t.Fatalf("pull with query string failed: %v\n%s", err, buf.String())
+	}
+	if !strings.Contains(buf.String(), "cli-test-rule") {
+		t.Fatalf("expected the pack rule to be installed, got: %s", buf.String())
+	}
+}
+
+func TestRulesPullRejectsUnsupportedPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prev := rulesOpts
+	rulesOpts.userMode, rulesOpts.systemMode = true, false
+	t.Cleanup(func() { rulesOpts = prev })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("nope"))
+	}))
+	t.Cleanup(srv.Close)
+
+	cmd, _ := newCmd()
+	// A non-pack path must still be rejected even with a pack-like query string.
+	if err := runRulesPull(cmd, []string{srv.URL + "/index.html?file=pack.tar.gz"}); err == nil {
+		t.Fatal("expected unsupported-url rejection for a non-pack path")
 	}
 }
 

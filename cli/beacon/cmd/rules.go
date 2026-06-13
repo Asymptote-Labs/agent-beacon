@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -117,6 +119,13 @@ func runRulesPull(cmd *cobra.Command, args []string) error {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return fmt.Errorf("url must start with http:// or https://")
 	}
+	// Detect the pack format from the URL path only; query/fragment must not
+	// influence the suffix match or the downloaded filename.
+	parsed, err := neturl.Parse(url)
+	if err != nil {
+		return fmt.Errorf("parse url: %w", err)
+	}
+	urlPath := parsed.Path
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Fetching %s (network)…\n", url)
 
@@ -138,13 +147,13 @@ func runRulesPull(cmd *cobra.Command, args []string) error {
 
 	var src string
 	switch {
-	case strings.HasSuffix(url, ".tar.gz"), strings.HasSuffix(url, ".tgz"):
+	case strings.HasSuffix(urlPath, ".tar.gz"), strings.HasSuffix(urlPath, ".tgz"):
 		if err := extractRuleTarball(resp.Body, tmp); err != nil {
 			return err
 		}
 		src = tmp
-	case strings.HasSuffix(url, ".rule.yaml"):
-		dest := filepath.Join(tmp, filepath.Base(url))
+	case strings.HasSuffix(urlPath, ".rule.yaml"):
+		dest := filepath.Join(tmp, path.Base(urlPath))
 		if err := writeReaderToFile(resp.Body, dest); err != nil {
 			return err
 		}
@@ -186,10 +195,15 @@ func extractRuleTarball(r io.Reader, dir string) error {
 		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".rule.yaml") {
 			continue
 		}
-		// Flatten archive directory structure to a base name, then confirm the joined
-		// destination stays within cleanDir before any file operation. The same `dest`
-		// value is both validated and written, guarding against archive path traversal
+		// Reject any entry whose name contains a path-traversal element before it is
+		// used in a filesystem path — the primary guard against archive path traversal
 		// ("Zip Slip").
+		if strings.Contains(hdr.Name, "..") {
+			return fmt.Errorf("archive entry %q contains a path traversal element", hdr.Name)
+		}
+		// Flatten archive directory structure to a base name, then confirm the joined
+		// destination stays within cleanDir before any file operation (defense in depth;
+		// the same `dest` value is both validated and written).
 		dest := filepath.Join(cleanDir, filepath.Base(filepath.ToSlash(hdr.Name)))
 		if dest != cleanDir && !strings.HasPrefix(dest, cleanDir+string(os.PathSeparator)) {
 			return fmt.Errorf("archive entry %q resolves outside the destination directory", hdr.Name)
