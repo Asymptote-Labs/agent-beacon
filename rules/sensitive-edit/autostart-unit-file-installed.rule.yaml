@@ -1,0 +1,71 @@
+id: autostart-unit-file-installed
+version: 1
+title: Autostart unit / service / login-item file installed
+description: >
+  The agent wrote an autostart definition that re-executes outside any sandbox at
+  login, boot, or on a schedule: a systemd user/system unit
+  (~/.config/systemd/user/*.service or *.timer, /etc/systemd/system/*.service),
+  a launchd property list under a LaunchAgents/LaunchDaemons directory
+  (*.plist), an XDG autostart entry (~/.config/autostart/*.desktop), or an
+  environment.d generator (~/.config/environment.d/*.conf). Planting one of these
+  is durable host persistence triggered with no further prompt. Derived from
+  blastradius host.autostart_sinks (the file-write counterpart of the
+  systemctl/launchctl command rule).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM05
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)(\\.config/systemd/(user|system)|etc/systemd/(system|user))/[^/]+\\.(service|timer|socket|path)$|(?i)(^|/)(library/)?launch(agents|daemons)/[^/]+\\.plist$|(?i)(^|/)\\.config/autostart/[^/]+\\.desktop$|(?i)(^|/)\\.config/environment\\.d/[^/]+\\.conf$")
+
+emit:
+  reason: "Autostart unit/service/login-item file installed (systemd unit, launchd plist, XDG autostart, or environment.d) — re-executes at login/boot/schedule outside the sandbox"
+
+tests:
+  - name: systemd_user_service
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.config/systemd/user/evil.service" }
+        session: { id: s1 }
+  - name: systemd_user_timer
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".config/systemd/user/beacon.timer" }
+        session: { id: s1 }
+  - name: launchd_agent_plist
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/Users/dev/Library/LaunchAgents/com.evil.run.plist" }
+        session: { id: s1 }
+  - name: xdg_autostart_desktop
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.config/autostart/payload.desktop" }
+        session: { id: s1 }
+  - name: ordinary_service_file
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "deploy/k8s/web.service.yaml" }
+        session: { id: s1 }
+  - name: plist_read_only
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "/Users/dev/Library/LaunchAgents/com.app.plist" }
+        session: { id: s1 }
+  - name: ordinary_desktop_entry
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/usr/share/applications/firefox.desktop" }
+        session: { id: s1 }
+

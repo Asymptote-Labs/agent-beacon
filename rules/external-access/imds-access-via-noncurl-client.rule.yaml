@@ -1,0 +1,60 @@
+id: imds-access-via-noncurl-client
+version: 1
+title: Cloud metadata endpoint accessed via non-curl HTTP client
+description: >
+  A command reaches a cloud instance metadata endpoint (AWS IMDS
+  169.254.169.254, ECS task-role 169.254.170.2, GCP metadata.google.internal /
+  computeMetadata, Azure IMDS) using an HTTP client OTHER than curl/wget — an
+  interpreter one-liner (python/python3/ruby/perl/php/node), powershell
+  Invoke-WebRequest/Invoke-RestMethod, or a raw bash /dev/tcp socket. The
+  existing cloud-metadata rules only match curl/wget; attackers routinely pull
+  instance credentials with whatever runtime is already present, so this closes
+  the HTTP-client evasion gap while still requiring a metadata target.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)(169\\.254\\.169\\.254|169\\.254\\.170\\.2|metadata\\.google\\.internal|metadata\\.goog\\b|metadata\\.azure\\.com|/computeMetadata/)") &&
+  !e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
+  e.command.command.matches("(?i)(\\b(python3?|ruby|perl|php|node|deno|bun)\\b|invoke-webrequest|invoke-restmethod|\\biwr\\b|\\bcurl\\.exe\\b|/dev/tcp/|urllib|requests\\.get|net/http|httpx|Net::HTTP|file_get_contents)")
+
+emit:
+  reason: "Cloud metadata endpoint reached with a non-curl/wget HTTP client (interpreter, PowerShell, or /dev/tcp)"
+
+tests:
+  - name: python_requests_imds
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import requests; print(requests.get('http://169.254.169.254/latest/meta-data/iam/security-credentials/').text)\"" }
+        session: { id: s1 }
+  - name: powershell_gcp_metadata
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "powershell -c \"Invoke-RestMethod -Headers @{'Metadata-Flavor'='Google'} http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token\"" }
+        session: { id: s1 }
+  - name: devtcp_imds
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "exec 3<>/dev/tcp/169.254.169.254/80; printf 'GET /latest/meta-data/ HTTP/1.0\\r\\n\\r\\n' >&3; cat <&3" }
+        session: { id: s1 }
+  - name: curl_imds_owned_by_other_rule
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://169.254.169.254/latest/meta-data/" }
+        session: { id: s1 }
+  - name: python_to_public_api
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -c \"import requests; requests.get('https://api.example.com/v1/status')\"" }
+        session: { id: s1 }
+

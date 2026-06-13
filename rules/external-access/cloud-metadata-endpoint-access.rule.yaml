@@ -1,0 +1,56 @@
+id: cloud-metadata-endpoint-access
+version: 1
+title: Cloud instance metadata endpoint accessed via HTTP client
+description: >
+  A command uses curl/wget to reach a cloud instance metadata service — the IMDS
+  link-local address 169.254.169.254 or a provider metadata host
+  (metadata.google.internal, metadata.goog, *.metadata.azure / Azure IMDS). These
+  endpoints vend short-lived instance credentials and are the canonical SSRF /
+  cloud-credential-theft target.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
+  e.command.command.matches("(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|metadata\\.goog\\b|metadata\\.azure\\.com|/latest/meta-data|/computeMetadata/)")
+
+emit:
+  reason: "HTTP client request to a cloud instance metadata endpoint (IMDS)"
+
+tests:
+  - name: aws_imds_ipv4
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/" }
+        session: { id: s1 }
+  - name: gcp_metadata_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" }
+        session: { id: s1 }
+  - name: azure_imds
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "wget -q -O- 'http://metadata.azure.com/metadata/instance?api-version=2021-02-01'" }
+        session: { id: s1 }
+  - name: benign_public_api
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s https://api.example.com/v1/status" }
+        session: { id: s1 }
+  - name: unrelated_169_subnet
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://169.254.10.20/status" }
+        session: { id: s1 }
+

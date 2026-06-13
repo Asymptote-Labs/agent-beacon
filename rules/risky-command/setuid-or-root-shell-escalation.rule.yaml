@@ -1,0 +1,74 @@
+id: setuid-or-root-shell-escalation
+version: 1
+title: Setuid bit installed or interactive root shell requested
+description: >
+  A command either installs the setuid bit on a file (chmod u+s, chmod with a leading
+  4 octal mode such as 4755, or chmod g+s setgid) — creating a standing privileged
+  binary that runs as its owner — or escalates to an interactive root shell via
+  `su - root` / `su root` / `su -` or `pkexec` (polkit). Setuid root binaries and
+  pkexec are classic local-privilege-escalation primitives. The setuid mode is
+  anchored to the chmod command position, and su is required to target root so that
+  `su someuser` does not match. Ported from blastradius host.privilege_escalation
+  (pkexec presence) and the setuid/setgid escalation surface.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0050
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ug]\\+[rwx]*s|[42][0-7]{3})\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")
+  )
+
+emit:
+  reason: "Setuid bit installed or interactive root shell requested (local privilege escalation)"
+
+tests:
+  - name: chmod_u_plus_s
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod u+s /tmp/rootbash" }
+        session: { id: s1 }
+  - name: chmod_4755_octal
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 4755 /usr/local/bin/x" }
+        session: { id: s1 }
+  - name: su_dash_root
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su - root" }
+        session: { id: s1 }
+  - name: pkexec_escalation
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pkexec /bin/sh" }
+        session: { id: s1 }
+  - name: chmod_normal_mode
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 755 deploy.sh" }
+        session: { id: s1 }
+  - name: su_to_regular_user
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "su postgres -c 'psql'" }
+        session: { id: s1 }
+  - name: pkexec_in_log_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep pkexec /var/log/auth.log" }
+        session: { id: s1 }
+

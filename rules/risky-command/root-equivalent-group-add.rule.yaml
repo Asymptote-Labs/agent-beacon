@@ -1,0 +1,71 @@
+id: root-equivalent-group-add
+version: 1
+title: User added to a root-equivalent or admin group
+description: >
+  A command adds an account to a group that is root-equivalent or grants
+  administrative escalation — docker, lxd, libvirt, kvm, incus, podman (container/VM
+  escape to the host) or sudo, wheel, admin, adm, root (sudo becomes available). This
+  is done with usermod -aG, gpasswd -a, adduser <user> <group>, or by writing the
+  group into /etc/group. Membership in any of these is a standing path to root.
+  The group token is required so unrelated usermod calls (e.g. changing a shell) do
+  not match. Ported from blastradius host.privilege_escalation ROOT_EQUIVALENT_GROUPS
+  and ADMIN_GROUPS.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0050
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?(usermod\\s+(-[a-z]+\\s+)*-a?G\\b|gpasswd\\s+(-[a-z]+\\s+)*-a\\b|adduser\\b|addgroup\\b)") &&
+  e.command.command.matches("(?i)(^|[\\s,=])(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|,|$)")
+
+emit:
+  reason: "Account added to a root-equivalent or admin group (standing escalation to root)"
+
+tests:
+  - name: usermod_docker_group
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "usermod -aG docker agent" }
+        session: { id: s1 }
+  - name: sudo_usermod_sudo_group
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo usermod -a -G sudo ci" }
+        session: { id: s1 }
+  - name: gpasswd_add_wheel
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpasswd -a builder wheel" }
+        session: { id: s1 }
+  - name: adduser_to_lxd
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "adduser worker lxd" }
+        session: { id: s1 }
+  - name: usermod_nonprivileged_group
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "usermod -aG www-data deploy" }
+        session: { id: s1 }
+  - name: usermod_change_shell
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "usermod -s /bin/zsh alice" }
+        session: { id: s1 }
+  - name: docker_mentioned_in_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'remember to run docker compose up'" }
+        session: { id: s1 }
+

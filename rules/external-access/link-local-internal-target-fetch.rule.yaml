@@ -1,0 +1,56 @@
+id: link-local-internal-target-fetch
+version: 1
+title: HTTP client fetch of a link-local or internal-only address
+description: >
+  A command uses curl/wget to fetch an explicit link-local (169.254.0.0/16) or
+  loopback-adjacent internal target by IP, including the IMDS-equivalent IPv6
+  link-local address (fd00:ec2::254) and the AWS IMDS DNS alias. Agents reaching
+  link-local space are characteristic of SSRF probing and metadata / internal
+  service credential theft rather than normal task work.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\b(curl|wget)\\b") &&
+  e.command.command.matches("(?i)(https?://(\\[?(fd00:ec2::254|fe80::[0-9a-f:]+)\\]?|169\\.254\\.169\\.254|169\\.254\\.170\\.2)|instance-data(\\.[a-z0-9.-]+)?/latest)")
+
+emit:
+  reason: "HTTP client request to a link-local / internal-only metadata target"
+
+tests:
+  - name: ipv6_imds_linklocal
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://[fd00:ec2::254]/latest/meta-data/" }
+        session: { id: s1 }
+  - name: ecs_task_role_endpoint
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://169.254.170.2/v2/credentials/abc" }
+        session: { id: s1 }
+  - name: instance_data_alias
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "wget -qO- http://instance-data/latest/meta-data/iam/" }
+        session: { id: s1 }
+  - name: benign_localhost_dev
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://127.0.0.1:8080/health" }
+        session: { id: s1 }
+  - name: benign_public_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s https://registry.example.com/v2/" }
+        session: { id: s1 }
+

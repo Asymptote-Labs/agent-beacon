@@ -1,0 +1,64 @@
+id: browser-session-store-read
+version: 2
+title: Agent read a browser session/cookie store
+description: >
+  The agent read a browser cookie jar or saved-login store (cookies.sqlite /
+  logins.json by name, or the ambiguous basenames Cookies / "Login Data" only inside a
+  known browser profile directory — Chrome/Chromium/Brave/Edge/Firefox/Safari). These
+  carry live session material that can hijack a SaaS session past password + MFA. The
+  browser-dir requirement keeps a non-browser file named "cookies" from firing, and
+  matches the read step of the browser-session-read-then-egress correlation. Ported
+  from blastradius is_browser_session_path.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM02
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "file.read" && (
+    e.file.path.matches("(?i)(^|/)(cookies\\.sqlite|logins\\.json)$") ||
+    e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft-?edge|edge|firefox|mozilla|safari)/.*(cookies|login data)$")
+  )
+
+emit:
+  reason: "Agent read a browser session/cookie store (session-hijack material)"
+
+tests:
+  - name: read_firefox_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+  - name: read_chrome_login_data
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.config/google-chrome/Default/Login Data" }
+        session: { id: s1 }
+  - name: read_chrome_bare_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.config/google-chrome/Default/Cookies" }
+        session: { id: s1 }
+  - name: read_brave_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.config/BraveSoftware/Brave-Browser/Default/Cookies" }
+        session: { id: s1 }
+  - name: source_file_named_cookies
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "src/cookies.test.ts" }
+        session: { id: s1 }
+  - name: non_browser_cookies_file
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "recipes/cookies" }
+        session: { id: s1 }

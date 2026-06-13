@@ -1,0 +1,56 @@
+id: agent-instruction-surface-modified
+version: 1
+title: Agent instruction surface (CLAUDE.md / AGENTS.md / skills) modified
+description: >
+  The agent modified durable instruction surface that is loaded into every future
+  session: a CLAUDE.md or AGENTS.md guidance file, or an entry under .claude/skills,
+  .claude/commands, or .claude/agents. Writing these is durable prompt-injection
+  persistence — instructions planted here ride along on later runs with no further
+  prompt. Ported from blastradius claude_code.writable_control_surface
+  (instruction-kind targets).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM01
+  mitre_atlas: AML.T0051
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)(claude\\.md|agents\\.md)$|(?i)(^|/)\\.claude/(skills|commands|agents)/")
+
+emit:
+  reason: "Agent instruction surface modified (CLAUDE.md/AGENTS.md or .claude skills/commands/agents) — durable prompt-injection persistence"
+
+tests:
+  - name: claude_md_repo_root
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "CLAUDE.md" }
+        session: { id: s1 }
+  - name: agents_md_nested
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "packages/api/AGENTS.md" }
+        session: { id: s1 }
+  - name: skill_entry_planted
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.claude/skills/deploy/SKILL.md" }
+        session: { id: s1 }
+  - name: ordinary_markdown
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "docs/README.md" }
+        session: { id: s1 }
+  - name: claude_md_read_only
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "CLAUDE.md" }
+        session: { id: s1 }
+

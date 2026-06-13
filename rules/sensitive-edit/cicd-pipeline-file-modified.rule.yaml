@@ -1,0 +1,69 @@
+id: cicd-pipeline-file-modified
+version: 2
+title: CI/CD or deployment manifest modified
+description: >
+  The agent modified a CI/CD or deployment manifest (GitHub Actions workflow,
+  GitLab CI, CircleCI, k8s/kustomize manifest, fly.toml, vercel.json, render.yaml).
+  These run with deploy/push privileges, so an edit here can reach production or
+  inject a build-time step. The k8s/kubernetes/.circleci directory branch matches at
+  repo root or nested. Ported from blastradius is_deploy_path
+  (modified_production_deploy / production_deployment_path).
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+
+match: >
+  e.event.action == "file.modified" && (
+    e.file.path.matches("(?i)\\.github/workflows/.*\\.ya?ml$") ||
+    e.file.path.matches("(?i)(^|/)(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)$") ||
+    e.file.path.matches("(?i)(^|/)(k8s|kubernetes|\\.circleci)/")
+  )
+
+emit:
+  reason: "CI/CD or deployment manifest modified"
+
+tests:
+  - name: github_workflow_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".github/workflows/deploy.yml" }
+        session: { id: s1 }
+  - name: k8s_manifest_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "infra/k8s/api-deployment.yaml" }
+        session: { id: s1 }
+  - name: circleci_root_config
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".circleci/config.yml" }
+        session: { id: s1 }
+  - name: vercel_case_insensitive
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "VERCEL.JSON" }
+        session: { id: s1 }
+  - name: ordinary_source_edit
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/handler.go" }
+        session: { id: s1 }
+  - name: workflow_read_not_modified
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: ".github/workflows/deploy.yml" }
+        session: { id: s1 }
+  - name: deployment_doc_near_miss
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "docs/deployment.md" }
+        session: { id: s1 }

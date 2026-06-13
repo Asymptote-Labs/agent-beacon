@@ -1,0 +1,58 @@
+id: ssh-agent-key-enumeration
+version: 1
+title: SSH agent key enumeration
+description: >
+  A command lists the private keys loaded in the running ssh-agent (`ssh-add -l`
+  / `ssh-add -L`) or sets SSH_AUTH_SOCK to probe an agent socket. The agent holds
+  decrypted private keys in memory; enumerating them is a reconnaissance step
+  toward using them for lateral movement. Derived from blastradius
+  process_introspect.rs, which flags that same-uid code can reach ssh-agent
+  in-memory keys when ptrace_scope is unrestricted.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\bssh-add\\s+(-[A-Za-z]*[lL])") ||
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)SSH_AUTH_SOCK=\\S+\\s+ssh-add\\b")
+
+emit:
+  reason: "SSH agent private-key list enumerated (ssh-add -l/-L)"
+
+tests:
+  - name: ssh_add_list
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add -l" }
+        session: { id: s1 }
+  - name: ssh_add_list_pubkeys
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add -L" }
+        session: { id: s1 }
+  - name: ssh_auth_sock_probe
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "SSH_AUTH_SOCK=/tmp/agent.sock ssh-add -l" }
+        session: { id: s1 }
+  - name: ssh_add_add_key_not_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add ~/.ssh/id_ed25519" }
+        session: { id: s1 }
+  - name: ssh_connect_not_agent
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh user@host" }
+        session: { id: s1 }
+

@@ -1,0 +1,58 @@
+id: imds-obfuscated-ip-fetch
+version: 1
+title: Cloud metadata IP fetched via obfuscated address encoding
+description: >
+  A command fetches a URL whose host is an alternate numeric encoding of the
+  AWS IMDS address 169.254.169.254 — its 32-bit decimal form (2852039166), its
+  hex form (0xa9fea9fe), or dotted hex/octal per-octet forms (0xa9.0xfe.0xa9.0xfe,
+  0251.0376.0251.0376). curl/wget and most HTTP stacks resolve these to the same
+  IMDS endpoint, so they are a deliberate evasion of plain-dotted-quad metadata
+  detection and a strong SSRF / cloud-credential-theft signal. Plain
+  169.254.169.254 is handled by cloud-metadata-endpoint-access; this rule covers
+  only the obfuscated encodings that rule misses.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)https?://(2852039166|0xa9fea9fe|0xa9\\.0xfe\\.0xa9\\.0xfe|0251\\.0376\\.0251\\.0376)(\\b|[:/])")
+
+emit:
+  reason: "HTTP client fetch of an obfuscated numeric encoding of the cloud metadata IP (169.254.169.254)"
+
+tests:
+  - name: decimal_imds
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://2852039166/latest/meta-data/iam/security-credentials/" }
+        session: { id: s1 }
+  - name: hex_imds
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://0xa9fea9fe/latest/meta-data/" }
+        session: { id: s1 }
+  - name: dotted_hex_imds
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "wget -qO- http://0xa9.0xfe.0xa9.0xfe/latest/meta-data/" }
+        session: { id: s1 }
+  - name: plain_imds_owned_by_other_rule
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://169.254.169.254/latest/meta-data/" }
+        session: { id: s1 }
+  - name: unrelated_decimal_port
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -s http://api.example.com:2852039166/" }
+        session: { id: s1 }
+

@@ -1,0 +1,56 @@
+id: shell-login-dotfile-modified
+version: 1
+title: Shell rc / login dotfile modified
+description: >
+  The agent modified a shell startup or login dotfile (.bashrc, .bash_profile,
+  .profile, .zshrc, .zprofile, .zshenv, .kshrc, .login, or fish config.fish).
+  These run on every new shell or login session, outside any agent sandbox, so an
+  edit here is durable user-level persistence (e.g. an injected command, alias, or
+  PATH change). Ported from blastradius host.deferred_exec_sinks / write_reach
+  login-dotfile surface.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM05
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc)$|(?i)(^|/)\\.config/fish/config\\.fish$")
+
+emit:
+  reason: "Shell rc / login dotfile modified — runs on every new shell/login, durable user-level persistence"
+
+tests:
+  - name: bashrc_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.bashrc" }
+        session: { id: s1 }
+  - name: zprofile_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".zprofile" }
+        session: { id: s1 }
+  - name: fish_config_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.config/fish/config.fish" }
+        session: { id: s1 }
+  - name: ordinary_config_edit
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".eslintrc.json" }
+        session: { id: s1 }
+  - name: profile_read_only
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: ".profile" }
+        session: { id: s1 }
+

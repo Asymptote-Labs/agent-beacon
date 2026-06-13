@@ -1,0 +1,50 @@
+id: git-hook-installed
+version: 1
+title: Git hook script installed or modified
+description: >
+  The agent modified a script under .git/hooks/ (pre-commit, post-checkout,
+  pre-push, post-merge, prepare-commit-msg, etc.). Git hooks execute on the next
+  matching git operation, outside any agent sandbox and with no further prompt, so
+  planting one is durable code-execution persistence triggered by ordinary
+  developer git activity. Derived from blastradius deferred-execution sink
+  analysis (.git/hooks).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM05
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman)$")
+
+emit:
+  reason: "Git hook script installed or modified — runs on the next matching git operation, durable code-execution persistence"
+
+tests:
+  - name: pre_commit_hook
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".git/hooks/pre-commit" }
+        session: { id: s1 }
+  - name: post_checkout_hook_nested
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/repo/.git/hooks/post-checkout" }
+        session: { id: s1 }
+  - name: sample_hook_not_active
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".git/hooks/pre-commit.sample" }
+        session: { id: s1 }
+  - name: ordinary_script_edit
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "scripts/pre-commit" }
+        session: { id: s1 }
+
