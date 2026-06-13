@@ -129,5 +129,5 @@ tidy:
 # release build produces the same artifact via the goreleaser before-hook.
 rules-pack:
 	mkdir -p release-rules
-	tar -czf release-rules/threat-rules.tar.gz -C ../.. rules
+	COPYFILE_DISABLE=1 tar --exclude='._*' --exclude='.DS_Store' -czf release-rules/threat-rules.tar.gz -C ../.. rules
 	@echo "wrote release-rules/threat-rules.tar.gz"

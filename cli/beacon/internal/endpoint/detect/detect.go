@@ -300,7 +300,7 @@ func ruleFilesAt(src string) ([]string, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
-		if !strings.HasSuffix(src, ruleFileSuffix) {
+		if !isRuleFile(src) {
 			return nil, fmt.Errorf("%s is not a %s file", src, ruleFileSuffix)
 		}
 		return []string{src}, nil
@@ -310,7 +310,7 @@ func ruleFilesAt(src string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && strings.HasSuffix(path, ruleFileSuffix) {
+		if !d.IsDir() && isRuleFile(path) {
 			paths = append(paths, path)
 		}
 		return nil
@@ -320,6 +320,10 @@ func ruleFilesAt(src string) ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func isRuleFile(path string) bool {
+	return strings.HasSuffix(path, ruleFileSuffix) && !strings.HasPrefix(filepath.Base(path), "._")
 }
 
 func storeIDs(store string) (map[string]bool, error) {

@@ -55,6 +55,19 @@ func TestLoadDir(t *testing.T) {
 	}
 }
 
+func TestLoadDirIgnoresAppleDoubleRuleFiles(t *testing.T) {
+	root := t.TempDir()
+	writeRule(t, root, "ok.rule.yaml", strings.Replace(sampleRule, "%s", "rule-one", 1))
+	writeRule(t, root, "._ok.rule.yaml", "\x00\x05metadata")
+	rules, err := LoadDir(root)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if len(rules) != 1 || rules[0].ID != "rule-one" {
+		t.Fatalf("unexpected rules: %+v", rules)
+	}
+}
+
 func TestLoadDirDuplicateID(t *testing.T) {
 	root := t.TempDir()
 	writeRule(t, filepath.Join(root, "a"), "x.rule.yaml", strings.Replace(sampleRule, "%s", "dup", 1))

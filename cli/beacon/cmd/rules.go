@@ -195,7 +195,7 @@ func extractRuleTarball(r io.Reader, dir string) error {
 		if err != nil {
 			return fmt.Errorf("tar: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".rule.yaml") {
+		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".rule.yaml") || isAppleDoubleArchiveEntry(hdr.Name) {
 			continue
 		}
 		// Reject any entry whose name contains a path-traversal element before it is
@@ -229,6 +229,15 @@ func extractRuleTarball(r io.Reader, dir string) error {
 		return fmt.Errorf("tarball contained no .rule.yaml files")
 	}
 	return nil
+}
+
+func isAppleDoubleArchiveEntry(name string) bool {
+	for _, part := range strings.Split(path.Clean(name), "/") {
+		if part == "__MACOSX" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }
 
 func writeReaderToFile(r io.Reader, dest string) error {

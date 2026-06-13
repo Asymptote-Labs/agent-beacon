@@ -145,6 +145,24 @@ func TestExtractRuleTarballExtractsCleanEntries(t *testing.T) {
 	}
 }
 
+func TestExtractRuleTarballIgnoresAppleDoubleEntries(t *testing.T) {
+	dir := t.TempDir()
+	data := makeTarGz(t, map[string]string{
+		"rules/approval-abuse/approval-denied-command-executed-anyway.rule.yaml":   "id: ok",
+		"rules/approval-abuse/._approval-denied-command-executed-anyway.rule.yaml": "\x00\x05metadata",
+		"__MACOSX/rules/._approval-denied-command-executed-anyway.rule.yaml":       "\x00\x05metadata",
+	})
+	if err := extractRuleTarball(bytes.NewReader(data), dir); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rules", "approval-abuse", "approval-denied-command-executed-anyway.rule.yaml")); err != nil {
+		t.Fatalf("expected real rule to be extracted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rules", "approval-abuse", "._approval-denied-command-executed-anyway.rule.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("AppleDouble entry should not be extracted, stat err=%v", err)
+	}
+}
+
 // TestExtractRuleTarballKeepsSameBaseNameEntries guards against the silent
 // overwrite where two archive paths sharing a base name flattened to the same
 // destination, so a pack could install fewer rules than it contained.

@@ -56,7 +56,7 @@ func LoadDir(root string) ([]*Rule, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(path, ruleFileSuffix) {
+		if isRuleFile(path) {
 			paths = append(paths, path)
 		}
 		return nil
@@ -80,4 +80,8 @@ func LoadDir(root string) ([]*Rule, error) {
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+func isRuleFile(path string) bool {
+	return strings.HasSuffix(path, ruleFileSuffix) && !strings.HasPrefix(filepath.Base(path), "._")
 }

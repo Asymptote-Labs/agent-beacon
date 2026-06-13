@@ -87,6 +87,24 @@ func TestInstallThenLoadActiveUsesStore(t *testing.T) {
 	}
 }
 
+func TestInstallFilesIgnoresAppleDoubleRuleFiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "ok.rule.yaml"), []byte(ruleWithID("custom-rule")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "._ok.rule.yaml"), []byte("\x00\x05metadata"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := InstallFiles(true, srcDir, false)
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if len(installed) != 1 || installed[0].ID != "custom-rule" {
+		t.Fatalf("unexpected install result: %+v", installed)
+	}
+}
+
 func TestInstallRejectsInvalidRule(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	src := filepath.Join(t.TempDir(), "bad.rule.yaml")

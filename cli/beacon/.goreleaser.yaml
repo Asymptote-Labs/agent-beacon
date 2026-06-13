@@ -15,7 +15,7 @@ before:
     - cp ../../collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol ./release-collectors/linux_arm64/beacon-otelcol
     # Package the external threat-rule pack (repo rules/, not embedded in the binary)
     # as a release asset users install with `beacon rules pull <asset-url>`.
-    - bash -c 'mkdir -p release-rules && tar -czf release-rules/threat-rules.tar.gz -C ../.. rules'
+    - bash -c 'mkdir -p release-rules && COPYFILE_DISABLE=1 tar --exclude="._*" --exclude=".DS_Store" -czf release-rules/threat-rules.tar.gz -C ../.. rules'
 
 builds:
   - id: beacon
