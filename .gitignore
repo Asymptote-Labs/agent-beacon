@@ -19,6 +19,7 @@ coverage.out
 coverage.html
 .gocache/
 .tmp/
+*.bin
 
 # Beacon CLI binaries and release output
 cli/beacon/beacon

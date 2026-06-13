@@ -1,0 +1,68 @@
+id: high-risk-approval-allowed-without-reason
+version: 1
+title: High-risk action approved with an empty approval reason
+description: >
+  An approval was granted (event.action approval.allowed) for a high-risk operation —
+  a destructive/privilege shell command or an edit to a credential, CI/CD, or
+  security-control file — while approval.reason is empty. A required gate that is
+  satisfied with no recorded justification is a rubber-stamp / auto-approve signal:
+  the operator either blanket-allowed the runtime or the approval was auto-issued
+  without a human-supplied rationale. The rule fires on a single approval.allowed event
+  and intentionally requires approval.required == true so it ignores informational
+  no-gate allows. It scopes the dangerous-target test tightly to avoid flagging routine
+  approved edits.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+
+match: >
+  e.event.action == "approval.allowed" &&
+  e.approval.required &&
+  e.approval.reason == "" &&
+  (
+    e.command.command.matches("(?i)(\\brm\\s+-[a-z]*r[a-z]*f\\b|\\bmkfs\\b|\\bdd\\s+if=|\\bsudo\\b|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b)") ||
+    e.file.path.matches("(?i)(\\.env$|\\.env\\.|/credentials$|id_rsa$|\\.aws/|\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.)")
+  )
+
+emit:
+  reason: "High-risk action approved with no recorded approval reason"
+
+tests:
+  - name: dangerous_command_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "sudo rm -rf /etc" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: workflow_edit_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        file: { path: ".github/workflows/release.yml" }
+        approval: { decision: "approve", required: true, reason: "" }
+        session: { id: s1 }
+  - name: dangerous_command_allowed_with_reason
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "sudo rm -rf /etc" }
+        approval: { decision: "allow", required: true, reason: "operator confirmed cleanup of stale config" }
+        session: { id: s1 }
+  - name: benign_command_allowed_empty_reason
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "go test ./..." }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: not_a_required_gate
+    verdict: no_match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "sudo rm -rf /etc" }
+        approval: { decision: "allow", required: false, reason: "" }
+        session: { id: s1 }
+

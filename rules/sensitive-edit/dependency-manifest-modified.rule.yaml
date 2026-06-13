@@ -1,0 +1,58 @@
+id: dependency-manifest-modified
+version: 2
+title: Dependency manifest or lockfile modified
+description: >
+  The agent modified a dependency manifest or lockfile (package.json, lockfiles,
+  Cargo.toml, requirements.txt, go.mod, Gemfile, composer.json, …). A changed
+  dependency edge is a supply-chain insertion point — a malicious or typosquatted
+  package can run install-time code. Ported from blastradius is_dependency_manifest_path.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)$")
+
+emit:
+  reason: "Dependency manifest or lockfile modified (supply-chain edge change)"
+
+tests:
+  - name: package_json_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "frontend/package.json" }
+        session: { id: s1 }
+  - name: cargo_toml_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "Cargo.toml" }
+        session: { id: s1 }
+  - name: ordinary_source_edit
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/index.js" }
+        session: { id: s1 }
+  - name: prefixed_filename_no_match
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "my-package.json" }
+        session: { id: s1 }
+  - name: suffixed_manifest_no_match
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "requirements.txt.bak" }
+        session: { id: s1 }
+  - name: read_not_modified_no_match
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "package.json" }
+        session: { id: s1 }

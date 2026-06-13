@@ -1,0 +1,40 @@
+id: browser-session-store-read
+version: 1
+title: Agent read a browser session/cookie store
+description: >
+  The agent read a browser cookie jar or saved-login store (Cookies / cookies.sqlite
+  / logins.json / "Login Data"). These carry live session material that can hijack a
+  SaaS session past password + MFA. Ported from blastradius `is_browser_session_path`.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM02
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "file.read" &&
+  e.file.path.matches("(?i)(^|/)(cookies\\.sqlite|logins\\.json|cookies|login data)$")
+
+emit:
+  reason: "Agent read a browser session/cookie store (session-hijack material)"
+
+tests:
+  - name: read_firefox_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+  - name: read_chrome_login_data
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.config/google-chrome/Default/Login Data" }
+        session: { id: s1 }
+  - name: source_file_named_cookies
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "src/cookies.test.ts" }
+        session: { id: s1 }

@@ -1,0 +1,83 @@
+id: git-remote-tampering
+version: 3
+title: Git remote repointed or force-push to remote
+description: >
+  A command repoints a git remote (remote set-url / remote add, or the config-key
+  form remote.<name>.url set to a value), force-pushes (--force / --force-with-lease /
+  -f / a leading + refspec), or installs an insteadOf URL rewrite — ways to redirect
+  code to an attacker-controlled destination or overwrite remote history. git is
+  anchored to a command boundary and each clause is kept within one command segment so
+  a benign mention or a read-only `git config --get` does not fire. Ported from
+  blastradius is_git_write_shape (source_control_mutation_path).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bremote\\b\\s+(set-url|add)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.url\\b\\s+\\S") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b|\\s\\+)") ||
+    e.command.command.matches("(?i)\\binsteadof\\b")
+  )
+
+emit:
+  reason: "Git remote repointed, force-pushed, or insteadOf URL rewrite installed"
+
+tests:
+  - name: remote_set_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git remote set-url origin https://attacker.example/x.git" }
+        session: { id: s1 }
+  - name: force_push
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin main" }
+        session: { id: s1 }
+  - name: force_after_positional
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin --force main" }
+        session: { id: s1 }
+  - name: force_refspec_plus
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin +main" }
+        session: { id: s1 }
+  - name: config_remote_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config remote.origin.url https://attacker.example/x.git" }
+        session: { id: s1 }
+  - name: ordinary_push
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin main" }
+        session: { id: s1 }
+  - name: remote_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git remote -v" }
+        session: { id: s1 }
+  - name: config_remote_url_read_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --get remote.origin.url" }
+        session: { id: s1 }
+  - name: echo_mention
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo git remote set-url is dangerous" }
+        session: { id: s1 }

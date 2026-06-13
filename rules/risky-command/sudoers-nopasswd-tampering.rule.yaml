@@ -1,0 +1,74 @@
+id: sudoers-nopasswd-tampering
+version: 1
+title: Sudoers / NOPASSWD privilege rule tampered or probed
+description: >
+  A command writes to the sudoers configuration (/etc/sudoers or /etc/sudoers.d/),
+  installs a passwordless NOPASSWD grant, or probes for passwordless sudo with a
+  non-interactive listing (sudo -n -l). Any of these establishes or confirms a path
+  to root that bypasses the password prompt. The match requires an actual write, a
+  NOPASSWD grant token, a visudo invocation, or the non-interactive sudo listing
+  probe rather than incidental mentions of "sudo". Ported from blastradius
+  host.privilege_escalation (passwordless sudo via `sudo -n -l` and NOPASSWD).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0050
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(>>?\\s*|tee\\s+(-a\\s+)?)/etc/sudoers(\\.d)?\\b") ||
+    e.command.command.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
+    e.command.command.matches("(?i)\\bvisudo\\b") ||
+    e.command.command.matches("(?i)\\bNOPASSWD\\s*:") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)sudo\\s+(-[a-z]+\\s+)*-n\\s+(-[a-z]+\\s+)*-l\\b")
+  )
+
+emit:
+  reason: "Sudoers/NOPASSWD privilege configuration was written or probed for passwordless root"
+
+tests:
+  - name: append_nopasswd_to_sudoers_d
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'agent ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/agent" }
+        session: { id: s1 }
+  - name: tee_into_sudoers
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'user ALL=(ALL) NOPASSWD:ALL' | tee -a /etc/sudoers" }
+        session: { id: s1 }
+  - name: visudo_edit
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "EDITOR=tee visudo" }
+        session: { id: s1 }
+  - name: nopasswd_grant_inline
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf 'me ALL=(ALL) NOPASSWD: ALL\\n' > /etc/sudoers.d/me" }
+        session: { id: s1 }
+  - name: probe_passwordless_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n -l" }
+        session: { id: s1 }
+  - name: normal_sudo_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo apt-get update" }
+        session: { id: s1 }
+  - name: read_sudoers_doc
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "man sudoers | grep example" }
+        session: { id: s1 }
+

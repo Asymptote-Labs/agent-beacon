@@ -1,0 +1,48 @@
+id: excessive-single-call-cost
+version: 1
+title: Single model call with anomalously high reported cost
+description: >
+  A single completed model call reported a runtime cost (gen_ai.usage.cost_usd)
+  above 10 USD. Per-call cost for interactive coding-agent turns is normally a
+  few cents to well under a dollar; even large-context frontier calls rarely
+  exceed a couple of dollars in one turn. A single turn billed above 10 USD is a
+  strong signal of unbounded-consumption abuse (OWASP LLM10) — a runaway loop,
+  an attacker-inflated context, or a misconfigured max_tokens — and is worth
+  surfacing because the cost is already incurred. cost_usd carries runtime
+  reported cost only; this rule never derives cost from a local pricing table.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM10
+match: >
+  (e.event.action == "tool.completed" || e.event.action == "tool.invoked") &&
+  e.gen_ai.usage.cost_usd > 10.0
+emit:
+  reason: "Single model call reported cost above 10 USD (unbounded-consumption signal)"
+tests:
+  - name: very_expensive_call
+    verdict: match
+    events:
+      - event: { action: tool.completed }
+        gen_ai: { usage: { cost_usd: 24.0 } }
+        session: { id: s1 }
+  - name: expensive_invoked
+    verdict: match
+    events:
+      - event: { action: tool.invoked }
+        gen_ai: { usage: { cost_usd: 11.5 } }
+        session: { id: s1 }
+  - name: ordinary_turn_cost
+    verdict: no_match
+    events:
+      - event: { action: tool.completed }
+        gen_ai: { usage: { cost_usd: 0.42 } }
+        session: { id: s1 }
+  - name: no_usage_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ls" }
+        session: { id: s1 }
+

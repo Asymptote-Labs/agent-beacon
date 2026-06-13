@@ -1,0 +1,51 @@
+id: direnv-envrc-modified
+version: 1
+title: direnv .envrc modified (auto-exec on directory entry)
+description: >
+  The agent modified a direnv .envrc file. When direnv is installed and the
+  directory has been allowed, .envrc is sourced automatically by the shell every
+  time a developer cd's into the directory (or an editor/terminal opens it),
+  outside any agent sandbox and with no further prompt. An injected command,
+  export, or PATH manipulation here is durable, ambient-triggered code execution.
+  Derived from blastradius host.deferred_exec_sinks (.envrc deferred-execution
+  sink).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM05
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)\\.envrc$")
+
+emit:
+  reason: "direnv .envrc modified — sourced automatically on directory entry outside the sandbox, durable ambient code execution"
+
+tests:
+  - name: envrc_repo_root
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".envrc" }
+        session: { id: s1 }
+  - name: envrc_nested
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/project/.envrc" }
+        session: { id: s1 }
+  - name: env_file_not_envrc
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "config/.env" }
+        session: { id: s1 }
+  - name: envrc_read_only
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: ".envrc" }
+        session: { id: s1 }
+

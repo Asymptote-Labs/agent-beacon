@@ -1,0 +1,65 @@
+id: persistence-install-command
+version: 1
+title: Command installs scheduled-job or service persistence
+description: >
+  A command installs persistence that runs outside any agent sandbox at login,
+  boot, or on a schedule: editing the user/root crontab (crontab -, crontab a
+  file), enabling a systemd service or timer (systemctl enable / --user enable),
+  or loading a launchd agent/daemon (launchctl load / bootstrap / enable). These
+  survive the session and re-execute later with no further prompt. Ported from
+  blastradius host.autostart_sinks / deferred_exec_sinks scheduled-job surface.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM05
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
+    e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--user)?\\s+enable\\b") ||
+    e.command.command.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")
+  )
+
+emit:
+  reason: "Command installs scheduled-job or service persistence (crontab / systemctl enable / launchctl) — runs outside the sandbox at login/boot/schedule"
+
+tests:
+  - name: crontab_install_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab /tmp/payload.cron" }
+        session: { id: s1 }
+  - name: crontab_stdin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '* * * * * /tmp/x.sh' | crontab -" }
+        session: { id: s1 }
+  - name: systemctl_user_enable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl --user enable beacon-evil.service" }
+        session: { id: s1 }
+  - name: launchctl_load
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "launchctl load ~/Library/LaunchAgents/com.evil.plist" }
+        session: { id: s1 }
+  - name: crontab_list_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -l" }
+        session: { id: s1 }
+  - name: systemctl_status
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl status nginx" }
+        session: { id: s1 }
+

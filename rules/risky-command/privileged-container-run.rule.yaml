@@ -1,0 +1,74 @@
+id: privileged-container-run
+version: 3
+title: Container started with host-escaping privileges
+description: >
+  A docker/podman run or exec grants container-escape primitives — --privileged,
+  host namespace sharing (--pid/--net/--network/--ipc/--uts host), a root-filesystem
+  bind mount (-v /:...), a kernel capability add (--cap-add), or a mount of the docker
+  socket. The docker/podman token is anchored to command/segment start (allowing a
+  flagged sudo, env, or VAR=value prefix) so it is not matched inside an unrelated
+  commit message. Ported from blastradius container-runtime / post_root_host_visibility.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0050
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)\\s+(container\\s+)?(run|exec)\\b") &&
+  e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|-v\\s+/:|--volume\\s+/:|--cap-add[= ]|/var/run/docker\\.sock\\b)")
+
+emit:
+  reason: "Container started with host-escaping privileges"
+
+tests:
+  - name: docker_run_privileged
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --privileged -v /:/host ubuntu sh" }
+        session: { id: s1 }
+  - name: docker_container_run_privileged
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker container run --privileged ubuntu" }
+        session: { id: s1 }
+  - name: podman_run_host_pid
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "podman run --pid host alpine ps aux" }
+        session: { id: s1 }
+  - name: docker_run_ipc_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --ipc=host ubuntu" }
+        session: { id: s1 }
+  - name: m_varprefix
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "DOCKER_HOST=tcp://x docker run --privileged ubuntu" }
+        session: { id: s1 }
+  - name: m_sudoE
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -E docker run --cap-add=SYS_ADMIN ubuntu" }
+        session: { id: s1 }
+  - name: docker_run_normal
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --rm -it node:20 npm test" }
+        session: { id: s1 }
+  - name: docker_in_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'docker run --net=host fix'" }
+        session: { id: s1 }

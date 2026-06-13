@@ -1,0 +1,82 @@
+id: auth-security-code-modified
+version: 3
+title: Authentication, payment, or security source modified
+description: >
+  The agent modified a source file in the auth / payment / security surface (basename
+  containing auth, login, session, password, payment, billing, charge, stripe, checkout,
+  security, crypto, token, oauth, jwt, rbac, acl, permission, credential). Changes here
+  carry outsized risk and warrant review. Ported from blastradius
+  is_auth_payment_security_path; documentation (.md/.txt), lockfiles, CI workflow
+  manifests, and credential stores (credentials.json/.toml — covered by
+  credential-file-read) are excluded so they are not double-counted.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)[^/]*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|acl|permission)[^/]*\\.[a-z0-9]+$") &&
+  !e.file.path.matches("(?i)\\.(md|txt|lock)$") &&
+  !e.file.path.matches("(?i)\\.github/workflows/[^/]*\\.ya?ml$") &&
+  !e.file.path.matches("(?i)(^|/)credentials\\.(json|toml)$")
+
+emit:
+  reason: "Authentication, payment, or security source file modified"
+
+tests:
+  - name: edit_login_handler
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/auth/login.ts" }
+        session: { id: s1 }
+  - name: edit_charge_handler
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "services/payments/charge.py" }
+        session: { id: s1 }
+  - name: edit_credentials_source
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/auth/credentials.go" }
+        session: { id: s1 }
+  - name: edit_token_source
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/auth/token.ts" }
+        session: { id: s1 }
+  - name: auth_doc_excluded
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "docs/authentication.md" }
+        session: { id: s1 }
+  - name: workflow_security_excluded
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".github/workflows/security.yml" }
+        session: { id: s1 }
+  - name: secret_store_credentials_excluded
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "config/credentials.json" }
+        session: { id: s1 }
+  - name: dir_named_auth_basename_clean
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/auth/index.ts" }
+        session: { id: s1 }
+  - name: ordinary_source_edit
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/utils/format.ts" }
+        session: { id: s1 }

@@ -1,0 +1,49 @@
+id: external-mcp-tool-call
+version: 2
+title: MCP tool call to a non-local server
+description: >
+  The agent invoked an MCP tool on a server that is not local (not localhost,
+  loopback, a unix socket, or stdio). External MCP servers are an egress and
+  data-handoff path that the operator may not have vetted. The local-server check uses
+  exact matches for local/localhost/::1 (so a look-alike host such as localhost.evil.com
+  is still flagged) and prefix matches for stdio/unix:/local:/127. Ported from
+  blastradius is_local_mcp_server / external_mcp_call.
+severity: low
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+
+match: >
+  e.event.action == "mcp.tool_invoked" &&
+  e.mcp.server != "" &&
+  !e.mcp.server.matches("(?i)^\\s*((local|localhost|::1)\\s*$|stdio|unix:|local:|127\\.)")
+
+emit:
+  reason: "MCP tool invoked on a non-local server"
+
+tests:
+  - name: remote_mcp_server
+    verdict: match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "https://api.notion.com", tool: "search" }
+        session: { id: s1 }
+  - name: localhost_lookalike_external
+    verdict: match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "localhost.evil.com", tool: "exfil" }
+        session: { id: s1 }
+  - name: localhost_mcp_server
+    verdict: no_match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "localhost", tool: "search" }
+        session: { id: s1 }
+  - name: stdio_mcp_server
+    verdict: no_match
+    events:
+      - event: { action: mcp.tool_invoked }
+        mcp: { server: "stdio", tool: "search" }
+        session: { id: s1 }

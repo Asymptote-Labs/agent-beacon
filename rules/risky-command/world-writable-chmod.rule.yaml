@@ -1,0 +1,77 @@
+id: world-writable-chmod
+version: 2
+title: chmod grants world-writable or full permissions
+description: >
+  A command makes a file or tree world-writable / fully permissive (chmod 777 / 0777,
+  or a symbolic mode that grants write to other/all). A common step for planting an
+  executable others can tamper with or for loosening a sensitive file. Ported from
+  blastradius DangerousCategory::WorldWritableChmod; chmod is anchored to the acting
+  command position so it is not matched as an argument to another program.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?(0?777\\b|[ugoa]*\\+[rwx]*w[rwx]*\\b)")
+
+emit:
+  reason: "chmod grants world-writable or fully permissive access"
+
+tests:
+  - name: chmod_777_recursive
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod -R 777 /var/www" }
+        session: { id: s1 }
+  - name: chmod_0777_octal
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 0777 evil.sh" }
+        session: { id: s1 }
+  - name: chmod_ugo_rwx_symbolic
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod ugo+rwx /usr/local/bin/x" }
+        session: { id: s1 }
+  - name: chmod_o_plus_w
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod o+w /etc/app/config" }
+        session: { id: s1 }
+  - name: chmod_after_cd_separator
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /opt && chmod 777 ./run" }
+        session: { id: s1 }
+  - name: chmod_normal_mode
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 644 README.md" }
+        session: { id: s1 }
+  - name: chmod_read_only_other
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod o+r /etc/hosts" }
+        session: { id: s1 }
+  - name: chmod_restrictive_mode
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 1750 /var/run" }
+        session: { id: s1 }
+  - name: chmod_as_argument_to_man
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "man chmod | grep 777" }
+        session: { id: s1 }

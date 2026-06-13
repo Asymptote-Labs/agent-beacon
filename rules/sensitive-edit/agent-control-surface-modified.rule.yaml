@@ -1,0 +1,56 @@
+id: agent-control-surface-modified
+version: 1
+title: Agent control surface (settings / MCP config) modified
+description: >
+  The agent modified a file that constrains or wires its own runtime: a Claude
+  Code settings file (.claude/settings.json, .claude/settings.local.json,
+  .claude.json) or an MCP server registration (.mcp.json). Writing these can
+  disable the sandbox, add an excludedCommands entry, register a hook, or wire in
+  a new MCP server that runs on every future session. Ported from blastradius
+  claude_code.writable_control_surface (control-kind targets).
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM05
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" &&
+  e.file.path.matches("(?i)(^|/)(\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json)$")
+
+emit:
+  reason: "Agent control surface modified (Claude settings or MCP server config) — can weaken sandbox or register persistent hooks/servers"
+
+tests:
+  - name: claude_settings_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".claude/settings.json" }
+        session: { id: s1 }
+  - name: claude_settings_local_in_home
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.claude/settings.local.json" }
+        session: { id: s1 }
+  - name: mcp_config_edit
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "project/.mcp.json" }
+        session: { id: s1 }
+  - name: ordinary_json_edit
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "config/app.json" }
+        session: { id: s1 }
+  - name: settings_read_only
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: ".claude/settings.json" }
+        session: { id: s1 }
+
