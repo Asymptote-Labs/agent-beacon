@@ -122,6 +122,26 @@ func TestScanFailOn(t *testing.T) {
 	}
 }
 
+// TestScanFailOnIgnoresMinSeverityFilter guards the CI gate: --min-severity is a
+// display-only filter, so a detection at or above --fail-on must still fail the
+// scan even when --min-severity hides it from the printed output.
+func TestScanFailOnIgnoresMinSeverityFilter(t *testing.T) {
+	scanFixture(t, []string{evSecretRead})
+	scanOpts.minSeverity = "critical" // high finding filtered out of output
+	scanOpts.failOn = "high"          // ...but still meets the fail gate
+	cmd, buf := newCmd()
+	err := runScan(cmd, nil)
+	if err == nil {
+		t.Fatalf("expected non-zero exit: a high finding meets --fail-on high even when --min-severity critical hides it; output:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "1 finding") {
+		t.Fatalf("expected fail gate to count the filtered finding, got: %v", err)
+	}
+	if !strings.Contains(buf.String(), "No findings") {
+		t.Fatalf("expected the high finding hidden from output by --min-severity critical, got:\n%s", buf.String())
+	}
+}
+
 func TestScanMinSeverityFilters(t *testing.T) {
 	scanFixture(t, []string{evSecretRead})
 	scanOpts.minSeverity = "critical" // finding is high -> filtered out

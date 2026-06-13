@@ -198,6 +198,11 @@ func InstallFiles(userMode bool, src string, force bool) ([]Installed, error) {
 				return nil, fmt.Errorf("%s: fixture %s", p, res.String())
 			}
 		}
+		// rule.ID passed CheckRule (id-grammar) above; re-assert it explicitly so the
+		// store path join below can never be driven outside the store by rule content.
+		if !threatrules.ValidID(rule.ID) {
+			return nil, fmt.Errorf("%s: invalid rule id %q", p, rule.ID)
+		}
 		if (existing[rule.ID] || staged[rule.ID]) && !force {
 			return nil, fmt.Errorf("rule %q already installed (use --force to overwrite)", rule.ID)
 		}
@@ -215,8 +220,13 @@ func InstallFiles(userMode bool, src string, force bool) ([]Installed, error) {
 	return installed, nil
 }
 
-// Remove deletes a rule by id from the store. Returns the removed path.
+// Remove deletes a rule by id from the store. Returns the removed path. The id
+// is validated against the rule-id grammar before use so it can never contain
+// path separators or ".." segments that would resolve outside the store.
 func Remove(userMode bool, id string) (string, error) {
+	if !threatrules.ValidID(id) {
+		return "", fmt.Errorf("invalid rule id %q", id)
+	}
 	path := filepath.Join(StoreDir(userMode), id+ruleFileSuffix)
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {

@@ -110,6 +110,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
+	// The --fail-on gate is a CI signal that must reflect every detection in the
+	// scan, so count it before --min-severity (a display-only filter) drops
+	// findings from the output slice.
+	failCount := 0
+	if failRank >= 0 {
+		failCount = countAtOrAbove(findings, failRank)
+	}
 	if minRank > 0 {
 		findings = filterBySeverity(findings, minRank)
 	}
@@ -136,12 +143,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 		printFindings(cmd, findings, len(events), runtimeLog.EffectiveLogPath)
 	}
 
-	if failRank >= 0 {
-		for _, f := range findings {
-			if severityRank[f.Severity] >= failRank {
-				return fmt.Errorf("scan found %d finding(s) at or above %q", countAtOrAbove(findings, failRank), scanOpts.failOn)
-			}
-		}
+	if failRank >= 0 && failCount > 0 {
+		return fmt.Errorf("scan found %d finding(s) at or above %q", failCount, scanOpts.failOn)
 	}
 	return nil
 }

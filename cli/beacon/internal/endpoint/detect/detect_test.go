@@ -150,6 +150,32 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestRemoveRejectsPathTraversal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// A rule file outside the store that a traversal id could resolve to.
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.rule.yaml")
+	if err := os.WriteFile(victim, []byte("id: victim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// id crafted so id+suffix == "<victimDir>/victim.rule.yaml" after Join+Clean.
+	rel, err := filepath.Rel(StoreDir(true), filepath.Join(victimDir, "victim"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{rel, "../../etc/passwd", "a/b", "."} {
+		if _, err := Remove(true, id); err == nil {
+			t.Fatalf("expected Remove to reject unsafe id %q", id)
+		}
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("victim file must not be deleted: %v", err)
+	}
+}
+
 func srcOf(l []LoadedRule) []Source {
 	s := make([]Source, len(l))
 	for i := range l {
