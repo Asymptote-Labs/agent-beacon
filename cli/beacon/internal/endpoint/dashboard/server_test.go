@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
 )
 
@@ -36,6 +38,83 @@ func TestStatusUsesExplicitRuntimeLogPath(t *testing.T) {
 	}
 	if status.RuntimeLog.EffectiveLogPath != logPath {
 		t.Fatalf("RuntimeLog.EffectiveLogPath = %q, want %q", status.RuntimeLog.EffectiveLogPath, logPath)
+	}
+}
+
+func TestStatusUsesRequestedRuntimeLogSource(t *testing.T) {
+	oldResolveRuntimeLog := resolveRuntimeLog
+	oldGetEndpointStatus := getEndpointStatus
+	t.Cleanup(func() {
+		resolveRuntimeLog = oldResolveRuntimeLog
+		getEndpointStatus = oldGetEndpointStatus
+	})
+
+	dir := t.TempDir()
+	systemLog := filepath.Join(dir, "system-runtime.jsonl")
+	userLog := filepath.Join(dir, "user-runtime.jsonl")
+	warning := "system collector is writing OTLP events to " + systemLog
+	resolveRuntimeLog = func(userMode bool, logPath string) lifecycle.RuntimeLogSource {
+		if !userMode || logPath != "" {
+			t.Fatalf("ResolveRuntimeLog called with userMode=%t logPath=%q, want requested user mode with empty log path", userMode, logPath)
+		}
+		return lifecycle.RuntimeLogSource{
+			RequestedUserMode: true,
+			EffectiveUserMode: false,
+			RequestedLogPath:  userLog,
+			EffectiveLogPath:  systemLog,
+			Warning:           warning,
+		}
+	}
+	getEndpointStatus = func(userMode bool, logPath string) lifecycle.Status {
+		if !userMode || logPath != "" {
+			t.Fatalf("GetStatus called with userMode=%t logPath=%q, want requested user mode with empty log path", userMode, logPath)
+		}
+		return lifecycle.Status{
+			Version:    "test",
+			ConfigPath: "system-config.json",
+			LogPath:    systemLog,
+			Diagnostics: []diagnostics.Check{{
+				Name:     "runtime_log_source",
+				Status:   "warn",
+				Severity: "medium",
+				Message:  warning,
+			}},
+		}
+	}
+	if err := os.WriteFile(systemLog, []byte(`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"test","category":"test"},"severity":"info","endpoint":{"os":"darwin"},"message":"system event"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write system log: %v", err)
+	}
+
+	handler, err := Handler(Options{UserMode: true})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var status StatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("unmarshal status response: %v", err)
+	}
+	if status.LogPath != systemLog || status.RuntimeLog.EffectiveLogPath != systemLog || status.RuntimeLog.Warning != warning {
+		t.Fatalf("status runtime log = %#v log_path=%q, want effective system log with warning", status.RuntimeLog, status.LogPath)
+	}
+	if !strings.Contains(rec.Body.String(), "runtime_log_source") {
+		t.Fatalf("status body missing runtime log diagnostic: %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("events status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "system event") {
+		t.Fatalf("events body did not read effective system log: %s", rec.Body.String())
 	}
 }
 

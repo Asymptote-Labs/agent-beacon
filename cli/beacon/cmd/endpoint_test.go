@@ -12,6 +12,7 @@ import (
 	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -654,6 +655,41 @@ func TestEndpointCommandsDefaultToUserMode(t *testing.T) {
 		if cmd.Flags().Lookup("system") == nil {
 			t.Fatalf("%s missing --system flag", cmd.Use)
 		}
+	}
+}
+
+func TestRunEndpointDashboardPassesRequestedLogPathToHandler(t *testing.T) {
+	oldOpts := endpointOpts
+	oldListen := dashboardListenAndServe
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		dashboardListenAndServe = oldListen
+	})
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configuredLog := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	if _, err := endpointconfig.Save(endpointconfig.Default(true, configuredLog)); err != nil {
+		t.Fatalf("save endpoint config: %v", err)
+	}
+
+	var got dashboard.Options
+	dashboardListenAndServe = func(opts dashboard.Options) error {
+		got = opts
+		return nil
+	}
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+	endpointOpts.logPath = ""
+	endpointOpts.dashboardAddr = "127.0.0.1:0"
+
+	if err := runEndpointDashboard(nil, nil); err != nil {
+		t.Fatalf("runEndpointDashboard returned error: %v", err)
+	}
+	if got.LogPath != "" {
+		t.Fatalf("dashboard LogPath = %q, want empty requested log path so Handler can resolve runtime source", got.LogPath)
+	}
+	if !got.UserMode {
+		t.Fatal("dashboard UserMode = false, want requested user mode")
 	}
 }
 
