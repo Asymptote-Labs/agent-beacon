@@ -7,12 +7,15 @@ const state = {
   error: null,
   currentQuery: "",
   newEventCount: 0,
+  lastDetectionHashScroll: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
+const isDetectionsPage = document.body.dataset.page === "detections";
+const isFindingsPage = document.body.dataset.page === "findings";
 const formFields = [
   "q",
   "harness",
@@ -865,7 +868,126 @@ function formatRatio(ratio, contextWindow) {
   return `${(ratio * 100).toFixed(1)}%`;
 }
 
-$("#refresh")?.addEventListener("click", () => (isTokensPage ? loadTokens() : load()).catch(console.error));
+async function loadDetections() {
+  try {
+    const resp = await getJSON("/api/detections");
+    state.error = null;
+    renderDetections(resp);
+  } catch (err) {
+    state.error = err;
+    setText("#detections-meta", `Failed to load detections: ${err.message}`);
+  }
+}
+
+function renderDetections(resp) {
+  const rules = resp?.rules || [];
+  setText("#detections-meta", `${rules.length} active rule${rules.length === 1 ? "" : "s"}`);
+  const tbody = $("#detections-rows");
+  if (!tbody) return;
+  if (!rules.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No active rules.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rules
+    .map((rule) => `
+      <tr id="rule-${escapeHTML(rule.id)}">
+        <td>${badge(rule.severity || "unknown", `severity-${rule.severity || "unknown"}`)}</td>
+        <td><span class="mono">${escapeHTML(rule.id)}</span><br /><span class="muted">${escapeHTML(rule.title || "")}</span></td>
+        <td>${escapeHTML(rule.status || "")}</td>
+        <td>${escapeHTML(rule.posture || "")}</td>
+        <td>${escapeHTML(rule.kind || "")}</td>
+        <td>${badge(rule.source || "unknown", "badge-muted")}</td>
+        <td>${escapeHTML(rule.reason || "")}</td>
+      </tr>
+    `)
+    .join("");
+  scrollDetectionHashIntoView();
+}
+
+function scrollDetectionHashIntoView({ force = false } = {}) {
+  if (!isDetectionsPage || !window.location.hash) return;
+  let targetID = window.location.hash.slice(1);
+  try {
+    targetID = decodeURIComponent(targetID);
+  } catch (_) {
+    // Use the raw hash when the browser exposes a malformed escape sequence.
+  }
+  if (!targetID || (!force && state.lastDetectionHashScroll === targetID)) return;
+  const target = document.getElementById(targetID);
+  if (!target) return;
+  target.scrollIntoView({ block: "start" });
+  state.lastDetectionHashScroll = targetID;
+}
+
+async function loadFindings() {
+  const params = new URLSearchParams(window.location.search);
+  const minSeverity = (params.get("min_severity") || "").trim();
+  const select = $("#min-severity");
+  if (select) select.value = minSeverity;
+  const query = new URLSearchParams();
+  if (minSeverity) query.set("min_severity", minSeverity);
+  const session = (params.get("session") || "").trim();
+  if (session) query.set("session", session);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  try {
+    const resp = await getJSON(`/api/findings${suffix}`);
+    state.error = null;
+    renderFindings(resp);
+  } catch (err) {
+    state.error = err;
+    setText("#findings-meta", `Failed to load findings: ${err.message}`);
+  }
+}
+
+function renderFindings(resp) {
+  const findings = resp?.findings || [];
+  setText("#findings-meta", `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${resp?.scanned || 0} events`);
+  const tbody = $("#findings-rows");
+  if (!tbody) return;
+  if (!findings.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">No findings.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = findings
+    .map((f) => `
+      <tr>
+        <td>${badge(f.severity || "unknown", `severity-${f.severity || "unknown"}`)}</td>
+        <td><a class="mono" href="/detections.html#rule-${escapeHTML(f.rule_id)}">${escapeHTML(f.rule_id)}</a><br /><span class="muted">${escapeHTML(f.title || "")}</span></td>
+        <td class="mono">${escapeHTML(f.session_id || "-")}</td>
+        <td>${escapeHTML(f.reason || "")}</td>
+        <td>${summarizeFindingEvents(f.events)}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function summarizeFindingEvents(events) {
+  if (!events || !events.length) return `<span class="muted">-</span>`;
+  return events
+    .map((e) => {
+      const action = e.event?.action || "event";
+      let detail = "";
+      if (e.command?.command) detail = e.command.command;
+      else if (e.file?.path) detail = e.file.path;
+      else if (e.prompt?.text) detail = e.prompt.text;
+      const when = e.timestamp ? `${escapeHTML(formatTime(e.timestamp))} ` : "";
+      const text = detail ? `${action}: ${detail}` : action;
+      return `<div>${when}<span class="mono">${escapeHTML(text)}</span></div>`;
+    })
+    .join("");
+}
+
+$("#min-severity")?.addEventListener("change", (event) => {
+  const params = new URLSearchParams(window.location.search);
+  if (event.target.value) params.set("min_severity", event.target.value);
+  else params.delete("min_severity");
+  window.location.search = params.toString();
+});
+
+$("#refresh")?.addEventListener("click", () => {
+  const loader = isFindingsPage ? loadFindings : isDetectionsPage ? loadDetections : isTokensPage ? loadTokens : load;
+  loader().catch(console.error);
+});
 $("#filters")?.addEventListener("submit", (event) => {
   event.preventDefault();
   load({ updateLocation: true }).catch(console.error);
@@ -873,11 +995,18 @@ $("#filters")?.addEventListener("submit", (event) => {
 $("#clear-search")?.addEventListener("click", clearSearch);
 $("#close-drawer")?.addEventListener("click", closeDrawer);
 $("#new-events")?.addEventListener("click", showNewEvents);
+window.addEventListener("hashchange", () => scrollDetectionHashIntoView({ force: true }));
 $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
 
-if (isTokensPage) {
+if (isDetectionsPage) {
+  loadDetections().catch(console.error);
+  setInterval(() => loadDetections().catch(console.error), 15000);
+} else if (isFindingsPage) {
+  loadFindings().catch(console.error);
+  setInterval(() => loadFindings().catch(console.error), 15000);
+} else if (isTokensPage) {
   loadTokens().catch(console.error);
   setInterval(() => loadTokens().catch(console.error), 15000);
 } else {

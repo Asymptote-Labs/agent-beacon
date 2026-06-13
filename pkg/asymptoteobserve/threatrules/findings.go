@@ -1,6 +1,57 @@
 package threatrules
 
-import "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+import (
+	"sort"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+)
+
+// severityRank orders severities for filtering and sorting findings.
+var severityRank = map[asymptoteobserve.Severity]int{
+	asymptoteobserve.SeverityInfo:     0,
+	asymptoteobserve.SeverityLow:      1,
+	asymptoteobserve.SeverityMedium:   2,
+	asymptoteobserve.SeverityHigh:     3,
+	asymptoteobserve.SeverityCritical: 4,
+}
+
+// SeverityRank returns the comparable rank of a severity (info=0 … critical=4).
+// Unknown values rank as 0. It is the single ordering shared by the `beacon scan`
+// command and the dashboard findings view.
+func SeverityRank(s asymptoteobserve.Severity) int { return severityRank[s] }
+
+// SortFindings orders findings highest-severity first, then by rule id, in place.
+func SortFindings(findings []Finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		ri, rj := severityRank[findings[i].Severity], severityRank[findings[j].Severity]
+		if ri != rj {
+			return ri > rj
+		}
+		return findings[i].RuleID < findings[j].RuleID
+	})
+}
+
+// FilterBySeverity returns the findings at or above minRank (see SeverityRank).
+func FilterBySeverity(findings []Finding, minRank int) []Finding {
+	out := findings[:0]
+	for _, f := range findings {
+		if severityRank[f.Severity] >= minRank {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// CountAtOrAbove returns how many findings are at or above rank.
+func CountAtOrAbove(findings []Finding, rank int) int {
+	n := 0
+	for _, f := range findings {
+		if severityRank[f.Severity] >= rank {
+			n++
+		}
+	}
+	return n
+}
 
 // Finding is a rule match with its supporting evidence, produced when evaluating a rule
 // over a real event stream (as opposed to the boolean Verdict used for conformance).

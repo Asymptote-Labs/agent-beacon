@@ -6,6 +6,32 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+func TestSortAndFilterFindings(t *testing.T) {
+	findings := []Finding{
+		{RuleID: "b-low", Severity: asymptoteobserve.SeverityLow},
+		{RuleID: "a-critical", Severity: asymptoteobserve.SeverityCritical},
+		{RuleID: "a-low", Severity: asymptoteobserve.SeverityLow},
+		{RuleID: "z-medium", Severity: asymptoteobserve.SeverityMedium},
+	}
+	SortFindings(findings)
+	gotOrder := []string{findings[0].RuleID, findings[1].RuleID, findings[2].RuleID, findings[3].RuleID}
+	wantOrder := []string{"a-critical", "z-medium", "a-low", "b-low"}
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Fatalf("sort order = %v, want %v", gotOrder, wantOrder)
+		}
+	}
+
+	// Count before filtering: FilterBySeverity reuses the input's backing array.
+	if n := CountAtOrAbove(findings, SeverityRank(asymptoteobserve.SeverityCritical)); n != 1 {
+		t.Fatalf("count at/above critical = %d, want 1", n)
+	}
+	kept := FilterBySeverity(findings, SeverityRank(asymptoteobserve.SeverityMedium))
+	if len(kept) != 2 {
+		t.Fatalf("filtered len = %d, want 2 (critical+medium)", len(kept))
+	}
+}
+
 func TestSingleEventFindings(t *testing.T) {
 	c, err := Compile(validSingleEventRule()) // matches e.event.action == "file.read"
 	if err != nil {

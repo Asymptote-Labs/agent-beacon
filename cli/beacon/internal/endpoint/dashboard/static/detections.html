@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beacon Endpoint Detections</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="detections">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-only</p>
+        <h1>Beacon Endpoint Detections</h1>
+      </div>
+      <nav class="nav-toggle" aria-label="Dashboard navigation">
+        <a href="/">Log Search</a>
+        <a href="/overview.html">Security Overview</a>
+        <a href="/tokens.html">Token Usage</a>
+        <a class="active" href="/detections.html" aria-current="page">Detections</a>
+        <a href="/findings.html">Findings</a>
+      </nav>
+      <button id="refresh">Refresh</button>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="section-head overview-head">
+          <div>
+            <h2>Threat Rules</h2>
+            <p class="muted">The active rule set <code>beacon scan</code> runs: the local store when present, otherwise the embedded baseline.</p>
+          </div>
+          <div id="detections-meta" class="muted"></div>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Severity</th><th>Rule</th><th>Status</th><th>Posture</th><th>Kind</th><th>Source</th><th>Reason</th></tr>
+          </thead>
+          <tbody id="detections-rows"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
