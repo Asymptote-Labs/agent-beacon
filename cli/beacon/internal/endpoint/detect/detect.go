@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -70,7 +71,7 @@ func Baseline() ([]*threatrules.Rule, error) {
 	rules := make([]*threatrules.Rule, 0, len(names))
 	seen := map[string]bool{}
 	for _, name := range names {
-		data, err := baselineFS.ReadFile(filepath.Join("baseline", name))
+		data, err := baselineFS.ReadFile(baselineRulePath(name))
 		if err != nil {
 			return nil, err
 		}
@@ -88,6 +89,10 @@ func Baseline() ([]*threatrules.Rule, error) {
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+func baselineRulePath(name string) string {
+	return path.Join("baseline", name)
 }
 
 // LoadActive resolves the active rule set:

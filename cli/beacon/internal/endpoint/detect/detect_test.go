@@ -25,6 +25,13 @@ func TestBaselineValid(t *testing.T) {
 	}
 }
 
+func TestBaselineRulePathUsesEmbedFSSeparator(t *testing.T) {
+	got := baselineRulePath("example.rule.yaml")
+	if got != "baseline/example.rule.yaml" {
+		t.Fatalf("embedded FS paths must use forward slashes, got %q", got)
+	}
+}
+
 const aRule = `
 id: %ID%
 version: 1
