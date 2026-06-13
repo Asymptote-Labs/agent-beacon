@@ -29,30 +29,52 @@ func (c *CompiledRule) evaluateCorrelation(events []asymptoteobserve.Event) (Ver
 // step's timestamp is absent the window is not enforced against it (positive fixtures need
 // not carry timestamps, while window fixtures supply them).
 func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) (bool, error) {
-	stepIdx := 0
-	var startTime time.Time
-	startKnown := false
-	final := len(c.steps) - 1
-
-	for i := range events {
-		matched, err := EvalMatch(c.steps[stepIdx], events[i])
+	// Try every step-0 match as a candidate anchor. A single greedy pass is not enough:
+	// an early anchor whose final step falls outside the window must not mask a later
+	// anchor that completes in-window with the same downstream event.
+	for start := range events {
+		matched, err := EvalMatch(c.steps[0], events[start])
 		if err != nil {
 			return false, err
 		}
 		if !matched {
 			continue
 		}
-		t, known := eventTime(events[i])
-		if stepIdx == 0 {
-			startTime, startKnown = t, known
+		ok, err := c.completeFrom(events, start)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// completeFrom reports whether the remaining steps (1..final) can be matched in order on
+// events after start, with the final step within the window of the anchor at start.
+//
+// Each subsequent step is matched at the earliest later event that satisfies it. Because
+// every step must occur after the previous one, taking the earliest match minimizes the
+// time of the final step, so if the greedy-earliest final is outside the window no other
+// alignment from this anchor could do better — the anchor is abandoned and the caller
+// tries the next one.
+func (c *CompiledRule) completeFrom(events []asymptoteobserve.Event, start int) (bool, error) {
+	startTime, startKnown := eventTime(events[start])
+	final := len(c.steps) - 1
+	stepIdx := 1
+	for j := start + 1; j < len(events); j++ {
+		matched, err := EvalMatch(c.steps[stepIdx], events[j])
+		if err != nil {
+			return false, err
+		}
+		if !matched {
+			continue
 		}
 		if stepIdx == final {
+			t, known := eventTime(events[j])
 			if startKnown && known && t.Sub(startTime) > c.window {
-				// This alignment completes outside the window; abandon it and keep
-				// scanning later events for a fresh sequence.
-				stepIdx = 0
-				startKnown = false
-				continue
+				return false, nil
 			}
 			return true, nil
 		}

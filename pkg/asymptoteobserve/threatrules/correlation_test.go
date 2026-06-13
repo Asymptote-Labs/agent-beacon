@@ -108,6 +108,25 @@ func TestCorrelationUnrelatedEventBetweenSteps(t *testing.T) {
 	}
 }
 
+func TestCorrelationLaterAnchorAfterFailedAlignment(t *testing.T) {
+	// An early step-0 match (read@10:00:00) cannot complete in-window: the only egress
+	// is 130s later. But a *second* step-0 match (read@10:00:50) forms a valid 80s pair
+	// with that same egress. The evaluator must try the later read as a fresh anchor
+	// rather than reporting no_match after the first alignment fails.
+	c := readThenEgressRule(t)
+	v, err := c.Evaluate([]asymptoteobserve.Event{
+		corrEvent("2026-06-13T10:00:00Z", "file.read", "s1", withEnv),       // anchor that fails
+		corrEvent("2026-06-13T10:00:50Z", "file.read", "s1", withEnv),       // valid anchor
+		corrEvent("2026-06-13T10:02:10Z", "command.executed", "s1", withCurl), // 130s after #1, 80s after #2
+	})
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if v != VerdictMatch {
+		t.Fatalf("expected match via the later read anchor, got %s", v)
+	}
+}
+
 func TestCorrelationNoTimestampsStillMatches(t *testing.T) {
 	// Without timestamps the window is not enforced, so an in-order sequence matches.
 	c := readThenEgressRule(t)
