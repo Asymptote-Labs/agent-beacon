@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beacon Endpoint Agent Inventory</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="inventory">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-only</p>
+        <h1>Beacon Endpoint Agent Inventory</h1>
+      </div>
+      <nav class="nav-toggle" aria-label="Dashboard navigation">
+        <a href="/">Log Search</a>
+        <a href="/overview.html">Security Analytics</a>
+        <a href="/findings.html">Findings</a>
+        <a href="/detections.html">Detections</a>
+        <a class="active" href="/inventory.html" aria-current="page">Agent Inventory</a>
+        <a href="/tokens.html">Token Usage</a>
+      </nav>
+      <button id="refresh">Refresh</button>
+    </header>
+
+    <main>
+      <section class="panel status-panel">
+        <div>
+          <h2>Endpoint</h2>
+          <p id="log-path" class="muted">Loading runtime log...</p>
+        </div>
+        <div id="inventory-meta" class="muted"></div>
+      </section>
+
+      <section>
+        <div class="section-head overview-head">
+          <div>
+            <h2>Inventory at a Glance</h2>
+            <p class="muted">Local discovery of installed AI agent runtimes, their telemetry posture, configuration files, and MCP servers. Read-only and offline.</p>
+          </div>
+        </div>
+        <div class="cards" id="inventory-cards"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Agent Runtimes</h2>
+            <p class="muted">Every supported runtime Beacon probes for, with detection and telemetry status.</p>
+          </div>
+        </div>
+        <div id="inventory-harnesses" class="harnesses"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Discovered Configurations</h2>
+            <p class="muted">Config, hook, plugin, and profile files found on this endpoint. Paths and hashes only &mdash; file contents are never read into the dashboard.</p>
+          </div>
+          <label class="inline-toggle">
+            <input type="checkbox" id="inventory-show-all" />
+            <span>Show probed paths not found</span>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Scope</th>
+                <th>Kind</th>
+                <th>Parser</th>
+                <th>MCP</th>
+                <th>Beacon Managed</th>
+                <th>Modified</th>
+                <th>Path</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-configs"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>MCP Servers</h2>
+            <p class="muted">Model Context Protocol servers declared across discovered runtime configs. Secret-bearing env keys are filtered out.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Server</th>
+                <th>Scope</th>
+                <th>Transport</th>
+                <th>Command</th>
+                <th>Args</th>
+                <th>Env Keys</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-mcp"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Scan Scope</h2>
+        <div id="inventory-scope" class="scope-grid"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

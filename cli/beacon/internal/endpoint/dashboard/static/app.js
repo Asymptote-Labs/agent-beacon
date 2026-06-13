@@ -3,11 +3,16 @@ const state = {
   summary: null,
   events: [],
   eventResult: null,
+  inventory: null,
   loading: false,
   error: null,
   currentQuery: "",
   newEventCount: 0,
   lastDetectionHashScroll: "",
+  findings: [],
+  findingsRules: null,
+  findingsSessions: new Map(),
+  findingsExpanded: new Set(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -16,6 +21,7 @@ const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
 const isDetectionsPage = document.body.dataset.page === "detections";
 const isFindingsPage = document.body.dataset.page === "findings";
+const isInventoryPage = document.body.dataset.page === "inventory";
 const formFields = [
   "q",
   "harness",
@@ -132,7 +138,6 @@ function render() {
   renderCards();
   renderInsights();
   renderSearchState();
-  renderHarnesses();
   renderEvents();
 }
 
@@ -243,22 +248,215 @@ function renderSummaryOnly() {
   renderCards();
   renderInsights();
   renderSearchState();
-  renderHarnesses();
 }
 
-function renderHarnesses() {
-  if (!$("#harnesses")) return;
-  const harnesses = state.status?.harnesses || [];
-  $("#harnesses").innerHTML = harnesses
-    .map((harness) => `
-      <div class="harness">
-        <strong>${escapeHTML(harness.display_name || harness.name || "unknown")}</strong>
-        <p class="muted">detected: ${Boolean(harness.detected)}</p>
-        <p class="muted">telemetry: ${escapeHTML(harness.telemetry_status || "unknown")}</p>
-        <p class="muted">${escapeHTML(harness.message || "")}</p>
+async function loadInventory() {
+  try {
+    const [status, inventory] = await Promise.all([
+      getJSON("/api/status"),
+      getJSON("/api/inventory"),
+    ]);
+    state.status = status;
+    state.inventory = inventory;
+    state.error = null;
+    renderInventory(inventory);
+  } catch (err) {
+    state.error = err;
+    setText("#inventory-meta", `Failed to load inventory: ${err.message}`);
+  }
+}
+
+function renderInventory(resp) {
+  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
+  const harnesses = resp?.harnesses || [];
+  const configs = resp?.configs || [];
+  const servers = resp?.mcp_servers || [];
+  const existingConfigs = configs.filter((config) => config.exists);
+  setText("#inventory-meta", resp?.generated_at ? `Scanned ${formatTime(resp.generated_at)}` : "");
+  renderInventoryCards(harnesses, existingConfigs, servers);
+  renderInventoryHarnesses(harnesses);
+  renderInventoryConfigs(configs);
+  renderInventoryMCP(servers);
+  renderInventoryScope(resp?.user_scope || {});
+}
+
+function renderInventoryCards(harnesses, configs, servers) {
+  if (!$("#inventory-cards")) return;
+  const detected = harnesses.filter((harness) => harness.detected).length;
+  const enabled = harnesses.filter((harness) => harness.telemetry_status === "enabled").length;
+  const managed = configs.filter((config) => config.beacon_managed).length;
+  const cards = [
+    { label: "Detected Runtimes", value: detected, hint: `${harnesses.length} probed` },
+    { label: "Telemetry Enabled", value: enabled, hint: "reporting to Beacon" },
+    { label: "Config Files", value: configs.length, hint: `${managed} Beacon-managed` },
+    { label: "MCP Servers", value: servers.length, hint: "across all configs" },
+  ];
+  $("#inventory-cards").innerHTML = cards
+    .map((card) => `
+      <div class="card">
+        <span class="muted">${escapeHTML(card.label)}</span>
+        <span class="value">${escapeHTML(card.value)}</span>
+        ${card.hint ? `<span class="muted">${escapeHTML(card.hint)}</span>` : ""}
       </div>
     `)
     .join("");
+}
+
+function renderInventoryHarnesses(harnesses) {
+  const el = $("#inventory-harnesses");
+  if (!el) return;
+  if (!harnesses.length) {
+    el.innerHTML = `<p class="muted">No runtimes probed.</p>`;
+    return;
+  }
+  el.innerHTML = harnesses
+    .map((harness) => {
+      const rows = [
+        ["Detected", harness.detected ? "yes" : "no"],
+        ["Telemetry", harness.telemetry_status || "unknown"],
+        ["Capability", harness.capability || ""],
+        ["Version", harness.version || ""],
+        ["Config", harness.config_path || ""],
+        ["Executable", harness.executable_path || ""],
+      ].filter(([, value]) => value !== "");
+      return `
+        <div class="harness ${harness.detected ? "" : "harness-muted"}">
+          <div class="harness-head">
+            <strong>${escapeHTML(harness.display_name || harness.name || "unknown")}</strong>
+            ${telemetryBadge(harness.telemetry_status, harness.detected)}
+          </div>
+          <dl class="harness-meta">
+            ${rows.map(([key, value]) => `<div><dt>${escapeHTML(key)}</dt><dd class="${key === "Config" || key === "Executable" ? "mono" : ""}">${escapeHTML(value)}</dd></div>`).join("")}
+          </dl>
+          ${harness.message ? `<p class="muted">${escapeHTML(harness.message)}</p>` : ""}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderInventoryConfigs(configs) {
+  const tbody = $("#inventory-configs");
+  if (!tbody) return;
+  const showAll = $("#inventory-show-all")?.checked;
+  const rows = (configs || []).filter((config) => showAll || config.exists);
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">No configuration files discovered.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows
+    .map((config) => `
+      <tr class="${config.exists ? "" : "row-absent"}">
+        <td>${escapeHTML(runtimeLabel(config.runtime))}</td>
+        <td>${badge(config.scope || "unknown", "badge-muted")}</td>
+        <td>${escapeHTML(configKindLabel(config.config_kind))}</td>
+        <td>${parserBadge(config)}</td>
+        <td>${config.exists ? escapeHTML(config.mcp_server_count ?? 0) : `<span class="muted">-</span>`}</td>
+        <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
+        <td class="nowrap">${config.modified_at ? escapeHTML(formatTime(config.modified_at)) : `<span class="muted">-</span>`}</td>
+        <td class="mono path-cell">${escapeHTML(config.path || config.path_hash || "")}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function renderInventoryMCP(servers) {
+  const tbody = $("#inventory-mcp");
+  if (!tbody) return;
+  if (!servers.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">No MCP servers declared in discovered configs.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = servers
+    .map((server) => `
+      <tr>
+        <td>${escapeHTML(runtimeLabel(server.runtime))}</td>
+        <td>${escapeHTML(server.server_name || server.server_name_hash || "")}</td>
+        <td>${badge(server.source_scope || "unknown", "badge-muted")}</td>
+        <td>${badge(server.transport || "unknown", "badge-muted")}</td>
+        <td class="mono">${server.command_present ? escapeHTML(server.command_name || "yes") : `<span class="muted">-</span>`}</td>
+        <td>${escapeHTML(server.args_count ?? 0)}</td>
+        <td>${envKeysCell(server)}</td>
+        <td class="mono path-cell">${escapeHTML(server.source_path || server.source_path_hash || "")}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function renderInventoryScope(scope) {
+  const el = $("#inventory-scope");
+  if (!el) return;
+  const rows = [
+    ["Mode", scope.mode || ""],
+    ["Home", scope.home_path || ""],
+    ["Working directory", scope.working_dir || ""],
+  ].filter(([, value]) => value);
+  el.innerHTML = rows.length
+    ? rows.map(([key, value]) => `<div><span class="muted">${escapeHTML(key)}</span><strong class="mono">${escapeHTML(value)}</strong></div>`).join("")
+    : `<p class="muted">No scope information.</p>`;
+}
+
+function telemetryBadge(status, detected) {
+  if (!detected) return badge("not detected", "badge-muted");
+  const classes = {
+    enabled: "badge-ok",
+    disabled: "badge-muted",
+    missing: "badge-warn",
+    misconfigured: "badge-warn",
+  };
+  return badge(status || "unknown", classes[status] || "badge-muted");
+}
+
+function parserBadge(config) {
+  const status = config.parser_status || "unknown";
+  const cls =
+    status === "ok" ? "badge-ok" :
+    status === "not_found" ? "badge-muted" :
+    status === "partial" ? "badge-warn" :
+    "badge-danger";
+  const showReason = config.reason && status !== "ok" && status !== "not_found";
+  return `${badge(status, cls)}${showReason ? `<br /><span class="muted">${escapeHTML(config.reason)}</span>` : ""}`;
+}
+
+function envKeysCell(server) {
+  const keys = server.env_keys || [];
+  const total = server.env_key_count || keys.length;
+  const filtered = Math.max(0, total - keys.length);
+  if (!keys.length) {
+    return filtered ? `<span class="muted">${filtered} filtered</span>` : `<span class="muted">-</span>`;
+  }
+  const chips = keys.map((key) => badge(key, "badge-muted")).join(" ");
+  return chips + (filtered ? ` <span class="muted">+${filtered} filtered</span>` : "");
+}
+
+function runtimeLabel(value) {
+  const labels = {
+    claude_code: "Claude Code",
+    codex_cli: "Codex CLI",
+    cursor: "Cursor",
+    gemini_cli: "Gemini CLI",
+    antigravity_cli: "Antigravity CLI",
+    vscode: "VS Code",
+    factory: "Factory Droid",
+    copilot_cli: "GitHub Copilot CLI",
+    opencode: "opencode",
+    hermes: "Hermes Agent",
+    "devin-cli": "Devin CLI",
+    "devin-desktop": "Devin Desktop",
+    grok: "Grok",
+  };
+  return labels[value] || harnessLabel(value);
+}
+
+function configKindLabel(kind) {
+  const labels = {
+    native_config: "Native config",
+    hook_config: "Hook config",
+    plugin: "Plugin",
+    profile: "Shell profile",
+    managed_config: "Managed config",
+  };
+  return labels[kind] || kind || "unknown";
 }
 
 function renderEvents() {
@@ -941,24 +1139,168 @@ async function loadFindings() {
 
 function renderFindings(resp) {
   const findings = resp?.findings || [];
+  state.findings = findings;
   setText("#findings-meta", `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${resp?.scanned || 0} events`);
   const tbody = $("#findings-rows");
   if (!tbody) return;
   if (!findings.length) {
+    state.findingsExpanded.clear();
     tbody.innerHTML = `<tr><td colspan="5" class="muted">No findings.</td></tr>`;
     return;
   }
   tbody.innerHTML = findings
-    .map((f) => `
-      <tr>
+    .map((f, i) => `
+      <tr class="finding-row row-link" data-finding-row="${i}" aria-expanded="false">
         <td>${badge(f.severity || "unknown", `severity-${f.severity || "unknown"}`)}</td>
-        <td><a class="mono" href="/detections.html#rule-${escapeHTML(f.rule_id)}">${escapeHTML(f.rule_id)}</a><br /><span class="muted">${escapeHTML(f.title || "")}</span></td>
-        <td class="mono">${escapeHTML(f.session_id || "-")}</td>
+        <td><span class="cell-link mono"><span class="cell-link-caret" aria-hidden="true">&#9656;</span>${escapeHTML(f.rule_id)}</span><br /><span class="muted">${escapeHTML(f.title || "")}</span></td>
+        <td><span class="cell-link mono">${escapeHTML(f.session_id || "-")}</span></td>
         <td>${escapeHTML(f.reason || "")}</td>
         <td>${summarizeFindingEvents(f.events)}</td>
       </tr>
     `)
     .join("");
+  $$("#findings-rows [data-finding-row]").forEach((row) => {
+    row.addEventListener("click", () => toggleFinding(Number(row.dataset.findingRow)));
+  });
+  applyFindingExpansions();
+}
+
+function toggleFinding(i) {
+  if (state.findingsExpanded.has(i)) state.findingsExpanded.delete(i);
+  else state.findingsExpanded.add(i);
+  applyFindingExpansions();
+}
+
+// applyFindingExpansions reconciles the inline detail rows with the set of
+// expanded findings. It is idempotent: it removes any stale detail rows, then
+// reinserts one detail row after each expanded finding. Async data loads
+// (rule definitions, session events) call back into it once they resolve.
+function applyFindingExpansions() {
+  const tbody = $("#findings-rows");
+  if (!tbody) return;
+  Array.from(tbody.querySelectorAll(".finding-detail")).forEach((el) => el.remove());
+  Array.from(tbody.querySelectorAll("[data-finding-row]")).forEach((row) => {
+    row.setAttribute("aria-expanded", "false");
+    row.classList.remove("open");
+  });
+  for (const i of state.findingsExpanded) {
+    const row = tbody.querySelector(`tr[data-finding-row="${i}"]`);
+    if (!row) continue;
+    row.setAttribute("aria-expanded", "true");
+    row.classList.add("open");
+    row.insertAdjacentHTML("afterend", `<tr class="finding-detail"><td colspan="5">${findingDetailHTML(i)}</td></tr>`);
+  }
+}
+
+function findingDetailHTML(i) {
+  const f = state.findings[i];
+  if (!f) return "";
+  return `
+    <div class="detail-panel">
+      ${ruleDetailHTML(f.rule_id)}
+      ${sessionDetailHTML(f.session_id)}
+    </div>
+  `;
+}
+
+async function ensureDetectionsCache() {
+  if (state.findingsRules) return state.findingsRules;
+  const resp = await getJSON("/api/detections");
+  const map = {};
+  for (const rule of resp?.rules || []) map[rule.id] = rule;
+  state.findingsRules = map;
+  return map;
+}
+
+function ruleDetailHTML(ruleId) {
+  if (!state.findingsRules) {
+    ensureDetectionsCache().then(applyFindingExpansions).catch(() => {
+      state.findingsRules = {};
+      applyFindingExpansions();
+    });
+    return `<div class="detail-section"><h3>Detection rule</h3><p class="muted">Loading rule definition&hellip;</p></div>`;
+  }
+  const rule = state.findingsRules[ruleId];
+  if (!rule) {
+    return `<div class="detail-section"><h3>Detection rule</h3><p class="muted">No active rule found for <span class="mono">${escapeHTML(ruleId)}</span> — it may have been removed from the active set.</p></div>`;
+  }
+  const rows = [
+    ["Rule", rule.id],
+    ["Title", rule.title],
+    ["Severity", rule.severity],
+    ["Status", rule.status],
+    ["Posture", rule.posture],
+    ["Kind", rule.kind],
+    ["Source", rule.source],
+    ["Reason", rule.reason],
+  ].filter(([, value]) => value);
+  const taxonomy = rule.taxonomy ? Object.entries(rule.taxonomy) : [];
+  return `
+    <div class="detail-section">
+      <h3>Detection rule</h3>
+      <div class="detail-grid">
+        ${rows.map(([label, value]) => `<div><span class="muted">${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`).join("")}
+      </div>
+      ${rule.description ? `<p>${escapeHTML(rule.description)}</p>` : ""}
+      ${taxonomy.length ? `<div class="detail-tags">${taxonomy.map(([key, value]) => badge(`${key}: ${value}`, "badge-muted")).join("")}</div>` : ""}
+      <a class="text-button" href="/detections.html#rule-${escapeHTML(rule.id)}">Open in Detections</a>
+    </div>
+  `;
+}
+
+function sessionDetailHTML(sessionId) {
+  if (!sessionId) {
+    return `<div class="detail-section"><h3>Session timeline</h3><p class="muted">This finding is not tied to a single session.</p></div>`;
+  }
+  if (!state.findingsSessions.has(sessionId)) {
+    ensureSessionEvents(sessionId).then(applyFindingExpansions).catch(() => {
+      state.findingsSessions.set(sessionId, []);
+      applyFindingExpansions();
+    });
+    return `<div class="detail-section"><h3>Session timeline</h3><p class="muted">Loading session timeline&hellip;</p></div>`;
+  }
+  const records = state.findingsSessions.get(sessionId);
+  if (!records.length) {
+    return `<div class="detail-section"><h3>Session timeline</h3><p class="muted">No events found for session <span class="mono">${escapeHTML(sessionId)}</span>.</p></div>`;
+  }
+  return `
+    <div class="detail-section">
+      <div class="detail-head">
+        <h3>Session timeline</h3>
+        <span class="muted">${escapeHTML(sessionId)} &middot; ${records.length} event${records.length === 1 ? "" : "s"}</span>
+        <a class="text-button" href="/?session=${encodeURIComponent(sessionId)}">Open in Log Search</a>
+      </div>
+      <ol class="session-timeline">${records.map((record) => sessionTimelineRow(record)).join("")}</ol>
+    </div>
+  `;
+}
+
+async function ensureSessionEvents(sessionId) {
+  if (state.findingsSessions.has(sessionId)) return state.findingsSessions.get(sessionId);
+  const resp = await getJSON(`/api/events?session=${encodeURIComponent(sessionId)}&limit=500`);
+  const records = (resp?.events || []).slice().sort((a, b) => {
+    const at = new Date(a.event?.timestamp || 0).getTime();
+    const bt = new Date(b.event?.timestamp || 0).getTime();
+    return at - bt;
+  });
+  state.findingsSessions.set(sessionId, records);
+  return records;
+}
+
+function sessionTimelineRow(record) {
+  const event = record.event || {};
+  const info = event.event || {};
+  const action = info.action || "event";
+  const severity = event.severity || "unknown";
+  const artifact = primaryArtifact(event) || event.message || "";
+  return `
+    <li>
+      <span class="muted nowrap">${escapeHTML(formatTime(event.timestamp))}</span>
+      ${badge(severity, `severity-${severity}`)}
+      <span class="mono">${escapeHTML(action)}</span>
+      ${artifact ? `<span class="artifact">${escapeHTML(truncateMiddle(artifact, 160))}</span>` : ""}
+    </li>
+  `;
 }
 
 function summarizeFindingEvents(events) {
@@ -985,9 +1327,10 @@ $("#min-severity")?.addEventListener("change", (event) => {
 });
 
 $("#refresh")?.addEventListener("click", () => {
-  const loader = isFindingsPage ? loadFindings : isDetectionsPage ? loadDetections : isTokensPage ? loadTokens : load;
+  const loader = isFindingsPage ? loadFindings : isDetectionsPage ? loadDetections : isTokensPage ? loadTokens : isInventoryPage ? loadInventory : load;
   loader().catch(console.error);
 });
+$("#inventory-show-all")?.addEventListener("change", () => renderInventoryConfigs(state.inventory?.configs || []));
 $("#filters")?.addEventListener("submit", (event) => {
   event.preventDefault();
   load({ updateLocation: true }).catch(console.error);
@@ -1009,6 +1352,9 @@ if (isDetectionsPage) {
 } else if (isTokensPage) {
   loadTokens().catch(console.error);
   setInterval(() => loadTokens().catch(console.error), 15000);
+} else if (isInventoryPage) {
+  loadInventory().catch(console.error);
+  setInterval(() => loadInventory().catch(console.error), 15000);
 } else {
   hydrateFiltersFromURL();
   load().catch(console.error);

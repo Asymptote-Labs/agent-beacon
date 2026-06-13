@@ -409,6 +409,76 @@ func TestRunScanRejectsEmptyRuleSet(t *testing.T) {
 	}
 }
 
+func TestInventoryEndpointReturnsConfigsAndMCPServers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A Claude Code user config declaring one MCP server, which the inventory
+	// scan should discover and surface.
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("mkdir claude config dir: %v", err)
+	}
+	settings := `{"mcpServers":{"local-fs":{"command":"npx","args":["-y","server"],"env":{"FS_ROOT":"/tmp"}}}}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0644); err != nil {
+		t.Fatalf("write claude settings: %v", err)
+	}
+
+	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/inventory", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var resp InventoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal inventory response: %v", err)
+	}
+	if resp.GeneratedAt == "" {
+		t.Fatal("expected generated_at to be set")
+	}
+	if resp.UserScope.Mode == "" {
+		t.Fatalf("expected user scope mode, got %#v", resp.UserScope)
+	}
+
+	var claudeConfig *struct {
+		exists bool
+		mcp    int
+	}
+	for _, config := range resp.Configs {
+		if config.Runtime == "claude_code" && config.Scope == "user" && config.Exists {
+			claudeConfig = &struct {
+				exists bool
+				mcp    int
+			}{exists: true, mcp: config.MCPServerCount}
+		}
+	}
+	if claudeConfig == nil {
+		t.Fatalf("expected an existing claude_code user config in %#v", resp.Configs)
+	}
+	if claudeConfig.mcp != 1 {
+		t.Fatalf("claude config mcp_server_count = %d, want 1", claudeConfig.mcp)
+	}
+
+	found := false
+	for _, server := range resp.MCPServers {
+		if server.Runtime == "claude_code" && server.ServerName == "local-fs" {
+			found = true
+			if !server.CommandPresent || server.CommandName != "npx" {
+				t.Fatalf("server command = %#v, want npx command present", server)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a local-fs MCP server, got %#v", resp.MCPServers)
+	}
+}
+
 func TestStaticDashboardPagesServe(t *testing.T) {
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {
@@ -420,10 +490,11 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		want string
 	}{
 		{path: "/", want: "Beacon Endpoint Log Search"},
-		{path: "/overview.html", want: "Beacon Endpoint Security Overview"},
+		{path: "/overview.html", want: "Beacon Endpoint Security Analytics"},
 		{path: "/tokens.html", want: "Beacon Endpoint Token Usage"},
 		{path: "/detections.html", want: "Beacon Endpoint Detections"},
 		{path: "/findings.html", want: "Beacon Endpoint Findings"},
+		{path: "/inventory.html", want: "Beacon Endpoint Agent Inventory"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
