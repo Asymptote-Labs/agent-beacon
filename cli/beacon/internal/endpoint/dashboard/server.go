@@ -40,9 +40,16 @@ type StatusResponse struct {
 	Diagnostics interface{}                `json:"diagnostics"`
 }
 
+var (
+	resolveRuntimeLog = lifecycle.ResolveRuntimeLog
+	getEndpointStatus = lifecycle.GetStatus
+)
+
 func Handler(opts Options) (http.Handler, error) {
+	requestedUserMode := opts.UserMode
+	requestedLogPath := opts.LogPath
 	rulesUserMode := opts.UserMode
-	runtimeLog := lifecycle.ResolveRuntimeLog(opts.UserMode, opts.LogPath)
+	runtimeLog := resolveRuntimeLog(requestedUserMode, requestedLogPath)
 	opts.LogPath = runtimeLog.EffectiveLogPath
 	opts.UserMode = runtimeLog.EffectiveUserMode
 	staticRoot, err := fs.Sub(staticFiles, "static")
@@ -55,7 +62,7 @@ func Handler(opts Options) (http.Handler, error) {
 			methodNotAllowed(w)
 			return
 		}
-		status := lifecycle.GetStatus(opts.UserMode, opts.LogPath)
+		status := getEndpointStatus(requestedUserMode, requestedLogPath)
 		writeJSON(w, StatusResponse{
 			Version:     status.Version,
 			ConfigPath:  status.ConfigPath,

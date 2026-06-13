@@ -56,6 +56,8 @@ var endpointDashboardCmd = &cobra.Command{
 	RunE:         runEndpointDashboard,
 }
 
+var dashboardListenAndServe = dashboard.ListenAndServe
+
 func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	cfg := loadOrDefaultConfig()
 	userMode := endpointUserMode()
@@ -79,9 +81,9 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	return dashboard.ListenAndServe(dashboard.Options{
+	return dashboardListenAndServe(dashboard.Options{
 		Addr:     endpointOpts.dashboardAddr,
-		LogPath:  cfg.LogPath,
+		LogPath:  endpointOpts.logPath,
 		UserMode: userMode,
 	})
 }
