@@ -624,3 +624,188 @@ pre {
 .row-link:hover {
   background: rgba(125, 211, 252, 0.08);
 }
+
+/* Findings: rule + session render as affordances; the whole row toggles an
+   inline detail panel showing the rule definition and session timeline. */
+.cell-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.finding-row:hover .cell-link {
+  text-decoration-style: solid;
+}
+
+.cell-link-caret {
+  display: inline-block;
+  font-size: 0.7em;
+  transition: transform 120ms ease;
+}
+
+.finding-row.open .cell-link-caret {
+  transform: rotate(90deg);
+}
+
+.finding-detail,
+.finding-detail > td {
+  cursor: default;
+  background: var(--panel-soft);
+}
+
+.finding-detail:hover {
+  background: var(--panel-soft);
+}
+
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.4rem 0.2rem;
+}
+
+.detail-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem 1.25rem;
+}
+
+.detail-grid > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.detail-head h3 {
+  margin: 0;
+}
+
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.session-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.session-timeline li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.badge-ok {
+  color: var(--ok);
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+
+.harness-muted {
+  opacity: 0.72;
+}
+
+.harness-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.harness-meta {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+}
+
+.harness-meta > div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.harness-meta dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.harness-meta dd {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.inline-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.inline-toggle input {
+  padding: 0;
+  width: auto;
+}
+
+.inline-toggle span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.row-absent {
+  opacity: 0.6;
+}
+
+.path-cell {
+  max-width: 26rem;
+}
+
+.scope-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.scope-grid > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.scope-grid strong {
+  overflow-wrap: anywhere;
+}

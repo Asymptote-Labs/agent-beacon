@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
@@ -40,9 +41,22 @@ type StatusResponse struct {
 	Diagnostics interface{}                `json:"diagnostics"`
 }
 
+// InventoryResponse is the richer agent inventory served to the dashboard's
+// dedicated Agent Inventory tab. It combines runtime telemetry detection
+// (harnesses) with the local configuration/MCP-server scan, mirroring the
+// shape of `beacon endpoint inventory --json`.
+type InventoryResponse struct {
+	GeneratedAt string                `json:"generated_at"`
+	UserScope   inventory.UserScope   `json:"user_scope"`
+	Harnesses   interface{}           `json:"harnesses"`
+	Configs     []inventory.Config    `json:"configs"`
+	MCPServers  []inventory.MCPServer `json:"mcp_servers"`
+}
+
 var (
 	resolveRuntimeLog = lifecycle.ResolveRuntimeLog
 	getEndpointStatus = lifecycle.GetStatus
+	scanInventory     = inventory.Scan
 )
 
 func Handler(opts Options) (http.Handler, error) {
@@ -72,6 +86,21 @@ func Handler(opts Options) (http.Handler, error) {
 			Collector:   status.Collector,
 			Service:     status.Service,
 			Diagnostics: status.Diagnostics,
+		})
+	})
+	mux.HandleFunc("/api/inventory", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		status := getEndpointStatus(requestedUserMode, requestedLogPath)
+		scan := scanInventory(inventory.Options{})
+		writeJSON(w, InventoryResponse{
+			GeneratedAt: scan.GeneratedAt,
+			UserScope:   scan.UserScope,
+			Harnesses:   status.Harnesses,
+			Configs:     scan.Configs,
+			MCPServers:  scan.MCPServers,
 		})
 	})
 	mux.HandleFunc("/api/summary", func(w http.ResponseWriter, r *http.Request) {
