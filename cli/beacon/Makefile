@@ -123,3 +123,11 @@ lint:
 # Run go mod tidy
 tidy:
 	go mod tidy
+
+# Package the external threat-rule pack (repo rules/, not embedded in the binary)
+# into a tarball that `beacon rules pull` / `beacon rules add` can install. The
+# release build produces the same artifact via the goreleaser before-hook.
+rules-pack:
+	mkdir -p release-rules
+	tar -czf release-rules/threat-rules.tar.gz -C ../.. rules
+	@echo "wrote release-rules/threat-rules.tar.gz"

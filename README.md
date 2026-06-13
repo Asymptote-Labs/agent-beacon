@@ -225,8 +225,17 @@ beacon rules lint ./rules         # validate + run a rule pack's fixtures (autho
 beacon rules fields               # list event fields a rule can match on
 ```
 
+The full rule pack ships as a release asset (`threat-rules.tar.gz`), not inside the
+binary, so the corpus grows without enlarging `beacon`. Install it with one command:
+
+```bash
+beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/latest/download/threat-rules.tar.gz
+beacon scan
+```
+
 `beacon rules pull` is the only command that reaches the network, and only when you run
-it against a URL you supply — the agent never fetches rules on its own.
+it against a URL you supply — the agent never fetches rules on its own. Offline or
+air-gapped users can instead `git clone` the repo and run `beacon rules add ./rules`.
 
 ## Start Here
 
