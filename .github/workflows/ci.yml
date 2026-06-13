@@ -46,6 +46,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: cli/beacon/go.mod
+      - name: Build embedded hooks binary
+        working-directory: cli/beacon
+        # hooks.bin is gitignored (build-time artifact). The CLI embeds it via
+        # //go:embed, so build the real binary for this runner before testing —
+        # a placeholder is not enough (InstallFactory requires a real binary).
+        run: make build-hooks-current
       - name: Test CLI
         working-directory: cli/beacon
         run: go test ./...
@@ -64,7 +70,7 @@ jobs:
       - name: Public CLI command tree smoke test
         working-directory: cli/beacon
         run: |
-          go build -o beacon .
+          make build
           ./beacon --help > /tmp/beacon-help.txt
           ./beacon endpoint --help > /tmp/beacon-endpoint-help.txt
           ./beacon endpoint hooks --help > /tmp/beacon-hooks-help.txt
@@ -124,7 +130,7 @@ jobs:
           sh packaging/macos/test-endpoint-scripts.sh
       - name: Build macOS package skeleton
         run: |
-          (cd cli/beacon && go build -o beacon .)
+          (cd cli/beacon && make build)
           mkdir -p /tmp/beacon-collector
           printf '#!/bin/sh\nexit 0\n' > /tmp/beacon-collector/beacon-otelcol
           chmod +x /tmp/beacon-collector/beacon-otelcol
