@@ -195,6 +195,36 @@ long-term retention and search.
   <img src="images/dashboard-log-search.png" alt="Beacon dashboard log search" width="860">
 </p>
 
+## Detect threats in local telemetry
+
+`beacon scan` runs threat-detection rules over the local runtime log and reports
+findings — read-only, with no network access. Rules are an open, versioned format
+([`spec/threat-rules`](spec/threat-rules/SPEC.md)) whose match conditions are
+[CEL](https://cel.dev) expressions over the endpoint event schema, and each rule ships
+its own conformance fixtures.
+
+```bash
+beacon scan                       # run the active rules over the runtime log
+beacon scan --json                # machine-readable findings
+beacon scan --min-severity high   # only high/critical findings
+beacon scan --fail-on high        # non-zero exit for CI gating
+```
+
+The detection engine ships in the binary, but the rule corpus is **external data** loaded
+from a local store (`~/.beacon/endpoint/rules`), so a growing rule set never enlarges the
+agent. A small baseline is built in; manage the store with `beacon rules`:
+
+```bash
+beacon rules list                 # active rules (baseline or store)
+beacon rules add ./my-rules       # install local rule files (validated before install)
+beacon rules pull <url>           # explicit, user-initiated fetch of a rule pack
+beacon rules lint ./rules         # validate + run a rule pack's fixtures (authoring)
+beacon rules fields               # list event fields a rule can match on
+```
+
+`beacon rules pull` is the only command that reaches the network, and only when you run
+it against a URL you supply — the agent never fetches rules on its own.
+
 ## Start Here
 
 - [Beacon CLI docs](https://docs.asymptotelabs.ai) — full documentation index.

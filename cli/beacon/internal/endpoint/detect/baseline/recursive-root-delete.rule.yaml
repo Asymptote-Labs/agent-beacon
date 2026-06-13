@@ -1,0 +1,38 @@
+id: recursive-root-delete
+version: 1
+title: Recursive delete targeting a sensitive root path
+description: >
+  A recursive `rm` whose target is a filesystem root, home, or a bare wildcard —
+  a destructive command an autonomous agent should not run unprompted.
+severity: critical
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM08
+
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)\\brm\\s+-[a-z]*[rf][a-z]*\\s+(/|~|\\$HOME|\\*)(\\s|$|/)")
+
+emit:
+  reason: "Recursive rm targeting a root, home, or wildcard path"
+
+tests:
+  - name: rm_rf_root
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf /" }
+        session: { id: s1 }
+  - name: rm_rf_home
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -fr ~/ " }
+        session: { id: s1 }
+  - name: rm_rf_local_build
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf ./build/cache" }
+        session: { id: s1 }

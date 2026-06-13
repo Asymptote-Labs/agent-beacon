@@ -36,6 +36,7 @@ Supported runtime surfaces today:
 - Elasticsearch/Filebeat content pack generation for forwarding local Beacon JSONL into customer-managed Elastic deployments or the bundled loopback-only development stack.
 - A local-only dashboard served by `beacon endpoint dashboard`, bound to loopback by default and backed by the runtime JSONL log.
 - Token usage and runtime-reported cost capture across spans, logs, and metric datapoints, normalized into `gen_ai.usage`, with attribution rollups served by the dashboard token view (`/api/tokens`) and the `beacon endpoint tokens` report command for local and CI logs.
+- Local threat detection via `beacon scan`, which runs the open Threat Rules format (`spec/threat-rules`; CEL match conditions over the endpoint event schema, with embedded conformance fixtures) over the runtime JSONL. The engine (`pkg/asymptoteobserve/threatrules`) ships in the binary; the rule corpus is external data loaded from a local store (`~/.beacon/endpoint/rules`) managed by `beacon rules`, so the corpus can grow without enlarging the binary. `scan` is read-only and offline; only the explicit, user-initiated `beacon rules pull <url>` reaches the network. A small frozen baseline is embedded so `scan` works before any rules are installed.
 
 Current non-goals unless explicitly requested:
 
@@ -109,6 +110,19 @@ Run the local dashboard during manual testing:
 cd cli/beacon
 go run . endpoint dashboard
 ```
+
+Run local threat detection and manage rules during manual testing:
+
+```bash
+cd cli/beacon
+go run . scan                  # run active rules over the runtime log
+go run . rules list            # show active rules (baseline or store)
+go run . rules lint ../../rules  # validate + run the repo rule pack's fixtures
+```
+
+When adding event fields a rule can match on, regenerate the field reference:
+`beacon rules fields --markdown > spec/threat-rules/FIELDS.md` (a conformance test fails if
+it drifts).
 
 ## Release Deployments
 

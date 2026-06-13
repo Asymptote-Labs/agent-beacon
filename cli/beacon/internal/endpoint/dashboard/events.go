@@ -83,6 +83,59 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	return result, nil
 }
 
+// StreamEvents reads every event from the runtime log and its rotated archives in
+// chronological (append) order and invokes fn for each, with no limit and no result
+// buffering. Rule evaluation (beacon scan) needs the full, ordered stream — ReadEvents
+// caps results and sorts newest-first, which is wrong for ordered correlation. Malformed
+// lines are skipped; a missing active log is not an error. If fn returns an error,
+// streaming stops and returns it.
+func StreamEvents(path string, fn func(schema.Event) error) error {
+	sources := eventSources(path) // [active, archive1, archive2, ...] (archives ascending)
+	// Chronological order is oldest first: highest archive index down to 1, then the
+	// active log last. Within a file, lines are already in append order.
+	ordered := make([]eventSource, 0, len(sources))
+	for i := len(sources) - 1; i >= 1; i-- {
+		ordered = append(ordered, sources[i])
+	}
+	ordered = append(ordered, sources[0])
+
+	for _, source := range ordered {
+		if err := streamSource(source, fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func streamSource(source eventSource, fn func(schema.Event) error) error {
+	file, err := os.Open(source.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var event schema.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			continue // skip malformed
+		}
+		normalizeDashboardEvent(&event)
+		if err := fn(event); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
 // SortRecordsAppendOrder orders records oldest-first in log append order: by
 // timestamp, then older archives before the live log, then by numeric line.
 // Token aggregation needs this because runtime timestamps are second-resolution
