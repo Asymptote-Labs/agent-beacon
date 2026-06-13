@@ -244,6 +244,81 @@ func TestTokensEndpointSessionFilterIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestDetectionsEndpointListsBaselineRules(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // empty store -> embedded baseline
+	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/detections", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp DetectionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal detections: %v", err)
+	}
+	if resp.Count == 0 || resp.Count != len(resp.Rules) {
+		t.Fatalf("count = %d, rules = %d", resp.Count, len(resp.Rules))
+	}
+	for _, rule := range resp.Rules {
+		if rule.Source != "baseline" {
+			t.Fatalf("rule %q source = %q, want baseline", rule.ID, rule.Source)
+		}
+		if rule.ID == "" || rule.Severity == "" || rule.Kind == "" {
+			t.Fatalf("rule missing fields: %#v", rule)
+		}
+	}
+}
+
+func TestFindingsEndpointReturnsHitsLinkedToRules(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // empty store -> embedded baseline
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	// A destructive command the baseline "recursive-root-delete" rule matches.
+	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"claude_code"},"session":{"id":"local-session"},"command":{"command":"rm -rf /"},"message":"command.executed"}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/findings", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp FindingsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal findings: %v", err)
+	}
+	if resp.Scanned != 1 {
+		t.Fatalf("scanned = %d, want 1", resp.Scanned)
+	}
+	found := false
+	for _, f := range resp.Findings {
+		if f.RuleID == "recursive-root-delete" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a recursive-root-delete finding, got %#v", resp.Findings)
+	}
+
+	// An out-of-range min_severity is rejected.
+	bad := httptest.NewRequest(http.MethodGet, "/api/findings?min_severity=nope", nil)
+	badRec := httptest.NewRecorder()
+	handler.ServeHTTP(badRec, bad)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid min_severity status = %d, want 400", badRec.Code)
+	}
+}
+
 func TestStaticDashboardPagesServe(t *testing.T) {
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {
@@ -257,6 +332,8 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		{path: "/", want: "Beacon Endpoint Log Search"},
 		{path: "/overview.html", want: "Beacon Endpoint Security Overview"},
 		{path: "/tokens.html", want: "Beacon Endpoint Token Usage"},
+		{path: "/detections.html", want: "Beacon Endpoint Detections"},
+		{path: "/findings.html", want: "Beacon Endpoint Findings"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {

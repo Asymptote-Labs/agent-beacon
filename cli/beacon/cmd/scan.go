@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -42,13 +41,15 @@ Scanning is read-only and never touches the network.`,
 	RunE:         runScan,
 }
 
-// severityRank orders severities for --min-severity / --fail-on comparisons.
-var severityRank = map[asymptoteobserve.Severity]int{
-	asymptoteobserve.SeverityInfo:     0,
-	asymptoteobserve.SeverityLow:      1,
-	asymptoteobserve.SeverityMedium:   2,
-	asymptoteobserve.SeverityHigh:     3,
-	asymptoteobserve.SeverityCritical: 4,
+// severityRanks maps --min-severity / --fail-on flag values to comparable ranks,
+// delegating to the shared ordering in the threatrules package.
+func severityRankOf(s asymptoteobserve.Severity) (int, bool) {
+	switch s {
+	case asymptoteobserve.SeverityInfo, asymptoteobserve.SeverityLow, asymptoteobserve.SeverityMedium,
+		asymptoteobserve.SeverityHigh, asymptoteobserve.SeverityCritical:
+		return threatrules.SeverityRank(s), true
+	}
+	return 0, false
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -59,7 +60,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	var minRank int
 	if s := strings.TrimSpace(scanOpts.minSeverity); s != "" {
-		r, ok := severityRank[asymptoteobserve.Severity(s)]
+		r, ok := severityRankOf(asymptoteobserve.Severity(s))
 		if !ok {
 			return fmt.Errorf("invalid --min-severity %q (info|low|medium|high|critical)", s)
 		}
@@ -67,7 +68,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	failRank := -1
 	if s := strings.TrimSpace(scanOpts.failOn); s != "" {
-		r, ok := severityRank[asymptoteobserve.Severity(s)]
+		r, ok := severityRankOf(asymptoteobserve.Severity(s))
 		if !ok {
 			return fmt.Errorf("invalid --fail-on %q (info|low|medium|high|critical)", s)
 		}
@@ -115,19 +116,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// findings from the output slice.
 	failCount := 0
 	if failRank >= 0 {
-		failCount = countAtOrAbove(findings, failRank)
+		failCount = threatrules.CountAtOrAbove(findings, failRank)
 	}
 	if minRank > 0 {
-		findings = filterBySeverity(findings, minRank)
+		findings = threatrules.FilterBySeverity(findings, minRank)
 	}
 	// Highest severity first, then rule id, for stable, useful ordering.
-	sort.SliceStable(findings, func(i, j int) bool {
-		ri, rj := severityRank[findings[i].Severity], severityRank[findings[j].Severity]
-		if ri != rj {
-			return ri > rj
-		}
-		return findings[i].RuleID < findings[j].RuleID
-	})
+	threatrules.SortFindings(findings)
 
 	out := cmd.OutOrStdout()
 	if scanOpts.jsonOutput {
@@ -151,26 +146,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 func scanSessionMatches(sessionID, query string) bool {
 	return strings.Contains(strings.ToLower(sessionID), strings.ToLower(strings.TrimSpace(query)))
-}
-
-func filterBySeverity(findings []threatrules.Finding, minRank int) []threatrules.Finding {
-	out := findings[:0]
-	for _, f := range findings {
-		if severityRank[f.Severity] >= minRank {
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
-func countAtOrAbove(findings []threatrules.Finding, rank int) int {
-	n := 0
-	for _, f := range findings {
-		if severityRank[f.Severity] >= rank {
-			n++
-		}
-	}
-	return n
 }
 
 func printFindings(cmd *cobra.Command, findings []threatrules.Finding, scanned int, logPath string) {

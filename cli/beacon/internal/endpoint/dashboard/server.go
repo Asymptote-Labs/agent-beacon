@@ -120,6 +120,31 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		writeJSON(w, tokens.Aggregate(events, tokenOptions(r)))
 	})
+	mux.HandleFunc("/api/detections", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		resp, err := BuildDetections(opts.UserMode, "")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, resp)
+	})
+	mux.HandleFunc("/api/findings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		q := r.URL.Query()
+		resp, err := RunScan(opts.UserMode, opts.LogPath, "", q.Get("session"), q.Get("min_severity"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, resp)
+	})
 	mux.HandleFunc("/api/event", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)

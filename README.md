@@ -173,7 +173,10 @@ and collection status, while log search helps teams inspect normalized event
 records during rollout, testing, and investigations. The token usage screen
 breaks captured token telemetry down by model, session (with per-step
 drilldown), CI run, and harness, including context-window utilization and
-runtime-reported cost.
+runtime-reported cost. The detections screen lists the active threat-detection
+rules (the local store when present, otherwise the embedded baseline), and the
+findings screen runs those rules over the runtime log on load and links each hit
+back to its rule — the same read-only, offline detection as `beacon scan`.
 
 For scripted or CI reporting, `beacon endpoint tokens` prints the same token
 usage rollups as text or JSON from any runtime JSONL log, for example
