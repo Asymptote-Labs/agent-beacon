@@ -13,6 +13,9 @@ before:
     - cp ../../collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol ./release-collectors/darwin_arm64/beacon-otelcol
     - cp ../../collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol ./release-collectors/linux_amd64/beacon-otelcol
     - cp ../../collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol ./release-collectors/linux_arm64/beacon-otelcol
+    # Package the external threat-rule pack (repo rules/, not embedded in the binary)
+    # as a release asset users install with `beacon rules pull <asset-url>`.
+    - bash -c 'mkdir -p release-rules && tar -czf release-rules/threat-rules.tar.gz -C ../.. rules'
 
 builds:
   - id: beacon
@@ -127,6 +130,10 @@ release:
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
+  extra_files:
+    # The threat-rule pack ships as a separate asset, not embedded in the binary,
+    # so the rule corpus can grow without enlarging `beacon`.
+    - glob: ./release-rules/threat-rules.tar.gz
   footer: |
     ## Installation
 
@@ -144,4 +151,13 @@ release:
     beacon endpoint install
     beacon endpoint status
     beacon endpoint wazuh print-config
+    ```
+
+    ## Threat detection rules
+    `beacon` ships with a small built-in baseline. Install the full threat-rule
+    pack (attached as `threat-rules.tar.gz` below) and scan your local telemetry:
+    ```bash
+    beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v{{.Version}}/threat-rules.tar.gz
+    beacon rules list
+    beacon scan
     ```

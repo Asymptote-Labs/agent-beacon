@@ -24,6 +24,7 @@ coverage.html
 cli/beacon/beacon
 cli/beacon/beacon-*
 cli/beacon/dist/
+cli/beacon/release-rules/
 dist/
 
 # Hook helper binaries
