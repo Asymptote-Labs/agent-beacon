@@ -41,6 +41,7 @@ type StatusResponse struct {
 }
 
 func Handler(opts Options) (http.Handler, error) {
+	rulesUserMode := opts.UserMode
 	runtimeLog := lifecycle.ResolveRuntimeLog(opts.UserMode, opts.LogPath)
 	opts.LogPath = runtimeLog.EffectiveLogPath
 	opts.UserMode = runtimeLog.EffectiveUserMode
@@ -125,7 +126,7 @@ func Handler(opts Options) (http.Handler, error) {
 			methodNotAllowed(w)
 			return
 		}
-		resp, err := BuildDetections(opts.UserMode, "")
+		resp, err := BuildDetections(rulesUserMode, "")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -138,7 +139,7 @@ func Handler(opts Options) (http.Handler, error) {
 			return
 		}
 		q := r.URL.Query()
-		resp, err := RunScan(opts.UserMode, opts.LogPath, "", q.Get("session"), q.Get("min_severity"))
+		resp, err := RunScan(rulesUserMode, opts.LogPath, "", q.Get("session"), q.Get("min_severity"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return

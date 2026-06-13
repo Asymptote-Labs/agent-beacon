@@ -82,7 +82,7 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	return dashboard.ListenAndServe(dashboard.Options{
 		Addr:     endpointOpts.dashboardAddr,
 		LogPath:  cfg.LogPath,
-		UserMode: cfg.UserMode,
+		UserMode: userMode,
 	})
 }
 
