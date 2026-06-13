@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// rulesDir locates the repo-root rules/ directory by walking up from this test file until
-// it finds the spec sentinel (spec/threat-rules/VERSION). This keeps the test hermetic
-// without hardcoded absolute paths.
-func rulesDir(t *testing.T) string {
+// repoRoot locates the repository root by walking up from this test file until it finds
+// the spec sentinel (spec/threat-rules/VERSION). This keeps tests hermetic without
+// hardcoded absolute paths.
+func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -19,7 +19,7 @@ func rulesDir(t *testing.T) string {
 	dir := filepath.Dir(thisFile)
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "spec", "threat-rules", "VERSION")); err == nil {
-			return filepath.Join(dir, "rules")
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -28,6 +28,10 @@ func rulesDir(t *testing.T) string {
 		dir = parent
 	}
 }
+
+func rulesDir(t *testing.T) string { return filepath.Join(repoRoot(t), "rules") }
+
+func specDir(t *testing.T) string { return filepath.Join(repoRoot(t), "spec", "threat-rules") }
 
 // TestPackConformance is the keystone: it loads the real rule pack and, for every rule,
 // validates it, enforces its maturity gate, and runs every embedded fixture against the

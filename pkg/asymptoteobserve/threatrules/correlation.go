@@ -16,71 +16,77 @@ func (c *CompiledRule) evaluateCorrelation(events []asymptoteobserve.Event) (Ver
 		if err != nil {
 			return "", err
 		}
-		if matched {
+		if matched != nil {
 			return VerdictMatch, nil
 		}
 	}
 	return VerdictNoMatch, nil
 }
 
-// matchSession reports whether one session's ordered events satisfy the step sequence
-// within the window. Steps must occur in order; the elapsed time from the first matched
-// step to the final matched step must not exceed the window. Timestamps are RFC3339; if a
-// step's timestamp is absent the window is not enforced against it (positive fixtures need
-// not carry timestamps, while window fixtures supply them).
-func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) (bool, error) {
+// matchSession returns the matched step events (one per step, in order) for the first
+// alignment in one session that satisfies the sequence within the window, or nil if none.
+//
+// Steps must occur in order; the elapsed time from the first matched step to the final
+// matched step must not exceed the window. Timestamps are RFC3339; if a step's timestamp
+// is absent the window is not enforced against it (positive fixtures need not carry
+// timestamps, while window fixtures supply them).
+func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
 	// Try every step-0 match as a candidate anchor. A single greedy pass is not enough:
 	// an early anchor whose final step falls outside the window must not mask a later
 	// anchor that completes in-window with the same downstream event.
 	for start := range events {
 		matched, err := EvalMatch(c.steps[0], events[start])
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if !matched {
 			continue
 		}
-		ok, err := c.completeFrom(events, start)
+		seq, err := c.completeFrom(events, start)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		if ok {
-			return true, nil
+		if seq != nil {
+			return seq, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
-// completeFrom reports whether the remaining steps (1..final) can be matched in order on
-// events after start, with the final step within the window of the anchor at start.
+// completeFrom returns the matched step events (including the anchor at start) if the
+// remaining steps (1..final) can be matched in order on events after start, with the
+// final step within the window of the anchor; otherwise nil.
 //
 // Each subsequent step is matched at the earliest later event that satisfies it. Because
 // every step must occur after the previous one, taking the earliest match minimizes the
 // time of the final step, so if the greedy-earliest final is outside the window no other
 // alignment from this anchor could do better — the anchor is abandoned and the caller
 // tries the next one.
-func (c *CompiledRule) completeFrom(events []asymptoteobserve.Event, start int) (bool, error) {
+func (c *CompiledRule) completeFrom(events []asymptoteobserve.Event, start int) ([]asymptoteobserve.Event, error) {
 	startTime, startKnown := eventTime(events[start])
 	final := len(c.steps) - 1
 	stepIdx := 1
+	seq := make([]asymptoteobserve.Event, 1, len(c.steps))
+	seq[0] = events[start]
 	for j := start + 1; j < len(events); j++ {
 		matched, err := EvalMatch(c.steps[stepIdx], events[j])
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if !matched {
 			continue
 		}
+		seq = append(seq, events[j])
 		if stepIdx == final {
 			t, known := eventTime(events[j])
 			if startKnown && known && t.Sub(startTime) > c.window {
-				return false, nil
+				return nil, nil
 			}
-			return true, nil
+			return seq, nil
 		}
 		stepIdx++
 	}
-	return false, nil
+	return nil, nil
 }
 
 // groupBySession partitions events by session.id, preserving per-group input order and

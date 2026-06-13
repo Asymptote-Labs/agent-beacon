@@ -21,6 +21,11 @@ import (
 // idPattern constrains rule ids to a stable kebab slug.
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// ValidID reports whether id is a well-formed rule id. The pattern admits no
+// path separators or "." segments, so a valid id is always a safe single
+// filename component when joined with the store directory.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
 // Status is a rule's maturity level; it drives the conformance gates (see lint.go).
 type Status string
 

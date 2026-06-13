@@ -115,8 +115,8 @@ func TestCorrelationLaterAnchorAfterFailedAlignment(t *testing.T) {
 	// rather than reporting no_match after the first alignment fails.
 	c := readThenEgressRule(t)
 	v, err := c.Evaluate([]asymptoteobserve.Event{
-		corrEvent("2026-06-13T10:00:00Z", "file.read", "s1", withEnv),       // anchor that fails
-		corrEvent("2026-06-13T10:00:50Z", "file.read", "s1", withEnv),       // valid anchor
+		corrEvent("2026-06-13T10:00:00Z", "file.read", "s1", withEnv),         // anchor that fails
+		corrEvent("2026-06-13T10:00:50Z", "file.read", "s1", withEnv),         // valid anchor
 		corrEvent("2026-06-13T10:02:10Z", "command.executed", "s1", withCurl), // 130s after #1, 80s after #2
 	})
 	if err != nil {
