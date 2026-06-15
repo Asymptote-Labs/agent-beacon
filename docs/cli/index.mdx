@@ -39,6 +39,7 @@ Top-level Agent Beacon CLI commands.
 | [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
 | [`beacon ci`](/cli/ci) | Run ephemeral AI runtime telemetry collection in CI. |
 | [`beacon cloud`](/cli/cloud) | Configure provider-managed cloud agent telemetry setup helpers. |
+| [`beacon integrations`](/cli/claude-compliance) | Pull external telemetry and compliance sources into local Beacon JSONL. |
 | [`beacon mcp`](/cli/mcp) | Expose local Beacon activity to MCP clients. |
 | [`beacon ingest`](/cli/ingest) | Upload Beacon telemetry to configured ingest destinations. |
 | [`beacon endpoint`](/cli/endpoint) | Manage local endpoint telemetry, runtime logs, and integrations. |
@@ -119,6 +120,18 @@ Configure provider-managed cloud agent telemetry setup helpers.
 | [`beacon cloud cursor print-setup`](/cli/cloud-cursor-print-setup) | Print a Cursor cloud agent binary setup script. |
 | [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-hooks) | Print Cursor project hook settings to commit for cloud agents. |
 | [`beacon cloud gcs setup`](/cli/cloud-gcs-setup) | Create or print GCS setup commands for cloud-agent telemetry. |
+
+## beacon integrations
+
+```bash title="Command syntax"
+beacon integrations [command]
+```
+
+Pull external telemetry and compliance sources into local Beacon JSONL.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon integrations claude-compliance`](/cli/claude-compliance) | Pull Claude Compliance API activity into local Beacon JSONL. |
 
 ## beacon mcp
 
