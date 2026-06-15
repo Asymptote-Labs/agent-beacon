@@ -173,6 +173,94 @@ func TestPullOncePersistsStateOnError(t *testing.T) {
 	}
 }
 
+func TestOneSessionErrorDoesNotBlockOthers(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions", func(w http.ResponseWriter, _ *http.Request) {
+		// "bad" sorts before "good"; bad fails, good must still be processed.
+		_, _ = w.Write([]byte(`{"items":[
+			{"session_id":"bad","status":"suspended","user_id":"u","created_at":10,"updated_at":20},
+			{"session_id":"good","status":"suspended","user_id":"u","created_at":10,"updated_at":20}
+		],"has_next_page":false,"total":2}`))
+	})
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions/bad/messages", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"detail":"always fails"}`, http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions/good/messages", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"event_id":"g1","source":"user","message":"hi","created_at":10}],"has_next_page":false}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := New(testOrg, "cog_test", WithBaseURL(srv.URL), WithRetry(0, 0))
+
+	sum, err := PullOnce(context.Background(), client, PullOptions{
+		Write: true, LogPath: logPath, StatePath: filepath.Join(dir, "state.json"),
+	})
+	if err == nil {
+		t.Fatal("expected an aggregated error from the failing session")
+	}
+	if sum.Errors != 1 {
+		t.Fatalf("Errors = %d, want 1", sum.Errors)
+	}
+	// The healthy session must still have been ingested despite the bad one.
+	lines := nonEmptyLines(t, logPath)
+	if len(lines) != 3 { // good: started + prompt + ended
+		t.Fatalf("healthy session not ingested: %d lines, want 3", len(lines))
+	}
+	for _, l := range lines {
+		if !strings.Contains(l, `"run_id":"good"`) {
+			t.Fatalf("unexpected event from non-good session: %s", l)
+		}
+	}
+}
+
+func TestForceRefreshReFetchesWithoutDuplicating(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "state.json")
+
+	var msgCalls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"session_id":"s1","status":"suspended","user_id":"u","created_at":10,"updated_at":20}],"has_next_page":false,"total":1}`))
+	})
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions/s1/messages", func(w http.ResponseWriter, _ *http.Request) {
+		msgCalls++
+		_, _ = w.Write([]byte(`{"items":[{"event_id":"e1","source":"user","message":"hi","created_at":10}],"has_next_page":false}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := New(testOrg, "cog_test", WithBaseURL(srv.URL), WithRetry(0, 0))
+
+	base := PullOptions{Write: true, LogPath: logPath, StatePath: statePath}
+	if _, err := PullOnce(context.Background(), client, base); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// Without force, an unchanged session is skipped (no second message fetch).
+	if _, err := PullOnce(context.Background(), client, base); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if msgCalls != 1 {
+		t.Fatalf("expected 1 message fetch (skip on unchanged), got %d", msgCalls)
+	}
+
+	// With force, the unchanged session is re-fetched, but dedup prevents new log lines.
+	before := len(nonEmptyLines(t, logPath))
+	forced := base
+	forced.ForceRefresh = true
+	if _, err := PullOnce(context.Background(), client, forced); err != nil {
+		t.Fatalf("forced: %v", err)
+	}
+	if msgCalls != 2 {
+		t.Fatalf("expected re-fetch with ForceRefresh, msgCalls=%d", msgCalls)
+	}
+	if got := len(nonEmptyLines(t, logPath)); got != before {
+		t.Fatalf("force-resync duplicated log lines: %d -> %d", before, got)
+	}
+}
+
 func nonEmptyLines(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)

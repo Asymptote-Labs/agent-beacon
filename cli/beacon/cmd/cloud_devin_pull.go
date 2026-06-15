@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ var devinPullOpts struct {
 	logPath    string
 	print      bool
 	watch      bool
+	fullResync bool
 	interval   time.Duration
 	noUpload   bool
 	userMode   bool
@@ -58,6 +60,7 @@ func init() {
 	f.StringVar(&devinPullOpts.logPath, "log-path", "", "Runtime JSONL log path (default resolved endpoint log)")
 	f.BoolVar(&devinPullOpts.print, "print", false, "Print mapped events as JSON without writing or uploading (dry run)")
 	f.BoolVar(&devinPullOpts.watch, "watch", false, "Poll continuously on --interval (default: a single sweep then exit)")
+	f.BoolVar(&devinPullOpts.fullResync, "full-resync", false, "Re-fetch every session's messages, ignoring the unchanged-session skip (dedup still applies)")
 	f.DurationVar(&devinPullOpts.interval, "interval", time.Minute, "Poll interval for --watch")
 	f.BoolVar(&devinPullOpts.noUpload, "no-upload", false, "Never upload to GCS even when BEACON_CLOUD_GCS_* is set")
 	f.BoolVar(&devinPullOpts.userMode, "user", true, "Use per-user endpoint log paths")
@@ -86,6 +89,7 @@ func runCloudDevinPull(cmd *cobra.Command, args []string) error {
 		Write:        !devinPullOpts.print,
 		UserMode:     userMode,
 		UploadPrefix: devincloud.GCSPrefixFromEnv(),
+		ForceRefresh: devinPullOpts.fullResync,
 	}
 	// --print is a dry run: do not read or write dedup state (so every event is
 	// shown on each run) and do not resolve a log path to write to.
@@ -146,8 +150,8 @@ func reportDevinSweep(cmd *cobra.Command, sum devincloud.Summary) {
 	if devinPullOpts.print {
 		return
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "devin pull: %d sessions, %d changed, %d events, %d uploaded\n",
-		sum.Sessions, sum.SessionsChanged, sum.EventsEmitted, sum.Uploaded)
+	fmt.Fprintf(cmd.OutOrStdout(), "devin pull: %d sessions, %d changed, %d events, %d uploaded, %d errors\n",
+		sum.Sessions, sum.SessionsChanged, sum.EventsEmitted, sum.Uploaded, sum.Errors)
 }
 
 func endpointDevinUserMode() bool {
@@ -157,13 +161,17 @@ func endpointDevinUserMode() bool {
 	return devinPullOpts.userMode
 }
 
+// resolveDevinStatePath always returns a non-empty path so dedup state is
+// persisted across runs. It prefers ~/.beacon but falls back to the OS temp dir
+// when $HOME is unavailable (e.g. some cron environments) — without persistence
+// every scheduled run would re-append the full event set.
 func resolveDevinStatePath(override, org string) string {
 	if strings.TrimSpace(override) != "" {
 		return override
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
+	base := filepath.Join(os.TempDir(), "beacon")
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		base = filepath.Join(home, ".beacon")
 	}
-	return fmt.Sprintf("%s/.beacon/cloud/devin/%s/state.json", home, org)
+	return filepath.Join(base, "cloud", "devin", org, "state.json")
 }

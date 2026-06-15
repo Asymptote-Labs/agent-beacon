@@ -3,6 +3,7 @@ package devincloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -28,6 +29,12 @@ type PullOptions struct {
 
 	Upload       Uploader // optional GCS uploader
 	UploadPrefix string   // GCS object prefix (e.g. "agent-traces")
+
+	// ForceRefresh fetches messages for every session regardless of the
+	// updated_at/status skip (dedup still prevents duplicate emits). Use it for
+	// backfills, or if the API is observed to add messages without bumping
+	// updated_at — the incremental signal this connector relies on.
+	ForceRefresh bool
 }
 
 // Summary reports what a sweep did.
@@ -36,6 +43,7 @@ type Summary struct {
 	SessionsChanged int
 	EventsEmitted   int
 	Uploaded        int
+	Errors          int
 }
 
 // PullOnce performs one sweep: list sessions, fetch messages for changed
@@ -63,59 +71,82 @@ func PullOnce(ctx context.Context, client *Client, opts PullOptions) (sum Summar
 	}
 	sum.Sessions = len(sessions)
 
+	var errs []error
 	for _, s := range sessions {
 		ss := state.get(s.SessionID)
-		// Skip sessions already finalized, or unchanged since last sweep.
-		if ss.Done {
-			continue
-		}
-		if _, seen := state.Sessions[s.SessionID]; seen && ss.UpdatedAt == s.UpdatedAt && ss.Status == s.Status && len(ss.Emitted) > 0 {
-			continue
-		}
-
-		msgs, err := client.SessionMessages(ctx, s.SessionID)
-		if err != nil {
-			return sum, fmt.Errorf("session %s messages: %w", s.SessionID, err)
-		}
-		sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].CreatedAt < msgs[j].CreatedAt })
-
-		mapped := MapSession(s, msgs)
-		sum.SessionsChanged++
-
-		for _, me := range mapped {
-			if ss.Emitted[me.DedupID] {
+		// Skip sessions already finalized, or unchanged since the last sweep.
+		// "Unchanged" relies on updated_at as the session's last-modified signal
+		// (new messages bump it); --full-resync (ForceRefresh) bypasses both
+		// skips when that assumption can't be trusted or for a backfill.
+		if !opts.ForceRefresh {
+			if ss.Done {
 				continue
 			}
-			if err := emit(me.Event, opts); err != nil {
-				return sum, err
+			if _, seen := state.Sessions[s.SessionID]; seen && ss.UpdatedAt == s.UpdatedAt && ss.Status == s.Status && len(ss.Emitted) > 0 {
+				continue
 			}
-			ss.Emitted[me.DedupID] = true
-			sum.EventsEmitted++
 		}
 
-		if opts.Upload != nil {
-			data, err := marshalEvents(mapped)
-			if err != nil {
-				return sum, err
-			}
-			obj := ObjectName(opts.UploadPrefix, Provider, s.UserID, s.SessionID)
-			if err := opts.Upload.Upload(ctx, obj, data); err != nil {
-				return sum, fmt.Errorf("upload session %s: %w", s.SessionID, err)
-			}
-			sum.Uploaded++
-		}
-
-		ss.UpdatedAt = s.UpdatedAt
-		ss.Status = s.Status
-		// A final session (finished/expired) can never resume, and its ended
-		// event was emitted in this sweep, so stop polling it. Suspended stays
-		// pollable in case it resumes.
-		if IsFinal(s.Status) {
-			ss.Done = true
+		if perr := processSession(ctx, client, s, ss, opts, &sum); perr != nil {
+			// One bad session must not block the rest of the org. Record it and
+			// move on; its change cursor is left unadvanced so it is retried next
+			// sweep (dedup prevents re-emitting already-written events).
+			errs = append(errs, fmt.Errorf("session %s: %w", s.SessionID, perr))
+			sum.Errors++
 		}
 	}
 
+	if len(errs) > 0 {
+		return sum, errors.Join(errs...)
+	}
 	return sum, nil
+}
+
+// processSession fetches and emits one session's events. State (UpdatedAt /
+// Status / Done) is advanced only on full success, so a partial failure causes
+// a retry on the next sweep.
+func processSession(ctx context.Context, client *Client, s Session, ss *SessionState, opts PullOptions, sum *Summary) error {
+	msgs, err := client.SessionMessages(ctx, s.SessionID)
+	if err != nil {
+		return fmt.Errorf("messages: %w", err)
+	}
+	sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].CreatedAt < msgs[j].CreatedAt })
+
+	mapped := MapSession(s, msgs)
+	sum.SessionsChanged++
+
+	for _, me := range mapped {
+		if ss.Emitted[me.DedupID] {
+			continue
+		}
+		if err := emit(me.Event, opts); err != nil {
+			return err
+		}
+		ss.Emitted[me.DedupID] = true
+		sum.EventsEmitted++
+	}
+
+	if opts.Upload != nil {
+		data, err := marshalEvents(mapped)
+		if err != nil {
+			return err
+		}
+		obj := ObjectName(opts.UploadPrefix, Provider, s.UserID, s.SessionID)
+		if err := opts.Upload.Upload(ctx, obj, data); err != nil {
+			return fmt.Errorf("upload: %w", err)
+		}
+		sum.Uploaded++
+	}
+
+	ss.UpdatedAt = s.UpdatedAt
+	ss.Status = s.Status
+	// A final session (finished/expired) can never resume, and its ended event
+	// was emitted in this sweep, so stop polling it. Suspended stays pollable in
+	// case it resumes.
+	if IsFinal(s.Status) {
+		ss.Done = true
+	}
+	return nil
 }
 
 func emit(ev schema.Event, opts PullOptions) error {
