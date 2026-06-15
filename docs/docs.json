@@ -60,7 +60,10 @@
             "icon": "cloud-arrow-up",
             "pages": [
               "deployment/hosting-options",
-              "deployment/managed",
+              {
+                "page": "deployment/managed",
+                "tag": "Enterprise"
+              },
               "deployment/open-source"
             ]
           },
@@ -280,6 +283,7 @@
                   "cli/cloud-gcs-setup"
                 ]
               },
+              "cli/claude-compliance",
               {
                 "group": "beacon mcp",
                 "root": "cli/mcp",
@@ -948,22 +952,6 @@
     {
       "source": "/cursor-cloud-agents",
       "destination": "/runtimes/cursor-cloud-agents"
-    },
-    {
-      "source": "/detections",
-      "destination": "/detections"
-    },
-    {
-      "source": "/detections-engine",
-      "destination": "/detections/engine"
-    },
-    {
-      "source": "/detections-standard",
-      "destination": "/detections/standard"
-    },
-    {
-      "source": "/detections-yaml-schema",
-      "destination": "/detections/yaml-schema"
     },
     {
       "source": "/development",

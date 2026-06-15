@@ -1,0 +1,150 @@
+---
+title: "beacon integrations claude-compliance"
+description: "Pull Claude Compliance API activity into local Beacon JSONL"
+---
+
+## Integration Command
+
+`beacon integrations claude-compliance` pulls organization-level Claude Compliance Activity Feed records from Anthropic's Compliance API and writes normalized Beacon JSONL locally. This is a cloud compliance feed, not endpoint runtime telemetry, so it lives outside `beacon endpoint`.
+
+The integration is explicit and pull-based. Beacon does not store the Compliance API key; provide it through an environment variable when you run `pull` or `validate`.
+
+```bash title="Command syntax"
+beacon integrations claude-compliance [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="pull" icon="cloud-arrow-down" href="#beacon-integrations-claude-compliance-pull">
+    Fetch activity records and append normalized events to local Beacon JSONL.
+  </Card>
+  <Card title="status" icon="circle-info" href="#beacon-integrations-claude-compliance-status">
+    Show local cursor state and whether Compliance events have been observed.
+  </Card>
+  <Card title="validate" icon="check" href="#beacon-integrations-claude-compliance-validate">
+    Verify API key access without writing logs or state.
+  </Card>
+</Columns>
+
+## Setup
+
+Create a Claude Compliance Access Key or Admin API key with the `read:compliance_activities` scope, then export it locally:
+
+```bash title="Set the API key"
+export ANTHROPIC_COMPLIANCE_ACCESS_KEY="sk-ant-..."
+```
+
+Validate access:
+
+```bash title="Validate access"
+beacon integrations claude-compliance validate
+```
+
+Run the first pull with an explicit lookback window:
+
+```bash title="Pull the last 24 hours"
+beacon integrations claude-compliance pull --since 24h
+```
+
+Subsequent pulls use saved cursor state and re-poll an overlap window to catch late-arriving activity records. Beacon deduplicates by Compliance API activity `id`.
+
+## Local Paths
+
+| Item | User mode | System mode |
+|------|-----------|-------------|
+| State | `~/.beacon/integrations/claude-compliance/state.json` | `/Library/Application Support/Beacon/Integrations/claude-compliance/state.json` |
+| JSONL output | `~/.beacon/endpoint/logs/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` |
+
+State files use `0600` permissions and store only cursors and recent activity IDs. API keys stay in your environment.
+
+## beacon integrations claude-compliance pull
+
+`pull` fetches Activity Feed records, normalizes each activity into a Beacon event with `event.kind = "compliance_activity"`, and appends it to local Beacon JSONL.
+
+```bash title="Pull recent activity"
+beacon integrations claude-compliance pull --since 24h
+```
+
+### Examples
+
+Pull only chat-created activity:
+
+```bash title="Filter by activity type"
+beacon integrations claude-compliance pull \
+  --since 24h \
+  --activity-type claude_chat_created
+```
+
+Pull multiple pages:
+
+```bash title="Fetch multiple pages"
+beacon integrations claude-compliance pull \
+  --since 24h \
+  --limit 500 \
+  --max-pages 5
+```
+
+Preview without writing JSONL or cursor state:
+
+```bash title="Dry run"
+beacon integrations claude-compliance pull \
+  --since 1h \
+  --dry-run
+```
+
+Use a custom API key environment variable:
+
+```bash title="Use a custom API key env var"
+CLAUDE_COMPLIANCE_KEY="sk-ant-..." \
+  beacon integrations claude-compliance pull \
+  --api-key-env CLAUDE_COMPLIANCE_KEY \
+  --since 24h
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--api-key-env <name>` | Environment variable containing the Claude Compliance API key. Defaults to `ANTHROPIC_COMPLIANCE_ACCESS_KEY` |
+| `--since <duration-or-time>` | Initial or manual lookback window, such as `24h`, or an RFC3339 timestamp |
+| `--overlap <duration>` | Incremental overlap window for late-arriving activity records. Defaults to `10m`; set `0` to disable |
+| `--limit <n>` | Maximum activities per API request. Defaults to `100`; API max is `5000` |
+| `--max-pages <n>` | Maximum API pages to fetch per pull. Defaults to `1` |
+| `--activity-type <type>` | Activity type to include. Repeat for multiple values |
+| `--organization-id <id>` | Organization ID or UUID to include. Repeat for multiple values |
+| `--actor-id <id>` | Actor user ID to include. Repeat for multiple values |
+| `--reset-cursor` | Ignore saved cursor state for this pull |
+| `--dry-run` | Fetch and normalize without writing JSONL or state |
+| `--json` | Print pull summary as JSON |
+| `--user` | Use per-user Beacon paths. Enabled by default |
+| `--system` | Use system Beacon paths |
+| `--log-path <path>` | Local Beacon JSONL output path |
+
+## beacon integrations claude-compliance status
+
+`status` shows the local cursor state and whether Beacon has observed Claude Compliance events in the configured JSONL log.
+
+```bash title="Show status"
+beacon integrations claude-compliance status
+```
+
+Print status as JSON:
+
+```bash title="Print JSON status"
+beacon integrations claude-compliance status --json
+```
+
+## beacon integrations claude-compliance validate
+
+`validate` makes a small Activity Feed request to verify the API key and scope. It does not write JSONL or update cursor state.
+
+```bash title="Validate API access"
+beacon integrations claude-compliance validate
+```
+
+Print validation output as JSON:
+
+```bash title="Print JSON validation"
+beacon integrations claude-compliance validate --json
+```
