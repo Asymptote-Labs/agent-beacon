@@ -1,7 +1,6 @@
 package devincloud
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -54,16 +53,19 @@ func IsFinal(status string) bool {
 	return finalStatuses[strings.ToLower(strings.TrimSpace(status))]
 }
 
-// MapSession converts a session and its messages into ordered Beacon events:
-// session.started, one event per message (prompt.submitted / agent.message),
-// and session.ended when the session has reached a terminal status.
+// MapSession converts a session and its messages into ordered stream events:
+// session.started plus one event per message (prompt.submitted / agent.message),
+// each with a stable dedup id (synthetic for started, event_id for messages).
+//
+// session.ended is intentionally NOT produced here. Whether to emit an end
+// depends on observed status transitions (a suspended session may resume, and
+// its updated_at can bump without a resume), which only the orchestrator knows.
+// See EndedEvent and the transition handling in PullOnce.
 func MapSession(s Session, msgs []Message) []MappedEvent {
-	var out []MappedEvent
-
-	out = append(out, MappedEvent{
+	out := []MappedEvent{{
 		DedupID: s.SessionID + ":started",
 		Event:   sessionLifecycleEvent(s, "session.started", "Devin Cloud session started", s.CreatedAt),
-	})
+	}}
 
 	for _, m := range msgs {
 		switch strings.ToLower(m.Source) {
@@ -80,17 +82,13 @@ func MapSession(s Session, msgs []Message) []MappedEvent {
 			out = append(out, MappedEvent{DedupID: m.EventID, Event: ev})
 		}
 	}
-
-	if IsTerminal(s.Status) {
-		// Key the ended event by updated_at: a suspended session may resume and
-		// suspend again, and each suspension is a distinct end-of-activity. A
-		// fixed ":ended" key would suppress every end after the first.
-		out = append(out, MappedEvent{
-			DedupID: fmt.Sprintf("%s:ended:%d", s.SessionID, s.UpdatedAt),
-			Event:   sessionLifecycleEvent(s, "session.ended", "Devin Cloud session ended", s.UpdatedAt),
-		})
-	}
 	return out
+}
+
+// EndedEvent builds the session.ended event for a terminal session, carrying
+// final status/PR/ACU/duration metadata.
+func EndedEvent(s Session) schema.Event {
+	return sessionLifecycleEvent(s, "session.ended", "Devin Cloud session ended", s.UpdatedAt)
 }
 
 // sessionLifecycleEvent builds a started/ended event carrying session metadata.

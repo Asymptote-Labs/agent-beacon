@@ -126,8 +126,33 @@ func processSession(ctx context.Context, client *Client, s Session, ss *SessionS
 		sum.EventsEmitted++
 	}
 
+	// session.ended is emitted once per observed terminal episode: only when the
+	// session is terminal and we have not already emitted an end since it was
+	// last seen active. Observing a non-terminal status resets the flag so a
+	// genuine resume-then-end emits a fresh end. This avoids both missing
+	// re-ends after a resume and spurious ends on metadata-only updated_at bumps.
+	terminal := IsTerminal(s.Status)
+	if terminal {
+		if !ss.EndedEmitted {
+			if err := emit(EndedEvent(s), opts); err != nil {
+				return err
+			}
+			ss.EndedEmitted = true
+			sum.EventsEmitted++
+		}
+	} else {
+		ss.EndedEmitted = false
+	}
+
 	if opts.Upload != nil {
-		data, err := marshalEvents(mapped)
+		// The GCS object is the full per-session snapshot, so it always includes
+		// the ended event while the session is terminal (idempotent overwrite).
+		snapshot := make([]MappedEvent, 0, len(mapped)+1)
+		snapshot = append(snapshot, mapped...)
+		if terminal {
+			snapshot = append(snapshot, MappedEvent{Event: EndedEvent(s)})
+		}
+		data, err := marshalEvents(snapshot)
 		if err != nil {
 			return err
 		}
@@ -140,9 +165,8 @@ func processSession(ctx context.Context, client *Client, s Session, ss *SessionS
 
 	ss.UpdatedAt = s.UpdatedAt
 	ss.Status = s.Status
-	// A final session (finished/expired) can never resume, and its ended event
-	// was emitted in this sweep, so stop polling it. Suspended stays pollable in
-	// case it resumes.
+	// A final session (finished/expired) can never resume, so stop polling it.
+	// Suspended stays pollable in case it resumes.
 	if IsFinal(s.Status) {
 		ss.Done = true
 	}

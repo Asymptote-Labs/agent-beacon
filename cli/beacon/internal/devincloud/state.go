@@ -14,10 +14,11 @@ type State struct {
 
 // SessionState records progress for one session.
 type SessionState struct {
-	UpdatedAt int64           `json:"updated_at"`
-	Status    string          `json:"status"`
-	Done      bool            `json:"done"` // terminal status + ended emitted; skip henceforth
-	Emitted   map[string]bool `json:"emitted"`
+	UpdatedAt    int64           `json:"updated_at"`
+	Status       string          `json:"status"`
+	Done         bool            `json:"done"`          // final status; skip henceforth
+	EndedEmitted bool            `json:"ended_emitted"` // session.ended emitted for the current terminal episode
+	Emitted      map[string]bool `json:"emitted"`       // dedup ids for started + message events
 }
 
 // LoadState reads state from path. A missing file yields empty state. An empty

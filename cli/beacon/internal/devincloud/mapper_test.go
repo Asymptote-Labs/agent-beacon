@@ -18,19 +18,19 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 	}
 
 	mapped := MapSession(s, msgs)
-	if len(mapped) != 4 {
-		t.Fatalf("got %d events, want 4 (started, prompt, agent, ended)", len(mapped))
+	if len(mapped) != 3 {
+		t.Fatalf("got %d events, want 3 (started, prompt, agent); ended is emitted by the orchestrator", len(mapped))
 	}
 
-	wantActions := []string{"session.started", "prompt.submitted", "agent.message", "session.ended"}
+	wantActions := []string{"session.started", "prompt.submitted", "agent.message"}
 	for i, want := range wantActions {
 		if mapped[i].Event.Event.Action != want {
 			t.Fatalf("event %d action = %q, want %q", i, mapped[i].Event.Event.Action, want)
 		}
 	}
 
-	// Dedup ids: lifecycle synthetic (ended keyed by updated_at), messages use event_id.
-	wantIDs := []string{"sess1:started", "e1", "e2", "sess1:ended:1600"}
+	// Dedup ids: lifecycle synthetic for started, event_id for messages.
+	wantIDs := []string{"sess1:started", "e1", "e2"}
 	for i, want := range wantIDs {
 		if mapped[i].DedupID != want {
 			t.Fatalf("event %d dedup id = %q, want %q", i, mapped[i].DedupID, want)
@@ -69,9 +69,20 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 	if mapped[0].Event.Timestamp != "1970-01-01T00:16:40Z" {
 		t.Fatalf("started ts = %q, want session created_at", mapped[0].Event.Timestamp)
 	}
+}
 
-	// Ended carries metadata.
-	ended := mapped[3].Event
+func TestEndedEventCarriesMetadata(t *testing.T) {
+	s := Session{
+		SessionID: "sess1", Status: "suspended", UserID: "user-1",
+		CreatedAt: 1000, UpdatedAt: 1600, AcusConsumed: 2.5,
+	}
+	ended := EndedEvent(s)
+	if ended.Event.Action != "session.ended" {
+		t.Fatalf("action = %q, want session.ended", ended.Event.Action)
+	}
+	if err := ended.Validate(); err != nil {
+		t.Fatalf("ended failed Validate: %v", err)
+	}
 	devin, _ := ended.Raw["devin"].(map[string]interface{})
 	if devin == nil || devin["acus_consumed"] != 2.5 {
 		t.Fatalf("ended raw.devin = %+v", ended.Raw)
@@ -81,26 +92,12 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 	}
 }
 
-func TestMapSessionReEndsOnNewSuspension(t *testing.T) {
-	// Same session suspended at two different updated_at values must produce two
-	// distinct ended dedup ids so a re-suspension after resume isn't suppressed.
-	first := MapSession(Session{SessionID: "s", Status: "suspended", UpdatedAt: 100}, nil)
-	second := MapSession(Session{SessionID: "s", Status: "suspended", UpdatedAt: 200}, nil)
-	id1 := first[len(first)-1].DedupID
-	id2 := second[len(second)-1].DedupID
-	if id1 == id2 {
-		t.Fatalf("re-suspension produced same ended id %q; would be deduped away", id1)
-	}
-	if id1 != "s:ended:100" || id2 != "s:ended:200" {
-		t.Fatalf("ended ids = %q,%q, want s:ended:100, s:ended:200", id1, id2)
-	}
-}
-
-func TestMapSessionNonTerminalHasNoEnded(t *testing.T) {
-	s := Session{SessionID: "sess2", Status: "working", UserID: "u", CreatedAt: 10}
-	mapped := MapSession(s, nil)
-	if len(mapped) != 1 || mapped[0].Event.Event.Action != "session.started" {
-		t.Fatalf("working session should only emit session.started, got %d events", len(mapped))
+func TestMapSessionHasNoEndedRegardlessOfStatus(t *testing.T) {
+	for _, st := range []string{"working", "suspended", "finished"} {
+		mapped := MapSession(Session{SessionID: "s", Status: st, CreatedAt: 10}, nil)
+		if len(mapped) != 1 || mapped[0].Event.Event.Action != "session.started" {
+			t.Fatalf("status %q: MapSession should emit only session.started, got %d events", st, len(mapped))
+		}
 	}
 }
 

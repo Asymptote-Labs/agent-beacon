@@ -2,6 +2,7 @@ package devincloud
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -258,6 +259,52 @@ func TestForceRefreshReFetchesWithoutDuplicating(t *testing.T) {
 	}
 	if got := len(nonEmptyLines(t, logPath)); got != before {
 		t.Fatalf("force-resync duplicated log lines: %d -> %d", before, got)
+	}
+}
+
+func TestEndedEmittedOncePerObservedEpisode(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+
+	current := ""
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(current))
+	})
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions/s1/messages", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"event_id":"e1","source":"user","message":"hi","created_at":10}],"has_next_page":false}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := New(testOrg, "cog_test", WithBaseURL(srv.URL), WithRetry(0, 0))
+	opts := PullOptions{Write: true, LogPath: logPath, StatePath: filepath.Join(dir, "state.json")}
+
+	sess := func(status string, updated int) string {
+		return fmt.Sprintf(`{"items":[{"session_id":"s1","status":%q,"user_id":"u","created_at":10,"updated_at":%d}],"has_next_page":false,"total":1}`, status, updated)
+	}
+	sweep := func() {
+		if _, err := PullOnce(context.Background(), client, opts); err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+	}
+
+	current = sess("suspended", 20)
+	sweep() // end #1
+	current = sess("suspended", 30)
+	sweep() // updated_at bump, no observed resume -> NO new end
+	current = sess("working", 40)
+	sweep() // resumed -> reset
+	current = sess("suspended", 50)
+	sweep() // end #2
+
+	ends := 0
+	for _, l := range nonEmptyLines(t, logPath) {
+		if strings.Contains(l, `"action":"session.ended"`) {
+			ends++
+		}
+	}
+	if ends != 2 {
+		t.Fatalf("session.ended count = %d, want 2 (one per observed terminal episode)", ends)
 	}
 }
 
