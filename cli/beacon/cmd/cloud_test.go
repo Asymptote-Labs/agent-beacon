@@ -13,6 +13,7 @@ func TestCloudCommandsRegistered(t *testing.T) {
 		{"cloud", "claude-web", "print-setup"},
 		{"cloud", "cursor", "print-hooks"},
 		{"cloud", "cursor", "print-setup"},
+		{"cloud", "devin", "pull"},
 		{"cloud", "gcs", "setup"},
 	} {
 		cmd, _, err := rootCmd.Find(path)
