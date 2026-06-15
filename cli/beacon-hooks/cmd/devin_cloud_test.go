@@ -47,7 +47,7 @@ func TestSeedDevinCloudRunIDNoopOutsideDevinCloud(t *testing.T) {
 	}
 }
 
-func TestSeedDevinCloudRunIDFallsBackWhenNoDevinEnv(t *testing.T) {
+func TestSeedDevinCloudRunIDFallsBackToUnknownWhenNoDevinEnv(t *testing.T) {
 	platformFlag = "devin"
 	t.Setenv("BEACON_ORIGIN", "cloud")
 	t.Setenv("BEACON_RUN_PROVIDER", "devin_cloud")
@@ -59,7 +59,8 @@ func TestSeedDevinCloudRunIDFallsBackWhenNoDevinEnv(t *testing.T) {
 
 	seedDevinCloudRunID()
 
-	if got := os.Getenv("BEACON_RUN_ID"); got != "" {
-		t.Fatalf("BEACON_RUN_ID = %q, want empty so shuttle falls back to unknown", got)
+	// Must be non-empty: cloudshuttle.Upload skips the upload when RunID == "".
+	if got := os.Getenv("BEACON_RUN_ID"); got != "unknown" {
+		t.Fatalf("BEACON_RUN_ID = %q, want unknown so the shuttle still uploads", got)
 	}
 }

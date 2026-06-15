@@ -307,10 +307,9 @@ echo "  beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hoo
 
 func renderDevinCloudSetup(version string) string {
 	return fmt.Sprintf(`set -euo pipefail
-# Run this from a Devin blueprint "maintenance" step so the Beacon binaries are
-# provisioned into every cloud session's machine.
-mkdir -p /tmp/beacon/bin /tmp/beacon/logs
-
+# Run this from a Devin blueprint "initialize" step. Devin boots each session from
+# a frozen snapshot, so beacon-hooks is installed to a persistent system path
+# (/usr/local/bin) rather than /tmp, which is not guaranteed to survive the boot.
 BEACON_VERSION=%q
 OS="linux"
 case "$(uname -m)" in
@@ -321,13 +320,15 @@ esac
 
 ARCHIVE="beacon_${BEACON_VERSION#v}_${OS}_${ARCH}.tar.gz"
 BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/${BEACON_VERSION}"
-curl -fsSL "${BASE}/${ARCHIVE}" -o "/tmp/beacon/${ARCHIVE}"
-tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin
-chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks 2>/dev/null || true
+TMP="$(mktemp -d)"
+curl -fsSL "${BASE}/${ARCHIVE}" -o "${TMP}/${ARCHIVE}"
+tar -xzf "${TMP}/${ARCHIVE}" -C "${TMP}"
+sudo install -m 0755 "${TMP}/beacon-hooks" /usr/local/bin/beacon-hooks
+rm -rf "${TMP}"
 
-echo "Beacon binaries installed in /tmp/beacon/bin"
+echo "beacon-hooks installed at /usr/local/bin/beacon-hooks"
 echo "Commit a project-level .devin/hooks.v1.json before starting Devin Cloud Agents:"
-echo "  beacon cloud devin print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .devin/hooks.v1.json"
+echo "  beacon cloud devin print-hooks --binary-path /usr/local/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .devin/hooks.v1.json"
 `, version)
 }
 

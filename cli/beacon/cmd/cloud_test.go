@@ -164,13 +164,17 @@ func TestRenderDevinCloudSetupInstallsBinariesOnly(t *testing.T) {
 	got := renderDevinCloudSetup("v0.0.50")
 	for _, want := range []string{
 		`BEACON_VERSION="v0.0.50"`,
-		`tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin`,
-		`Beacon binaries installed in /tmp/beacon/bin`,
-		`beacon cloud devin print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .devin/hooks.v1.json`,
+		`sudo install -m 0755 "${TMP}/beacon-hooks" /usr/local/bin/beacon-hooks`,
+		`beacon-hooks installed at /usr/local/bin/beacon-hooks`,
+		`beacon cloud devin print-hooks --binary-path /usr/local/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .devin/hooks.v1.json`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered setup missing %q:\n%s", want, got)
 		}
+	}
+	// beacon-hooks must land on a persistent path, not /tmp (snapshot-boot model).
+	if strings.Contains(got, "/tmp/beacon/bin") {
+		t.Fatalf("devin setup should install to a persistent path, not /tmp/beacon/bin:\n%s", got)
 	}
 }
 

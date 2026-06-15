@@ -77,7 +77,10 @@ func isDevinCloudMode() bool {
 // seedDevinCloudRunID resolves a run id for Devin Cloud sessions. The Devin hook
 // payloads do not carry a session id, so derive BEACON_RUN_ID from a
 // Devin-provided session environment variable when one is available. If none is
-// set, leave BEACON_RUN_ID unset so the cloud shuttle falls back to "unknown".
+// found it falls back to "unknown" rather than leaving BEACON_RUN_ID empty:
+// cloudshuttle.Upload skips the upload entirely when RunID is empty, so an empty
+// value would silently drop all telemetry. Sessions without a discoverable id
+// therefore share the run_id=unknown object path (last writer wins).
 func seedDevinCloudRunID() {
 	if !isDevinLikePlatform(platformFlag) || !isDevinCloudMode() || strings.TrimSpace(os.Getenv("BEACON_RUN_ID")) != "" {
 		return
@@ -90,6 +93,7 @@ func seedDevinCloudRunID() {
 			return
 		}
 	}
+	_ = os.Setenv("BEACON_RUN_ID", "unknown")
 }
 
 func maybeUploadCursorCloudTelemetry(logger *logging.Logger) {
