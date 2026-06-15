@@ -7,9 +7,7 @@ description: >
   appending `set -gx PATH ...` to fish config, or a drop-in under /etc/profile.d).
   Prepending an attacker-controlled directory to PATH in a file that is sourced on
   every new shell or login is durable persistence and a binary-shadowing primitive
-  that runs outside any agent sandbox with no further prompt. Derived from
-  blastradius host.deferred_exec_sinks / write_reach login-dotfile surface
-  (the "adding to PATH" persistence vector).
+  that runs outside any agent sandbox with no further prompt.
 severity: high
 status: stable
 posture: detect

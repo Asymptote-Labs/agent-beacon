@@ -8,9 +8,8 @@ description: >
   a launchd property list under a LaunchAgents/LaunchDaemons directory
   (*.plist), an XDG autostart entry (~/.config/autostart/*.desktop), or an
   environment.d generator (~/.config/environment.d/*.conf). Planting one of these
-  is durable host persistence triggered with no further prompt. Derived from
-  blastradius host.autostart_sinks (the file-write counterpart of the
-  systemctl/launchctl command rule).
+  is durable host persistence triggered with no further prompt. This is the
+  file-write counterpart of the systemctl/launchctl command rule.
 severity: high
 status: stable
 posture: detect

@@ -8,7 +8,7 @@ description: >
   bind mount (-v /:...), a kernel capability add (--cap-add), or a mount of the docker
   socket. The docker/podman token is anchored to command/segment start (allowing a
   flagged sudo, env, or VAR=value prefix) so it is not matched inside an unrelated
-  commit message. Ported from blastradius container-runtime / post_root_host_visibility.
+  commit message.
 severity: high
 status: stable
 posture: detect

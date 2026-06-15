@@ -7,9 +7,8 @@ description: >
   ngrok, bashupload, termbin, gofile, catbox, oshi.at). These hosts are common
   exfiltration channels because they accept anonymous uploads to attacker-readable
   URLs and bypass curl-to-arbitrary-host heuristics by targeting a "legitimate"
-  domain. Complements the blastradius egress-mediation note that hostname-only
-  allowlists leave exfil to an allowed domain residual
-  (src/probes/egress_mediation.rs).
+  domain. Hostname-only allowlists do not stop this, since the destination is an
+  otherwise-allowed domain.
 severity: high
 status: stable
 posture: detect

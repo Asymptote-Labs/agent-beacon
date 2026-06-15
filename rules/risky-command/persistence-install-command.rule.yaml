@@ -6,8 +6,7 @@ description: >
   boot, or on a schedule: editing the user/root crontab (crontab -, crontab a
   file), enabling a systemd service or timer (systemctl enable / --user enable),
   or loading a launchd agent/daemon (launchctl load / bootstrap / enable). These
-  survive the session and re-execute later with no further prompt. Ported from
-  blastradius host.autostart_sinks / deferred_exec_sinks scheduled-job surface.
+  survive the session and re-execute later with no further prompt.
 severity: high
 status: stable
 posture: detect

@@ -5,13 +5,10 @@ description: >
   The agent modified a source file in the auth / payment / security surface (basename
   containing auth, login, session, password, payment, billing, charge, stripe, checkout,
   security, crypto, token, oauth, jwt, rbac, permission, credential). Changes here carry
-  outsized risk and warrant review. Ported from blastradius
-  is_auth_payment_security_path; documentation (.md/.txt), lockfiles, CI workflow
+  outsized risk and warrant review. Documentation (.md/.txt), lockfiles, CI workflow
   manifests, and credential stores (credentials.json/.toml — covered by
   credential-file-read) are excluded so they are not double-counted. Keyword matching
-  is substring-based (faithful to the ported source), so a basename that embeds a
-  keyword (e.g. tokenizer) may match; the 3-char `acl` needle was dropped because it
-  false-matched unrelated words (oracle, miracle).
+  is substring-based, so a basename that embeds a keyword (e.g. tokenizer) may match.
 severity: medium
 status: stable
 posture: detect

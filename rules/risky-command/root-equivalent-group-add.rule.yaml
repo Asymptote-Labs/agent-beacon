@@ -8,8 +8,7 @@ description: >
   is done with usermod -aG, gpasswd -a, adduser <user> <group>, or by writing the
   group into /etc/group. Membership in any of these is a standing path to root.
   The group token is required so unrelated usermod calls (e.g. changing a shell) do
-  not match. Ported from blastradius host.privilege_escalation ROOT_EQUIVALENT_GROUPS
-  and ADMIN_GROUPS.
+  not match.
 severity: high
 status: stable
 posture: detect

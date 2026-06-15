@@ -6,9 +6,7 @@ description: >
   `export -p`) and pipes it into an outbound network sender (curl/wget data body,
   netcat, or a /dev/tcp redirect). The environment of an agent runtime commonly
   holds API keys, cloud credentials, and tokens, so streaming it straight to the
-  network is a high-signal credential-exfiltration shape. Grounded in the
-  blastradius egress surface where filtered HTTP egress and DNS/LAN paths can still
-  carry leaked secrets (src/probes/egress.rs).
+  network is a high-signal credential-exfiltration shape.
 severity: critical
 status: stable
 posture: detect

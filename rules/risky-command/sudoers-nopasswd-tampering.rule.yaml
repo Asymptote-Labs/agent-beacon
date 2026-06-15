@@ -7,8 +7,7 @@ description: >
   non-interactive listing (sudo -n -l). Any of these establishes or confirms a path
   to root that bypasses the password prompt. The match requires an actual write, a
   NOPASSWD grant token, a visudo invocation, or the non-interactive sudo listing
-  probe rather than incidental mentions of "sudo". Ported from blastradius
-  host.privilege_escalation (passwordless sudo via `sudo -n -l` and NOPASSWD).
+  probe rather than incidental mentions of "sudo".
 severity: high
 status: stable
 posture: detect

@@ -4,8 +4,7 @@ title: Base64-decoded payload piped into a shell
 description: >
   A command base64-decodes content and pipes it straight into a shell — the classic
   obfuscated remote-code-execution shape that hides the payload from a casual review.
-  Combines blastradius DangerousCategory::Base64Decode with the pipe-to-shell shape;
-  the pipe-to-shell match is case-insensitive so an uppercase shell name cannot evade.
+  The pipe-to-shell match is case-insensitive so an uppercase shell name cannot evade.
 severity: high
 status: stable
 posture: detect
