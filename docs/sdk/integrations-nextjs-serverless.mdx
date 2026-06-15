@@ -1,0 +1,82 @@
+---
+title: "Next.js And Serverless"
+description: "Initialize Asymptote Observe in Next.js and short-lived serverless runtimes"
+---
+
+## Serverless Setup
+
+Initialize `Observe` once in the earliest Node-only entrypoint. In Next.js, use `instrumentation.ts` and guard against the edge runtime:
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- A Next.js app or another serverless Node.js runtime.
+- `@asymptote/sdk` installed.
+- Any agent SDKs used by your route handlers, such as Vercel AI SDK.
+- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK and Vercel AI SDK"
+npm install @asymptote/sdk ai @ai-sdk/openai
+```
+
+## Next.js Instrumentation
+
+```typescript title="Initialize in instrumentation.ts" lines
+export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { Observe } = await import("@asymptote/sdk");
+
+    Observe.initialize({
+      apiKey: process.env.ASYMPTOTE_API_KEY,
+    });
+  }
+}
+```
+
+This keeps SDK initialization out of edge runtimes while ensuring Node.js routes, server actions, and background work share the same tracing setup.
+
+## Serverless Handlers
+
+For short-lived serverless invocations, call `Observe.flush()` before returning if traces are created immediately before the process may terminate.
+
+```typescript title="Flush traces in a serverless handler" lines
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+import { Observe } from "@asymptote/sdk";
+
+export async function POST(request: Request) {
+  const prompt = await request.text();
+  const result = await generateText({
+    model: openai("gpt-4.1-mini"),
+    prompt,
+    experimental_telemetry: {
+      isEnabled: true,
+      tracer: Observe.getTracer(),
+    },
+  });
+
+  await Observe.flush();
+
+  return Response.json({ text: result.text });
+}
+```
+
+If the runtime owns a long-lived process, reserve `Observe.shutdown()` for graceful process shutdown rather than calling it after every request.
+
+## Customer-Managed OTLP
+
+Serverless and preview environments can send to a customer-managed collector by setting `OTEL_EXPORTER_OTLP_ENDPOINT` instead of Asymptote Managed hosted Observe credentials.
+
+```bash title="Set the OTLP endpoint"
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
+```
+
+```typescript title="Initialize with a customer-managed OTLP endpoint" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+});
+```
+
+Explicit OTLP export does not require an Asymptote Managed `ASYMPTOTE_API_KEY`.

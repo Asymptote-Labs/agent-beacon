@@ -1,0 +1,83 @@
+---
+title: "Schema Fields"
+description: "Beacon event entities, optional context, and shared fields"
+---
+
+## Field Reference
+
+Beacon models each event as an action plus a set of typed entities. The [`event` object and surrounding entities](/concepts/core-concepts#entity-model) describe what happened and who or what participated in that action.
+
+## Entity model
+
+| Entity | Purpose | Common fields |
+|--------|---------|---------------|
+| `endpoint` | Device and agent context for the machine where telemetry was collected | `hostname`, `os`, `agent_version` |
+| `user` | Local operating system user context | `name`, `uid` |
+| `harness` | Agent harness that produced the signal | `name`, `version`, `executable_path`, `config_path` |
+| `origin` | Event origin for local endpoint, cloud, or CI telemetry | `local`, `cloud`, `ci` |
+| `run` | CI or ephemeral run context | `provider`, `run_id`, `run_attempt`, `workflow`, `job`, `event_name`, `commit`, `repository`, `branch`, `pr`, `pr_number`, `actor`, `ephemeral` |
+| `session` | Conversation or runtime session context | `id`, `working_directory` |
+| `tool` | Tool invocation context, including shell-like tools | `name`, `command`, `path` |
+| `file` | File activity context | `path`, `operation`, `language`, `diff_hash`, `diff_bytes` |
+| `command` | Shell or process execution context | `command`, `exit_code`, `duration_ms` |
+| `mcp` | MCP-like server and tool context | `server`, `tool` |
+| `approval` | Approval or policy decision context | `required`, `decision`, `reason` |
+| `policy` | Policy metadata when available from a runtime or integration | `id`, `name`, `decision`, `enforcement`, `reason` |
+| `prompt` | Prompt text when the source emits it and content handling allows it | `text` |
+| `content` | Content handling state for the event | `retention`, `included`, `redacted`, `truncated` |
+| `gen_ai` | OpenTelemetry GenAI semantic convention context | `agent`, `conversation`, `input`, `output`, `provider`, `request`, `response`, `retrieval`, `system_instructions`, `tool`, `usage`, `workflow` |
+| `destination` | Output or validation destination state | `type`, `mode`, `status` |
+| `health` | Endpoint or component health state | `component`, `status`, `reason` |
+
+Top-level `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields add shared context that can apply across multiple entities. For example, a command event can include both `tool` and `command`; a file edit can include `file`, `session`, `repository`, and `branch`; a CI event can include `origin` and `run`; and a GenAI tool call can include both `tool` and nested `gen_ai.tool` metadata.
+
+## GenAI context
+
+When a runtime emits OpenTelemetry GenAI semantic convention attributes, Beacon preserves them under `gen_ai` while also projecting commonly queried values into top-level fields such as `model`, `tool.name`, or `prompt.text`.
+
+| Field | Detail |
+|-------|--------|
+| `gen_ai.request` | Request settings such as `model`, `max_tokens`, `temperature`, `top_p`, `top_k`, `seed`, `stream`, `choice_count`, `encoding_formats`, and `stop_sequences` |
+| `gen_ai.response` | Response metadata such as `id`, `model`, `finish_reasons`, and `time_to_first_chunk` |
+| `gen_ai.usage` | Token counters such as `input_tokens`, `output_tokens`, `cache_creation.input_tokens`, `cache_read.input_tokens`, and `reasoning.output_tokens`, plus runtime-reported `cost_usd` |
+| `gen_ai.input.messages`, `gen_ai.output.messages` | Message arrays or objects emitted by the runtime |
+| `gen_ai.tool` | Tool metadata such as `name`, `type`, `description`, `definitions`, and `call.id`, `call.arguments`, or `call.result` |
+| `gen_ai.retrieval` | Retrieval context such as `query_text` and `documents` |
+| `gen_ai.evaluation` | Evaluation metadata such as `name`, `explanation`, `score.label`, and `score.value` |
+| `gen_ai.agent`, `gen_ai.provider`, `gen_ai.workflow` | Runtime-specific agent, provider, and workflow metadata |
+
+## Optional context
+
+Optional context fields add detail when available:
+
+| Field | Detail |
+|-------|--------|
+| `user` | Local user metadata |
+| `origin` | Whether the event came from local endpoint telemetry, cloud telemetry, or CI telemetry |
+| `run` | CI provider and run metadata, including repository, branch, commit, workflow, job, actor, and pull-request identifiers |
+| `session` | Conversation or runtime session metadata |
+| `tool` | Tool name, command, or path metadata |
+| `file` | File path, operation, language, diff hash, or diff byte counts |
+| `command` | Shell command, exit code, or duration metadata |
+| `mcp` | MCP-like server and tool metadata |
+| `approval` | Approval requirement, decision, or reason |
+| `policy` | Policy ID, name, decision, enforcement mode, or reason |
+| `content` | Content inclusion, redaction, and truncation state |
+| `gen_ai` | OpenTelemetry GenAI request, response, usage, message, tool, retrieval, evaluation, provider, and workflow metadata |
+| `destination` | Output destination state, such as Wazuh localfile validation |
+| `health` | Component health status |
+| `model`, `repository`, `branch`, `message`, `raw`, `field_truncated` | Additional runtime context and truncation metadata |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Unified telemetry schema" icon="code" href="/telemetry-schema/event-schema">
+    Return to the schema overview.
+  </Card>
+  <Card title="Schema normalization" icon="arrows-rotate" href="/telemetry-schema/normalization">
+    See how source fields map into the event contract.
+  </Card>
+  <Card title="Schema examples" icon="code" href="/telemetry-schema/examples">
+    Inspect example events and content handling behavior.
+  </Card>
+</Columns>

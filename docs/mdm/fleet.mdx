@@ -1,0 +1,190 @@
+---
+title: "Fleet"
+description: "Deploy and inventory the Beacon endpoint agent with Fleet."
+---
+
+## Overview
+
+Fleet can deploy and inventory the local Beacon endpoint agent on managed Macs. Beacon's Fleet support uses the signed and notarized macOS `.pkg` as Fleet software, while the endpoint agent writes local JSONL telemetry without requiring a hosted account, remote policy fetch, or Fleet API credentials.
+
+## What Fleet manages
+
+| Signal | How it helps |
+| --- | --- |
+| Package installation | Deploy Beacon binaries, endpoint scripts, Fleet queries, and Fleet helper scripts. |
+| System endpoint configuration | Install launchd service files and collector configuration for system-mode telemetry. |
+| Runtime telemetry location | Write endpoint events to `/var/log/beacon-agent/runtime.jsonl`. |
+| Inventory and remediation | Use Fleet queries, policies, labels, and scripts to identify missing, stale, or unhealthy installs. |
+
+## Package layout
+
+The macOS package includes Beacon binaries, endpoint helper scripts, and Fleet assets:
+
+```text
+/opt/beacon/bin/beacon
+/opt/beacon/bin/beacon-otelcol
+/opt/beacon/scripts/install-endpoint.sh
+/opt/beacon/scripts/uninstall-endpoint.sh
+/opt/beacon/fleet/queries/*.sql
+/opt/beacon/fleet/scripts/*.sh
+```
+
+The package postinstall performs the default system install. That install creates system configuration and runtime state:
+
+```text
+/Library/Application Support/Beacon/Endpoint/config.json
+/Library/Application Support/Beacon/Endpoint/otelcol.yaml
+/Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/var/log/beacon-agent/runtime.jsonl
+```
+
+## Deploy with Fleet
+
+Upload the signed and notarized `.pkg` as Fleet software and scope it to a pilot team or label. The package postinstall performs the default system install, so no post-install script is required for the common deployment path.
+
+<Steps>
+  <Step title="Upload the Beacon package">
+    Upload the signed and notarized Beacon macOS package as Fleet software. The package installs Beacon binaries under `/opt/beacon` and includes Fleet helper scripts and inventory queries.
+  </Step>
+  <Step title="Scope to a pilot">
+    Scope the software to a pilot team or label before broader rollout.
+  </Step>
+  <Step title="Add policies or labels">
+    Add queries from `/opt/beacon/fleet/queries` as Fleet policies or labels to track install state, service health, log freshness, config state, and runtime log writability.
+  </Step>
+  <Step title="Validate the deployment">
+    Run the Fleet validation helper on a managed Mac:
+
+    ```bash
+    /opt/beacon/fleet/scripts/validate.sh
+    ```
+  </Step>
+</Steps>
+
+## Fleet scripts
+
+Fleet scripts are installed under `/opt/beacon/fleet/scripts`:
+
+| Script | Purpose |
+|--------|---------|
+| `install.sh` | Reinstall or install with optional arguments |
+| `validate.sh` | Check status JSON, Wazuh validation, and LaunchDaemon health |
+| `repair.sh` | Preserve logs and config while repairing collector and harness configuration |
+| `uninstall.sh` | Remove endpoint service files |
+
+Use the install script when a workflow needs explicit parameters or a reinstall action.
+
+Fleet install script positional arguments:
+
+```text
+install.sh argument 1: harnesses, default claude,codex; include gemini to opt in Gemini CLI telemetry; do not include GitHub Copilot CLI
+install.sh argument 2: OTLP gRPC port, default 4317
+install.sh argument 3: OTLP HTTP port, default 4318
+install.sh argument 4: collector path, default /opt/beacon/bin/beacon-otelcol
+install.sh argument 5: no-start flag, accepts 1/true/yes
+install.sh argument 6: Splunk HEC endpoint URL
+install.sh argument 7: Splunk HEC token
+install.sh argument 8: optional Splunk index
+install.sh argument 9: optional Splunk source, default beacon-endpoint-agent when configured
+install.sh argument 10: optional Splunk sourcetype, default beacon:endpoint when configured
+install.sh argument 11: Splunk TLS skip-verify flag, accepts 1/true/yes; use only for testing
+install.sh argument 12: optional Splunk HEC CA certificate path
+```
+
+Fleet repair script positional arguments:
+
+```text
+repair.sh argument 1: harnesses, default claude,codex; include gemini to opt in Gemini CLI telemetry; do not include GitHub Copilot CLI
+repair.sh argument 2: OTLP gRPC port, default 4317
+repair.sh argument 3: OTLP HTTP port, default 4318
+repair.sh argument 4: Splunk HEC endpoint URL
+repair.sh argument 5: Splunk HEC token
+repair.sh argument 6: optional Splunk index
+repair.sh argument 7: optional Splunk source
+repair.sh argument 8: optional Splunk sourcetype
+repair.sh argument 9: Splunk TLS skip-verify flag
+repair.sh argument 10: optional Splunk HEC CA certificate path
+```
+
+## Inventory with queries
+
+Add queries from `/opt/beacon/fleet/queries` as Fleet policies or labels. They cover package, service, log, and config presence and freshness.
+
+Available queries:
+
+- `beacon-version.sql`
+- `collector-service-health.sql`
+- `last-event-age-seconds.sql`
+- `configured-harnesses.sql`
+- `runtime-log-writable.sql`
+- `splunk-hec-forwarding.sql`
+
+Recommended Fleet policies:
+
+- Beacon install state is not `not_installed`.
+- Collector service health is `running`.
+- Last runtime event age is less than `86400`.
+- Endpoint config state is `present`.
+- Runtime log state is `present`.
+- Splunk HEC config state is `configured` when HEC export is required.
+
+## Repair and uninstall
+
+Use `/opt/beacon/fleet/scripts/repair.sh` for endpoints where policies report a stale or unhealthy install. Include `gemini` in the harness argument, for example `claude,codex,gemini`, when the repair workflow should manage Gemini CLI telemetry settings. Configure GitHub Copilot CLI separately by deploying `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in Copilot's launch environment.
+
+Use `/opt/beacon/fleet/scripts/uninstall.sh` to remove endpoint service files. Set `BEACON_KEEP_LOGS=1` or the first uninstall argument to preserve runtime logs during removal. Set `BEACON_KEEP_CONFIG=1` or the second uninstall argument to preserve harness telemetry configuration.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Beacon is not installed">
+    If the Beacon version query reports `not_installed`, confirm the Fleet software install completed and that the package is scoped to the host.
+
+    On the device, verify that the expected files exist:
+
+    ```bash
+    ls /opt/beacon/bin/beacon
+    ls /opt/beacon/fleet/scripts/validate.sh
+    ```
+  </Accordion>
+  <Accordion title="Collector service is not running">
+    Check endpoint status and launchd state:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --json
+    sudo launchctl print system/com.beacon.endpoint.collector
+    ```
+
+    If the service file or collector configuration drifted, run `/opt/beacon/fleet/scripts/repair.sh`.
+  </Accordion>
+  <Accordion title="Runtime events are stale or missing">
+    Verify that the runtime log exists and is writable:
+
+    ```bash
+    sudo test -w /var/log/beacon-agent/runtime.jsonl
+    sudo /opt/beacon/bin/beacon endpoint wazuh validate
+    ```
+
+    If validation succeeds but events remain stale, confirm the configured harnesses match the agent harnesses installed or configured for the device and that the local collector ports are not in use by another process. For GitHub Copilot CLI, confirm Copilot's launch environment includes `COPILOT_OTEL_ENABLED=true` and points OTLP HTTP at the local Beacon collector.
+  </Accordion>
+  <Accordion title="Splunk HEC is not configured">
+    Check Fleet install script arguments 6 and 7, or the `BEACON_SPLUNK_HEC_ENDPOINT` and `BEACON_SPLUNK_HEC_TOKEN` environment variables used by the install workflow.
+
+    Use `splunk-hec-forwarding.sql` to verify whether endpoint configuration contains a Splunk destination. On the device, confirm the non-secret destination fields:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --system --json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
+    Review the shared macOS MDM deployment model and package layout.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, or customer-managed pipelines.
+  </Card>
+</Columns>

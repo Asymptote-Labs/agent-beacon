@@ -1,0 +1,98 @@
+---
+title: "Codex CLI"
+description: "Asymptote support details for Codex CLI endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Codex CLI through local OTLP logs and token usage metrics, with optional raw Codex spans for troubleshooting.
+
+## Prerequisites
+
+Before enabling Codex CLI telemetry, make sure:
+
+- Codex CLI is installed and available as the `codex` executable for the user or managed endpoint.
+- `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
+- The install includes the `codex` harness, either through the default harness list or an explicit `--harness codex` value.
+- Your team has reviewed content handling and destination access for prompt telemetry.
+
+## Collection path
+
+Codex CLI exports local OpenTelemetry logs and metrics to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events, and keeps the `codex.turn.token_usage` metric for token attribution. Other high-volume Codex metrics, and Codex spans, are suppressed by default.
+
+Use `--include-codex-spans` during install or repair only when you need raw Codex spans for troubleshooting.
+
+### Token usage and cost
+
+`beacon endpoint install` configures both the Codex log exporter and the Codex metrics exporter in `~/.codex/config.toml`, so Codex's per-turn `codex.turn.token_usage` metric reaches the collector. Beacon normalizes it into the canonical `gen_ai.usage` fields (`input_tokens`, `output_tokens`, `cache_read.input_tokens`, `reasoning.output_tokens`). Codex reports prompt tokens inclusive of the cached portion, so Beacon subtracts cached input to keep `input_tokens` and `cache_read` disjoint and avoid double-counting in totals.
+
+Two attribution limits are specific to Codex and follow from what Codex emits, not from Beacon:
+
+- **No cost.** Codex does not emit a cost signal, so `gen_ai.usage.cost_usd` is empty for Codex turns. Beacon never derives cost from local pricing tables.
+- **No per-session attribution.** Codex's usage metric carries no conversation id, so Codex turns do not roll up by session. Model, harness, repository, and run attribution work normally.
+
+See [How token attribution works](/cli/endpoint-tokens#how-token-attribution-works) for the cross-runtime model.
+
+## CI support
+
+Asymptote can also capture Codex telemetry in CI with `beacon ci start` and `beacon ci finish`. In GitHub Actions, the Asymptote action creates a temporary `CODEX_HOME` with Codex OTLP settings and exposes it as `steps.<id>.outputs.codex-home` for actions such as `openai/codex-action`.
+
+```yaml
+- name: Start Asymptote telemetry
+  id: beacon
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: start
+    harnesses: codex
+
+- uses: openai/codex-action@main
+  with:
+    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    codex-home: ${{ steps.beacon.outputs.codex-home }}
+    prompt: "Review this pull request"
+
+- name: Finish Asymptote telemetry
+  if: always()
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: finish
+```
+
+## Discovery and status
+
+Asymptote detects Codex CLI through the `codex` executable and `~/.codex/config.toml`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex CLI is present and configured.
+
+## Install or configuration support
+
+`beacon endpoint install` writes Codex OTLP exporter tables to `~/.codex/config.toml`.
+
+Codex CLI is not currently configured through Asymptote's hook adapter.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported when emitted through Codex semantic logs |
+| Command, tool, and file telemetry | Supported when emitted through Codex semantic logs |
+| Token usage | Supported through the `codex.turn.token_usage` metric (input, output, cache read, reasoning) |
+| Cost attribution | Not available; Codex emits no cost signal |
+| Per-session attribution | Not available; Codex usage metric carries no conversation id |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported through the system-mode package or MDM-managed config |
+
+## Deployment notes
+
+For MDM deployments, use the signed and notarized macOS `.pkg` so endpoint events land in `/var/log/beacon-agent/runtime.jsonl`. The package installs the endpoint agent under `/opt/beacon`, creates system endpoint configuration, and loads the local collector LaunchDaemon.
+
+If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures supported runtimes.
+  </Card>
+</Columns>

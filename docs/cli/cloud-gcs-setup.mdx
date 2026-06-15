@@ -1,0 +1,58 @@
+---
+title: "beacon cloud gcs setup"
+description: "Create or print GCS setup commands for cloud-agent telemetry"
+---
+
+## Command Overview
+
+`beacon cloud gcs setup` creates or prints self-serve Google Cloud Storage setup commands for cloud-agent telemetry.
+
+```bash title="Command syntax"
+beacon cloud gcs setup
+```
+
+The helper creates or validates a bucket, creates a dedicated uploader service account, grants object upload access, creates a service-account key, and prints the `BEACON_CLOUD_GCS_*` environment variables for cloud agents.
+
+<Warning>
+  This self-serve flow passes a scoped Google service-account key into the provider-managed cloud agent environment. Use it for proof-of-concept testing and prototyping. For production enterprise deployments, use [Asymptote Managed](/deployment/managed) or contact Asymptote about secure forwarding in customer-managed infrastructure.
+</Warning>
+
+## Examples
+
+Create GCS resources and print cloud-agent environment variables:
+
+```bash title="Create GCS resources and print environment variables"
+beacon cloud gcs setup \
+  --project "$GCP_PROJECT" \
+  --bucket "$BEACON_CLOUD_GCS_BUCKET" \
+  --prefix "$BEACON_CLOUD_GCS_PREFIX" \
+  --service-account beacon-cloud-trace-uploader \
+  --apply \
+  --print-env
+```
+
+Print the setup commands without applying them:
+
+```bash title="Print GCS setup commands"
+beacon cloud gcs setup \
+  --project "$GCP_PROJECT" \
+  --bucket "$BEACON_CLOUD_GCS_BUCKET" \
+  --prefix "$BEACON_CLOUD_GCS_PREFIX"
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud" icon="cloud" href="/cli/cloud">
+    Review cloud command group behavior.
+  </Card>
+  <Card title="Claude Code Cloud Agents" icon="cloud" href="/runtimes/claude-code-cloud-agents">
+    Configure Claude Code cloud agent telemetry and GCS upload end to end.
+  </Card>
+  <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
+    Configure Cursor cloud agent telemetry and GCS upload end to end.
+  </Card>
+  <Card title="Google Cloud Storage forwarding" icon="database" href="/log-forwarding/gcs">
+    Review local endpoint GCS forwarding for persistent endpoint deployments.
+  </Card>
+</Columns>

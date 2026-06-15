@@ -1,0 +1,70 @@
+---
+title: "beacon version"
+description: "Display the Agent Beacon CLI version and check for updates"
+---
+
+## Command Overview
+
+Display the version number, git commit, and build date of the Agent Beacon CLI, or check whether a newer released version is available.
+
+```bash title="Command syntax"
+beacon version
+```
+
+<Accordion title="Example output">
+```bash title="Example output"
+$ beacon version
+
+beacon version 0.0.66 (c618237) built on 2026-06-13T23:01:46Z
+```
+</Accordion>
+
+## beacon version check
+
+Check GitHub releases for the latest published Beacon CLI version:
+
+```bash title="Check GitHub releases for the latest published Beacon CLI version"
+beacon version check
+```
+
+When an update is available, Beacon prints the latest version, the installed version, Homebrew upgrade guidance, and a release download URL.
+
+<Accordion title="Example output">
+```bash title="Example output"
+$ beacon version check
+
+Beacon v0.0.66 is available. Current version: v0.0.65
+If installed with Homebrew: brew upgrade beacon
+Download: https://github.com/Asymptote-Labs/agent-beacon/releases/tag/v0.0.66
+```
+</Accordion>
+
+For development builds or versions that cannot be compared with published releases, Beacon prints an informational message and exits successfully.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `-h, --help` | Help for version |
+| `-v, --version` | Also available as `beacon -v` at the top level |
+
+## Upgrade
+
+Use `beacon version check` before upgrading to confirm whether a newer release is available:
+
+```bash title="Use beacon version check before upgrading to confirm whether a newer release is available"
+beacon version check
+brew update
+brew upgrade beacon
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install, repair, and inspect the endpoint agent.
+  </Card>
+  <Card title="Upgrade Beacon" icon="arrow-up" href="/cli/upgrade">
+    Check for updates and upgrade the Beacon CLI.
+  </Card>
+</Columns>

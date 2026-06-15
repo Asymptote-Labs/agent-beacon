@@ -1,0 +1,96 @@
+---
+title: "Runtime Surface Overview"
+description: "Asymptote agent harness support overview and runtime-specific pages"
+---
+
+## Support Matrix
+
+Asymptote supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surface) because each [agent harness](/concepts/core-concepts#agent-harness) exposes telemetry differently. The runtime support model applies to both Asymptote Open Source and Asymptote Managed: Open Source collects and normalizes supported local, CI, and cloud-agent telemetry, while Managed adds hosted ingest, visibility, and governance on top of the same surfaces.
+
+These integrations are grouped by where the agent runs and how telemetry is collected:
+
+- **Local**: Agent harnesses running on an endpoint write telemetry to Asymptote's local collector, hook adapter, plugin, or gateway path.
+- **CI**: Ephemeral CI jobs use a temporary collector and write normalized runtime JSONL as a build artifact or upload target instead of installing a persistent endpoint service.
+- **Cloud**: Provider-managed cloud agents can write session telemetry from the cloud sandbox to customer-managed storage, while SDK integrations instrument agent applications that run in servers, serverless functions, workers, and hosted agent platforms.
+
+## Support matrix
+
+### Local Coding Agent Harnesses
+
+| Agent harness | Collection path | Telemetry coverage |
+|----------------|-----------------|--------------------|
+| [Antigravity CLI](/runtimes/antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
+| [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, lifecycle, subagent, and permission telemetry where emitted through OTLP or hooks |
+| [Codex CLI](/runtimes/codex-cli) | Local OTLP logs | Session, prompt, approval, and tool-result activity from Codex semantic logs |
+| [Cursor](/runtimes/cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
+| [Devin CLI](/runtimes/devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
+| [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
+| [Factory Droid](/runtimes/factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
+| [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
+| [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
+| [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
+| [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
+| [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
+
+### Local Knowledge Worker Agent Harnesses
+
+| Agent harness | Collection path | Telemetry coverage |
+|----------------|-----------------|--------------------|
+| [Claude Cowork](/runtimes/claude-cowork) | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
+| [Hermes Agent](/runtimes/hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
+| [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
+
+### CI Harnesses
+
+| Harness | Collection path | Telemetry coverage |
+|---------|-----------------|--------------------|
+| [CI agent telemetry](/runtimes/claude-code-ci) | Temporary local collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish` | Supported agent prompt, tool, command, file, and run context where emitted during the job |
+
+### Cloud Agent Harnesses and SDKs
+
+| Cloud surface | Collection path | Telemetry coverage |
+|---------------|-----------------|--------------------|
+| [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| [Cursor Cloud Agents](/runtimes/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
+| [Anthropic](/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
+| [Claude Agent SDK](/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
+| [OpenAI](/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
+| [Vercel AI SDK](/sdk/integrations-vercel-ai-sdk) | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
+
+## Deployment notes
+
+For MDM deployments, use the signed and notarized macOS `.pkg`.
+
+- Writes [endpoint events](/concepts/core-concepts#endpoint-event) to `/var/log/beacon-agent/runtime.jsonl`
+- Installs the endpoint agent under `/opt/beacon`
+- Creates system endpoint configuration
+- Loads the [local collector](/concepts/core-concepts#local-collector) LaunchDaemon
+- Supports Jamf Pro, Fleet, or another macOS MDM
+
+| Runtime | Enterprise configuration |
+|---------|--------------------------|
+| Gemini CLI | Opt in by adding `gemini` to the endpoint harness list, for example `claude,codex,gemini`. Asymptote can then manage `~/.gemini/settings.json` for local OTLP collection. |
+| GitHub Copilot CLI | Configure launch environment through MDM or customer policy: `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Asymptote validates the endpoint but does not edit shell profiles or launch environments. |
+| Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
+| OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
+
+Install Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks separately in the logged-in user's context when you need richer hook telemetry.
+
+If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
+    Return to the support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures each runtime.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+  <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
+    Deploy Asymptote through Jamf Pro, Fleet, or another macOS MDM.
+  </Card>
+</Columns>

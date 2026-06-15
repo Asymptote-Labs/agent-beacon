@@ -1,0 +1,95 @@
+---
+title: "Hosting Options"
+description: "Choose between Open Source, Managed, and Private Deployment paths"
+---
+
+Asymptote can start local-first with the open-source Agent Beacon endpoint agent, run as Managed Asymptote Cloud, or deploy privately for teams with stricter infrastructure requirements.
+
+| Hosting Option | Use it when | Data and operations model |
+| -------------- | ----------- | ------------------------- |
+| Asymptote Open Source | You want endpoint telemetry, local JSONL, and customer-managed forwarding. | Beacon runs on the endpoint and writes local logs by default. |
+| Asymptote Managed | You need centralized visibility, policy controls, investigations, SSO/RBAC, audit trails, and rollout support. | Asymptote provides managed ingest, retention, search, detections, and enterprise operations. |
+| Asymptote Private Deployment | You want Managed capabilities with stronger isolation, residency, or infrastructure ownership requirements. | Asymptote works with you on dedicated infrastructure and custom deployment boundaries. |
+
+## Asymptote Open Source
+
+Use the open-source local path when you want endpoint telemetry without a hosted Asymptote backend. Agent Beacon runs on the endpoint, writes normalized events to local JSONL, and can forward events into customer-managed security workflows.
+
+```bash title="Install Beacon"
+brew tap asymptote-labs/tap
+brew install beacon
+beacon version
+```
+
+```bash title="Configure local endpoint telemetry"
+beacon endpoint install
+beacon endpoint status
+```
+
+Open the local dashboard to inspect runtime inventory, timelines, filters, and event details:
+
+```bash title="Open the local dashboard"
+beacon endpoint dashboard --open
+```
+
+The local path preserves `runtime.jsonl` on the endpoint and supports optional forwarding to supported SIEM, observability, object-storage, local JSONL, and customer-managed destinations.
+
+See [Asymptote Open Source](/deployment/open-source) for setup details and [Security & IT Rollout Guide](/security) for managed endpoint deployment.
+
+## Asymptote Managed
+
+Use Managed when you want hosted visibility, governance, and enterprise rollout support for agent activity.
+
+1. Request access at [asymptotelabs.ai/contact](https://asymptotelabs.ai/contact).
+2. Configure your workspace with the runtimes and teams you want to observe.
+3. Use the Asymptote Observe SDK for cloud-hosted agents, services, workers, and serverless functions.
+4. Deploy Agent Beacon on endpoints when you also need local harness visibility.
+
+Managed adds centralized ingest, retention, search, detections, fleet-wide visibility, policy controls, identity mapping, approvals, investigation workflows, SSO, RBAC, audit trails, and enterprise onboarding on top of the open-source Agent Beacon foundation.
+
+For cloud-hosted agent applications, install the SDK and initialize hosted export with an Asymptote API key:
+
+```bash title="Set the hosted Observe API key"
+export ASYMPTOTE_API_KEY=...
+```
+
+```typescript title="Initialize hosted Observe"
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+```
+
+See [Asymptote Managed](/deployment/managed) for managed platform capabilities and [SDK Quickstart](/sdk/quickstart) for cloud instrumentation details.
+
+## Asymptote Private Deployment
+
+Use Private Deployment when Managed is the right operating model, but your organization needs dedicated infrastructure, stricter data boundaries, custom retention, or residency requirements.
+
+Private Deployment can include customer-controlled or private-cloud deployment options, custom forwarding architecture, coverage across endpoints and execution environments, and dedicated deployment engineering.
+
+[Contact us](https://asymptotelabs.ai/contact) to discuss Managed or Private Deployment requirements.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
+    Review managed ingest, governance, investigations, access control, and rollout support.
+  </Card>
+  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+    Install Beacon, configure endpoint telemetry, and keep the CLI up to date.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    Choose the right path for a local, managed, or private rollout.
+  </Card>
+  <Card title="Asymptote Observe SDK" icon="code" href="/sdk/quickstart">
+    Instrument cloud-hosted agent applications with hosted or customer-managed export.
+  </Card>
+  <Card title="Asymptote Overview" icon="diagram-project" href="/get-started/overview">
+    See how the open-source Beacon foundation fits into managed and private deployment paths.
+  </Card>
+  <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward local Beacon events into security and observability platforms.
+  </Card>
+</Columns>

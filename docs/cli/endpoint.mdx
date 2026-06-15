@@ -1,0 +1,88 @@
+---
+title: "beacon endpoint"
+description: "Install, inspect, repair, and remove the Beacon endpoint agent"
+---
+
+## Command Overview
+
+The `beacon endpoint` command group manages the local Beacon [endpoint agent](/concepts/core-concepts#endpoint-agent). It configures agent harness telemetry, runs a [local OpenTelemetry Collector](/concepts/core-concepts#local-collector), writes Beacon [endpoint events](/concepts/core-concepts#endpoint-event) to JSONL, and exposes subcommands for local inspection and integrations. Endpoint commands use per-user paths by default; pass `--system` for root-managed package or MDM deployments.
+
+```bash title="Command syntax"
+beacon endpoint [command]
+```
+
+## Commands
+
+<span id="beacon-endpoint-install" />
+<span id="beacon-endpoint-status" />
+<span id="beacon-endpoint-doctor" />
+<span id="beacon-endpoint-inventory" />
+<span id="beacon-endpoint-discover" />
+<span id="beacon-endpoint-test-event" />
+<span id="beacon-endpoint-bundle-diagnostics" />
+<span id="beacon-endpoint-repair" />
+<span id="beacon-endpoint-uninstall" />
+<span id="beacon-endpoint-config" />
+
+<Columns cols={2}>
+  <Card title="beacon endpoint install" icon="download" href="/cli/endpoint-install">
+    Configure endpoint telemetry, collector service files, and harness telemetry.
+  </Card>
+  <Card title="beacon endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Show collector, service, harness, diagnostic, and runtime log status.
+  </Card>
+  <Card title="beacon endpoint doctor" icon="stethoscope" href="/cli/endpoint-doctor">
+    Run local endpoint health checks with pass/fail exit behavior.
+  </Card>
+  <Card title="beacon endpoint repair" icon="wrench" href="/cli/endpoint-repair">
+    Reapply service files and telemetry configuration.
+  </Card>
+  <Card title="beacon endpoint uninstall" icon="trash" href="/cli/endpoint-uninstall">
+    Stop services and remove managed endpoint files.
+  </Card>
+  <Card title="beacon endpoint config" icon="gear" href="/cli/endpoint-config">
+    Inspect, validate, and update endpoint configuration.
+  </Card>
+  <Card title="beacon scan" icon="magnifying-glass" href="/cli/scan">
+    Run threat-detection rules over local endpoint telemetry.
+  </Card>
+  <Card title="beacon rules" icon="shield-halved" href="/cli/rules">
+    Manage local threat-detection rules used by scans.
+  </Card>
+</Columns>
+
+Additional endpoint commands: [`inventory`](/cli/endpoint-inventory), [`discover`](/cli/endpoint-discover), [`test-event`](/cli/endpoint-test-event), and [`bundle-diagnostics`](/cli/endpoint-bundle-diagnostics).
+
+## Common Paths
+
+| Item | User mode | System mode |
+|------|-----------|-------------|
+| Config | `~/.beacon/endpoint/config.json` | `/Library/Application Support/Beacon/Endpoint/config.json` |
+| Base directory | `~/.beacon/endpoint` | `/Library/Application Support/Beacon/Endpoint` |
+| Runtime log | `~/.beacon/endpoint/logs/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` |
+| Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` |
+
+## Related Groups
+
+<Columns cols={2}>
+  <Card title="Core Concepts" icon="book-open" href="/concepts/core-concepts">
+    Review endpoint agent, collector, harness, and runtime log terminology.
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/cli/dashboard">
+    Inspect Beacon runtime logs in a local dashboard.
+  </Card>
+  <Card title="Wazuh" icon="shield" href="/cli/wazuh">
+    Manage Wazuh localfile, rule, and validation content.
+  </Card>
+  <Card title="Datadog" icon="chart-line" href="/cli/datadog">
+    Manage Datadog Agent custom log collection content.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Manage supported hook-based endpoint integrations.
+  </Card>
+  <Card title="OpenClaw Gateway" icon="network-wired" href="/cli/openclaw">
+    Manage OpenClaw Gateway OpenTelemetry export.
+  </Card>
+</Columns>
+
+Other related guides: [Claude Cowork](/cli/claude-cowork), [Rapid7 InsightIDR](/cli/rapid7), [AWS S3](/cli/s3), and [Google Cloud Storage](/cli/gcs).

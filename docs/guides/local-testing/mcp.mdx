@@ -1,0 +1,218 @@
+---
+title: "Test MCP Access"
+description: "Understand how Beacon exposes local endpoint activity to MCP clients and how to test it"
+---
+
+## Overview
+
+Model Context Protocol (MCP) lets local assistants connect to tools and data sources through a standard interface. Beacon uses MCP to make local endpoint activity searchable from an MCP client without requiring a hosted Beacon account.
+
+This guide shows how to validate Beacon MCP locally, connect Cursor or Claude Code, and test that MCP query results match the same runtime log used by the dashboard.
+
+## What Beacon MCP Exposes
+
+`beacon mcp` exposes compact activity tools over MCP so an assistant can search, summarize, and fetch events from the local Beacon runtime log.
+
+Beacon exposes these MCP tools:
+
+| Tool | Description |
+|------|-------------|
+| `search_activity` | Search local Beacon activity logs and return compact event summaries. |
+| `summarize_activity` | Summarize local Beacon activity over a time window and optional filters. |
+| `get_activity_event` | Fetch one compact event by an ID returned from `search_activity`. |
+| `list_activity_filters` | List common filter values found in local Beacon activity logs. |
+
+## Setup
+
+Write a known event and confirm Beacon can read the runtime log:
+
+```bash title="Prepare MCP test data"
+beacon endpoint test-event
+beacon endpoint status
+```
+
+## 1. Run MCP Doctor
+
+Validate runtime log access, transport settings, readable event samples, and registered MCP tools:
+
+```bash title="Run MCP doctor"
+beacon mcp doctor
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon mcp doctor
+
+runtime log: readable
+transport: stdio
+tools: search_activity, summarize_activity, get_activity_event, list_activity_filters
+sample events: found
+```
+</Accordion>
+
+## 2. Understand Transport Options
+
+Beacon reads the same local `runtime.jsonl` used by the [dashboard](/cli/dashboard). MCP clients can launch Beacon over stdio, or local tools can connect to a running loopback HTTP JSON-RPC server.
+
+```bash title="Serve Beacon MCP over stdio"
+beacon mcp serve
+```
+
+Use stdio for desktop MCP clients that launch Beacon as a subprocess. Use HTTP only for local loopback testing or local tools that connect to a running server.
+
+<Warning>
+  Do not expose `beacon mcp serve --transport http` on a non-loopback interface. Beacon MCP is designed for local activity inspection, not remote administration.
+</Warning>
+
+## Security Use Cases
+
+MCP is useful when an analyst wants to ask a local assistant targeted questions about Beacon activity without opening the raw runtime log.
+
+- Find recent high-severity activity, failed tools, denied approvals, or events that need review.
+- Summarize activity by harness, model, repository, category, or MCP server over a time window.
+- Pull one event by ID and compare it with the same event in the dashboard.
+- List available filters before narrowing an investigation to a specific command, file, session, or repository.
+
+## 3. Test MCP End To End
+
+<Steps>
+  <Step title="Write a known event">
+    Append a synthetic endpoint event so MCP queries have a controlled record to find.
+
+    ```bash
+    beacon endpoint test-event
+    ```
+  </Step>
+  <Step title="Run MCP doctor">
+    Confirm Beacon resolves the expected runtime log, transport, readable event samples, and registered MCP tools.
+
+    ```bash
+    beacon mcp doctor
+    ```
+  </Step>
+  <Step title="Connect an MCP client">
+    Follow [Connect Cursor and Claude Code](#connect-cursor-and-claude-code) below, then ask the client to search recent Beacon activity or summarize activity from the last hour.
+  </Step>
+  <Step title="Test loopback HTTP if needed">
+    If your local tool uses HTTP JSON-RPC, validate the loopback transport before connecting.
+
+    ```bash
+    beacon mcp doctor --transport http --addr 127.0.0.1:8766
+    ```
+  </Step>
+  <Step title="Compare with the dashboard">
+    Open Log Search and confirm MCP query results match the same event window and event IDs shown by the dashboard.
+
+    ```bash
+    beacon endpoint dashboard --open
+    ```
+  </Step>
+</Steps>
+
+## 4. Connect Cursor And Claude Code
+
+Before connecting a client, confirm Beacon is installed and resolve the absolute CLI path:
+
+```bash title="Resolve Beacon path"
+which beacon
+beacon mcp doctor
+```
+
+`beacon mcp doctor` validates the runtime log, transport, readable event samples, and registered MCP tools. Use the absolute path from `which beacon` in client configuration so the client does not depend on your shell `PATH`.
+
+### Cursor
+
+Open or create the global Cursor MCP config:
+
+```text
+~/.cursor/mcp.json
+```
+
+Add `beacon` under `mcpServers`, merging it with any existing servers:
+
+```json
+{
+  "mcpServers": {
+    "beacon": {
+      "command": "/opt/homebrew/bin/beacon",
+      "args": ["mcp", "serve", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+Restart Cursor or run **Developer: Reload Window**, then verify the server in **Cursor Settings → MCP**. Beacon should connect with four tools: `search_activity`, `summarize_activity`, `get_activity_event`, and `list_activity_filters`.
+
+<Note>
+  Replace `/opt/homebrew/bin/beacon` with the path from `which beacon`. Do not rely on `"command": "beacon"` because Cursor's subprocess environment may not include Homebrew or shell `PATH` entries.
+</Note>
+
+<Accordion title="Use project-level Cursor config">
+  To share the setup with a team, use `.cursor/mcp.json` in a repository root instead of `~/.cursor/mcp.json`. The JSON shape is the same, but the server only loads for that workspace.
+</Accordion>
+
+### Claude Code
+
+Use `claude mcp add` for the scope you want:
+
+```bash
+# Available in all projects for your user
+claude mcp add --transport stdio --scope user beacon -- /opt/homebrew/bin/beacon mcp serve --transport stdio
+
+# Shared with a project through .mcp.json
+claude mcp add --transport stdio --scope project beacon -- /opt/homebrew/bin/beacon mcp serve --transport stdio
+```
+
+Replace `/opt/homebrew/bin/beacon` with the path from `which beacon`.
+
+To configure Claude Code manually, add the same `beacon` entry to the top-level `mcpServers` object in `~/.claude.json` for user scope or `.mcp.json` for project scope:
+
+```json
+{
+  "mcpServers": {
+    "beacon": {
+      "command": "/opt/homebrew/bin/beacon",
+      "args": ["mcp", "serve", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+Verify the server:
+
+```bash
+claude mcp list
+claude mcp get beacon
+```
+
+Inside a Claude Code session, run `/mcp` and confirm Beacon is connected. Project-scoped `.mcp.json` servers require approval the first time Claude Code loads them.
+
+## Troubleshooting
+
+- Server fails to start: use the absolute path from `which beacon` in `command`.
+- Tools connect but return empty results: run `beacon endpoint status`; the runtime log may not have events yet.
+- Claude Code ignores project config: approve the `.mcp.json` server when prompted or check project-scope MCP settings.
+
+## Key Features Demonstrated
+
+- Local MCP access to the same runtime log used by the dashboard.
+- Compact activity search, summary, event fetch, and filter discovery tools.
+- Cursor and Claude Code client configuration using an absolute Beacon path.
+- Loopback-only HTTP testing when stdio is not the right local transport.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon mcp" icon="server" href="/cli/mcp">
+    Review MCP commands, tools, transports, and flags.
+  </Card>
+  <Card title="beacon mcp doctor" icon="stethoscope" href="/cli/mcp-doctor">
+    Validate local MCP setup and print client configuration.
+  </Card>
+  <Card title="Test the Local Dashboard" icon="chart-line" href="/guides/local-testing/dashboard">
+    Compare MCP results against the local dashboard.
+  </Card>
+  <Card title="Write Validation Events" icon="vial" href="/guides/local-testing/events">
+    Write a known-good event before testing MCP queries.
+  </Card>
+</Columns>

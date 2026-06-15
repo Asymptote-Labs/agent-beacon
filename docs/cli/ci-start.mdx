@@ -1,0 +1,55 @@
+---
+title: "beacon ci start"
+description: "Start a detached Beacon CI telemetry session"
+---
+
+## Command Overview
+
+`beacon ci start` starts a local collector, writes a session state file, and prints or exports telemetry environment variables for later workflow steps.
+
+```bash title="Command syntax"
+beacon ci start
+```
+
+In the GitHub Action, these variables are written to `$GITHUB_ENV` so later `run:` or `uses:` steps can inherit them. Claude Code uses environment variables; Codex uses a generated `CODEX_HOME` with Beacon OTLP configuration.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--harness <harnesses>` | Harnesses to configure. Defaults to `claude,codex` when omitted |
+| `--log-path <path>` | CI runtime JSONL log path |
+| `--state-path <path>` | CI session state path |
+| `--github-env <path>` | Optional GitHub Actions environment file to append exports to |
+| `--forward <destination>` | Optionally forward CI events to a customer-managed SIEM. Supported values are `splunk` and `falcon` |
+| `--forward-endpoint <url>` | SIEM HEC endpoint URL for the selected `--forward` provider |
+
+## Examples
+
+Start a detached Beacon CI telemetry session:
+
+```bash title="Start a detached Beacon CI telemetry session"
+beacon ci start --harness claude,codex
+```
+
+Start a session with a stable runtime log path:
+
+```bash title="Start with a stable runtime log path"
+beacon ci start \
+  --harness codex \
+  --log-path "$RUNNER_TEMP/beacon/runtime.jsonl"
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci" icon="terminal" href="/cli/ci">
+    Review CI artifact paths and command group behavior.
+  </Card>
+  <Card title="beacon ci finish" icon="stop" href="/cli/ci-finish">
+    Stop, validate, and export a detached telemetry session.
+  </Card>
+  <Card title="CI Telemetry Exports" icon="file-export" href="/log-forwarding/ci-telemetry-exports">
+    Export CI runtime JSONL through workflow artifacts, S3, GCS, or downstream pipelines.
+  </Card>
+</Columns>

@@ -1,0 +1,172 @@
+---
+title: "Vercel AI SDK"
+description: "Use Asymptote Observe tracing with Vercel AI SDK telemetry"
+---
+
+## Integration Overview
+
+Pass the Asymptote tracer into AI SDK telemetry so model calls and tool loops stay in the same trace.
+
+## Overview
+
+AI SDK exposes OpenTelemetry hooks through `experimental_telemetry`. Asymptote Observe is OpenTelemetry-first, so you can trace `generateText`, `streamText`, tool loops, and custom orchestration by passing `Observe.getTracer()` to each AI SDK call you want captured.
+
+This page covers Node.js usage. For framework placement and serverless flushing, see [Next.js and serverless](/sdk/integrations-nextjs-serverless).
+
+## What Asymptote Captures
+
+- AI SDK spans emitted when `experimental_telemetry.isEnabled` is `true`.
+- Model call spans for supported `generate*` and `stream*` operations.
+- Tool call spans emitted by AI SDK telemetry.
+- Provider and model metadata where AI SDK and provider adapters emit it.
+- Parent spans you add with `Observe.observe()` for route or workflow grouping.
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- `@asymptote/sdk` installed.
+- `ai` and an AI SDK model provider package installed.
+- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK and Vercel AI SDK"
+npm install @asymptote/sdk ai @ai-sdk/openai
+```
+
+Set environment variables for Asymptote and your provider:
+
+```bash title="Set Asymptote Managed and OpenAI environment variables"
+export ASYMPTOTE_API_KEY=...
+export OPENAI_API_KEY=...
+```
+
+## Getting Started
+
+Initialize `Observe` once at application startup, then pass the tracer to AI SDK calls.
+
+```typescript title="Trace an AI SDK generateText call" lines
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+
+await generateText({
+  model: openai("gpt-4.1-mini"),
+  prompt: "Review this pull request",
+  experimental_telemetry: {
+    isEnabled: true,
+    tracer: Observe.getTracer(),
+  },
+});
+
+await Observe.flush();
+```
+
+The same pattern applies anywhere AI SDK accepts `experimental_telemetry`.
+
+## Reuse The Tracer
+
+Use `Observe.getTracer()` anywhere AI SDK accepts an OpenTelemetry tracer. This lets generated spans share the same exporter, resource attributes, and Beacon compatibility path as the rest of your application.
+
+```typescript title="Reuse the Observe tracer" lines
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+import { Observe } from "@asymptote/sdk";
+
+const tracer = Observe.getTracer();
+
+await generateText({
+  model: openai("gpt-4.1-mini"),
+  prompt: "Find risky shell commands in this agent transcript.",
+  experimental_telemetry: {
+    isEnabled: true,
+    tracer,
+  },
+});
+```
+
+## Trace A Tool Loop
+
+Pass the tracer into tool-calling AI SDK flows as well.
+
+```typescript title="Trace an AI SDK tool loop" lines
+import { openai } from "@ai-sdk/openai";
+import { generateText, stepCountIs, tool } from "ai";
+import { z } from "zod";
+import { Observe } from "@asymptote/sdk";
+
+const result = await generateText({
+  model: openai("gpt-4.1-mini"),
+  prompt: "Look up the security owner for the repository and summarize next steps.",
+  tools: {
+    repoOwner: tool({
+      description: "Look up the owner for a repository.",
+      inputSchema: z.object({ repo: z.string() }),
+      execute: async ({ repo }) => ({ repo, owner: "security-platform" }),
+    }),
+  },
+  stopWhen: stepCountIs(3),
+  experimental_telemetry: {
+    isEnabled: true,
+    tracer: Observe.getTracer(),
+    functionId: "repo-security-owner",
+  },
+});
+```
+
+## Group Calls With Custom Steps
+
+Wrap orchestration code around AI SDK calls when you need spans for planning, policy checks, retrieval, or handoffs that are not covered by model telemetry.
+
+```typescript title="Group AI SDK calls with a parent span" lines
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+import {
+  ATTR_BEACON_EVENT_ACTION,
+  ATTR_BEACON_HARNESS_NAME,
+  Observe,
+} from "@asymptote/sdk";
+
+const runAgentTurn = Observe.observe(
+  {
+    name: "agent.turn",
+    attributes: {
+      [ATTR_BEACON_HARNESS_NAME]: "vercel_ai_sdk",
+      [ATTR_BEACON_EVENT_ACTION]: "prompt.submitted",
+    },
+  },
+  async (prompt: string) => {
+    return generateText({
+      model: openai("gpt-4.1-mini"),
+      prompt,
+      experimental_telemetry: {
+        isEnabled: true,
+        tracer: Observe.getTracer(),
+      },
+    });
+  },
+);
+```
+
+For serverless handlers, call `Observe.flush()` before returning if the invocation may terminate immediately after the model call.
+
+## Troubleshooting
+
+- Confirm `ASYMPTOTE_API_KEY` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set in the runtime process.
+- Make sure every AI SDK call you want traced has `experimental_telemetry.isEnabled=true`.
+- Pass `tracer: Observe.getTracer()` on each traced AI SDK call.
+- In short-lived scripts or jobs, call `Observe.flush()` before exit.
+- In Next.js, initialize from `instrumentation.ts` in the Node.js runtime.
+
+## What's Next
+
+<Columns cols={2}>
+  <Card title="Next.js And Serverless" icon="cloud" href="/sdk/integrations-nextjs-serverless">
+    Place initialization correctly in Next.js and flush traces in short-lived runtimes.
+  </Card>
+  <Card title="Observe" icon="diagram-project" href="/sdk/observe">
+    Group AI SDK calls under custom parent spans.
+  </Card>
+</Columns>

@@ -1,0 +1,75 @@
+---
+title: "Run local scans"
+description: "Scan local Beacon endpoint telemetry with active threat-detection rules"
+---
+
+## Command Overview
+
+Run `beacon scan` after endpoint telemetry is flowing to evaluate the runtime log with active threat-detection rules.
+
+```bash title="Run a local scan"
+beacon scan
+```
+
+Scanning is read-only. It loads local telemetry from the resolved runtime JSONL log, evaluates rules in memory, and prints findings without contacting the network.
+
+## Rule selection
+
+Beacon chooses rules in this order:
+
+1. Rules in the local rule store.
+2. The built-in baseline rules when no store is installed.
+3. The directory passed with `--rules`, when you want an explicit rule pack for one scan.
+
+```bash title="Scan with an explicit rule directory"
+beacon scan --rules ./rules
+```
+
+## Runtime log selection
+
+Use per-user endpoint paths by default:
+
+```bash title="Scan user-mode telemetry"
+beacon scan --user
+```
+
+Scan system-mode telemetry:
+
+```bash title="Scan system-mode telemetry"
+sudo beacon scan --system
+```
+
+Scan a copied or exported runtime log:
+
+```bash title="Scan a specific runtime log"
+beacon scan --log-path ./runtime.jsonl
+```
+
+## Session filtering
+
+Filter to one session id substring when you are investigating a known agent run:
+
+```bash title="Scan one session"
+beacon scan --session claude-session-123
+```
+
+## Output
+
+Human-readable output summarizes each finding, its severity, rule id, reason, session, and matched events.
+
+For JSON output, use:
+
+```bash title="Print JSON findings"
+beacon scan --json
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Use scan gates" icon="circle-exclamation" href="/cli/scan-ci-gates">
+    Filter findings and fail automation on severity thresholds.
+  </Card>
+  <Card title="beacon rules" icon="shield-halved" href="/cli/rules">
+    Manage the rules used by local scans.
+  </Card>
+</Columns>

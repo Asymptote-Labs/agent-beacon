@@ -1,0 +1,75 @@
+---
+title: "beacon mcp"
+description: "Expose local Beacon activity to MCP clients"
+---
+
+## Command Overview
+
+The `beacon mcp` command group exposes local Beacon endpoint activity to MCP clients so an assistant can search, summarize, and retrieve compact event records from the local `runtime.jsonl` log.
+
+```bash title="Command syntax"
+beacon mcp [command]
+```
+
+The server reads the same local runtime log used by the [dashboard](/cli/dashboard). It supports stdio for desktop MCP clients and loopback HTTP JSON-RPC for local tools that connect to a running server.
+
+## Commands
+
+<span id="beacon-mcp-serve" />
+<span id="beacon-mcp-doctor" />
+
+<Columns cols={2}>
+  <Card title="beacon mcp serve" icon="server" href="/cli/mcp-serve">
+    Run the local Beacon MCP server.
+  </Card>
+  <Card title="beacon mcp doctor" icon="stethoscope" href="/cli/mcp-doctor">
+    Validate local Beacon MCP setup and print client configuration.
+  </Card>
+</Columns>
+
+## MCP tools
+
+Beacon exposes these MCP tools:
+
+| Tool | Description |
+|------|-------------|
+| `search_activity` | Search local Beacon activity logs and return compact event summaries. |
+| `summarize_activity` | Summarize local Beacon activity over a time window and optional filters. |
+| `get_activity_event` | Fetch one compact event by an ID returned from `search_activity`. |
+| `list_activity_filters` | List common filter values found in local Beacon activity logs. |
+
+Search and summary tools accept filters such as `since`, `until`, `limit`, `q`, `harness`, `model`, `action`, `severity`, `category`, `repository`, `session`, `file`, `command`, `mcp`, `approval`, `decision`, `policy`, `review`, and `wazuh_level`.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--log-path PATH` | Runtime JSONL log path |
+| `--transport stdio\|http` | MCP transport. Defaults to `stdio` |
+| `--addr ADDR` | Loopback HTTP JSON-RPC listen address for `--transport http`. Defaults to `127.0.0.1:8766` |
+
+<Note>
+  `beacon mcp` only reads local Beacon runtime logs. It does not require a hosted Beacon account, and HTTP transport should remain bound to loopback.
+</Note>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon mcp serve" icon="server" href="/cli/mcp-serve">
+    Run the local Beacon MCP server.
+  </Card>
+  <Card title="beacon mcp doctor" icon="stethoscope" href="/cli/mcp-doctor">
+    Validate local Beacon MCP setup.
+  </Card>
+  <Card title="Connect Cursor and Claude Code" icon="plug" href="/guides/local-testing/mcp#connect-cursor-and-claude-code">
+    Install Beacon MCP in local assistant clients.
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/cli/dashboard">
+    Inspect the same local activity log in a browser.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review the normalized JSONL fields behind MCP activity results.
+  </Card>
+</Columns>

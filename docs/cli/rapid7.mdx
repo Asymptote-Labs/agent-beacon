@@ -1,0 +1,181 @@
+---
+title: "beacon endpoint rapid7"
+description: "Generate Rapid7 InsightIDR Custom Logs forwarding content and validation events for Beacon endpoint events."
+---
+
+## Forwarding Command
+
+Use `beacon endpoint rapid7` to generate Rapid7 InsightIDR Custom Logs forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed shipper upload `runtime.jsonl` to a Rapid7 Custom Logs webhook event source.
+
+Beacon does not store Rapid7 webhook URLs or tokens. Keep those values in your shipper configuration, endpoint-management secret store, or deployment tooling.
+
+```bash title="Command syntax"
+beacon endpoint rapid7 [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint rapid7 print-config" icon="file-lines" href="#beacon-endpoint-rapid7-print-config">
+    Print a Rapid7 Custom Logs webhook smoke-test uploader for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint rapid7 install-pack" icon="box-archive" href="#beacon-endpoint-rapid7-install-pack">
+    Write Rapid7 InsightIDR Custom Logs forwarding content to a directory.
+  </Card>
+  <Card title="beacon endpoint rapid7 validate" icon="check" href="#beacon-endpoint-rapid7-validate">
+    Write and describe a Beacon Rapid7 validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+## beacon endpoint rapid7 print-config
+
+`beacon endpoint rapid7 print-config` prints a Rapid7 Custom Logs webhook smoke-test uploader for the configured Beacon runtime JSONL log.
+
+```bash title="Print the configuration"
+beacon endpoint rapid7 print-config
+```
+
+Use this command when you want to copy the one-shot upload script into an existing validation workflow. For production forwarding, use a tailing forwarder that checkpoints offsets instead of repeatedly uploading the whole file.
+
+### Examples
+
+Print a smoke-test uploader for the default per-user Beacon install:
+
+```bash title="Print a smoke-test uploader for the default per-user Beacon install"
+beacon endpoint rapid7 print-config
+```
+
+Print a smoke-test uploader for a system-mode MDM deployment:
+
+```bash title="Print a smoke-test uploader for a system-mode MDM deployment"
+sudo /opt/beacon/bin/beacon endpoint rapid7 print-config --system
+```
+
+Print a smoke-test uploader for a custom runtime log:
+
+```bash title="Print a smoke-test uploader for a custom runtime log"
+beacon endpoint rapid7 print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint rapid7 install-pack
+
+`beacon endpoint rapid7 install-pack` writes Rapid7 InsightIDR Custom Logs forwarding content to a directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint rapid7 install-pack --output ./beacon-rapid7-pack
+```
+
+The pack includes setup instructions, a one-shot NDJSON upload smoke-test script, and sample Beacon endpoint events.
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint rapid7 install-pack --output ./beacon-rapid7-pack
+```
+
+Generate a content pack for a system-mode deployment:
+
+```bash title="Generate a content pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint rapid7 install-pack \
+  --system \
+  --output ./beacon-rapid7-pack
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint rapid7 install-pack \
+  --output ./beacon-rapid7-pack \
+  --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the Rapid7 InsightIDR content pack. Defaults to `beacon-rapid7-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint rapid7 validate
+
+`beacon endpoint rapid7 validate` writes a Beacon validation event to the runtime JSONL log and prints the expected Rapid7 fields and validation query.
+
+```bash title="Run the validation check"
+beacon endpoint rapid7 validate
+```
+
+### Examples
+
+Write a validation event for the default per-user install:
+
+```bash title="Write a validation event for the default per-user install"
+beacon endpoint rapid7 validate
+```
+
+Write a validation event for a system-mode deployment:
+
+```bash title="Write a validation event for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint rapid7 validate --system
+```
+
+Write a validation event to a custom runtime log:
+
+```bash title="Write a validation event to a custom runtime log"
+beacon endpoint rapid7 validate --log-path /path/to/runtime.jsonl
+```
+
+The validation command prints a Rapid7 Log Search query:
+
+```text
+"Beacon endpoint Rapid7 validation event"
+```
+
+It also prints the expected fields:
+
+```text
+vendor=beacon product=endpoint-agent destination.type=rapid7
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Rapid7 forwarding" icon="chart-line" href="/log-forwarding/rapid7">
+    Configure Rapid7 InsightIDR Custom Logs webhook forwarding for Beacon events.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

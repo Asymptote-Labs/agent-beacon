@@ -1,0 +1,145 @@
+---
+title: "Investigate Agent Runtime Activity"
+description: "Collect and inspect normalized telemetry from local AI agent runtimes"
+---
+
+## Overview
+
+This guide shows how to confirm local telemetry collection, generate or find activity, inspect runtime events in the dashboard, and decide whether events are ready to forward for detection.
+
+Use it when you want to see what supported AI agent runtimes actually did: prompts, tools, commands, approvals, MCP-like activity, file changes, and runtime health signals.
+
+## Setup
+
+Configure endpoint telemetry:
+
+```bash title="Configure collection"
+beacon endpoint install
+beacon endpoint status
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint status
+
+Collector: running
+Runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
+Configured harnesses: claude,codex
+Last event: 2026-06-10T04:24:11Z
+```
+</Accordion>
+
+If the status output has no recent runtime event, write a controlled validation event before testing real agent activity:
+
+```bash title="Write a validation event"
+beacon endpoint test-event
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint test-event
+
+checked runtime log: ok
+wrote validation event: ok
+event action: endpoint.validation
+```
+</Accordion>
+
+## 1. Generate Or Find Activity
+
+Run a supported local agent harness, then check that Beacon has observed activity:
+
+```bash title="Check observed runtime coverage"
+beacon endpoint inventory
+```
+
+If the validation event appears but runtime activity does not, check [Inventory Local Agent Runtimes](/guides/inventory) for installed, configured, managed, and observed state.
+
+## 2. Open The Local Dashboard
+
+Open Log Search and Security Overview:
+
+```bash title="Open the dashboard"
+beacon endpoint dashboard --open
+```
+
+## 3. Inspect Key Fields
+
+| Signal | Why it matters |
+|--------|----------------|
+| Harness | Identifies the agent runtime that produced the event. |
+| User and endpoint | Ties activity to the local account and host. |
+| Session and repository | Reconstructs where work happened. |
+| Tool, command, file | Shows actions taken by the agent. |
+| MCP-like activity | Highlights external tool or server interactions. |
+| Approval and policy | Shows prompts for permission, denial, blocking, or enforcement context. |
+| Severity and needs-review | Helps analysts prioritize. |
+| Content handling | Explains whether prompt, command, or diff content is present, redacted, or truncated. |
+
+Beacon normalizes runtime-specific signals into the [Endpoint Event Schema](/telemetry-schema/event-schema), so analysts can search across runtimes with the same core fields.
+
+## 4. Investigate Activity
+
+In Log Search, start with:
+
+- Harness or model
+- Severity or needs-review
+- Commands and file changes
+- Approval or blocked activity
+- MCP-like activity
+- Repository or working directory
+
+## 5. Scan Locally
+
+Run the active threat-detection rules over the runtime log:
+
+```bash title="Scan local telemetry"
+beacon scan
+```
+
+Use JSON output or severity gates when you want automation-friendly results:
+
+```bash title="Scan with a severity gate"
+beacon scan --json --fail-on high
+```
+
+Manage the active rule store with [`beacon rules`](/cli/rules). Scanning is read-only and does not reach the network.
+
+## 6. Forward For Detection
+
+Beacon writes normalized JSONL locally first. Forward it into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, Microsoft Sentinel, AWS S3, Google Cloud Storage, or a customer-managed shipper with [Log Forwarding](/log-forwarding).
+
+## Key Features Demonstrated
+
+- Local collection health and last-event freshness.
+- Runtime coverage from installed/configured/observed inventory state.
+- Cross-runtime event review through the normalized endpoint schema.
+- Local threat scanning before SIEM or log forwarding.
+- Dashboard-based triage before SIEM or log forwarding.
+
+## Troubleshooting
+
+- If `beacon endpoint status` has no recent event, run `beacon endpoint test-event`.
+- If test events appear but runtime activity does not, confirm the runtime is supported and configured in [Inventory Local Agent Runtimes](/guides/inventory).
+- If the dashboard is empty, confirm it is reading the same user-mode, system-mode, or custom runtime log you validated.
+- If forwarded events are missing downstream, validate local JSONL first before debugging destination configuration.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Inventory Local Agent Runtimes" icon="clipboard-list" href="/guides/inventory">
+    Discover local runtimes, MCP servers, configs, hooks, and observed coverage.
+  </Card>
+  <Card title="Endpoint Telemetry" icon="gear" href="/deployment/open-source#configure-endpoint-telemetry">
+    Configure endpoint telemetry and harnesses.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and event entities.
+  </Card>
+  <Card title="beacon scan" icon="magnifying-glass" href="/cli/scan">
+    Run local threat-detection rules over endpoint telemetry.
+  </Card>
+  <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon endpoint events into customer-managed destinations.
+  </Card>
+</Columns>

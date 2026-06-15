@@ -1,0 +1,74 @@
+---
+title: "Local JSONL"
+description: "Use Beacon's local runtime JSONL log as the default endpoint log and local dashboard source."
+---
+
+## Local Log Output
+
+Beacon's default destination is the local [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). The endpoint agent writes one normalized [endpoint event](/concepts/core-concepts#endpoint-event) per line and keeps the active path stable for local review, the Beacon dashboard, and downstream shippers.
+
+Use this path when you want a local audit trail without configuring a remote SIEM, log aggregator, or object storage exporter.
+
+## Runtime log paths
+
+| Mode | Runtime log |
+|------|-------------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+User mode is convenient for local evaluation. System mode is preferred for package or MDM deployments because the log path is shared and root-managed.
+
+## What reads the local log
+
+Beacon uses the same JSONL source for:
+
+- Local inspection with `beacon endpoint status`, `beacon endpoint doctor`, and diagnostics commands.
+- The loopback-only [endpoint dashboard](/cli/dashboard), including Log Search and Security Overview.
+- Validation events written by forwarding commands.
+- Customer-managed shippers that tail the active `runtime.jsonl` path.
+
+Beacon rotates the active log at 10 MiB and keeps five numbered archives such as `runtime.jsonl.1`. The active `runtime.jsonl` path remains the stable handoff point for the local dashboard and external shippers.
+
+## Inspect locally
+
+Confirm the endpoint is healthy and writing events:
+
+```bash title="Confirm the endpoint is healthy and writing events"
+beacon endpoint status --json
+beacon endpoint test-event
+```
+
+For a system-mode deployment:
+
+```bash title="For a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint status --system --json
+sudo /opt/beacon/bin/beacon endpoint test-event --system
+sudo test -r /var/log/beacon-agent/runtime.jsonl
+```
+
+Open the local dashboard:
+
+```bash title="Open the local dashboard"
+beacon endpoint dashboard --open
+```
+
+## Content Handling
+
+Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to local JSONL. Review filesystem access, archive retention, and any downstream readers so retained telemetry matches your approved collection policy.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon endpoint dashboard" icon="chart-line" href="/cli/dashboard">
+    Inspect Beacon runtime logs in the local dashboard.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Compare local, SIEM, log aggregation, and object storage paths.
+  </Card>
+  <Card title="Customer-managed log pipelines" icon="route" href="/log-forwarding/customer-managed">
+    Forward local Beacon JSONL through customer-controlled shippers.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

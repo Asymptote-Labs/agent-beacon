@@ -1,0 +1,94 @@
+---
+title: "Unified Telemetry Schema"
+description: "A normalized telemetry contract for local, CI, and cloud agent activity"
+---
+
+## Why the schema exists
+
+AI agent activity is emitted from many places: local developer machines, CI jobs, cloud-hosted coding agents, SDK integrations, OpenTelemetry exporters, and runtime-specific hook systems. Each source has its own event names, payload shapes, identifiers, and ideas about what counts as a prompt, tool call, command, approval, file change, or policy decision.
+
+Beacon's unified telemetry schema turns those different signals into one normalized event model. The goal is to make agent activity searchable, detectable, and explainable across local, CI, and cloud environments without requiring every downstream rule, dashboard, or SIEM parser to understand each runtime's native format.
+
+## What normalization provides
+
+The schema gives every event a consistent backbone:
+
+| Schema concept | Purpose |
+|----------------|---------|
+| `event` | Describes what happened with normalized actions such as `prompt.submitted`, `tool.invoked`, `command.executed`, `file.modified`, `approval.requested`, or `mcp.tool_invoked` |
+| `harness` | Identifies the agent runtime or integration that produced the signal |
+| `origin` | Distinguishes local, CI, and cloud telemetry while preserving a shared event shape |
+| `run` and `session` | Connects activity to CI runs, cloud-agent jobs, local sessions, repositories, branches, and working directories |
+| `tool`, `command`, `file`, `mcp`, `approval`, and `policy` | Captures the entities analysts and detections need to understand agent behavior |
+| `content` | Records whether prompt or tool content was included, redacted, truncated, or omitted |
+
+## Required fields
+
+| Field | Meaning |
+|-------|---------|
+| `timestamp` | UTC event time |
+| `vendor` | Always `beacon` |
+| `product` | Current product identifier, `endpoint-agent` |
+| `schema_version` | Current public schema version, `1.0` |
+| `event.kind` | Event family, currently `agent_runtime` |
+| `event.action` | Normalized action such as `command.executed` or `tool.invoked` |
+| `event.category` | Event category, provided by the runtime or inferred from `event.action` when possible |
+| `severity` | `info`, `low`, `medium`, `high`, or `critical` |
+| `endpoint` | Host and operating system context |
+| `harness` | Runtime that produced the signal |
+
+## How it extends OpenTelemetry
+
+Beacon accepts OpenTelemetry attributes, including the GenAI semantic conventions, and projects them into fields that are easier to query across agent runtimes. OpenTelemetry context is preserved under `gen_ai` where available, while commonly investigated values are also normalized into Beacon fields such as `model`, `tool.name`, `prompt.text`, `command.command`, `file.path`, and `gen_ai.usage`.
+
+This lets teams use OpenTelemetry-native data without giving up a security-focused vocabulary for agent behavior. A detection can ask for a normalized command, MCP tool, approval decision, or file operation instead of branching on every source runtime's attribute names.
+
+## Why it matters
+
+The normalized schema is the contract between collection, detection, investigation, and forwarding. It lets Asymptote:
+
+- Correlate agent activity across local endpoints, ephemeral CI jobs, and cloud agent sessions.
+- Write detections once against stable fields instead of per-runtime payloads.
+- Preserve source-specific OpenTelemetry and GenAI context without forcing downstream tools to parse raw traces.
+- Keep prompt, tool, command, file, approval, policy, and token-usage telemetry comparable across supported harnesses.
+- Forward one predictable JSONL shape into customer-managed analytics, SIEM, object-storage, and review workflows.
+
+## Read next
+
+<Columns cols={2}>
+  <Card title="Schema normalization" icon="arrows-rotate" href="/telemetry-schema/normalization">
+    See how OTLP attributes and hook payloads map into Beacon fields and actions.
+  </Card>
+  <Card title="Schema fields" icon="table-list" href="/telemetry-schema/fields">
+    Review entities, optional context, and shared top-level fields.
+  </Card>
+  <Card title="Schema examples" icon="code" href="/telemetry-schema/examples">
+    Inspect example events and content handling behavior.
+  </Card>
+  <Card title="Data inventory" icon="table-list" href="/security/data-inventory">
+    Review runtime coverage and the event fields Beacon can write when a source provides them.
+  </Card>
+</Columns>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Core Concepts" icon="book-open" href="/concepts/core-concepts">
+    Review the glossary behind events and entities.
+  </Card>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    See how runtime telemetry becomes normalized JSONL.
+  </Card>
+  <Card title="Detections" icon="shield-halved" href="/detections">
+    See how events are evaluated by threat rules.
+  </Card>
+  <Card title="Wazuh" icon="shield" href="/cli/wazuh">
+    Configure Wazuh ingestion for Beacon events.
+  </Card>
+  <Card title="Datadog" icon="chart-line" href="/cli/datadog">
+    Configure Datadog Agent custom log collection for Beacon events.
+  </Card>
+  <Card title="Sumo Logic" icon="chart-line" href="/cli/sumo">
+    Configure Sumo Logic HTTP Source forwarding for Beacon events.
+  </Card>
+</Columns>

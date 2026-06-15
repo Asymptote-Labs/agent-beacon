@@ -1,0 +1,219 @@
+---
+title: "beacon endpoint wazuh"
+description: "Configure Wazuh ingestion for Beacon endpoint events"
+---
+
+## Forwarding Command
+
+Beacon writes Wazuh-compatible JSONL endpoint events to the local runtime log. The `beacon endpoint wazuh` commands help security and IT teams connect that log to Wazuh localfile ingestion, install Beacon-specific Wazuh rules, and write validation events.
+
+Beacon does not require Wazuh credentials and does not call the Wazuh API during normal endpoint operation. Wazuh tails the runtime log from disk and stores decoded Beacon fields under `data.*` in Wazuh alerts.
+
+```bash title="Command syntax"
+beacon endpoint wazuh [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint wazuh print-config" icon="file-lines" href="#beacon-endpoint-wazuh-print-config">
+    Print a Wazuh localfile snippet for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint wazuh install-pack" icon="box-archive" href="#beacon-endpoint-wazuh-install-pack">
+    Write Wazuh rules and config snippets to a directory.
+  </Card>
+  <Card title="beacon endpoint wazuh validate" icon="check" href="#beacon-endpoint-wazuh-validate">
+    Write and describe a Beacon validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+Use user mode for local workstation testing. Use system mode for managed endpoint deployments so Wazuh can read a shared, predictable path.
+
+## beacon endpoint wazuh print-config
+
+`beacon endpoint wazuh print-config` prints a Wazuh localfile snippet for the configured Beacon runtime JSONL log.
+
+```bash title="Print the configuration"
+beacon endpoint wazuh print-config
+```
+
+Use this command when you want to copy the localfile configuration into an existing Wazuh agent configuration.
+
+The output looks like:
+
+```xml
+<localfile>
+  <location>/var/log/beacon-agent/runtime.jsonl</location>
+  <log_format>json</log_format>
+</localfile>
+```
+
+Install this snippet in the Wazuh agent or manager configuration that can read the Beacon runtime log. For Docker-based Wazuh tests, the `<location>` must be the container-side path, not the macOS host path.
+
+### Examples
+
+Print config for the default per-user Beacon install:
+
+```bash title="Print config for the default per-user Beacon install"
+beacon endpoint wazuh print-config
+```
+
+Print config for a custom runtime log:
+
+```bash title="Print config for a custom runtime log"
+beacon endpoint wazuh print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint wazuh install-pack
+
+`beacon endpoint wazuh install-pack` writes Beacon Wazuh rules and configuration snippets to an output directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint wazuh install-pack --output ./beacon-wazuh
+```
+
+Use the generated content pack when you want a file-based bundle of Wazuh integration artifacts instead of copying only the localfile snippet.
+
+The generated pack includes:
+
+| File | Purpose |
+|------|---------|
+| `ossec-localfile.xml` | Wazuh `localfile` snippet for the configured Beacon runtime log |
+| `beacon-rules.xml` | Wazuh rules for Beacon endpoint runtime events |
+| `sample-event.jsonl` | Sample Beacon endpoint event content |
+| `apply-dashboard-default-columns.sh` | Optional helper that sets Wazuh Dashboard event columns for Beacon fields |
+| `README.md` | Pack install notes |
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint wazuh install-pack --output ./beacon-wazuh
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint wazuh install-pack \
+  --output ./beacon-wazuh \
+  --log-path /path/to/runtime.jsonl
+```
+
+For local Docker validation, generate the pack with the path Wazuh sees inside the container:
+
+```bash title="Generate the pack for Docker validation"
+beacon endpoint wazuh install-pack \
+  --output ./beacon-wazuh \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the Wazuh content pack. Required |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint wazuh validate
+
+`beacon endpoint wazuh validate` writes a Beacon validation event to the runtime JSONL log and describes it, so you can verify localfile ingestion in Wazuh.
+
+```bash title="Run the validation check"
+beacon endpoint wazuh validate
+```
+
+### Examples
+
+Write a validation event for the default per-user install:
+
+```bash title="Write a validation event for the default per-user install"
+beacon endpoint wazuh validate
+```
+
+Write a validation event to a custom runtime log:
+
+```bash title="Write a validation event to a custom runtime log"
+beacon endpoint wazuh validate --log-path /path/to/runtime.jsonl
+```
+
+For local Wazuh Docker testing, the `--log-path` used in `print-config` or `install-pack` should usually be the path Wazuh sees inside the container, such as `/var/log/beacon-agent/runtime.jsonl`. The `validate` command should write to the host Beacon log path, such as `~/.beacon/endpoint/logs/runtime.jsonl`, when that directory is bind-mounted into the Wazuh manager container.
+
+The validation event should produce Wazuh rule `100500` with:
+
+```text
+data.vendor: beacon
+data.product: endpoint-agent
+data.event.kind: agent_runtime
+data.event.action: agent.detected
+data.message: Beacon endpoint Wazuh validation event
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Wazuh Dashboard fields
+
+In Wazuh Dashboard, Beacon event details appear under `data.*` fields. Useful columns include:
+
+```text
+data.event.action
+data.prompt.text
+data.message
+data.harness.name
+data.model
+data.repository
+data.command
+data.file
+data.session.id
+data.session.working_directory
+```
+
+Useful Wazuh Dashboard filters:
+
+```text
+data.vendor: beacon
+```
+
+```text
+data.vendor: beacon AND data.event.action: prompt.submitted
+```
+
+```text
+data.vendor: beacon AND data.harness.name: cursor
+```
+
+The generated `apply-dashboard-default-columns.sh` helper can set the recommended OpenSearch Dashboards columns for local Wazuh validation. See [Wazuh forwarding](/log-forwarding/wazuh#local-docker-test) for the full Docker setup.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/cli/dashboard">
+    Inspect Beacon events locally before forwarding.
+  </Card>
+</Columns>

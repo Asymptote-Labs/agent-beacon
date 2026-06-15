@@ -1,0 +1,182 @@
+---
+title: "beacon endpoint s3"
+description: "Generate AWS S3 forwarding content and validation events for Beacon endpoint events."
+---
+
+## Forwarding Command
+
+Use `beacon endpoint s3` to generate AWS S3 forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload `runtime.jsonl` to an S3 bucket as gzip-compressed NDJSON.
+
+Beacon does not store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules, or encryption settings. Keep those values in AWS, Vector, endpoint-management policy, or deployment tooling.
+
+```bash title="Command syntax"
+beacon endpoint s3 [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint s3 print-config" icon="file-lines" href="#beacon-endpoint-s3-print-config">
+    Print the Vector AWS S3 forwarding template for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint s3 install-pack" icon="box-archive" href="#beacon-endpoint-s3-install-pack">
+    Write AWS S3 forwarding content to a directory.
+  </Card>
+  <Card title="beacon endpoint s3 validate" icon="check" href="#beacon-endpoint-s3-validate">
+    Write and describe a Beacon AWS S3 validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+## beacon endpoint s3 print-config
+
+`beacon endpoint s3 print-config` prints a Vector configuration that tails the selected Beacon runtime JSONL log and writes gzip-compressed NDJSON objects to AWS S3.
+
+```bash title="Print the configuration"
+beacon endpoint s3 print-config
+```
+
+Use this command when you want to inspect or copy the Vector template into an existing endpoint forwarding workflow.
+
+### Examples
+
+Print Vector config for the default per-user Beacon install:
+
+```bash title="Print Vector config for the default per-user Beacon install"
+beacon endpoint s3 print-config
+```
+
+Print Vector config for a system-mode MDM deployment:
+
+```bash title="Print Vector config for a system-mode MDM deployment"
+sudo /opt/beacon/bin/beacon endpoint s3 print-config --system
+```
+
+Print Vector config for a custom runtime log:
+
+```bash title="Print Vector config for a custom runtime log"
+beacon endpoint s3 print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint s3 install-pack
+
+`beacon endpoint s3 install-pack` writes AWS S3 forwarding content to a directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint s3 install-pack --output ./beacon-s3-pack
+```
+
+The pack includes setup instructions, a one-shot AWS CLI smoke-test script, a Vector `aws_s3` forwarding template, and sample Beacon endpoint events.
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint s3 install-pack --output ./beacon-s3-pack
+```
+
+Generate a content pack for a system-mode deployment:
+
+```bash title="Generate a content pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint s3 install-pack \
+  --system \
+  --output ./beacon-s3-pack
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint s3 install-pack \
+  --output ./beacon-s3-pack \
+  --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the AWS S3 content pack. Defaults to `beacon-s3-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint s3 validate
+
+`beacon endpoint s3 validate` writes a Beacon validation event to the runtime JSONL log and prints the expected AWS S3 validation fields and follow-up AWS CLI checks.
+
+```bash title="Run the validation check"
+beacon endpoint s3 validate
+```
+
+### Examples
+
+Write a validation event for the default per-user install:
+
+```bash title="Write a validation event for the default per-user install"
+beacon endpoint s3 validate
+```
+
+Write a validation event for a system-mode deployment:
+
+```bash title="Write a validation event for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint s3 validate --system
+```
+
+Write a validation event to a custom runtime log:
+
+```bash title="Write a validation event to a custom runtime log"
+beacon endpoint s3 validate --log-path /path/to/runtime.jsonl
+```
+
+The validation command writes the local event only. Confirm remote delivery with AWS tooling:
+
+```text
+aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/" --recursive --region "$AWS_REGION"
+aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/date=<date>/<object>.jsonl.gz" - --region "$AWS_REGION" | gzip -dc | grep "Beacon endpoint S3 validation event"
+```
+
+Expected validation fields:
+
+```text
+vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="AWS S3 forwarding" icon="chart-line" href="/log-forwarding/s3">
+    Configure Vector forwarding from Beacon JSONL into AWS S3.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

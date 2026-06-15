@@ -1,0 +1,83 @@
+---
+title: "Redaction and Size Limits"
+description: "How Beacon handles retained content before writing endpoint events"
+---
+
+## Retention and Redaction
+
+Beacon can write supported prompt, command, tool, file, approval, policy, and runtime context when a configured source runtime emits it. Before endpoint events are written to local JSONL or forwarded through configured destinations, Beacon applies redaction, sanitization, truncation, and event-size limits.
+
+## Content Handling
+
+| Control | Behavior |
+|---------|----------|
+| Redaction | Common secret patterns are replaced before retained content is written |
+| Sanitization | Runtime payloads are normalized into typed event fields instead of storing source payloads verbatim wherever possible |
+| Truncation | Oversized fields are shortened and marked with truncation metadata |
+| Event-size limits | Events are bounded before they are written to `runtime.jsonl` or sent to configured destinations |
+
+## Prompt Event Example
+
+Prompt content is included only when the source runtime emits it. Secret-like values are redacted before the event is written:
+
+```json
+{
+  "event": {
+    "action": "prompt.submitted",
+    "category": "prompt"
+  },
+  "harness": {
+    "name": "claude"
+  },
+  "prompt": {
+    "text": "Review this API client. Token: [REDACTED]"
+  },
+  "content": {
+    "included": true,
+    "redacted": true
+  }
+}
+```
+
+## Command Event Example
+
+Command events can include normalized tool and command context, with truncation metadata when fields exceed limits:
+
+```json
+{
+  "event": {
+    "action": "command.executed",
+    "category": "command"
+  },
+  "tool": {
+    "name": "Shell",
+    "command": "go test ./..."
+  },
+  "command": {
+    "command": "go test ./...",
+    "exit_code": 0,
+    "duration_ms": 18420
+  },
+  "content": {
+    "included": true,
+    "truncated": false
+  }
+}
+```
+
+## Forwarding Implications
+
+Content handling is applied before events are written to `runtime.jsonl`. File-based destinations such as Wazuh, Elastic/Filebeat, Datadog Agent custom log collection, Sumo Logic forwarding, Rapid7 forwarding, Microsoft Sentinel forwarding, AWS S3 Vector forwarding, Google Cloud Storage Vector forwarding, and customer-managed shippers read the resulting local JSONL. Splunk HEC and Falcon LogScale HEC forwarding receive the same normalized collector output according to the configured endpoint pipeline.
+
+Review runtime scope, artifact access, destination permissions, and downstream retention before rollout so retained content matches your approved telemetry policy.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Schema examples" icon="code" href="/telemetry-schema/examples">
+    Inspect endpoint event examples and content fields.
+  </Card>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Configure endpoint telemetry and collector service files.
+  </Card>
+</Columns>

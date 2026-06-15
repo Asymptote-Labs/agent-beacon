@@ -1,0 +1,203 @@
+---
+title: "Jamf"
+description: "Deploy and inventory the Beacon endpoint agent with Jamf Pro."
+---
+
+## Overview
+
+Jamf Pro can deploy and inventory the local Beacon endpoint agent on managed Macs. Beacon's Jamf support is deployment-native: Jamf installs the package and reports endpoint health while Beacon writes telemetry to local JSONL without requiring a hosted account or Jamf Pro API credentials.
+
+## What Jamf manages
+
+| Signal | How it helps |
+| --- | --- |
+| Package installation | Deploy Beacon binaries, endpoint scripts, Jamf helpers, and extension attributes. |
+| System endpoint configuration | Install launchd service files and collector configuration for system-mode telemetry. |
+| Runtime telemetry location | Write endpoint events to `/var/log/beacon-agent/runtime.jsonl`. |
+| Inventory and remediation | Use extension attributes and Smart Groups to identify missing, stale, or unhealthy installs. |
+
+## Package layout
+
+The macOS package includes Beacon binaries, endpoint helper scripts, and Jamf assets:
+
+```text
+/opt/beacon/bin/beacon
+/opt/beacon/bin/beacon-otelcol
+/opt/beacon/scripts/install-endpoint.sh
+/opt/beacon/scripts/uninstall-endpoint.sh
+/opt/beacon/jamf/extension-attributes/*.sh
+/opt/beacon/jamf/scripts/*.sh
+```
+
+The package postinstall performs the default system install. That install creates system configuration and runtime state:
+
+```text
+/Library/Application Support/Beacon/Endpoint/config.json
+/Library/Application Support/Beacon/Endpoint/otelcol.yaml
+/Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/var/log/beacon-agent/runtime.jsonl
+```
+
+## Deploy with Jamf Pro
+
+Build or obtain a signed and notarized Beacon macOS package, upload it to Jamf Pro, and attach the package to a policy scoped to a pilot Smart Group. The package postinstall performs the default system install, so no script is required for the common deployment path.
+
+<Steps>
+  <Step title="Upload the Beacon package">
+    Upload the signed Beacon macOS package to Jamf Pro. The package installs Beacon binaries under `/opt/beacon` and includes Jamf helper scripts and extension attributes.
+  </Step>
+  <Step title="Create an install policy">
+    Create a Jamf policy that installs the Beacon package. Add the install helper only when the policy needs explicit parameters or a reinstall action:
+
+    ```bash
+    /opt/beacon/jamf/scripts/install.sh "$@"
+    ```
+  </Step>
+  <Step title="Configure optional policy parameters">
+    Set Jamf script parameters when using the install helper to override the defaults:
+
+    | Parameter | Value |
+    | --- | --- |
+    | 4 | Harnesses, default `claude,codex`; include `gemini` to opt in Gemini CLI telemetry. Do not include GitHub Copilot CLI; configure its launch environment separately. |
+    | 5 | OTLP gRPC port, default `4317`. |
+    | 6 | OTLP HTTP port, default `4318`. |
+    | 7 | Collector path, default `/opt/beacon/bin/beacon-otelcol`. |
+    | 8 | No-start flag for `install.sh` only, accepts `1`, `true`, or `yes`. |
+    | 9 | Splunk HEC endpoint URL. |
+    | 10 | Splunk HEC token. |
+    | 11 | Optional Splunk index. |
+    | 12 | Optional Splunk source, default `beacon-endpoint-agent` when configured. |
+    | 13 | Optional Splunk sourcetype, default `beacon:endpoint` when configured. |
+    | 14 | Splunk TLS skip-verify flag, accepts `1`, `true`, or `yes`; use only for testing. |
+    | 15 | Optional Splunk HEC CA certificate path. |
+  </Step>
+  <Step title="Validate the deployment">
+    After the package deploys, validate the endpoint state on a managed Mac:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --json
+    sudo /opt/beacon/bin/beacon endpoint wazuh validate
+    sudo launchctl print system/com.beacon.endpoint.collector
+    ```
+  </Step>
+</Steps>
+
+## Build a test package
+
+When building from source, build the CLI and collector first, then assemble the macOS package:
+
+```bash
+cd cli/beacon
+make build
+cd ../..
+
+cd collector-builder
+ocb --config builder.yaml
+cd ..
+
+sh packaging/macos/build-pkg.sh
+```
+
+Set `PKG_SIGN_IDENTITY` to sign with `pkgbuild`, and set `NOTARYTOOL_PROFILE` to submit and staple the package with Apple's notary service.
+
+## Inventory with extension attributes
+
+Upload the scripts from `/opt/beacon/jamf/extension-attributes` to Jamf Pro to inventory:
+
+- Beacon version
+- Collector service health
+- Last runtime event age in seconds
+- Configured harnesses
+- Runtime log writability
+- Splunk HEC forwarding configuration state
+
+Suggested Smart Groups:
+
+- Beacon version is `not_installed`.
+- Collector service health is not `running`.
+- Last runtime event age is greater than `86400`.
+- Runtime log writability is not `writable` or `creatable`.
+- Splunk HEC forwarding is `not_configured` when HEC export is required.
+
+Use `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-context policy for hook telemetry. Set `BEACON_HOOK_HARNESSES=antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode` when you want Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hook integrations. Hook configuration is per user and should run only when an interactive console user is present. Gemini CLI is configured through the endpoint harness list instead; add `gemini` to Jamf parameter 4, for example `claude,codex,gemini`. GitHub Copilot CLI is MDM-managed outside the Beacon harness list; configure `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in Copilot's launch environment. OpenClaw Gateway is configured in OpenClaw, not through Jamf hook helpers.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Beacon is not installed">
+    If the Beacon version extension attribute reports `not_installed`, confirm the Jamf policy installed the Beacon package.
+
+    On the device, verify that the expected files exist:
+
+    ```bash
+    ls /opt/beacon/bin/beacon
+    ls /opt/beacon/jamf/scripts/install.sh
+    ```
+
+    Re-run the install policy after confirming the package is scoped to the device.
+  </Accordion>
+  <Accordion title="Collector service is not running">
+    Check the endpoint status and launchd service state:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --json
+    sudo launchctl print system/com.beacon.endpoint.collector
+    ```
+
+    If the service file or collector configuration drifted, run `/opt/beacon/jamf/scripts/repair.sh` from a Jamf remediation policy.
+  </Accordion>
+  <Accordion title="Runtime events are stale or missing">
+    Verify that the runtime log exists and is writable:
+
+    ```bash
+    sudo test -w /var/log/beacon-agent/runtime.jsonl
+    sudo /opt/beacon/bin/beacon endpoint wazuh validate
+    ```
+
+    If validation succeeds but events remain stale, confirm the configured harnesses match the agent harnesses installed or configured for the device and that the local collector ports are not in use by another process. If GitHub Copilot CLI events are missing, confirm Copilot's launch environment includes `COPILOT_OTEL_ENABLED=true` and a localhost OTLP HTTP endpoint. If Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, or OpenCode hook events are missing, confirm the separate user-context hook policy has run for the logged-in user. For OpenClaw Gateway, confirm the `diagnostics-otel` plugin is enabled and pointed at Beacon's OTLP HTTP receiver.
+  </Accordion>
+  <Accordion title="Configured harnesses are wrong">
+    Check Jamf parameter 4 on the install policy. The default is `claude,codex`; set the parameter explicitly when you want a narrower or broader harness list. Include `gemini` when Gemini CLI telemetry should be managed. Do not include GitHub Copilot CLI in this list; manage Copilot's OTel environment separately.
+
+    After changing the policy, run the repair script so Beacon reapplies harness telemetry configuration without removing runtime logs.
+  </Accordion>
+  <Accordion title="Splunk HEC is not configured">
+    Check Jamf parameters 9 and 10, or the `BEACON_SPLUNK_HEC_ENDPOINT` and `BEACON_SPLUNK_HEC_TOKEN` environment variables used by the install policy.
+
+    Use the Splunk HEC forwarding extension attribute to verify whether endpoint configuration contains a Splunk destination. On the device, confirm the non-secret destination fields:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --system --json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Repair and uninstall
+
+Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where extension attributes report a stale or unhealthy install.
+
+Use `/opt/beacon/jamf/scripts/uninstall.sh` to remove endpoint service files. Set `BEACON_KEEP_LOGS=1` or Jamf parameter 4 to preserve runtime logs during removal. Set `BEACON_KEEP_CONFIG=1` or Jamf parameter 5 to preserve harness telemetry configuration.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
+    Review the broader Jamf, Fleet, and macOS MDM deployment model.
+  </Card>
+  <Card title="Fleet" icon="laptop-file" href="/mdm/fleet">
+    Deploy Beacon with Fleet software, policies, queries, and scripts.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, or customer-managed pipelines.
+  </Card>
+</Columns>
+
+## Smoke test
+
+Before publishing or distributing a package, run the non-root endpoint smoke test on a macOS host or VM:
+
+```bash
+sh packaging/macos/smoke-endpoint.sh
+```
+
+The smoke test builds a temporary Beacon binary, uses a temporary `HOME`, runs a default user-mode install with `--no-start`, validates status and Wazuh output, installs supported runtime hooks, uninstalls, and preserves the runtime log long enough to assert expected events were written.

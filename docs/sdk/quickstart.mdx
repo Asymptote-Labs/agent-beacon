@@ -1,0 +1,150 @@
+---
+title: "SDK Quickstart"
+description: "Install and initialize the Asymptote TypeScript SDK"
+---
+
+## Setup Flow
+
+Follow this path to install `@asymptote/sdk`, initialize tracing, create a first span, and flush it before the process exits.
+
+## 1. Install
+
+```bash title="Install the SDK"
+npm install @asymptote/sdk
+```
+
+The package requires Node.js 20 or newer.
+
+## 2. Configure Export
+
+Choose Asymptote Managed hosted Observe or a customer-managed OTLP endpoint.
+
+### Hosted Observe
+
+Hosted Observe requires an Asymptote Managed account. To get an `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact), then initialize `Observe` as early as possible in your application startup:
+
+```bash title="Set the Asymptote Managed API key"
+export ASYMPTOTE_API_KEY=...
+```
+
+```typescript title="Hosted Observe initialization" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+```
+
+Hosted export uses OTLP/HTTP traces.
+
+| Setting | Value |
+| --- | --- |
+| Default base URL | `https://api.asymptotelabs.ai` |
+| Observe path | `/v1/observe` |
+| API key env var | `ASYMPTOTE_API_KEY` |
+| Base URL env var | `ASYMPTOTE_BASE_URL` |
+| Auth header | `authorization: Bearer <api key>` |
+
+The SDK appends `/v1/observe` when the configured base URL or endpoint does not already include it.
+
+### Customer-Managed OTLP
+
+Use an explicit OTLP endpoint when traces should go to a local or customer-managed collector instead of Asymptote Managed hosted Observe:
+
+```bash title="Set the OTLP endpoint"
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+```
+
+```typescript title="Customer-managed OTLP initialization" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+});
+```
+
+Explicit OTLP export does not require an Asymptote Managed API key.
+
+## 3. Create A First Trace
+
+Wrap application code with `Observe.observe()` to create a Beacon-compatible span.
+
+```typescript title="Create a traced function" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+
+const plan = Observe.observe(
+  {
+    name: "agent.plan",
+    attributes: {
+      "beacon.harness.name": "custom_agent",
+      "beacon.event.action": "tool.invoked",
+      "beacon.event.category": "tool",
+      "beacon.tool.name": "planner",
+    },
+  },
+  async (input: string) => {
+    return `Plan for: ${input}`;
+  },
+);
+
+await plan("Review this pull request");
+await Observe.flush();
+```
+
+## Export Precedence
+
+`Observe.initialize()` resolves export configuration in this order:
+
+| Priority | Source |
+| --- | --- |
+| 1 | `initialize({ otlpEndpoint })` |
+| 2 | `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| 3 | Asymptote Managed hosted `baseUrl` when `apiKey` or `ASYMPTOTE_API_KEY` is present |
+
+If neither hosted credentials nor an explicit OTLP endpoint is configured, use a custom exporter or disable the default exporter.
+
+```typescript title="Initialize with a custom exporter" lines
+import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  spanExporter: new InMemorySpanExporter(),
+  disableDefaultExporter: true,
+  disableBatch: true,
+});
+```
+
+## What To Read Next
+
+<Columns cols={2}>
+  <Card title="Instrumentation" icon="wand-magic-sparkles" href="/sdk/instrumentation">
+    Configure SDK initialization, module patching, and existing OpenTelemetry providers.
+  </Card>
+  <Card title="Observe" icon="diagram-project" href="/sdk/observe">
+    Wrap custom agent functions and control span metadata.
+  </Card>
+  <Card title="SDK Lifecycle" icon="rotate" href="/sdk/lifecycle">
+    Decide when to flush or shut down tracing.
+  </Card>
+  <Card title="Agent SDK Integrations" icon="plug" href="/sdk/integrations">
+    Add supported Anthropic, Claude Agent SDK, OpenAI, or Vercel AI SDK instrumentation.
+  </Card>
+</Columns>
+
+## Flush Before Exit
+
+For short-lived scripts, CI jobs, and serverless handlers, flush spans before the process exits:
+
+```typescript title="Flush spans before exit" lines
+await Observe.flush();
+```
+
+When the process owns the OpenTelemetry provider lifecycle, shut it down during graceful termination:
+
+```typescript title="Shut down tracing on exit" lines
+await Observe.shutdown();
+```

@@ -1,0 +1,126 @@
+---
+title: "Inspect Runtime Logs"
+description: "Inspect Beacon runtime JSONL paths and last-event state during local testing"
+---
+
+## Overview
+
+Beacon writes endpoint telemetry to a local runtime JSONL log. Local log checks help confirm that commands, the dashboard, and any downstream forwarding are reading the same file.
+
+This guide shows how to find the active log, keep user-mode and system-mode checks separate, test a custom log path, and understand local rotation behavior.
+
+## Setup
+
+Write a validation event first so the runtime log has a known record:
+
+```bash title="Write a validation event"
+beacon endpoint test-event
+```
+
+## 1. Find The Active Runtime Log
+
+Use status to print the configured runtime log path and last observed event:
+
+```bash title="Print runtime log path"
+beacon endpoint status
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint status
+
+Runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
+Last event: 2026-06-10T04:37:14Z
+Runtime log source: user
+```
+</Accordion>
+
+For machine-readable output:
+
+```bash title="Print status as JSON"
+beacon endpoint status --json
+```
+
+Status also reports runtime-log source warnings when a system collector may be writing OTLP events to a different log than the one you are inspecting.
+
+## 2. Compare User And System Paths
+
+Default local evaluation uses per-user endpoint paths:
+
+```bash title="Check user-mode paths"
+beacon endpoint status --user
+beacon endpoint test-event --user
+```
+
+Managed package deployments usually use system mode and write endpoint events to `/var/log/beacon-agent/runtime.jsonl`:
+
+```bash title="Check system-mode paths"
+sudo beacon endpoint status --system
+sudo beacon endpoint test-event --system
+```
+
+Keep user-mode and system-mode checks separate. A dashboard opened against a user log will not show events written only to the system log, and a system-mode status check may report a different collector or launchd service state.
+
+## 3. Understand Log Rotation
+
+Beacon keeps the active `runtime.jsonl` path stable and rotates it when the next write would exceed 10 MiB. By default, it keeps five numbered local archives next to the active file:
+
+```text
+runtime.jsonl
+runtime.jsonl.1
+runtime.jsonl.2
+runtime.jsonl.3
+runtime.jsonl.4
+runtime.jsonl.5
+```
+
+External shippers should continue tailing the active `runtime.jsonl` path and use their normal file-rotation handling to checkpoint offsets. The local dashboard can inspect the active log and numbered archives when you need to review recent rotated events.
+
+## 4. Test A Custom Log Path
+
+Use `--log-path` when testing a temporary runtime log or a support reproduction:
+
+```bash title="Use a custom runtime log"
+beacon endpoint test-event --log-path /path/to/runtime.jsonl
+beacon endpoint status --log-path /path/to/runtime.jsonl
+beacon endpoint dashboard --log-path /path/to/runtime.jsonl
+```
+
+The same path should be used across the write, status, and dashboard checks.
+
+When a custom log rotates, archives use the same path plus a numeric suffix. For example, `/tmp/beacon/runtime.jsonl` rotates to `/tmp/beacon/runtime.jsonl.1`.
+
+## Verify Results
+
+| Area | Expected result |
+|------|-----------------|
+| Runtime path | Status shows the log path you intend to test |
+| Writability | `beacon endpoint test-event` can append a validation event |
+| Freshness | Status reports a recent last Beacon event |
+| Rotation | The active log remains at `runtime.jsonl` and older local data moves to numbered archives |
+| Dashboard source | Dashboard `--log-path` matches the tested runtime log |
+| Deployment mode | User or system mode matches the installation you are validating |
+
+## Troubleshooting
+
+- If status points at a different log than the dashboard, pass the same `--log-path` to both commands.
+- If the system collector is running but the user log is empty, validate with `--system`.
+- If a shipper misses records after rotation, confirm it tails the active `runtime.jsonl` path and handles numbered archives normally.
+- If `test-event` cannot write, check parent directory permissions and run doctor checks.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Run Endpoint Health Checks" icon="stethoscope" href="/guides/local-testing/health">
+    Confirm endpoint configuration, collector health, and local diagnostics.
+  </Card>
+  <Card title="Write Validation Events" icon="vial" href="/guides/local-testing/events">
+    Append a known-good event to the runtime JSONL log.
+  </Card>
+  <Card title="Test the Local Dashboard" icon="chart-line" href="/guides/local-testing/dashboard">
+    Confirm the dashboard is reading and summarizing the expected log.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review the normalized JSONL contract used for endpoint events.
+  </Card>
+</Columns>

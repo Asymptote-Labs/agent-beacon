@@ -1,0 +1,117 @@
+---
+title: "Detection Standard"
+description: "The threat-rules/v1 standard for portable AI-agent security detections"
+---
+
+## Standard Overview
+
+Beacon threat rules are an open detection-rule format for AI-agent security threats. The standard is intentionally small: rules are YAML, match logic is CEL, input data is the Beacon endpoint event schema, and every rule carries fixtures that prove its expected behavior.
+
+This makes the format portable. Any engine that loads the same rule pack and produces the declared fixture verdicts conforms to the standard.
+
+## Version
+
+The current rule format is `threat-rules/v1`.
+
+The version covers the rule document shape, required metadata, CEL contract, correlation model, and fixture semantics. Rule files also include their own integer `version` field, which is the content revision for that individual rule.
+
+## Design Goals
+
+The standard is designed to be:
+
+- human-readable enough for security review
+- strict enough for automated validation
+- native to Beacon endpoint events
+- testable without a live endpoint
+- portable across engines that implement the same conformance checks
+
+## CEL Contract
+
+Rules express detection logic in CEL. The current event is bound as `e`.
+
+```yaml title="CEL over a Beacon event"
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("\\bwget\\s")
+```
+
+The CEL contract has a few important requirements:
+
+- Expressions must type-check to `bool`.
+- Field paths must exist in the Beacon endpoint event schema.
+- Missing fields evaluate as empty or zero values rather than crashing a scan.
+- Regular expressions use RE2 semantics through CEL `.matches(...)`.
+- Invalid CEL is rejected when the rule loads, before scanning begins.
+
+## Maturity Ladder
+
+The `status` field communicates how much evidence supports a rule.
+
+| Status | Requirement |
+| --- | --- |
+| `experimental` | The rule is structurally valid, CEL compiles, and at least one fixture exists. |
+| `stable` | The rule is valid, includes at least one `match` fixture and one `no_match` fixture, and every fixture produces the declared verdict. |
+| `deprecated` | The rule still parses and validates, but fixtures are optional. |
+
+Use `experimental` for new or narrow rules that need field testing. Use `stable` when the rule has both positive and negative examples and is suitable for a shared corpus.
+
+## Verdict Model
+
+Rule evaluation produces one of two verdicts:
+
+- `match`: the rule fired for the supplied event sequence.
+- `no_match`: the rule did not fire.
+
+Fixtures are the conformance boundary. A rule says what should happen, and an engine proves it by running each fixture and comparing the actual verdict to the declared one.
+
+## Severity And Posture
+
+`severity` describes the importance of a finding when the rule fires. It uses the same severity values as Beacon endpoint events: `info`, `low`, `medium`, `high`, and `critical`.
+
+`posture` describes how the rule should be used:
+
+- `detect`: observe-only detection logic.
+- `enforce-capable`: detection logic that is designed to support enforcement workflows.
+
+The current local scan path reports findings. Enforcement behavior, when present in a broader deployment, should be explicit in the consuming system rather than inferred from a scan alone.
+
+## Taxonomy
+
+The optional `taxonomy` map lets a rule attach external references without runtime lookups.
+
+```yaml title="Taxonomy references"
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+```
+
+Use taxonomy fields to make a rule easier to map into security programs, not as part of detection logic.
+
+## Publishable Rule Checklist
+
+A publishable rule should:
+
+- have a stable, unique `id`
+- use a clear `title` and `description`
+- choose severity based on the likely impact of the matched behavior
+- keep CEL focused on fields in the Beacon event schema
+- include a plain-language `emit.reason`
+- include fixtures that prove both true positives and important false-positive boundaries
+- pass `beacon rules lint`
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Detection YAML Schema" icon="code" href="/detections/yaml-schema">
+    Review the rule fields and examples.
+  </Card>
+  <Card title="Detection Engine" icon="gears" href="/detections/engine">
+    Learn how conformant rules run against local telemetry.
+  </Card>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Run structural, CEL, maturity, and fixture checks.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="table-list" href="/telemetry-schema/event-schema">
+    Understand the data model that rules evaluate.
+  </Card>
+</Columns>

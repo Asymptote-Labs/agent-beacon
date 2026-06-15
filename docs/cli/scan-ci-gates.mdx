@@ -1,0 +1,63 @@
+---
+title: "Use scan gates"
+description: "Filter Beacon scan findings and fail automation on severity thresholds"
+---
+
+## Command Overview
+
+`beacon scan` can filter displayed findings and return a non-zero exit code when findings meet a severity threshold.
+
+Use these flags when you want a local check in rollout scripts, CI validation jobs, or support workflows that should stop on high-risk telemetry.
+
+## Filter displayed findings
+
+Only print findings at or above a minimum severity:
+
+```bash title="Only show high and critical findings"
+beacon scan --min-severity high
+```
+
+Accepted severity values are:
+
+| Severity |
+|----------|
+| `info` |
+| `low` |
+| `medium` |
+| `high` |
+| `critical` |
+
+## Fail on findings
+
+Exit non-zero if any finding is at or above a severity threshold:
+
+```bash title="Fail on high-severity findings"
+beacon scan --fail-on high
+```
+
+The `--fail-on` check evaluates every finding from the scan before `--min-severity` filters display output. This keeps the exit code accurate even when the printed output is narrowed.
+
+## JSON output
+
+Combine JSON output with severity gates for automation:
+
+```bash title="JSON output with a severity gate"
+beacon scan --json --fail-on high
+```
+
+For copied runtime logs or artifacts, point the scan at the file explicitly:
+
+```bash title="Scan an exported runtime log"
+beacon scan --log-path ./beacon-runtime.jsonl --json --fail-on high
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Run local scans" icon="magnifying-glass" href="/cli/scan-local">
+    Choose logs, rules, sessions, and output formats.
+  </Card>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate rule packs before using them in automation.
+  </Card>
+</Columns>

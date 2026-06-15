@@ -1,0 +1,134 @@
+---
+title: "CI Agent Telemetry"
+description: "Wrap agent commands and CI actions with ephemeral Beacon telemetry"
+---
+
+## Command Overview
+
+`beacon ci` wraps supported agent commands and agent-launching CI steps with ephemeral Beacon telemetry. It runs for a single CI job without installing a persistent endpoint service or modifying runner-wide harness configuration.
+
+```bash title="Command syntax"
+beacon ci [command]
+```
+
+Use `beacon ci exec` when the workflow runs an agent command directly. For multi-step CI workflows or third-party GitHub Actions that launch agents internally, use `beacon ci start` and `beacon ci finish`.
+
+<Note>
+  `beacon ci` is designed for ephemeral CI jobs. For managed endpoint rollout on laptops or workstations, use [`beacon endpoint install`](/cli/endpoint-install).
+</Note>
+
+For artifact upload, object storage export, and downstream SIEM handoff patterns, see [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports).
+
+## Wrap Agent Runs
+
+`beacon ci exec` starts a temporary local collector, injects supported telemetry configuration into one child process, writes normalized endpoint events to a CI runtime log, then validates that matching events were captured.
+
+```bash title="Wrap one agent command"
+beacon ci exec -- <agent command>
+```
+
+For example, wrap a Claude Code prompt in a GitHub Actions step:
+
+```bash title="Wrap Claude Code"
+beacon ci exec -- claude -p "Review this pull request"
+```
+
+## Wrap Agent Actions
+
+Some workflows call a third-party action that launches the agent internally. In those cases, start a detached Beacon session before the action and finish it in a cleanup step.
+
+```yaml title="Wrap a CI action that launches an agent"
+- name: Start Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: start
+    harnesses: claude
+
+- name: Run Claude Code Security Review
+  uses: anthropics/claude-code-security-review@main
+  with:
+    claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+    comment-pr: false
+    upload-results: true
+    claudecode-timeout: "10"
+
+- name: Finish Beacon telemetry
+  if: always()
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: finish
+    min-events: "1"
+    upload-artifact: "true"
+    artifact-name: beacon-claude-security-review-runtime-log
+```
+
+See the [Claude Code Security Review session workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-security-review-session.yml) for the full GitHub Actions example.
+
+## Commands
+
+<span id="beacon-ci-exec" />
+<span id="beacon-ci-start" />
+<span id="beacon-ci-finish" />
+<span id="beacon-ci-validate" />
+
+<Columns cols={2}>
+  <Card title="beacon ci exec" icon="terminal" href="/cli/ci-exec">
+    Run a command with agent telemetry captured for the CI job.
+  </Card>
+  <Card title="beacon ci start" icon="play" href="/cli/ci-start">
+    Start a detached telemetry session for later CI steps.
+  </Card>
+  <Card title="beacon ci finish" icon="stop" href="/cli/ci-finish">
+    Stop, validate, and export a detached telemetry session.
+  </Card>
+  <Card title="beacon ci validate" icon="check" href="/cli/ci-validate">
+    Validate Beacon CI telemetry artifacts after a job step.
+  </Card>
+</Columns>
+
+## Artifact paths
+
+By default, Beacon writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNNER_TEMP` is set. Otherwise it uses the system temp directory.
+
+| Artifact | Default path |
+|----------|--------------|
+| Runtime log | `$RUNNER_TEMP/beacon/runtime.jsonl` |
+| Collector config | `$RUNNER_TEMP/beacon/otelcol.yaml` |
+| Collector spool | `$RUNNER_TEMP/beacon/spool/otlp.jsonl` |
+
+Use `--log-path` when your workflow needs a stable artifact path.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci exec" icon="terminal" href="/cli/ci-exec">
+    Run a single command with ephemeral CI telemetry.
+  </Card>
+  <Card title="beacon ci start" icon="play" href="/cli/ci-start">
+    Start detached telemetry across workflow steps.
+  </Card>
+  <Card title="beacon ci finish" icon="stop" href="/cli/ci-finish">
+    Stop and validate a detached telemetry session.
+  </Card>
+  <Card title="beacon ci validate" icon="check" href="/cli/ci-validate">
+    Validate an existing CI runtime log.
+  </Card>
+  <Card title="CI Telemetry Exports" icon="file-export" href="/log-forwarding/ci-telemetry-exports">
+    Export CI runtime JSONL through workflow artifacts, S3, GCS, or downstream pipelines.
+  </Card>
+  <Card title="CI Agent Telemetry" icon="terminal" href="/runtimes/claude-code-ci">
+    Capture supported agent telemetry in CI workflows.
+  </Card>
+  <Card title="Codex CLI" icon="terminal" href="/runtimes/codex-cli">
+    Review Beacon support for Codex endpoint and CI telemetry.
+  </Card>
+  <Card title="Local testing" icon="flask-vial" href="/guides/local-testing">
+    Validate Beacon runtime logs, events, dashboards, and MCP access locally.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install persistent endpoint telemetry for managed devices.
+  </Card>
+  <Card title="Command reference" icon="book" href="/cli">
+    Browse Beacon commands by hierarchy.
+  </Card>
+</Columns>

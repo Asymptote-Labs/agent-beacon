@@ -1,0 +1,137 @@
+---
+title: "Splunk HEC"
+description: "Send Beacon endpoint telemetry to Splunk HTTP Event Collector."
+---
+
+## Forwarding Overview
+
+Beacon writes normalized endpoint events as JSONL and can also send OTLP logs, traces, and metrics to Splunk HTTP Event Collector (HEC) through the bundled collector. The active runtime log remains the stable local handoff path and rotates locally. Use the built-in HEC destination when you want Beacon to forward directly, or configure a customer-managed forwarder to read the runtime log and send each JSON object to HEC.
+
+When the built-in HEC destination is enabled, Beacon's collector needs network access to your Splunk HEC endpoint and stores the HEC token in the collector config. When you use an external forwarder, that forwarder is responsible for reading the local file, authenticating to HEC, and retrying delivery.
+
+## Runtime log paths
+
+| Mode | Runtime log |
+|------|-------------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+Use system mode for MDM deployments so every managed endpoint writes to `/var/log/beacon-agent/runtime.jsonl`.
+
+## Beacon-managed forwarding
+
+For Beacon-managed forwarding, pass HEC settings during endpoint install or repair:
+
+```bash title="Install Beacon with Splunk HEC forwarding"
+beacon endpoint install \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+Keep the HEC token in your endpoint-management secret store before passing it to Beacon. Beacon writes the token into the collector config so the local collector can authenticate to Splunk HEC.
+
+## Customer-managed forwarding
+
+Create or reuse a Splunk HEC token for Beacon endpoint telemetry, then install Beacon with the HEC destination:
+
+```bash title="Install Beacon with Splunk HEC forwarding"
+beacon endpoint install \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+To add or update Splunk HEC on an existing endpoint, run repair with the same destination flags:
+
+```bash title="Update Splunk HEC on an existing endpoint"
+beacon endpoint repair \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+## Settings
+
+| Setting | Recommendation |
+|---------|----------------|
+| Endpoint | Splunk HEC endpoint URL, such as `https://splunk.example:8088/services/collector` |
+| Token | Splunk HEC token from your Splunk administrator |
+| Index | Your endpoint telemetry or security operations index |
+| Event format | One HEC event per JSONL line |
+| Payload | Preserve the full Beacon JSON object as the HEC `event` |
+
+If you use a customer-managed forwarder instead of Beacon's collector destination, store the token in that forwarder's secret store rather than Beacon configuration.
+
+## Example HEC payload
+
+Your forwarder should wrap each Beacon JSON object in a Splunk HEC envelope:
+
+```json
+{
+  "sourcetype": "asymptote:beacon:json",
+  "source": "/var/log/beacon-agent/runtime.jsonl",
+  "event": {
+    "vendor": "asymptote",
+    "product": "beacon",
+    "event": {
+      "category": "health",
+      "type": "validation"
+    }
+  }
+}
+```
+
+Keep the HEC token in your endpoint-management secret store and pass it to Beacon at install or repair time.
+
+## Customer-managed forwarder behavior
+
+## Collector behavior
+
+When Splunk HEC is configured, Beacon writes a collector pipeline with both exporters enabled:
+
+```text
+exporters: [beaconjson, splunk_hec]
+```
+
+The `beaconjson` exporter preserves the local runtime log. The `splunk_hec` exporter sends OTLP logs, traces, and metrics to Splunk HEC.
+
+## Validate forwarding
+
+Confirm Beacon has the destination configured:
+
+```bash title="Confirm Beacon has the destination configured"
+sudo /opt/beacon/bin/beacon endpoint status --system --json
+```
+
+In the JSON output, check that `destinations.splunk_hec.configured` is `true` and that the endpoint, index, source, and sourcetype match your deployment. The token is not printed.
+
+Then write a validation event:
+
+```bash title="Write a validation event"
+sudo /opt/beacon/bin/beacon endpoint wazuh validate --system
+```
+
+Then search Splunk for the validation event:
+
+```spl
+index=<your_index> sourcetype="beacon:endpoint" product="endpoint-agent" event.category="validation"
+```
+
+If the event does not appear, verify that the collector service is running, the HEC endpoint accepts the configured token, and TLS settings match your Splunk deployment.
+
+```bash title="Check endpoint status as JSON"
+sudo /opt/beacon/bin/beacon endpoint status --system --json
+sudo launchctl print system/com.beacon.endpoint.collector
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

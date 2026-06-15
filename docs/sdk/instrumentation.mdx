@@ -1,0 +1,105 @@
+---
+title: "Instrumentation"
+description: "Initialize Asymptote Observe and configure TypeScript SDK instrumentation"
+---
+
+## Instrumentation Model
+
+Use `Observe.initialize()` once at application startup to configure the OpenTelemetry provider, exporter, resource attributes, and supported AI SDK instrumentations.
+
+## Initialize
+
+```typescript title="Initialize Observe" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+```
+
+By default, the SDK creates OpenAI and Anthropic OpenLLMetry instrumentations when they are not disabled.
+
+## Initialize Options
+
+| Option | Purpose |
+| --- | --- |
+| `apiKey` | Asymptote Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
+| `baseUrl` | Asymptote Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
+| `otlpEndpoint` | Explicit OTLP/HTTP endpoint. Defaults to `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| `headers` | Additional exporter headers |
+| `serviceName` | OpenTelemetry service name. Defaults to `OTEL_SERVICE_NAME` or `asymptote-app` |
+| `resourceAttributes` | Extra OpenTelemetry resource attributes |
+| `instrumentModules` | Already-loaded modules to patch manually |
+| `disableInstrumentations` | Disable default OpenAI and Anthropic instrumentations |
+| `instrumentationOptions` | Configure OpenAI and Anthropic instrumentation behavior |
+| `spanProcessor` / `spanProcessors` | Custom span processors |
+| `spanExporter` | Custom span exporter |
+| `disableDefaultExporter` | Skip hosted or explicit OTLP exporter creation |
+| `disableBatch` | Use a simple span processor instead of batching |
+| `traceExportTimeoutMillis` | Batch exporter timeout |
+| `maxExportBatchSize` | Batch exporter size limit |
+
+`Observe.initialize()` may only be called once per process configuration. Call `Observe.shutdown()` before reinitializing with different options. A later `Observe.initialize({ instrumentModules })` call can patch additional modules without replacing the provider.
+
+## Instrument Modules
+
+Pass modules to `instrumentModules` when they may be loaded before auto-instrumentation runs.
+
+```typescript title="Patch already-loaded modules during initialization" lines
+import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+  instrumentModules: {
+    OpenAI,
+    Anthropic,
+  },
+});
+```
+
+Supported module keys in the current TypeScript SDK:
+
+| Key | Package |
+| --- | --- |
+| `OpenAI`, `openAI`, or `openai` | `openai` |
+| `Anthropic` or `anthropic` | `@anthropic-ai/sdk` |
+| `claudeAgentSDK` or `claudeAgentSdk` | `@anthropic-ai/claude-agent-sdk` query export |
+
+## Patch Modules After Initialization
+
+Use `Observe.patch()` when the SDK has already initialized and a module needs to be instrumented later, such as inside a framework-specific module boundary.
+
+```typescript title="Patch modules after initialization" lines
+import OpenAI from "openai";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+
+Observe.patch({
+  OpenAI,
+});
+```
+
+`Observe.patch()` requires at least one module. It applies supported OpenLLMetry instrumentation and wraps Claude Agent SDK query functions when the module object is writable.
+
+## Existing OpenTelemetry Providers
+
+If your application already owns OpenTelemetry setup, use `Observe.instrumentations()` with your provider instead of calling `Observe.initialize()` twice.
+
+```typescript title="Reuse an existing OpenTelemetry provider" lines
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { Observe } from "@asymptote/sdk";
+
+registerInstrumentations({
+  instrumentations: Observe.instrumentations({
+    openAI: true,
+    anthropic: true,
+  }),
+});
+```
+
+For custom export behavior, pass your own `spanExporter`, `spanProcessor`, or `spanProcessors` to `Observe.initialize()`.

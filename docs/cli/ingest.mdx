@@ -1,0 +1,73 @@
+---
+title: "beacon ingest"
+description: "Upload Beacon telemetry to configured ingest destinations"
+tag: "Enterprise"
+---
+
+## Command Overview
+
+`beacon ingest` shows managed ingest status and uploads endpoint telemetry to configured Asymptote Managed destinations.
+
+```bash title="Command syntax"
+beacon ingest [command]
+```
+
+Use these commands when an endpoint is configured for managed ingest and you need to verify upload state or trigger an upload from the local runtime log.
+
+<Note>
+  Managed ingest requires dashboard credentials from `beacon login` and endpoint ingest configuration. Local endpoint collection remains local-only unless managed ingest is configured and upload commands are used.
+</Note>
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="status" icon="circle-info" href="#beacon-ingest-status">
+    Show configured ingest status across ingest sources.
+  </Card>
+  <Card title="endpoint" icon="desktop" href="/cli/ingest-endpoint">
+    Check and upload endpoint telemetry for managed ingest.
+  </Card>
+</Columns>
+
+## Shared Flags
+
+`beacon ingest status`, `beacon ingest endpoint status`, and `beacon ingest endpoint upload` accept the same endpoint selection and output flags.
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print output as JSON |
+
+## beacon ingest status
+
+`beacon ingest status` prints configured ingest status across ingest sources.
+
+```bash title="Show ingest status"
+beacon ingest status
+```
+
+Example output:
+
+```bash title="Example output"
+Beacon ingest
+Endpoint: enabled=true managed=true logged_in=true accepted=0 rejected=0
+```
+
+Print machine-readable status:
+
+```bash title="Print JSON"
+beacon ingest status --json
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint ingest" icon="desktop" href="/cli/ingest-endpoint">
+    Check endpoint upload status and upload local runtime events.
+  </Card>
+  <Card title="beacon login" icon="key" href="/cli/login">
+    Authenticate the Beacon CLI with your Asymptote dashboard account.
+  </Card>
+</Columns>

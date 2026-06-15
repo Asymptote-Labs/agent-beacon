@@ -1,0 +1,221 @@
+---
+title: "beacon endpoint elastic"
+description: "Generate Elastic content and run a local Elasticsearch, Kibana, and Filebeat validation stack for Beacon endpoint events."
+---
+
+## Forwarding Command
+
+Use `beacon endpoint elastic` to generate Elastic integration content for Beacon endpoint events. The generated pack tails Beacon's local `runtime.jsonl` file with Filebeat or standalone Elastic Agent and installs Elasticsearch/Kibana assets around the `logs-beacon.endpoint-*` data stream pattern.
+
+Beacon does not store Elastic cluster URLs or credentials. Keep `ES_HOSTS`, `ES_API_KEY`, usernames, passwords, and TLS settings in Filebeat, Elastic Agent, or your endpoint-management secret store.
+
+```bash title="Command syntax"
+beacon endpoint elastic [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint elastic print-config" icon="file-lines" href="#beacon-endpoint-elastic-print-config">
+    Print a Filebeat config for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint elastic install-pack" icon="box-archive" href="#beacon-endpoint-elastic-install-pack">
+    Write Elasticsearch, Kibana, Filebeat, and Elastic Agent content to a directory.
+  </Card>
+  <Card title="beacon endpoint elastic up" icon="play" href="#beacon-endpoint-elastic-up">
+    Start a local Elasticsearch, Kibana, and Filebeat validation stack.
+  </Card>
+  <Card title="beacon endpoint elastic down" icon="stop" href="#beacon-endpoint-elastic-down">
+    Stop the local Elastic validation stack.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+## beacon endpoint elastic print-config
+
+`beacon endpoint elastic print-config` prints a Filebeat filestream config for the configured Beacon runtime JSONL log.
+
+```bash title="Print the configuration"
+beacon endpoint elastic print-config
+```
+
+Use this command when you want to copy the Filebeat input into an existing endpoint shipper configuration.
+
+### Examples
+
+Print config for the default per-user Beacon install:
+
+```bash title="Print config for the default per-user Beacon install"
+beacon endpoint elastic print-config
+```
+
+Print config for a system-mode MDM deployment:
+
+```bash title="Print config for a system-mode MDM deployment"
+sudo /opt/beacon/bin/beacon endpoint elastic print-config --system
+```
+
+Print config for a custom runtime log:
+
+```bash title="Print config for a custom runtime log"
+beacon endpoint elastic print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint elastic install-pack
+
+`beacon endpoint elastic install-pack` writes an Elastic content pack to a directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint elastic install-pack --output ./beacon-elastic-pack
+```
+
+The pack includes Filebeat and standalone Elastic Agent configuration, Elasticsearch ILM, component templates, an index template, an ingest pipeline, starter Kibana saved objects, a sample event, and a local Docker Compose validation stack.
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint elastic install-pack --output ./beacon-elastic-pack
+```
+
+Generate a content pack for a system-mode deployment:
+
+```bash title="Generate a content pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint elastic install-pack \
+  --system \
+  --output ./beacon-elastic-pack
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint elastic install-pack \
+  --output ./beacon-elastic-pack \
+  --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the Elastic content pack. Defaults to `beacon-elastic-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint elastic up
+
+`beacon endpoint elastic up` starts a loopback-only local Elasticsearch, Kibana, and Filebeat stack for validating Beacon event ingestion.
+
+```bash title="Command example"
+beacon endpoint elastic up --pack-dir ./beacon-elastic-pack
+```
+
+The command creates the pack if it does not exist, ensures the runtime log exists, mounts the runtime log directory into Filebeat, loads Elasticsearch and Kibana assets, and starts the stack with Docker Compose.
+
+When the stack is healthy, Beacon events are searchable in the `logs-beacon.endpoint-*` data stream using the `beacon.*` fields produced by the ingest pipeline:
+
+```bash title="When the stack is healthy, Beacon events are searchable in the logs-beacon.endpoint-* data stream using the beacon.* fields produced by the ingest pipeline"
+curl "http://localhost:9200/logs-beacon.endpoint-*/_search?q=beacon.product:endpoint-agent"
+curl "http://localhost:9200/logs-beacon.endpoint-*/_search?q=beacon.prompt.text:%22Beacon%20E2E%22"
+curl "http://localhost:9200/logs-beacon.endpoint-*/_search?q=beacon.harness.name:cursor"
+```
+
+### Examples
+
+Start the local validation stack with the default pack directory:
+
+```bash title="Start the local validation stack with the default pack directory"
+beacon endpoint elastic up
+```
+
+Start with a generated pack directory:
+
+```bash title="Start with a generated pack directory"
+beacon endpoint elastic install-pack --output ./beacon-elastic-pack
+beacon endpoint elastic up --pack-dir ./beacon-elastic-pack
+```
+
+Use alternate local ports:
+
+```bash title="Use alternate local ports"
+BEACON_ELASTIC_ES_PORT=19200 \
+BEACON_ELASTIC_KIBANA_PORT=15601 \
+beacon endpoint elastic up
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--pack-dir <dir>` | Elastic pack directory. Defaults to `beacon-elastic-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+<Note>
+  `elastic up` is a macOS local validation helper that expects Docker Desktop or Docker Compose. For production, run Filebeat or standalone Elastic Agent through your endpoint-management system instead.
+</Note>
+
+## beacon endpoint elastic down
+
+`beacon endpoint elastic down` stops the local Elastic validation stack for a generated pack directory.
+
+```bash title="Command example"
+beacon endpoint elastic down --pack-dir ./beacon-elastic-pack
+```
+
+### Examples
+
+Stop the local validation stack:
+
+```bash title="Stop the local validation stack"
+beacon endpoint elastic down
+```
+
+Stop a stack that uses a custom pack directory:
+
+```bash title="Stop a stack that uses a custom pack directory"
+beacon endpoint elastic down --pack-dir ./beacon-elastic-pack
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--pack-dir <dir>` | Elastic pack directory. Defaults to `beacon-elastic-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Elastic forwarding" icon="magnifying-glass" href="/log-forwarding/elastic">
+    Set up local, Elastic Cloud, or self-managed Elastic forwarding.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

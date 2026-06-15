@@ -1,0 +1,62 @@
+---
+title: "Gemini CLI"
+description: "Asymptote support details for Gemini CLI endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Gemini CLI through opt-in local OTLP logs, traces, and metrics.
+
+## Prerequisites
+
+Before enabling Gemini CLI telemetry, make sure:
+
+- Gemini CLI is installed and available as the `gemini` executable for the user or managed endpoint.
+- `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
+- The install explicitly includes Gemini, for example `beacon endpoint install --harness claude,codex,gemini`.
+- No project settings or `GEMINI_TELEMETRY_*` environment variables override the user-level Asymptote settings you expect to use.
+- Your team has reviewed content handling and destination access for prompt telemetry.
+
+## Collection path
+
+Gemini CLI exports local OpenTelemetry data to Asymptote's localhost collector when the `gemini` endpoint harness is enabled. Asymptote maps Gemini prompts, tool calls, MCP activity, file operations, and approval-related events into normalized endpoint events.
+
+## Discovery and status
+
+Asymptote detects Gemini CLI through the `gemini` executable and `~/.gemini/settings.json`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Gemini CLI is present and configured.
+
+## Install or configuration support
+
+Gemini CLI telemetry is opt-in. Run `beacon endpoint install --harness claude,codex,gemini` when you want Asymptote to manage Gemini telemetry settings.
+
+Asymptote writes local OTLP settings to `~/.gemini/settings.json`, sets `target` to `local`, uses OTLP gRPC, enables collector mode, and removes `outfile` so telemetry flows to Asymptote.
+
+Gemini CLI is not currently configured through Asymptote's hook adapter.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported when emitted through Gemini OTLP |
+| Command, tool, and file telemetry | Supported for prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported through the system-mode package or MDM-managed config when `gemini` is included in the harness list |
+
+## Deployment notes
+
+Project settings or `GEMINI_TELEMETRY_*` environment variables may override Asymptote's user-level Gemini config.
+
+For enterprise rollouts, add `gemini` to the endpoint harness list, for example `claude,codex,gemini`, when you want Asymptote to manage `~/.gemini/settings.json` for local OTLP collection.
+
+If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures supported runtimes.
+  </Card>
+</Columns>

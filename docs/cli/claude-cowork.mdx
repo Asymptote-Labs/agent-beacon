@@ -1,0 +1,209 @@
+---
+title: "beacon endpoint integrations claude-cowork"
+description: "Set up Claude Cowork OpenTelemetry export for Beacon"
+---
+
+## Integration Command
+
+Claude Cowork exports telemetry from Anthropic's service, so its OTLP endpoint must be reachable from the public internet. Beacon can print the settings you need for the Claude admin console and validate whether Cowork events are arriving in the local runtime log.
+
+```bash title="Command syntax"
+beacon endpoint integrations claude-cowork [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="print-config" icon="file-lines" href="#beacon-endpoint-integrations-claude-cowork-print-config">
+    Print Claude Cowork OTLP setup guidance.
+  </Card>
+  <Card title="setup" icon="gear" href="#beacon-endpoint-integrations-claude-cowork-setup">
+    Print or create Claude Cowork OTLP admin settings.
+  </Card>
+  <Card title="status" icon="circle-info" href="#beacon-endpoint-integrations-claude-cowork-status">
+    Show Claude Cowork endpoint integration status.
+  </Card>
+  <Card title="validate" icon="check" href="#beacon-endpoint-integrations-claude-cowork-validate">
+    Validate whether Claude Cowork events are arriving.
+  </Card>
+</Columns>
+
+## Production setup
+
+For ongoing use, run a customer-managed HTTPS OpenTelemetry Collector endpoint:
+
+```text
+https://otel.example.com
+```
+
+Generate Claude Cowork setup values:
+
+```bash title="Generate Claude Cowork setup values"
+beacon endpoint integrations claude-cowork setup \
+  --endpoint https://otel.example.com \
+  --headers "Authorization=Bearer <token>" \
+  --open
+```
+
+Copy the generated values into the Claude Cowork monitoring settings:
+
+| Claude setting | Value |
+|----------------|-------|
+| OTLP endpoint | Your public HTTPS collector endpoint |
+| OTLP protocol | `HTTP/protobuf` |
+| OTLP headers | Optional, commonly `Authorization=Bearer <token>` |
+| Resource attributes | Defaults to `deployment.environment=prod,service.name=claude-cowork` |
+
+Recommended production shape:
+
+- Use a real DNS name with TLS, such as `https://otel.company.com`
+- Require authentication at the public edge
+- Terminate TLS at a hardened reverse proxy or load balancer
+- Forward OTLP HTTP paths such as `/v1/logs`, `/v1/metrics`, and `/v1/traces` to the Collector's local `4318` receiver
+- Treat Cowork telemetry as sensitive because prompt text, tool parameters, file paths, user email addresses, model usage, and errors may be present before Beacon redaction or export
+
+## Local testing with ngrok
+
+For demos, validation, or local development only, Beacon can create a temporary authenticated ngrok tunnel to the local OTLP HTTP receiver:
+
+```bash title="Create a temporary ngrok tunnel"
+beacon endpoint install
+beacon endpoint integrations claude-cowork setup --ngrok --open
+```
+
+Do not use an ngrok URL, `127.0.0.1`, or a laptop endpoint for production monitoring.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--endpoint <url>` | Public OTLP HTTPS endpoint reachable by Claude Cowork |
+| `--headers <headers>` | Optional OTLP headers for Claude admin settings |
+| `--resource-attributes <attrs>` | Optional Claude Cowork resource attributes |
+| `--ngrok` | Create a temporary authenticated ngrok tunnel to the local OTLP HTTP receiver |
+| `--open` | Open Claude Cowork admin settings in a browser |
+| `--since <duration>` | Require a Cowork event within this duration, such as `10m`. Validate only |
+| `--json` | Print status as JSON. Status only |
+
+## beacon endpoint integrations claude-cowork print-config
+
+`beacon endpoint integrations claude-cowork print-config` prints Claude Cowork OTLP setup guidance without creating a tunnel or opening the admin console.
+
+```bash title="Print the configuration"
+beacon endpoint integrations claude-cowork print-config \
+  --endpoint https://otel.example.com \
+  --headers "Authorization=Bearer <token>"
+```
+
+### Examples
+
+Print guidance for a production collector:
+
+```bash title="Print guidance for a production collector"
+beacon endpoint integrations claude-cowork print-config \
+  --endpoint https://otel.example.com \
+  --headers "Authorization=Bearer <token>" \
+  --resource-attributes "deployment.environment=prod,service.name=claude-cowork"
+```
+
+Print guidance using the local OTLP HTTP receiver from the Beacon config:
+
+```bash title="Print guidance using the local OTLP HTTP receiver from the Beacon config"
+beacon endpoint integrations claude-cowork print-config
+```
+
+## beacon endpoint integrations claude-cowork setup
+
+`beacon endpoint integrations claude-cowork setup` prints the OTLP values to copy into Claude Cowork monitoring settings. It can also open the Claude admin console or create a temporary authenticated ngrok tunnel for local testing.
+
+```bash title="Set up the integration"
+beacon endpoint integrations claude-cowork setup \
+  --endpoint https://otel.example.com \
+  --headers "Authorization=Bearer <token>" \
+  --open
+```
+
+### Production setup
+
+For ongoing monitoring, use a durable public HTTPS OpenTelemetry Collector endpoint:
+
+```bash title="Set up a production OTLP endpoint"
+beacon endpoint integrations claude-cowork setup \
+  --endpoint https://otel.example.com \
+  --headers "Authorization=Bearer <token>" \
+  --resource-attributes "deployment.environment=prod,service.name=claude-cowork"
+```
+
+### Local testing with ngrok
+
+For demos, validation, or local development only, create a temporary authenticated ngrok tunnel to the local OTLP HTTP receiver:
+
+```bash title="Create a temporary ngrok tunnel"
+beacon endpoint install
+beacon endpoint integrations claude-cowork setup --ngrok --open
+```
+
+Do not use `127.0.0.1`, a laptop endpoint, or an ngrok URL for production monitoring.
+
+## beacon endpoint integrations claude-cowork status
+
+`beacon endpoint integrations claude-cowork status` reports whether Claude Cowork is detected and whether Cowork events have been observed in the endpoint runtime log.
+
+```bash title="Check status"
+beacon endpoint integrations claude-cowork status
+```
+
+### Examples
+
+Show status:
+
+```bash title="Show status"
+beacon endpoint integrations claude-cowork status
+```
+
+Print status as JSON:
+
+```bash title="Print status as JSON"
+beacon endpoint integrations claude-cowork status --json
+```
+
+Check a custom runtime log:
+
+```bash title="Check a custom runtime log"
+beacon endpoint integrations claude-cowork status \
+  --log-path /path/to/runtime.jsonl
+```
+
+## beacon endpoint integrations claude-cowork validate
+
+`beacon endpoint integrations claude-cowork validate` checks whether Claude Cowork events have arrived in the endpoint runtime log.
+
+```bash title="Run the validation check"
+beacon endpoint integrations claude-cowork validate --since 10m
+```
+
+If validation fails, Beacon prints setup guidance using any endpoint, headers, or resource attributes you provide.
+
+### Examples
+
+Require a Cowork event in the last 10 minutes:
+
+```bash title="Require a Cowork event in the last 10 minutes"
+beacon endpoint integrations claude-cowork validate --since 10m
+```
+
+Validate and include production setup guidance if no event is found:
+
+```bash title="Validate and include production setup guidance if no event is found"
+beacon endpoint integrations claude-cowork validate \
+  --since 10m \
+  --endpoint https://otel.example.com \
+  --headers "Authorization=Bearer <token>"
+```
+
+Validate a custom runtime log:
+
+```bash title="Validate a custom runtime log"
+beacon endpoint integrations claude-cowork validate \
+  --log-path /path/to/runtime.jsonl
+```

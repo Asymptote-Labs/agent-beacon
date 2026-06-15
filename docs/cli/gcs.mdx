@@ -1,0 +1,182 @@
+---
+title: "beacon endpoint gcs"
+description: "Generate Google Cloud Storage forwarding content and validation events for Beacon endpoint events."
+---
+
+## Forwarding Command
+
+Use `beacon endpoint gcs` to generate Google Cloud Storage forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload `runtime.jsonl` to a GCS bucket as gzip-compressed NDJSON.
+
+Beacon does not store Google Cloud credentials, service accounts, workload identity settings, bucket IAM, lifecycle rules, retention policies, or encryption settings. Keep those values in Google Cloud, Vector, endpoint-management policy, or deployment tooling.
+
+```bash title="Command syntax"
+beacon endpoint gcs [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint gcs print-config" icon="file-lines" href="#beacon-endpoint-gcs-print-config">
+    Print the Vector Google Cloud Storage forwarding template for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint gcs install-pack" icon="box-archive" href="#beacon-endpoint-gcs-install-pack">
+    Write Google Cloud Storage forwarding content to a directory.
+  </Card>
+  <Card title="beacon endpoint gcs validate" icon="check" href="#beacon-endpoint-gcs-validate">
+    Write and describe a Beacon Google Cloud Storage validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+## beacon endpoint gcs print-config
+
+`beacon endpoint gcs print-config` prints a Vector configuration that tails the selected Beacon runtime JSONL log and writes gzip-compressed NDJSON objects to Google Cloud Storage.
+
+```bash title="Print the configuration"
+beacon endpoint gcs print-config
+```
+
+Use this command when you want to inspect or copy the Vector template into an existing endpoint forwarding workflow.
+
+### Examples
+
+Print Vector config for the default per-user Beacon install:
+
+```bash title="Print Vector config for the default per-user Beacon install"
+beacon endpoint gcs print-config
+```
+
+Print Vector config for a system-mode MDM deployment:
+
+```bash title="Print Vector config for a system-mode MDM deployment"
+sudo /opt/beacon/bin/beacon endpoint gcs print-config --system
+```
+
+Print Vector config for a custom runtime log:
+
+```bash title="Print Vector config for a custom runtime log"
+beacon endpoint gcs print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint gcs install-pack
+
+`beacon endpoint gcs install-pack` writes Google Cloud Storage forwarding content to a directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint gcs install-pack --output ./beacon-gcs-pack
+```
+
+The pack includes setup instructions, a one-shot GCS upload smoke-test script, a Vector `gcp_cloud_storage` forwarding template, and sample Beacon endpoint events.
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint gcs install-pack --output ./beacon-gcs-pack
+```
+
+Generate a content pack for a system-mode deployment:
+
+```bash title="Generate a content pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint gcs install-pack \
+  --system \
+  --output ./beacon-gcs-pack
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint gcs install-pack \
+  --output ./beacon-gcs-pack \
+  --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the Google Cloud Storage content pack. Defaults to `beacon-gcs-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint gcs validate
+
+`beacon endpoint gcs validate` writes a Beacon validation event to the runtime JSONL log and prints the expected GCS validation fields and follow-up Google Cloud checks.
+
+```bash title="Run the validation check"
+beacon endpoint gcs validate
+```
+
+### Examples
+
+Write a validation event for the default per-user install:
+
+```bash title="Write a validation event for the default per-user install"
+beacon endpoint gcs validate
+```
+
+Write a validation event for a system-mode deployment:
+
+```bash title="Write a validation event for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint gcs validate --system
+```
+
+Write a validation event to a custom runtime log:
+
+```bash title="Write a validation event to a custom runtime log"
+beacon endpoint gcs validate --log-path /path/to/runtime.jsonl
+```
+
+The validation command writes the local event only. Confirm remote delivery with Google Cloud tooling:
+
+```text
+gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/**"
+gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"
+```
+
+Expected validation fields:
+
+```text
+vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Google Cloud Storage forwarding" icon="chart-line" href="/log-forwarding/gcs">
+    Configure Vector forwarding from Beacon JSONL into Google Cloud Storage.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

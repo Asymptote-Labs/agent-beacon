@@ -1,0 +1,71 @@
+---
+title: "Devin CLI"
+description: "Asymptote support details for Devin CLI endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Devin CLI through native Devin hook payloads sent to `beacon-hooks`.
+
+## Prerequisites
+
+Before enabling Devin CLI hooks, make sure:
+
+- Devin CLI is installed for the user or configured in the project where hooks will run.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote hooks are installed with `beacon endpoint hooks install --harness devin-cli`. The legacy `devin` harness name still maps to Devin CLI.
+- For project-level collection, install hooks from the target project with `--level project`.
+- Devin CLI is restarted after hook install or removal so new sessions load the updated hook configuration.
+
+## Collection path
+
+Devin CLI invokes Asymptote's hook adapter from hook entries in Devin configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+
+## Discovery and status
+
+Asymptote detects Devin CLI through the `devin` executable, `~/.config/devin`, or `./.devin`, then checks Asymptote hook configuration.
+
+Use `beacon endpoint hooks status --harness devin-cli` to inspect Devin CLI hook status.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Devin CLI hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness devin-cli
+```
+
+For project-level Devin CLI hooks, run:
+
+```bash title="Install project-level Devin CLI hooks"
+beacon endpoint hooks install --harness devin-cli --level project
+```
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through `UserPromptSubmit` hooks |
+| Command, tool, and file telemetry | Supported for session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry where Devin CLI exposes payloads |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Devin CLI hooks are installed separately in the logged-in user's context or project context |
+
+## Deployment notes
+
+Asymptote writes Devin CLI user-level hooks under the `hooks` key in `~/.config/devin/config.json`. Devin CLI project-level installs write the standalone hook map to `./.devin/hooks.v1.json`.
+
+Install and uninstall preserve unrelated Devin settings and non-Asymptote hook commands. Restart Devin CLI after installing or removing hooks so new sessions pick up the updated hook configuration.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Devin Desktop" icon="plug" href="/runtimes/devin-desktop">
+    Configure Devin Desktop through Cascade/Windsurf hooks.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

@@ -1,0 +1,144 @@
+---
+title: "Custom Agent Steps"
+description: "Trace custom agent orchestration with Observe.observe"
+---
+
+## Custom Step Tracking
+
+Use `Observe.observe()` for orchestration steps, tool execution, policy checks, and handoffs that provider SDKs do not expose.
+
+## Overview
+
+Custom agent steps are the fallback integration path for frameworks, internal tools, and orchestration code without a dedicated adapter. Wrap the function you control and add Beacon compatibility attributes that describe what happened.
+
+## What Asymptote Captures
+
+- A span for each wrapped function call.
+- Input count and output type unless disabled.
+- Errors recorded on failed spans.
+- Beacon compatibility attributes such as `beacon.event.action`, `beacon.tool.name`, `beacon.mcp.server`, and `beacon.approval.decision`.
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- `@asymptote/sdk` installed.
+- The agent framework, tool client, or internal orchestration code you want to wrap.
+- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK"
+npm install @asymptote/sdk
+```
+
+Set an export destination:
+
+```bash title="Set the Asymptote Managed API key"
+export ASYMPTOTE_API_KEY=...
+```
+
+## Getting Started
+
+```typescript title="Wrap a custom tool step" lines
+import {
+  ATTR_BEACON_EVENT_ACTION,
+  ATTR_BEACON_HARNESS_NAME,
+  ATTR_BEACON_TOOL_NAME,
+  Observe,
+} from "@asymptote/sdk";
+import { searchDocs } from "./tools/search-docs";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+
+const runTool = Observe.observe(
+  {
+    name: "agent.tool.run",
+    attributes: {
+      [ATTR_BEACON_HARNESS_NAME]: "custom_agent",
+      [ATTR_BEACON_EVENT_ACTION]: "tool.invoked",
+      [ATTR_BEACON_TOOL_NAME]: "search_docs",
+    },
+  },
+  async (query: string) => searchDocs(query),
+);
+
+await runTool("How does endpoint telemetry get forwarded?");
+await Observe.flush();
+```
+
+The wrapped function preserves the original return behavior for sync functions, promises, and async iterables. Errors are recorded on the span and then rethrown.
+
+## Avoid Sensitive Metadata
+
+Set `ignoreInput` or `ignoreOutput` when wrapper metadata should avoid recording argument counts or output type.
+
+```typescript title="Redact sensitive step metadata" lines
+import { Observe } from "@asymptote/sdk";
+import { lookupSecret } from "./tools/secrets";
+
+const redactSensitiveStep = Observe.observe(
+  {
+    name: "agent.secret.lookup",
+    ignoreInput: true,
+    ignoreOutput: true,
+  },
+  async (id: string) => lookupSecret(id),
+);
+```
+
+## Common Beacon Actions
+
+Use Beacon compatibility attributes when a custom step should normalize into a known event category.
+
+| Action | Typical category | Example use |
+| --- | --- | --- |
+| `prompt.submitted` | `prompt` | User prompt or agent turn |
+| `tool.invoked` | `tool` | Function call, retrieval step, or external API call |
+| `command.executed` | `command` | Shell command or build step |
+| `file.modified` | `file` | Agent-created or edited file |
+| `mcp.tool_invoked` | `mcp` | MCP server tool call |
+| `approval.requested` | `approval` | Human review or policy gate |
+
+```typescript title="Wrap an MCP tool call" lines
+import {
+  ATTR_BEACON_EVENT_ACTION,
+  ATTR_BEACON_EVENT_CATEGORY,
+  ATTR_BEACON_MCP_SERVER,
+  ATTR_BEACON_MCP_TOOL,
+  Observe,
+} from "@asymptote/sdk";
+import { searchDocsMcp } from "./mcp/docs";
+
+const callMcpTool = Observe.observe(
+  {
+    name: "agent.mcp.call",
+    attributes: {
+      [ATTR_BEACON_EVENT_ACTION]: "mcp.tool_invoked",
+      [ATTR_BEACON_EVENT_CATEGORY]: "mcp",
+      [ATTR_BEACON_MCP_SERVER]: "docs",
+      [ATTR_BEACON_MCP_TOOL]: "search",
+    },
+  },
+  async (query: string) => searchDocsMcp(query),
+);
+```
+
+See the [SDK reference](/sdk/reference#beacon-compatibility-attributes) for the full attribute list.
+
+## Troubleshooting
+
+- Confirm `Observe.initialize()` runs before wrapped functions are called.
+- Confirm the wrapped function returned by `Observe.observe()` is the function your application invokes.
+- Use `ignoreInput` or `ignoreOutput` for sensitive steps.
+- Call `Observe.flush()` before short-lived scripts or jobs exit.
+
+## What's Next
+
+<Columns cols={2}>
+  <Card title="Observe" icon="diagram-project" href="/sdk/observe">
+    Review the full manual span wrapper reference.
+  </Card>
+  <Card title="SDK Reference" icon="book-open" href="/sdk/reference">
+    Review supported Beacon compatibility attributes.
+  </Card>
+</Columns>

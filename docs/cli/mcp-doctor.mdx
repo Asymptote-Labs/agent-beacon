@@ -1,0 +1,83 @@
+---
+title: "beacon mcp doctor"
+description: "Validate local Beacon MCP setup"
+---
+
+## Command Overview
+
+`beacon mcp doctor` validates local Beacon MCP setup before you connect an MCP client.
+
+```bash title="Command syntax"
+beacon mcp doctor
+```
+
+Doctor resolves the effective runtime log path, checks transport settings, samples readable events and archives, and confirms that the expected MCP tools are registered.
+
+## Checks
+
+Doctor reports:
+
+- MCP transport
+- Loopback HTTP address and bind check, when `--transport http` is used
+- Runtime log path and source
+- Runtime log warnings, when present
+- Content handling and readable event samples
+- Sampled event count
+- Malformed line count
+- Readable runtime archives
+- Registered MCP tools
+
+If the runtime log does not exist yet, doctor reports that Beacon MCP can still start, but activity answers will be empty until endpoint telemetry writes events.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--log-path PATH` | Runtime JSONL log path |
+| `--transport stdio\|http` | MCP transport. Defaults to `stdio` |
+| `--addr ADDR` | Loopback HTTP JSON-RPC listen address for `--transport http`. Defaults to `127.0.0.1:8766` |
+
+## Examples
+
+Validate stdio MCP setup:
+
+```bash title="Validate stdio MCP setup"
+beacon mcp doctor
+```
+
+Validate loopback HTTP setup:
+
+```bash title="Validate loopback HTTP setup"
+beacon mcp doctor --transport http --addr 127.0.0.1:8766
+```
+
+Validate a specific runtime log:
+
+```bash title="Validate a specific runtime log"
+beacon mcp doctor --log-path /path/to/runtime.jsonl
+```
+
+Validate system-mode paths:
+
+```bash title="Validate system-mode paths"
+sudo beacon mcp doctor --system
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon mcp" icon="server" href="/cli/mcp">
+    Review MCP tools, filters, and command group behavior.
+  </Card>
+  <Card title="beacon mcp serve" icon="server" href="/cli/mcp-serve">
+    Run the local Beacon MCP server after validation.
+  </Card>
+  <Card title="Test MCP Access" icon="server" href="/guides/local-testing/mcp">
+    Understand Beacon MCP and test local client access.
+  </Card>
+  <Card title="Connect Cursor and Claude Code" icon="plug" href="/guides/local-testing/mcp#connect-cursor-and-claude-code">
+    Install Beacon MCP in local assistant clients.
+  </Card>
+</Columns>

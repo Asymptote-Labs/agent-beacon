@@ -1,0 +1,73 @@
+---
+title: "Cursor"
+description: "Asymptote support details for Cursor endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Cursor through native hook payloads sent to `beacon-hooks`.
+For provider-managed Cursor cloud sessions, see
+[Cursor Cloud Agents](/runtimes/cursor-cloud-agents).
+
+## Prerequisites
+
+Before enabling Cursor hooks, make sure:
+
+- Cursor is installed for the user or the `~/.cursor` directory exists.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote hooks are installed with `beacon endpoint hooks install --harness cursor`.
+- For project-level collection, install hooks from the target project with `--level project`.
+- Cursor is restarted after hook install or removal so new sessions load the updated hook configuration.
+
+## Collection path
+
+Cursor invokes Asymptote's hook adapter from Cursor hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+
+## Discovery and status
+
+Asymptote detects Cursor through the Cursor binary or `~/.cursor`, then checks Asymptote hook configuration.
+
+Use `beacon endpoint hooks status --harness cursor` to inspect Cursor hook status.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Cursor hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness cursor
+```
+
+For project-level hooks, run:
+
+```bash title="Install project-level hooks"
+beacon endpoint hooks install --harness cursor --level project
+```
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported for local Cursor through `beforeSubmitPrompt` hooks; not available in Cursor Cloud Agents because Cursor submits the prompt before the cloud VM exists. See [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support). |
+| Command, tool, and file telemetry | Supported for tool, shell command, MCP-like, approval, and file edit payloads where Cursor exposes them; Cursor Cloud support is limited to Cursor's [cloud-supported command hooks](https://cursor.com/docs/hooks#cloud-agent-support). |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Cursor hooks are installed separately in the logged-in user's context |
+
+## Deployment notes
+
+Restart Cursor after installing or removing hooks so the updated hook configuration is picked up by new sessions.
+
+Hook events include metadata such as file path, operation, language, diff hash, and diff byte count. Raw diffs are subject to Asymptote's redaction, sanitization, truncation, and event-size limits before writing.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+  <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
+    Capture Cursor cloud agent telemetry with sandbox-local hooks and GCS upload.
+  </Card>
+</Columns>

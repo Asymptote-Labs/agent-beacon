@@ -1,0 +1,44 @@
+---
+title: "Install Beacon"
+description: "Install the Beacon CLI with Homebrew or platform archives"
+---
+
+## Homebrew
+
+Install the Beacon CLI with Homebrew:
+
+```bash title="Install Beacon"
+brew tap asymptote-labs/tap
+brew install beacon
+beacon version
+```
+
+<Accordion title="Example output">
+```bash title="beacon version output"
+$ beacon version
+beacon version 0.0.66
+```
+</Accordion>
+
+## Other install methods
+
+Beacon releases publish macOS and Linux archives for `amd64` and `arm64` alongside Homebrew builds. For archive-based installs or source builds, see [Manual CLI Installation](/cli/manual-install).
+
+## Next steps
+
+After installing Beacon, configure the workflow you need:
+
+<Columns cols={2}>
+  <Card title="Endpoint telemetry" icon="satellite-dish" href="/cli/endpoint-install">
+    Configure local agent harness telemetry.
+  </Card>
+  <Card title="Cloud agent telemetry" icon="cloud" href="/cli/cloud">
+    Configure provider-managed cloud agent telemetry setup helpers.
+  </Card>
+  <Card title="CI telemetry" icon="terminal" href="/cli/ci">
+    Run ephemeral AI runtime telemetry collection in CI.
+  </Card>
+  <Card title="Upgrade Beacon" icon="arrow-up" href="/cli/upgrade">
+    Keep the Beacon CLI up to date.
+  </Card>
+</Columns>

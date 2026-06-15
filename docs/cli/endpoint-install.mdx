@@ -1,0 +1,170 @@
+---
+title: "beacon endpoint install"
+description: "Install or update the local Beacon endpoint collector and runtime telemetry"
+---
+
+## Command Overview
+
+`beacon endpoint install` configures the local endpoint agent, writes the OpenTelemetry Collector configuration, installs the launchd service, configures selected agent harnesses, and optionally adds Splunk HEC or Falcon LogScale HEC collector destinations.
+
+```bash title="Command syntax"
+beacon endpoint install
+```
+
+By default, Beacon configures Claude Code and Codex CLI telemetry for local or customer-controlled runtime JSONL logs. Gemini CLI and VS Code Copilot telemetry are opt-in with the `gemini` and `vscode` harnesses. Claude Code can also use optional hook telemetry for richer lifecycle, subagent, permission, and tool detail; install the endpoint agent first, then add Claude hooks with `beacon endpoint hooks install --harness claude`. Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields. GitHub Copilot CLI and Factory Droid OTLP are managed through their launch environments, so Beacon validates their telemetry state but does not mutate shell profiles during install.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon. Requires root |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` for Gemini CLI, `vscode` for VS Code Copilot telemetry, `devin-cli` for Devin CLI hooks, or `devin-desktop` for Devin Desktop hooks. Claude Code, Grok Build, Hermes Agent, Cursor, Factory, OpenCode, and optional VS Code hook telemetry are managed with `beacon endpoint hooks`. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
+| `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
+| `--collector <path>` | Path to a `beacon-otelcol` binary |
+| `--no-start` | Write files without starting the launchd service |
+| `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
+| `--include-codex-spans` | Include high-volume Codex OTLP spans for troubleshooting. By default, Beacon records Codex semantic logs and suppresses raw Codex spans |
+| `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
+| `--splunk-hec-token <token>` | Splunk HEC token |
+| `--splunk-index <index>` | Optional Splunk index |
+| `--splunk-source <source>` | Optional Splunk source |
+| `--splunk-sourcetype <type>` | Optional Splunk sourcetype |
+| `--splunk-insecure-skip-verify` | Skip Splunk HEC TLS certificate verification |
+| `--splunk-ca-file <path>` | Optional CA certificate path for Splunk HEC TLS verification |
+| `--falcon-hec-endpoint <url>` | Falcon LogScale HEC endpoint URL |
+| `--falcon-hec-token <token>` | Falcon LogScale ingest token |
+| `--falcon-index <repository>` | Optional Falcon LogScale repository for multi-repository tokens |
+| `--falcon-source <source>` | Optional Falcon LogScale source |
+| `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
+| `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
+| `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+
+## Examples
+
+Install with the default per-user paths:
+
+```bash title="Install with the default per-user paths"
+beacon endpoint install
+```
+
+Install without starting the launchd service:
+
+```bash title="Install without starting the launchd service"
+beacon endpoint install --no-start
+```
+
+Configure only one harness:
+
+```bash title="Configure only one harness"
+beacon endpoint install --harness claude
+```
+
+Opt in Gemini CLI telemetry alongside the defaults:
+
+```bash title="Opt in Gemini CLI telemetry alongside the defaults"
+beacon endpoint install --harness claude,codex,gemini
+```
+
+Configure VS Code Copilot telemetry:
+
+```bash title="Configure VS Code Copilot telemetry"
+beacon endpoint install --harness vscode
+```
+
+Configure Devin CLI and Devin Desktop hooks alongside the default OTLP harnesses:
+
+```bash title="Configure Devin CLI and Devin Desktop hooks alongside the default OTLP harnesses"
+beacon endpoint install --harness claude,codex,devin-cli,devin-desktop
+```
+
+Include low-level runtime OTLP metrics that are filtered from JSONL by default:
+
+```bash title="Include low-level runtime OTLP metrics that are filtered from JSONL by default"
+beacon endpoint install --include-runtime-metrics
+```
+
+Include raw Codex spans for troubleshooting:
+
+```bash title="Include raw Codex spans for troubleshooting"
+beacon endpoint install --include-codex-spans
+```
+
+Install with system paths for a root-managed package or MDM deployment:
+
+```bash title="Install with system paths for a root-managed package or MDM deployment"
+sudo beacon endpoint install --system --harness claude,codex
+```
+
+Install and forward to CrowdStrike Falcon LogScale HEC:
+
+```bash title="Install and forward to CrowdStrike Falcon LogScale HEC"
+sudo beacon endpoint install \
+  --system \
+  --falcon-hec-endpoint https://cloud.<region>.humio.com/api/v1/ingest/hec \
+  --falcon-hec-token "$FALCON_HEC_TOKEN" \
+  --falcon-index beacon
+```
+
+Configure Factory Droid's OTLP endpoint through MDM or another customer-owned launch policy:
+
+```bash title="Configure Factory Droid's OTLP endpoint through MDM or another customer-owned launch policy"
+export OTEL_TELEMETRY_ENDPOINT="http://127.0.0.1:4318"
+droid exec "review this repository"
+```
+
+Configure GitHub Copilot CLI's OTLP endpoint through MDM or another customer-owned launch policy:
+
+```bash title="Configure GitHub Copilot CLI's OTLP endpoint through MDM or another customer-owned launch policy"
+export COPILOT_OTEL_ENABLED="true"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+```
+
+For richer hook telemetry, install runtime hooks after the endpoint configuration exists:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode
+```
+
+Install Claude Code hooks at the user level:
+
+```bash title="Install Claude Code hooks at the user level"
+beacon endpoint hooks install --harness claude
+```
+
+Install Grok Build hooks at the user level:
+
+```bash title="Install Grok Build hooks at the user level"
+beacon endpoint hooks install --harness grok
+```
+
+Install Hermes Agent hooks at the user level:
+
+```bash title="Install Hermes Agent hooks at the user level"
+beacon endpoint hooks install --harness hermes
+```
+
+Hermes hooks write `~/.hermes/config.yaml` and support user-level installs only.
+
+Project-level Grok Build hooks write `./.grok/hooks/beacon-endpoint.json` and require `/hooks-trust` in Grok before they execute:
+
+```bash title="Install project-level Grok Build hooks"
+beacon endpoint hooks install --harness grok --level project
+```
+
+<Note>
+  Production endpoint install is currently supported on macOS. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather than Beacon-managed shell-profile edits.
+</Note>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Inspect collector health, runtime log state, harnesses, diagnostics, and forwarding readiness.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install hook-based telemetry after the endpoint collector is configured.
+  </Card>
+</Columns>

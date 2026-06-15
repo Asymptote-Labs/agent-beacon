@@ -1,0 +1,91 @@
+---
+title: "Security & IT Rollout Guide"
+description: "Deploy Beacon endpoint telemetry and forward events into security operations workflows."
+---
+
+Beacon gives Security and IT teams local endpoint visibility into supported [agent harnesses](/runtimes). It captures supported activity, normalizes it into a stable endpoint event schema, and writes JSONL for local inspection or customer-managed forwarding.
+
+Beacon is local-only by default. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection. Use [Asymptote Managed](/deployment/managed) when you need centralized retention, search, governance, investigations, access control, or rollout support.
+
+## Rollout Path
+
+<Steps>
+  <Step title="Pilot">
+    Start with a small macOS group that represents the agent harnesses and teams you want to observe. Decide which runtimes are in scope, whether events stay local at first, and which MDM group owns the initial package rollout.
+  </Step>
+  <Step title="Validate">
+    Confirm install coverage, collector health, runtime log freshness, configured harness scope, and expected event coverage before expanding.
+  </Step>
+  <Step title="Expand">
+    Deploy the signed and notarized macOS package through Jamf Pro, Fleet, or another MDM. Production deployments use system mode and write events to `/var/log/beacon-agent/runtime.jsonl`.
+  </Step>
+  <Step title="Centralize">
+    Keep local JSONL on the endpoint, then add forwarding into your SIEM, observability stack, object storage, or customer-managed pipeline when the destination policy is approved.
+  </Step>
+</Steps>
+
+## Deployment Decisions
+
+Before broad rollout, document these decisions:
+
+| Decision | What to define |
+| -------- | -------------- |
+| Runtime scope | Which supported harnesses are approved for collection and whether optional runtime integrations are in scope. |
+| Install mode | Local evaluation, root-managed system install, or MDM package rollout. |
+| Event destination | Local JSONL only, Wazuh localfile, supported forwarding destination, object storage, or customer-managed pipeline. |
+| Access and retention | Who can read local logs, how long downstream systems retain events, and which teams own review. |
+| Managed handoff | Whether the rollout now needs centralized visibility, policy controls, investigations, SSO/RBAC, or private infrastructure. |
+
+## Validation Signals
+
+Track these signals in your device-management platform or operations dashboard:
+
+| Area | Recommended signal |
+|------|--------------------|
+| Install coverage | Beacon package or binary version is present |
+| Collector health | `com.beacon.endpoint.collector` is running |
+| Event freshness | Last runtime event age is within your expected window |
+| Runtime configuration | Configured harnesses match the approved deployment scope |
+| Forwarding readiness | Runtime log exists and is writable; downstream forwarding is configured when required |
+
+For command-level checks, see [Endpoint status](/cli/endpoint-status), [Endpoint discover](/cli/endpoint-discover), and [Local testing](/guides/local-testing).
+
+## Guides
+
+<Columns cols={2}>
+  <Card title="Enterprise security review" icon="shield-halved" href="/security/review">
+    Answer procurement and security review questions about local collection, data inventory, content handling, endpoint behavior, and disclosure policy.
+  </Card>
+  <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
+    Plan managed macOS rollout with the packaged system agent.
+  </Card>
+  <Card title="Jamf" icon="laptop" href="/mdm/jamf">
+    Deploy and inventory Beacon with Jamf Pro policies and extension attributes.
+  </Card>
+  <Card title="Fleet" icon="laptop-file" href="/mdm/fleet">
+    Deploy Beacon with Fleet software, policies, queries, and scripts.
+  </Card>
+  <Card title="SIEM forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events to Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, or a customer-managed SIEM pipeline.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review the normalized JSONL contract used for endpoint events.
+  </Card>
+</Columns>
+
+Also review [Agent harness integrations](/runtimes) to confirm supported runtimes, deployment modes, storage paths, and forwarding boundaries.
+
+## When to Move to Managed
+
+Open Source works well when your team wants local endpoint telemetry and controls the downstream destination. Consider [Asymptote Managed](/deployment/managed) when you need:
+
+- centralized ingest, retention, search, and detections
+- fleet-wide visibility across endpoints, users, and teams
+- policy controls, identity mapping, approvals, and investigation workflows
+- SSO, RBAC, audit trails, onboarding, and rollout support
+
+For dedicated infrastructure, stricter data boundaries, or residency requirements, ask about Private Deployment. [Contact us](https://asymptotelabs.ai/contact) to discuss Managed or Private Deployment.
+
+## Boundaries
+
+Beacon currently focuses on endpoint telemetry for supported agent harnesses and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, browser or SaaS telemetry, credential-use attribution, or automatic mutation of Factory Droid shell profiles. Use [Log Forwarding](/log-forwarding) for supported SIEM, observability, object-storage, local JSONL, and customer-managed destinations.

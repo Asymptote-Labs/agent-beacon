@@ -1,0 +1,46 @@
+---
+title: "beacon rules remove"
+description: "Remove a Beacon threat-detection rule from the local store"
+---
+
+## Command Overview
+
+`beacon rules remove` removes one installed threat-detection rule from the local store by rule id.
+
+```bash title="Command syntax"
+beacon rules remove <id> [flags]
+```
+
+Use [`beacon rules list`](/cli/rules-list) first when you need to confirm the active rule ids.
+
+## Examples
+
+Remove one rule from the user-mode store:
+
+```bash title="Remove a rule"
+beacon rules remove suspicious-egress-command
+```
+
+Remove one rule from the system-mode store:
+
+```bash title="Remove a system-mode rule"
+sudo beacon rules remove suspicious-egress-command --system
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules list" icon="list" href="/cli/rules-list">
+    List active rules and rule ids.
+  </Card>
+  <Card title="beacon rules add" icon="plus" href="/cli/rules-add">
+    Install local rules into the store.
+  </Card>
+</Columns>

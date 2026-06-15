@@ -1,0 +1,150 @@
+---
+title: "Schema Examples"
+description: "Example Beacon events and content handling behavior"
+---
+
+## Event Examples
+
+Beacon writes events as JSONL records. Each line is a complete JSON object that follows the [Unified Telemetry Schema](/telemetry-schema/event-schema).
+
+## Example command event
+
+```json
+{
+  "timestamp": "2026-05-11T22:21:00Z",
+  "vendor": "beacon",
+  "product": "endpoint-agent",
+  "schema_version": "1.0",
+  "event": {
+    "kind": "agent_runtime",
+    "action": "command.executed",
+    "category": "command"
+  },
+  "severity": "info",
+  "endpoint": {
+    "hostname": "example-mac",
+    "os": "darwin",
+    "agent_version": "0.0.11"
+  },
+  "user": {
+    "name": "local-user"
+  },
+  "harness": {
+    "name": "cursor"
+  },
+  "session": {
+    "id": "conversation-1",
+    "working_directory": "/Users/local-user/repo"
+  },
+  "tool": {
+    "name": "Shell",
+    "command": "go test ./..."
+  },
+  "command": {
+    "command": "go test ./..."
+  },
+  "message": "Shell command executed"
+}
+```
+
+## Example GenAI tool event
+
+```json
+{
+  "timestamp": "2026-06-08T12:12:00Z",
+  "vendor": "beacon",
+  "product": "endpoint-agent",
+  "schema_version": "1.0",
+  "event": {
+    "kind": "agent_runtime",
+    "action": "tool.invoked",
+    "category": "tool"
+  },
+  "severity": "info",
+  "endpoint": {
+    "hostname": "ci-runner-1",
+    "os": "linux",
+    "agent_version": "0.0.48"
+  },
+  "harness": {
+    "name": "claude"
+  },
+  "origin": "ci",
+  "run": {
+    "provider": "github_actions",
+    "run_id": "123456789",
+    "workflow": "Security review",
+    "repository": "acme/app",
+    "branch": "main",
+    "commit": "abc123",
+    "actor": "octocat",
+    "ephemeral": true
+  },
+  "tool": {
+    "name": "read_file",
+    "command": "{\"path\":\"src/app.ts\"}"
+  },
+  "gen_ai": {
+    "provider": {
+      "name": "anthropic"
+    },
+    "request": {
+      "model": "claude-sonnet-4",
+      "max_tokens": 4096,
+      "temperature": 0.2
+    },
+    "response": {
+      "model": "claude-sonnet-4",
+      "finish_reasons": ["tool_use"]
+    },
+    "usage": {
+      "input_tokens": 1200,
+      "output_tokens": 240,
+      "cache_read": {
+        "input_tokens": 800
+      }
+    },
+    "tool": {
+      "name": "read_file",
+      "call": {
+        "id": "toolu_123",
+        "arguments": {
+          "path": "src/app.ts"
+        }
+      }
+    },
+    "input": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Review this file"
+        }
+      ]
+    }
+  },
+  "model": "claude-sonnet-4",
+  "message": "GenAI tool call observed"
+}
+```
+
+## Privacy and content fields
+
+Beacon records supported content fields when source runtimes emit them. Redaction, sanitization, truncation, and event-size limits are applied before events are written or forwarded.
+
+Beacon caps event size, redacts common secret patterns, and marks events with `field_truncated` when fields must be shortened before writing. The `content` object can describe whether content was included, redacted, or truncated for a specific event. When present, `content.truncated` identifies truncation for that event's content payload even if downstream views also summarize top-level `field_truncated`.
+
+For Codex CLI, Beacon writes semantic session, prompt, approval, and tool-result events while suppressing noisy startup, turn, transport, metric, and duplicate span records by default. For GitHub Copilot CLI, Beacon maps OTLP spans into prompt, session, tool, and approval-like events. Beacon also filters generic process and runtime OTLP metrics, such as process CPU, memory, Node.js event loop, and V8 heap telemetry, plus Copilot CLI and OpenClaw operational metrics, out of the JSONL log by default. Use `--include-runtime-metrics` during endpoint install or repair only when those low-level metrics are required, and use `--include-codex-spans` only when raw Codex spans are needed for troubleshooting. The schema remains the same; these filters reduce low-signal records rather than changing event fields.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Unified telemetry schema" icon="code" href="/telemetry-schema/event-schema">
+    Return to the schema overview.
+  </Card>
+  <Card title="Schema fields" icon="table-list" href="/telemetry-schema/fields">
+    Review entities, optional context, and shared top-level fields.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See which runtime surfaces produce Beacon events.
+  </Card>
+</Columns>

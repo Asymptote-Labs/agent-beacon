@@ -1,0 +1,77 @@
+---
+title: "GitHub Copilot CLI"
+description: "Asymptote support details for GitHub Copilot CLI endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports GitHub Copilot CLI through MDM-managed OpenTelemetry export to the local OTLP HTTP receiver.
+
+## Prerequisites
+
+Before enabling GitHub Copilot CLI telemetry, make sure:
+
+- GitHub Copilot CLI is installed and available as the `copilot` executable for the user or managed endpoint.
+- `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
+- The Copilot CLI launch environment sets `COPILOT_OTEL_ENABLED=true`.
+- The Copilot CLI launch environment sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` or `COPILOT_OTEL_ENDPOINT=http://127.0.0.1:4318`.
+- Copilot CLI is restarted after launch-environment changes so new sessions use the updated settings.
+
+## Collection path
+
+GitHub Copilot CLI exports OTLP HTTP telemetry to Asymptote's local collector. Asymptote normalizes Copilot spans into endpoint events for prompt submission, session activity, tool invocation, and approval-like permission activity.
+
+Copilot CLI metrics are filtered from the local runtime JSONL log by default so endpoint timelines stay focused on user and agent activity. Use `--include-runtime-metrics` during install or repair only when you need low-level Copilot metrics for troubleshooting.
+
+## Discovery and status
+
+Asymptote detects GitHub Copilot CLI through the `copilot` executable or `~/.copilot/config.json`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Copilot CLI is present and exporting to Asymptote's local OTLP HTTP receiver.
+
+Asymptote reports Copilot CLI telemetry as configured only when `COPILOT_OTEL_ENABLED` is truthy and the effective OTLP endpoint points to `localhost` or `127.0.0.1`. If `COPILOT_OTEL_FILE_EXPORTER_PATH` is configured, Asymptote reports Copilot as misconfigured because the file exporter bypasses the local OTLP collector.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares the collector, endpoint config, and runtime log paths. Copilot CLI telemetry is configured outside Asymptote through MDM, shell profile management, or another customer-owned launch policy.
+
+Do not add Copilot CLI to the `--harness` list. If `copilot`, `copilot_cli`, or `github_copilot` is passed to `beacon endpoint install --harness` or `beacon endpoint repair --harness`, Asymptote reports that Copilot CLI telemetry is MDM-managed instead of writing Copilot configuration directly.
+
+Configure Copilot CLI's launch environment to export to the local OTLP HTTP receiver:
+
+```bash title="Configure Copilot CLI's launch environment to export to the local OTLP HTTP receiver"
+export COPILOT_OTEL_ENABLED="true"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+```
+
+If your deployment intentionally captures GenAI message content from Copilot telemetry, also configure:
+
+```bash title="If your deployment intentionally captures GenAI message content from Copilot telemetry, also configure"
+export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="true"
+```
+
+For a one-command local validation flow, see [Test GitHub Copilot CLI telemetry](/guides/local-testing/events#test-github-copilot-cli-telemetry).
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported from Copilot chat spans when exported over OTLP HTTP |
+| Command, tool, and file telemetry | Supported for session activity, tool invocation, and permission or approval-like spans emitted by Copilot CLI |
+| Local JSONL and dashboard | Supported after events reach the local collector |
+| MDM deployment | Supported for the endpoint agent; Copilot launch-environment configuration stays under MDM or customer policy control |
+
+## Deployment notes
+
+Copilot CLI currently exports OTLP over HTTP, not gRPC. Point it at Asymptote's HTTP receiver, usually `http://127.0.0.1:4318`, or the custom `--otlp-http-port` used by your endpoint install.
+
+Asymptote validates the effective Copilot environment but does not write Copilot shell profiles or `~/.copilot/config.json`. Keep Copilot CLI outside the default Asymptote harness list, and deploy its environment settings with the same MDM or shell-management mechanism you use to launch Copilot.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Configure the local collector before enabling Copilot CLI export.
+  </Card>
+</Columns>

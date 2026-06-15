@@ -1,0 +1,144 @@
+---
+title: "SDK Reference"
+description: "Asymptote Observe TypeScript API, options, and Beacon compatibility attributes"
+---
+
+## API Surface
+
+The TypeScript SDK exports the `Observe` class, function equivalents, and Beacon compatibility constants from `@asymptote/sdk`.
+
+For guided setup, start with [SDK Quickstart](/sdk/quickstart), [Instrumentation](/sdk/instrumentation), [Observe](/sdk/observe), and [SDK Lifecycle](/sdk/lifecycle).
+
+## Observe APIs
+
+| API | Purpose |
+| --- | --- |
+| `Observe.initialize(options)` | Configure the OpenTelemetry provider, exporter, resource attributes, and default instrumentations |
+| `Observe.getTracer(name?, version?)` | Return the SDK tracer, or the global OpenTelemetry tracer before initialization |
+| `Observe.observe(options, fn)` | Wrap a sync, async, or async-iterable function in a span |
+| `Observe.patch(modules)` | Manually apply supported instrumentations to modules loaded before initialization |
+| `Observe.instrumentations(options?)` | Return OpenAI and Anthropic OpenLLMetry instrumentations for an existing provider |
+| `Observe.wrapClaudeAgentQuery(query)` | Wrap a Claude Agent SDK query function with a Beacon-compatible prompt span |
+| `Observe.flush()` | Force flush finished spans |
+| `Observe.shutdown()` | Disable instrumentations, shut down the provider, and allow later reinitialization |
+
+Function exports are also available for the same operations, including `initialize`, `getTracer`, `observe`, `patch`, `initializeAsymptoteInstrumentations`, `wrapClaudeAgentQuery`, `flush`, `shutdown`, `isInitialized`, and `resolveExporterConfig`.
+
+## Initialize Options
+
+| Option | Purpose |
+| --- | --- |
+| `apiKey` | Asymptote Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
+| `baseUrl` | Asymptote Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
+| `otlpEndpoint` | Explicit OTLP/HTTP endpoint. Defaults to `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| `headers` | Additional exporter headers |
+| `serviceName` | OpenTelemetry service name. Defaults to `OTEL_SERVICE_NAME` or `asymptote-app` |
+| `resourceAttributes` | Extra OpenTelemetry resource attributes |
+| `instrumentModules` | Already-loaded modules to patch manually |
+| `disableInstrumentations` | Disable default OpenAI and Anthropic instrumentations |
+| `instrumentationOptions` | Configure OpenAI and Anthropic instrumentation behavior |
+| `spanProcessor` / `spanProcessors` | Custom span processors |
+| `spanExporter` | Custom span exporter |
+| `disableDefaultExporter` | Skip hosted or explicit OTLP exporter creation |
+| `disableBatch` | Use a simple span processor instead of batching |
+| `traceExportTimeoutMillis` | Batch exporter timeout |
+| `maxExportBatchSize` | Batch exporter size limit |
+
+`Observe.initialize()` may only be called once per process configuration. Call `Observe.shutdown()` before reinitializing with different options. A later `initialize({ instrumentModules })` call can patch additional modules without replacing the provider.
+
+## Observe Options
+
+| Option | Purpose |
+| --- | --- |
+| `name` | Span name |
+| `spanKind` | Optional OpenTelemetry span kind |
+| `attributes` | Span attributes, including Beacon compatibility attributes |
+| `ignoreInput` | Do not record `asymptote.observe.input.count` |
+| `ignoreOutput` | Do not record `asymptote.observe.output.type` |
+
+## Export Modes
+
+| Mode | How it is selected |
+| --- | --- |
+| `hosted` | Asymptote Managed `apiKey` or `ASYMPTOTE_API_KEY` is present and no explicit OTLP endpoint is configured |
+| `otlp` | `otlpEndpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` is present |
+| `custom` | Default exporter is disabled or a custom span exporter is provided |
+
+## Beacon Compatibility Attributes
+
+Cloud SDKs should prefer standard OpenTelemetry attributes when they exist, especially `gen_ai.*` attributes for model and prompt metadata. Use Beacon attributes for fields that need to normalize into Beacon endpoint-style events.
+
+| Attribute | Purpose |
+| --- | --- |
+| `beacon.origin` | `cloud`, `local`, or `ci`; the SDK sets cloud resource attributes by default |
+| `beacon.harness.name` | Runtime or integration name such as `vercel_ai_sdk`, `claude_agent_sdk`, `openai_sdk`, `anthropic_sdk`, `gemini_api`, or `custom_agent` |
+| `beacon.event.action` | Normalized action such as `prompt.submitted`, `tool.invoked`, `command.executed`, `file.modified`, `mcp.tool_invoked`, or `approval.requested` |
+| `beacon.event.category` | Category such as `prompt`, `tool`, `command`, `file`, `mcp`, `approval`, or `session` |
+| `beacon.session.id` | Stable trace, session, or conversation identifier |
+| `beacon.session.working_directory` | Workspace path when safe to disclose |
+| `beacon.tool.name` | Tool or function name |
+| `beacon.tool.command` | Tool arguments or command string, subject to redaction and size limits |
+| `beacon.tool.path` | Tool target path |
+| `beacon.command` | Shell command text |
+| `beacon.command.exit_code` | Shell command exit code |
+| `beacon.command.duration_ms` | Command duration in milliseconds |
+| `beacon.file.path` | File touched by the agent |
+| `beacon.file.operation` | File operation such as `read`, `create`, `modify`, or `delete` |
+| `beacon.file.language` | Language identifier |
+| `beacon.mcp.server` | MCP server name |
+| `beacon.mcp.tool` | MCP tool name |
+| `beacon.approval.decision` | Approval or policy decision |
+| `beacon.approval.reason` | Approval or policy reason |
+| `beacon.prompt.text` | Prompt text when available |
+| `beacon.content.retention` | Content retention hint |
+
+## SDK Metadata Attributes
+
+| Attribute | Purpose |
+| --- | --- |
+| `asymptote.observe.integration.name` | Integration or wrapper name |
+| `asymptote.observe.integration.version` | Integration package version |
+| `asymptote.observe.sdk.mode` | Export mode: `hosted`, `otlp`, or `custom` |
+
+## Constants
+
+The package exports constants for the stable Beacon event identity and compatibility attributes:
+
+```typescript title="Import Beacon compatibility constants" lines
+import {
+  ATTR_ASYMPTOTE_SDK_MODE,
+  ATTR_BEACON_EVENT_ACTION,
+  ATTR_BEACON_HARNESS_NAME,
+  ATTR_BEACON_ORIGIN,
+  BEACON_PRODUCT,
+  BEACON_SCHEMA_VERSION,
+  BEACON_VENDOR,
+} from "@asymptote/sdk";
+```
+
+The wire-compatible Beacon event identity remains:
+
+```json
+{
+  "vendor": "beacon",
+  "product": "endpoint-agent",
+  "schema_version": "1.0"
+}
+```
+
+## Integration Pages
+
+<Columns cols={2}>
+  <Card title="Anthropic" icon="robot" href="/sdk/integrations-anthropic">
+    Instrument `@anthropic-ai/sdk` model calls.
+  </Card>
+  <Card title="Claude Agent SDK" icon="robot" href="/sdk/integrations-claude-agent-sdk">
+    Wrap Claude Agent SDK query functions.
+  </Card>
+  <Card title="OpenAI" icon="brain" href="/sdk/integrations-openai">
+    Instrument `openai` package model calls.
+  </Card>
+  <Card title="Vercel AI SDK" icon="bolt" href="/sdk/integrations-vercel-ai-sdk">
+    Pass the Asymptote tracer into AI SDK telemetry.
+  </Card>
+</Columns>

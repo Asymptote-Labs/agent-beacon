@@ -1,0 +1,68 @@
+---
+title: "Hermes Agent"
+description: "Asymptote support details for Hermes Agent endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Hermes Agent through shell hook payloads sent to `beacon-hooks`.
+
+## Prerequisites
+
+Before enabling Hermes Agent hooks, make sure:
+
+- Hermes Agent is installed for the user or `~/.hermes/config.yaml` exists.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote hooks are installed with `beacon endpoint hooks install --harness hermes`.
+- Hermes hook consent is handled for the session, especially in non-interactive gateway, cron, or CI runs.
+- Hermes is restarted after hook install or removal so new sessions load the updated config.
+
+## Collection path
+
+Asymptote merges shell-hook entries into `~/.hermes/config.yaml`. Hermes invokes Asymptote's hook adapter for supported lifecycle, prompt, tool, approval, and subagent events, and the adapter writes normalized endpoint events to the configured runtime JSONL log.
+
+## Discovery and status
+
+Asymptote detects Hermes through the `hermes` executable or a local `~/.hermes` directory, then checks `~/.hermes/config.yaml` for Asymptote-managed commands with `BEACON_ENDPOINT_MODE=1` and `--platform hermes`.
+
+Use `beacon endpoint hooks status --harness hermes` to inspect Hermes Agent hook status.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Hermes Agent hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness hermes
+```
+
+Hermes Agent hooks support user-level config only. Project-level installs are rejected because Hermes reads shell hooks from the user's Hermes config.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through Hermes `pre_llm_call` payloads, including `extra.user_message` where provided |
+| Command, tool, and file telemetry | Supported for observed pre-tool calls, post-tool results, command execution, file-like tools, and raw Hermes payload context |
+| Approval telemetry | Supported for Hermes approval request and response hooks, including allow, deny, timeout, and unknown decisions |
+| Session and subagent telemetry | Supported for session lifecycle events and subagent stop metadata where Hermes exposes role, status, summary, and duration |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Hermes hooks are installed separately in the logged-in user's context |
+
+## Deployment notes
+
+Hermes prompts for first-use consent for each `(event, command)` hook pair. For non-interactive gateway, cron, or CI runs, set `HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure `hooks_auto_accept: true` in `~/.hermes/config.yaml`.
+
+Asymptote preserves existing Hermes settings and non-Asymptote hooks when installing or uninstalling Hermes telemetry. It replaces only Asymptote-managed Hermes hook commands.
+
+Restart Hermes after installing or removing hooks so new sessions pick up the updated configuration.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

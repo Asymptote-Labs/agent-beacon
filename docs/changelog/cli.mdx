@@ -1,0 +1,441 @@
+---
+title: Agent Beacon CLI Changelog
+description: Latest updates and improvements to the Agent Beacon CLI
+---
+
+## Latest updates
+
+Stay up to date with the latest changes to the Agent Beacon CLI.
+
+---
+
+## June 2026
+
+### v0.0.66 · June 13, 2026
+
+- **Dashboard routing fixes** · Fixed local dashboard route handling so Log Search, Security Overview, Detections, Findings, and inventory views resolve reliably from the loopback dashboard.
+- **Dedicated dashboard inventory** · Split agent inventory into its own dashboard area so runtime coverage, MCP server context, and telemetry state are easier to inspect separately from the Security Overview.
+- **Threat-rule pack guidance** · Release notes now point operators at the versioned `threat-rules.tar.gz` asset for installing the full rule pack with `beacon rules pull`.
+
+### v0.0.65 · June 13, 2026
+
+- **Dashboard route reliability** · Continued dashboard routing fixes for the new detections, findings, and inventory screens.
+- **Rule-pack release asset guidance** · Kept the published release notes aligned with the versioned `threat-rules.tar.gz` rule-pack asset.
+
+### v0.0.64 · June 13, 2026
+
+- **Rule-pack archive cleanup** · Ignored macOS metadata files when installing packaged threat rules, so Finder-created archive entries do not appear as rule-pack content.
+- **Rule-pack release asset guidance** · Kept the full threat-rule pack available as the release-attached `threat-rules.tar.gz` archive.
+
+### v0.0.63 · June 13, 2026
+
+- **Comprehensive threat-rule pack** · Added the first full threat-rule pack, ported from BlastRadius-style detections, with coverage for risky agent behavior beyond the small built-in baseline.
+- **Additional rule coverage** · Added invisible-character and shell-escape detection rules from ATR review.
+- **External rule-pack distribution** · Ships the full threat-rule pack as a release asset instead of embedding it in the Beacon binary, so operators explicitly install it with `beacon rules pull`.
+
+### v0.0.62 · June 13, 2026
+
+- **Dashboard detections view** · Added a local dashboard Detections screen for browsing the active threat-rule set from the endpoint rule store or built-in baseline without using the CLI.
+- **Dashboard findings view** · Added a local dashboard Findings screen that runs the active rules over the configured runtime log on demand, with severity and session filtering for focused investigations.
+- **Read-only local investigation** · Dashboard detection and finding APIs mirror `beacon scan` behavior while staying offline, loopback-only, and read-only against local endpoint telemetry.
+- **Finding ordering and severity helpers** · Shared severity ranking, filtering, fail-threshold counting, and stable finding sorting between `beacon scan` and the dashboard.
+
+### v0.0.61 · June 13, 2026
+
+- **Local threat scanning** · Added `beacon scan` to run threat-detection rules over local endpoint telemetry without network access, with JSON output, session filtering, severity filtering, and CI-friendly `--fail-on` exit behavior.
+- **Threat rule management** · Added `beacon rules` for listing active rules, installing local `.rule.yaml` files, explicitly pulling rule packs, linting rules, and printing event fields available to CEL match expressions.
+- **Open YAML rule format** · Added a versioned threat-rule format with CEL expressions over Beacon endpoint events, single-event and session-correlated detections, severity/status metadata, and embedded conformance fixtures.
+- **Rule-pack hardening** · Hardened rule-pack extraction and install paths against archive path traversal while preserving nested rule-pack layouts.
+
+### v0.0.60 · June 13, 2026
+
+- **Codex token attribution** · `beacon endpoint tokens` and the dashboard token view now report Codex CLI token usage. `beacon endpoint install` configures the Codex metrics exporter, and the collector normalizes Codex's `codex.turn.token_usage` metric into the canonical `gen_ai.usage` representation alongside other runtimes.
+- **Disjoint Codex cache accounting** · Codex reports prompt tokens inclusive of the cached portion. Beacon subtracts cached input so `input_tokens` and `cache_read` stay disjoint and totals are not double-counted.
+- **Codex attribution limits** · Codex emits no cost signal and no conversation id on its usage metric, so `cost_usd` and per-session attribution are unavailable for Codex. Model, harness, repository, and run attribution are supported.
+
+### v0.0.59 · June 13, 2026
+
+- **Managed ingest commands** · Added `beacon ingest` commands for checking managed ingest status and uploading endpoint telemetry to configured Asymptote Managed destinations.
+- **Endpoint token reporting** · Added `beacon endpoint tokens` for local token, cost, model, session, run, harness, and repository attribution from Beacon runtime logs.
+- **Token attribution fixes** · Improved token usage normalization for Claude Code telemetry, cumulative metric batches, composite run IDs, and SDK session attributes.
+
+### v0.0.58 · June 13, 2026
+
+- **Token usage foundation** · Added token usage aggregation, dashboard token views, and trace identity fields so endpoint activity can report usage and cost consistently.
+- **Managed ingest support** · Added the endpoint ingest plumbing that lets authenticated Beacon clients upload endpoint telemetry to Asymptote Managed when configured.
+- **Telemetry schema updates** · Added trace identity, usage cost, and int64 token count fields while preserving local runtime log workflows.
+
+### v0.0.57 · June 11, 2026
+
+- **Beacon dashboard login** · Added `beacon login` so the Beacon CLI can authenticate with the Asymptote dashboard through a browser-based flow.
+- **Credential replacement controls** · `beacon login --force` lets operators replace saved credentials when switching users or organizations.
+- **Dashboard URL configuration** · Login can target a custom dashboard URL with `--dashboard-url` or `BEACON_DASHBOARD_URL`, while endpoint telemetry remains local-only unless cloud features are explicitly used.
+
+### v0.0.56 · June 10, 2026
+
+- **Cursor Cloud committed hooks** · Cursor Cloud telemetry now expects project hooks to be committed in `.cursor/hooks.json` before the agent starts; `beacon cloud cursor print-hooks` is the supported way to generate that file.
+- **Binary-only Cursor setup** · `beacon cloud cursor print-setup` now installs Beacon binaries in the sandbox without mutating `.cursor/hooks.json`, and the removed `beacon cloud cursor install-hooks` command is no longer part of the cloud flow.
+- **Cursor cloud reliability** · Generated Cursor Cloud hooks avoid broad `preToolUse` matchers and rely on Cursor's supported project hook surfaces for file, shell, tool-failure, subagent, and compaction events.
+
+### v0.0.55 · June 10, 2026
+
+- **Cursor Cloud run IDs** · Cursor Cloud telemetry uses Cursor's `conversation_id` as the default `run.run_id` when `BEACON_RUN_ID` is not set, so GCS object paths line up with the Cursor cloud conversation.
+- **Lower-noise Cursor Cloud events** · Reduced duplicate read and shell telemetry where Cursor exposes both generic and specific hook surfaces.
+
+### v0.0.54 · June 10, 2026
+
+- **Cloud upload run IDs** · Cloud-agent GCS uploads now wait for a real provider run ID, such as Claude's `CLAUDE_CODE_REMOTE_SESSION_ID`, instead of creating fallback `manual-*` upload folders from early hook processes.
+- **Cleaner cloud traces** · Claude Code cloud sessions now keep GCS object paths and event metadata aligned under the provider session ID.
+
+### v0.0.53 · June 10, 2026
+
+- **Cursor configuration support** · Added Cursor cloud-agent configuration updates used by the generated cloud setup and hook workflows.
+- **Cursor hook safe mode** · Added safer Cursor hook behavior for cloud and project-hook telemetry setup.
+- **README support matrices** · Updated upstream README guidance with CI and cloud-agent support matrices and refreshed links.
+
+### v0.0.52 · June 10, 2026
+
+- **Cursor Cloud Agents** · Added Cursor cloud agent telemetry support through sandbox-local Beacon hooks and per-session GCS upload.
+- **Cursor cloud CLI helpers** · Added `beacon cloud cursor print-setup`, `beacon cloud cursor print-hooks`, and `beacon cloud cursor install-hooks` for generated setup scripts and project-level `.cursor/hooks.json` management.
+- **Cursor telemetry fixes** · Fixed duplicate Cursor shell command events, preserved cloud uploads after edit failures, and improved Cursor session and subagent metadata handling.
+
+### v0.0.51 · June 10, 2026
+
+- **Cloud agent telemetry preview** · Added `beacon cloud` helpers for Claude Code Cloud Agents, including generated cloud setup scripts and sandbox-local hook configuration.
+- **GCS upload for cloud sessions** · Claude Code cloud agent sessions can write Beacon `runtime.jsonl` in the cloud sandbox and upload one readable per-session object to customer-managed Google Cloud Storage.
+- **Standalone hook packaging** · Release archives and Homebrew installs now include `beacon-hooks` alongside `beacon` and `beacon-otelcol` so cloud sandboxes can install hook telemetry without extracting embedded binaries.
+
+### v0.0.50 · June 9, 2026
+
+- **CI session mode** · Added `beacon ci start` and `beacon ci finish` so Beacon can capture telemetry around multi-step CI workflows and third-party agent actions, not just a single child command.
+- **Codex CI telemetry** · Added Codex CI setup through a generated `CODEX_HOME`, enabling OpenAI Codex Action and other local Codex CI steps to export telemetry to Beacon's ephemeral collector.
+- **CI run normalization** · Promoted GitHub Actions run context to top-level `origin` and `run` fields in CI JSONL, including decoded PR, repository, workflow, and branch metadata.
+
+### v0.0.49 · June 8, 2026
+
+- **CrowdStrike Falcon Vector forwarding** · Added `beacon endpoint falcon` content-pack commands for forwarding Beacon `runtime.jsonl` events to CrowdStrike Falcon HEC with Vector.
+- **Hook-only Claude forwarding** · Added a managed macOS Vector forwarder for deployments where Claude Code events are written by user-level hooks instead of Beacon's local OTLP collector.
+- **Jamf deployment helpers** · Added packaged Jamf scripts and inventory checks to install, repair, and monitor the Falcon Vector forwarder while keeping HEC tokens in a root-owned env file.
+
+### v0.0.48 · June 8, 2026
+
+- **OpenTelemetry GenAI schema support** · Beacon now preserves standard `gen_ai` request, response, usage, tool, retrieval, evaluation, message, provider, workflow, and system-instruction metadata in endpoint events.
+- **Observe package rename** · Renamed the shared schema package from Asymptote Trace to Asymptote Observe while preserving the public Beacon event schema version.
+- **Content handling fixes** · Improved prompt detection for empty GenAI input messages and kept `content.retention` validation backward compatible while using `content.truncated` for truncation display where available.
+
+### v0.0.47 · June 8, 2026
+
+- **Content handling simplification** · Deprecated the legacy content-retention flag and removed stale `content_retention` references from dashboard, Sentinel, generated pack, and packaging paths.
+- **Telemetry sample upload** · Added sample upload coverage for Beacon telemetry handoff workflows.
+- **Release cleanup** · Removed obsolete retention plumbing from endpoint configuration, generated assets, and MDM inventory helpers so docs and package behavior match the current full-content-with-redaction posture.
+
+### v0.0.46 · June 7, 2026
+
+- **CI telemetry release polish** · Continued the Agent Beacon CI telemetry release line for Claude Code telemetry captured to Beacon JSONL, workflow artifacts, and customer-managed destinations.
+
+### v0.0.45 · June 7, 2026
+
+- **Agent Beacon CI Telemetry** · Published the CI telemetry release for capturing Claude Code activity to Beacon JSONL, GitHub Actions artifacts, and customer-managed export destinations.
+- **Action naming update** · Updated the GitHub Action presentation around Agent Beacon CI Telemetry.
+
+### v0.0.44 · June 7, 2026
+
+- **CI telemetry exports** · `beacon ci exec` can upload completed CI runtime JSONL to Amazon S3 or Google Cloud Storage with repeatable `--upload s3` and `--upload gcs` destinations.
+- **GitHub Actions artifact controls** · The Agent Beacon action now exposes `upload`, `upload-artifact`, and `artifact-name` inputs so teams can retain CI telemetry as workflow artifacts or hand it off through object storage.
+- **CI export reliability and safety** · CI uploads still run when `--require-telemetry=false` downgrades validation failures, child command exit codes remain authoritative, and common AWS and Google credential variables are stripped from the child agent process during observed runs.
+
+### v0.0.43 · June 5, 2026
+
+- **Doctor auto-remediation** · Added `beacon endpoint doctor --fix` and the top-level `beacon doctor --fix` alias so operators can apply safe fixes after health checks.
+- **Resilient collector repair** · Doctor fixes can recreate missing runtime logs and repair macOS collector service files with config validation, readiness checks, and rollback if service repair fails.
+- **Clearer health results** · Doctor now prints refreshed results after partial fixes, includes applied and skipped fix details in JSON output, and avoids suggesting automated fixes for unsafe permission or non-macOS service cases.
+
+### v0.0.42 · June 5, 2026
+
+- **AWS CloudWatch Logs forwarding support** · Added `beacon endpoint cloudwatch` commands for generating customer-managed CloudWatch Logs forwarding content over Beacon's local `runtime.jsonl`.
+- **CloudWatch content pack** · Added generated setup guidance, a Vector `aws_cloudwatch_logs` forwarding template, and sample events for JSON log events in a customer-managed CloudWatch Logs log group.
+- **CloudWatch validation guidance** · Added validation events with `destination.type=cloudwatch` and `destination.mode=aws_cloudwatch_logs`, plus AWS CLI and CloudWatch Logs Insights queries for confirming remote delivery without storing AWS credentials in Beacon endpoint configuration.
+
+### v0.0.41 · June 5, 2026
+
+- **Expanded endpoint inventory** · Beacon inventory now covers a broader set of endpoint configuration signals, including supported agent config files and MCP server configuration context where available.
+- **Inventory filtering fixes** · JSON inventory output now applies the same default filtering as human-readable output, so config and MCP server records are omitted unless they are relevant or `--all` is set.
+- **Managed-state detection fixes** · Improved Beacon-managed detection for Gemini CLI, VS Code OTLP, GitHub Copilot CLI, and Factory Droid so status and inventory output more accurately reflect customer-managed versus Beacon-managed configuration.
+
+### v0.0.40 · June 5, 2026
+
+- **Hermes Agent support** · Added Hermes Agent as a first-class hook harness with `beacon endpoint hooks install --harness hermes`, `status`, and `uninstall` support through Beacon-managed shell hooks.
+- **Hermes telemetry coverage** · Beacon now normalizes Hermes prompts, observed tool calls, command and file activity, approval request and response events, session lifecycle, and subagent stop metadata into local endpoint events.
+- **Hermes deployment controls** · Hermes hooks are installed in user-level `~/.hermes/config.yaml`, preserve existing settings and non-Beacon hooks, and document first-use hook consent options for non-interactive runs.
+- **CI PR context fix** · CI run metadata now assigns pull request fields only when the GitHub ref shape contains PR context, avoiding incorrect PR numbers on non-PR events.
+
+### v0.0.39 · June 4, 2026
+
+- **Devin Desktop support** · Added Devin Desktop coverage through Beacon's hook adapter using Cascade/Windsurf-compatible hook configuration alongside existing Devin CLI hooks.
+- **Runtime support organization** · Split agent harness documentation into coding agent harnesses and knowledge-worker agent harnesses so local coding agents and service or gateway integrations are easier to compare.
+- **Output destination organization** · Split forwarding destinations into SIEM, log aggregation, object storage, and local categories, with clearer links for Google Cloud Storage forwarding and customer-managed pipeline guidance.
+- **Release workflow polish** · Updated release automation and upstream documentation ordering for the latest Agent Beacon artifacts.
+
+### v0.0.38 · June 3, 2026
+
+- **Google Cloud Storage forwarding support** · Added `beacon endpoint gcs` commands for generating customer-managed GCS forwarding content over Beacon's local `runtime.jsonl`.
+- **GCS content pack** · Added generated setup guidance, a Vector `gcp_cloud_storage` forwarding template, one-shot `gcloud storage` or `gsutil` smoke-test script, and sample events for gzip-compressed NDJSON objects with date-partitioned keys.
+- **Customer-managed Google Cloud controls** · Kept Google Cloud credentials, service accounts, workload identity, bucket IAM, lifecycle, retention, and encryption settings outside Beacon endpoint configuration.
+
+### v0.0.37 · June 3, 2026
+
+- **AWS S3 forwarding support** · Added `beacon endpoint s3` commands for generating customer-managed AWS S3 forwarding content over Beacon's local `runtime.jsonl`.
+- **S3 content pack** · Added generated setup guidance, a Vector `aws_s3` forwarding template, one-shot AWS CLI smoke-test script, and sample events for gzip-compressed NDJSON objects with date-partitioned keys.
+- **Community links** · Surfaced the Agent Beacon Discord community link in upstream project documentation.
+
+### v0.0.36 · June 1, 2026
+
+- **Release artifact validation** · Added release checks that build and validate the bundled `beacon-otelcol` collector alongside the CLI.
+- **Cross-platform release confidence** · Release validation now covers macOS and Linux archives for `amd64` and `arm64`, confirms each archive contains both `beacon` and `beacon-otelcol`, and smoke-runs the Linux archive.
+- **Project documentation polish** · Added upstream README star growth visibility and release automation cleanup.
+
+### v0.0.35 · June 1, 2026
+
+- **Release update checks** · `beacon version check` now checks the latest published Beacon release and prints Homebrew or manual download guidance when an update is available.
+- **Claude CI telemetry** · Added `beacon ci exec` and `beacon ci validate` for ephemeral Claude Code telemetry collection in CI without installing a persistent endpoint service or modifying user harness configuration.
+- **CI validation reliability** · CI validation now scopes malformed-line checks to the active session window and tightens collector shutdown handling so job artifacts are easier to validate.
+- **CLI usage polish** · Root command usage now routes through the Beacon banner output.
+
+## May 2026
+
+### v0.0.34 · May 29, 2026
+
+- **Endpoint repair reliability** · `beacon endpoint repair` now stops the existing collector before reinstalling so unhealthy services can free their ports and complete repair cleanly.
+- **Rollback preservation** · If endpoint reinstall fails during repair, Beacon restores the previous endpoint configuration instead of leaving partial rollback state behind.
+- **macOS package bootstrap fix** · The package postinstall now handles transient `launchctl bootstrap` failures under `set -e` by checking whether the service is already registered before failing the package install.
+
+### v0.0.33 · May 28, 2026
+
+- **Claude Code hook support** · Added optional Claude Code hook telemetry through `beacon endpoint hooks install --harness claude`, complementing the existing local OTLP setup.
+- **Claude hook coverage** · Beacon now records Claude Code session, prompt, pre-tool, post-tool, failed-tool, stop, subagent, permission-request, and session-end events where Claude exposes hook payloads.
+- **Settings-safe hook management** · Claude Code hook install and uninstall preserve existing Claude settings and non-Beacon hooks while replacing older Beacon-managed Claude hook entries.
+
+### v0.0.32 · May 27, 2026
+
+- **Microsoft Sentinel support** · Added `beacon endpoint sentinel` commands for forwarding Beacon's local `runtime.jsonl` into Microsoft Sentinel through Azure Monitor Agent custom log collection.
+- **Sentinel content pack** · Added generated `table-schema.json`, `dcr-template.json`, `dcr-transform.kql`, starter hunting queries, detection examples, and sample events for the `BeaconRuntime_CL` table.
+- **DCR template reliability** · Fixed Sentinel validation messaging, escaped log paths and KQL correctly in the DCR template JSON, and removed duplicate transform rendering in the generated pack.
+
+### v0.0.31 · May 27, 2026
+
+- **VS Code Copilot telemetry** · Added VS Code Copilot Chat support through local OpenTelemetry export to Beacon's endpoint collector with normalized `vscode_copilot` prompt, model, session, and tool events.
+- **Low-noise VS Code normalization** · Beacon filters noisy VS Code Copilot chat spans, embeddings, repeated session-start logs, turn summaries, and low-level metrics by default while preserving useful prompt and tool activity.
+- **Optional VS Code hooks** · Added preview VS Code hook installation for teams that want extra lifecycle and cross-agent detail when `Chat: Use Hooks` is enabled by their organization.
+
+### v0.0.30 · May 26, 2026
+
+- **Antigravity prompt reliability** · Fixed Antigravity pre-tool handling so `prompt.submitted` is emitted after readable transcript text exists instead of being suppressed when the first pre-tool hook fires before the transcript file is written.
+- **Hook release packaging** · Restored the embedded `beacon-hooks` binary in release artifacts so Antigravity hook telemetry remains available after install or upgrade.
+
+### v0.0.29 · May 26, 2026
+
+- **Antigravity CLI hook support** · Added Antigravity CLI endpoint telemetry through Beacon's hook adapter with user-level hooks in `~/.gemini/config/hooks.json` and project-level hooks in `./.agents/hooks.json`.
+- **Antigravity event coverage** · Beacon now records Antigravity prompt, pre-tool, post-tool, invocation, stop, command, file edit, and diff telemetry where Antigravity exposes hook payloads.
+- **Antigravity telemetry fixes** · Fixed duplicate prompt telemetry in metadata mode, failed edit handling, quoted path parsing, and `edit_file` diff extraction.
+
+### v0.0.28 · May 26, 2026
+
+- **Wazuh dashboard helper** · Added `apply-dashboard-default-columns.sh` to the generated Wazuh content pack so local Wazuh Dashboard validation can show Beacon event action, prompt text, harness, model, repository, command, file, and session fields by default.
+- **Wazuh pack coverage** · Updated Wazuh content-pack tests so generated packs include the dashboard helper and avoid unmapped Wazuh display fields.
+
+### v0.0.27 · May 25, 2026
+
+- **CrowdStrike Falcon LogScale HEC forwarding** · Added optional Falcon LogScale HEC forwarding from Beacon's bundled collector while preserving the local `runtime.jsonl` audit log.
+- **Falcon endpoint flags** · Added install and repair flags for Falcon HEC endpoint, ingest token, repository, source, parser, TLS verification, and custom CA configuration.
+- **Collector packaging fix** · Fixed the Falcon collector exporter module path in the collector builder so release builds include the new Falcon HEC exporter.
+
+### v0.0.26 · May 25, 2026
+
+- **Vector forwarding templates** · Added generated `vector.toml` templates to the Sumo Logic and Rapid7 content packs so teams can run Vector as a customer-managed host agent for Beacon JSONL forwarding.
+- **Sumo Logic Vector path** · The Sumo template tails `runtime.jsonl`, parses each Beacon JSON line, and forwards newline-delimited JSON to a Sumo HTTP Logs & Metrics Source with source category, fields, and optional auth-header token settings supplied through Vector.
+- **Rapid7 Vector path** · The Rapid7 template tails the same local runtime log, preserves one Beacon event per line, and posts newline-delimited JSON to the Rapid7 InsightIDR Custom Logs webhook while keeping the webhook URL outside Beacon endpoint configuration.
+
+### v0.0.25 · May 24, 2026
+
+- **Rapid7 InsightIDR endpoint integration** · Added `beacon endpoint rapid7` commands for forwarding Beacon's local `runtime.jsonl` into Rapid7 InsightIDR Custom Logs through a webhook event source.
+- **Rapid7 content pack** · Added generated setup guidance, a one-shot NDJSON upload smoke-test script, and sample events for managed endpoint deployments.
+- **Validation workflow** · Added `beacon endpoint rapid7 validate` so teams can write a known-good Beacon event and verify Rapid7 Log Search ingestion with the expected validation query and fields.
+
+### v0.0.24 · May 24, 2026
+
+- **GitHub Copilot CLI support** · Added Copilot CLI discovery, status reporting, and OTLP span normalization for prompt, session, tool, and approval-like activity when Copilot exports to Beacon's local HTTP collector.
+- **MDM-managed Copilot telemetry** · Beacon now validates Copilot CLI telemetry from `COPILOT_OTEL_ENABLED=true` and a localhost OTLP endpoint while making clear that Copilot launch-environment configuration stays under MDM or customer policy control.
+- **Quieter operational metrics** · Copilot CLI and OpenClaw operational metrics are filtered from endpoint JSONL by default, with `--include-runtime-metrics` available when teams need low-level metrics for troubleshooting.
+
+### v0.0.23 · May 23, 2026
+
+- **Local MCP server** · Added `beacon mcp serve` and `beacon mcp doctor` so MCP clients can search, summarize, and retrieve compact local Beacon activity from `runtime.jsonl` over stdio or loopback HTTP JSON-RPC.
+- **Activity filter fixes** · `list_activity_filters` now scans the full matching activity window for accurate facets, and HTTP MCP activity queries preserve command context.
+- **Security and contribution docs** · Added upstream `SECURITY.md` and `CONTRIBUTING.md` guidance covering Beacon's local-only posture, disclosure process, validation commands, and contribution expectations.
+
+### v0.0.22 · May 23, 2026
+
+- **Bounded runtime logs** · Beacon now rotates the active `runtime.jsonl` file at 10 MiB and keeps five numbered local archives, preserving the stable handoff path for dashboards and external shippers.
+- **Safer concurrent writes** · Runtime log writers now use a lock file during append and rotation so hook, CLI, and collector writes stay serialized.
+- **Dashboard archive lookup fix** · Fixed local dashboard event detail lookup for records stored in rotated archives, including cases where older archive numbers have already been pruned.
+
+### v0.0.21 · May 22, 2026
+
+- **Endpoint health checks** · Fixed `beacon endpoint doctor` and `beacon doctor` so failed health checks return a failing exit code for scripts and MDM validation.
+- **Inventory accuracy** · Fixed endpoint inventory config scoping, restored `--all` output for all supported targets, and corrected the `droid` hook alias lookup for Factory Droid inventory.
+- **Diagnostics reliability** · Fixed `beacon endpoint test-event` writable-log checks, `beacon endpoint discover --all`, and diagnostics bundle output so missing logs still produce empty summaries without leaking the last raw event.
+
+### v0.0.20 · May 22, 2026
+
+- **Sumo Logic endpoint integration** · Added `beacon endpoint sumo` commands for forwarding Beacon's local `runtime.jsonl` into a Sumo Logic Hosted Collector HTTP Logs & Metrics Source.
+- **Sumo Logic content pack** · Added generated setup guidance, a one-shot upload smoke-test script, and sample events for managed endpoint deployments.
+- **Sumo smoke-test fix** · Removed an unused argument from the Sumo upload smoke-test template.
+
+### v0.0.19 · May 21, 2026
+
+- **Grok Build hook support** · Added Grok Build endpoint telemetry through Beacon's hook adapter with user-level and project-level managed hook files.
+- **Grok event coverage** · Beacon now records Grok session, prompt, pre-tool, post-tool, stop, and session-end activity, including command and file-operation context where Grok exposes it.
+- **Grok failure severity fix** · Grok post-tool failures now normalize to `tool.failed` with high severity instead of being logged as successful info-level tool events.
+
+### v0.0.18 · May 20, 2026
+
+- **Datadog endpoint integration** · Added `beacon endpoint datadog` commands for Datadog Agent custom log collection over Beacon's local `runtime.jsonl`.
+- **Datadog content pack** · Added generated Datadog Agent `conf.yaml`, setup guidance, and sample events for managed endpoint deployments.
+- **Datadog validation event** · Added `beacon endpoint datadog validate` so teams can write a known-good Beacon event and verify Log Explorer ingestion with `service:beacon-endpoint-agent`.
+
+### v0.0.17 · May 20, 2026
+
+- **OpenClaw Gateway support** · Added OpenClaw Gateway endpoint integration commands for printing OTLP/HTTP configuration, checking status, and validating observed events.
+- **Gateway telemetry guidance** · Documented OpenClaw's Gateway-configured diagnostics export path alongside other supported runtime surfaces.
+
+### v0.0.16 · May 20, 2026
+
+- **Quieter Codex telemetry** · Beacon now keeps Codex endpoint timelines focused on semantic session, prompt, approval, and tool-result events while suppressing high-volume Codex startup, turn, transport, metric, and duplicate trace records by default.
+- **Codex span troubleshooting opt-in** · Added `--include-codex-spans` for `beacon endpoint install` and `beacon endpoint repair` when teams need raw Codex OTLP spans for debugging.
+- **Metadata retention fix** · Codex prompt text is no longer copied into the event `message` field when `--content-retention metadata` is configured.
+- **Elastic prompt visibility** · The generated Kibana saved search now includes `beacon.prompt.text`, so prompt content is visible in Elastic when retention allows it.
+
+### v0.0.15 · May 20, 2026
+
+- **Devin hook support** · Added Devin hook installation, status, uninstall, discovery, and normalization through the `devin` hook harness.
+- **Devin hook paths** · Beacon can manage user-level Devin hooks in `~/.config/devin/config.json` or project-level hooks in `./.devin/hooks.v1.json` while preserving unrelated settings and non-Beacon hooks.
+- **Devin event coverage** · Devin hooks cover session start, prompt submission, pre-tool and post-tool activity, permission requests, stop events, session-end events, approvals, and file telemetry where payloads are available.
+- **Dependency maintenance** · Updated OpenTelemetry dependencies and removed an unreachable pre-tool observation branch.
+
+### v0.0.14 · May 19, 2026
+
+- **Gemini CLI support** · Added opt-in Gemini CLI local OpenTelemetry configuration through the `gemini` endpoint harness.
+- **Gemini discovery and status** · `beacon endpoint discover` and `beacon endpoint status` now report Gemini CLI telemetry state from `~/.gemini/settings.json`.
+- **Gemini event normalization** · Beacon normalizes Gemini CLI prompts, tool calls, MCP tool activity, file operations, and approval-related events into the endpoint event schema.
+- **Deployment guidance** · MDM deployments can include Gemini CLI by adding `gemini` to the endpoint harness list, for example `claude,codex,gemini`.
+
+### v0.0.13 · May 18, 2026
+
+- **Collector startup fix** · Beacon now omits the `include_runtime_metrics` collector-exporter option unless explicitly enabled, so the bundled `beacon-otelcol` starts cleanly after Homebrew installs and upgrades.
+- **Apple Silicon hook fix** · Release builds now serialize target packaging around the embedded `beacon-hooks` adapter, preventing arm64 Homebrew releases from embedding an amd64 hook binary.
+- **Elastic validation polish** · Updated Elastic content-pack assets and docs to use ingested `beacon.*` fields and the `Beacon Endpoint Events` Kibana data view name.
+- **Release validation runbook** · Added an end-to-end Beacon release validation runbook for Homebrew install, endpoint setup, runtime telemetry, and local Elastic ingestion checks.
+
+### v0.0.12 · May 18, 2026
+
+- **Hook binary validation** · Beacon now validates that the embedded `beacon-hooks` binary matches the host architecture before installing Cursor, Factory, or OpenCode hooks.
+- **Clearer hook failures** · Hook installation now fails early with an actionable architecture error instead of writing a hook configuration that points at an unusable binary.
+- **README support overview** · Expanded the upstream Beacon README with supported agent harnesses, SIEM/output destinations, MDM deployment paths, architecture notes, dashboard guidance, and quickstart links.
+- **Release guidance** · Added maintainer release instructions for tag-based GoReleaser deployments and pre-release test gates.
+
+### v0.0.11 · May 18, 2026
+
+- **Elastic content pack** · Added `beacon endpoint elastic install-pack` to generate Filebeat, standalone Elastic Agent, Elasticsearch template, ingest pipeline, ILM, Kibana, and sample event assets for Beacon endpoint events.
+- **Local Elastic validation** · Added `beacon endpoint elastic up` and `beacon endpoint elastic down` for a loopback-only macOS development stack with Elasticsearch, Kibana, and Filebeat.
+- **Elastic CLI config** · Added `beacon endpoint elastic print-config` for quickly printing Filebeat configuration that tails Beacon's local `runtime.jsonl`.
+- **SIEM forwarding docs** · Documented local, Elastic Cloud, and self-managed Elastic setup while keeping Elastic hosts and credentials outside Beacon endpoint configuration.
+
+### v0.0.10 · May 18, 2026
+
+- **OpenCode plugin support** · Added OpenCode discovery and hook/plugin support through `beacon endpoint discover` and `beacon endpoint hooks`.
+- **Managed OpenCode plugin** · Beacon now installs an owned local OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` or `./.opencode/plugins/beacon.ts`, forwarding supported chat, session, command, permission, diff, and error events through Beacon's local hook adapter.
+- **Local retention and normalization** · OpenCode hook payloads use the same local normalization, redaction, retention, and JSONL output path as other Beacon endpoint events.
+- **Release polish** · Updated upstream README links and OpenCode casing in release documentation.
+
+### v0.0.9 · May 18, 2026
+
+- **Endpoint dashboard visibility** · Improved the local dashboard and runtime visibility with the latest main-branch investigation updates.
+- **Claude Code prompt content** · Enabled Claude Code prompt content export when endpoint retention is set to `full` or `redacted`.
+- **Runtime metric filtering** · Filtered noisy generic process and runtime OTLP metrics from Beacon JSONL by default, with `--include-runtime-metrics` available when those low-level metrics are needed.
+- **Collector release build** · Fixed collector release builds by pinning generated collector log modules consistently.
+
+### v0.0.8 · May 18, 2026
+
+- **Dashboard views** · Refactored the local dashboard into separate **Log Search** and **Security Overview** views for investigation and posture review.
+- **Model-aware investigation** · Added model filtering and model summary data so teams can search and summarize local activity by agent model.
+- **Dashboard usability** · Improved dashboard layout, including clearer investigation columns, quick filters, top harnesses, top models, top repositories, and MCP server summaries.
+- **Documentation references** · Streamlined the upstream README and added clearer links into the Agent Beacon CLI docs.
+- **Dependency maintenance** · Updated the bundled collector exporter dependency on `google.golang.org/grpc`.
+
+### v0.0.7 · May 16, 2026
+
+- **Factory Droid telemetry** · Added Factory Droid discovery, OTLP endpoint validation, and local telemetry collection support.
+- **Factory hooks** · Added Factory hook install, status, and uninstall support for prompt, session, tool, file, stop, and session-end telemetry.
+- **Hook preservation** · Improved Factory hook management so install and uninstall preserve non-Beacon hooks in mixed Factory settings groups and handle `hooks: null` safely.
+- **Metric normalization** · Fixed metric event naming after category inference so metric events can fall back to the message field when needed.
+
+### v0.0.6 · May 15, 2026
+
+- **Splunk HEC exporter** · Added optional Splunk HEC forwarding from the bundled collector while preserving Beacon's local JSONL audit log.
+- **Endpoint forwarding flags** · Added install and repair flags for Splunk HEC endpoint, token, index, source, sourcetype, and TLS configuration.
+- **MDM forwarding support** · Added Jamf and Fleet package support, scripts, and inventory signals for Splunk HEC forwarding state.
+
+### v0.0.5 · May 15, 2026
+
+- **Factory Droid support** · Added Factory Droid discovery and OTLP validation, with guidance for managing `OTEL_TELEMETRY_ENDPOINT` through Droid's launch environment.
+- **Factory hooks** · Added Beacon endpoint hooks for Factory prompt, session, write/edit/create tool, stop, and session-end telemetry.
+- **Agent harness integrations** · Added an agent harness support matrix covering collection paths, hook support, MDM support, telemetry coverage, and local JSONL/dashboard output.
+- **Splunk HEC forwarding** · Documented optional Splunk HEC collector forwarding while preserving the local Beacon JSONL audit log.
+
+### v0.0.4 · May 14, 2026
+
+- **Cursor hook reliability** · Fixed Cursor hook handling so prompt submission and hook-emitted events are captured more consistently.
+- **Prompt events** · Improved prompt event normalization so local timelines better reflect what users asked supported agents to do.
+- **Release artifacts** · Published macOS and Linux archives for `amd64` and `arm64`, plus SHA-256 checksums for release verification.
+
+### v0.0.3 · May 14, 2026
+
+- **Codex discovery** · Fixed Codex CLI detection so `beacon endpoint discover` and `beacon endpoint status` report Codex telemetry state more accurately.
+- **Release packaging** · Packaged target-specific `beacon-otelcol` collector binaries with each platform archive.
+- **Hook distribution** · Cleaned up release packaging for embedded hook assets and Homebrew distribution.
+
+### v0.0.2 · May 14, 2026
+
+- **Release artifacts** · Beacon now publishes platform archives for macOS and Linux on `amd64` and `arm64`, plus SHA-256 checksums for release verification.
+- **Default local install** · Endpoint commands now use per-user paths by default, with `--system` reserved for root-managed package and MDM deployments.
+- **Runtime log visibility** · Status output and the local dashboard now surface warnings when a system collector may be writing OTLP events to a different runtime log than the selected user-mode view.
+- **Jamf-ready packaging** · macOS packaging now includes system-mode install and uninstall helpers for Jamf, Kandji, or generic MDM command runners.
+
+### Codex
+
+- **Telemetry defaults** · Beacon now writes structured Codex OTEL exporter configuration for logs, traces, and metrics while setting `log_user_prompt = false`.
+- **Noisy trace filtering** · Beacon filters noisy internal Codex transport traces so endpoint timelines focus on meaningful Codex activity instead of HTTP/2 framing and flow-control churn.
+
+### Beacon Endpoint
+
+- **Endpoint telemetry** · Beacon now configures local agent harness telemetry and writes normalized endpoint events to local JSONL logs.
+- **Runtime discovery** · Beacon discovers supported local agent harnesses, including Claude Code, Codex CLI, Cursor, and Claude Cowork.
+- **Local dashboard** · Inspect Beacon runtime logs from a local-only endpoint dashboard.
+
+### Wazuh
+
+- **Wazuh content pack** · Generate localfile configuration, rules, and validation content for Beacon endpoint events.
+- **Validation event** · Write a Beacon validation event to confirm Wazuh ingestion paths are configured correctly.
+
+### Hooks
+
+- **Cursor hooks** · Install, inspect, and remove Beacon endpoint hooks for supported harnesses.
+
+### v0.0.1 · May 13, 2026
+
+- **Endpoint telemetry** · Introduced the open-source Beacon Endpoint Agent for local agent harness telemetry.
+- **Collector exporter** · Added the `beaconjson` OpenTelemetry Collector exporter for normalized Beacon endpoint JSONL.
+- **Runtime integrations** · Added support for Claude Code, Codex CLI, Cursor hooks, and Claude Cowork telemetry validation.
+- **Local dashboard** · Added a loopback-only dashboard for inspecting local runtime inventory, event timelines, filters, and event details.
+- **Wazuh output** · Added Wazuh localfile configuration, rules, sample content, and validation events for Beacon endpoint logs.
+- **Release distribution** · Established Homebrew and manual archive distribution for macOS and Linux.

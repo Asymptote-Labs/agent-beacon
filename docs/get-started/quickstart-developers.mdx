@@ -1,0 +1,73 @@
+---
+title: "For Individual Developers"
+description: "Validate a local Beacon setup and inspect AI agent activity on your own machine"
+---
+
+Use this path when you want to try Asymptote Open Source on your own machine before a team rollout.
+
+The developer setup uses per-user paths and writes endpoint events to `~/.beacon/endpoint/logs/runtime.jsonl`.
+
+## 1. Install Beacon
+
+```bash
+brew tap asymptote-labs/tap
+brew install beacon
+beacon endpoint install
+```
+
+See [Asymptote Open Source](/deployment/open-source) for install details and runtime-specific notes.
+
+## 2. Confirm collection health
+
+```bash
+beacon endpoint status
+beacon endpoint discover
+```
+
+`status` confirms the local collector is running. `discover` shows the supported [agent harnesses](/runtimes) Beacon can see on your machine.
+
+## 3. Inspect local activity
+
+Open the dashboard to review runtime inventory, timelines, filters, and event details from local Beacon logs.
+
+```bash
+beacon endpoint dashboard --open
+```
+
+Beacon writes supported prompt, tool, command, file, approval, and runtime context when source runtimes emit it. See [Endpoint event schema](/telemetry-schema/event-schema) for event fields and examples.
+
+## 4. Add hooks if needed
+
+Some runtimes need user- or project-scoped hooks for richer telemetry.
+
+```bash
+beacon endpoint hooks install --harness cursor
+beacon endpoint hooks status --harness cursor
+```
+
+Restart the selected runtime after installing or removing hooks. See [Runtime hooks](/cli/hooks) for supported harnesses, setup, status checks, and uninstall steps.
+
+## 5. Clean up
+
+Remove endpoint service files when you are done testing. Use `--keep-logs` if you want to preserve local runtime logs.
+
+```bash
+beacon endpoint uninstall --keep-logs
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+    Install Beacon and understand the files it manages.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install, repair, inspect, and uninstall the local endpoint agent.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install, check, and remove supported hook-based endpoint telemetry.
+  </Card>
+  <Card title="Local testing" icon="flask-vial" href="/guides/local-testing">
+    Validate endpoint health, events, dashboard access, MCP access, and logs.
+  </Card>
+</Columns>

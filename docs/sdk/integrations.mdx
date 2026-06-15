@@ -1,0 +1,55 @@
+---
+title: "Agent SDK Integrations"
+description: "Choose an Asymptote Observe integration path for AI SDKs and agent orchestration"
+---
+
+## Integration Overview
+
+Asymptote Observe traces supported LLM providers, agent SDKs, and orchestration code through OpenTelemetry. Initialize `Observe`, configure the integration path for the SDK you use, and your model calls or agent turns can flow to Asymptote Managed hosted Observe or a customer-managed OTLP collector.
+
+Browse the integrations below to see setup instructions, what is captured, and troubleshooting guidance.
+
+<Columns cols={2}>
+  <Card title="Anthropic" icon="robot" href="/sdk/integrations-anthropic">
+    Instrument `@anthropic-ai/sdk` model calls with Asymptote Observe.
+  </Card>
+  <Card title="Claude Agent SDK" icon="robot" href="/sdk/integrations-claude-agent-sdk">
+    Wrap Claude Agent SDK query functions with Beacon-compatible prompt spans.
+  </Card>
+  <Card title="OpenAI" icon="brain" href="/sdk/integrations-openai">
+    Instrument `openai` package model calls with Asymptote Observe.
+  </Card>
+  <Card title="Vercel AI SDK" icon="bolt" href="/sdk/integrations-vercel-ai-sdk">
+    Pass `Observe.getTracer()` into AI SDK telemetry for model calls and tool loops.
+  </Card>
+  <Card title="Custom Agent Steps" icon="diagram-project" href="/sdk/integrations-custom-agent-steps">
+    Use `Observe.observe()` for orchestration, tools, policy checks, and handoffs.
+  </Card>
+  <Card title="Next.js And Serverless" icon="cloud" href="/sdk/integrations-nextjs-serverless">
+    Initialize once in Node-only entrypoints and flush traces before short-lived runtimes exit.
+  </Card>
+</Columns>
+
+## Shared Setup
+
+All integration paths start by installing and initializing the SDK:
+
+Hosted Observe export requires an Asymptote Managed API key. To get `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK"
+npm install @asymptote/sdk
+```
+
+```typescript title="Shared SDK initialization" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+```
+
+See the [SDK quickstart](/sdk/quickstart) for Asymptote Managed hosted Observe, customer-managed OTLP, custom exporter, and shutdown options.
+
+## Not Supported Yet
+
+OpenAI agent-framework tracing is not documented here because the current `agent-beacon` TypeScript SDK does not ship that adapter yet.

@@ -1,0 +1,85 @@
+---
+title: "beacon endpoint bundle-diagnostics"
+description: "Write a redacted local diagnostics bundle for Beacon endpoint support"
+---
+
+## Command Overview
+
+`beacon endpoint bundle-diagnostics` writes a redacted local diagnostics bundle for Beacon endpoint support and troubleshooting.
+
+```bash title="Command syntax"
+beacon endpoint bundle-diagnostics --output ./beacon-diagnostics
+```
+
+The bundle is designed for support workflows where an operator needs endpoint configuration, health, inventory, and runtime-log context without exposing secrets by default. Beacon redacts sensitive destination values and only includes runtime event data when explicitly requested.
+
+## Bundle Contents
+
+The diagnostics bundle can include:
+
+- Endpoint status and doctor output
+- Endpoint configuration with secrets redacted
+- Runtime inventory
+- Local path and service metadata
+- Optional redacted event summaries
+- Optional raw runtime JSONL events
+
+If the runtime log does not exist yet, Beacon still writes an empty summary file for requested event summaries so bundle structure remains predictable.
+
+<Warning>
+  `--include-raw-events` can include prompt, tool, file, and command telemetry from the endpoint runtime log. Review the bundle before sharing it outside your organization.
+</Warning>
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the diagnostics bundle |
+| `--include-event-summaries` | Include redacted event summaries |
+| `--include-raw-events` | Include raw runtime JSONL events |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Examples
+
+Write a basic diagnostics bundle:
+
+```bash title="Write a basic diagnostics bundle"
+beacon endpoint bundle-diagnostics --output ./beacon-diagnostics
+```
+
+Include redacted event summaries:
+
+```bash title="Include redacted event summaries"
+beacon endpoint bundle-diagnostics \
+  --output ./beacon-diagnostics \
+  --include-event-summaries
+```
+
+Include raw runtime events for local troubleshooting:
+
+```bash title="Include raw runtime events for local troubleshooting"
+beacon endpoint bundle-diagnostics \
+  --output ./beacon-diagnostics \
+  --include-raw-events
+```
+
+Bundle diagnostics for a system-mode deployment:
+
+```bash title="Bundle diagnostics for a system-mode deployment"
+sudo beacon endpoint bundle-diagnostics \
+  --system \
+  --output ./beacon-diagnostics
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint doctor" icon="stethoscope" href="/cli/endpoint-doctor">
+    Run local endpoint health checks with pass/fail exit behavior.
+  </Card>
+  <Card title="Endpoint config" icon="gear" href="/cli/endpoint-config">
+    Inspect and validate endpoint configuration with secrets redacted.
+  </Card>
+</Columns>

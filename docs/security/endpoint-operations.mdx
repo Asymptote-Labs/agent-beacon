@@ -1,0 +1,107 @@
+---
+title: "Endpoint Operations"
+description: "Filesystem paths, permissions, daemon behavior, network behavior, and uninstall guarantees"
+---
+
+## Operational Controls
+
+Beacon endpoint operations are local to the managed machine. User-mode installs use per-user paths for local evaluation. System-mode installs use root-managed paths and a LaunchDaemon for MDM or package deployments.
+
+## Filesystem Paths
+
+| Item | User mode | System mode |
+|------|-----------|-------------|
+| Config | `~/.beacon/endpoint/config.json` | `/Library/Application Support/Beacon/Endpoint/config.json` |
+| Base directory | `~/.beacon/endpoint` | `/Library/Application Support/Beacon/Endpoint` |
+| Runtime log | `~/.beacon/endpoint/logs/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` |
+| Rotated runtime archives | `~/.beacon/endpoint/logs/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` |
+| Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` |
+| OTLP gRPC | `127.0.0.1:4317` | `127.0.0.1:4317` |
+| OTLP HTTP | `127.0.0.1:4318` | `127.0.0.1:4318` |
+
+The macOS package installs Beacon binaries and deployment assets under `/opt/beacon`:
+
+```text
+/opt/beacon/bin/beacon
+/opt/beacon/bin/beacon-otelcol
+/opt/beacon/scripts/install-endpoint.sh
+/opt/beacon/scripts/uninstall-endpoint.sh
+/opt/beacon/jamf/extension-attributes/*.sh
+/opt/beacon/jamf/scripts/*.sh
+/opt/beacon/fleet/queries/*.sql
+/opt/beacon/fleet/scripts/*.sh
+```
+
+System endpoint install creates root-managed runtime state:
+
+```text
+/Library/Application Support/Beacon/Endpoint/config.json
+/Library/Application Support/Beacon/Endpoint/otelcol.yaml
+/Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/var/log/beacon-agent/runtime.jsonl
+/var/log/beacon-agent/runtime.jsonl.1
+```
+
+## Hook Configuration Paths
+
+| Runtime | User-level config | Project-level config | Hook binary | Runtime log |
+|---------|-------------------|----------------------|-------------|-------------|
+| Cursor | `~/.cursor/hooks.json` | `./.cursor/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Devin CLI | `~/.config/devin/config.json` | `./.devin/hooks.v1.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Devin Desktop | `~/.codeium/windsurf/hooks.json` | `./.windsurf/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Factory Droid | `~/.factory/settings.json` | `./.factory/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Grok Build | `~/.grok/hooks/beacon-endpoint.json` | `./.grok/hooks/beacon-endpoint.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| OpenCode | `~/.config/opencode/plugins/beacon.ts` | `./.opencode/plugins/beacon.ts` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+
+In system mode, the hook binary is written under `/Library/Application Support/Beacon/Endpoint/hooks/` and the default runtime log is `/var/log/beacon-agent/runtime.jsonl`.
+
+## Permissions and Daemon Behavior
+
+User mode is the default for local evaluation and writes under the current user's home directory. System mode requires root, writes root-managed configuration and log paths, and loads the local collector as `com.beacon.endpoint.collector` through launchd.
+
+The system package is designed for Jamf Pro, Fleet, or another macOS MDM. It installs a signed and notarized `.pkg`, creates system endpoint configuration, loads the local collector LaunchDaemon, and writes endpoint events to `/var/log/beacon-agent/runtime.jsonl`.
+
+The active runtime log rotates when the next write would exceed 10 MiB. Beacon keeps up to five numbered local archives next to the active file, preserving the active path as the handoff point for local inspection and customer-managed shippers.
+
+## Network Behavior
+
+Normal endpoint collection uses localhost OTLP receivers and local hook execution. Beacon does not require a hosted account, remote policy fetch, MDM API credentials, or external network connection for normal collection.
+
+Optional network behavior is customer configured:
+
+| Destination | Network behavior |
+|-------------|------------------|
+| Wazuh | Wazuh localfile reads local JSONL |
+| Elastic/Filebeat | Filebeat or Elastic Agent tails local JSONL |
+| Datadog | Datadog Agent custom log collection tails local JSONL |
+| Sumo Logic | Customer-managed Sumo forwarding reads local JSONL and sends to a Hosted Collector HTTP Source |
+| Splunk HEC | Optional collector exporter sends events to the configured Splunk HEC endpoint |
+| Falcon LogScale HEC | Optional collector exporter sends events to the configured Falcon LogScale HEC endpoint |
+| Customer-managed forwarding | Customer shipper, agent, or SIEM pipeline reads local JSONL |
+
+Beacon itself does not store Elastic cluster URLs or credentials, Datadog API keys or site configuration, Sumo Source URLs, tokens, collector configuration, or Rapid7 webhook URLs. Splunk HEC and Falcon LogScale HEC tokens are stored only in local collector configuration when those optional destinations are enabled.
+
+## Uninstall Guarantees
+
+`beacon endpoint uninstall` unloads the local Beacon service and removes managed endpoint files. Beacon removes files listed in its install manifest, including managed config, collector config, and service files. Unless `--keep-logs` is set, it also removes the configured runtime JSONL log.
+
+Use retention flags when you intentionally want to preserve evidence or configuration:
+
+```bash
+beacon endpoint uninstall --keep-logs
+beacon endpoint uninstall --keep-config
+beacon endpoint uninstall --keep-logs --keep-config
+```
+
+`beacon endpoint hooks uninstall` removes Beacon hook entries for supported harnesses and preserves existing non-Beacon hooks.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Review install, status, repair, and uninstall commands.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and remove hook-based runtime integrations.
+  </Card>
+</Columns>

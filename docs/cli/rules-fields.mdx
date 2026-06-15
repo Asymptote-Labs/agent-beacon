@@ -1,0 +1,57 @@
+---
+title: "beacon rules fields"
+description: "Print Beacon endpoint event fields available to threat-rule CEL expressions"
+---
+
+## Command Overview
+
+`beacon rules fields` prints the endpoint event fields that threat-rule CEL expressions can match on.
+
+```bash title="Command syntax"
+beacon rules fields [flags]
+```
+
+Use this command while authoring rules to confirm field paths and value types.
+
+## CEL field paths
+
+Threat-rule expressions bind each Beacon event as `e`. Field paths mirror the event JSON shape, such as:
+
+| Field path | Example use |
+|------------|-------------|
+| `e.event.action` | Match event type, such as `command.executed` or `file.read` |
+| `e.command.command` | Match executed command text |
+| `e.file.path` | Match a file path |
+| `e.prompt.text` | Match prompt text when retained |
+| `e.gen_ai.usage.input_tokens` | Match normalized token usage fields |
+
+## Examples
+
+Print the field list:
+
+```bash title="List rule fields"
+beacon rules fields
+```
+
+Render the field reference as markdown:
+
+```bash title="Render fields as markdown"
+beacon rules fields --markdown
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--markdown` | Render as a markdown reference table |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate CEL expressions and embedded fixtures.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon endpoint events.
+  </Card>
+</Columns>

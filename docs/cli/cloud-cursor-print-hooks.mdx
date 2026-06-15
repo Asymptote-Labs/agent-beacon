@@ -1,0 +1,52 @@
+---
+title: "beacon cloud cursor print-hooks"
+description: "Print Cursor cloud hook settings"
+---
+
+## Command Overview
+
+`beacon cloud cursor print-hooks` prints project-level Cursor hook settings for
+a cloud sandbox. Commit the rendered JSON to `.cursor/hooks.json` before
+starting Cursor Cloud Agents.
+
+```bash title="Command syntax"
+beacon cloud cursor print-hooks
+```
+
+The rendered hooks set `BEACON_ORIGIN=cloud`, `BEACON_RUN_PROVIDER=cursor_cloud`, and `BEACON_RUN_EPHEMERAL=true` for Cursor cloud hook events.
+
+Cursor Cloud only runs command-based project hooks after the cloud VM starts.
+The generated hook set uses supported Cursor Cloud hooks such as
+`beforeReadFile`, `beforeShellExecution`, `afterShellExecution`,
+`afterFileEdit`, `postToolUse`, `postToolUseFailure`, `subagentStart`,
+`subagentStop`, and `preCompact`. It does not include broad `preToolUse`,
+`beforeSubmitPrompt`, `sessionStart`, `sessionEnd`, or `stop` because Cursor
+does not run those hooks in cloud agents. See
+[Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
+for the current platform support list.
+
+Beacon uses Cursor's `conversation_id` hook payload as the default
+`run.run_id` for Cursor Cloud telemetry unless `BEACON_RUN_ID` is already set.
+
+## Examples
+
+Print hook settings for a cloud sandbox:
+
+```bash title="Print hook settings for a cloud sandbox"
+mkdir -p .cursor
+beacon cloud cursor print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json
+git add .cursor/hooks.json
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud" icon="cloud" href="/cli/cloud">
+    Review cloud command group behavior.
+  </Card>
+  <Card title="beacon cloud cursor print-setup" icon="cloud" href="/cli/cloud-cursor-print-setup">
+    Print a Cursor cloud agent binary setup script.
+  </Card>
+</Columns>

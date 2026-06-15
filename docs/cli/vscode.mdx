@@ -1,0 +1,126 @@
+---
+title: "beacon endpoint integrations vscode"
+description: "Set up VS Code Copilot OpenTelemetry export for Beacon"
+---
+
+## Integration Command
+
+VS Code Copilot Chat can export OpenTelemetry to Beacon's local collector. Beacon can configure VS Code user settings, show integration status, and validate whether VS Code-derived events are arriving in the runtime log.
+
+```bash title="Command syntax"
+beacon endpoint integrations vscode [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="print-config" icon="file-lines" href="#beacon-endpoint-integrations-vscode-print-config">
+    Print VS Code Copilot OTel setup guidance.
+  </Card>
+  <Card title="setup" icon="gear" href="#beacon-endpoint-integrations-vscode-setup">
+    Configure VS Code Copilot OTel settings.
+  </Card>
+  <Card title="status" icon="circle-info" href="#beacon-endpoint-integrations-vscode-status">
+    Show VS Code endpoint integration status.
+  </Card>
+  <Card title="validate" icon="check" href="#beacon-endpoint-integrations-vscode-validate">
+    Validate whether VS Code events are arriving.
+  </Card>
+</Columns>
+
+## Recommended setup
+
+Use the endpoint harness path for first-time setup:
+
+```bash title="Use the endpoint harness path for first-time setup"
+beacon endpoint install --harness vscode
+```
+
+This starts Beacon's local collector and configures VS Code Copilot Chat to export OTLP/HTTP to `http://127.0.0.1:4318`. Reload VS Code after setup.
+
+Validate recent events:
+
+```bash title="Validate recent events"
+beacon endpoint integrations vscode validate --since 10m
+```
+
+OTel is the preferred VS Code collection path. It provides Copilot session, prompt, model, and tool activity without requiring VS Code's preview hook feature.
+
+## Optional hooks
+
+VS Code hooks are currently in preview and may be disabled by organization policy. Use hooks only when you want additional lifecycle/tool detail or cross-agent coverage beyond Copilot's OTel stream.
+
+Before installing hooks, confirm `Chat: Use Hooks` is enabled in VS Code settings. `Chat: Use Claude Hooks` is not enough for Copilot-format `.github/hooks/*.json` files. If `Chat: Use Hooks` is unchecked and managed by your organization, VS Code will not execute Beacon's VS Code hook file.
+
+<img src="/images/vscode-chat-use-hooks-setting.png" alt="VS Code settings showing Chat: Use Hooks disabled and managed by organization, while Chat: Use Claude Hooks is enabled." />
+
+```bash title="Install runtime hooks"
+cd /path/to/workspace
+beacon endpoint hooks install --harness vscode --level project
+```
+
+Hook-derived events use `harness.name=vscode`. OTel-derived events use `harness.name=vscode_copilot`.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--endpoint <url>` | OTLP HTTP endpoint for VS Code Copilot. Defaults to Beacon's configured local OTLP HTTP receiver |
+| `--workspace <path>` | Workspace path for `.vscode/settings.json` instead of user settings |
+| `--capture-content` | Enable full Copilot prompt, response, tool argument, and tool result capture |
+| `--since <duration>` | Require a VS Code event within this duration, such as `10m`. Validate only |
+| `--json` | Print status as JSON. Status only |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint integrations vscode setup
+
+`beacon endpoint integrations vscode setup` writes VS Code Copilot OTel settings without reinstalling the endpoint collector.
+
+```bash title="Set up the integration"
+beacon endpoint integrations vscode setup
+```
+
+Prefer `beacon endpoint install --harness vscode` for first-time setup because it configures both the collector and VS Code settings.
+
+## beacon endpoint integrations vscode status
+
+`beacon endpoint integrations vscode status` reports whether VS Code is detected, whether Copilot OTel settings point to Beacon, and whether VS Code events have been observed.
+
+```bash title="Check status"
+beacon endpoint integrations vscode status
+```
+
+Print status as JSON:
+
+```bash title="Print status as JSON"
+beacon endpoint integrations vscode status --json
+```
+
+## beacon endpoint integrations vscode validate
+
+`beacon endpoint integrations vscode validate` checks whether VS Code OTel or hook-derived events have arrived in the endpoint runtime log.
+
+```bash title="Run the validation check"
+beacon endpoint integrations vscode validate --since 10m
+```
+
+If validation fails, Beacon prints VS Code setup guidance using any endpoint or workspace path you provide.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="VS Code runtime support" icon="code" href="/runtimes/vscode">
+    Review collection paths and telemetry coverage.
+  </Card>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Install and configure the local endpoint collector.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install optional hook-based telemetry where supported.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Beacon discovers and configures supported runtimes.
+  </Card>
+</Columns>

@@ -1,0 +1,96 @@
+---
+title: "Agent Harness Integration Model"
+description: "How Beacon discovers, validates, and configures supported agent harnesses"
+---
+
+## Integration Model
+
+Beacon supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surface) because each [agent harness](/runtimes) exposes telemetry differently. Supported harnesses use local OpenTelemetry configuration, admin- or gateway-configured OTLP export, hook adapters, or a combination of those paths.
+
+## Discovery and status
+
+`beacon endpoint discover` checks which supported agent harnesses are present and whether their telemetry is configured.
+
+| Runtime | How Beacon discovers or validates it |
+|---------|--------------------------------------|
+| [Claude Code](/runtimes/claude-code) | Looks for the `claude` executable and Claude settings paths |
+| [Codex CLI](/runtimes/codex-cli) | Looks for the `codex` executable and `~/.codex/config.toml` |
+| [Gemini CLI](/runtimes/gemini-cli) | Looks for the `gemini` executable and `~/.gemini/settings.json` |
+| [GitHub Copilot CLI](/runtimes/github-copilot-cli) | Looks for the `copilot` executable or `~/.copilot/config.json`, then validates Copilot OTel environment variables |
+| [VS Code](/runtimes/vscode) | Looks for the `code` executable or VS Code user settings, then validates Copilot Chat OTel settings |
+| [Grok Build](/runtimes/grok-build) | Checks for Beacon's managed Grok hook file at `~/.grok/hooks/beacon-endpoint.json` or `./.grok/hooks/beacon-endpoint.json` |
+| [OpenCode](/runtimes/opencode) | Looks for the `opencode` executable or `~/.config/opencode`, then checks the managed Beacon plugin |
+| [Devin CLI](/runtimes/devin) | Looks for the `devin` executable, `~/.config/devin`, or `./.devin`, then checks Beacon hook configuration |
+| [Devin Desktop](/runtimes/devin-desktop) | Checks Cascade/Windsurf hook configuration at `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json` |
+| [Factory Droid](/runtimes/factory-droid) | Looks for the `droid` executable and validates `OTEL_TELEMETRY_ENDPOINT` in the effective launch environment |
+| [Cursor](/runtimes/cursor) | Looks for the Cursor binary or `~/.cursor`, then checks Beacon hook configuration |
+| [Claude Cowork](/runtimes/claude-cowork) | Treats it as an admin-configured OTLP source because telemetry is enabled in Claude organization settings |
+| [OpenClaw Gateway](/runtimes/openclaw-gateway) | Validates observed OpenClaw-derived events in the runtime log after Gateway diagnostics are configured |
+
+## Install-time configuration
+
+During install, Beacon configures the runtime surfaces it can safely manage:
+
+| Runtime or surface | Install-time behavior |
+|--------------------|-----------------------|
+| [Claude Code](/runtimes/claude-code) | Beacon points Claude Code at the local OTLP collector. Hook installation is separate through [`beacon endpoint hooks`](/cli/hooks). |
+| [Codex CLI](/runtimes/codex-cli) | Beacon points Codex CLI at the local OTLP collector, writes structured OTLP exporter tables to `~/.codex/config.toml`, sets `log_user_prompt = false`, and sends logs, traces, and metrics to the local collector. |
+| [Gemini CLI](/runtimes/gemini-cli) | Optional with `--harness gemini`. Beacon writes local OTLP settings to `~/.gemini/settings.json`, sets `target` to `local`, uses OTLP gRPC, enables the collector, and removes `outfile` so telemetry flows to Beacon. |
+| [VS Code](/runtimes/vscode) | Optional with `--harness vscode`. Beacon writes Copilot Chat OTel settings to VS Code user settings and points OTLP/HTTP to the local collector. |
+| [GitHub Copilot CLI](/runtimes/github-copilot-cli) | Copilot's OTLP HTTP endpoint remains under MDM or customer-owned launch-environment policy. Beacon validates `COPILOT_OTEL_ENABLED=true` and a localhost OTLP endpoint but does not write Copilot configuration. |
+| [Factory Droid](/runtimes/factory-droid) | Droid's OTLP endpoint remains under its launch environment, commonly managed through MDM or another customer-owned policy. |
+| [OpenClaw Gateway](/runtimes/openclaw-gateway) | Configure OpenClaw with the `diagnostics-otel` plugin. Beacon prints local OTLP/HTTP setup guidance and validates observed events. |
+| Hook-based runtimes | [Antigravity CLI](/runtimes/antigravity-cli), [Claude Code](/runtimes/claude-code), [Cursor](/runtimes/cursor), [Devin CLI](/runtimes/devin), [Devin Desktop](/runtimes/devin-desktop), [Factory](/runtimes/factory-droid), [Grok Build](/runtimes/grok-build), [Hermes Agent](/runtimes/hermes-agent), and [OpenCode](/runtimes/opencode) hooks are installed separately with [`beacon endpoint hooks`](/cli/hooks), because hooks are per-user or per-project runtime configuration rather than base collector service configuration. |
+
+## Integration paths
+
+| Runtime | Collection path | Notes |
+|---------|-----------------|-------|
+| [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Uses Claude settings to enable telemetry and point OTLP to localhost; optional hooks add lifecycle, subagent, permission, and tool event detail. |
+| [Codex CLI](/runtimes/codex-cli) | Local OTLP logs, traces, and metrics | Beacon writes structured Codex OTLP config and filters noisy internal transport spans. |
+| [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP logs, traces, and metrics | Beacon writes Gemini telemetry settings and maps Gemini prompts, tool calls, MCP activity, file operations, and approval events into endpoint events. |
+| [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP export | Beacon validates Copilot's effective launch environment and maps Copilot spans into prompt, session, tool, and approval-like endpoint events. |
+| [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Beacon writes VS Code Copilot OTel settings and maps Copilot prompts, sessions, model metadata, and tool activity into endpoint events. Hooks are optional for extra lifecycle and cross-agent detail. |
+| [Antigravity CLI](/runtimes/antigravity-cli) | Native hook payloads through `beacon-hooks` | Beacon writes a managed Antigravity hook block and maps prompt, pre-tool, post-tool, invocation, command, file edit, and diff telemetry into endpoint events. |
+| [Grok Build](/runtimes/grok-build) | Native hook payloads through `beacon-hooks` | Beacon writes an owned Grok hook file and maps session, prompt, tool, command, file, and failed-tool events into endpoint events. |
+| [Hermes Agent](/runtimes/hermes-agent) | Shell hook payloads through `beacon-hooks` | Beacon merges user-level Hermes shell hooks and maps prompts, tools, commands, approvals, session lifecycle, and subagent stop metadata into endpoint events. |
+| [OpenCode](/runtimes/opencode) | Managed local plugin through `beacon-hooks` | Plugin invokes Beacon for chat, session, command, permission, diff, and error events where payloads are available. |
+| [Devin CLI](/runtimes/devin) | Native hook payloads through `beacon-hooks` | Hooks emit session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry where Devin CLI exposes payloads. |
+| [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hook payloads through `beacon-hooks` | Hooks emit prompt, command, MCP tool, file read, and file write telemetry where Devin Desktop exposes Cascade/Windsurf payloads. |
+| [Factory Droid](/runtimes/factory-droid) | OTLP HTTP launch environment plus optional hooks | Beacon validates Factory OTLP state but does not mutate shell profiles for Droid. |
+| [Cursor](/runtimes/cursor) | Native hook payloads through `beacon-hooks` | Hooks emit session, prompt, tool, command, MCP-like, approval, and file edit telemetry where Cursor exposes payloads. |
+| [Claude Cowork](/runtimes/claude-cowork) | Admin-configured OTLP from Anthropic's service | Production Cowork telemetry should use a durable customer-managed HTTPS collector endpoint. |
+| [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP export | Beacon prints Gateway diagnostics settings and validates OpenClaw-derived events in the runtime log. |
+
+## Hook telemetry
+
+Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks cover activity that is better represented as runtime events than generic OTLP spans.
+
+| Runtime | Hook telemetry |
+|---------|----------------|
+| [Antigravity CLI](/runtimes/antigravity-cli) | Prompt submission, pre-tool and post-tool activity, invocation stop events, command activity, file edits, and diffs where payloads are available. |
+| [Claude Code](/runtimes/claude-code) | Session lifecycle, prompt submission, pre-tool and post-tool activity, failed tool calls, subagent start and stop, permission requests, and session-end events where payloads are available. |
+| [Cursor](/runtimes/cursor) | Session lifecycle, prompt submission, tool invocation, shell command execution, MCP-like tool activity, approval decisions, and file edits where payloads are available. |
+| [VS Code](/runtimes/vscode) | Preview only and may be disabled by organization policy. When enabled, hooks add lifecycle, prompt, pre-tool, post-tool, stop, and subagent detail across VS Code agent surfaces. |
+| [Devin CLI](/runtimes/devin) | Session lifecycle, prompt submission, pre-tool and post-tool activity, permission requests, stop events, session-end events, approvals, and file telemetry where payloads are available. |
+| [Devin Desktop](/runtimes/devin-desktop) | Prompt submission, command execution, MCP tool use, file reads, and file writes where Cascade/Windsurf hook payloads are available. |
+| [Factory](/runtimes/factory-droid) | Session start and end, prompt submission, write/edit/create tool use, stop events, and related file activity where payloads are available. |
+| [Grok Build](/runtimes/grok-build) | Session lifecycle, prompt submission, pre-tool and post-tool activity, post-tool failures, stop events, session-end events, command execution, and file activity where payloads are available. Project-level hooks require `/hooks-trust` in Grok before they execute. |
+| [Hermes Agent](/runtimes/hermes-agent) | Session lifecycle, prompt submission, observed tool calls, post-tool command and file activity, approval request and response events, and subagent stop metadata where Hermes exposes payloads. Hermes hooks are user-level only. |
+| [OpenCode](/runtimes/opencode) | Chat messages, session events, command execution, permission activity, diffs, and errors where payloads are available. |
+
+Hook events include metadata such as file path, operation, language, diff hash, and diff byte count. Raw diffs are subject to Beacon's redaction, sanitization, truncation, and event-size limits before writing.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    Follow runtime signals through collection, normalization, storage, and forwarding.
+  </Card>
+  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
+    Compare agent harness support and open runtime-specific details.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

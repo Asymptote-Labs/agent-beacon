@@ -1,0 +1,55 @@
+---
+title: "Security Policy"
+description: "Security contact, vulnerability disclosure, and release verification policy"
+---
+
+## Policy Controls
+
+Use this page for security contact, vulnerability disclosure, and release verification details for Beacon endpoint deployments.
+
+## Security Contact
+
+Report suspected vulnerabilities or security concerns to [security@asymptotelabs.ai](mailto:security@asymptotelabs.ai).
+
+For non-security product support, use [support@asymptotelabs.ai](mailto:support@asymptotelabs.ai).
+
+## Vulnerability Disclosure
+
+When reporting a vulnerability, include enough detail for the security team to reproduce and assess impact:
+
+- Affected Beacon version, build date, and install mode when known.
+- Operating system and architecture.
+- Reproduction steps, proof of concept, logs, or screenshots.
+- Expected impact and whether the issue is already being exploited.
+- Any constraints on coordinated disclosure timing.
+
+Asymptote asks reporters to avoid accessing data that does not belong to them, disrupting customer systems, or publicly disclosing an issue before the security team has had time to investigate and coordinate remediation.
+
+## Release Signing and Verification
+
+Beacon macOS packages for managed deployment are signed and notarized. Manual release archives include the `beacon` CLI and matching `beacon-otelcol` collector binary, with SHA-256 checksums published alongside the release.
+
+Use `beacon version` to confirm the installed version, git commit, and build date:
+
+```bash
+beacon version
+```
+
+Example output:
+
+```bash
+beacon version 0.0.48 (1904988) built on 2026-06-08T12:12:11Z
+```
+
+For managed macOS rollouts, deploy the signed and notarized `.pkg` through Jamf Pro, Fleet, or another MDM. For manual archives, compare the downloaded archive checksum to the published SHA-256 checksum before installation.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+    Install Beacon, review archive contents, and verify the CLI version.
+  </Card>
+  <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
+    Deploy the signed and notarized macOS package through MDM.
+  </Card>
+</Columns>

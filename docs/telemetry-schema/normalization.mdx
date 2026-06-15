@@ -1,0 +1,119 @@
+---
+title: "Schema Normalization"
+description: "How Beacon maps OTLP attributes and hook payloads into normalized events"
+---
+
+## Normalization Rules
+
+Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/concepts/core-concepts#hooks) payloads into the same event contract. The collector exporter looks for common runtime fields, while hook telemetry builds those fields directly from hook payloads.
+
+## Source mapping
+
+| Source signal | Normalized field or action |
+|---------------|----------------------------|
+| `gen_ai.request.model`, `gen_ai.response.model`, `model`, `ai.model` | `model` |
+| `gen_ai.tool.name`, `tool.name`, `function_name`, `tool_name` | `tool.name` and `gen_ai.tool.name` |
+| `gen_ai.tool.call.arguments`, `function_args`, `arguments` | `tool.command` when command-like, plus `gen_ai.tool.call.arguments` |
+| `gen_ai.tool.call.id`, `gen_ai.tool.call.result` | `gen_ai.tool.call.id`, `gen_ai.tool.call.result` |
+| `mcp.tool.name` | `mcp.tool` |
+| `process.command_line` | `command.command` |
+| `file.path` | `file.path` |
+| `conversation.id` | `session.id` |
+| `gen_ai.conversation.id` | `gen_ai.conversation.id` |
+| `vcs.repository.url` | `repository` |
+| `git.branch` | `branch` |
+| `beacon.origin` | `origin` |
+| `beacon.run.*` | `run.*` |
+| Prompt-like events | `prompt.submitted` |
+| Shell or exec events | `command.executed` |
+| MCP events | `mcp.tool_invoked` |
+| File, write, or edit events | `file.modified` |
+| Approval events | `approval.requested` |
+| Other tool activity | `tool.invoked` |
+
+## OpenTelemetry GenAI fields
+
+Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested `gen_ai` object and also projects selected fields into Beacon's common investigation fields. This keeps the raw GenAI context available without forcing downstream rules to parse runtime-specific attribute names.
+
+| Source signal | Normalized field |
+|---------------|------------------|
+| `gen_ai.agent.description`, `gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.agent.version` | `gen_ai.agent.*` |
+| `gen_ai.data_source.id` | `gen_ai.data_source.id` |
+| `gen_ai.embeddings.dimension.count` | `gen_ai.embeddings.dimension_count` |
+| `gen_ai.evaluation.name`, `gen_ai.evaluation.explanation`, `gen_ai.evaluation.score.label`, `gen_ai.evaluation.score.value` | `gen_ai.evaluation.*` |
+| `gen_ai.input.messages`, legacy `gen_ai.prompt.*`, `llm.prompts`, `gen_ai.prompts` | `gen_ai.input.messages` |
+| `gen_ai.output.messages`, legacy `gen_ai.completion.*`, `llm.completions`, `gen_ai.completions` | `gen_ai.output.messages` |
+| `gen_ai.output.type` | `gen_ai.output.type` |
+| `gen_ai.operation.name` | `gen_ai.operation.name` |
+| `gen_ai.prompt.name` | `gen_ai.prompt.name` |
+| `gen_ai.provider.name`, `gen_ai.system` | `gen_ai.provider.name` |
+| `gen_ai.system_instructions` | `gen_ai.system_instructions` |
+| `gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents` | `gen_ai.retrieval.*` |
+| `gen_ai.token.type` | `gen_ai.token.type` |
+| `gen_ai.workflow.name` | `gen_ai.workflow.name` |
+
+### Request and response metadata
+
+| Source signal | Normalized field |
+|---------------|------------------|
+| `gen_ai.request.model`, `llm.request.model` | `gen_ai.request.model` |
+| `gen_ai.request.choice.count` | `gen_ai.request.choice_count` |
+| `gen_ai.request.encoding_formats` | `gen_ai.request.encoding_formats` |
+| `gen_ai.request.frequency_penalty` | `gen_ai.request.frequency_penalty` |
+| `gen_ai.request.max_tokens`, `llm.request.max_tokens` | `gen_ai.request.max_tokens` |
+| `gen_ai.request.presence_penalty` | `gen_ai.request.presence_penalty` |
+| `gen_ai.request.seed` | `gen_ai.request.seed` |
+| `gen_ai.request.stop_sequences` | `gen_ai.request.stop_sequences` |
+| `gen_ai.request.stream` | `gen_ai.request.stream` |
+| `gen_ai.request.temperature`, `llm.request.temperature` | `gen_ai.request.temperature` |
+| `gen_ai.request.top_k`, `gen_ai.request.top_p` | `gen_ai.request.top_k`, `gen_ai.request.top_p` |
+| `gen_ai.response.id`, `gen_ai.response.model`, `llm.response.model` | `gen_ai.response.id`, `gen_ai.response.model` |
+| `gen_ai.response.finish_reasons` | `gen_ai.response.finish_reasons` |
+| `gen_ai.response.time_to_first_chunk` | `gen_ai.response.time_to_first_chunk` |
+
+### Usage metadata
+
+| Source signal | Normalized field |
+|---------------|------------------|
+| `gen_ai.usage.input_tokens`, `llm.usage.prompt_tokens`, `gen_ai.usage.prompt_tokens` | `gen_ai.usage.input_tokens` |
+| `gen_ai.usage.output_tokens`, `llm.usage.completion_tokens`, `gen_ai.usage.completion_tokens` | `gen_ai.usage.output_tokens` |
+| `gen_ai.usage.cache_creation.input_tokens` | `gen_ai.usage.cache_creation.input_tokens` |
+| `gen_ai.usage.cache_read.input_tokens` | `gen_ai.usage.cache_read.input_tokens` |
+| `gen_ai.usage.reasoning.output_tokens` | `gen_ai.usage.reasoning.output_tokens` |
+| `gen_ai.usage.cost`, runtime `*.cost.usage` metric datapoints | `gen_ai.usage.cost_usd` |
+
+Usage also arrives as metric datapoints, not just span and log attributes. Claude Code's `claude_code.token.usage` and `claude_code.cost.usage` and Codex's `codex.turn.token_usage` are expanded per datapoint and mapped into the same `gen_ai.usage` fields by their `token_type` (for example Codex `cached_input` maps to `cache_read.input_tokens` and `reasoning_output` to `reasoning.output_tokens`; rollup types such as `total` are ignored). `gen_ai.usage.cost_usd` carries runtime-reported cost only and is never derived from a local pricing table. See [How token attribution works](/cli/endpoint-tokens#how-token-attribution-works) for how these normalized fields aggregate into local reports.
+
+## Prompt and content handling
+
+Prompt text can come from `gen_ai.prompt`, `prompt`, `user_prompt`, `input.prompt`, `copilot_chat.user_request`, or the first meaningful text value in `gen_ai.input.messages`. Empty input message arrays do not create prompt events by themselves.
+
+Beacon accepts empty `content.retention` values for compatibility with older records. Truncation can be represented by top-level `field_truncated` and, for event-specific content state, `content.truncated`.
+
+## Category inference
+
+When a runtime omits `event.category`, Beacon infers it from `event.action`:
+
+| Action pattern | Inferred category |
+|----------------|-------------------|
+| `prompt.*` | `prompt` |
+| `command.*` | `command` |
+| `file.*` | `file` |
+| `mcp.*` | `mcp` |
+| `approval.*` or `policy.*` | `approval` |
+| `metric.*` | `metric` |
+| `tool.*` | `tool` |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Unified telemetry schema" icon="code" href="/telemetry-schema/event-schema">
+    Return to the schema overview.
+  </Card>
+  <Card title="Schema fields" icon="table-list" href="/telemetry-schema/fields">
+    Review entities, optional context, and shared top-level fields.
+  </Card>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    See where normalization fits in the local telemetry architecture.
+  </Card>
+</Columns>

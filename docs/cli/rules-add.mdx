@@ -1,0 +1,59 @@
+---
+title: "beacon rules add"
+description: "Install local Beacon threat-detection rule files into the store"
+---
+
+## Command Overview
+
+`beacon rules add` installs a local `.rule.yaml` file or a directory of rule files into the local threat-rule store.
+
+```bash title="Command syntax"
+beacon rules add <path> [flags]
+```
+
+Beacon validates rules before installing them. Installed rules become active for future [`beacon scan`](/cli/scan) runs.
+
+## Examples
+
+Install all rules from a local directory:
+
+```bash title="Install local rules"
+beacon rules add ./rules
+```
+
+Install one rule file:
+
+```bash title="Install one rule"
+beacon rules add ./rules/suspicious-egress-command.rule.yaml
+```
+
+Overwrite an existing rule with the same id:
+
+```bash title="Overwrite an existing rule"
+beacon rules add ./rules --force
+```
+
+Install into the system-mode rule store:
+
+```bash title="Install system-mode rules"
+sudo beacon rules add ./rules --system
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--force` | Overwrite an existing rule with the same id |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate rules and fixtures before installing.
+  </Card>
+  <Card title="beacon rules list" icon="list" href="/cli/rules-list">
+    Confirm which rules are active.
+  </Card>
+</Columns>

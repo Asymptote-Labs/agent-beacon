@@ -1,0 +1,67 @@
+---
+title: "beacon login"
+description: "Log in to the Asymptote dashboard from the Beacon CLI"
+tag: "Enterprise"
+---
+
+## Command Overview
+
+Authenticate the Beacon CLI with your Asymptote dashboard account. The command opens a browser-based authorization flow and saves credentials for Beacon features that need dashboard access.
+
+```bash title="Command syntax"
+beacon login [flags]
+```
+
+<Accordion title="Example output">
+```bash title="Example output"
+$ beacon login
+
+Opening browser to https://asymptotelabs.ai/cli/auth...
+Waiting for authentication...
+
+Success! Logged in as justin@acme.com
+Organization: Acme Corp
+
+Beacon endpoint telemetry remains local-only unless you explicitly use cloud features.
+```
+</Accordion>
+
+If the browser cannot be opened automatically, Beacon prints the authorization URL so you can open it manually.
+
+Credentials are stored in `~/.beacon/auth/credentials.json` with user-only file permissions.
+
+<Note>
+  Logging in does not change local endpoint telemetry collection. Beacon endpoint telemetry remains local-only unless you explicitly configure cloud features.
+</Note>
+
+## Existing sessions
+
+When valid credentials already exist, `beacon login` prints the saved account and organization instead of replacing them:
+
+```bash title="Existing session"
+$ beacon login
+Already logged in as justin@acme.com
+Organization: Acme Corp
+Run 'beacon login --force' to log in as a different user.
+```
+
+Use `--force` when you need to replace saved credentials.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dashboard-url <url>` | Asymptote dashboard URL. Defaults to `https://asymptotelabs.ai`, or the value of `BEACON_DASHBOARD_URL`. |
+| `--force` | Replace existing saved credentials. |
+| `-h, --help` | Help for login |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud" icon="cloud" href="/cli/cloud">
+    Configure cloud-agent telemetry features that may use dashboard authentication.
+  </Card>
+  <Card title="beacon version" icon="code-branch" href="/cli/version">
+    Check your installed Beacon CLI version.
+  </Card>
+</Columns>

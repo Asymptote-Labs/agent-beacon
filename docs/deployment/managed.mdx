@@ -1,0 +1,77 @@
+---
+title: "Asymptote Managed"
+description: "Managed visibility, governance, and investigations for agent activity at scale"
+---
+
+Asymptote Managed builds on the open-source Agent Beacon foundation for teams that need centralized operations, policy controls, and investigation workflows across a fleet.
+
+Use this path when local JSONL and customer-managed forwarding are not enough on their own, or when agent adoption has moved beyond a small local pilot.
+
+## What Managed Adds
+
+Asymptote Managed includes the open-source capture and forwarding paths, then adds the managed services needed to operate agent security at company scale.
+
+| Capability | What managed adds beyond open source |
+| --- | --- |
+| Managed ingest and retention | Centralized collection, retention, search, and detections for agent activity |
+| Fleet-wide visibility | Inventory across endpoints, agent harnesses, users, and teams |
+| Policy controls | Policy enforcement workflows, identity mapping, and approval visibility |
+| Investigations | Timelines and case workflows for reviewing prompts, tools, file access, and agent actions |
+| Access control | SSO, role-based access control, and audit trails |
+| Operations support | Priority support, onboarding, and rollout guidance |
+
+## Core Managed Workflows
+
+### Centralize Runtime Visibility
+
+Managed ingest turns endpoint and cloud-agent telemetry into searchable fleet-wide visibility. Security teams can review which agents are running, which tools they use, and what sensitive files or data are involved in agent activity.
+
+For provider-managed cloud agents, Managed avoids proof-of-concept patterns such
+as placing storage service-account keys directly into cloud sandbox environment
+variables. Asymptote can operate the secure ingest and retention layer for you,
+or work with your team on a production-grade forwarding design in
+customer-managed infrastructure.
+
+### Govern Agent Activity
+
+Policy, identity mapping, and approvals help teams connect runtime actions back to users and workflows. Use this when you need governance beyond a local audit log or SIEM-forwarded event stream.
+
+### Investigate Agent Behavior
+
+Investigation timelines and case workflows organize prompts, tool calls, file access, command execution, and related context so security teams can reconstruct what happened during an agent session.
+
+### Support Enterprise Rollout
+
+Managed deployments include rollout planning, onboarding, and support for teams deploying across endpoints and execution environments.
+
+## Private Deployment
+
+For regulated teams that need dedicated infrastructure or stricter data boundaries, Asymptote supports private cloud or customer-controlled deployment options.
+
+Private deployment can include:
+
+- complete data isolation and residency options
+- custom retention and forwarding architecture
+- coverage across endpoints and execution environments
+- dedicated deployment engineering and rollout planning
+
+## Get Access
+
+Request access or discuss deployment requirements at [asymptotelabs.ai/contact](https://asymptotelabs.ai/contact). For plan details, see [Asymptote pricing](https://asymptotelabs.ai/pricing).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
+    Compare Open Source, Managed, and Private Deployment paths.
+  </Card>
+  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+    Install Beacon locally and configure endpoint telemetry.
+  </Card>
+  <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
+    Plan endpoint inventory, MDM rollout, validation, retention, and forwarding.
+  </Card>
+  <Card title="Asymptote Observe SDK" icon="code" href="/sdk/quickstart">
+    Instrument cloud-hosted agent applications with Asymptote telemetry.
+  </Card>
+</Columns>
