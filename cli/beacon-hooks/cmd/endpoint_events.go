@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -74,13 +75,17 @@ func isDevinCloudMode() bool {
 		strings.TrimSpace(os.Getenv("BEACON_RUN_PROVIDER")) == "devin_cloud"
 }
 
-// seedDevinCloudRunID resolves a run id for Devin Cloud sessions. The Devin hook
-// payloads do not carry a session id, so derive BEACON_RUN_ID from a
-// Devin-provided session environment variable when one is available. If none is
-// found it falls back to "unknown" rather than leaving BEACON_RUN_ID empty:
-// cloudshuttle.Upload skips the upload entirely when RunID is empty, so an empty
-// value would silently drop all telemetry. Sessions without a discoverable id
-// therefore share the run_id=unknown object path (last writer wins).
+// seedDevinCloudRunID resolves a run id for Devin Cloud sessions and exports it
+// as BEACON_RUN_ID. The Devin hook payloads carry no session id, and Devin does
+// not expose one through the environment, so the resolution order is:
+//
+//  1. An explicit BEACON_RUN_ID (operator override) — left untouched.
+//  2. A Devin-provided session env var, if a future Devin release adds one.
+//  3. A per-session id minted on first use and persisted next to the runtime log
+//     so every hook invocation in the same session reuses it.
+//
+// A non-empty value is always set: cloudshuttle.Upload skips the upload entirely
+// when RunID is empty, so leaving it blank would silently drop all telemetry.
 func seedDevinCloudRunID() {
 	if !isDevinLikePlatform(platformFlag) || !isDevinCloudMode() || strings.TrimSpace(os.Getenv("BEACON_RUN_ID")) != "" {
 		return
@@ -93,7 +98,51 @@ func seedDevinCloudRunID() {
 			return
 		}
 	}
-	_ = os.Setenv("BEACON_RUN_ID", "unknown")
+	_ = os.Setenv("BEACON_RUN_ID", loadOrCreateDevinCloudRunID())
+}
+
+// devinCloudRunIDPath returns the per-session run-id file, kept beside the
+// runtime log so every hook process in the session resolves the same path.
+func devinCloudRunIDPath() string {
+	logPath := strings.TrimSpace(os.Getenv("BEACON_ENDPOINT_LOG"))
+	if logPath == "" {
+		logPath = "/tmp/beacon/runtime.jsonl"
+	}
+	return filepath.Join(filepath.Dir(logPath), "devin-run-id")
+}
+
+// loadOrCreateDevinCloudRunID returns the session's persisted run id, minting and
+// writing one on first use. Hooks run as separate processes, so the id must be
+// persisted; without it each process would pick a different id and scatter one
+// session across many GCS objects. The O_EXCL write keeps the first writer's id
+// if two early hooks race.
+func loadOrCreateDevinCloudRunID() string {
+	path := devinCloudRunIDPath()
+	if data, err := os.ReadFile(path); err == nil {
+		if existing := strings.TrimSpace(string(data)); existing != "" {
+			return existing
+		}
+	}
+	runID := generateRunID()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+		if f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644); err == nil {
+			_, _ = f.WriteString(runID)
+			_ = f.Close()
+		} else if data, err := os.ReadFile(path); err == nil {
+			if existing := strings.TrimSpace(string(data)); existing != "" {
+				return existing
+			}
+		}
+	}
+	return runID
+}
+
+func generateRunID() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "unknown"
+	}
+	return "devin-" + hex.EncodeToString(buf)
 }
 
 func maybeUploadCursorCloudTelemetry(logger *logging.Logger) {
