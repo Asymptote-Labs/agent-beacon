@@ -152,6 +152,7 @@
                   "sdk/integrations-claude-agent-sdk",
                   "runtimes/claude-code-cloud-agents",
                   "runtimes/cursor-cloud-agents",
+                  "runtimes/devin-cloud-agents",
                   "sdk/integrations-openai",
                   "sdk/integrations-vercel-ai-sdk"
                 ]
@@ -948,6 +949,10 @@
     {
       "source": "/cursor-cloud-agents",
       "destination": "/runtimes/cursor-cloud-agents"
+    },
+    {
+      "source": "/devin-cloud-agents",
+      "destination": "/runtimes/devin-cloud-agents"
     },
     {
       "source": "/detections",

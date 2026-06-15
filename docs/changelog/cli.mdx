@@ -11,6 +11,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.67 · June 15, 2026
+
+- **Devin Cloud agent telemetry** · Added `beacon cloud devin pull` to capture autonomous [Devin Cloud agent](/runtimes/devin-cloud-agents) telemetry org-wide. Using a Devin organization service key, one central run pulls every user's cloud sessions from the Devin API, normalizes them into Beacon endpoint events (`provider=devin_cloud`), writes the runtime JSONL, and optionally uploads a per-session snapshot to a customer-managed GCS bucket. No per-user or per-sandbox setup is required.
+- **Live and scheduled capture** · `--watch` polls continuously for near-real-time capture; a single sweep (the default) suits cron and CI runners. Re-runs are idempotent — events are deduplicated by Devin event id and unchanged sessions are skipped — and `--full-resync` re-fetches and re-uploads every session for backfills.
+- **Per-user attribution** · Devin Cloud events carry the Devin session id as `run_id` and the Devin user id as `run.actor`, so org-wide telemetry stays attributable per end-user and forwards to any existing SIEM destination over the normalized runtime log. Telemetry is message-level (session lifecycle, prompts, agent messages, status, pull requests, and ACU usage); the Devin API does not expose per-tool or per-command events for autonomous sessions.
+
 ### v0.0.66 · June 13, 2026
 
 - **Dashboard routing fixes** · Fixed local dashboard route handling so Log Search, Security Overview, Detections, Findings, and inventory views resolve reliably from the loopback dashboard.
