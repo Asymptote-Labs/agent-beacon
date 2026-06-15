@@ -160,7 +160,22 @@ func installDevinHooksForPlatform(path, binaryPath, logPath, configPath, platfor
 		return err
 	}
 	prefix := endpointCommandPrefix(platform, binaryPath, logPath, configPath)
-	endpointHooks := map[string]devinHookGroup{
+	for eventName, group := range devinEndpointHookGroups(prefix) {
+		config.hooks[eventName] = mergeDevinEndpointHook(config.hooks[eventName], group, replacePlatforms...)
+	}
+	data, err := config.marshal()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+// devinEndpointHookGroups maps Devin lifecycle events to Beacon hook command
+// groups for the given command prefix. Shared by the local installer and the
+// cloud renderer so the two never drift; the only difference between them is the
+// command prefix passed in.
+func devinEndpointHookGroups(prefix string) map[string]devinHookGroup {
+	return map[string]devinHookGroup{
 		"SessionStart":      {Hooks: []devinHookRef{{Type: "command", Command: prefix + " session-start"}}},
 		"UserPromptSubmit":  {Hooks: []devinHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}}},
 		"PreToolUse":        {Matcher: "", Hooks: []devinHookRef{{Type: "command", Command: prefix + " pre-tool"}}},
@@ -169,14 +184,41 @@ func installDevinHooksForPlatform(path, binaryPath, logPath, configPath, platfor
 		"Stop":              {Hooks: []devinHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}}},
 		"SessionEnd":        {Hooks: []devinHookRef{{Type: "command", Command: prefix + " session-end"}}},
 	}
-	for eventName, group := range endpointHooks {
-		config.hooks[eventName] = mergeDevinEndpointHook(config.hooks[eventName], group, replacePlatforms...)
+}
+
+// DevinCloudOptions configures the standalone .devin/hooks.v1.json emitted for
+// Devin Cloud agent sandboxes.
+type DevinCloudOptions struct {
+	BinaryPath string
+	LogPath    string
+}
+
+// RenderDevinCloudHooks renders a standalone .devin/hooks.v1.json that forwards
+// Devin Cloud telemetry through beacon-hooks. The cloud command prefix tags
+// every event with BEACON_ORIGIN=cloud and BEACON_RUN_PROVIDER=devin_cloud so
+// the cloud shuttle uploads runtime JSONL under provider=devin_cloud.
+func RenderDevinCloudHooks(opts DevinCloudOptions) (string, error) {
+	if opts.LogPath == "" {
+		opts.LogPath = "/tmp/beacon/runtime.jsonl"
 	}
-	data, err := config.marshal()
+	prefix := devinCloudCommandPrefix(opts.BinaryPath, opts.LogPath)
+	hooks := map[string][]devinHookGroup{}
+	for eventName, group := range devinEndpointHookGroups(prefix) {
+		hooks[eventName] = []devinHookGroup{group}
+	}
+	data, err := json.MarshalIndent(hooks, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
-	return os.WriteFile(path, data, 0600)
+	return string(data) + "\n", nil
+}
+
+func devinCloudCommandPrefix(binaryPath, logPath string) string {
+	return fmt.Sprintf(
+		"BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG=%s %s --platform devin",
+		shellQuote(logPath),
+		shellQuote(binaryPath),
+	)
 }
 
 func readDevinConfig(path string) (devinConfig, error) {

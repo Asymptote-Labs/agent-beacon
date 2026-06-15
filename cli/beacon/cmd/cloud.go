@@ -107,6 +107,44 @@ var cloudCursorPrintSetupCmd = &cobra.Command{
 	},
 }
 
+var cloudDevinCmd = &cobra.Command{
+	Use:   "devin",
+	Short: "Generate Devin cloud agent telemetry setup",
+}
+
+var cloudDevinPrintHooksCmd = &cobra.Command{
+	Use:          "print-hooks",
+	Short:        "Print project-level Devin hook settings for a cloud sandbox",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(cloudOpts.binaryPath) == "" {
+			return fmt.Errorf("--binary-path is required")
+		}
+		rendered, err := endpointhooks.RenderDevinCloudHooks(endpointhooks.DevinCloudOptions{
+			BinaryPath: cloudOpts.binaryPath,
+			LogPath:    defaultCloudLogPath(cloudOpts.logPath),
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Print(rendered)
+		return nil
+	},
+}
+
+var cloudDevinPrintSetupCmd = &cobra.Command{
+	Use:          "print-setup",
+	Short:        "Print a Devin cloud agent binary setup script",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(cloudOpts.version) == "" {
+			return fmt.Errorf("--version is required")
+		}
+		fmt.Print(renderDevinCloudSetup(cloudOpts.version))
+		return nil
+	},
+}
+
 var cloudGCSCmd = &cobra.Command{
 	Use:   "gcs",
 	Short: "Configure GCS forwarding for cloud agent telemetry",
@@ -123,11 +161,14 @@ func init() {
 	rootCmd.AddCommand(cloudCmd)
 	cloudCmd.AddCommand(cloudClaudeWebCmd)
 	cloudCmd.AddCommand(cloudCursorCmd)
+	cloudCmd.AddCommand(cloudDevinCmd)
 	cloudCmd.AddCommand(cloudGCSCmd)
 	cloudClaudeWebCmd.AddCommand(cloudClaudeWebPrintHooksCmd)
 	cloudClaudeWebCmd.AddCommand(cloudClaudeWebPrintSetupCmd)
 	cloudCursorCmd.AddCommand(cloudCursorPrintHooksCmd)
 	cloudCursorCmd.AddCommand(cloudCursorPrintSetupCmd)
+	cloudDevinCmd.AddCommand(cloudDevinPrintHooksCmd)
+	cloudDevinCmd.AddCommand(cloudDevinPrintSetupCmd)
 	cloudGCSCmd.AddCommand(cloudGCSSetupCmd)
 
 	cloudClaudeWebPrintHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
@@ -137,6 +178,9 @@ func init() {
 	cloudCursorPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
 	cloudCursorPrintHooksCmd.Flags().BoolVar(&cloudOpts.safeHooks, "safe-hooks", false, "Skip Cursor cloud shell/edit-specific hooks while testing telemetry forwarding")
 	cloudCursorPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
+	cloudDevinPrintHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
+	cloudDevinPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
+	cloudDevinPrintSetupCmd.Flags().StringVar(&cloudOpts.version, "version", "", "Beacon release tag to download, such as v0.0.50")
 
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.project, "project", "", "Google Cloud project ID")
 	cloudGCSSetupCmd.Flags().StringVar(&cloudOpts.bucket, "bucket", "", "GCS bucket for cloud agent telemetry")
@@ -258,6 +302,32 @@ chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks 2>/dev/null || true
 echo "Beacon binaries installed in /tmp/beacon/bin"
 echo "Commit a project-level .cursor/hooks.json before starting Cursor Cloud Agents:"
 echo "  beacon cloud cursor print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json"
+`, version)
+}
+
+func renderDevinCloudSetup(version string) string {
+	return fmt.Sprintf(`set -euo pipefail
+# Run this from a Devin blueprint "maintenance" step so the Beacon binaries are
+# provisioned into every cloud session's machine.
+mkdir -p /tmp/beacon/bin /tmp/beacon/logs
+
+BEACON_VERSION=%q
+OS="linux"
+case "$(uname -m)" in
+  x86_64|amd64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+esac
+
+ARCHIVE="beacon_${BEACON_VERSION#v}_${OS}_${ARCH}.tar.gz"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/${BEACON_VERSION}"
+curl -fsSL "${BASE}/${ARCHIVE}" -o "/tmp/beacon/${ARCHIVE}"
+tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin
+chmod +x /tmp/beacon/bin/beacon /tmp/beacon/bin/beacon-hooks 2>/dev/null || true
+
+echo "Beacon binaries installed in /tmp/beacon/bin"
+echo "Commit a project-level .devin/hooks.v1.json before starting Devin Cloud Agents:"
+echo "  beacon cloud devin print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .devin/hooks.v1.json"
 `, version)
 }
 

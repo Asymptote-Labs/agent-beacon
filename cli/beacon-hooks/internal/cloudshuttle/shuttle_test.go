@@ -44,6 +44,19 @@ func TestObjectNameUsesCursorCloudProvider(t *testing.T) {
 	}
 }
 
+func TestObjectNameUsesDevinCloudProvider(t *testing.T) {
+	got := ObjectName(Config{
+		Prefix:   "agent-traces",
+		Provider: "devin_cloud",
+		UserID:   "user-1",
+		RunID:    "devin-123",
+	})
+	want := "agent-traces/provider=devin_cloud/user_id=user-1/run_id=devin-123/runtime.jsonl"
+	if got != want {
+		t.Fatalf("ObjectName = %q, want %q", got, want)
+	}
+}
+
 func TestUploadNoopsWithoutCredentials(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {

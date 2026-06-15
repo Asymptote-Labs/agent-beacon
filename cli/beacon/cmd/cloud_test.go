@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -13,6 +14,8 @@ func TestCloudCommandsRegistered(t *testing.T) {
 		{"cloud", "claude-web", "print-setup"},
 		{"cloud", "cursor", "print-hooks"},
 		{"cloud", "cursor", "print-setup"},
+		{"cloud", "devin", "print-hooks"},
+		{"cloud", "devin", "print-setup"},
 		{"cloud", "gcs", "setup"},
 	} {
 		cmd, _, err := rootCmd.Find(path)
@@ -103,6 +106,70 @@ func TestRenderCursorCloudSetupInstallsBinariesOnly(t *testing.T) {
 	for _, forbidden := range []string{`beacon cloud cursor install-hooks`, `--hooks-json`, `.git/info/exclude`} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("cursor setup should not rewrite project hooks with %q:\n%s", forbidden, got)
+		}
+	}
+}
+
+func TestRenderDevinCloudHooks(t *testing.T) {
+	got, err := endpointhooks.RenderDevinCloudHooks(endpointhooks.DevinCloudOptions{
+		BinaryPath: "/tmp/beacon/bin/beacon-hooks",
+		LogPath:    "/tmp/beacon/runtime.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("render devin cloud hooks: %v", err)
+	}
+	for _, want := range []string{
+		`"SessionStart"`,
+		`"UserPromptSubmit"`,
+		`"PreToolUse"`,
+		`"PermissionRequest"`,
+		`"PostToolUse"`,
+		`"Stop"`,
+		`"SessionEnd"`,
+		`BEACON_ORIGIN=cloud`,
+		`BEACON_RUN_PROVIDER=devin_cloud`,
+		`BEACON_RUN_EPHEMERAL=true`,
+		`'/tmp/beacon/bin/beacon-hooks' --platform devin session-start`,
+		`'/tmp/beacon/bin/beacon-hooks' --platform devin post-tool`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered hooks missing %q:\n%s", want, got)
+		}
+	}
+	// Standalone .devin/hooks.v1.json: the top level is the bare event map, not a
+	// Cursor-style {"version":1,"hooks":{...}} wrapper.
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &top); err != nil {
+		t.Fatalf("rendered hooks not valid JSON: %v\n%s", err, got)
+	}
+	if _, ok := top["SessionStart"]; !ok {
+		t.Fatalf("expected top-level event keys in standalone format, got keys %v", topLevelKeys(top))
+	}
+	for _, wrapper := range []string{"version", "hooks"} {
+		if _, ok := top[wrapper]; ok {
+			t.Fatalf("devin cloud hooks should not be wrapped under %q:\n%s", wrapper, got)
+		}
+	}
+}
+
+func topLevelKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func TestRenderDevinCloudSetupInstallsBinariesOnly(t *testing.T) {
+	got := renderDevinCloudSetup("v0.0.50")
+	for _, want := range []string{
+		`BEACON_VERSION="v0.0.50"`,
+		`tar -xzf "/tmp/beacon/${ARCHIVE}" -C /tmp/beacon/bin`,
+		`Beacon binaries installed in /tmp/beacon/bin`,
+		`beacon cloud devin print-hooks --binary-path /tmp/beacon/bin/beacon-hooks --log-path /tmp/beacon/runtime.jsonl > .devin/hooks.v1.json`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered setup missing %q:\n%s", want, got)
 		}
 	}
 }

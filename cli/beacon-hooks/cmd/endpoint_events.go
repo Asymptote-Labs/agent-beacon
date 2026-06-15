@@ -19,6 +19,7 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 		fields = map[string]interface{}{}
 	}
 	seedCursorCloudRunID(input)
+	seedDevinCloudRunID()
 	if platformFlag == "grok" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"grok": input})
 	}
@@ -65,6 +66,29 @@ func seedCursorCloudRunID(input map[string]interface{}) {
 	}
 	if runID := getFirstStr(input, "conversation_id", "parent_conversation_id"); runID != "" {
 		_ = os.Setenv("BEACON_RUN_ID", runID)
+	}
+}
+
+func isDevinCloudMode() bool {
+	return strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" &&
+		strings.TrimSpace(os.Getenv("BEACON_RUN_PROVIDER")) == "devin_cloud"
+}
+
+// seedDevinCloudRunID resolves a run id for Devin Cloud sessions. The Devin hook
+// payloads do not carry a session id, so derive BEACON_RUN_ID from a
+// Devin-provided session environment variable when one is available. If none is
+// set, leave BEACON_RUN_ID unset so the cloud shuttle falls back to "unknown".
+func seedDevinCloudRunID() {
+	if !isDevinLikePlatform(platformFlag) || !isDevinCloudMode() || strings.TrimSpace(os.Getenv("BEACON_RUN_ID")) != "" {
+		return
+	}
+	// Candidate session/run identifiers Devin may expose inside the sandbox.
+	// Confirm the authoritative name from a live session and trim this list.
+	for _, key := range []string{"DEVIN_SESSION_ID", "DEVIN_RUN_ID", "DEVIN_SESSION", "ACI_RUN_ID"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			_ = os.Setenv("BEACON_RUN_ID", value)
+			return
+		}
 	}
 }
 
