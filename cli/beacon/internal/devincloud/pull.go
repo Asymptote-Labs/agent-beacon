@@ -128,10 +128,13 @@ func emit(ev schema.Event, opts PullOptions) error {
 	return nil
 }
 
+// marshalEvents builds the per-session JSONL snapshot for upload. Events are run
+// through the same redaction/truncation/size controls as the local writer so
+// the GCS snapshot never carries more raw content than the local log.
 func marshalEvents(mapped []MappedEvent) ([]byte, error) {
 	var buf []byte
 	for _, me := range mapped {
-		data, err := json.Marshal(me.Event)
+		data, err := json.Marshal(writer.SanitizeEvent(me.Event, writer.MaxEventBytes))
 		if err != nil {
 			return nil, err
 		}

@@ -72,6 +72,35 @@ func TestPullOnceWritesAndUploads(t *testing.T) {
 	}
 }
 
+func TestUploadSnapshotIsRedacted(t *testing.T) {
+	dir := t.TempDir()
+	up := &fakeUploader{}
+	srv := fakeDevinAPI(t, `{"items":[
+		{"session_id":"s1","status":"suspended","user_id":"user-1","created_at":1000,"updated_at":1600}
+	],"has_next_page":false,"total":1}`, map[string]string{
+		"s1": `{"items":[
+			{"event_id":"e1","source":"user","message":"deploy with token=supersecretvalue123456","created_at":1000}
+		],"has_next_page":false}`,
+	})
+	defer srv.Close()
+
+	_, err := PullOnce(context.Background(), testClient(t, srv), PullOptions{
+		Write:        true,
+		LogPath:      filepath.Join(dir, "runtime.jsonl"),
+		StatePath:    filepath.Join(dir, "state.json"),
+		Upload:       up,
+		UploadPrefix: "agent-traces",
+	})
+	if err != nil {
+		t.Fatalf("PullOnce: %v", err)
+	}
+	for obj, body := range up.objects {
+		if strings.Contains(string(body), "supersecretvalue123456") {
+			t.Fatalf("uploaded object %q leaked an unredacted secret:\n%s", obj, body)
+		}
+	}
+}
+
 func TestPullOnceDedupsAcrossRuns(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "runtime.jsonl")
