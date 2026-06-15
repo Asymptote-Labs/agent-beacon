@@ -23,7 +23,6 @@ var devinPullOpts struct {
 	state      string
 	logPath    string
 	print      bool
-	once       bool
 	watch      bool
 	interval   time.Duration
 	noUpload   bool
@@ -58,8 +57,7 @@ func init() {
 	f.StringVar(&devinPullOpts.state, "state", "", "Dedup state file path (default ~/.beacon/cloud/devin/<org>/state.json)")
 	f.StringVar(&devinPullOpts.logPath, "log-path", "", "Runtime JSONL log path (default resolved endpoint log)")
 	f.BoolVar(&devinPullOpts.print, "print", false, "Print mapped events as JSON without writing or uploading (dry run)")
-	f.BoolVar(&devinPullOpts.once, "once", true, "Run a single sweep and exit")
-	f.BoolVar(&devinPullOpts.watch, "watch", false, "Poll continuously on --interval")
+	f.BoolVar(&devinPullOpts.watch, "watch", false, "Poll continuously on --interval (default: a single sweep then exit)")
 	f.DurationVar(&devinPullOpts.interval, "interval", time.Minute, "Poll interval for --watch")
 	f.BoolVar(&devinPullOpts.noUpload, "no-upload", false, "Never upload to GCS even when BEACON_CLOUD_GCS_* is set")
 	f.BoolVar(&devinPullOpts.userMode, "user", true, "Use per-user endpoint log paths")

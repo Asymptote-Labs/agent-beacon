@@ -2,6 +2,8 @@ package devincloud
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +123,53 @@ func TestPullOnceDedupsAcrossRuns(t *testing.T) {
 	}
 	if len(nonEmptyLines(t, logPath)) != 4 {
 		t.Fatalf("log grew on re-run; dedup failed")
+	}
+}
+
+func TestPullOncePersistsStateOnError(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "state.json")
+
+	var s2Calls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[
+			{"session_id":"s1","status":"suspended","user_id":"u","created_at":10,"updated_at":20},
+			{"session_id":"s2","status":"suspended","user_id":"u","created_at":10,"updated_at":20}
+		],"has_next_page":false,"total":2}`))
+	})
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions/s1/messages", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"event_id":"e1","source":"user","message":"hi","created_at":10}],"has_next_page":false}`))
+	})
+	mux.HandleFunc("/v3/organizations/"+testOrg+"/sessions/s2/messages", func(w http.ResponseWriter, _ *http.Request) {
+		s2Calls++
+		if s2Calls == 1 {
+			http.Error(w, `{"detail":"boom"}`, http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"event_id":"e2","source":"user","message":"yo","created_at":10}],"has_next_page":false}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := New(testOrg, "cog_test", WithBaseURL(srv.URL), WithRetry(0, 0))
+
+	opts := PullOptions{Write: true, LogPath: logPath, StatePath: statePath}
+
+	// First sweep: s1 succeeds and is written; s2 errors -> PullOnce returns error.
+	if _, err := PullOnce(context.Background(), client, opts); err == nil {
+		t.Fatal("expected error from failing session")
+	}
+	afterFirst := len(nonEmptyLines(t, logPath)) // s1: started + prompt + ended = 3
+
+	// Second sweep: s1 must be skipped (state persisted), s2 now succeeds.
+	if _, err := PullOnce(context.Background(), client, opts); err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	total := len(nonEmptyLines(t, logPath))
+	added := total - afterFirst
+	if added != 3 { // only s2's started + prompt + ended; s1 not re-emitted
+		t.Fatalf("second sweep added %d lines, want 3 (s1 not duplicated)", added)
 	}
 }
 

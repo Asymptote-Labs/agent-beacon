@@ -29,8 +29,8 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 		}
 	}
 
-	// Dedup ids: lifecycle synthetic, messages use event_id.
-	wantIDs := []string{"sess1:started", "e1", "e2", "sess1:ended"}
+	// Dedup ids: lifecycle synthetic (ended keyed by updated_at), messages use event_id.
+	wantIDs := []string{"sess1:started", "e1", "e2", "sess1:ended:1600"}
 	for i, want := range wantIDs {
 		if mapped[i].DedupID != want {
 			t.Fatalf("event %d dedup id = %q, want %q", i, mapped[i].DedupID, want)
@@ -78,6 +78,21 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 	}
 	if devin["duration_seconds"] != int64(600) {
 		t.Fatalf("duration = %v, want 600", devin["duration_seconds"])
+	}
+}
+
+func TestMapSessionReEndsOnNewSuspension(t *testing.T) {
+	// Same session suspended at two different updated_at values must produce two
+	// distinct ended dedup ids so a re-suspension after resume isn't suppressed.
+	first := MapSession(Session{SessionID: "s", Status: "suspended", UpdatedAt: 100}, nil)
+	second := MapSession(Session{SessionID: "s", Status: "suspended", UpdatedAt: 200}, nil)
+	id1 := first[len(first)-1].DedupID
+	id2 := second[len(second)-1].DedupID
+	if id1 == id2 {
+		t.Fatalf("re-suspension produced same ended id %q; would be deduped away", id1)
+	}
+	if id1 != "s:ended:100" || id2 != "s:ended:200" {
+		t.Fatalf("ended ids = %q,%q, want s:ended:100, s:ended:200", id1, id2)
 	}
 }
 

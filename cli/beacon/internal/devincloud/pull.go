@@ -41,13 +41,21 @@ type Summary struct {
 // PullOnce performs one sweep: list sessions, fetch messages for changed
 // sessions, map to Beacon events, emit new ones (print/write), and upload each
 // changed session's full snapshot. State makes it idempotent across runs.
-func PullOnce(ctx context.Context, client *Client, opts PullOptions) (Summary, error) {
-	var sum Summary
-
+func PullOnce(ctx context.Context, client *Client, opts PullOptions) (sum Summary, err error) {
 	state, err := LoadState(opts.StatePath)
 	if err != nil {
 		return sum, fmt.Errorf("load state: %w", err)
 	}
+
+	// Persist dedup progress no matter how we return. Events are appended to the
+	// runtime log as each session is processed, so if a later session errors we
+	// must still save the progress made — otherwise the next sweep re-emits
+	// already-written events and duplicates log lines.
+	defer func() {
+		if saveErr := state.Save(opts.StatePath); saveErr != nil && err == nil {
+			err = fmt.Errorf("save state: %w", saveErr)
+		}
+	}()
 
 	sessions, err := client.ListSessions(ctx)
 	if err != nil {
@@ -99,14 +107,14 @@ func PullOnce(ctx context.Context, client *Client, opts PullOptions) (Summary, e
 
 		ss.UpdatedAt = s.UpdatedAt
 		ss.Status = s.Status
-		if IsFinal(s.Status) && ss.Emitted[s.SessionID+":ended"] {
+		// A final session (finished/expired) can never resume, and its ended
+		// event was emitted in this sweep, so stop polling it. Suspended stays
+		// pollable in case it resumes.
+		if IsFinal(s.Status) {
 			ss.Done = true
 		}
 	}
 
-	if err := state.Save(opts.StatePath); err != nil {
-		return sum, fmt.Errorf("save state: %w", err)
-	}
 	return sum, nil
 }
 

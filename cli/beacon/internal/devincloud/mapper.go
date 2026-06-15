@@ -1,6 +1,7 @@
 package devincloud
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -81,8 +82,11 @@ func MapSession(s Session, msgs []Message) []MappedEvent {
 	}
 
 	if IsTerminal(s.Status) {
+		// Key the ended event by updated_at: a suspended session may resume and
+		// suspend again, and each suspension is a distinct end-of-activity. A
+		// fixed ":ended" key would suppress every end after the first.
 		out = append(out, MappedEvent{
-			DedupID: s.SessionID + ":ended",
+			DedupID: fmt.Sprintf("%s:ended:%d", s.SessionID, s.UpdatedAt),
 			Event:   sessionLifecycleEvent(s, "session.ended", "Devin Cloud session ended", s.UpdatedAt),
 		})
 	}
