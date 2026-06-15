@@ -1,0 +1,174 @@
+---
+title: "Inventory Local Agent Runtimes"
+description: "Inventory local agent runtimes, MCP servers, and Beacon-observable configuration"
+---
+
+## Overview
+
+This guide shows how to inventory the AI agent footprint on an endpoint: installed runtimes, MCP servers, local config files, telemetry hooks, OTLP settings, and recent observed activity.
+
+Use it when you need to answer what is installed, what an agent may be able to access, and whether Beacon has recently observed activity from each runtime.
+
+## Setup
+
+Install Beacon and configure endpoint telemetry before running inventory checks:
+
+```bash
+beacon endpoint install
+beacon endpoint status
+```
+
+## 1. Run A Basic Inventory
+
+Start with the default inventory view:
+
+```bash title="Inventory local runtimes"
+beacon endpoint inventory
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint inventory
+
+Runtime inventory
+Claude Code      installed  configured  observed
+Codex CLI        installed  managed     observed
+Cursor           installed  hooks: not installed
+MCP servers      3 configured
+Runtime log      ~/.beacon/endpoint/logs/runtime.jsonl
+```
+</Accordion>
+
+## 2. Include All Local Signals
+
+Use `--all` when you want local config files, MCP servers, hooks, OTLP settings, and observed runtime coverage in one report:
+
+```bash title="Show full local inventory"
+beacon endpoint inventory --all
+```
+
+Use `--system` for packaged or MDM-managed installs:
+
+```bash title="Check a system-mode install"
+sudo beacon endpoint inventory --system --all
+```
+
+## 3. Export JSON For Review
+
+Use JSON output for support bundles, scripts, or fleet comparison:
+
+```bash title="Export inventory as JSON"
+beacon endpoint inventory --json
+```
+
+<Accordion title="Sample JSON output">
+```json title="Sample JSON output"
+{
+  "runtimes": [
+    {
+      "name": "codex",
+      "installed": true,
+      "configured": true,
+      "managed": true,
+      "observed": true
+    }
+  ],
+  "mcpServers": [
+    {
+      "name": "filesystem",
+      "source": "~/.cursor/mcp.json"
+    }
+  ]
+}
+```
+</Accordion>
+
+## Key Questions Answered
+
+- Which supported agent runtimes are installed or configured on this machine?
+- Which MCP servers are referenced by local agent configuration?
+- Which runtime config files can Beacon inspect locally?
+- Which hooks, OTLP settings, or launch environment entries are present?
+- Which detected runtimes have recently produced Beacon events?
+
+## What To Look For
+
+| Signal | Why it matters |
+|--------|----------------|
+| Installed runtimes | Shows the local AI tools present on the endpoint. |
+| Config files | Identifies where runtime behavior and integrations are defined. |
+| MCP servers | Shows external tools an agent may be able to call. |
+| Hooks and OTLP settings | Confirms whether Beacon can collect telemetry. |
+| Managed state | Distinguishes Beacon-managed collection from customer-managed config. |
+| Observed events | Confirms the runtime has recently emitted Beacon telemetry. |
+
+Inventory reads local endpoint state only. It does not authenticate to remote SaaS accounts or MCP servers.
+
+## View Results
+
+### Runtime Coverage States
+
+- **Installed:** the runtime or executable appears to be present locally.
+- **Configured:** Beacon can see telemetry settings, hooks, launch environment entries, or other local config for the runtime.
+- **Managed:** the detected telemetry surface appears to be configured by Beacon.
+- **Observed:** recent Beacon events in the runtime log reference the runtime.
+
+A runtime can be installed but not configured, configured but not observed, or observed only in a different user-mode or system-mode log.
+
+### MCP Servers And Configs
+
+Use MCP inventory to spot tool exposure from local agent configs:
+
+- Expected MCP servers missing after deployment
+- Unexpected MCP servers on sensitive endpoints
+- Server references introduced by a specific runtime config
+- User-mode versus system-mode config differences
+
+## 4. Open Dashboard Inventory
+
+Open the dashboard for a quick visual check alongside top harnesses, models, repositories, MCP servers, and risk signals:
+
+```bash title="Open the dashboard"
+beacon endpoint dashboard --open
+```
+
+## Key Features Demonstrated
+
+- Local runtime discovery without remote SaaS authentication.
+- MCP server and config inventory from supported local paths.
+- Coverage state comparison across installed, configured, managed, and observed runtimes.
+- Dashboard handoff for visual review.
+
+## Troubleshooting
+
+Check whether:
+
+- The runtime is installed on the endpoint
+- Beacon can detect the runtime or its configuration file
+- The MCP server is defined in a supported local config path
+- Hooks, OTLP settings, or launch environment entries are configured for that runtime
+- User mode or system mode is reading the config and runtime log you expect
+- Recent events exist in the active runtime log or a rotated archive
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Agent Activity Guides" icon="bullseye" href="/guides/use-cases">
+    Review common Beacon workflows for local agent runtime visibility.
+  </Card>
+  <Card title="Investigate Agent Runtime Activity" icon="tower-broadcast" href="/guides/agent-runtime-telemetry">
+    Collect, inspect, and forward normalized telemetry from local agent runtimes.
+  </Card>
+  <Card title="beacon endpoint dashboard" icon="chart-line" href="/cli/dashboard">
+    Open the local dashboard and review Security Overview.
+  </Card>
+  <Card title="beacon endpoint inventory" icon="clipboard-list" href="/cli/endpoint-inventory">
+    Review flags, examples, and JSON output behavior.
+  </Card>
+  <Card title="Endpoint discover" icon="magnifying-glass" href="/cli/endpoint-discover">
+    Discover supported local agent harnesses and telemetry state.
+  </Card>
+  <Card title="Data inventory" icon="table-list" href="/security/data-inventory">
+    Review runtime coverage and endpoint event fields Beacon can write.
+  </Card>
+</Columns>

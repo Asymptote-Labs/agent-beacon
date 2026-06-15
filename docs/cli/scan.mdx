@@ -1,0 +1,96 @@
+---
+title: "beacon scan"
+description: "Run threat-detection rules over local Beacon endpoint telemetry"
+---
+
+## Command Overview
+
+`beacon scan` runs active threat-detection rules over the local Beacon runtime log and reports findings. The scan is read-only and never touches the network.
+
+```bash title="Command syntax"
+beacon scan [flags]
+```
+
+Use this command after endpoint telemetry is flowing when you want a local risk check before forwarding events, sharing diagnostics, or gating a CI-like validation workflow.
+
+## How scanning works
+
+Beacon loads rules from the local rule store when present. If no store is installed, Beacon uses the built-in baseline rules. You can also point a scan at an explicit rule directory with `--rules`.
+
+Rules are YAML documents with CEL expressions over the Beacon [Endpoint Event Schema](/telemetry-schema/event-schema). Rules can match one event or correlate multiple ordered events within one session window.
+
+## Workflows
+
+<Columns cols={2}>
+  <Card title="Run local scans" icon="magnifying-glass" href="/cli/scan-local">
+    Choose runtime logs, rule directories, sessions, and output formats.
+  </Card>
+  <Card title="Use scan gates" icon="circle-exclamation" href="/cli/scan-ci-gates">
+    Filter findings and fail automation on severity thresholds.
+  </Card>
+</Columns>
+
+## Examples
+
+Run the active rules over the default per-user endpoint log:
+
+```bash title="Run a local scan"
+beacon scan
+```
+
+Print machine-readable findings:
+
+```bash title="Print JSON findings"
+beacon scan --json
+```
+
+Only report high and critical findings:
+
+```bash title="Filter by severity"
+beacon scan --min-severity high
+```
+
+Fail the command when any high or critical finding is present:
+
+```bash title="Fail on high-severity findings"
+beacon scan --fail-on high
+```
+
+Scan a copied runtime log with a local rule pack:
+
+```bash title="Scan an explicit log and rules directory"
+beacon scan --log-path ./runtime.jsonl --rules ./rules
+```
+
+Filter to one session id substring:
+
+```bash title="Scan one session"
+beacon scan --session claude-session-123
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the path resolved from endpoint config |
+| `--rules <dir>` | Rule directory to scan with. Defaults to the local store, then the built-in baseline |
+| `--json` | Output findings as JSON |
+| `--min-severity <level>` | Only report findings at or above `info`, `low`, `medium`, `high`, or `critical` |
+| `--session <id>` | Only scan events whose session id contains this value |
+| `--fail-on <level>` | Exit non-zero if any finding is at or above `info`, `low`, `medium`, `high`, or `critical` |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules" icon="shield-halved" href="/cli/rules">
+    Manage, pull, and author threat-detection rules.
+  </Card>
+  <Card title="Detections" icon="book-open" href="/detections">
+    Learn how detection rules, fixtures, and findings work.
+  </Card>
+  <Card title="Endpoint dashboard" icon="chart-line" href="/cli/dashboard">
+    Inspect the same runtime logs locally before or after scanning.
+  </Card>
+</Columns>

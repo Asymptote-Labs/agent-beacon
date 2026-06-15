@@ -1,0 +1,56 @@
+---
+title: "Upgrade Beacon"
+description: "Check for Beacon CLI updates and upgrade safely"
+---
+
+## Check for updates
+
+Use `beacon version check` before upgrading to confirm whether a newer release is available:
+
+```bash title="Check for updates"
+beacon version check
+```
+
+When an update is available, Beacon prints the latest version, the installed version, Homebrew upgrade guidance, and a release download URL.
+
+## Upgrade with Homebrew
+
+Upgrade Beacon with the standard Homebrew flow:
+
+```bash title="Upgrade Beacon"
+brew update
+brew upgrade beacon
+beacon version
+```
+
+## Repair endpoint configuration
+
+If you run Beacon as a local endpoint service, reapply managed service files and telemetry configuration after upgrading:
+
+```bash title="Repair endpoint configuration after upgrade"
+beacon endpoint repair
+beacon endpoint status
+```
+
+`beacon endpoint repair` preserves runtime logs while reapplying service files, collector configuration, harness telemetry settings, and forwarding destinations.
+
+<Note>
+  On v0.0.43 or newer, use `beacon endpoint doctor --fix` when you only need supported health-check drift remediated without a full repair.
+</Note>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Install Beacon" icon="download" href="/cli/install">
+    Install the Beacon CLI with Homebrew or platform archives.
+  </Card>
+  <Card title="beacon version" icon="code-branch" href="/cli/version">
+    Display the installed version and check for released updates.
+  </Card>
+  <Card title="Endpoint repair" icon="wrench" href="/cli/endpoint-repair">
+    Reapply service files and telemetry configuration.
+  </Card>
+  <Card title="Endpoint health checks" icon="stethoscope" href="/cli/endpoint-doctor">
+    Validate endpoint health and apply supported fixes.
+  </Card>
+</Columns>

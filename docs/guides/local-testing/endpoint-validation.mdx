@@ -1,0 +1,86 @@
+---
+title: "Validate Endpoint Telemetry"
+description: "Confirm local Beacon endpoint health, event writes, and runtime log state"
+---
+
+## Overview
+
+Use endpoint validation to prove the local Beacon install can find its configuration, write endpoint events, and read the expected runtime JSONL log.
+
+Start here when you are evaluating Beacon locally, preparing a pilot, or collecting support evidence before managed deployment.
+
+## Setup
+
+Run validation after Beacon has installed endpoint telemetry:
+
+```bash title="Configure endpoint telemetry"
+beacon endpoint install
+beacon endpoint status
+```
+
+## Validation Workflow
+
+<Steps>
+  <Step title="Check health">
+    Run status and doctor checks to confirm local configuration, collector state, diagnostics, and discovered harnesses.
+  </Step>
+  <Step title="Write a validation event">
+    Append a known-good synthetic event so later checks have a controlled record to find.
+  </Step>
+  <Step title="Confirm the runtime log">
+    Verify user or system mode, runtime path, freshness, rotation behavior, and any custom log path used for testing.
+  </Step>
+</Steps>
+
+## Run The Validation Path
+
+```bash title="Validate local endpoint telemetry"
+beacon endpoint status
+beacon endpoint doctor
+beacon endpoint test-event
+beacon endpoint status
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint doctor
+
+endpoint config: pass
+collector config: pass
+runtime log: pass
+launchd service: pass
+harness telemetry: pass
+
+$ beacon endpoint test-event
+checked runtime log: ok
+wrote validation event: ok
+```
+</Accordion>
+
+## View Results
+
+The final status check should show a recent last Beacon event. If you open the dashboard, Log Search should include the synthetic validation event.
+
+```bash title="Open dashboard"
+beacon endpoint dashboard --open
+```
+
+## Detailed Guides
+
+<Columns cols={2}>
+  <Card title="Run Endpoint Health Checks" icon="stethoscope" href="/guides/local-testing/health">
+    Validate endpoint status, doctor checks, discovered harnesses, and local collector readiness.
+  </Card>
+  <Card title="Write Validation Events" icon="vial" href="/guides/local-testing/events">
+    Write synthetic Beacon events and confirm the runtime log accepts endpoint telemetry.
+  </Card>
+  <Card title="Inspect Runtime Logs" icon="file-lines" href="/guides/local-testing/logs">
+    Inspect runtime JSONL paths, last-event state, and user versus system mode behavior.
+  </Card>
+</Columns>
+
+## Troubleshooting
+
+- If doctor fails before writing an event, fix endpoint configuration or collector health first.
+- If `test-event` fails, check runtime log path and permissions.
+- If status shows no recent event after a successful write, confirm you are checking the same user-mode, system-mode, or custom log path.

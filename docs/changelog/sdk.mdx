@@ -1,0 +1,20 @@
+---
+title: Asymptote SDK Release Notes
+description: Latest updates and improvements to the Asymptote Observe SDK
+---
+
+## Latest updates
+
+Stay up to date with the latest changes to the Asymptote Observe SDK.
+
+---
+
+## June 2026
+
+### v0.1.0 · June 10, 2026
+
+- **Initial TypeScript SDK release** · Published `@asymptote/sdk` for instrumenting cloud-hosted agent applications with OpenTelemetry spans compatible with Beacon's normalized event model.
+- **Hosted and customer-managed export** · Added hosted Asymptote Observe export through `ASYMPTOTE_API_KEY` and customer-managed OTLP export through `OTEL_EXPORTER_OTLP_ENDPOINT` or `Observe.initialize({ otlpEndpoint })`.
+- **AI SDK instrumentation** · Enabled OpenAI and Anthropic OpenLLMetry instrumentation by default, with configuration hooks for disabling or tuning provider instrumentation.
+- **Agent integration helpers** · Added `Observe.observe()`, `Observe.getTracer()`, `Observe.wrapClaudeAgentQuery()`, `Observe.flush()`, and `Observe.shutdown()` for custom agent steps, Vercel AI SDK telemetry, Claude Agent SDK query wrapping, and process lifecycle handling.
+- **Beacon compatibility attributes** · Exported constants for Beacon-compatible fields such as `beacon.origin`, `beacon.harness.name`, `beacon.event.action`, and `beacon.prompt.text`.

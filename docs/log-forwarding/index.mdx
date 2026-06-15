@@ -1,0 +1,313 @@
+---
+title: "Log Forwarding"
+description: "Forward Beacon endpoint events from local JSONL into SIEMs, log aggregators, object storage, or local review workflows."
+---
+
+## Forwarding Overview
+
+Beacon writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) as JSONL. The active [runtime log](/concepts/core-concepts#runtime-jsonl-log) is the handoff point for local review, customer-managed log pipelines, log aggregators, object storage exporters, and most SIEM content packs. Beacon can also enable optional collector exporters for [Splunk HTTP Event Collector (HEC)](/concepts/core-concepts#splunk-hec) and [CrowdStrike Falcon LogScale HEC](/concepts/core-concepts#falcon-logscale-hec) during endpoint install or repair.
+
+Use the subpages below by destination category. SIEM pages are for destinations that become investigation or detection systems. Log aggregation pages are for customer-owned pipelines and observability stores that tail local JSONL. Object storage pages are for archival or data lake export. Local pages cover the default runtime log and dashboard source.
+
+For ephemeral CI jobs, see [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports) for workflow artifacts, S3/GCS upload, and downstream handoff patterns over the completed CI `runtime.jsonl` file.
+
+For provider-managed cloud agents, see
+[Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) or
+[Cursor Cloud Agents](/runtimes/cursor-cloud-agents). Cloud agents currently support
+Google Cloud Storage as the self-serve artifact destination; AWS S3 and SIEM
+destinations are planned.
+
+## Runtime log paths
+
+| Mode | Runtime log |
+|------|-------------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+Use system mode for MDM deployments so endpoint events land in the shared system log path.
+
+## Destination categories
+
+### Security Information and Event Management (SIEM)
+
+Use these paths when the destination is the security investigation or detection system.
+
+<Columns cols={2}>
+  <Card title="Falcon LogScale" icon="magnifying-glass-chart" href="/log-forwarding/falcon">
+    Optional endpoint forwarding with LogScale ingest tokens, or Vector runtime-log forwarding for hook-only deployments.
+  </Card>
+  <Card title="Microsoft Sentinel" icon="chart-line" href="/log-forwarding/microsoft-sentinel">
+    Azure Monitor Agent and Data Collection Rule content pack over local JSONL.
+  </Card>
+  <Card title="Rapid7 InsightIDR" icon="chart-line" href="/log-forwarding/rapid7">
+    Custom Logs webhook content pack over local JSONL.
+  </Card>
+  <Card title="Splunk HEC" icon="magnifying-glass-chart" href="/log-forwarding/splunk">
+    Optional endpoint forwarding during install or repair.
+  </Card>
+  <Card title="Sumo Logic" icon="chart-line" href="/log-forwarding/sumo">
+    HTTP Logs & Metrics Source content pack over local JSONL.
+  </Card>
+  <Card title="Wazuh" icon="shield" href="/log-forwarding/wazuh">
+    Localfile configuration and Beacon Wazuh content pack.
+  </Card>
+</Columns>
+
+### Log Aggregation
+
+Use these paths when Beacon JSONL feeds an observability store or customer-managed forwarding pipeline.
+
+<Columns cols={2}>
+  <Card title="AWS CloudWatch Logs" icon="chart-line" href="/log-forwarding/cloudwatch">
+    Vector content pack over local JSONL using customer-managed AWS credentials.
+  </Card>
+  <Card title="Customer-managed log pipelines" icon="route" href="/log-forwarding/customer-managed">
+    Forward from local Beacon JSONL under customer control.
+  </Card>
+  <Card title="Datadog" icon="chart-line" href="/log-forwarding/datadog">
+    Datadog Agent custom log collection over local JSONL.
+  </Card>
+  <Card title="Elastic" icon="magnifying-glass" href="/log-forwarding/elastic">
+    Filebeat or Elastic Agent content pack over local JSONL.
+  </Card>
+</Columns>
+
+### Object Storage
+
+Use these paths when Beacon JSONL should land in a customer-managed bucket for archive, lake, or downstream detection workflows.
+
+<Columns cols={2}>
+  <Card title="AWS S3" icon="box-archive" href="/log-forwarding/s3">
+    Vector content pack over local JSONL using customer-managed AWS credentials.
+  </Card>
+  <Card title="Google Cloud Storage" icon="box-archive" href="/log-forwarding/gcs">
+    Vector content pack over local JSONL using customer-managed Google credentials.
+  </Card>
+</Columns>
+
+### Local
+
+Use this path when Beacon's local file and dashboard are the destination.
+
+<Columns cols={2}>
+  <Card title="Local JSONL" icon="file-lines" href="/log-forwarding/local-jsonl">
+    Default endpoint log and local dashboard source.
+  </Card>
+  <Card title="CI Telemetry Exports" icon="file-export" href="/log-forwarding/ci-telemetry-exports">
+    Export ephemeral CI runtime JSONL through artifacts, object storage, or downstream pipelines.
+  </Card>
+</Columns>
+
+## Quick examples
+
+### Wazuh localfile
+
+Use Beacon's Wazuh commands to generate localfile configuration, rules, sample content, and validation events.
+
+```bash title="Print the configuration"
+beacon endpoint wazuh print-config --system
+beacon endpoint wazuh install-pack --system --output ./beacon-wazuh
+beacon endpoint wazuh validate --system
+```
+
+`print-config` emits the localfile snippet for an existing Wazuh agent configuration. `install-pack` writes a file-based bundle with rules and config snippets. `validate` writes a known-good Beacon event to the runtime log so you can confirm ingestion.
+
+### Splunk HEC
+
+For Splunk HEC, configure Beacon's optional collector exporter or your existing forwarder.
+
+```bash title="Install Beacon endpoint"
+beacon endpoint install \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+### CrowdStrike Falcon LogScale
+
+For Falcon LogScale HEC, configure Beacon's optional collector exporter during endpoint install or repair.
+
+```bash title="Install Beacon endpoint"
+beacon endpoint install \
+  --falcon-hec-endpoint https://cloud.<region>.humio.com/api/v1/ingest/hec \
+  --falcon-hec-token "$FALCON_HEC_TOKEN" \
+  --falcon-index beacon
+```
+
+Beacon preserves the local `runtime.jsonl` file while adding the `falcon_hec` collector exporter. For hook-only Claude deployments, use the Falcon Vector forwarder to tail `runtime.jsonl` instead. See [Falcon LogScale forwarding](/log-forwarding/falcon) for endpoint, repository, source, parser, TLS, and validation guidance.
+
+### Elastic
+
+For Elastic Cloud, self-managed Elastic, or local Kibana validation, generate Beacon's Elastic content pack and use Filebeat or standalone Elastic Agent to tail the runtime log.
+
+```bash title="Generate the integration pack"
+beacon endpoint elastic install-pack --system --output ./beacon-elastic-pack
+```
+
+For local macOS testing with Docker Desktop, Beacon can start a loopback-only Elasticsearch, Kibana, and Filebeat stack:
+
+```bash title="Start the local Elastic validation stack"
+beacon endpoint elastic install-pack --system --output ./beacon-elastic-pack
+beacon endpoint elastic up --system --pack-dir ./beacon-elastic-pack
+```
+
+See [Elastic forwarding](/log-forwarding/elastic) for local and hosted setup steps.
+
+### Datadog
+
+For Datadog Logs, generate Beacon's Datadog content pack and install the custom log collection config into the Datadog Agent.
+
+```bash title="Generate the integration pack"
+beacon endpoint datadog install-pack --system --output ./beacon-datadog-pack
+```
+
+The generated config tails `/var/log/beacon-agent/runtime.jsonl`, sets `service:beacon-endpoint-agent`, and tags events with `vendor:beacon` and `product:endpoint-agent`.
+
+See [Datadog forwarding](/log-forwarding/datadog) for install, permission, retention, and validation steps.
+
+### Sumo Logic
+
+For Sumo Logic, generate Beacon's Sumo content pack and configure a customer-managed shipper to send Beacon JSONL to a Hosted Collector HTTP Logs & Metrics Source.
+
+```bash title="Generate the integration pack"
+beacon endpoint sumo install-pack --system --output ./beacon-sumo-pack
+```
+
+The generated pack includes setup guidance, a one-shot upload smoke-test script, `vector.toml`, and sample events. Use the smoke test only for validation; production forwarding should tail `runtime.jsonl`, checkpoint offsets, and preserve each JSON line as one event.
+
+See [Sumo Logic forwarding](/log-forwarding/sumo) for Hosted Collector setup, source URL options, smoke testing, production forwarding, and validation queries.
+
+### Rapid7 InsightIDR
+
+For Rapid7 InsightIDR, generate Beacon's Rapid7 content pack and configure a customer-managed shipper to send Beacon JSONL to a Custom Logs webhook event source.
+
+```bash title="Generate the integration pack"
+beacon endpoint rapid7 install-pack --system --output ./beacon-rapid7-pack
+```
+
+The generated pack includes setup guidance, a one-shot NDJSON upload smoke-test script, `vector.toml`, and sample events. Use the smoke test only for validation; production forwarding should tail `runtime.jsonl`, checkpoint offsets, preserve each JSON line as one event, and keep the Rapid7 webhook URL outside Beacon endpoint configuration.
+
+See [Rapid7 forwarding](/log-forwarding/rapid7) for Custom Logs setup, webhook handling, smoke testing, production forwarding, and validation queries.
+
+### Microsoft Sentinel
+
+For Microsoft Sentinel, generate Beacon's Sentinel content pack and configure Azure Monitor Agent custom log collection to tail Beacon JSONL into the `BeaconRuntime_CL` table.
+
+```bash title="Generate the integration pack"
+beacon endpoint sentinel install-pack --system --output ./beacon-sentinel-pack
+```
+
+The generated pack includes setup guidance, `table-schema.json`, `dcr-template.json`, `dcr-transform.kql`, starter hunting queries, example detection logic, and sample events. Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, and ingestion endpoints stay in Azure Monitor, endpoint-management tooling, or customer-managed forwarders rather than Beacon endpoint configuration.
+
+See [Microsoft Sentinel forwarding](/log-forwarding/microsoft-sentinel) for Azure Monitor Agent setup, DCR configuration, validation queries, and content handling guidance.
+
+### AWS CloudWatch Logs
+
+For AWS CloudWatch Logs, generate Beacon's CloudWatch content pack and configure a customer-managed Vector host agent to write parsed Beacon JSON events into a log group.
+
+```bash title="Generate the integration pack"
+beacon endpoint cloudwatch install-pack --system --output ./beacon-cloudwatch-pack
+```
+
+The generated pack includes setup guidance, a Vector `aws_cloudwatch_logs` sink template, and sample events. AWS credentials, IAM roles, log group retention, stream naming, and encryption stay in AWS, Vector, endpoint-management tooling, or your secret store rather than Beacon endpoint configuration.
+
+See [AWS CloudWatch Logs forwarding](/log-forwarding/cloudwatch) for IAM, Vector setup, CloudWatch Logs queries, and validation steps.
+
+### AWS S3
+
+For AWS S3, generate Beacon's S3 content pack and configure a customer-managed Vector host agent to write gzip-compressed NDJSON objects into a bucket.
+
+```bash title="Generate the integration pack"
+beacon endpoint s3 install-pack --system --output ./beacon-s3-pack
+```
+
+The generated pack includes setup guidance, a Vector `aws_s3` sink template, a one-shot AWS CLI smoke-test script, and sample events. AWS credentials, bucket policy, lifecycle, retention, encryption, and object ownership stay in AWS, Vector, endpoint-management tooling, or your secret store rather than Beacon endpoint configuration.
+
+See [AWS S3 forwarding](/log-forwarding/s3) for IAM, object layout, Vector setup, smoke testing, and validation steps.
+
+### Google Cloud Storage
+
+For Google Cloud Storage, generate Beacon's GCS content pack and configure a customer-managed Vector host agent to write gzip-compressed NDJSON objects into a bucket.
+
+```bash title="Generate the integration pack"
+beacon endpoint gcs install-pack --system --output ./beacon-gcs-pack
+```
+
+The generated pack includes setup guidance, a Vector `gcp_cloud_storage` sink template, a one-shot `gcloud storage` or `gsutil` smoke-test script, and sample events. Google Cloud credentials, service accounts, workload identity, bucket IAM, lifecycle, retention, and encryption stay in Google Cloud, Vector, endpoint-management tooling, or your secret store rather than Beacon endpoint configuration.
+
+See [Google Cloud Storage forwarding](/log-forwarding/gcs) for IAM, object layout, Vector setup, smoke testing, and validation steps.
+
+### Vector log forwarding
+
+Beacon `v0.0.26` added generated Vector configs to the Sumo Logic and Rapid7 content packs, Beacon `v0.0.37` added a Vector AWS S3 content pack, Beacon `v0.0.38` added a Vector Google Cloud Storage content pack, Beacon `v0.0.42` added a Vector AWS CloudWatch Logs content pack, and Beacon `v0.0.49` added a CrowdStrike Falcon Vector path. Use these templates when you want a customer-managed host agent to tail Beacon's local `runtime.jsonl` and forward events without storing destination secrets in Beacon endpoint configuration.
+
+```bash title="Generate the integration pack"
+beacon endpoint sumo install-pack --system --output ./beacon-sumo-pack
+beacon endpoint rapid7 install-pack --system --output ./beacon-rapid7-pack
+beacon endpoint falcon install-pack --system --output ./beacon-falcon-pack
+beacon endpoint cloudwatch install-pack --system --output ./beacon-cloudwatch-pack
+beacon endpoint s3 install-pack --system --output ./beacon-s3-pack
+beacon endpoint gcs install-pack --system --output ./beacon-gcs-pack
+```
+
+The generated `vector.toml` files use the selected Beacon log path, parse each JSONL line into the original Beacon event, and send JSON with destination-appropriate framing. Vector owns checkpointing in its `data_dir`, batching, retries, destination URLs, CloudWatch log streams, S3 and GCS object keys, and destination-specific headers or settings such as `X-Sumo-Category`, `X-Sumo-Fields`, `x-sumo-token`, `Content-Type: application/x-ndjson`, `BEACON_FALCON_HEC_ENDPOINT`, `BEACON_CLOUDWATCH_LOG_GROUP`, `BEACON_CLOUDWATCH_LOG_STREAM_PREFIX`, `BEACON_S3_BUCKET`, `BEACON_S3_PREFIX`, `AWS_REGION`, `BEACON_GCS_BUCKET`, and `BEACON_GCS_PREFIX`.
+
+For managed endpoint deployments, install Vector through your normal endpoint tooling, copy the generated config into Vector's config directory, and provide `SUMO_URL`, optional `SUMO_TOKEN`, `RAPID7_WEBHOOK_URL`, `BEACON_FALCON_HEC_ENDPOINT`, `BEACON_FALCON_HEC_TOKEN`, `BEACON_CLOUDWATCH_LOG_GROUP`, optional `BEACON_CLOUDWATCH_LOG_STREAM_PREFIX`, `BEACON_S3_BUCKET`, optional `BEACON_S3_PREFIX`, `AWS_REGION`, `BEACON_GCS_BUCKET`, optional `BEACON_GCS_PREFIX`, and destination credentials through the Vector service environment, host identity, or your MDM/secret tooling.
+
+### Customer-managed forwarding
+
+For another SIEM, observability store, archive, or pipeline, configure a customer-managed forwarder to read the Beacon runtime log and preserve each JSONL line as one event. See [Customer-managed log pipelines](/log-forwarding/customer-managed) for the dedicated forwarding contract.
+
+Recommended settings:
+
+- Read from `/var/log/beacon-agent/runtime.jsonl` for system deployments.
+- Follow file rotation at that active path and checkpoint offsets according to your shipper's rotation support.
+- Treat each line as a complete JSON event.
+- Preserve the raw Beacon JSON for investigation.
+- Use the `vendor`, `product`, `event`, `actor`, `endpoint`, `process`, `file`, `tool`, `mcp`, `approval`, and `health` fields for parsing and routing.
+- Validate forwarding after deployment by writing a Beacon validation event, searching for the Falcon LogScale, Sumo Logic, Rapid7, Microsoft Sentinel, AWS CloudWatch Logs, AWS S3, or Google Cloud Storage validation message, or simulating the Elastic ingest pipeline with the generated sample event.
+
+### Local JSONL
+
+Local JSONL is the default endpoint log and local dashboard source. See [Local JSONL](/log-forwarding/local-jsonl) when you want the local audit trail without remote forwarding.
+
+```bash title="Check endpoint status as JSON"
+beacon endpoint status --json
+beacon endpoint test-event
+beacon endpoint dashboard --open
+```
+
+## Validation
+
+After installing or repairing Beacon, confirm the endpoint state and write a validation event:
+
+```bash title="Check the endpoint state and write a validation event"
+sudo /opt/beacon/bin/beacon endpoint status --system --json
+sudo /opt/beacon/bin/beacon endpoint wazuh validate --system
+```
+
+If the validation event is not visible downstream, verify that the runtime log exists, is writable, and is the same path your Wazuh agent, Filebeat input, Elastic Agent input, Datadog Agent config, Sumo Logic shipper, Rapid7 forwarder, Azure Monitor Agent DCR, Vector CloudWatch, S3, or GCS shipper, or customer-managed shipper is reading. For Splunk HEC and Falcon LogScale HEC, also confirm `beacon endpoint status --json` reports `destinations.splunk_hec.configured: true` or `destinations.falcon_hec.configured: true`.
+
+```bash title="Command example"
+sudo test -w /var/log/beacon-agent/runtime.jsonl
+sudo launchctl print system/com.beacon.endpoint.collector
+```
+
+## Event schema
+
+Beacon endpoint events share a stable schema across supported runtime sources. The generated Wazuh, Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, AWS CloudWatch Logs, AWS S3, and Google Cloud Storage content and the Splunk HEC or Falcon LogScale HEC collector exporters can identify telemetry health issues, command and MCP activity, policy blocks, endpoint health failures, prompt and tool workflow telemetry, file activity, and tool failures while preserving the raw Beacon JSON.
+
+<Columns cols={2}>
+  <Card title="Core Concepts" icon="book-open" href="/concepts/core-concepts">
+    Review runtime log, local collector, content pack, and forwarding terms.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+  <Card title="Customer-managed log pipelines" icon="route" href="/log-forwarding/customer-managed">
+    Forward local Beacon JSONL through customer-controlled shippers.
+  </Card>
+  <Card title="Local JSONL" icon="file-lines" href="/log-forwarding/local-jsonl">
+    Use the default endpoint log and local dashboard source.
+  </Card>
+</Columns>

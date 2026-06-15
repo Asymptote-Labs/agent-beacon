@@ -1,0 +1,62 @@
+---
+title: "OpenClaw Gateway"
+description: "Asymptote support details for OpenClaw Gateway endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports OpenClaw Gateway through gateway-configured OTLP/HTTP export.
+
+## Prerequisites
+
+Before enabling OpenClaw Gateway telemetry, make sure:
+
+- You can configure the OpenClaw Gateway `diagnostics-otel` plugin.
+- `beacon endpoint install` has run so the local collector and runtime log path exist.
+- You have run `beacon endpoint integrations openclaw print-config` to get the local OTLP/HTTP settings for Gateway.
+- OpenClaw Gateway points at the same Asymptote collector and runtime log that you will inspect with `beacon` commands.
+- `captureContent` is explicitly enabled in OpenClaw if you expect prompt content rather than metadata-only telemetry.
+
+## Collection path
+
+OpenClaw Gateway emits OTLP logs, traces, and metrics through the `diagnostics-otel` plugin. Asymptote prints local OTLP/HTTP Gateway config and validates whether OpenClaw-derived events have reached the endpoint runtime log.
+
+## Discovery and status
+
+Asymptote validates OpenClaw Gateway support by scanning the endpoint runtime log for OpenClaw-derived events after Gateway diagnostics are configured.
+
+Use `beacon endpoint integrations openclaw status` to check whether OpenClaw events have been observed.
+
+## Install or configuration support
+
+OpenClaw Gateway is configured in OpenClaw, not by `beacon endpoint install`.
+
+Use `beacon endpoint integrations openclaw print-config` to print local Gateway OTLP settings, then configure OpenClaw Gateway with the `diagnostics-otel` plugin.
+
+OpenClaw Gateway is not hook-based.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Disabled by default unless OpenClaw `captureContent` settings are explicitly enabled |
+| Command, tool, and file telemetry | Supported for OTLP logs, traces, and metrics emitted by the Gateway diagnostics plugin |
+| Local JSONL and dashboard | Supported after events reach the collector |
+| MDM deployment | Supported for the endpoint agent; Gateway diagnostics configuration is managed in OpenClaw |
+
+## Deployment notes
+
+Because OpenClaw Gateway configuration lives in OpenClaw, use Asymptote's OpenClaw integration commands to print the expected local OTLP/HTTP configuration and validate observed runtime events.
+
+If no OpenClaw events appear, confirm the Gateway diagnostics plugin is enabled, the OTLP endpoint points at the Asymptote collector, and the runtime log being inspected is the same log the collector writes.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="OpenClaw commands" icon="plug" href="/cli/openclaw">
+    Print config, check status, and validate OpenClaw telemetry.
+  </Card>
+</Columns>

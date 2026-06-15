@@ -1,0 +1,166 @@
+---
+title: "beacon endpoint integrations openclaw"
+description: "Set up OpenClaw Gateway OpenTelemetry export for Beacon"
+---
+
+## Integration Command
+
+OpenClaw Gateway can export diagnostics through the `diagnostics-otel` plugin. Beacon can print a local OTLP/HTTP Gateway configuration and validate whether OpenClaw-derived events are arriving in the endpoint runtime log.
+
+```bash title="Command syntax"
+beacon endpoint integrations openclaw [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="print-config" icon="file-lines" href="#beacon-endpoint-integrations-openclaw-print-config">
+    Print OpenClaw Gateway OTLP setup guidance.
+  </Card>
+  <Card title="status" icon="circle-info" href="#beacon-endpoint-integrations-openclaw-status">
+    Show OpenClaw Gateway endpoint integration status.
+  </Card>
+  <Card title="validate" icon="check" href="#beacon-endpoint-integrations-openclaw-validate">
+    Validate whether OpenClaw OTLP-derived events are arriving.
+  </Card>
+</Columns>
+
+## Gateway setup
+
+Start Beacon's local endpoint collector:
+
+```bash title="Start Beacon's local endpoint collector"
+beacon endpoint install
+```
+
+Install and enable the OpenClaw diagnostics plugin:
+
+```bash title="Install and enable the OpenClaw diagnostics plugin"
+openclaw plugins install clawhub:@openclaw/diagnostics-otel
+openclaw plugins enable diagnostics-otel
+```
+
+Print the Gateway config values that point OpenClaw at Beacon's local OTLP HTTP receiver:
+
+```bash title="Print the Gateway config values that point OpenClaw at Beacon's local OTLP HTTP receiver"
+beacon endpoint integrations openclaw print-config
+```
+
+By default, Beacon prints an endpoint of `http://127.0.0.1:4318`, protocol `http/protobuf`, and service name `openclaw-gateway`.
+
+<Note>
+  OpenClaw does not export raw prompt, response, tool, or system-prompt content unless `diagnostics.otel.captureContent.*` is explicitly enabled in the Gateway config. Beacon validation confirms at least one OpenClaw OTLP-derived event reached the runtime log; it does not prove logs, traces, and metrics are each flowing.
+</Note>
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--endpoint <url>` | OTLP HTTP endpoint to show in setup guidance. Defaults to Beacon's configured local OTLP HTTP receiver |
+| `--since <duration>` | Require an OpenClaw event within this duration, such as `10m`. Validate only |
+| `--json` | Print status as JSON. Status only |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint integrations openclaw print-config
+
+`beacon endpoint integrations openclaw print-config` prints OpenClaw Gateway OTLP setup guidance.
+
+```bash title="Print the configuration"
+beacon endpoint integrations openclaw print-config
+```
+
+### Examples
+
+Print guidance using the local OTLP HTTP receiver from the Beacon config:
+
+```bash title="Print guidance using the local OTLP HTTP receiver from the Beacon config"
+beacon endpoint integrations openclaw print-config
+```
+
+Print guidance for a custom local collector endpoint:
+
+```bash title="Print guidance for a custom local collector endpoint"
+beacon endpoint integrations openclaw print-config \
+  --endpoint http://127.0.0.1:14318
+```
+
+## beacon endpoint integrations openclaw status
+
+`beacon endpoint integrations openclaw status` reports whether OpenClaw OTLP-derived events have been observed in the endpoint runtime log.
+
+```bash title="Check status"
+beacon endpoint integrations openclaw status
+```
+
+### Examples
+
+Show status:
+
+```bash title="Show status"
+beacon endpoint integrations openclaw status
+```
+
+Print status as JSON:
+
+```bash title="Print status as JSON"
+beacon endpoint integrations openclaw status --json
+```
+
+Check a custom runtime log:
+
+```bash title="Check a custom runtime log"
+beacon endpoint integrations openclaw status \
+  --log-path /path/to/runtime.jsonl
+```
+
+## beacon endpoint integrations openclaw validate
+
+`beacon endpoint integrations openclaw validate` checks whether OpenClaw OTLP-derived events have arrived in the endpoint runtime log.
+
+```bash title="Run the validation check"
+beacon endpoint integrations openclaw validate --since 10m
+```
+
+If validation fails, Beacon prints OpenClaw setup guidance using any endpoint you provide.
+
+### Examples
+
+Require an OpenClaw event in the last 10 minutes:
+
+```bash title="Require an OpenClaw event in the last 10 minutes"
+beacon endpoint integrations openclaw validate --since 10m
+```
+
+Validate and include custom setup guidance if no event is found:
+
+```bash title="Validate and include custom setup guidance if no event is found"
+beacon endpoint integrations openclaw validate \
+  --since 10m \
+  --endpoint http://127.0.0.1:14318
+```
+
+Validate a custom runtime log:
+
+```bash title="Validate a custom runtime log"
+beacon endpoint integrations openclaw validate \
+  --log-path /path/to/runtime.jsonl
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Beacon discovers and configures supported runtime surfaces.
+  </Card>
+  <Card title="Supported runtimes" icon="list-check" href="/runtimes">
+    Compare agent harness support across local OTLP, hooks, and admin-configured integrations.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install, repair, inspect, and uninstall the local endpoint agent.
+  </Card>
+  <Card title="Claude Cowork" icon="robot" href="/cli/claude-cowork">
+    Manage Claude Cowork OTLP export.
+  </Card>
+</Columns>

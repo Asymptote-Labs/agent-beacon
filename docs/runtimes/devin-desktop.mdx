@@ -1,0 +1,79 @@
+---
+title: "Devin Desktop"
+description: "Asymptote support details for Devin Desktop endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Devin Desktop through Cascade/Windsurf-compatible hook payloads sent to `beacon-hooks`.
+
+## Prerequisites
+
+Before enabling Devin Desktop hooks, make sure:
+
+- Devin Desktop is installed for the user or available in the workspace where hooks will run.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote hooks are installed with `beacon endpoint hooks install --harness devin-desktop`.
+- For project-level collection, install hooks from the target workspace with `--level project`.
+- Devin Desktop is restarted after hook install or removal so new sessions load the updated hook configuration.
+
+## Collection path
+
+Devin Desktop invokes Asymptote's hook adapter through Cascade/Windsurf hook files. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+
+## Discovery and status
+
+Asymptote detects Devin Desktop through Cascade/Windsurf hook paths such as `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json`.
+
+Use `beacon endpoint hooks status --harness devin-desktop` to inspect Devin Desktop hook status.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Devin Desktop hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness devin-desktop
+```
+
+For project-level Devin Desktop hooks, run from the target workspace:
+
+```bash title="Install project-level Devin Desktop hooks"
+beacon endpoint hooks install --harness devin-desktop --level project
+```
+
+You can also configure Devin Desktop hooks alongside default OTLP harnesses:
+
+```bash title="You can also configure Devin Desktop hooks alongside default OTLP harnesses"
+beacon endpoint install --harness claude,codex,devin-desktop
+```
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through Cascade prompt hooks |
+| Command, tool, and file telemetry | Supported for prompt, command, MCP tool, file read, and file write telemetry where Cascade/Windsurf hook payloads are available |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Devin Desktop hooks are installed separately in the logged-in user's context or project context |
+
+## Deployment notes
+
+Asymptote writes Devin Desktop user-level hooks to `~/.codeium/windsurf/hooks.json`. Project-level Devin Desktop installs write `./.windsurf/hooks.json`, which can also affect Windsurf/Cascade in that workspace.
+
+Asymptote installs visibility-only hooks for prompt submission, file writes, command execution, MCP tool use, and file reads. The hooks do not block or enforce policy. After installation, generate a Devin Desktop event and check the Asymptote runtime log to validate that the Desktop app executed the hook file.
+
+Install and uninstall preserve unrelated settings and non-Asymptote hook commands. Restart Devin Desktop after installing or removing hooks so new sessions pick up the updated hook configuration.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Devin CLI" icon="plug" href="/runtimes/devin">
+    Configure Devin CLI through native Devin hooks.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

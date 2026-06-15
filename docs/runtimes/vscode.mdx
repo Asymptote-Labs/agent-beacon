@@ -1,0 +1,102 @@
+---
+title: "VS Code"
+description: "Asymptote support details for VS Code Copilot and hook telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports VS Code primarily through GitHub Copilot Chat OpenTelemetry export to Asymptote's localhost collector. VS Code hooks are also supported as an optional preview path when your organization allows them.
+
+## Prerequisites
+
+Before enabling VS Code telemetry, make sure:
+
+- Visual Studio Code is installed for the user.
+- GitHub Copilot Chat is installed and available in VS Code.
+- `beacon endpoint install` can start the local collector and write the runtime log.
+- Your team has reviewed content handling and destination access for prompt and tool telemetry.
+
+## Recommended collection path
+
+Use OpenTelemetry as the primary VS Code collection path:
+
+```bash title="Use OpenTelemetry as the primary VS Code collection path"
+beacon endpoint install --harness vscode
+```
+
+This configures VS Code Copilot Chat to export OTLP/HTTP to Asymptote's local collector at `http://127.0.0.1:4318`. Reload VS Code after setup so the Copilot extension reinitializes its telemetry configuration.
+
+Validate recent activity:
+
+```bash title="Validate recent activity"
+beacon endpoint integrations vscode validate --since 10m
+```
+
+OTel-derived events use `harness.name=vscode_copilot`.
+
+## Optional hook path
+
+VS Code hooks are currently in preview, and the `Chat: Use Hooks` setting may be disabled or managed by your organization. Use hooks only when you want extra lifecycle/tool detail or cross-agent coverage beyond Copilot's OTel stream.
+
+Before installing hooks, confirm `Chat: Use Hooks` is enabled in VS Code settings. If this setting is unchecked and marked as managed by your organization, VS Code will not execute `.github/hooks/*.json` hook files even if Asymptote installs them successfully.
+
+<img src="/images/vscode-chat-use-hooks-setting.png" alt="VS Code settings showing Chat: Use Hooks disabled and managed by organization, while Chat: Use Claude Hooks is enabled." />
+
+Project-level hooks:
+
+```bash title="Install project-level hooks"
+cd /path/to/workspace
+beacon endpoint hooks install --harness vscode --level project
+```
+
+User-level hooks:
+
+```bash title="User-level hooks"
+beacon endpoint hooks install --harness vscode --level user
+```
+
+Hook-derived events use `harness.name=vscode`. They can capture VS Code lifecycle events such as prompt submission, pre-tool and post-tool activity, stop events, and subagent start/stop where VS Code exposes those hook payloads. Because hooks are preview, behavior may vary across VS Code versions, organizations, and agent surfaces.
+
+## Discovery and status
+
+Asymptote detects VS Code through the `code` executable or the VS Code user settings directory. It checks whether Copilot Chat OTel is enabled, whether the exporter is `otlp-http`, and whether the endpoint points to Asymptote's local OTLP HTTP receiver.
+
+Use:
+
+```bash title="Use"
+beacon endpoint status
+beacon endpoint integrations vscode status
+beacon endpoint hooks status --harness vscode --level project
+```
+
+## Telemetry coverage
+
+| Area | OpenTelemetry support | Optional hook support |
+|------|-----------------------|-----------------------|
+| Prompt telemetry | Supported from Copilot `invoke_agent` activity when emitted | Supported through `UserPromptSubmit` when hooks execute |
+| Model metadata | Supported | Not typically exposed by hooks |
+| Tool activity | Supported for Copilot tool spans and tool-call events | Supported through pre-tool and post-tool hooks |
+| File, command, and MCP-like activity | Supported where Copilot emits tool metadata | Supported where VS Code exposes hook payloads |
+| Non-Copilot VS Code agents | Limited to what those agents emit through Copilot/VS Code OTel | Best-effort when VS Code hooks are enabled |
+| Local JSONL and dashboard | Supported | Supported |
+
+## Deployment notes
+
+For managed endpoint deployments, include `vscode` in the endpoint harness list when you want Asymptote to manage VS Code Copilot OTel settings:
+
+```bash title="For managed endpoint deployments, include vscode in the endpoint harness list when you want Asymptote to manage VS Code Copilot OTel settings"
+beacon endpoint install --system --harness claude,codex,vscode
+```
+
+If hooks are allowed by organization policy, install them separately in the logged-in user's context or within the target project. Do not rely on hooks as the primary VS Code signal path; Copilot OTel is preferred and should provide most of the session, prompt, model, and tool visibility needed for Asymptote.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall optional hook integrations.
+  </Card>
+</Columns>

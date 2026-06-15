@@ -1,0 +1,103 @@
+---
+title: "beacon endpoint doctor"
+description: "Run local Beacon endpoint health checks"
+---
+
+## Command Overview
+
+`beacon endpoint doctor` runs local health checks for the Beacon endpoint agent and exits non-zero when any hard check fails. Add `--fix` to apply safe remediations for supported findings.
+
+```bash title="Command syntax"
+beacon endpoint doctor
+```
+
+Use doctor when rollout automation, support scripts, or an operator needs a pass/fail health signal. For a broader status view that includes collector readiness, service state, discovered harnesses, and last-event state, use [`beacon endpoint status`](/cli/endpoint-status).
+
+`beacon doctor` is a top-level alias for `beacon endpoint doctor`.
+
+## Checks
+
+Doctor verifies:
+
+- Endpoint configuration file
+- Endpoint configuration validity
+- Collector configuration file
+- Runtime JSONL log path
+- Runtime log permissions
+- launchd plist on macOS
+- Configured harness telemetry and recent observed events
+
+The runtime log itself can be missing before the first event is written. In that case, doctor reports a warning instead of a hard failure.
+
+## Fix mode
+
+`beacon endpoint doctor --fix` plans and applies safe remediations for supported findings. It can create a missing runtime log and, on macOS, recreate managed collector configuration and launchd service files when the endpoint configuration is valid.
+
+Fix mode deliberately skips cases that need operator intent, such as invalid endpoint configuration, missing harness setup, missing observed runtime events, unsafe runtime log permissions, or non-macOS service repair. If a collector service repair fails, Beacon rolls back the files and service state it changed where possible, then refreshes doctor results so the printed checks reflect any partial fixes that succeeded.
+
+JSON output includes applied and skipped fix details so deployment scripts can distinguish remediated checks from findings that still need manual action.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--fix` | Apply safe remediations for supported failed or warning checks |
+| `--json` | Print doctor results as JSON |
+
+## Examples
+
+Run health checks with the default per-user paths:
+
+```bash title="Run health checks with the default per-user paths"
+beacon endpoint doctor
+```
+
+Run health checks and apply supported fixes:
+
+```bash title="Run health checks and apply supported fixes"
+beacon endpoint doctor --fix
+```
+
+Check a root-managed endpoint deployment:
+
+```bash title="Check a root-managed endpoint deployment"
+sudo beacon endpoint doctor --system
+```
+
+Repair supported root-managed findings:
+
+```bash title="Repair supported root-managed findings"
+sudo beacon endpoint doctor --system --fix
+```
+
+Print machine-readable check results:
+
+```bash title="Print machine-readable check results"
+beacon endpoint doctor --json
+```
+
+Print machine-readable results with applied and skipped fix details:
+
+```bash title="Print machine-readable results with applied and skipped fix details"
+beacon endpoint doctor --fix --json
+```
+
+Use the top-level alias:
+
+```bash title="Use the top-level alias"
+beacon doctor
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Inspect collector, service, harness, diagnostics, and runtime-log state.
+  </Card>
+  <Card title="Endpoint inventory" icon="clipboard-list" href="/cli/endpoint-inventory">
+    Show configured, detected, and observed endpoint inventory.
+  </Card>
+</Columns>

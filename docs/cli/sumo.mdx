@@ -1,0 +1,175 @@
+---
+title: "beacon endpoint sumo"
+description: "Generate Sumo Logic HTTP Source forwarding content and validation events for Beacon endpoint events."
+---
+
+## Forwarding Command
+
+Use `beacon endpoint sumo` to generate Sumo Logic HTTP Source forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed shipper upload `runtime.jsonl` to a Sumo Logic Hosted Collector HTTP Logs & Metrics Source.
+
+Beacon does not store Sumo Source URLs, tokens, or collector configuration. Keep those values in your shipper configuration, endpoint-management secret store, or deployment tooling.
+
+```bash title="Command syntax"
+beacon endpoint sumo [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint sumo print-config" icon="file-lines" href="#beacon-endpoint-sumo-print-config">
+    Print a Sumo HTTP Source smoke-test uploader for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint sumo install-pack" icon="box-archive" href="#beacon-endpoint-sumo-install-pack">
+    Write Sumo Logic HTTP Source forwarding content to a directory.
+  </Card>
+  <Card title="beacon endpoint sumo validate" icon="check" href="#beacon-endpoint-sumo-validate">
+    Write and describe a Beacon Sumo Logic validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+## beacon endpoint sumo print-config
+
+`beacon endpoint sumo print-config` prints a Sumo Logic HTTP Source smoke-test uploader for the configured Beacon runtime JSONL log.
+
+```bash title="Print the configuration"
+beacon endpoint sumo print-config
+```
+
+Use this command when you want to copy the one-shot upload script into an existing validation workflow. For production forwarding, use a tailing forwarder that checkpoints offsets instead of repeatedly uploading the whole file.
+
+### Examples
+
+Print a smoke-test uploader for the default per-user Beacon install:
+
+```bash title="Print a smoke-test uploader for the default per-user Beacon install"
+beacon endpoint sumo print-config
+```
+
+Print a smoke-test uploader for a system-mode MDM deployment:
+
+```bash title="Print a smoke-test uploader for a system-mode MDM deployment"
+sudo /opt/beacon/bin/beacon endpoint sumo print-config --system
+```
+
+Print a smoke-test uploader for a custom runtime log:
+
+```bash title="Print a smoke-test uploader for a custom runtime log"
+beacon endpoint sumo print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint sumo install-pack
+
+`beacon endpoint sumo install-pack` writes Sumo Logic HTTP Source forwarding content to a directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint sumo install-pack --output ./beacon-sumo-pack
+```
+
+The pack includes setup instructions, a one-shot upload smoke-test script, and sample Beacon endpoint events.
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint sumo install-pack --output ./beacon-sumo-pack
+```
+
+Generate a content pack for a system-mode deployment:
+
+```bash title="Generate a content pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint sumo install-pack \
+  --system \
+  --output ./beacon-sumo-pack
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint sumo install-pack \
+  --output ./beacon-sumo-pack \
+  --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the Sumo Logic content pack. Defaults to `beacon-sumo-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint sumo validate
+
+`beacon endpoint sumo validate` writes a Beacon validation event to the runtime JSONL log and prints the expected Sumo Logic fields and validation query.
+
+```bash title="Run the validation check"
+beacon endpoint sumo validate
+```
+
+### Examples
+
+Write a validation event for the default per-user install:
+
+```bash title="Write a validation event for the default per-user install"
+beacon endpoint sumo validate
+```
+
+Write a validation event for a system-mode deployment:
+
+```bash title="Write a validation event for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint sumo validate --system
+```
+
+Write a validation event to a custom runtime log:
+
+```bash title="Write a validation event to a custom runtime log"
+beacon endpoint sumo validate --log-path /path/to/runtime.jsonl
+```
+
+The validation command prints a Sumo Logic query:
+
+```text
+_sourceCategory=security/agentbeacon "Beacon endpoint Sumo validation event"
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Sumo Logic forwarding" icon="chart-line" href="/log-forwarding/sumo">
+    Configure Sumo Logic Hosted Collector HTTP Source forwarding for Beacon events.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

@@ -1,0 +1,63 @@
+---
+title: "beacon endpoint discover"
+description: "Discover supported local agent harnesses and their Beacon telemetry state"
+---
+
+## Command Overview
+
+`beacon endpoint discover` lists supported [agent harnesses](/runtimes) detected on the local host.
+
+```bash title="Command syntax"
+beacon endpoint discover
+```
+
+Beacon discovers local runtime surfaces and reports their telemetry configuration state, including whether supported configuration appears Beacon-managed or customer-managed. By default, discover prints detected targets. Add `--all` to include every supported runtime target, including runtimes that are not detected on the host. OpenClaw Gateway is validated through the `beacon endpoint integrations openclaw` commands after Gateway diagnostics export is configured.
+
+Gemini CLI discovery looks for the `gemini` executable and `~/.gemini/settings.json`, then checks whether local OTLP telemetry is enabled for Beacon. VS Code discovery checks Copilot Chat OpenTelemetry configuration and reports Beacon-managed state when the OTLP endpoint points at Beacon's local receiver. GitHub Copilot CLI discovery looks for the `copilot` executable or `~/.copilot/config.json`, then validates that `COPILOT_OTEL_ENABLED=true` and the effective OTLP endpoint points at Beacon's local HTTP receiver, usually `http://127.0.0.1:4318`. Claude Code discovery looks for the `claude` executable and Claude settings paths; optional Claude hook status is available through `beacon endpoint hooks status --harness claude`. Antigravity CLI discovery looks for the `antigravity` or `antigravity-cli` executable, `~/.gemini/config`, or `./.agents`, then checks whether Beacon endpoint hooks are installed in `~/.gemini/config/hooks.json` or `./.agents/hooks.json`. Grok Build discovery checks whether Beacon's managed hook file is installed at `~/.grok/hooks/beacon-endpoint.json` or `./.grok/hooks/beacon-endpoint.json`. Hermes Agent discovery looks for the `hermes` executable or `~/.hermes`, then checks `~/.hermes/config.yaml` for Beacon shell hooks with `BEACON_ENDPOINT_MODE=1` and `--platform hermes`. OpenCode discovery looks for the `opencode` executable or `~/.config/opencode`, then checks whether Beacon's managed plugin is installed at `~/.config/opencode/plugins/beacon.ts`. Devin CLI discovery looks for the `devin` executable, `~/.config/devin`, or `./.devin`, then checks whether Beacon endpoint hooks are installed in `~/.config/devin/config.json` or `./.devin/hooks.v1.json`; `devin` remains a legacy alias for `devin-cli`. Devin Desktop discovery checks Cascade/Windsurf hook files at `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json`. Factory Droid discovery looks for the `droid` executable and validates the effective `OTEL_TELEMETRY_ENDPOINT` launch environment without treating customer-managed shell export values as Beacon-owned configuration. Set MDM-managed launch environments to Beacon's local OTLP HTTP receiver through MDM or another customer-owned launch policy.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print discovery as JSON |
+| `--all` | Discover all supported runtime targets, not only detected targets |
+
+## Examples
+
+Show detected runtimes:
+
+```bash title="Show detected runtimes"
+beacon endpoint discover
+```
+
+Print discovery results as JSON:
+
+```bash title="Print discovery results as JSON"
+beacon endpoint discover --json
+```
+
+Show all supported runtime targets:
+
+```bash title="Show all supported runtime targets"
+beacon endpoint discover --all
+```
+
+Use system endpoint paths while discovering:
+
+```bash title="Use system endpoint paths while discovering"
+sudo beacon endpoint discover --system
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
+    Compare supported runtimes and telemetry modes.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install and inspect hook-based endpoint telemetry.
+  </Card>
+</Columns>

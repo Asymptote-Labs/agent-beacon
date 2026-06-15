@@ -1,0 +1,133 @@
+---
+title: "Claude Agent SDK"
+description: "Wrap Claude Agent SDK query functions with Asymptote Observe"
+---
+
+## Integration Overview
+
+Use this integration when your application runs Claude Agent SDK queries through `@anthropic-ai/claude-agent-sdk`. Asymptote Observe can wrap the query function to create a Beacon-compatible root span for each agent turn.
+
+## Overview
+
+Claude Agent SDK integration is currently a query wrapper, not a custom hook adapter. Use `Observe.wrapClaudeAgentQuery()` when module loading prevents provider-level instrumentation or when you want a stable root span around an agent query.
+
+For direct Anthropic API calls through `@anthropic-ai/sdk`, use [Anthropic](/sdk/integrations-anthropic).
+
+## What Asymptote Captures
+
+- A `claude_agent_sdk.query` span for wrapped query calls.
+- `beacon.harness.name=claude_agent_sdk`.
+- `beacon.event.action=prompt.submitted` and `beacon.event.category=prompt`.
+- Prompt text from the first string argument or common object fields such as `prompt`, `input`, and `query`.
+- Errors recorded on failed spans.
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- `@asymptote/sdk` installed.
+- `@anthropic-ai/claude-agent-sdk` installed.
+- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK and Claude Agent SDK"
+npm install @asymptote/sdk @anthropic-ai/claude-agent-sdk
+```
+
+Set environment variables:
+
+```bash title="Set the Asymptote Managed API key"
+export ASYMPTOTE_API_KEY=...
+```
+
+## Getting Started
+
+Wrap the query function before using it.
+
+```typescript title="Wrap a Claude Agent SDK query" lines
+import { query as originalQuery } from "@anthropic-ai/claude-agent-sdk";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+
+const query = Observe.wrapClaudeAgentQuery(originalQuery);
+
+const stream = query({
+  prompt: "Inspect this repository and summarize the highest-risk changes.",
+});
+
+for await (const message of stream) {
+  handleMessage(message);
+}
+
+await Observe.flush();
+```
+
+## Prompt Detection
+
+`wrapClaudeAgentQuery()` records the first string argument as `beacon.prompt.text`. If the first argument is an object, it checks common prompt fields such as `prompt`, `input`, and `query`.
+
+```typescript title="Prompt detection examples" lines
+await query("Explain this diff");
+
+await query({
+  prompt: "Review this pull request",
+});
+```
+
+## Patch Module Exports
+
+If you prefer patching the module object, pass it through `instrumentModules` during initialization.
+
+```typescript title="Patch the Claude Agent SDK module" lines
+import * as claudeAgentSDK from "@anthropic-ai/claude-agent-sdk";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+  instrumentModules: {
+    claudeAgentSDK,
+  },
+});
+```
+
+If ESM namespace exports are read-only, wrap the query function explicitly with `Observe.wrapClaudeAgentQuery()`.
+
+## Group Agent Work
+
+Use `Observe.observe()` around your entrypoint when one request combines Claude Agent SDK queries with other application work.
+
+```typescript title="Group Claude agent work under a parent span" lines
+import { query as originalQuery } from "@anthropic-ai/claude-agent-sdk";
+import { Observe } from "@asymptote/sdk";
+
+const query = Observe.wrapClaudeAgentQuery(originalQuery);
+
+const runInvestigation = Observe.observe(
+  { name: "agent.investigation" },
+  async (prompt: string) => {
+    const stream = query({ prompt });
+    for await (const message of stream) {
+      handleMessage(message);
+    }
+  },
+);
+```
+
+## Troubleshooting
+
+- Confirm `ASYMPTOTE_API_KEY` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set in the same process that runs the SDK.
+- Make sure application code calls the wrapped `query` function, not the original import.
+- If module patching does not work in an ESM namespace, use `Observe.wrapClaudeAgentQuery()` explicitly.
+- Call `Observe.flush()` before short-lived scripts or jobs exit.
+
+## What's Next
+
+<Columns cols={2}>
+  <Card title="Anthropic" icon="robot" href="/sdk/integrations-anthropic">
+    Instrument direct Anthropic provider calls.
+  </Card>
+  <Card title="Observe" icon="diagram-project" href="/sdk/observe">
+    Wrap additional agent steps and tool calls.
+  </Card>
+</Columns>

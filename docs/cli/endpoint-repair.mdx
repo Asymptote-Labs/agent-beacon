@@ -1,0 +1,120 @@
+---
+title: "beacon endpoint repair"
+description: "Repair Beacon endpoint service files, collector configuration, and telemetry settings"
+---
+
+## Command Overview
+
+`beacon endpoint repair` reapplies Beacon endpoint service files, collector configuration, harness telemetry configuration, and optional destinations such as Splunk HEC or Falcon LogScale HEC. It is useful after upgrading Beacon, changing ports, changing SIEM settings, or correcting local configuration drift.
+
+```bash title="Command syntax"
+beacon endpoint repair
+```
+
+Repair preserves runtime logs and harness telemetry configuration while reinstalling managed endpoint files. GitHub Copilot CLI and Factory Droid launch-environment settings remain customer-managed; repair validates their telemetry state but does not write those environment settings.
+
+During repair, Beacon removes the existing managed service before reinstalling it so an unhealthy collector can release local OTLP ports. If reinstall cannot complete, Beacon restores the previous endpoint configuration so local state is not left partially rolled back.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` to opt in Gemini CLI telemetry, `vscode` for VS Code Copilot telemetry, `devin-cli` for Devin CLI hooks, or `devin-desktop` for Devin Desktop hooks. Claude Code, Grok Build, Cursor, Factory, and OpenCode hook telemetry are managed with `beacon endpoint hooks`. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
+| `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
+| `--collector <path>` | Path to a `beacon-otelcol` binary |
+| `--no-start` | Write files without starting the launchd service |
+| `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
+| `--include-codex-spans` | Include high-volume Codex OTLP spans for troubleshooting. By default, Beacon records Codex semantic logs and suppresses raw Codex spans |
+| `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
+| `--splunk-hec-token <token>` | Splunk HEC token |
+| `--splunk-index <index>` | Optional Splunk index |
+| `--splunk-source <source>` | Optional Splunk source |
+| `--splunk-sourcetype <type>` | Optional Splunk sourcetype |
+| `--splunk-insecure-skip-verify` | Skip Splunk HEC TLS certificate verification |
+| `--splunk-ca-file <path>` | Optional CA certificate path for Splunk HEC TLS verification |
+| `--falcon-hec-endpoint <url>` | Falcon LogScale HEC endpoint URL |
+| `--falcon-hec-token <token>` | Falcon LogScale ingest token |
+| `--falcon-index <repository>` | Optional Falcon LogScale repository for multi-repository tokens |
+| `--falcon-source <source>` | Optional Falcon LogScale source |
+| `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
+| `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
+| `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+
+## Examples
+
+Repair a default per-user install:
+
+```bash title="Repair a default per-user install"
+beacon endpoint repair
+```
+
+Repair and opt into low-level runtime OTLP metrics:
+
+```bash title="Repair and opt into low-level runtime OTLP metrics"
+beacon endpoint repair --include-runtime-metrics
+```
+
+Repair after changing Copilot CLI's customer-managed launch environment:
+
+```bash title="Repair after changing Copilot CLI's customer-managed launch environment"
+export COPILOT_OTEL_ENABLED="true"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+beacon endpoint repair
+```
+
+Repair and opt into raw Codex spans for troubleshooting:
+
+```bash title="Repair and opt into raw Codex spans for troubleshooting"
+beacon endpoint repair --include-codex-spans
+```
+
+Repair and configure Devin CLI and Devin Desktop hooks:
+
+```bash title="Repair and configure Devin CLI and Devin Desktop hooks"
+beacon endpoint repair --harness claude,codex,devin-cli,devin-desktop
+```
+
+Repair with custom OTLP ports:
+
+```bash title="Repair with custom OTLP ports"
+beacon endpoint repair --otlp-grpc-port 14317 --otlp-http-port 14318
+```
+
+Repair a system-mode deployment:
+
+```bash title="Repair a system-mode deployment"
+sudo beacon endpoint repair --system
+```
+
+Repair and add or update Splunk HEC export:
+
+```bash title="Repair and add or update Splunk HEC export"
+beacon endpoint repair \
+  --splunk-hec-endpoint https://splunk.example:8088/services/collector \
+  --splunk-hec-token "$SPLUNK_HEC_TOKEN" \
+  --splunk-index beacon
+```
+
+Repair and add or update Falcon LogScale HEC export:
+
+```bash title="Repair and add or update Falcon LogScale HEC export"
+beacon endpoint repair \
+  --falcon-hec-endpoint https://cloud.<region>.humio.com/api/v1/ingest/hec \
+  --falcon-hec-token "$FALCON_HEC_TOKEN" \
+  --falcon-index beacon
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Check collector health and runtime telemetry state after repair.
+  </Card>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Review install options and endpoint configuration defaults.
+  </Card>
+</Columns>

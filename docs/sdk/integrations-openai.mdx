@@ -1,0 +1,166 @@
+---
+title: "OpenAI"
+description: "Instrument OpenAI SDK calls with Asymptote Observe"
+---
+
+## Integration Overview
+
+Use this integration when your application calls the `openai` JavaScript package directly. Asymptote Observe uses OpenLLMetry's OpenAI instrumentation so OpenAI spans flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
+
+## Overview
+
+Initialize Asymptote Observe before creating the OpenAI client when possible. The instrumentation captures supported OpenAI SDK spans without changing the way you call `openai`.
+
+## What Asymptote Captures
+
+- OpenAI model calls emitted by the OpenLLMetry OpenAI instrumentation.
+- OpenTelemetry resource attributes such as service name, SDK version, `beacon.origin=cloud`, and export mode.
+- Beacon compatibility hints where supported by the SDK and instrumentation path.
+- Errors recorded on failed spans.
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- `@asymptote/sdk` installed.
+- `openai` installed.
+- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK and OpenAI client"
+npm install @asymptote/sdk openai
+```
+
+Set environment variables:
+
+```bash title="Set Asymptote Managed and OpenAI environment variables"
+export ASYMPTOTE_API_KEY=...
+export OPENAI_API_KEY=...
+```
+
+## Getting Started
+
+Initialize `Observe` before creating the OpenAI client when possible.
+
+```typescript title="Trace OpenAI responses.create" lines
+import OpenAI from "openai";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+  instrumentationOptions: {
+    openAI: {
+      traceContent: true,
+    },
+  },
+});
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const response = await openai.responses.create({
+  model: "gpt-4.1-mini",
+  input: "Summarize the security implications of this diff.",
+});
+
+await Observe.flush();
+```
+
+All supported OpenAI SDK calls are now traced through the configured Asymptote exporter.
+
+## Already-Loaded Clients
+
+If your application imports or creates the OpenAI client before initialization, pass the module to `instrumentModules` or patch it after initialization.
+
+```typescript title="Instrument an already-loaded OpenAI module" lines
+import OpenAI from "openai";
+import { Observe } from "@asymptote/sdk";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+  instrumentModules: {
+    OpenAI,
+  },
+});
+
+const response = await openai.chat.completions.create({
+  model: "gpt-4.1-mini",
+  messages: [
+    {
+      role: "user",
+      content: "Draft a remediation plan for this finding.",
+    },
+  ],
+});
+
+await Observe.flush();
+```
+
+## Group Calls With Custom Spans
+
+Wrap application logic with `Observe.observe()` when one route, job, or agent turn makes multiple OpenAI calls and you want them grouped under one parent span.
+
+```typescript title="Wrap multiple OpenAI calls" lines
+import OpenAI from "openai";
+import { Observe } from "@asymptote/sdk";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const reviewPullRequest = Observe.observe(
+  { name: "agent.pr_review" },
+  async (diff: string) => {
+    const summary = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: `Summarize this diff:\n${diff}`,
+    });
+
+    const risk = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: `Identify security risks in: ${summary.output_text}`,
+    });
+
+    return risk.output_text;
+  },
+);
+```
+
+## Existing OpenTelemetry Providers
+
+If your application already owns OpenTelemetry setup, register Asymptote's OpenAI instrumentation with your existing provider instead of calling `Observe.initialize()` twice.
+
+```typescript title="Register OpenAI instrumentation on an existing provider" lines
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { Observe } from "@asymptote/sdk";
+
+registerInstrumentations({
+  instrumentations: Observe.instrumentations({
+    openAI: {
+      traceContent: true,
+    },
+    anthropic: false,
+  }),
+});
+```
+
+## Troubleshooting
+
+- Confirm `ASYMPTOTE_API_KEY` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set in the same process that runs the SDK.
+- Initialize `Observe` before constructing the OpenAI client when possible.
+- If the OpenAI module is imported before initialization, pass it through `instrumentModules` or `Observe.patch()`.
+- Call `Observe.flush()` before short-lived scripts or jobs exit.
+
+## What's Next
+
+<Columns cols={2}>
+  <Card title="Instrumentation" icon="wand-magic-sparkles" href="/sdk/instrumentation">
+    Review initialization, module patching, and existing OpenTelemetry provider setup.
+  </Card>
+  <Card title="Observe" icon="diagram-project" href="/sdk/observe">
+    Group multiple model calls and custom agent steps under parent spans.
+  </Card>
+</Columns>

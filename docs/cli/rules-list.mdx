@@ -1,0 +1,46 @@
+---
+title: "beacon rules list"
+description: "List active Beacon threat-detection rules"
+---
+
+## Command Overview
+
+`beacon rules list` prints the active threat-detection rules used by [`beacon scan`](/cli/scan).
+
+```bash title="Command syntax"
+beacon rules list [flags]
+```
+
+The output includes each rule id, severity, maturity status, and source. The source shows whether Beacon loaded the rule from the local store or the built-in baseline.
+
+## Examples
+
+List active user-mode rules:
+
+```bash title="List active rules"
+beacon rules list
+```
+
+List active system-mode rules:
+
+```bash title="List system-mode rules"
+sudo beacon rules list --system
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules add" icon="plus" href="/cli/rules-add">
+    Install local rule files into the store.
+  </Card>
+  <Card title="beacon scan" icon="magnifying-glass" href="/cli/scan">
+    Run active rules over local telemetry.
+  </Card>
+</Columns>

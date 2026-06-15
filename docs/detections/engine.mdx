@@ -1,0 +1,140 @@
+---
+title: "Detection Engine"
+description: "How Beacon loads, validates, evaluates, and reports detections"
+---
+
+## Engine Overview
+
+The Beacon detection engine runs threat rules over ordered endpoint events. The engine ships in the Beacon CLI, while the rule corpus is external data loaded from a directory, the local rule store, or a small embedded baseline.
+
+Local scanning is read-only and does not contact the network.
+
+## Active Rule Resolution
+
+When `beacon scan` runs, Beacon resolves the active rules in this order:
+
+1. If `--rules <dir>` is provided, load `.rule.yaml` files from that directory.
+2. Otherwise, load installed rules from the endpoint rule store.
+3. If the store is absent or empty, load the built-in baseline rules embedded in the binary.
+
+The per-user store is under the endpoint base directory, commonly `~/.beacon/endpoint/rules`. System-mode installs use the system endpoint base directory.
+
+## Load-Time Validation
+
+Rules are checked before any event scanning begins.
+
+Beacon:
+
+- decodes rule YAML strictly
+- rejects unknown structural fields
+- enforces required fields and `match` versus `correlation` exclusivity
+- validates rule IDs and duplicate IDs in a pack
+- compiles CEL expressions against Beacon event fields
+- ensures expressions evaluate to booleans
+- enforces maturity gates for `experimental`, `stable`, and `deprecated`
+- runs embedded fixtures for linting and install workflows
+
+Invalid rules fail early so scans do not produce ambiguous results.
+
+## Event Input
+
+`beacon scan` reads the resolved `runtime.jsonl` endpoint log unless a different path is supplied with `--log-path`.
+
+Each line is parsed as a Beacon endpoint event. The scan keeps the ordered event stream because correlation rules need event order and timestamps to evaluate windows.
+
+Use `--session` to scan only events whose `session.id` contains a given value.
+
+## Single-Event Matching
+
+A single-event rule has a top-level `match` expression. The engine evaluates that expression independently against each event.
+
+```yaml title="Single-event match"
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("\\b(curl|wget|nc)\\b")
+```
+
+If any event satisfies the expression, the rule produces a finding with that event as evidence.
+
+## Correlation Matching
+
+A correlation rule describes ordered steps inside a session window.
+
+```yaml title="Ordered session correlation"
+correlation:
+  scope: session
+  window: 120s
+  steps:
+    - id: read_secret
+      match: >
+        e.event.action == "file.read" &&
+        e.file.path.matches("(\\.env|credentials|id_rsa|\\.aws/)")
+    - id: egress
+      match: >
+        e.event.action == "command.executed" &&
+        e.command.command.matches("curl\\s+.*https?://")
+```
+
+For `threat-rules/v1`, correlation scope is `session`. Beacon groups events by `e.session.id`, then looks for each step in order. A later step must occur at or after the prior matched step, and the final step must occur within the configured `window` from the first matched step.
+
+Correlation is useful when no single event is suspicious enough on its own, but the sequence is meaningful.
+
+## Findings
+
+When a rule fires, Beacon emits a finding. Findings include:
+
+- rule ID and rule title
+- severity
+- emitted reason from `emit.reason`
+- session ID when available
+- evidence events that matched the rule
+- policy metadata derived from the rule, such as `policy.id`, `policy.name`, and `policy.reason`
+
+Human output summarizes findings by severity, rule, session, reason, and evidence lines. JSON output emits machine-readable finding objects for automation.
+
+## Filtering And Gates
+
+`beacon scan` supports two severity controls:
+
+- `--min-severity` filters displayed findings.
+- `--fail-on` exits non-zero if any finding at or above the threshold exists.
+
+The fail gate is evaluated before display filtering, so automation can fail on all matching detections even when output is narrowed for readability.
+
+## Operational Boundaries
+
+Scanning does not mutate endpoint telemetry, change rule files, or fetch remote content. Rule installation and remote rule pack retrieval are explicit `beacon rules` workflows.
+
+Use the CLI pages for operational details:
+
+<Columns cols={2}>
+  <Card title="beacon scan" icon="magnifying-glass" href="/cli/scan">
+    Run detections over local endpoint telemetry.
+  </Card>
+  <Card title="Run local scans" icon="terminal" href="/cli/scan-local">
+    Choose logs, rule directories, sessions, and output formats.
+  </Card>
+  <Card title="Use scan gates" icon="circle-exclamation" href="/cli/scan-ci-gates">
+    Fail automation based on severity thresholds.
+  </Card>
+  <Card title="beacon rules" icon="list-check" href="/cli/rules">
+    Manage the active rule store.
+  </Card>
+</Columns>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Detections" icon="shield-halved" href="/detections">
+    Return to the detections overview.
+  </Card>
+  <Card title="Detection YAML Schema" icon="code" href="/detections/yaml-schema">
+    Review the rule document fields the engine loads.
+  </Card>
+  <Card title="Detection Standard" icon="book-open" href="/detections/standard">
+    Understand conformance, maturity, and CEL requirements.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="table-list" href="/telemetry-schema/event-schema">
+    Review the event stream evaluated by detections.
+  </Card>
+</Columns>

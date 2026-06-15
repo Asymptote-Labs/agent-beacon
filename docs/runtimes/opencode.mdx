@@ -1,0 +1,61 @@
+---
+title: "OpenCode"
+description: "Asymptote support details for OpenCode endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports OpenCode through a managed local plugin that invokes `beacon-hooks`.
+
+## Prerequisites
+
+Before enabling OpenCode telemetry, make sure:
+
+- OpenCode is installed and available as the `opencode` executable or has a local config directory.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote's OpenCode plugin is installed with `beacon endpoint hooks install --harness opencode`.
+- OpenCode is restarted after plugin install or removal so new sessions load the updated plugin.
+
+## Collection path
+
+Asymptote installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Asymptote's hook adapter.
+
+## Discovery and status
+
+Asymptote detects OpenCode through the `opencode` executable or `~/.config/opencode`, then checks for Asymptote plugin configuration.
+
+Use `beacon endpoint hooks status --harness opencode` to inspect OpenCode plugin status.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install OpenCode hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness opencode
+```
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through `chat.message` hooks |
+| Command, tool, and file telemetry | Supported for chat messages, session events, command execution, permission activity, diffs, and errors where OpenCode exposes payloads |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; OpenCode plugins are installed separately in the logged-in user's context |
+
+## Deployment notes
+
+Restart OpenCode after installing or removing hooks so new sessions pick up the updated plugin configuration.
+
+For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. Asymptote telemetry should not interrupt OpenCode execution if the hook command fails.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

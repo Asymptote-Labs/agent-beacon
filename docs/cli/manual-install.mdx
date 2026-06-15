@@ -1,0 +1,29 @@
+---
+title: "Manual CLI Installation"
+description: "Install the Beacon CLI from platform archives or build it from source"
+---
+
+## Archive Collection
+
+Beacon releases publish platform archives for macOS and Linux on `amd64` and `arm64`. Each archive includes the `beacon` CLI and the matching `beacon-otelcol` collector binary, with SHA-256 checksums published alongside the release.
+
+## Build from source
+
+To build the CLI directly from the Beacon repository:
+
+```bash title="Build Beacon from source"
+git clone https://github.com/Asymptote-Labs/agent-beacon.git
+cd agent-beacon/cli/beacon
+make build
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Install Beacon" icon="download" href="/cli/install">
+    Install Beacon with Homebrew.
+  </Card>
+  <Card title="Endpoint telemetry" icon="satellite-dish" href="/cli/endpoint-install">
+    Configure local agent harness telemetry after installing the CLI.
+  </Card>
+</Columns>

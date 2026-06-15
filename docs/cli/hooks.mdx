@@ -1,0 +1,402 @@
+---
+title: "beacon endpoint hooks"
+description: "Install and manage Beacon endpoint hooks for supported agent harnesses"
+---
+
+## Command Overview
+
+Beacon can install [hook-based endpoint telemetry](/concepts/core-concepts#hooks) for supported [agent harnesses](/runtimes). The hook adapter emits local Beacon [endpoint events](/concepts/core-concepts#endpoint-event) for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where each runtime exposes those hook payloads.
+
+```bash title="Command syntax"
+beacon endpoint hooks [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint hooks install" icon="download" href="#beacon-endpoint-hooks-install">
+    Install endpoint hooks for supported hook runtimes.
+  </Card>
+  <Card title="beacon endpoint hooks status" icon="circle-info" href="#beacon-endpoint-hooks-status">
+    Show endpoint hook integration status.
+  </Card>
+  <Card title="beacon endpoint hooks uninstall" icon="trash" href="#beacon-endpoint-hooks-uninstall">
+    Remove Beacon hook entries while preserving non-Beacon hooks.
+  </Card>
+</Columns>
+
+## Paths
+
+| Runtime | User-level config | Project-level config | Hook binary | Runtime log |
+|---------|-------------------|----------------------|-------------|-------------|
+| Antigravity CLI | `~/.gemini/config/hooks.json` | `./.agents/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Claude Code | `~/.claude/settings.json` | `./.claude/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Cursor | `~/.cursor/hooks.json` | `./.cursor/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Devin CLI | `~/.config/devin/config.json` | `./.devin/hooks.v1.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Devin Desktop | `~/.codeium/windsurf/hooks.json` | `./.windsurf/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Factory Droid | `~/.factory/settings.json` | `./.factory/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Grok Build | `~/.grok/hooks/beacon-endpoint.json` | `./.grok/hooks/beacon-endpoint.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Hermes Agent | `~/.hermes/config.yaml` | Not supported | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| OpenCode | `~/.config/opencode/plugins/beacon.ts` | `./.opencode/plugins/beacon.ts` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+
+In system mode, the hook binary is written under `/Library/Application Support/Beacon/Endpoint/hooks/` and the default runtime log is `/var/log/beacon-agent/runtime.jsonl`.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, or `antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`. Defaults to `cursor` |
+| `--level <level>` | Hook install level: `user` or `project` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print status as JSON. Status only |
+| `--all` | Target or show all supported hook harnesses |
+| `--dry-run` | Print planned install or uninstall actions without changing hook files. Install and uninstall only |
+
+<Note>
+  Restart Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, or OpenCode after installing or removing hooks so the updated hook configuration is picked up by new sessions.
+</Note>
+
+Beacon validates the embedded `beacon-hooks` binary before writing hook configuration. If install fails with an architecture validation error, upgrade Beacon or reinstall the platform-specific release archive for the host, then run the hook install command again.
+
+## beacon endpoint hooks install
+
+`beacon endpoint hooks install` installs hook-based Beacon telemetry for supported harnesses.
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness cursor
+```
+
+ The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events.
+
+### Examples
+
+Install Cursor hooks at the user level:
+
+```bash title="Install Cursor hooks at the user level"
+beacon endpoint hooks install --harness cursor
+```
+
+Install Antigravity hooks at the user level:
+
+```bash title="Install Antigravity hooks at the user level"
+beacon endpoint hooks install --harness antigravity
+```
+
+Install Claude Code hooks at the user level:
+
+```bash title="Install Claude Code hooks at the user level"
+beacon endpoint hooks install --harness claude
+```
+
+Install Antigravity hooks at the project level:
+
+```bash title="Install Antigravity hooks at the project level"
+beacon endpoint hooks install --harness antigravity --level project
+```
+
+Install Cursor hooks at the project level:
+
+```bash title="Install Cursor hooks at the project level"
+beacon endpoint hooks install --harness cursor --level project
+```
+
+Install Devin CLI hooks at the user level:
+
+```bash title="Install Devin CLI hooks at the user level"
+beacon endpoint hooks install --harness devin-cli
+```
+
+Install Devin CLI hooks at the project level:
+
+```bash title="Install Devin CLI hooks at the project level"
+beacon endpoint hooks install --harness devin-cli --level project
+```
+
+Install Devin Desktop hooks at the user level:
+
+```bash title="Install Devin Desktop hooks at the user level"
+beacon endpoint hooks install --harness devin-desktop
+```
+
+Install Devin Desktop hooks at the project level:
+
+```bash title="Install Devin Desktop hooks at the project level"
+beacon endpoint hooks install --harness devin-desktop --level project
+```
+
+Install Factory hooks at the user level:
+
+```bash title="Install Factory hooks at the user level"
+beacon endpoint hooks install --harness factory
+```
+
+Install OpenCode hooks at the user level:
+
+```bash title="Install OpenCode hooks at the user level"
+beacon endpoint hooks install --harness opencode
+```
+
+Install Grok Build hooks at the user level:
+
+```bash title="Install Grok Build hooks at the user level"
+beacon endpoint hooks install --harness grok
+```
+
+Install Hermes Agent hooks at the user level:
+
+```bash title="Install Hermes Agent hooks at the user level"
+beacon endpoint hooks install --harness hermes
+```
+
+Install Grok Build hooks at the project level:
+
+```bash title="Install Grok Build hooks at the project level"
+beacon endpoint hooks install --harness grok --level project
+```
+
+Project-level Grok Build hooks require `/hooks-trust` in Grok before they execute.
+
+Hermes Agent hooks support user-level config only. `beacon endpoint hooks install --harness hermes --level project` returns an error instead of writing project files.
+
+Install all supported hook integrations:
+
+```bash title="Install all supported hook integrations"
+beacon endpoint hooks install --all
+```
+
+When `--all` is used with `--level project`, Beacon skips Hermes Agent because Hermes shell hooks are user-level only.
+
+Install Antigravity, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log:
+
+```bash title="Install Antigravity, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log"
+beacon endpoint hooks install --harness antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode
+```
+
+Use a custom runtime log:
+
+```bash title="Use a custom runtime log"
+beacon endpoint hooks install \
+  --harness cursor \
+  --log-path /path/to/runtime.jsonl
+```
+
+## beacon endpoint hooks status
+
+`beacon endpoint hooks status` checks whether Beacon hook integrations are installed for the selected harnesses.
+
+```bash title="Check hook status"
+beacon endpoint hooks status --harness cursor
+```
+
+### Examples
+
+Check Cursor hook status:
+
+```bash title="Check Cursor hook status"
+beacon endpoint hooks status --harness cursor
+```
+
+Check Antigravity hook status:
+
+```bash title="Check Antigravity hook status"
+beacon endpoint hooks status --harness antigravity
+```
+
+Check Claude Code hook status:
+
+```bash title="Check Claude Code hook status"
+beacon endpoint hooks status --harness claude
+```
+
+Check Factory hook status:
+
+```bash title="Check Factory hook status"
+beacon endpoint hooks status --harness factory
+```
+
+Check Devin CLI hook status:
+
+```bash title="Check Devin CLI hook status"
+beacon endpoint hooks status --harness devin-cli
+```
+
+Check Devin Desktop hook status:
+
+```bash title="Check Devin Desktop hook status"
+beacon endpoint hooks status --harness devin-desktop
+```
+
+Check OpenCode plugin status:
+
+```bash title="Check OpenCode plugin status"
+beacon endpoint hooks status --harness opencode
+```
+
+Check Grok Build hook status:
+
+```bash title="Check Grok Build hook status"
+beacon endpoint hooks status --harness grok
+```
+
+Check Hermes Agent hook status:
+
+```bash title="Check Hermes Agent hook status"
+beacon endpoint hooks status --harness hermes
+```
+
+Print hook status as JSON:
+
+```bash title="Print hook status as JSON"
+beacon endpoint hooks status --harness cursor --json
+```
+
+Show every supported hook integration:
+
+```bash title="Show every supported hook integration"
+beacon endpoint hooks status --all
+```
+
+Check project-level hooks:
+
+```bash title="Check project-level hooks"
+beacon endpoint hooks status --harness cursor --level project
+```
+
+## beacon endpoint hooks uninstall
+
+`beacon endpoint hooks uninstall` removes Beacon hook entries for supported harnesses. Existing non-Beacon hooks are preserved.
+
+```bash title="Remove runtime hooks"
+beacon endpoint hooks uninstall --harness cursor
+```
+
+### Examples
+
+Remove user-level Cursor hooks:
+
+```bash title="Remove user-level Cursor hooks"
+beacon endpoint hooks uninstall --harness cursor
+```
+
+Remove user-level Antigravity hooks:
+
+```bash title="Remove user-level Antigravity hooks"
+beacon endpoint hooks uninstall --harness antigravity
+```
+
+Remove user-level Claude Code hooks:
+
+```bash title="Remove user-level Claude Code hooks"
+beacon endpoint hooks uninstall --harness claude
+```
+
+Remove project-level Antigravity hooks:
+
+```bash title="Remove project-level Antigravity hooks"
+beacon endpoint hooks uninstall --harness antigravity --level project
+```
+
+Remove project-level Cursor hooks:
+
+```bash title="Remove project-level Cursor hooks"
+beacon endpoint hooks uninstall --harness cursor --level project
+```
+
+Remove user-level Devin CLI hooks:
+
+```bash title="Remove user-level Devin CLI hooks"
+beacon endpoint hooks uninstall --harness devin-cli
+```
+
+Remove project-level Devin CLI hooks:
+
+```bash title="Remove project-level Devin CLI hooks"
+beacon endpoint hooks uninstall --harness devin-cli --level project
+```
+
+Remove user-level Devin Desktop hooks:
+
+```bash title="Remove user-level Devin Desktop hooks"
+beacon endpoint hooks uninstall --harness devin-desktop
+```
+
+Remove project-level Devin Desktop hooks:
+
+```bash title="Remove project-level Devin Desktop hooks"
+beacon endpoint hooks uninstall --harness devin-desktop --level project
+```
+
+Remove user-level Factory hooks:
+
+```bash title="Remove user-level Factory hooks"
+beacon endpoint hooks uninstall --harness factory
+```
+
+Remove user-level OpenCode hooks:
+
+```bash title="Remove user-level OpenCode hooks"
+beacon endpoint hooks uninstall --harness opencode
+```
+
+Remove user-level Grok Build hooks:
+
+```bash title="Remove user-level Grok Build hooks"
+beacon endpoint hooks uninstall --harness grok
+```
+
+Remove user-level Hermes Agent hooks:
+
+```bash title="Remove user-level Hermes Agent hooks"
+beacon endpoint hooks uninstall --harness hermes
+```
+
+Remove project-level Grok Build hooks:
+
+```bash title="Remove project-level Grok Build hooks"
+beacon endpoint hooks uninstall --harness grok --level project
+```
+
+## Antigravity troubleshooting
+
+Beacon writes Antigravity user-level hooks to `~/.gemini/config/hooks.json`. Project-level installs write `./.agents/hooks.json`. Beacon owns only the `beacon-endpoint` hook block and leaves other Antigravity hook blocks in place.
+
+If Antigravity telemetry is missing, check the selected level, confirm the hook file contains commands with `--platform antigravity`, and restart Antigravity so new sessions pick up the updated hook configuration.
+
+## Grok Build troubleshooting
+
+Beacon writes Grok Build user-level hooks to `~/.grok/hooks/beacon-endpoint.json`. Project-level installs write `./.grok/hooks/beacon-endpoint.json` and require `/hooks-trust` in Grok before those hooks execute. Beacon owns only the `beacon-endpoint.json` hook file and leaves other Grok hook files in place.
+
+If Grok telemetry is missing, check the selected level, confirm the hook file contains commands with `--platform grok`, run `/hooks-trust` for project-level hooks, and restart Grok so new sessions pick up the updated hook configuration.
+
+## Hermes Agent troubleshooting
+
+Beacon merges Hermes Agent hooks into `~/.hermes/config.yaml`. Hermes hooks are user-level only; project-level install, status, or uninstall requests return a clear error. Beacon preserves existing Hermes settings and non-Beacon hooks, and replaces only Beacon-managed commands with `BEACON_ENDPOINT_MODE=1` and `--platform hermes`.
+
+If Hermes telemetry is missing, confirm `~/.hermes/config.yaml` contains commands with `--platform hermes`, restart Hermes, and verify hook consent. Hermes prompts for first-use consent for each `(event, command)` pair; for non-interactive gateway, cron, or CI runs, set `HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure `hooks_auto_accept: true`.
+
+## OpenCode troubleshooting
+
+Beacon installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin is a thin local adapter: it forwards supported OpenCode hook payloads to Beacon's Go hook binary, and Beacon handles normalization, redaction, retention, and JSONL output.
+
+For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. Beacon telemetry should not interrupt OpenCode execution if the hook command fails.
+
+## Devin troubleshooting
+
+Beacon writes Devin CLI user-level hooks under the `hooks` key in `~/.config/devin/config.json`. Devin CLI project-level installs write the standalone hook map to `./.devin/hooks.v1.json`. The legacy `devin` harness name maps to `devin-cli`.
+
+Beacon writes Devin Desktop user-level hooks to `~/.codeium/windsurf/hooks.json`. Project-level installs write `.windsurf/hooks.json`, which may also affect Windsurf/Cascade in that workspace. Install and uninstall preserve unrelated settings and non-Beacon hook commands.
+
+If Devin CLI hook telemetry is missing, check the selected level, confirm the hook file contains commands with `--platform devin-cli`, and restart Devin CLI so new sessions pick up the updated hook configuration. If Devin Desktop telemetry is missing, confirm the hook file contains commands with `--platform devin-desktop`, generate a Desktop event, and then check the Beacon runtime log.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Core Concepts" icon="book-open" href="/concepts/core-concepts">
+    Review hook, harness, endpoint event, and runtime log terminology.
+  </Card>
+  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
+    Compare hook and OTLP support across Beacon runtimes.
+  </Card>
+</Columns>

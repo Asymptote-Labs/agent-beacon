@@ -1,0 +1,131 @@
+---
+title: "Write Validation Events"
+description: "Write synthetic Beacon endpoint events to validate local runtime logging"
+---
+
+## Overview
+
+Use a validation event to prove Beacon can write a known-good endpoint event to the local runtime JSONL log before you rely on real agent activity.
+
+This guide covers the default validation event, JSON output for automation, custom log paths, and system-mode validation.
+
+## Setup
+
+Confirm endpoint telemetry is configured:
+
+```bash title="Check endpoint status"
+beacon endpoint status
+```
+
+## 1. Write A Test Event
+
+Run `beacon endpoint test-event` with the default per-user endpoint paths:
+
+```bash title="Write a validation event"
+beacon endpoint test-event
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint test-event
+
+checking runtime log: ok
+writing validation event: ok
+event action: endpoint.validation
+runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
+```
+</Accordion>
+
+The command checks that the configured runtime log is writable, appends a synthetic Beacon endpoint event, and reports validation stages. `beacon endpoint validate-pipeline` is an alias for the same local validation path.
+
+```bash title="Alias for the same validation path"
+beacon endpoint validate-pipeline
+```
+
+## 2. Print Validation Stages As JSON
+
+Use JSON output when capturing evidence for support, scripts, or rollout checks:
+
+```bash title="Print validation event result as JSON"
+beacon endpoint test-event --json
+```
+
+<Accordion title="Sample JSON output">
+```json title="Sample JSON output"
+{
+  "runtimeLogWritable": true,
+  "eventWritten": true,
+  "eventAction": "endpoint.validation",
+  "logPath": "~/.beacon/endpoint/logs/runtime.jsonl"
+}
+```
+</Accordion>
+
+## 3. Validate A Specific Log Path
+
+If you are testing a non-default runtime log, pass the path explicitly:
+
+```bash title="Write to a custom runtime log"
+beacon endpoint test-event --log-path /path/to/runtime.jsonl
+```
+
+For a system-mode deployment, use the system endpoint paths:
+
+```bash title="Write a system-mode validation event"
+sudo beacon endpoint test-event --system
+```
+
+## 4. Test GitHub Copilot CLI Telemetry
+
+After `beacon endpoint install` has started the local collector, run a real Copilot CLI prompt with OTLP export enabled:
+
+```bash title="Generate Copilot CLI telemetry"
+COPILOT_OTEL_ENABLED=true \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
+copilot -p "Tell me about this repo."
+```
+
+Use `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` only when prompt content capture is intended for the test.
+
+Confirm the Copilot event with status or the local dashboard:
+
+```bash title="Confirm telemetry"
+beacon endpoint status
+beacon endpoint dashboard --open
+```
+
+## Verify Results
+
+After writing the event, confirm it with status or the local dashboard:
+
+```bash title="Verify validation event"
+beacon endpoint status
+beacon endpoint dashboard --open
+```
+
+The status output should include a recent last Beacon event when the runtime log has been written successfully. The dashboard should show the validation event in Log Search.
+
+## Troubleshooting
+
+- If the write fails, check runtime log path and permissions.
+- If JSON output shows the log is not writable, run `beacon endpoint doctor --fix` when safe.
+- If system-mode writes work but user-mode checks look empty, confirm the dashboard is pointed at the system log.
+- If Copilot telemetry is missing, confirm the OTLP endpoint and environment variables are set for the Copilot process.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon endpoint test-event" icon="vial" href="/cli/endpoint-test-event">
+    Review all flags and examples for synthetic validation events.
+  </Card>
+  <Card title="Test the Local Dashboard" icon="chart-line" href="/guides/local-testing/dashboard">
+    Confirm validation events through the local read-only dashboard.
+  </Card>
+  <Card title="Inspect Runtime Logs" icon="file-lines" href="/guides/local-testing/logs">
+    Inspect runtime JSONL paths and last-event freshness.
+  </Card>
+  <Card title="Log forwarding" icon="share-nodes" href="/log-forwarding">
+    Move from local validation to destination-specific forwarding checks.
+  </Card>
+</Columns>

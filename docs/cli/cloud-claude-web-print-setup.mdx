@@ -1,0 +1,36 @@
+---
+title: "beacon cloud claude-web print-setup"
+description: "Print a Claude Code cloud environment setup script"
+---
+
+## Command Overview
+
+`beacon cloud claude-web print-setup` prints a Claude Code cloud environment setup script for a Beacon release.
+
+```bash title="Command syntax"
+beacon cloud claude-web print-setup
+```
+
+Paste the generated script into the Claude Code cloud environment setup field. It installs `beacon` and `beacon-hooks` into `/tmp/beacon/bin`, discovers the cloud sandbox repository root, and writes `.claude/settings.local.json` inside the sandbox clone.
+
+## Examples
+
+Print setup for a specific Beacon release:
+
+```bash title="Print setup for a specific Beacon release"
+beacon cloud claude-web print-setup --version v0.0.66
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud" icon="cloud" href="/cli/cloud">
+    Review cloud command group behavior.
+  </Card>
+  <Card title="beacon cloud claude-web print-hooks" icon="plug" href="/cli/cloud-claude-web-print-hooks">
+    Print the Claude hook settings used by the setup script.
+  </Card>
+  <Card title="Claude Code Cloud Agents" icon="cloud" href="/runtimes/claude-code-cloud-agents">
+    Configure Claude Code cloud agent telemetry and GCS upload end to end.
+  </Card>
+</Columns>

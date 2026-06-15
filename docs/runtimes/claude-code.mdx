@@ -1,0 +1,96 @@
+---
+title: "Claude Code"
+description: "Asymptote support details for Claude Code endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Claude Code through local OpenTelemetry export to Asymptote's localhost collector, with optional hook telemetry for richer lifecycle and tool activity.
+
+## Prerequisites
+
+Before enabling Claude Code telemetry, make sure:
+
+- Claude Code is installed and available as the `claude` executable for the user or managed endpoint.
+- `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
+- The install includes the `claude` harness, either through the default harness list or an explicit `--harness claude` value.
+- Your team has reviewed content handling and destination access for prompt telemetry.
+
+## Collection paths
+
+Claude Code exports OTLP telemetry to the local Asymptote collector. Asymptote writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) to the configured runtime JSONL log and makes them available in the local dashboard.
+
+For richer local telemetry, Asymptote can also install Claude Code hooks with the same hook adapter used by other supported runtimes:
+
+```bash title="Install Claude Code hooks"
+beacon endpoint hooks install --harness claude
+beacon endpoint hooks status --harness claude
+```
+
+User-level hooks are written to `~/.claude/settings.json`. Project-level hooks are written to `./.claude/settings.json`:
+
+```bash title="User-level hooks are written to ~/.claude/settings.json. Project-level hooks are written to ./.claude/settings.json"
+beacon endpoint hooks install --harness claude --level project
+```
+
+## Claude Code Cloud Agents
+
+Asymptote also supports proof-of-concept telemetry capture from Claude Code
+cloud agents. The cloud setup path installs ephemeral Beacon hooks inside the
+Claude cloud sandbox, writes `/tmp/beacon/runtime.jsonl`, and uploads the
+session log to customer-managed Google Cloud Storage.
+
+Start with [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) when you want to
+test Claude Code cloud agent telemetry without deploying Asymptote Managed.
+
+<Warning>
+  The self-serve GCS path passes a scoped service-account credential to the
+  Claude Code cloud environment. Use it for evaluation and prototypes. For
+  production enterprise deployments, use [Asymptote Managed](/deployment/managed)
+  or contact Asymptote about secure forwarding in your own customer-managed
+  infrastructure.
+</Warning>
+
+## Discovery and status
+
+Asymptote detects Claude Code through the `claude` executable and Claude settings paths. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Claude Code is present and configured for local telemetry.
+
+## Install or configuration support
+
+`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector.
+
+`beacon endpoint hooks install --harness claude` adds Asymptote-managed Claude Code hooks while preserving existing Claude settings and non-Asymptote hooks. `beacon endpoint hooks uninstall --harness claude` removes only Asymptote-managed Claude hook entries.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported when emitted through Claude Code OTLP or hooks |
+| Command, tool, and file telemetry | Supported when emitted through Claude Code OTLP |
+| Token usage and cost | Supported through OTLP token and cost metrics, with per-model and per-session attribution |
+| Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
+| Claude Code cloud agent sessions | Supported through cloud sandbox hooks with GCS upload |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported through the system-mode package or MDM-managed settings |
+
+Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Pre-tool matching includes common Claude tools such as `Bash`, `Edit`, `Write`, `MultiEdit`, `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, and `mcp__.*`.
+
+## Deployment notes
+
+For MDM deployments, use the signed and notarized macOS `.pkg` so endpoint events land in `/var/log/beacon-agent/runtime.jsonl`. The package installs the endpoint agent under `/opt/beacon`, creates system endpoint configuration, and loads the local collector LaunchDaemon.
+
+If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures supported runtimes.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall Claude Code hook telemetry.
+  </Card>
+</Columns>

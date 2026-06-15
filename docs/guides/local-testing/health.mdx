@@ -1,0 +1,116 @@
+---
+title: "Run Endpoint Health Checks"
+description: "Validate local Beacon endpoint health, diagnostics, and runtime readiness"
+---
+
+## Overview
+
+Start local testing by confirming Beacon can find its endpoint configuration, collector, runtime log, and supported harnesses.
+
+This guide covers status checks, doctor diagnostics, and harness discovery before you test real agent activity.
+
+## Setup
+
+Run these checks after `beacon endpoint install` has configured the local endpoint agent.
+
+## 1. Run Status
+
+`beacon endpoint status` gives the broadest local view. It reports the Agent Beacon CLI version, config path, runtime log path, collector health, service state, discovered harnesses, diagnostics, destinations, and last observed event.
+
+```bash title="Check endpoint status"
+beacon endpoint status
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint status
+
+Beacon version: 0.0.66
+Endpoint config: ~/.beacon/endpoint/config.yaml
+Runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
+Collector: running
+Diagnostics: passing
+Last event: 2026-06-10T04:31:02Z
+```
+</Accordion>
+
+For automation or support collection, use JSON output:
+
+```bash title="Print status as JSON"
+beacon endpoint status --json
+```
+
+If you are validating a system-mode install from a managed package, check system paths with elevated privileges:
+
+```bash title="Check system-mode status"
+sudo beacon endpoint status --system
+```
+
+## 2. Run Doctor
+
+`beacon endpoint doctor` runs pass/fail health checks and exits non-zero when a hard check fails. Add `--fix` when you want Beacon to apply supported safe remediations, such as creating a missing runtime log or repairing managed macOS collector service files.
+
+```bash title="Run endpoint doctor"
+beacon endpoint doctor
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint doctor
+
+endpoint config: pass
+collector config: pass
+runtime log: pass
+launchd service: pass
+configured harnesses: pass
+```
+</Accordion>
+
+Doctor verifies the endpoint configuration file, config validity, collector configuration file, runtime JSONL path, runtime log permissions, the macOS launchd plist, and configured harness telemetry. If the runtime log has not been created because no event has been written yet, doctor reports a warning rather than a hard failure.
+
+```bash title="Apply supported fixes"
+beacon endpoint doctor --fix
+```
+
+Fix mode reports any applied and skipped remediations. Skipped findings need operator review, such as invalid endpoint configuration, missing harness setup, missing observed events, unsafe log permissions, or service repair on non-macOS hosts.
+
+## 3. Discover Harnesses
+
+Use discovery to compare configured and detected local runtimes before testing real agent activity.
+
+```bash title="Discover local harnesses"
+beacon endpoint discover --json
+```
+
+Confirm that discovered harnesses match the local test scope. Hook-based runtimes such as Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode may require user or project scoped hook installation before real activity appears.
+
+## Key Signals
+
+- Collector is running and bound to local OTLP endpoints.
+- Runtime log path exists and is writable.
+- Diagnostics are passing or have actionable warnings.
+- Discovered harnesses match your expected local test scope.
+
+## Troubleshooting
+
+- If the collector is stopped, run `beacon endpoint repair` or `beacon endpoint doctor --fix`.
+- If the runtime log is missing before any event exists, write a validation event.
+- If a harness is installed but not configured, review [Agent harness integrations](/runtimes).
+- If system-mode checks differ from user-mode checks, confirm which install mode you are validating.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Inspect endpoint health, diagnostics, destinations, and last-event state.
+  </Card>
+  <Card title="beacon endpoint doctor" icon="stethoscope" href="/cli/endpoint-doctor">
+    Run local health checks with pass/fail exit behavior.
+  </Card>
+  <Card title="beacon endpoint discover" icon="magnifying-glass" href="/cli/endpoint-discover">
+    Show detected and configured local agent harnesses.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install and inspect hook telemetry for supported harnesses.
+  </Card>
+</Columns>

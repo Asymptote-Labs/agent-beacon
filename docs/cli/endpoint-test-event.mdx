@@ -1,0 +1,68 @@
+---
+title: "beacon endpoint test-event"
+description: "Write a synthetic Beacon endpoint validation event"
+---
+
+## Command Overview
+
+`beacon endpoint test-event` writes a synthetic validation event to the Beacon runtime JSONL log.
+
+```bash title="Command syntax"
+beacon endpoint test-event
+```
+
+Use a test event to validate local write permissions and downstream file-tail pipelines before relying on real agent activity. The command checks that the configured runtime log is writable, appends a known-good Beacon endpoint event, and reports the validation stages. `beacon endpoint validate-pipeline` is an alias.
+
+For destination-specific validation guidance, use the SIEM commands such as [`beacon endpoint wazuh validate`](/cli/wazuh#beacon-endpoint-wazuh-validate), [`beacon endpoint datadog validate`](/cli/datadog#beacon-endpoint-datadog-validate), [`beacon endpoint sumo validate`](/cli/sumo#beacon-endpoint-sumo-validate), or [`beacon endpoint rapid7 validate`](/cli/rapid7#beacon-endpoint-rapid7-validate).
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print validation stages as JSON |
+
+## Examples
+
+Write a validation event to the default per-user runtime log:
+
+```bash title="Write a validation event to the default per-user runtime log"
+beacon endpoint test-event
+```
+
+Validate a custom runtime log:
+
+```bash title="Validate a custom runtime log"
+beacon endpoint test-event --log-path /path/to/runtime.jsonl
+```
+
+Print validation stages as JSON:
+
+```bash title="Print validation stages as JSON"
+beacon endpoint test-event --json
+```
+
+Use the pipeline-validation alias:
+
+```bash title="Use the pipeline-validation alias"
+beacon endpoint validate-pipeline
+```
+
+Validate a system-mode runtime log:
+
+```bash title="Validate a system-mode runtime log"
+sudo beacon endpoint test-event --system
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Inspect endpoint health and last-event state.
+  </Card>
+  <Card title="Log forwarding" icon="share-nodes" href="/log-forwarding">
+    Forward Beacon runtime JSONL to customer-managed destinations.
+  </Card>
+</Columns>

@@ -1,0 +1,64 @@
+---
+title: "Common Issues"
+description: "Solutions for common issues when setting up and using Asymptote."
+---
+
+<AccordionGroup>
+  <Accordion title="Scans aren't triggering on pull requests">
+    - Verify the Asymptote GitHub App is installed on the target repository.
+    - Check that webhook deliveries are succeeding under your GitHub App settings → **Recent Deliveries**.
+    - Confirm the `ASYMPTOTE_API_KEY` secret is set in your repository under **Settings → Secrets and variables → Actions**.
+  </Accordion>
+  <Accordion title="Status checks are stuck as pending">
+    - Confirm your `ASYMPTOTE_API_KEY` secret is correctly set and hasn't expired.
+    - Large pull requests may take a few extra minutes to process.
+    - Check the Actions tab in your repository to see if the workflow is running.
+  </Accordion>
+  <Accordion title="Permission errors on the GitHub App">
+    Re-install the Asymptote GitHub App and ensure the correct repositories are selected. See the [GitHub integration page](/deployment/hosting-options) for a full list of required permissions.
+  </Accordion>
+  <Accordion title="The CLI isn't authenticating">
+    Run `asymptote whoami` to check your current auth state. If unauthenticated, run `asymptote login` to re-authenticate. See the [CLI authentication docs](/cli/login) for more details.
+  </Accordion>
+  <Accordion title="My coding agent isn't being intercepted">
+    Ensure Asymptote is configured for your agent. See the [Coding Agent Integrations](/runtimes/cursor) docs for setup instructions for your specific tool.
+  </Accordion>
+  <Accordion title="How do I disconnect a repository?">
+    In GitHub: **Repository → Settings → GitHub Apps → Asymptote Security**, then suspend or uninstall the app.
+  </Accordion>
+  <Accordion title="How do I disconnect all repositories?">
+    In GitHub: **Organization → Settings → GitHub Apps → Asymptote Security**, then suspend or uninstall the app.
+  </Accordion>
+  <Accordion title="How do I remove agent hooks from my local machine?">
+    Use `beacon endpoint hooks uninstall` for whichever hook harness you set up:
+
+    **Cursor**
+    ```bash
+    beacon endpoint hooks uninstall --harness cursor
+    beacon endpoint hooks uninstall --harness cursor --level project
+    ```
+
+    **Claude Code**
+    ```bash
+    beacon endpoint hooks uninstall --harness claude
+    beacon endpoint hooks uninstall --harness claude --level project
+    ```
+
+    **Factory Droid**
+    ```bash
+    beacon endpoint hooks uninstall --harness factory
+    beacon endpoint hooks uninstall --harness factory --level project
+    ```
+
+    **All supported hook integrations**
+    ```bash
+    beacon endpoint hooks uninstall --all
+    ```
+
+    After uninstalling hooks, restart the affected agent or IDE so new sessions pick up the updated hook configuration. See the [hook command docs](/cli/hooks#beacon-endpoint-hooks-uninstall) for supported harness names and flags.
+  </Accordion>
+</AccordionGroup>
+
+<Info icon="circle-question" title="Still stuck?">
+  Contact us at [support@asymptotelabs.ai](mailto:support@asymptotelabs.ai) and we'll help you get sorted.
+</Info>

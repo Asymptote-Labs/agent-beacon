@@ -1,0 +1,66 @@
+---
+title: "Factory Droid"
+description: "Asymptote support details for Factory Droid endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports Factory Droid through an OTLP HTTP launch environment plus optional hook telemetry.
+
+## Prerequisites
+
+Before enabling Factory Droid telemetry, make sure:
+
+- Factory Droid is installed and available as the `droid` executable for the user or managed endpoint.
+- `beacon endpoint install` has run so the local collector, shared endpoint config, and runtime log paths exist.
+- Droid's launch environment sets `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318` through MDM or another customer-owned policy.
+- Optional hook telemetry is installed with `beacon endpoint hooks install --harness factory`.
+- Factory Droid is restarted after launch-environment or hook changes so new sessions use the updated settings.
+
+## Collection path
+
+Factory Droid can send OTLP HTTP telemetry to Asymptote's local collector. Factory hooks can also invoke Asymptote's hook adapter for richer runtime events where Factory exposes hook payloads.
+
+## Discovery and status
+
+Asymptote detects Factory Droid through the `droid` executable and validates `OTEL_TELEMETRY_ENDPOINT` in the effective launch environment.
+
+Use `beacon endpoint discover`, `beacon endpoint status`, or `beacon endpoint hooks status --harness factory` to inspect Factory Droid support.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares the collector, shared endpoint config, and runtime log paths. Factory Droid's launch environment is managed by MDM or customer policy.
+
+Install optional Factory hooks separately:
+
+```bash title="Install optional Factory hooks separately"
+beacon endpoint hooks install --harness factory
+```
+
+`--harness droid` is also accepted for Factory Droid hook installs.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through `UserPromptSubmit` hooks |
+| Command, tool, and file telemetry | Supported for session, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Factory launch environment and user/project hooks are managed in the user's Droid context |
+
+## Deployment notes
+
+Factory Droid OTLP is controlled by Droid's launch environment. Set `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318` through MDM or another customer-owned launch policy.
+
+Asymptote discovers Droid and validates the endpoint, but it does not mutate shell profiles for Droid. Restart Factory Droid after installing or removing hooks so new sessions pick up the updated hook configuration.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

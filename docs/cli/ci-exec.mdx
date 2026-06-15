@@ -1,0 +1,88 @@
+---
+title: "beacon ci exec"
+description: "Run a command with Beacon telemetry captured for a CI job"
+---
+
+## Command Overview
+
+`beacon ci exec` starts a temporary Beacon collector, runs the child command after `--`, stops the collector, validates the runtime log, and prints the artifact paths. The child command's exit code is preserved.
+
+```bash title="Command syntax"
+beacon ci exec -- <command>
+```
+
+When `GITHUB_ACTIONS=true`, Beacon records GitHub Actions run metadata such as workflow, run ID, commit, ref, and actor in the CI session result. Other CI environments are marked as ephemeral CI runs when `CI` is set.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--harness <harness>` | CI harness to configure. Defaults to `claude`; supported values include `claude`, `codex`, or comma-separated aliases |
+| `--log-path <path>` | CI runtime JSONL log path |
+| `--json` | Print the execution and validation result as JSON |
+| `--min-events <count>` | Minimum matching events required during validation. Defaults to `1` |
+| `--keep-artifacts` | Keep CI runtime log and collector config after exit. Enabled by default |
+| `--forward <destination>` | Optionally forward CI events to a customer-managed SIEM. Supported values are `splunk` and `falcon` |
+| `--forward-endpoint <url>` | SIEM HEC endpoint URL for the selected `--forward` provider. Tokens are read from `BEACON_CI_SPLUNK_HEC_TOKEN` or `BEACON_CI_FALCON_HEC_TOKEN` |
+| `--require-telemetry <bool>` | Fail when telemetry validation fails. Defaults to `true`; set `false` to warn without gating the child command result |
+| `--upload <destination>` | Upload the completed CI runtime JSONL after validation. Supported values are `s3` and `gcs`; repeat for multiple destinations |
+
+Hidden operational flags are available for custom runners and tests, including `--base-dir`, `--work-dir`, `--collector`, `--otlp-grpc-port`, and `--otlp-http-port`.
+
+`--upload s3` reads `BEACON_CI_S3_BUCKET` and optional `BEACON_CI_S3_PREFIX`. `--upload gcs` reads `BEACON_CI_GCS_BUCKET` and optional `BEACON_CI_GCS_PREFIX`.
+
+<Note>
+  `--content-retention` is deprecated and hidden. Beacon now captures supported CI content subject to redaction, sanitization, truncation, and event-size limits; the flag is accepted as a no-op for compatibility.
+</Note>
+
+## Examples
+
+Wrap an agent command in GitHub Actions:
+
+```bash title="Wrap an agent command in GitHub Actions"
+beacon ci exec -- claude -p "Run the repository test suite and summarize failures"
+```
+
+Write CI telemetry to a known artifact path:
+
+```bash title="Write CI telemetry to a known artifact path"
+beacon ci exec \
+  --log-path "$RUNNER_TEMP/beacon/runtime.jsonl" \
+  -- claude -p "Review this pull request"
+```
+
+Run with telemetry validation as a warning instead of a hard gate:
+
+```bash title="Run with telemetry validation as a warning instead of a hard gate"
+beacon ci exec \
+  --require-telemetry=false \
+  -- claude -p "Inspect the changed files"
+```
+
+Print machine-readable output:
+
+```bash title="Print machine-readable output"
+beacon ci exec --json -- claude -p "Check release readiness"
+```
+
+Upload the completed CI runtime log to S3:
+
+```bash title="Upload the completed CI runtime log to S3"
+BEACON_CI_S3_BUCKET="my-beacon-telemetry" \
+BEACON_CI_S3_PREFIX="github-actions" \
+beacon ci exec --upload s3 -- claude -p "Review this pull request"
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci" icon="terminal" href="/cli/ci">
+    Review CI artifact paths and command group behavior.
+  </Card>
+  <Card title="beacon ci validate" icon="check" href="/cli/ci-validate">
+    Validate CI runtime telemetry artifacts after a job step.
+  </Card>
+  <Card title="CI Telemetry Exports" icon="file-export" href="/log-forwarding/ci-telemetry-exports">
+    Export CI runtime JSONL through workflow artifacts, S3, GCS, or downstream pipelines.
+  </Card>
+</Columns>

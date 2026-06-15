@@ -1,0 +1,75 @@
+---
+title: "beacon rules lint"
+description: "Validate Beacon threat-rule files and run embedded conformance fixtures"
+---
+
+## Command Overview
+
+`beacon rules lint` validates rule files and runs their embedded conformance fixtures.
+
+```bash title="Command syntax"
+beacon rules lint [path]
+```
+
+Use this command while authoring rules or before installing or publishing a rule pack.
+
+## What lint checks
+
+`beacon rules lint`:
+
+- loads one `.rule.yaml` file or every `.rule.yaml` file under a directory
+- validates rule structure
+- compiles CEL expressions against the Beacon endpoint event schema
+- enforces maturity gates for `experimental`, `stable`, and `deprecated` rules
+- runs every embedded fixture and checks the declared verdict
+
+Stable rules must include at least one `match` fixture and at least one `no_match` fixture.
+
+## Examples
+
+Lint the default `./rules` directory:
+
+```bash title="Lint default rules directory"
+beacon rules lint
+```
+
+Lint a specific directory:
+
+```bash title="Lint a rule directory"
+beacon rules lint ./rules
+```
+
+Lint one rule file:
+
+```bash title="Lint one rule"
+beacon rules lint ./rules/suspicious-egress-command.rule.yaml
+```
+
+## Rule fixture shape
+
+Each fixture declares the expected `verdict` and an ordered list of partial Beacon events.
+
+```yaml title="Fixture example"
+tests:
+  - name: positive_basic
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+  - name: unrelated
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ls -la" }
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules fields" icon="table-list" href="/cli/rules-fields">
+    Print event fields available to CEL expressions.
+  </Card>
+  <Card title="beacon rules add" icon="plus" href="/cli/rules-add">
+    Install validated rules into the local store.
+  </Card>
+</Columns>

@@ -1,0 +1,86 @@
+---
+title: "Asymptote Open Source"
+description: "Install Beacon, configure open-source telemetry, and keep the CLI up to date"
+---
+
+Install Beacon with Homebrew, configure the local endpoint telemetry path, and use the repair workflow when you need to reapply configuration after an upgrade. For CI, cloud-agent, and SDK setup paths, see [Agent harness integrations](/runtimes).
+
+<Frame>
+  <iframe
+    src="https://www.loom.com/embed/b39038879dc24b10af9e603ad4e03fb6?t=0s"
+    title="Asymptote Open Source installation walkthrough"
+    allowFullScreen
+    style={{ aspectRatio: "16 / 9", width: "100%", border: 0 }}
+  />
+</Frame>
+
+## Install Beacon
+
+```bash title="Install Beacon"
+brew tap asymptote-labs/tap
+brew install beacon
+beacon version
+```
+
+<Accordion title="Example output">
+```bash title="beacon version output"
+$ beacon version
+beacon version 0.0.48
+```
+</Accordion>
+
+## Configure endpoint telemetry
+
+For most individual developer setups, continue with the default per-user endpoint install:
+
+```bash title="Configure endpoint telemetry"
+beacon endpoint install
+beacon endpoint status
+```
+
+By default, Beacon configures Claude Code and Codex CLI to export telemetry to a local OpenTelemetry Collector on `127.0.0.1`. Add Gemini when you want Beacon to manage Gemini OTLP settings too:
+
+```bash title="Include Gemini telemetry"
+beacon endpoint install --harness claude,codex,gemini
+```
+
+<Note>
+  Production endpoint install is currently supported on macOS. The default mode uses per-user paths; use `--system` as root for package or MDM deployments.
+</Note>
+
+Beacon records supported prompt, tool, command, file, approval, policy, and runtime context when the source runtime emits it. Before events are written to `runtime.jsonl` or sent through configured destinations, Beacon applies redaction, sanitization, truncation, and event-size limits.
+
+Beacon filters generic process/runtime OTLP metrics, Copilot CLI and OpenClaw operational metrics, and high-volume Codex spans out of the local JSONL log by default. Use `--include-runtime-metrics` or `--include-codex-spans` only when troubleshooting.
+
+## Upgrade Beacon
+
+Use the standard Homebrew upgrade flow, then reapply endpoint configuration if needed:
+
+```bash title="Upgrade Beacon"
+beacon version check
+brew update
+brew upgrade beacon
+beacon endpoint repair
+```
+
+`beacon endpoint repair` reapplies managed service files, collector configuration, harness telemetry settings, and forwarding destinations while preserving runtime logs. On v0.0.43 or newer, use `beacon endpoint doctor --fix` when you only need supported health-check drift remediated without a full repair.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
+    Choose between Asymptote Cloud and the open-source Agent Beacon path.
+  </Card>
+  <Card title="Endpoint paths and ports" icon="folder-tree" href="/cli/endpoint-paths">
+    Review files, logs, collector config, ports, and hook locations.
+  </Card>
+  <Card title="Endpoint command reference" icon="terminal" href="/cli/endpoint">
+    Review install, status, repair, and uninstall commands.
+  </Card>
+  <Card title="Endpoint repair" icon="wrench" href="/cli/endpoint-repair">
+    Reapply service files and telemetry configuration.
+  </Card>
+  <Card title="Manual CLI installation" icon="file-zipper" href="/cli/manual-install">
+    Install from platform archives or build the CLI from source.
+  </Card>
+</Columns>

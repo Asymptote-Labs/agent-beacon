@@ -1,0 +1,176 @@
+---
+title: "CI Telemetry Exports"
+description: "Export Beacon CI runtime JSONL through artifacts, object storage, or customer-managed log pipelines."
+---
+
+## Overview
+
+Beacon CI telemetry is written as normalized JSONL for a single ephemeral CI job. The completed `runtime.jsonl` file is the durable handoff artifact: upload it as a workflow artifact, copy it to object storage, or route it into the same SIEM and log pipelines that consume Beacon endpoint JSONL.
+
+<Note>
+  This page covers export workflows for `beacon ci`. For persistent laptop or workstation forwarding, use [Log Forwarding](/log-forwarding).
+</Note>
+
+## Export Contract
+
+By default, `beacon ci exec` writes the CI runtime log to `$RUNNER_TEMP/beacon/runtime.jsonl` when `RUNNER_TEMP` is set. Otherwise it uses the system temp directory. Use `--log-path` when your workflow needs a stable artifact path.
+
+| Artifact | Default path | Export guidance |
+|----------|--------------|-----------------|
+| Runtime log | `$RUNNER_TEMP/beacon/runtime.jsonl` | Upload or forward this JSONL file |
+| Collector config | `$RUNNER_TEMP/beacon/otelcol.yaml` | Keep out of shared artifacts when it may contain environment references |
+| Collector spool | `$RUNNER_TEMP/beacon/spool/otlp.jsonl` | Operational buffer for troubleshooting |
+
+Each line in `runtime.jsonl` is one complete Beacon event using the [Endpoint Event Schema](/telemetry-schema/event-schema). Beacon applies redaction, sanitization, truncation, and event-size limits before events are written, so downstream artifacts receive the same normalized JSONL contract as local endpoint logs.
+
+## Export Paths
+
+### Workflow Artifact
+
+The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a workflow artifact by default:
+
+```yaml
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    command: claude --print "Review this pull request"
+    upload-artifact: "true"
+    artifact-name: beacon-runtime-log
+```
+
+Use the workflow artifact path when a security team or downstream job will retrieve the completed JSONL file after the run. Artifact access, retention, and download permissions stay under GitHub Actions controls.
+
+### Object Storage Upload
+
+For CI runners that should hand off telemetry through object storage, `beacon ci exec` can upload the completed `runtime.jsonl` after telemetry validation.
+
+Upload to Amazon S3:
+
+```bash
+export BEACON_CI_S3_BUCKET="my-beacon-telemetry"
+export BEACON_CI_S3_PREFIX="github-actions"
+
+beacon ci exec --upload s3 -- claude --print "Summarize this repository"
+```
+
+Upload to Google Cloud Storage:
+
+```bash
+export BEACON_CI_GCS_BUCKET="my-beacon-telemetry"
+export BEACON_CI_GCS_PREFIX="github-actions"
+
+beacon ci exec --upload gcs -- claude --print "Summarize this repository"
+```
+
+`--upload` is repeatable, so a job can upload to both destinations when required:
+
+```bash
+beacon ci exec --upload s3 --upload gcs -- claude --print "Review this repository"
+```
+
+`--upload` requires Beacon `v0.0.44` or newer.
+
+S3 upload uses `aws s3 cp` and the standard AWS credential provider chain. GCS upload uses `gcloud storage cp` when available, falling back to `gsutil cp`.
+
+### GitHub Actions Object Storage
+
+Configure cloud credentials at the job level, then pass the upload destination to the Agent Beacon action:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
+    aws-region: us-east-1
+
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  env:
+    BEACON_CI_S3_BUCKET: my-beacon-telemetry
+    BEACON_CI_S3_PREFIX: github-actions
+  with:
+    command: claude --print "Review this pull request"
+    upload: s3
+```
+
+For GCS, authenticate with your normal Google Cloud CI mechanism and set `BEACON_CI_GCS_BUCKET` plus optional `BEACON_CI_GCS_PREFIX`:
+
+```yaml
+- uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ secrets.BEACON_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+    service_account: ${{ secrets.BEACON_GCP_SERVICE_ACCOUNT }}
+
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  env:
+    BEACON_CI_GCS_BUCKET: my-beacon-telemetry
+    BEACON_CI_GCS_PREFIX: github-actions
+  with:
+    command: claude --print "Review this pull request"
+    upload: gcs
+```
+
+## Object Layout
+
+In GitHub Actions, object keys use this shape:
+
+```text
+<prefix>/<owner>/<repo>/<run_id>/<run_attempt>/runtime.jsonl
+```
+
+Outside GitHub Actions, Beacon falls back to:
+
+```text
+<prefix>/ci/<timestamp>/runtime.jsonl
+```
+
+Prefixes are optional. Beacon trims empty path parts and normalizes path separators before building the upload key.
+
+## Destination Mapping
+
+The JSONL artifact is the universal CI export contract. Existing destination packs and forwarding patterns can consume the same file after it is downloaded, copied, or routed into the customer-managed handoff path.
+
+| Destination | CI export path |
+|-------------|----------------|
+| Wazuh | Download the artifact and ingest it with the Wazuh localfile pack or an equivalent JSONL import path |
+| Elastic | Download the artifact and ingest it with Filebeat or Elastic Agent pack assets |
+| Datadog | Download the artifact and ingest it with Datadog Agent log collection or a customer-managed log pipeline |
+| Sumo Logic | Download the artifact for Vector-based forwarding, or use `--upload` when object storage is the handoff point |
+| Rapid7 | Download the artifact for Vector or webhook forwarding |
+| AWS S3 | Use `--upload s3` in CI, or upload the workflow artifact manually |
+| AWS CloudWatch Logs | Download the artifact and forward it with the Vector CloudWatch pack |
+| Google Cloud Storage | Use `--upload gcs` in CI, or upload the workflow artifact manually |
+| Microsoft Sentinel | Download the artifact and ingest it with Azure Monitor Agent or a Data Collection Rule path |
+| Splunk | Use direct `--forward splunk`, or ingest the JSONL artifact with an existing Splunk pipeline |
+| Falcon LogScale | Use direct `--forward falcon`, or ingest the JSONL artifact with an existing pipeline |
+
+## Security Notes
+
+Keep cloud credentials in CI secret stores, OIDC roles, workload identity, or job-level credential actions. Do not pass cloud credentials through prompt text, action inputs, or committed workflow files.
+
+When object storage upload is configured, Beacon strips common AWS and Google credential environment variables from the child agent process while keeping them available to the post-run uploader. This reduces credential exposure to the command being observed.
+
+Review artifact access before rollout. CI runtime JSONL can contain prompt, tool, file, command, and run context where supported runtimes emit it. Beacon applies redaction, sanitization, truncation, and event-size limits before writing the artifact, but artifact retention, access, and downstream routing remain controlled by GitHub Actions, object storage, and your customer-managed pipeline.
+
+## Failure Behavior
+
+By default, `beacon ci exec` fails the step when telemetry validation fails. Set `--require-telemetry=false` or the action input `require-telemetry: "false"` when telemetry health should warn but not gate the build.
+
+Object storage upload runs after telemetry validation. Upload failures fail the CI step so broken export paths are visible. If the child command exits non-zero, that child exit code still takes precedence.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci" icon="terminal" href="/cli/ci">
+    Run and validate ephemeral Beacon telemetry collection in CI.
+  </Card>
+  <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Compare endpoint SIEM, log aggregation, object storage, and local forwarding paths.
+  </Card>
+  <Card title="Retention and Redaction" icon="shield-halved" href="/security/retention-redaction">
+    Choose how much content Beacon writes before export.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized JSONL event fields.
+  </Card>
+</Columns>

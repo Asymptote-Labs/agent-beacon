@@ -1,0 +1,85 @@
+---
+title: "beacon ingest endpoint"
+description: "Check and upload endpoint telemetry for managed ingest"
+---
+
+## Command Overview
+
+`beacon ingest endpoint` manages endpoint telemetry uploads to Asymptote Managed ingest.
+
+```bash title="Command syntax"
+beacon ingest endpoint [command]
+```
+
+Use this command group when endpoint ingest is configured and you need to inspect upload state or trigger an upload from the local runtime log.
+
+<Note>
+  Endpoint ingest requires dashboard credentials from `beacon login` and endpoint ingest configuration. Beacon endpoint collection remains local-only unless managed ingest is configured and endpoint upload commands are used.
+</Note>
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="status" icon="circle-info" href="#beacon-ingest-endpoint-status">
+    Show endpoint telemetry upload status.
+  </Card>
+  <Card title="upload" icon="cloud-arrow-up" href="#beacon-ingest-endpoint-upload">
+    Upload endpoint telemetry to managed ingest.
+  </Card>
+</Columns>
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print output as JSON |
+
+## beacon ingest endpoint status
+
+`beacon ingest endpoint status` prints endpoint telemetry upload status, including whether ingest is enabled, whether it is managed, whether the CLI is logged in, upload cursor position, accepted and rejected counts, and the last upload error when present.
+
+```bash title="Show endpoint ingest status"
+beacon ingest endpoint status
+```
+
+Check status for a system-mode endpoint:
+
+```bash title="Show system endpoint ingest status"
+sudo beacon ingest endpoint status --system
+```
+
+Print machine-readable endpoint ingest status:
+
+```bash title="Print JSON"
+beacon ingest endpoint status --json
+```
+
+## beacon ingest endpoint upload
+
+`beacon ingest endpoint upload` uploads endpoint telemetry from the runtime log to managed ingest.
+
+```bash title="Upload endpoint telemetry"
+beacon ingest endpoint upload
+```
+
+Upload from an explicit runtime log:
+
+```bash title="Upload from a runtime log"
+beacon ingest endpoint upload --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+When the upload completes, Beacon prints the updated ingest state. If managed ingest is enabled and the upload is rejected or fails, the command exits with an error and includes the latest ingest error in the status output.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ingest" icon="cloud-arrow-up" href="/cli/ingest">
+    Review the managed ingest command group.
+  </Card>
+  <Card title="Endpoint config" icon="gear" href="/cli/endpoint-config">
+    Inspect and validate local endpoint configuration.
+  </Card>
+</Columns>

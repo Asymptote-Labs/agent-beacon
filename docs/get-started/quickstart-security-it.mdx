@@ -1,0 +1,76 @@
+---
+title: "For Security & IT Teams"
+description: "Choose a rollout path for open-source telemetry, managed visibility, or private deployment"
+---
+
+Use this path when you are evaluating Asymptote for a security operations, IT, or endpoint-management rollout.
+
+## 1. Choose your path
+
+Start with the deployment model that matches your review and operating needs.
+
+| Hosting Option | Best for | Where to go |
+| -------------- | -------- | ----------- |
+| Asymptote Open Source | Small pilots across supported local, CI, and cloud-agent surfaces, with local JSONL and customer-managed forwarding where applicable. | Continue below. |
+| Asymptote Managed | Centralized visibility, policy controls, investigations, SSO/RBAC, and rollout support. | See [Asymptote Managed](/deployment/managed). |
+| Asymptote Private Deployment | Managed capabilities with stricter data isolation, residency, or infrastructure ownership requirements. | [Contact us](https://asymptotelabs.ai/contact). |
+
+For the full comparison, see [Hosting Options](/deployment/hosting-options).
+
+## 2. Run a small open-source pilot
+
+If you are starting local-first, pilot Beacon on a small macOS group before broad MDM deployment.
+
+Decide three things up front:
+
+- which [agent harnesses](/runtimes) are in scope
+- whether events should stay local at first or forward into a security workflow
+- which MDM group will receive the first system-mode package rollout
+
+Beacon is local-only by default. It writes normalized endpoint events to JSONL and does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection.
+
+## 3. Deploy and validate
+
+```bash
+sudo beacon endpoint install --system
+beacon endpoint status
+```
+
+After deployment, confirm collector health, runtime log freshness, harness scope, and forwarding readiness.
+
+```bash
+beacon endpoint status --json
+beacon endpoint discover --json
+beacon scan --min-severity high
+```
+
+For package rollout details, see [MDM Deployment](/mdm), [Jamf](/mdm/jamf), and [Fleet](/mdm/fleet). For the deeper operational checklist, see the [Security & IT Rollout Guide](/security).
+
+## 4. Expand or centralize
+
+If the pilot is healthy, expand through MDM and add forwarding only where it matches your security workflow. Beacon preserves local JSONL even when you forward events downstream.
+
+Use [Log Forwarding](/log-forwarding) for Wazuh, Splunk HEC, Falcon LogScale HEC, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, Microsoft Sentinel, object storage, local JSONL, and customer-managed pipelines.
+
+Use [`beacon scan`](/cli/scan) and [`beacon rules`](/cli/rules) when you want local threat-detection checks over endpoint telemetry before or alongside downstream forwarding.
+
+Move to [Asymptote Managed](/deployment/managed) when you need centralized retention, search, detections, fleet-wide visibility, governance, investigations, SSO/RBAC, audit trails, or rollout support.
+
+[Contact us](https://asymptotelabs.ai/contact) if you want Managed or Private Deployment guidance.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="MDM Deployment" icon="laptop-mobile" href="/mdm">
+    Plan managed macOS rollout with the packaged system agent.
+  </Card>
+  <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events into security and observability platforms.
+  </Card>
+  <Card title="Security Review" icon="shield-halved" href="/security/review">
+    Review local collection, data inventory, content handling, endpoint behavior, and disclosure policy.
+  </Card>
+  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
+    Review managed visibility, policy controls, investigations, and rollout support.
+  </Card>
+</Columns>

@@ -1,0 +1,1293 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Asymptote",
+  "colors": {
+    "primary": "#3080FF",
+    "light": "#54A2FF",
+    "dark": "#155DFC"
+  },
+  "favicon": "/images/favicon.ico",
+  "navigation": {
+    "style": "sidebar",
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Community",
+          "icon": "discord",
+          "iconType": "brands",
+          "href": "https://discord.com/invite/zdNChS2fBu",
+          "color": {
+            "light": "#5865F2",
+            "dark": "#5865F2"
+          }
+        },
+        {
+          "anchor": "GitHub",
+          "icon": "github",
+          "iconType": "brands",
+          "href": "https://github.com/Asymptote-Labs/agent-beacon",
+          "color": {
+            "light": "#24292F",
+            "dark": "#FFFFFF"
+          }
+        }
+      ]
+    },
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "icon": "book-open",
+        "groups": [
+          {
+            "group": "Get Started",
+            "icon": "rocket",
+            "pages": [
+              "index",
+              "get-started/overview",
+              {
+                "group": "Quickstart",
+                "root": "get-started/quickstart",
+                "pages": [
+                  "get-started/quickstart-security-it",
+                  "get-started/quickstart-developers"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Deploy Asymptote",
+            "icon": "cloud-arrow-up",
+            "pages": [
+              "deployment/hosting-options",
+              "deployment/managed",
+              "deployment/open-source"
+            ]
+          },
+          {
+            "group": "How Asymptote Works",
+            "icon": "book-open",
+            "pages": [
+              "concepts/core-concepts",
+              {
+                "group": "System Architecture",
+                "root": "architecture/system-architecture",
+                "pages": [
+                  "architecture/architecture",
+                  "architecture/managed-architecture"
+                ]
+              },
+              {
+                "group": "Unified Telemetry Schema",
+                "root": "telemetry-schema/event-schema",
+                "pages": [
+                  "telemetry-schema/normalization",
+                  "telemetry-schema/fields",
+                  "telemetry-schema/examples"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Manage Asymptote",
+            "icon": "sliders",
+            "pages": [
+              {
+                "group": "Detections",
+                "root": "detections/index",
+                "pages": [
+                  "detections/yaml-schema",
+                  "detections/standard",
+                  "detections/engine"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Agent Harness Integrations",
+            "icon": "list-check",
+            "pages": [
+              "runtimes/index",
+              "runtimes/integration-model",
+              {
+                "group": "Local Agents",
+                "pages": [
+                  {
+                    "group": "Coding",
+                    "pages": [
+                      "runtimes/antigravity-cli",
+                      "runtimes/claude-code",
+                      "runtimes/codex-cli",
+                      "runtimes/cursor",
+                      "runtimes/devin",
+                      "runtimes/devin-desktop",
+                      "runtimes/factory-droid",
+                      "runtimes/gemini-cli",
+                      "runtimes/github-copilot-cli",
+                      "runtimes/grok-build",
+                      "runtimes/opencode",
+                      "runtimes/vscode"
+                    ]
+                  },
+                  {
+                    "group": "Knowledge Worker",
+                    "pages": [
+                      "runtimes/claude-cowork",
+                      "runtimes/hermes-agent",
+                      "runtimes/openclaw-gateway"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "CI Agents",
+                "pages": [
+                  "runtimes/claude-code-ci"
+                ]
+              },
+              {
+                "group": "Cloud Agents",
+                "pages": [
+                  "sdk/integrations-anthropic",
+                  "sdk/integrations-claude-agent-sdk",
+                  "runtimes/claude-code-cloud-agents",
+                  "runtimes/cursor-cloud-agents",
+                  "sdk/integrations-openai",
+                  "sdk/integrations-vercel-ai-sdk"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "For Security & IT Teams",
+            "icon": "building-shield",
+            "pages": [
+              "security/index",
+              {
+                "group": "Security Overview",
+                "root": "security/review",
+                "pages": [
+                  "security/data-flow-threat-model",
+                  "security/data-inventory",
+                  "security/retention-redaction",
+                  "security/endpoint-operations",
+                  "security/policy"
+                ]
+              },
+              {
+                "group": "MDM Deployment",
+                "root": "mdm/index",
+                "pages": [
+                  "mdm/jamf",
+                  "mdm/fleet"
+                ]
+              },
+              {
+                "group": "Log Forwarding",
+                "root": "log-forwarding/index",
+                "pages": [
+                  "log-forwarding/ci-telemetry-exports",
+                  {
+                    "group": "Security Information and Event Management (SIEM)",
+                    "pages": [
+                      "log-forwarding/falcon",
+                      "log-forwarding/microsoft-sentinel",
+                      "log-forwarding/rapid7",
+                      "log-forwarding/splunk",
+                      "log-forwarding/sumo",
+                      "log-forwarding/wazuh"
+                    ]
+                  },
+                  {
+                    "group": "Log Aggregation",
+                    "pages": [
+                      "log-forwarding/cloudwatch",
+                      "log-forwarding/customer-managed",
+                      "log-forwarding/datadog",
+                      "log-forwarding/elastic"
+                    ]
+                  },
+                  {
+                    "group": "Object Storage",
+                    "pages": [
+                      "log-forwarding/s3",
+                      "log-forwarding/gcs"
+                    ]
+                  },
+                  {
+                    "group": "Local",
+                    "pages": [
+                      "log-forwarding/local-jsonl"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI",
+        "icon": "terminal",
+        "groups": [
+          {
+            "group": "Install and Upgrade",
+            "icon": "download",
+            "pages": [
+              "cli/install",
+              "cli/upgrade",
+              "cli/manual-install"
+            ]
+          },
+          {
+            "group": "Command Manual",
+            "icon": "terminal",
+            "pages": [
+              "cli/index",
+              "cli/version",
+              "cli/login",
+              "cli/scan",
+              {
+                "group": "beacon rules",
+                "root": "cli/rules",
+                "pages": [
+                  "cli/rules-list",
+                  "cli/rules-add",
+                  "cli/rules-remove",
+                  "cli/rules-pull",
+                  "cli/rules-lint",
+                  "cli/rules-fields"
+                ]
+              },
+              {
+                "group": "beacon ci",
+                "root": "cli/ci",
+                "pages": [
+                  "cli/ci-exec",
+                  "cli/ci-start",
+                  "cli/ci-finish",
+                  "cli/ci-validate"
+                ]
+              },
+              {
+                "group": "beacon cloud",
+                "root": "cli/cloud",
+                "pages": [
+                  "cli/cloud-claude-web-print-setup",
+                  "cli/cloud-claude-web-print-hooks",
+                  "cli/cloud-cursor-print-setup",
+                  "cli/cloud-cursor-print-hooks",
+                  "cli/cloud-gcs-setup"
+                ]
+              },
+              {
+                "group": "beacon mcp",
+                "root": "cli/mcp",
+                "pages": [
+                  "cli/mcp-serve",
+                  "cli/mcp-doctor"
+                ]
+              },
+              {
+                "group": "beacon ingest",
+                "root": "cli/ingest",
+                "tag": "Enterprise",
+                "pages": [
+                  "cli/ingest-endpoint"
+                ]
+              },
+              {
+                "group": "beacon endpoint",
+                "root": "cli/endpoint",
+                "pages": [
+                  "cli/endpoint-install",
+                  "cli/endpoint-status",
+                  "cli/endpoint-doctor",
+                  "cli/endpoint-inventory",
+                  "cli/endpoint-discover",
+                  "cli/endpoint-test-event",
+                  "cli/endpoint-bundle-diagnostics",
+                  "cli/endpoint-repair",
+                  "cli/endpoint-uninstall",
+                  "cli/endpoint-config",
+                  "cli/endpoint-tokens",
+                  "cli/dashboard",
+                  "cli/wazuh",
+                  "cli/elastic",
+                  "cli/datadog",
+                  "cli/sumo",
+                  "cli/rapid7",
+                  "cli/sentinel",
+                  "cli/cloudwatch",
+                  "cli/s3",
+                  "cli/gcs",
+                  "cli/hooks",
+                  {
+                    "group": "integrations",
+                    "pages": [
+                      "cli/claude-cowork",
+                      "cli/openclaw",
+                      "cli/vscode"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "group": "CLI Resources",
+            "icon": "folder-open",
+            "pages": [
+              "cli/endpoint-paths"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SDK",
+        "icon": "code",
+        "groups": [
+          {
+            "group": "Asymptote Observe SDK",
+            "icon": "code",
+            "pages": [
+              "sdk/index",
+              "sdk/quickstart",
+              {
+                "group": "Tracing Structure",
+                "pages": [
+                  "sdk/instrumentation",
+                  "sdk/observe",
+                  "sdk/lifecycle",
+                  "sdk/integrations-nextjs-serverless"
+                ]
+              },
+              {
+                "group": "Agent SDK Integrations",
+                "root": "sdk/integrations",
+                "pages": [
+                  "sdk/integrations-openai",
+                  "sdk/integrations-anthropic",
+                  "sdk/integrations-claude-agent-sdk",
+                  "sdk/integrations-vercel-ai-sdk",
+                  "sdk/integrations-custom-agent-steps"
+                ]
+              },
+              "sdk/reference"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "icon": "map",
+        "groups": [
+          {
+            "group": "Agent Activity Guides",
+            "icon": "clipboard-list",
+            "root": "guides/use-cases",
+            "pages": [
+              "guides/inventory",
+              "guides/agent-runtime-telemetry"
+            ]
+          },
+          {
+            "group": "Local Testing Guides",
+            "icon": "flask-vial",
+            "root": "guides/local-testing/index",
+            "pages": [
+              {
+                "group": "Validate Endpoint Telemetry",
+                "root": "guides/local-testing/endpoint-validation",
+                "pages": [
+                  "guides/local-testing/health",
+                  "guides/local-testing/events",
+                  "guides/local-testing/logs"
+                ]
+              },
+              "guides/local-testing/dashboard",
+              "guides/local-testing/mcp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Asymptote Blog",
+        "icon": "newspaper",
+        "pages": [
+          "blog/index",
+          "blog/introducing-beacon-endpoint-telemetry",
+          "blog/enterprises-are-counting-tokens-because",
+          "blog/agent-visibility-beyond-the-endpoint"
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "icon": "clock",
+        "groups": [
+          {
+            "group": "Changelog",
+            "icon": "clock",
+            "pages": [
+              "changelog/cli",
+              "changelog/sdk"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/logo/logo_with_text.png",
+    "dark": "/logo/logo_with_text_dark.png",
+    "href": "https://asymptotelabs.ai/",
+    "height": 100
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Status",
+        "href": "https://status.asymptotelabs.ai/"
+      },
+      {
+        "label": "Trust Center",
+        "href": "https://trust.asymptotelabs.ai/"
+      },
+      {
+        "label": "Book Demo",
+        "href": "https://asymptotelabs.ai/contact"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Sign In",
+      "href": "https://asymptotelabs.ai/login"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "redirects": [
+    {
+      "source": "/product-changelog",
+      "destination": "/changelog/cli"
+    },
+    {
+      "source": "/cli/agent-runtime-telemetry",
+      "destination": "/guides/agent-runtime-telemetry"
+    },
+    {
+      "source": "/cli/architecture",
+      "destination": "/architecture/architecture"
+    },
+    {
+      "source": "/cli/architecture-runtime-integrations",
+      "destination": "/runtimes/integration-model"
+    },
+    {
+      "source": "/architecture-runtime-integrations",
+      "destination": "/runtimes/integration-model"
+    },
+    {
+      "source": "/cli/architecture-telemetry-pipeline",
+      "destination": "/architecture/architecture"
+    },
+    {
+      "source": "/architecture-telemetry-pipeline",
+      "destination": "/architecture/architecture"
+    },
+    {
+      "source": "/cli/ci-telemetry-exports",
+      "destination": "/log-forwarding/ci-telemetry-exports"
+    },
+    {
+      "source": "/cli/concepts",
+      "destination": "/concepts/core-concepts"
+    },
+    {
+      "source": "/concepts",
+      "destination": "/concepts/core-concepts"
+    },
+    {
+      "source": "/glossary",
+      "destination": "/concepts/core-concepts"
+    },
+    {
+      "source": "/cli/glossary",
+      "destination": "/concepts/core-concepts"
+    },
+    {
+      "source": "/cli/endpoint-telemetry",
+      "destination": "/deployment/open-source#configure-endpoint-telemetry"
+    },
+    {
+      "source": "/endpoint-telemetry",
+      "destination": "/deployment/open-source#configure-endpoint-telemetry"
+    },
+    {
+      "source": "/cli/event-schema",
+      "destination": "/telemetry-schema/event-schema"
+    },
+    {
+      "source": "/cli/event-schema-examples",
+      "destination": "/telemetry-schema/examples"
+    },
+    {
+      "source": "/cli/event-schema-fields",
+      "destination": "/telemetry-schema/fields"
+    },
+    {
+      "source": "/cli/event-schema-normalization",
+      "destination": "/telemetry-schema/normalization"
+    },
+    {
+      "source": "/cli/fleet",
+      "destination": "/mdm/fleet"
+    },
+    {
+      "source": "/cli/installation",
+      "destination": "/cli/install"
+    },
+    {
+      "source": "/installation",
+      "destination": "/cli/install"
+    },
+    {
+      "source": "/cli/inventory",
+      "destination": "/guides/inventory"
+    },
+    {
+      "source": "/cli/jamf",
+      "destination": "/mdm/jamf"
+    },
+    {
+      "source": "/cli/local-testing",
+      "destination": "/guides/local-testing"
+    },
+    {
+      "source": "/cli/local-testing-dashboard",
+      "destination": "/guides/local-testing/dashboard"
+    },
+    {
+      "source": "/cli/local-testing-endpoint-validation",
+      "destination": "/guides/local-testing/endpoint-validation"
+    },
+    {
+      "source": "/cli/local-testing-events",
+      "destination": "/guides/local-testing/events"
+    },
+    {
+      "source": "/cli/local-testing-health",
+      "destination": "/guides/local-testing/health"
+    },
+    {
+      "source": "/cli/local-testing-logs",
+      "destination": "/guides/local-testing/logs"
+    },
+    {
+      "source": "/cli/local-testing-mcp",
+      "destination": "/guides/local-testing/mcp"
+    },
+    {
+      "source": "/manual-archives",
+      "destination": "/cli/manual-install"
+    },
+    {
+      "source": "/cli/manual-archives",
+      "destination": "/cli/manual-install"
+    },
+    {
+      "source": "/cli/mdm-deployment",
+      "destination": "/mdm"
+    },
+    {
+      "source": "/cli/overview",
+      "destination": "/get-started/overview"
+    },
+    {
+      "source": "/overview",
+      "destination": "/get-started/overview"
+    },
+    {
+      "source": "/agent-beacon",
+      "destination": "/get-started/overview"
+    },
+    {
+      "source": "/paths",
+      "destination": "/cli/endpoint-paths"
+    },
+    {
+      "source": "/cli/paths",
+      "destination": "/cli/endpoint-paths"
+    },
+    {
+      "source": "/cli/quickstart",
+      "destination": "/get-started/quickstart"
+    },
+    {
+      "source": "/cli/quickstart-developers",
+      "destination": "/get-started/quickstart-developers"
+    },
+    {
+      "source": "/cli/quickstart-security-it",
+      "destination": "/get-started/quickstart-security-it"
+    },
+    {
+      "source": "/cli/security-it-teams",
+      "destination": "/security"
+    },
+    {
+      "source": "/cli/security-review",
+      "destination": "/security/review"
+    },
+    {
+      "source": "/cli/security-review-data-flow-threat-model",
+      "destination": "/security/data-flow-threat-model"
+    },
+    {
+      "source": "/cli/security-review-data-inventory",
+      "destination": "/security/data-inventory"
+    },
+    {
+      "source": "/cli/security-review-endpoint-operations",
+      "destination": "/security/endpoint-operations"
+    },
+    {
+      "source": "/cli/security-review-policy",
+      "destination": "/security/policy"
+    },
+    {
+      "source": "/cli/security-review-retention-redaction",
+      "destination": "/security/retention-redaction"
+    },
+    {
+      "source": "/cli/siem-forwarding",
+      "destination": "/log-forwarding"
+    },
+    {
+      "source": "/cli/siem-forwarding-cloudwatch",
+      "destination": "/log-forwarding/cloudwatch"
+    },
+    {
+      "source": "/cli/siem-forwarding-customer-managed",
+      "destination": "/log-forwarding/customer-managed"
+    },
+    {
+      "source": "/cli/siem-forwarding-datadog",
+      "destination": "/log-forwarding/datadog"
+    },
+    {
+      "source": "/cli/siem-forwarding-elastic",
+      "destination": "/log-forwarding/elastic"
+    },
+    {
+      "source": "/cli/siem-forwarding-falcon",
+      "destination": "/log-forwarding/falcon"
+    },
+    {
+      "source": "/cli/siem-forwarding-gcs",
+      "destination": "/log-forwarding/gcs"
+    },
+    {
+      "source": "/cli/siem-forwarding-local-jsonl",
+      "destination": "/log-forwarding/local-jsonl"
+    },
+    {
+      "source": "/cli/siem-forwarding-microsoft-sentinel",
+      "destination": "/log-forwarding/microsoft-sentinel"
+    },
+    {
+      "source": "/cli/siem-forwarding-rapid7",
+      "destination": "/log-forwarding/rapid7"
+    },
+    {
+      "source": "/cli/siem-forwarding-s3",
+      "destination": "/log-forwarding/s3"
+    },
+    {
+      "source": "/cli/siem-forwarding-splunk",
+      "destination": "/log-forwarding/splunk"
+    },
+    {
+      "source": "/cli/siem-forwarding-sumo",
+      "destination": "/log-forwarding/sumo"
+    },
+    {
+      "source": "/cli/siem-forwarding-wazuh",
+      "destination": "/log-forwarding/wazuh"
+    },
+    {
+      "source": "/cli/supported-runtimes",
+      "destination": "/runtimes"
+    },
+    {
+      "source": "/cli/supported-runtimes-antigravity-cli",
+      "destination": "/runtimes/antigravity-cli"
+    },
+    {
+      "source": "/cli/supported-runtimes-claude-code",
+      "destination": "/runtimes/claude-code"
+    },
+    {
+      "source": "/cli/supported-runtimes-claude-code-ci",
+      "destination": "/runtimes/claude-code-ci"
+    },
+    {
+      "source": "/cli/supported-runtimes-claude-cowork",
+      "destination": "/runtimes/claude-cowork"
+    },
+    {
+      "source": "/cli/supported-runtimes-codex-cli",
+      "destination": "/runtimes/codex-cli"
+    },
+    {
+      "source": "/cli/supported-runtimes-cursor",
+      "destination": "/runtimes/cursor"
+    },
+    {
+      "source": "/cli/supported-runtimes-devin",
+      "destination": "/runtimes/devin"
+    },
+    {
+      "source": "/cli/supported-runtimes-devin-desktop",
+      "destination": "/runtimes/devin-desktop"
+    },
+    {
+      "source": "/cli/supported-runtimes-factory-droid",
+      "destination": "/runtimes/factory-droid"
+    },
+    {
+      "source": "/cli/supported-runtimes-gemini-cli",
+      "destination": "/runtimes/gemini-cli"
+    },
+    {
+      "source": "/cli/supported-runtimes-github-copilot-cli",
+      "destination": "/runtimes/github-copilot-cli"
+    },
+    {
+      "source": "/cli/supported-runtimes-grok-build",
+      "destination": "/runtimes/grok-build"
+    },
+    {
+      "source": "/cli/supported-runtimes-hermes-agent",
+      "destination": "/runtimes/hermes-agent"
+    },
+    {
+      "source": "/cli/supported-runtimes-openclaw-gateway",
+      "destination": "/runtimes/openclaw-gateway"
+    },
+    {
+      "source": "/cli/supported-runtimes-opencode",
+      "destination": "/runtimes/opencode"
+    },
+    {
+      "source": "/cli/supported-runtimes-vscode",
+      "destination": "/runtimes/vscode"
+    },
+    {
+      "source": "/cli/upgrading",
+      "destination": "/cli/upgrade"
+    },
+    {
+      "source": "/upgrading",
+      "destination": "/cli/upgrade"
+    },
+    {
+      "source": "/cli/use-cases",
+      "destination": "/guides/use-cases"
+    },
+    {
+      "source": "/cli/command-reference",
+      "destination": "/cli"
+    },
+    {
+      "source": "/cli/beacon-mcp",
+      "destination": "/cli/mcp"
+    },
+    {
+      "source": "/cli/ci#beacon-ci-exec",
+      "destination": "/cli/ci-exec"
+    },
+    {
+      "source": "/cli/ci#beacon-ci-start",
+      "destination": "/cli/ci-start"
+    },
+    {
+      "source": "/cli/ci#beacon-ci-finish",
+      "destination": "/cli/ci-finish"
+    },
+    {
+      "source": "/cli/ci#beacon-ci-validate",
+      "destination": "/cli/ci-validate"
+    },
+    {
+      "source": "/cli/cloud#beacon-cloud-claude-web-print-setup",
+      "destination": "/cli/cloud-claude-web-print-setup"
+    },
+    {
+      "source": "/cli/cloud#beacon-cloud-claude-web-print-hooks",
+      "destination": "/cli/cloud-claude-web-print-hooks"
+    },
+    {
+      "source": "/cli/cloud#beacon-cloud-cursor-print-setup",
+      "destination": "/cli/cloud-cursor-print-setup"
+    },
+    {
+      "source": "/cli/cloud#beacon-cloud-cursor-print-hooks",
+      "destination": "/cli/cloud-cursor-print-hooks"
+    },
+    {
+      "source": "/cli/cloud#beacon-cloud-gcs-setup",
+      "destination": "/cli/cloud-gcs-setup"
+    },
+    {
+      "source": "/cli/endpoint-dashboard",
+      "destination": "/cli/dashboard#beacon-endpoint-dashboard"
+    },
+    {
+      "source": "/cli/wazuh-print-config",
+      "destination": "/cli/wazuh#beacon-endpoint-wazuh-print-config"
+    },
+    {
+      "source": "/cli/wazuh-install-pack",
+      "destination": "/cli/wazuh#beacon-endpoint-wazuh-install-pack"
+    },
+    {
+      "source": "/cli/wazuh-validate",
+      "destination": "/cli/wazuh#beacon-endpoint-wazuh-validate"
+    },
+    {
+      "source": "/cli/hooks-install",
+      "destination": "/cli/hooks#beacon-endpoint-hooks-install"
+    },
+    {
+      "source": "/cli/hooks-status",
+      "destination": "/cli/hooks#beacon-endpoint-hooks-status"
+    },
+    {
+      "source": "/cli/hooks-uninstall",
+      "destination": "/cli/hooks#beacon-endpoint-hooks-uninstall"
+    },
+    {
+      "source": "/cli/claude-cowork-print-config",
+      "destination": "/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-print-config"
+    },
+    {
+      "source": "/cli/claude-cowork-setup",
+      "destination": "/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-setup"
+    },
+    {
+      "source": "/cli/claude-cowork-status",
+      "destination": "/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-status"
+    },
+    {
+      "source": "/cli/claude-cowork-validate",
+      "destination": "/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-validate"
+    },
+    {
+      "source": "/cli/openclaw-print-config",
+      "destination": "/cli/openclaw#beacon-endpoint-integrations-openclaw-print-config"
+    },
+    {
+      "source": "/cli/openclaw-status",
+      "destination": "/cli/openclaw#beacon-endpoint-integrations-openclaw-status"
+    },
+    {
+      "source": "/cli/openclaw-validate",
+      "destination": "/cli/openclaw#beacon-endpoint-integrations-openclaw-validate"
+    },
+    {
+      "source": "/agent-harness-integration-model",
+      "destination": "/runtimes/integration-model"
+    },
+    {
+      "source": "/agent-runtime-telemetry",
+      "destination": "/guides/agent-runtime-telemetry"
+    },
+    {
+      "source": "/architecture",
+      "destination": "/architecture/architecture"
+    },
+    {
+      "source": "/asymptote-managed",
+      "destination": "/deployment/managed"
+    },
+    {
+      "source": "/asymptote-open-source",
+      "destination": "/deployment/open-source"
+    },
+    {
+      "source": "/asymptote-overview",
+      "destination": "/get-started/overview"
+    },
+    {
+      "source": "/ci-telemetry-exports",
+      "destination": "/log-forwarding/ci-telemetry-exports"
+    },
+    {
+      "source": "/claude-code-cloud-agents",
+      "destination": "/runtimes/claude-code-cloud-agents"
+    },
+    {
+      "source": "/cli-changelog",
+      "destination": "/changelog/cli"
+    },
+    {
+      "source": "/core-concepts",
+      "destination": "/concepts/core-concepts"
+    },
+    {
+      "source": "/cursor-cloud-agents",
+      "destination": "/runtimes/cursor-cloud-agents"
+    },
+    {
+      "source": "/detections",
+      "destination": "/detections"
+    },
+    {
+      "source": "/detections-engine",
+      "destination": "/detections/engine"
+    },
+    {
+      "source": "/detections-standard",
+      "destination": "/detections/standard"
+    },
+    {
+      "source": "/detections-yaml-schema",
+      "destination": "/detections/yaml-schema"
+    },
+    {
+      "source": "/development",
+      "destination": "/contributing/development"
+    },
+    {
+      "source": "/event-schema",
+      "destination": "/telemetry-schema/event-schema"
+    },
+    {
+      "source": "/event-schema-examples",
+      "destination": "/telemetry-schema/examples"
+    },
+    {
+      "source": "/event-schema-fields",
+      "destination": "/telemetry-schema/fields"
+    },
+    {
+      "source": "/event-schema-normalization",
+      "destination": "/telemetry-schema/normalization"
+    },
+    {
+      "source": "/fleet",
+      "destination": "/mdm/fleet"
+    },
+    {
+      "source": "/hosting-options",
+      "destination": "/deployment/hosting-options"
+    },
+    {
+      "source": "/inventory",
+      "destination": "/guides/inventory"
+    },
+    {
+      "source": "/jamf",
+      "destination": "/mdm/jamf"
+    },
+    {
+      "source": "/local-testing",
+      "destination": "/guides/local-testing"
+    },
+    {
+      "source": "/local-testing-dashboard",
+      "destination": "/guides/local-testing/dashboard"
+    },
+    {
+      "source": "/local-testing-endpoint-validation",
+      "destination": "/guides/local-testing/endpoint-validation"
+    },
+    {
+      "source": "/local-testing-events",
+      "destination": "/guides/local-testing/events"
+    },
+    {
+      "source": "/local-testing-health",
+      "destination": "/guides/local-testing/health"
+    },
+    {
+      "source": "/local-testing-logs",
+      "destination": "/guides/local-testing/logs"
+    },
+    {
+      "source": "/local-testing-mcp",
+      "destination": "/guides/local-testing/mcp"
+    },
+    {
+      "source": "/managed-architecture",
+      "destination": "/architecture/managed-architecture"
+    },
+    {
+      "source": "/mdm-deployment",
+      "destination": "/mdm"
+    },
+    {
+      "source": "/quickstart",
+      "destination": "/get-started/quickstart"
+    },
+    {
+      "source": "/quickstart-developers",
+      "destination": "/get-started/quickstart-developers"
+    },
+    {
+      "source": "/quickstart-security-it",
+      "destination": "/get-started/quickstart-security-it"
+    },
+    {
+      "source": "/sdk-changelog",
+      "destination": "/changelog/sdk"
+    },
+    {
+      "source": "/security-it-teams",
+      "destination": "/security"
+    },
+    {
+      "source": "/security-review",
+      "destination": "/security/review"
+    },
+    {
+      "source": "/security-review-data-flow-threat-model",
+      "destination": "/security/data-flow-threat-model"
+    },
+    {
+      "source": "/security-review-data-inventory",
+      "destination": "/security/data-inventory"
+    },
+    {
+      "source": "/security-review-endpoint-operations",
+      "destination": "/security/endpoint-operations"
+    },
+    {
+      "source": "/security-review-policy",
+      "destination": "/security/policy"
+    },
+    {
+      "source": "/security-review-retention-redaction",
+      "destination": "/security/retention-redaction"
+    },
+    {
+      "source": "/siem-forwarding",
+      "destination": "/log-forwarding"
+    },
+    {
+      "source": "/siem-forwarding-cloudwatch",
+      "destination": "/log-forwarding/cloudwatch"
+    },
+    {
+      "source": "/siem-forwarding-customer-managed",
+      "destination": "/log-forwarding/customer-managed"
+    },
+    {
+      "source": "/siem-forwarding-datadog",
+      "destination": "/log-forwarding/datadog"
+    },
+    {
+      "source": "/siem-forwarding-elastic",
+      "destination": "/log-forwarding/elastic"
+    },
+    {
+      "source": "/siem-forwarding-falcon",
+      "destination": "/log-forwarding/falcon"
+    },
+    {
+      "source": "/siem-forwarding-gcs",
+      "destination": "/log-forwarding/gcs"
+    },
+    {
+      "source": "/siem-forwarding-local-jsonl",
+      "destination": "/log-forwarding/local-jsonl"
+    },
+    {
+      "source": "/siem-forwarding-microsoft-sentinel",
+      "destination": "/log-forwarding/microsoft-sentinel"
+    },
+    {
+      "source": "/siem-forwarding-rapid7",
+      "destination": "/log-forwarding/rapid7"
+    },
+    {
+      "source": "/siem-forwarding-s3",
+      "destination": "/log-forwarding/s3"
+    },
+    {
+      "source": "/siem-forwarding-splunk",
+      "destination": "/log-forwarding/splunk"
+    },
+    {
+      "source": "/siem-forwarding-sumo",
+      "destination": "/log-forwarding/sumo"
+    },
+    {
+      "source": "/siem-forwarding-wazuh",
+      "destination": "/log-forwarding/wazuh"
+    },
+    {
+      "source": "/supported-runtimes",
+      "destination": "/runtimes"
+    },
+    {
+      "source": "/supported-runtimes-antigravity-cli",
+      "destination": "/runtimes/antigravity-cli"
+    },
+    {
+      "source": "/supported-runtimes-claude-code",
+      "destination": "/runtimes/claude-code"
+    },
+    {
+      "source": "/supported-runtimes-claude-code-ci",
+      "destination": "/runtimes/claude-code-ci"
+    },
+    {
+      "source": "/supported-runtimes-claude-cowork",
+      "destination": "/runtimes/claude-cowork"
+    },
+    {
+      "source": "/supported-runtimes-codex-cli",
+      "destination": "/runtimes/codex-cli"
+    },
+    {
+      "source": "/supported-runtimes-cursor",
+      "destination": "/runtimes/cursor"
+    },
+    {
+      "source": "/supported-runtimes-devin",
+      "destination": "/runtimes/devin"
+    },
+    {
+      "source": "/supported-runtimes-devin-desktop",
+      "destination": "/runtimes/devin-desktop"
+    },
+    {
+      "source": "/supported-runtimes-factory-droid",
+      "destination": "/runtimes/factory-droid"
+    },
+    {
+      "source": "/supported-runtimes-gemini-cli",
+      "destination": "/runtimes/gemini-cli"
+    },
+    {
+      "source": "/supported-runtimes-github-copilot-cli",
+      "destination": "/runtimes/github-copilot-cli"
+    },
+    {
+      "source": "/supported-runtimes-grok-build",
+      "destination": "/runtimes/grok-build"
+    },
+    {
+      "source": "/supported-runtimes-hermes-agent",
+      "destination": "/runtimes/hermes-agent"
+    },
+    {
+      "source": "/supported-runtimes-openclaw-gateway",
+      "destination": "/runtimes/openclaw-gateway"
+    },
+    {
+      "source": "/supported-runtimes-opencode",
+      "destination": "/runtimes/opencode"
+    },
+    {
+      "source": "/supported-runtimes-vscode",
+      "destination": "/runtimes/vscode"
+    },
+    {
+      "source": "/system-architecture",
+      "destination": "/architecture/system-architecture"
+    },
+    {
+      "source": "/troubleshooting",
+      "destination": "/support/troubleshooting"
+    },
+    {
+      "source": "/use-cases",
+      "destination": "/guides/use-cases"
+    }
+  ],
+  "footer": {
+    "socials": {
+      "x": "https://x.com/asymptotelabs",
+      "github": "https://github.com/Asymptote-Labs",
+      "linkedin": "https://www.linkedin.com/company/asymptotelabs/"
+    },
+    "links": [
+      {
+        "title": "Product",
+        "items": [
+          {
+            "label": "Platform",
+            "href": "https://asymptotelabs.ai/"
+          },
+          {
+            "label": "Security",
+            "href": "https://trust.asymptotelabs.ai/"
+          },
+          {
+            "label": "Pricing",
+            "href": "https://asymptotelabs.ai/pricing"
+          }
+        ]
+      },
+      {
+        "title": "Company",
+        "items": [
+          {
+            "label": "About",
+            "href": "https://asymptotelabs.ai/about"
+          },
+          {
+            "label": "Blog",
+            "href": "https://asymptotelabs.ai/blog"
+          },
+          {
+            "label": "Careers",
+            "href": "https://asymptotelabs.ai/careers"
+          },
+          {
+            "label": "Status",
+            "href": "https://status.asymptotelabs.ai/"
+          },
+          {
+            "label": "Contact",
+            "href": "mailto:support@asymptotelabs.ai"
+          }
+        ]
+      },
+      {
+        "title": "Legal",
+        "items": [
+          {
+            "label": "Privacy Policy",
+            "href": "https://asymptotelabs.ai/privacy"
+          },
+          {
+            "label": "Terms of Service",
+            "href": "https://asymptotelabs.ai/terms"
+          },
+          {
+            "label": "Trust Center",
+            "href": "https://trust.asymptotelabs.ai/"
+          }
+        ]
+      }
+    ],
+    "content": "\u00a9 2025 Asymptote Labs Inc. All rights reserved."
+  },
+  "appearance": {
+    "hidePoweredBy": true
+  }
+}

@@ -1,0 +1,57 @@
+---
+title: "Agent Activity Guides"
+description: "Common Beacon CLI workflows for inventorying and monitoring local agent runtimes"
+---
+
+## Overview
+
+Use these guides when you need practical steps for understanding local AI agent usage on an endpoint. They focus on inventorying what is present, confirming what Beacon can observe, and investigating runtime activity once events are flowing.
+
+## Which Guide Should I Use?
+
+<Columns cols={2}>
+  <Card title="Inventory Local Agent Runtimes" icon="clipboard-list" href="/guides/inventory">
+    Find installed runtimes, MCP servers, local configs, hooks, OTLP settings, and observed coverage.
+  </Card>
+  <Card title="Investigate Agent Runtime Activity" icon="tower-broadcast" href="/guides/agent-runtime-telemetry">
+    Inspect prompts, tools, commands, approvals, MCP activity, file changes, and forwarding readiness.
+  </Card>
+</Columns>
+
+## Fast Triage
+
+Use these pages to answer:
+
+- **What is installed?** Use [Inventory Local Agent Runtimes](/guides/inventory).
+- **What can the agent access?** Check MCP server and config inventory.
+- **What happened?** Use [Investigate Agent Runtime Activity](/guides/agent-runtime-telemetry).
+- **Can I forward this?** Validate the runtime log, then use [Log Forwarding](/log-forwarding).
+
+## Setup
+
+Before following these guides, install Beacon and configure endpoint telemetry:
+
+```bash title="Configure endpoint telemetry"
+beacon endpoint install
+beacon endpoint status
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint status
+
+Endpoint config: ~/.beacon/endpoint/config.yaml
+Runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
+Collector: running
+Last event: 2026-06-10T04:18:22Z
+```
+</Accordion>
+
+## Key Features Demonstrated
+
+- Discover installed and configured local agent runtimes.
+- Inspect MCP servers, hooks, OTLP settings, and runtime config files.
+- Confirm whether supported runtimes have produced Beacon events.
+- Move from local investigation to forwarding-ready event streams.
+
+For full command syntax and flags, use the [Command Reference](/cli).

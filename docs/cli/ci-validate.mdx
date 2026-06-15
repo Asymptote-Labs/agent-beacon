@@ -1,0 +1,63 @@
+---
+title: "beacon ci validate"
+description: "Validate Beacon CI runtime telemetry artifacts"
+---
+
+## Command Overview
+
+`beacon ci validate` checks that the runtime log exists, parses as Beacon JSONL, and contains at least the required number of matching harness events.
+
+```bash title="Command syntax"
+beacon ci validate
+```
+
+Use validation after a job step when telemetry collection and agent execution are managed separately.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--harness <harness>` | Required harness to validate. Defaults to `claude` |
+| `--log-path <path>` | CI runtime JSONL log path. Defaults to `$RUNNER_TEMP/beacon/runtime.jsonl` or the system temp path |
+| `--json` | Print validation results as JSON |
+| `--min-events <count>` | Minimum matching events required. Defaults to `1` |
+
+## Examples
+
+Validate the default CI artifact path:
+
+```bash title="Validate the default CI artifact path"
+beacon ci validate
+```
+
+Validate a custom runtime log:
+
+```bash title="Validate a custom runtime log"
+beacon ci validate --log-path "$RUNNER_TEMP/beacon/runtime.jsonl"
+```
+
+Require at least three Claude events:
+
+```bash title="Require at least three Claude events"
+beacon ci validate --min-events 3
+```
+
+Print machine-readable validation results:
+
+```bash title="Print machine-readable validation results"
+beacon ci validate --json
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci" icon="terminal" href="/cli/ci">
+    Review CI artifact paths and command group behavior.
+  </Card>
+  <Card title="beacon ci exec" icon="terminal" href="/cli/ci-exec">
+    Run a single command with ephemeral CI telemetry.
+  </Card>
+  <Card title="beacon ci finish" icon="stop" href="/cli/ci-finish">
+    Stop and validate a detached telemetry session.
+  </Card>
+</Columns>

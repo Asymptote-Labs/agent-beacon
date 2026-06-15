@@ -1,0 +1,132 @@
+---
+title: "Anthropic"
+description: "Instrument Anthropic SDK calls with Asymptote Observe"
+---
+
+## Integration Overview
+
+Use this integration when your application calls Anthropic's `@anthropic-ai/sdk` TypeScript package directly. Asymptote Observe uses OpenLLMetry's Anthropic instrumentation so Anthropic model calls flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
+
+## Overview
+
+Initialize Asymptote Observe before creating the Anthropic client when possible. The instrumentation captures supported Anthropic SDK spans without changing the way you call `anthropic.messages.create()`.
+
+Using Claude Agent SDK instead of the direct provider SDK? See [Claude Agent SDK](/sdk/integrations-claude-agent-sdk).
+
+## What Asymptote Captures
+
+- Anthropic model calls emitted by the OpenLLMetry Anthropic instrumentation.
+- OpenTelemetry resource attributes such as service name, SDK version, `beacon.origin=cloud`, and export mode.
+- Beacon compatibility hints where supported by the SDK and instrumentation path.
+- Errors recorded on failed spans.
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- `@asymptote/sdk` installed.
+- `@anthropic-ai/sdk` installed.
+- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+```bash title="Install the SDK and Anthropic client"
+npm install @asymptote/sdk @anthropic-ai/sdk
+```
+
+Set environment variables:
+
+```bash title="Set Asymptote Managed and Anthropic environment variables"
+export ASYMPTOTE_API_KEY=...
+export ANTHROPIC_API_KEY=...
+```
+
+## Getting Started
+
+Initialize `Observe` before creating the Anthropic client when possible.
+
+```typescript title="Trace Anthropic messages.create" lines
+import Anthropic from "@anthropic-ai/sdk";
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+  instrumentationOptions: {
+    anthropic: {
+      traceContent: true,
+    },
+  },
+});
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+const message = await anthropic.messages.create({
+  model: "claude-sonnet-4-5",
+  max_tokens: 1024,
+  messages: [
+    {
+      role: "user",
+      content: "Review this agent workflow for risky tool use.",
+    },
+  ],
+});
+
+await Observe.flush();
+```
+
+All supported Anthropic SDK calls are now traced through the configured Asymptote exporter.
+
+## Already-Loaded Clients
+
+If your application imports or creates the Anthropic client before initialization, pass the module to `instrumentModules` or patch it after initialization.
+
+```typescript title="Instrument an already-loaded Anthropic module" lines
+import Anthropic from "@anthropic-ai/sdk";
+import { Observe } from "@asymptote/sdk";
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+  instrumentModules: {
+    Anthropic,
+  },
+});
+```
+
+## Existing OpenTelemetry Providers
+
+If your application already owns OpenTelemetry setup, register only Asymptote's Anthropic instrumentation with your existing provider.
+
+```typescript title="Register Anthropic instrumentation on an existing provider" lines
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { Observe } from "@asymptote/sdk";
+
+registerInstrumentations({
+  instrumentations: Observe.instrumentations({
+    openAI: false,
+    anthropic: {
+      traceContent: true,
+    },
+  }),
+});
+```
+
+## Troubleshooting
+
+- Confirm `ASYMPTOTE_API_KEY` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set in the same process that runs the SDK.
+- Initialize `Observe` before constructing the Anthropic client when possible.
+- If the Anthropic module is imported before initialization, pass it through `instrumentModules` or `Observe.patch()`.
+- Call `Observe.flush()` before short-lived scripts or jobs exit.
+
+## What's Next
+
+<Columns cols={2}>
+  <Card title="Claude Agent SDK" icon="robot" href="/sdk/integrations-claude-agent-sdk">
+    Wrap Claude Agent SDK query functions with Beacon-compatible prompt spans.
+  </Card>
+  <Card title="Instrumentation" icon="wand-magic-sparkles" href="/sdk/instrumentation">
+    Review initialization, module patching, and existing OpenTelemetry provider setup.
+  </Card>
+</Columns>

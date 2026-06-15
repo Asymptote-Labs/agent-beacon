@@ -1,0 +1,162 @@
+---
+title: "beacon rules"
+description: "Manage and author Beacon threat-detection rules"
+---
+
+## Command Overview
+
+`beacon rules` manages the local threat-rule store used by [`beacon scan`](/cli/scan) and provides authoring helpers for validating rule packs.
+
+```bash title="Command syntax"
+beacon rules [command]
+```
+
+The detection engine ships in the Beacon binary, but rules are external data loaded from the local store. A small baseline is built in and used until you install your own rules. Beacon publishes the full threat-rule pack as a versioned `threat-rules.tar.gz` asset on each GitHub release.
+
+<Note>
+  Beacon never fetches rules on its own. `beacon rules pull` is the only rules command that reaches the network, and only for the explicit URL you provide.
+</Note>
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="list" icon="list" href="/cli/rules-list">
+    List the active threat-detection rules.
+  </Card>
+  <Card title="add" icon="plus" href="/cli/rules-add">
+    Install local rule files into the store.
+  </Card>
+  <Card title="remove" icon="trash" href="/cli/rules-remove">
+    Remove a rule from the store by id.
+  </Card>
+  <Card title="pull" icon="cloud-arrow-down" href="/cli/rules-pull">
+    Fetch an explicit rule pack URL into the store.
+  </Card>
+  <Card title="lint" icon="check" href="/cli/rules-lint">
+    Validate rule files and run embedded fixtures.
+  </Card>
+  <Card title="fields" icon="table-list" href="/cli/rules-fields">
+    Print event fields available to CEL match expressions.
+  </Card>
+</Columns>
+
+## Rule format
+
+Threat rules are YAML documents whose match conditions are CEL expressions over Beacon endpoint events. A single-event rule uses a top-level `match`; a correlated rule uses ordered `correlation.steps` scoped to a session window.
+
+Rules include severity, maturity status, posture, an emitted reason, and embedded conformance fixtures. Stable rules must include at least one matching and one non-matching fixture.
+
+```yaml title="Example rule shape"
+id: suspicious-egress-command
+version: 1
+title: Suspicious network egress command
+severity: high
+status: stable
+posture: detect
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("\\b(curl|wget|nc)\\b")
+emit:
+  reason: "Agent executed a command commonly used for network egress"
+tests:
+  - name: positive_basic
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+  - name: unrelated
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ls -la" }
+```
+
+## beacon rules list
+
+List the active rules and show whether each rule came from the store or the built-in baseline.
+
+```bash title="List active rules"
+beacon rules list
+```
+
+Use `--system` to inspect the system-mode rule store.
+
+## beacon rules add
+
+Install a local `.rule.yaml` file or a directory of rule files into the store. Rules are validated before install.
+
+```bash title="Install local rules"
+beacon rules add ./rules
+```
+
+Overwrite an existing rule with the same id:
+
+```bash title="Overwrite an existing rule"
+beacon rules add ./rules --force
+```
+
+## beacon rules remove
+
+Remove one rule from the store by id.
+
+```bash title="Remove a rule"
+beacon rules remove suspicious-egress-command
+```
+
+## beacon rules pull
+
+Fetch a `.rule.yaml`, `.tar.gz`, or `.tgz` rule pack from an explicit URL and install valid rules into the store.
+
+```bash title="Pull a rule pack"
+beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz
+```
+
+Downloaded tarballs only install `.rule.yaml` entries. Archive entries containing path traversal elements are rejected before install.
+
+## beacon rules lint
+
+Validate a rule file or directory, compile CEL expressions against the endpoint event schema, enforce maturity gates, and run embedded conformance fixtures.
+
+```bash title="Lint a rule directory"
+beacon rules lint ./rules
+```
+
+With no path, Beacon lints `./rules`.
+
+## beacon rules fields
+
+Print the event fields a rule can reference from CEL expressions.
+
+```bash title="List rule fields"
+beacon rules fields
+```
+
+Render a markdown field reference:
+
+```bash title="Render fields as markdown"
+beacon rules fields --markdown
+```
+
+## Shared Store Flags
+
+`beacon rules list`, `add`, `remove`, and `pull` accept endpoint mode flags:
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--force` | Overwrite an existing rule with the same id. Available on `add` and `pull` |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon scan" icon="magnifying-glass" href="/cli/scan">
+    Run active rules over local endpoint telemetry.
+  </Card>
+  <Card title="Detections" icon="shield-halved" href="/detections">
+    Understand the detection model behind Beacon threat rules.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized event fields available to rules.
+  </Card>
+</Columns>

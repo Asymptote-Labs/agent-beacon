@@ -1,0 +1,76 @@
+---
+title: "Local Testing Guides"
+description: "Validate Beacon endpoint telemetry locally before managed rollout or log forwarding"
+---
+
+## Overview
+
+Use local testing to confirm Beacon is installed, writing endpoint events, and readable through local review tools before you move into managed deployment or log forwarding.
+
+Beacon runs locally by default. These checks use the endpoint runtime JSONL log and local-only commands, so you can validate collection without a Beacon-hosted account or external network dependency.
+
+## Setup
+
+Install Beacon and configure endpoint telemetry before testing:
+
+```bash title="Configure endpoint telemetry"
+beacon endpoint install
+beacon endpoint status
+```
+
+<Accordion title="Sample output">
+```bash title="Sample output"
+$ beacon endpoint status
+
+Collector: running
+Runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
+Diagnostics: passing
+```
+</Accordion>
+
+## Validation Workflow
+
+<Steps>
+  <Step title="Check endpoint health">
+    Run `beacon endpoint status` and `beacon endpoint doctor` to confirm the endpoint configuration, collector, runtime log, and local service state.
+  </Step>
+  <Step title="Write a validation event">
+    Use `beacon endpoint test-event` to append a known-good synthetic event to the runtime JSONL log.
+  </Step>
+  <Step title="Review the dashboard">
+    Start `beacon endpoint dashboard --open` and confirm the validation event appears in Log Search and summary views.
+  </Step>
+  <Step title="Validate MCP access">
+    Run `beacon mcp doctor`, then test an MCP query path against the same runtime log to confirm local assistants only receive the intended compact activity summaries.
+  </Step>
+  <Step title="Inspect local logs">
+    Confirm the runtime JSONL path, last-event freshness, and user or system mode paths match your test scope.
+  </Step>
+</Steps>
+
+## Guides In This Section
+
+<Columns cols={2}>
+  <Card title="Validate Endpoint Telemetry" icon="stethoscope" href="/guides/local-testing/endpoint-validation">
+    Confirm endpoint health, write validation events, and inspect the runtime JSONL log.
+  </Card>
+  <Card title="Test the Local Dashboard" icon="chart-line" href="/guides/local-testing/dashboard">
+    Review Log Search, Security Overview, and runtime inventory from the local dashboard.
+  </Card>
+  <Card title="Test MCP Access" icon="server" href="/guides/local-testing/mcp">
+    Test local MCP tools and connect Cursor or Claude Code to Beacon activity.
+  </Card>
+</Columns>
+
+For ephemeral agent telemetry in CI jobs, see [CI Telemetry](/cli/ci).
+
+## Key Features Demonstrated
+
+- Verify local endpoint health before a rollout.
+- Write a synthetic endpoint event to prove the runtime log is writable.
+- Confirm the dashboard and MCP tools read the same local log.
+- Separate user-mode, system-mode, and custom log-path checks.
+
+## When To Use Local Testing
+
+Local testing is useful for developer evaluation, support triage, security review demos, and pilot preparation. For managed rollout guidance, see [Security & IT Rollout Guide](/security), [MDM Deployment](/mdm), and [Log Forwarding](/log-forwarding).

@@ -1,0 +1,111 @@
+---
+title: "MDM Deployment"
+description: "Plan managed macOS deployment of Beacon with Jamf Pro, Fleet, or another MDM."
+---
+
+## Deployment Overview
+
+Beacon's macOS package is designed for security and IT rollout through MDM. A signed and notarized `.pkg` installs Beacon under `/opt/beacon`, creates system endpoint configuration, loads the local collector LaunchDaemon, and writes endpoint events to `/var/log/beacon-agent/runtime.jsonl`. Optional Splunk HEC or Falcon LogScale HEC settings add collector destinations while preserving the local runtime log.
+
+The package installs and inventories a local-only endpoint agent. Beacon does not require a hosted account, remote policy fetch, or MDM API credentials for normal collection. During package postinstall, Beacon tolerates a transient `launchctl bootstrap` failure when the LaunchDaemon is already registered and continues validation against the existing service registration.
+
+## Package layout
+
+The macOS package includes Beacon binaries, endpoint scripts, and MDM assets:
+
+```text
+/opt/beacon/bin/beacon
+/opt/beacon/bin/beacon-otelcol
+/opt/beacon/scripts/install-endpoint.sh
+/opt/beacon/scripts/uninstall-endpoint.sh
+/opt/beacon/jamf/extension-attributes/*.sh
+/opt/beacon/jamf/scripts/*.sh
+/opt/beacon/fleet/queries/*.sql
+/opt/beacon/fleet/scripts/*.sh
+```
+
+The endpoint install creates system configuration and runtime state:
+
+```text
+/Library/Application Support/Beacon/Endpoint/config.json
+/Library/Application Support/Beacon/Endpoint/otelcol.yaml
+/Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/var/log/beacon-agent/runtime.jsonl
+```
+
+## Deployment model
+
+<Steps>
+  <Step title="Deploy to a pilot group">
+    Upload the signed and notarized `.pkg` to your MDM and scope it to a pilot group, team, or label.
+  </Step>
+  <Step title="Confirm the system agent">
+    Verify that the LaunchDaemon is running and that `beacon endpoint wazuh validate` writes a validation event.
+  </Step>
+  <Step title="Add inventory signals">
+    Track version, collector service health, log freshness, configured harnesses, and runtime log writability.
+  </Step>
+  <Step title="Scope repair workflows">
+    Use the packaged repair scripts for endpoints where inventory reports a stale or unhealthy install. Repair stops the existing collector before reinstalling it and restores the previous endpoint configuration if reinstall cannot complete.
+  </Step>
+  <Step title="Roll out in stages">
+    Broaden deployment after inventory and validation stay healthy for the pilot population.
+  </Step>
+</Steps>
+
+Environment variables take precedence over MDM script parameters:
+
+| Environment variable | Default |
+|----------------------|---------|
+| `BEACON_ENDPOINT_HARNESSES` | `claude,codex` |
+| `BEACON_HOOK_HARNESSES` | Optional user-context hooks such as `antigravity,claude,cursor,devin,factory,grok,hermes,opencode` |
+| `BEACON_OTLP_GRPC_PORT` | `4317` |
+| `BEACON_OTLP_HTTP_PORT` | `4318` |
+| `BEACON_COLLECTOR` | `/opt/beacon/bin/beacon-otelcol` when present |
+| `BEACON_NO_START` | accepts `1`, `true`, or `yes` |
+| `BEACON_SPLUNK_HEC_ENDPOINT` | Optional Splunk HEC URL |
+| `BEACON_SPLUNK_HEC_TOKEN` | Optional Splunk HEC token |
+| `BEACON_SPLUNK_INDEX` | Optional Splunk index |
+| `BEACON_SPLUNK_SOURCE` | Optional Splunk source |
+| `BEACON_SPLUNK_SOURCETYPE` | Optional Splunk sourcetype |
+| `BEACON_SPLUNK_INSECURE_SKIP_VERIFY` | accepts `1`, `true`, or `yes` |
+| `BEACON_SPLUNK_CA_FILE` | Optional CA certificate path |
+| `BEACON_FALCON_HEC_ENDPOINT` | Optional Falcon LogScale HEC URL |
+| `BEACON_FALCON_HEC_TOKEN` | Optional Falcon LogScale ingest token |
+| `BEACON_FALCON_INDEX` | Optional Falcon LogScale repository |
+| `BEACON_FALCON_SOURCE` | Optional Falcon LogScale source |
+| `BEACON_FALCON_SOURCETYPE` | Optional Falcon LogScale parser or sourcetype |
+| `BEACON_FALCON_INSECURE_SKIP_VERIFY` | accepts `1`, `true`, or `yes` |
+| `BEACON_FALCON_CA_FILE` | Optional Falcon LogScale CA certificate path |
+
+<Note>
+  Gemini CLI telemetry is opt-in. Set `BEACON_ENDPOINT_HARNESSES=claude,codex,gemini` when the deployment should manage Gemini's local OTLP settings. Supported hook runtime installation is separate from the base system package because runtime hook configuration is per user or per project. Run hook helpers only when an interactive console user is present. Manage GitHub Copilot CLI's `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` launch environment through MDM or another customer-owned policy; do the same for Factory Droid's `OTEL_TELEMETRY_ENDPOINT`. Configure OpenClaw Gateway in OpenClaw and point its diagnostics OTLP/HTTP export at the Beacon collector.
+</Note>
+
+## Uninstall and rollback
+
+Use the vendor uninstall helper to remove endpoint service files. Set `BEACON_KEEP_LOGS=1` or the first uninstall argument to preserve runtime logs during removal. Set `BEACON_KEEP_CONFIG=1` or the second uninstall argument to preserve harness telemetry configuration.
+
+```bash
+/opt/beacon/jamf/scripts/uninstall.sh "$@"
+/opt/beacon/fleet/scripts/uninstall.sh "$@"
+```
+
+The endpoint uninstall removes service and configuration state. Package payload removal remains under the MDM or package receipt lifecycle.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Enterprise security review" icon="shield-halved" href="/security/review">
+    Review local collection, paths, content handling, network behavior, and security contact details.
+  </Card>
+  <Card title="Jamf" icon="laptop" href="/mdm/jamf">
+    Deploy and inventory Beacon with Jamf Pro policies and extension attributes.
+  </Card>
+  <Card title="Fleet" icon="laptop-file" href="/mdm/fleet">
+    Deploy Beacon with Fleet software, policies, queries, and scripts.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, or customer-managed pipelines.
+  </Card>
+</Columns>

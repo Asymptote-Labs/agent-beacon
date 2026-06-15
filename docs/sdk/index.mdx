@@ -1,0 +1,71 @@
+---
+title: "Asymptote Observe SDK"
+description: "Instrument cloud-hosted agent applications with Beacon-compatible telemetry"
+---
+
+## SDK Overview
+
+Asymptote Observe instruments cloud-hosted agent applications and exports OpenTelemetry traces that remain compatible with Beacon's normalized endpoint event model. Use it for servers, serverless functions, workers, and hosted agent platforms where installing the local Beacon endpoint agent is not the right fit.
+
+Hosted Observe ingest is available through Asymptote Managed. To get an `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact).
+
+The open-source `agent-beacon` repository currently includes the TypeScript package `@asymptote/sdk`. It provides the `Observe` module for OpenTelemetry setup, common AI SDK instrumentation, manual span wrappers, lifecycle helpers, and Beacon compatibility attributes.
+
+## What Asymptote Captures
+
+Asymptote Observe is OpenTelemetry-first. It records supported model calls, agent turns, tool calls, custom orchestration steps, errors, and Beacon compatibility attributes as spans that can be sent to Asymptote Managed hosted Observe or a customer-managed OTLP collector.
+
+Supported cloud SDK paths:
+
+| SDK or pattern | Support path |
+| --- | --- |
+| Anthropic | OpenLLMetry instrumentation for `@anthropic-ai/sdk` |
+| Claude Agent SDK | `Observe.wrapClaudeAgentQuery()` or `Observe.observe()` around the agent entrypoint |
+| OpenAI | OpenLLMetry instrumentation for the `openai` package |
+| Vercel AI SDK | Pass `Observe.getTracer()` into `experimental_telemetry` |
+| Custom orchestration | Wrap functions with `Observe.observe()` |
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/sdk/quickstart">
+    Install `@asymptote/sdk`, configure export, create a trace, and flush it.
+  </Card>
+  <Card title="Instrumentation" icon="wand-magic-sparkles" href="/sdk/instrumentation">
+    Configure `Observe.initialize()`, patch already-loaded modules, or plug into an existing OpenTelemetry provider.
+  </Card>
+  <Card title="Observe" icon="diagram-project" href="/sdk/observe">
+    Wrap custom agent steps, tool calls, and orchestration logic.
+  </Card>
+  <Card title="SDK Lifecycle" icon="rotate" href="/sdk/lifecycle">
+    Flush or shut down tracing in scripts, jobs, serverless handlers, and long-running services.
+  </Card>
+  <Card title="Agent SDK Integrations" icon="plug" href="/sdk/integrations">
+    Capture Anthropic, Claude Agent SDK, OpenAI, Vercel AI SDK, and custom orchestration.
+  </Card>
+  <Card title="Reference" icon="book-open" href="/sdk/reference">
+    Review `Observe` APIs, export options, environment variables, and Beacon compatibility attributes.
+  </Card>
+</Columns>
+
+## Choose The Right Surface
+
+Use the SDK when agent activity runs in application code you control. Use Asymptote endpoint or CI collection when activity happens in a local harness or ephemeral build job.
+
+| Environment | Recommended surface |
+| --- | --- |
+| Node.js services, workers, and hosted agent apps | [Asymptote Observe SDK](/sdk/quickstart) |
+| Next.js and serverless functions | [Next.js and serverless guide](/sdk/integrations-nextjs-serverless) |
+| Local coding and knowledge-worker harnesses | [Asymptote endpoint agent](/runtimes) |
+| CI jobs running Claude Code | [`beacon ci`](/cli/ci) |
+
+## SDK And Endpoint Telemetry
+
+The SDK and Asymptote endpoint telemetry share an event contract, but they target different deployment surfaces.
+
+| Surface | Purpose |
+| --- | --- |
+| Asymptote Observe SDK | Cloud application telemetry exported as OpenTelemetry traces |
+| Asymptote endpoint agent | Local endpoint telemetry collected from supported agent harnesses |
+| Asymptote CI | Ephemeral CI telemetry captured for a single job |
+| Beacon JSONL schema | Normalized event model used by local logs, dashboards, and downstream security pipelines |
+
+Cloud SDK spans set `beacon.origin=cloud` and can include Beacon compatibility attributes such as `beacon.harness.name`, `beacon.event.action`, `beacon.tool.name`, and `beacon.prompt.text`. The same attributes can be consumed by Beacon-compatible collectors or Asymptote Managed Observe ingest.

@@ -1,0 +1,55 @@
+---
+title: "Enterprise Security Review"
+description: "Procurement and security review details for Beacon endpoint telemetry"
+---
+
+## Review Scope
+
+Beacon is designed for endpoint-local collection of supported agent harness activity. During normal collection, supported runtimes send telemetry to a localhost OpenTelemetry receiver or invoke the local `beacon-hooks` adapter. Beacon normalizes those signals into endpoint events and writes them to a local JSONL log for local review or customer-controlled forwarding.
+
+Normal hook execution has no Beacon-hosted dependency. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network connection to collect supported local runtime activity.
+
+## Review Package
+
+<Columns cols={2}>
+  <Card title="Data flow and threat model" icon="diagram-project" href="/security/data-flow-threat-model">
+    Follow runtime signals from local collection through normalization, storage, dashboard inspection, and optional forwarding.
+  </Card>
+  <Card title="Data inventory" icon="table-list" href="/security/data-inventory">
+    Review runtime coverage and the event fields Beacon can write when a source provides them.
+  </Card>
+  <Card title="Redaction and size limits" icon="filter" href="/security/retention-redaction">
+    Review content handling, redaction, sanitization, truncation, and event-size limits.
+  </Card>
+  <Card title="Endpoint operations" icon="desktop" href="/security/endpoint-operations">
+    Review paths, permissions, daemon behavior, network behavior, forwarding boundaries, and uninstall behavior.
+  </Card>
+  <Card title="Security policy" icon="shield-halved" href="/security/policy">
+    Find the security contact, vulnerability disclosure guidance, and release verification policy.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Inspect the normalized JSONL contract used for Beacon endpoint events.
+  </Card>
+</Columns>
+
+## Default Posture
+
+| Area | Default behavior |
+|------|------------------|
+| Collection | Local OpenTelemetry receivers on `127.0.0.1` or local hook adapter execution |
+| Storage | Local `runtime.jsonl` on the endpoint |
+| Hosted dependency | None required for normal endpoint collection |
+| Forwarding | Optional and customer configured |
+| Content handling | Retained local telemetry is subject to redaction, sanitization, truncation, and event-size limits |
+| Removal | Endpoint uninstall removes managed service/config files, with explicit flags to keep logs or config |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    See the endpoint collection, normalization, storage, and forwarding architecture.
+  </Card>
+  <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
+    Plan deployment, monitoring, and forwarding workflows.
+  </Card>
+</Columns>

@@ -1,0 +1,92 @@
+---
+title: "beacon endpoint config"
+description: "Inspect, validate, and update Beacon endpoint configuration"
+---
+
+## Command Overview
+
+`beacon endpoint config` inspects and safely updates the local Beacon endpoint configuration.
+
+```bash title="Command syntax"
+beacon endpoint config [command]
+```
+
+Use this command group when you need to review the effective endpoint configuration or validate config file contents without reinstalling the endpoint agent.
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="show" icon="eye" href="#beacon-endpoint-config-show">
+    Print endpoint configuration with secrets redacted.
+  </Card>
+  <Card title="validate" icon="check" href="#beacon-endpoint-config-validate">
+    Validate endpoint configuration and destination settings.
+  </Card>
+</Columns>
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint config show
+
+`beacon endpoint config show` prints the endpoint configuration with secrets redacted.
+
+```bash title="Manage endpoint configuration"
+beacon endpoint config show
+```
+
+Splunk HEC tokens and other secret destination values are not printed. Use this command before support handoffs or diagnostics collection when you need to confirm paths, ports, harnesses, and destination settings.
+
+### Examples
+
+Show per-user endpoint config:
+
+```bash title="Show per-user endpoint config"
+beacon endpoint config show
+```
+
+Show system endpoint config:
+
+```bash title="Show system endpoint config"
+sudo beacon endpoint config show --system
+```
+
+## beacon endpoint config validate
+
+`beacon endpoint config validate` validates the endpoint configuration file.
+
+```bash title="Run the validation check"
+beacon endpoint config validate
+```
+
+Validation checks endpoint and destination configuration. For example, Splunk HEC and Falcon LogScale HEC forwarding require both an endpoint URL and token when configured.
+
+### Examples
+
+Validate per-user endpoint config:
+
+```bash title="Validate per-user endpoint config"
+beacon endpoint config validate
+```
+
+Validate system endpoint config:
+
+```bash title="Validate system endpoint config"
+sudo beacon endpoint config validate --system
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Configure endpoint telemetry and collector service files.
+  </Card>
+  <Card title="Diagnostics bundle" icon="file-zipper" href="/cli/endpoint-bundle-diagnostics">
+    Collect redacted endpoint support artifacts.
+  </Card>
+</Columns>

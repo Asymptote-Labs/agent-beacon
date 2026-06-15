@@ -1,0 +1,123 @@
+---
+title: "Asymptote Overview"
+description: "Why AI agent security needs a new control layer, and how Asymptote moves teams from local visibility to enterprise control"
+---
+
+Asymptote helps security and IT teams understand what AI agents are doing at runtime and add controls as adoption grows.
+
+You can start with open-source telemetry across the agent surfaces you already run, then move into centralized visibility, policy controls, and investigations when a small pilot turns into a broader rollout.
+
+## Why Teams Need This
+
+AI agents create a visibility gap that most security tools do not cover well. Traditional endpoint and application logs can usually tell you that something happened, but not enough about the agent session that caused it.
+
+In practice, teams usually run into a few problems:
+
+### Unknown Agents, Unknown Risk
+
+- Teams often do not have a reliable inventory of which agent tools are in use.
+- Ownership is unclear once agents spread across individual laptops and teams.
+- It becomes hard to answer basic questions such as which harness is running, what it can access, and where activity should be monitored.
+
+### Runtime Moves Faster Than Review
+
+- Agents can read files, call tools, write code, and trigger actions very quickly.
+- Manual review works for a small pilot, but it does not scale once many users or teams depend on agents.
+- Security teams need a way to observe and govern activity while it is happening, not only after the fact.
+
+### Logs Without Runtime Context
+
+- Standard logs may show a process, file write, or network connection.
+- They usually do not show the prompt, tool call, file context, or session flow behind that action.
+- That makes investigations harder and weakens policy decisions.
+
+## How Asymptote Fits Together
+
+Asymptote is built as a progression rather than a single all-or-nothing product.
+
+- **Asymptote Open Source** is the open-source foundation, built on Agent Beacon. It captures supported agent activity across local endpoints, CI jobs, and cloud-agent surfaces, then normalizes prompts, tool calls, file edits, commands, and related session events into records teams can inspect or forward into their own security tools.
+- **Asymptote Managed** builds on that foundation with centralized ingest, retention, detections, fleet-wide visibility, policy controls, identity mapping, approvals, and investigation workflows.
+- **Private Deployment** is for teams that need dedicated infrastructure, tighter data boundaries, or residency controls.
+
+That gives teams a practical path:
+
+- start with open-source telemetry on the surfaces you already run
+- validate what agents are doing across local, CI, and cloud paths
+- centralize and govern that activity as usage expands
+- move into private deployment when compliance or infrastructure requirements demand it
+
+## Choosing a Deployment Path
+
+Use these rules of thumb:
+
+- Choose **Asymptote Open Source** if you want open-source telemetry across supported local, CI, and cloud agent surfaces, normalized records you control, and customer-managed forwarding into your SIEM or observability stack.
+- Choose **Asymptote Managed** if you need centralized operations across endpoints, users, and teams.
+- Choose **Private Deployment** if managed capabilities are right, but you need stronger infrastructure ownership or data-isolation requirements.
+
+| Capability | Asymptote Open Source | Asymptote Managed | Private Deployment |
+| --- | --- | --- | --- |
+| Open-source runtime telemetry | ✓ | ✓ | ✓ |
+| Capture from supported local agent harnesses | ✓ | ✓ | ✓ |
+| Capture from supported CI jobs and cloud-agent surfaces | ✓ | ✓ | ✓ |
+| Customer-managed SIEM forwarding | ✓ | ✓ | ✓ |
+| MDM-friendly endpoint rollout | ✓ | ✓ | ✓ |
+| Managed ingest, retention, search, and detections | - | ✓ | ✓ |
+| Fleet-wide inventory and centralized visibility | - | ✓ | ✓ |
+| Policy controls, identity mapping, and approvals | - | ✓ | ✓ |
+| Investigation timelines and case workflows | - | ✓ | ✓ |
+| SSO, RBAC, and audit trails | - | ✓ | ✓ |
+| Dedicated deployment and data isolation options | - | - | ✓ |
+
+## Asymptote Open Source
+
+Asymptote Open Source is built on the `agent-beacon` repository.
+
+<a href="https://github.com/Asymptote-Labs/agent-beacon">
+  <img
+    src="https://api.star-history.com/svg?repos=asymptote-labs/agent-beacon&type=Date"
+    alt="Agent Beacon GitHub star growth"
+    width="860"
+  />
+</a>
+
+If you are starting with Asymptote Open Source, these pages are the most useful next steps:
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    Choose the right setup path for a managed rollout or local developer evaluation.
+  </Card>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    Learn how Beacon collects, normalizes, stores, and forwards telemetry across supported runtime surfaces.
+  </Card>
+  <Card title="Local testing" icon="flask-vial" href="/guides/local-testing">
+    Validate endpoint health, events, dashboard access, MCP access, and logs.
+  </Card>
+  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
+    See supported agent harnesses, deployment modes, destinations, and boundaries.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review Asymptote Open Source JSONL fields, normalization behavior, and example events.
+  </Card>
+  <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
+    Plan endpoint inventory, MDM rollout, retention policy, validation, and log forwarding.
+  </Card>
+</Columns>
+
+Additional references: [Core Concepts](/concepts/core-concepts), [Command reference](/cli), and [MCP server](/cli/mcp).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+    Install the open-source CLI and configure Agent Beacon telemetry.
+  </Card>
+  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
+    Review managed visibility, policy controls, investigations, and rollout support.
+  </Card>
+  <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
+    Compare the open-source local path with managed and enterprise deployment options.
+  </Card>
+  <Card title="Pricing" icon="tag" href="https://asymptotelabs.ai/pricing">
+    See plan positioning for open-source, managed enterprise, and private deployment.
+  </Card>
+</Columns>

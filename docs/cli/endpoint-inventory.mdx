@@ -1,0 +1,85 @@
+---
+title: "beacon endpoint inventory"
+description: "Show installed, configured, and observed Beacon endpoint inventory"
+---
+
+## Command Overview
+
+`beacon endpoint inventory` shows Beacon endpoint inventory across configured harnesses, detected local runtimes, hook integrations, and observed runtime events.
+
+```bash title="Command syntax"
+beacon endpoint inventory
+```
+
+Use inventory when you need a fleet-friendly view of what Beacon is configured to monitor and what the endpoint has actually observed. By default, inventory focuses on configured, detected, or observed targets. Add `--all` to include every supported target, including runtimes and configuration files that are not detected on the host.
+
+`beacon inventory` is a top-level alias for `beacon endpoint inventory`.
+
+## Inventory Data
+
+Inventory can include:
+
+- Endpoint config path, runtime log path, and configured OTLP harnesses
+- Detected supported runtimes and telemetry status, including MDM-managed launch-environment state for GitHub Copilot CLI and Factory Droid
+- Hook integration status for Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, and OpenCode
+- Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally
+- Recently observed Beacon runtime events when the runtime log exists
+- Admin-configured integration observations such as Claude Cowork and OpenClaw Gateway events
+
+Human-readable and JSON inventory use the same default filtering: configuration records and MCP server context are shown when they are relevant to the local endpoint state. Use `--all` with `--json` when you need the complete supported inventory surface for fleet comparison or troubleshooting.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print inventory as JSON |
+| `--all` | Include all supported targets, not only configured, detected, or observed targets |
+
+## Examples
+
+Show endpoint inventory:
+
+```bash title="Show endpoint inventory"
+beacon endpoint inventory
+```
+
+Include all supported targets:
+
+```bash title="Include all supported targets"
+beacon endpoint inventory --all
+```
+
+Print machine-readable inventory:
+
+```bash title="Print machine-readable inventory"
+beacon endpoint inventory --json
+```
+
+Inventory a system-mode endpoint:
+
+```bash title="Inventory a system-mode endpoint"
+sudo beacon endpoint inventory --system --all
+```
+
+Use the top-level alias:
+
+```bash title="Use the top-level alias"
+beacon inventory --json
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Inventory Local Agent Runtimes" icon="clipboard-list" href="/guides/inventory">
+    Understand dashboard Inventory and common runtime coverage workflows.
+  </Card>
+  <Card title="Endpoint discover" icon="magnifying-glass" href="/cli/endpoint-discover">
+    Discover supported local agent harnesses and telemetry state.
+  </Card>
+  <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
+    Install and inspect hook-based endpoint telemetry.
+  </Card>
+</Columns>

@@ -1,0 +1,336 @@
+---
+title: "Cursor Cloud Agents"
+description: "Capture Cursor cloud agent telemetry and forward cloud-agent runtime logs to customer-managed Google Cloud Storage"
+---
+
+## Integration Overview
+
+Use this integration to capture Cursor cloud-agent activity and upload each
+session log to your own Google Cloud Storage bucket. It is meant for testing
+cloud-agent telemetry without running a hosted Asymptote backend.
+
+This flow depends on the Beacon CLI. You run `beacon cloud` commands from your
+workstation to create the GCS upload path, generate project hooks to commit to
+your repository, and generate the setup script that installs Beacon binaries in
+the Cursor cloud sandbox.
+
+<Info>
+  If you're interested in leveraging this telemetry ingest across your
+  enterprise, [Asymptote Managed](/deployment/managed) is designed for
+  production cloud-agent telemetry ingest at scale.
+</Info>
+
+## Overview
+
+Cursor Cloud Agents run in Cursor's cloud environment, so Beacon cannot use the
+long-running endpoint agent that local installs use. Instead, commit
+project-level Cursor hooks to `.cursor/hooks.json` and use the setup script to
+install Beacon binaries in the sandbox. During a cloud-agent session, those
+hooks write `/tmp/beacon/runtime.jsonl`; Beacon refreshes the corresponding GCS
+object as supported Cursor hook events run.
+
+```mermaid
+flowchart LR
+  CursorCloud["Cursor Cloud Agents"] --> Hooks["Beacon hooks in sandbox"]
+  Hooks --> RuntimeLog["/tmp/beacon/runtime.jsonl"]
+  RuntimeLog --> GCS["Customer-managed GCS bucket"]
+```
+
+The setup has four parts:
+
+1. Create a dedicated GCS bucket and uploader service account with Beacon.
+2. Add Beacon cloud telemetry environment variables to the Cursor cloud environment.
+3. Commit Beacon's project-level Cursor hooks to `.cursor/hooks.json`.
+4. Run a Beacon-generated setup script inside the Cursor cloud environment to
+   install `/tmp/beacon/bin/beacon` and `/tmp/beacon/bin/beacon-hooks`.
+
+Each Cursor cloud agent conversation writes one readable JSONL object:
+
+```text
+gs://<bucket>/<prefix>/provider=cursor_cloud/user_id=<user_id>/run_id=<cursor_conversation_id>/runtime.jsonl
+```
+
+Beacon uses Cursor's `conversation_id` hook field as the default `run_id` for
+Cursor Cloud telemetry. If you set `BEACON_RUN_ID` yourself, Beacon preserves
+that value instead.
+
+## Prerequisites
+
+- Beacon CLI `v0.0.56` or later.
+- `gcloud` installed and authenticated to the Google Cloud project you will use
+  for telemetry storage.
+- A Google Cloud project where you can create buckets, service accounts, IAM
+  bindings, and service account keys.
+- Cursor Cloud Agent access for the repository you want to test.
+- A Cursor cloud environment with outbound access to:
+  - `oauth2.googleapis.com`
+  - `storage.googleapis.com`
+  - `github.com`
+  - `*.githubusercontent.com`
+
+Install or upgrade Beacon before you start:
+
+```bash
+brew tap asymptote-labs/tap
+brew install beacon
+brew upgrade beacon
+beacon version
+```
+
+Authenticate `gcloud` and select your project:
+
+```bash
+gcloud auth login
+gcloud config set project <your-gcp-project>
+```
+
+## 1. Create the GCS Upload Path
+
+From your workstation, choose a bucket and prefix:
+
+```bash
+export GCP_PROJECT="your-gcp-project"
+export BEACON_TEST_BUCKET="your-beacon-cloud-agent-traces"
+export BEACON_CLOUD_GCS_PREFIX="agent-traces/customer=my-team"
+```
+
+Review the GCP changes Beacon will make:
+
+```bash
+beacon cloud gcs setup \
+  --project "$GCP_PROJECT" \
+  --bucket "$BEACON_TEST_BUCKET" \
+  --location us-central1 \
+  --prefix "$BEACON_CLOUD_GCS_PREFIX" \
+  --service-account beacon-cloud-trace-uploader \
+  --print
+```
+
+<Frame caption="Review the bucket, service account, and IAM commands before applying them.">
+  <img src="/images/cursor-cloud-agents/beacon-cloud-setup-print.png" width="720" alt="Terminal showing beacon cloud gcs setup --print output with gcloud commands for creating the bucket, service account, and IAM binding." />
+</Frame>
+
+Apply the setup and print the cloud telemetry environment variables:
+
+```bash
+beacon cloud gcs setup \
+  --project "$GCP_PROJECT" \
+  --bucket "$BEACON_TEST_BUCKET" \
+  --location us-central1 \
+  --prefix "$BEACON_CLOUD_GCS_PREFIX" \
+  --service-account beacon-cloud-trace-uploader \
+  --apply \
+  --print-env
+```
+
+Copy the printed values. Redact `BEACON_CLOUD_GCS_CREDENTIALS_B64` anywhere you
+share screenshots or logs.
+
+<Frame caption="Copy the printed BEACON_CLOUD_GCS_* variables into the Cursor cloud environment.">
+  <img src="/images/cursor-cloud-agents/beacon-cloud-setup-print-env.png" alt="Terminal showing beacon cloud gcs setup --apply --print-env output with bucket, prefix, and credentials environment variables." />
+</Frame>
+
+The helper creates a dedicated uploader service account and grants it object
+upload access to the selected bucket.
+
+## 2. Configure Cursor Cloud Agents
+
+Open your Cursor Cloud Agent environment for the repository.
+
+Add these environment variables:
+
+```bash
+BEACON_ORIGIN=cloud
+BEACON_RUN_PROVIDER=cursor_cloud
+BEACON_RUN_EPHEMERAL=true
+BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
+BEACON_CLOUD_GCS_BUCKET=<bucket-from-setup>
+BEACON_CLOUD_GCS_PREFIX=<prefix-from-setup>
+BEACON_CLOUD_GCS_CREDENTIALS_B64=<base64-service-account-json>
+```
+
+<Frame caption="Configure network access and Beacon runtime secrets for Cursor Cloud Agents.">
+  <img src="/images/cursor-cloud-agents/cursor-cloud-agent-config.png" alt="Cursor Cloud Agents settings showing network allowlist entries and Beacon runtime secrets for GCS upload." />
+</Frame>
+
+If your Cursor cloud environment restricts outbound network access, allow:
+
+```text
+oauth2.googleapis.com
+storage.googleapis.com
+github.com
+*.githubusercontent.com
+```
+
+## 3. Commit Cursor Project Hooks
+
+Cursor Cloud Agents load project hooks from `.cursor/hooks.json` at repository
+checkout and task start. Generate the hook file locally, commit it, and push it
+before starting cloud agents:
+
+```bash
+mkdir -p .cursor
+beacon cloud cursor print-hooks \
+  --binary-path /tmp/beacon/bin/beacon-hooks \
+  --log-path /tmp/beacon/runtime.jsonl > .cursor/hooks.json
+git add .cursor/hooks.json
+git commit -m "Add Beacon Cursor Cloud hooks"
+git push
+```
+
+<Warning>
+  Do not rely on generating `.cursor/hooks.json` from inside the Cursor Cloud
+  setup script. Cursor Cloud may load project hooks before the setup script
+  creates files in the VM. Committing `.cursor/hooks.json` makes the hook config
+  available when the agent starts.
+</Warning>
+
+## 4. Add the Setup Script
+
+Generate the setup script for your Beacon release:
+
+```bash
+beacon cloud cursor print-setup --version v0.0.66
+```
+
+Paste the generated script into the Cursor cloud environment setup step. The
+script:
+
+- installs `beacon` and `beacon-hooks` in `/tmp/beacon/bin`,
+- does not modify `.cursor/hooks.json`,
+- expects project hooks to already be committed in the repository.
+
+<Frame caption="Paste the generated Beacon setup script into the Cursor cloud environment update script.">
+  <img src="/images/cursor-cloud-agents/cursor-environment-script.png" alt="Cursor cloud environment configuration showing a Beacon setup script in the update script field and Beacon runtime secrets below it." />
+</Frame>
+
+<Tip>
+  If you are testing unreleased Beacon changes from a branch, build `beacon` and
+  `beacon-hooks` from that branch in the setup script instead of using
+  `print-setup --version`.
+</Tip>
+
+## 5. Run a Cloud Agent Task
+
+Start a Cursor cloud agent task that uses tools. For example:
+
+```text
+Read the README, run pwd && ls, create a tiny temporary markdown note under /tmp or in the repo, then summarize what you did.
+```
+
+Beacon captures Cursor cloud hook activity such as tool use, shell execution,
+file reads and edits, subagent lifecycle events, and compaction events where
+Cursor exposes hook payloads.
+
+<Note>
+  Cursor Cloud Agents do not run `beforeSubmitPrompt`, `sessionStart`,
+  `sessionEnd`, or `stop` hooks. Prompt text and final session lifecycle hooks
+  are therefore not available through this self-serve hook path; Beacon records
+  the supported in-sandbox events Cursor exposes after the cloud VM starts. See
+  [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
+  for the current platform support list.
+</Note>
+
+## 6. Verify GCS Upload
+
+List the uploaded session objects:
+
+```bash
+gcloud storage ls --recursive "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/"
+```
+
+You should see a path like:
+
+```text
+provider=cursor_cloud/user_id=<user_id>/run_id=<run_id>/runtime.jsonl
+```
+
+<Frame caption="Beacon uploads one readable runtime.jsonl object per Cursor cloud agent session.">
+  <img src="/images/cursor-cloud-agents/gcs-object-browser.png" alt="Google Cloud Storage object browser showing Beacon cloud agent traces partitioned by provider, user ID, Cursor run ID, and runtime.jsonl." />
+</Frame>
+
+Inspect the log:
+
+```bash
+gcloud storage cat "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=cursor_cloud/user_id=<user_id>/run_id=<run_id>/runtime.jsonl" | head
+```
+
+Expected fields include:
+
+```text
+vendor=beacon
+product=endpoint-agent
+schema_version=1.0
+origin=cloud
+harness.name=cursor
+run.provider=cursor_cloud
+```
+
+## Security Note
+
+The self-serve GCS flow above creates a dedicated service account scoped to
+object uploads for one bucket, then stores its credentials in the Cursor cloud
+environment. This is useful for proof-of-concept testing, but treat that
+environment variable as a sensitive credential.
+
+Avoid broad credentials and review access before using this flow with sensitive
+telemetry.
+
+## Troubleshooting
+
+### The bucket is empty
+
+Confirm the Cursor setup script ran and installed binaries, and confirm the
+repository checkout includes committed project hooks:
+
+```bash
+ls -la /tmp/beacon/bin
+ls -la .cursor
+sed -n '1,160p' .cursor/hooks.json
+```
+
+Confirm hooks wrote telemetry:
+
+```bash
+ls -l /tmp/beacon/runtime.jsonl
+head /tmp/beacon/runtime.jsonl
+```
+
+If `runtime.jsonl` exists but GCS is empty, check network access and GCS
+credentials. The cloud sandbox must reach both `oauth2.googleapis.com` and
+`storage.googleapis.com`.
+
+If `runtime.jsonl` does not exist, confirm the task used a Cursor Cloud
+supported hook surface such as a file read, shell command, file edit, tool use,
+subagent event, or compaction event. Prompt-only tasks do not emit
+`beforeSubmitPrompt` in Cursor Cloud because the prompt is submitted before the
+cloud VM exists. Cursor documents the supported and unsupported cloud hooks in
+its [Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support).
+
+### Cursor tries to commit hook settings
+
+The setup script should not modify `.cursor/hooks.json`. If a cloud agent shows
+changes to `.cursor/hooks.json`, update the setup script to `v0.0.56` or later
+and remove older commands that ran `beacon cloud cursor install-hooks` inside
+the VM.
+
+```bash
+git diff -- .cursor/hooks.json
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Cursor runtime support" icon="terminal" href="/runtimes/cursor">
+    Review local Cursor telemetry through Beacon-managed hooks.
+  </Card>
+  <Card title="Google Cloud Storage forwarding" icon="database" href="/log-forwarding/gcs">
+    Review local endpoint GCS forwarding for persistent endpoint deployments.
+  </Card>
+  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
+    Use managed secure ingest for production enterprise cloud-agent telemetry.
+  </Card>
+  <Card title="Agent Beacon on GitHub" icon="github" href="https://github.com/Asymptote-Labs/agent-beacon">
+    Request new cloud-agent destinations or contribute support.
+  </Card>
+</Columns>

@@ -1,0 +1,71 @@
+---
+title: "beacon rules pull"
+description: "Fetch an explicit Beacon threat-rule pack into the local store"
+---
+
+## Command Overview
+
+`beacon rules pull` downloads a rule file or rule pack from an explicit URL and installs valid rules into the local store.
+
+```bash title="Command syntax"
+beacon rules pull <url> [flags]
+```
+
+This is the only `beacon rules` command that reaches the network, and only when you run it. Beacon never fetches rules on its own. The full Asymptote threat-rule pack is published as a versioned `threat-rules.tar.gz` asset on each Agent Beacon GitHub release.
+
+## Supported inputs
+
+`beacon rules pull` accepts:
+
+| Input | Description |
+|-------|-------------|
+| `.rule.yaml` | One rule file |
+| `.tar.gz` | Gzipped tarball containing `.rule.yaml` files |
+| `.tgz` | Gzipped tarball containing `.rule.yaml` files |
+
+Downloaded tarballs only install `.rule.yaml` entries. Archive entries containing path traversal elements are rejected before install.
+
+## Examples
+
+Pull a rule pack:
+
+```bash title="Pull a rule pack"
+beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz
+```
+
+Pull one rule file:
+
+```bash title="Pull one rule file"
+beacon rules pull https://example.com/rules/suspicious-egress-command.rule.yaml
+```
+
+Overwrite an existing rule with the same id:
+
+```bash title="Overwrite existing rules"
+beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz --force
+```
+
+Install into the system-mode rule store:
+
+```bash title="Pull system-mode rules"
+sudo beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz --system
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--force` | Overwrite an existing rule with the same id |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate a rule pack before publishing or installing.
+  </Card>
+  <Card title="beacon rules list" icon="list" href="/cli/rules-list">
+    Confirm the installed active rules.
+  </Card>
+</Columns>

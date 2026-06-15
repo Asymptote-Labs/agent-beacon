@@ -1,0 +1,111 @@
+---
+title: "Detections"
+description: "How Beacon detections turn agent runtime telemetry into security findings"
+---
+
+## Overview
+
+Beacon detections are threat rules for AI-agent telemetry. They read normalized [endpoint events](/telemetry-schema/event-schema), evaluate rule conditions over those events, and emit findings that explain which rule fired, why it fired, and which events were involved.
+
+The detection format is open and lives in the Agent Beacon repository. Rules are YAML documents with CEL match expressions, metadata, and embedded test fixtures. The detection engine ships with the Beacon CLI, while rule packs can be managed separately from the binary.
+
+## What Detections Look For
+
+Detections focus on risky agent behavior that is hard to understand from one raw log line alone:
+
+- commands that suggest network egress, credential access, or destructive activity
+- file reads or edits involving sensitive paths
+- MCP and tool activity that crosses expected boundaries
+- approval, policy, or enforcement outcomes that should be reviewed
+- sequences of events within the same agent session, such as reading a secret and then making an outbound request
+
+Because rules run over the shared Beacon event model, the same rule vocabulary can apply across supported harnesses when those harnesses emit the required fields.
+
+## Detection Flow
+
+1. A supported agent harness emits runtime telemetry.
+2. Beacon normalizes that telemetry into endpoint events and writes `runtime.jsonl`.
+3. `beacon scan` loads the active rule set from an explicit rules directory, the local rule store, or the built-in baseline.
+4. Each rule is decoded, validated, and compiled before it runs.
+5. The scan evaluates rules against the ordered event stream.
+6. Matching rules produce findings with rule metadata, severity, reason, session context, and evidence events.
+
+You can run the same local detection flow from the command line with [`beacon scan`](/cli/scan) or inspect it in the loopback-only [endpoint dashboard](/cli/dashboard). The dashboard Detections view lists active rules, while the Findings view runs those rules over the configured runtime log on demand.
+
+## Rules And Findings
+
+A rule is the durable detection definition. It contains an `id`, `title`, `severity`, CEL logic, and test fixtures that prove the expected behavior.
+
+A finding is the runtime result of a rule firing. Findings include the rule identity, severity, emitted reason, matched session when available, and the event evidence that caused the match.
+
+```yaml title="Single-event rule shape"
+id: suspicious-egress-command
+version: 1
+title: Suspicious network egress command
+severity: high
+status: stable
+posture: detect
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("\\b(curl|wget|nc)\\b")
+emit:
+  reason: "Agent executed a command commonly used for network egress"
+tests:
+  - name: positive_basic
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+  - name: unrelated
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ls -la" }
+```
+
+## Rule Sources
+
+Beacon can run detections from three sources:
+
+- an explicit directory passed to `beacon scan --rules`
+- the local endpoint rule store managed by `beacon rules`
+- the built-in baseline when no local store is installed
+
+The built-in baseline is intentionally small. Install the full Asymptote threat-rule pack from the current Agent Beacon release when you want the broader maintained rule set:
+
+```bash title="Install the full threat-rule pack"
+beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz
+```
+
+Beacon does not fetch rules automatically during scans. Pulling a remote rule pack is an explicit `beacon rules pull` action.
+
+## Read Next
+
+<Columns cols={2}>
+  <Card title="YAML Schema" icon="code" href="/detections/yaml-schema">
+    Learn the fields used by Beacon threat-rule YAML files.
+  </Card>
+  <Card title="Detection Standard" icon="shield-halved" href="/detections/standard">
+    Understand the threat-rules/v1 standard, maturity ladder, and conformance model.
+  </Card>
+  <Card title="Detection Engine" icon="gears" href="/detections/engine">
+    See how rules are loaded, compiled, evaluated, and turned into findings.
+  </Card>
+  <Card title="beacon scan" icon="magnifying-glass" href="/cli/scan">
+    Run active rules over local endpoint telemetry.
+  </Card>
+  <Card title="Endpoint dashboard" icon="chart-line" href="/cli/dashboard">
+    Browse active detections and findings in the local dashboard.
+  </Card>
+</Columns>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
+    Review the normalized JSON fields that detections evaluate.
+  </Card>
+  <Card title="beacon rules" icon="list-check" href="/cli/rules">
+    Manage, install, lint, and inspect local detection rules.
+  </Card>
+</Columns>

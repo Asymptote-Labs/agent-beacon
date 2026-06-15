@@ -1,0 +1,77 @@
+---
+title: "beacon ci finish"
+description: "Stop, validate, and export a detached Beacon CI telemetry session"
+---
+
+## Command Overview
+
+`beacon ci finish` loads the state file from `beacon ci start`, stops the collector, validates the runtime log, and optionally uploads the completed JSONL artifact.
+
+```bash title="Command syntax"
+beacon ci finish
+```
+
+Run this command in an `always()` or equivalent cleanup step so Beacon can stop the detached collector even when earlier CI steps fail.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--state-path <path>` | CI session state path |
+| `--min-events <count>` | Minimum matching events required during validation. Defaults to `1` |
+| `--require-telemetry <bool>` | Fail when telemetry validation fails. Defaults to `true`; set `false` to warn |
+| `--upload <destination>` | Upload the completed CI runtime JSONL after validation. Supported values are `s3` and `gcs`; repeat for multiple destinations |
+
+## Examples
+
+Stop and validate a detached session:
+
+```bash title="Stop and validate a detached session"
+beacon ci finish --min-events 1
+```
+
+Upload the completed CI runtime log to GCS:
+
+```bash title="Upload the completed CI runtime log to GCS"
+BEACON_CI_GCS_BUCKET="my-beacon-telemetry" \
+BEACON_CI_GCS_PREFIX="github-actions" \
+beacon ci finish --upload gcs
+```
+
+## GitHub Actions Session
+
+```yaml
+- name: Start Beacon telemetry
+  id: beacon
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: start
+    harnesses: codex
+
+- uses: openai/codex-action@main
+  with:
+    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    codex-home: ${{ steps.beacon.outputs.codex-home }}
+    prompt: "Review this pull request"
+
+- name: Finish Beacon telemetry
+  if: always()
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: finish
+    min-events: "1"
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci" icon="terminal" href="/cli/ci">
+    Review CI artifact paths and command group behavior.
+  </Card>
+  <Card title="beacon ci start" icon="play" href="/cli/ci-start">
+    Start detached telemetry across workflow steps.
+  </Card>
+  <Card title="beacon ci validate" icon="check" href="/cli/ci-validate">
+    Validate an existing CI runtime log.
+  </Card>
+</Columns>

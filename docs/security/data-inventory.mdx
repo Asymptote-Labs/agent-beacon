@@ -1,0 +1,71 @@
+---
+title: "Data Inventory"
+description: "Runtime coverage and endpoint event fields Beacon can write"
+---
+
+## Data Categories
+
+Beacon writes normalized endpoint events only when supported runtimes provide telemetry through a configured local surface. Each event includes required event, endpoint, and harness context. Optional entities are present only when the source payload provides that context and the configured retention mode allows it.
+
+## Runtime Inventory
+
+| Agent harness | Collection path | Commonly available telemetry |
+|---------------|-----------------|------------------------------|
+| Claude Code | Local OTLP export | Prompt, command, tool, and file telemetry when emitted through OTLP |
+| Codex CLI | Local OTLP logs | Session, prompt, approval, and tool-result activity from Codex semantic logs |
+| Gemini CLI | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
+| Grok Build | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
+| OpenCode | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
+| Devin CLI | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
+| Devin Desktop | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
+| Factory Droid | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
+| Cursor | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
+| Claude Cowork | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
+| OpenClaw Gateway | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
+
+## Required Fields
+
+| Field | Meaning |
+|-------|---------|
+| `timestamp` | UTC event time |
+| `vendor` | Always `beacon` |
+| `product` | Always `endpoint-agent` |
+| `schema_version` | Public schema version |
+| `event.kind` | Event family, currently `agent_runtime` |
+| `event.action` | Normalized action such as `command.executed` or `tool.invoked` |
+| `event.category` | Runtime-provided or inferred event category |
+| `severity` | Event severity |
+| `endpoint` | Host and operating system context |
+| `harness` | Runtime that produced the signal |
+
+## Optional Entities
+
+| Entity | Purpose | Common fields |
+|--------|---------|---------------|
+| `endpoint` | Device and agent context | `hostname`, `os`, `agent_version` |
+| `user` | Local operating system user context | `name`, `uid` |
+| `harness` | Agent harness context | `name`, `version`, `executable_path`, `config_path` |
+| `session` | Conversation or runtime session context | `id`, `working_directory` |
+| `tool` | Tool invocation context | `name`, `command`, `path` |
+| `file` | File activity context | `path`, `operation`, `language`, `diff_hash`, `diff_bytes` |
+| `command` | Shell or process execution context | `command`, `exit_code`, `duration_ms` |
+| `mcp` | MCP-like server and tool context | `server`, `tool` |
+| `approval` | Approval or policy decision context | `required`, `decision`, `reason` |
+| `policy` | Policy metadata when available | `id`, `name`, `decision`, `enforcement`, `reason` |
+| `prompt` | Prompt text when retention allows it | `text` |
+| `content` | Content handling state | `retention`, `included`, `redacted`, `truncated` |
+| `destination` | Output or validation destination state | `type`, `mode`, `status` |
+| `health` | Endpoint or component health state | `component`, `status`, `reason` |
+
+Top-level `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields can add shared context across entities. Content-bearing fields follow the configured retention mode.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Schema fields" icon="table-list" href="/telemetry-schema/fields">
+    Review the full entity model and common fields.
+  </Card>
+  <Card title="Agent harnesses" icon="list-check" href="/runtimes">
+    Compare runtime-specific collection surfaces and telemetry coverage.
+  </Card>
+</Columns>

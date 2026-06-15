@@ -1,0 +1,154 @@
+---
+title: "CI Agent Telemetry"
+description: "Capture supported agent telemetry in CI with Asymptote"
+---
+
+<Frame>
+  <iframe
+    src="https://www.loom.com/embed/f45c536b9f37455493f7d513ce6f1866?t=0s"
+    title="CI Agent Telemetry walkthrough"
+    allowFullScreen
+    style={{ aspectRatio: "16 / 9", width: "100%", border: 0 }}
+  />
+</Frame>
+
+## Runtime Overview
+
+Asymptote can capture supported agent telemetry for a single CI job without installing a persistent endpoint service on the runner. The CI integration starts a temporary local collector, configures the selected agent harness, writes normalized CI runtime JSONL, and validates that events were captured before the job exits.
+
+## How It Works
+
+Use `beacon ci exec` when your workflow runs the agent command directly:
+
+```bash title="Wrap one agent command"
+beacon ci exec -- <agent command>
+```
+
+For example, wrap a Claude Code prompt:
+
+```bash title="Wrap Claude Code"
+beacon ci exec -- claude -p "Review this pull request"
+```
+
+For third-party actions that launch an agent internally, use CI session mode:
+
+```bash title="Wrap multiple CI steps"
+beacon ci start --harness claude
+# run an agent action or CI step here
+beacon ci finish --min-events 1
+```
+
+During collection, Asymptote:
+
+1. Starts a temporary local OpenTelemetry collector.
+2. Configures supported agent telemetry for the wrapped command or later session steps.
+3. Runs the command after `--` or lets later CI steps inherit session exports.
+4. Writes normalized CI runtime events to `runtime.jsonl`.
+5. Validates that matching agent events were captured.
+6. Leaves the completed runtime log available as a CI artifact or upload target.
+
+By default, Asymptote writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNNER_TEMP` is available. Otherwise it uses the system temp directory.
+
+| Artifact | Default path |
+| --- | --- |
+| Runtime log | `$RUNNER_TEMP/beacon/runtime.jsonl` |
+| Collector config | `$RUNNER_TEMP/beacon/otelcol.yaml` |
+| Collector spool | `$RUNNER_TEMP/beacon/spool/otlp.jsonl` |
+
+## Telemetry Coverage
+
+CI collection captures supported prompt, tool, command, file, lifecycle, and run context where the configured agent emits telemetry during the job. For example, Claude Code CI collection captures Claude Code events when the `claude` harness is configured. When `GITHUB_ACTIONS=true`, Asymptote also records GitHub Actions metadata such as workflow, run ID, commit, ref, and actor.
+
+Asymptote applies redaction, sanitization, truncation, and event-size limits before writing the CI runtime JSONL file. Artifact retention, access, object storage, and downstream forwarding remain controlled by your CI and security pipeline.
+
+## GitHub Actions
+
+Use the Asymptote GitHub Action when you want the workflow to install the CI collector and upload the runtime log artifact. Pass a command when the workflow invokes the agent directly.
+
+```yaml
+- name: Run an agent with Asymptote telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    command: claude --print "Review this pull request"
+    upload-artifact: "true"
+    artifact-name: beacon-runtime-log
+```
+
+To wrap a third-party action that launches an agent internally, start and finish a Beacon session around that action. Anthropic's Claude Code Security Review action is one example:
+
+```yaml
+- name: Start Asymptote telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: start
+    harnesses: claude
+
+- uses: anthropics/claude-code-security-review@main
+  with:
+    claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+
+- name: Finish Asymptote telemetry
+  if: always()
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  with:
+    mode: finish
+    min-events: "1"
+```
+
+See the sample workflow:
+
+- [Claude Code telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-code-telemetry.yml)
+- [Claude Code Security Review session workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-security-review-session.yml)
+
+## Upload To Object Storage
+
+Use `--upload` when the completed `runtime.jsonl` should be handed off through object storage after validation.
+
+Upload to Google Cloud Storage:
+
+```yaml
+- uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ secrets.BEACON_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+    service_account: ${{ secrets.BEACON_GCP_SERVICE_ACCOUNT }}
+
+- name: Run an agent with Asymptote telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  env:
+    BEACON_CI_GCS_BUCKET: my-beacon-telemetry
+    BEACON_CI_GCS_PREFIX: github-actions
+  with:
+    command: claude --print "Review this pull request"
+    upload: gcs
+```
+
+See the sample workflow:
+
+- [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
+
+## Validation Behavior
+
+By default, `beacon ci exec` fails the step when telemetry validation fails. Set `--require-telemetry=false` or the action input `require-telemetry: "false"` when telemetry health should warn but not gate the child command result.
+
+```bash title="Warn instead of failing on telemetry validation"
+beacon ci exec \
+  --require-telemetry=false \
+  -- claude -p "Inspect the changed files"
+```
+
+Validate an existing runtime log after the fact:
+
+```bash title="Validate an existing runtime log after the fact"
+beacon ci validate --log-path "$RUNNER_TEMP/beacon/runtime.jsonl"
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon ci" icon="terminal" href="/cli/ci">
+    Review the full command manual for wrapping agent runs in CI.
+  </Card>
+  <Card title="CI Telemetry Exports" icon="upload" href="/log-forwarding/ci-telemetry-exports">
+    Export CI runtime JSONL through artifacts, S3, GCS, or downstream pipelines.
+  </Card>
+</Columns>

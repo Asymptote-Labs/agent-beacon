@@ -1,0 +1,48 @@
+---
+title: "Managed Architecture"
+description: "How Asymptote Managed centralizes agent telemetry, policy, detections, and investigations"
+---
+
+## Overview
+
+Asymptote Managed builds on the open-source Agent Beacon foundation with hosted ingest, retention, search, detections, policy controls, identity mapping, approvals, and investigation workflows.
+
+Use this architecture when agent activity needs to be visible across teams, endpoints, cloud agent applications, and security workflows from one managed control plane.
+
+<img src="/images/asymptote-platform-diagram.png" alt="Asymptote platform architecture showing agent activity flowing into managed visibility, policy, and investigation workflows." />
+
+## System Architecture
+
+1. **Agent activity sources:** Endpoint agent harnesses, cloud-hosted agent applications, services, workers, serverless functions, and other execution environments produce runtime telemetry.
+2. **Collection paths:** Agent Beacon collects local endpoint activity, while the Asymptote Observe SDK instruments cloud-hosted agent applications.
+3. **Managed ingest:** Asymptote centralizes telemetry for managed retention, search, detections, and fleet-wide visibility.
+4. **Governance layer:** Policy controls, identity mapping, approvals, SSO, RBAC, and audit trails connect runtime activity to users, teams, and security workflows.
+5. **Investigation workflows:** Timelines and case workflows organize prompts, tool calls, file access, command execution, and related context for review.
+
+## Managed Capabilities
+
+| Capability | Purpose |
+| --- | --- |
+| Managed ingest and retention | Centralize runtime telemetry and preserve it according to managed retention policy |
+| Fleet-wide visibility | Track agent harnesses, endpoints, users, teams, and cloud execution environments |
+| Search and detections | Find risky activity and surface detection signals across the managed dataset |
+| Policy and approvals | Govern agent actions and connect approvals back to identity and workflow context |
+| Investigation timelines | Reconstruct agent sessions from prompts, tool calls, files, commands, and outcomes |
+| Access control | Use SSO, RBAC, and audit trails for enterprise access governance |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    Review the local-first Agent Beacon architecture.
+  </Card>
+  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
+    Review managed ingest, governance, investigations, and rollout support.
+  </Card>
+  <Card title="Asymptote Observe SDK" icon="code" href="/sdk/quickstart">
+    Instrument cloud-hosted agent applications with Asymptote telemetry.
+  </Card>
+  <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
+    Compare Open Source, Managed, and Private Deployment paths.
+  </Card>
+</Columns>

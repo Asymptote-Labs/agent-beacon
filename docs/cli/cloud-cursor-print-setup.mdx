@@ -1,0 +1,49 @@
+---
+title: "beacon cloud cursor print-setup"
+description: "Print a Cursor cloud agent binary setup script"
+---
+
+## Command Overview
+
+`beacon cloud cursor print-setup` prints a Cursor cloud agent setup script for
+installing Beacon binaries in the cloud sandbox.
+
+```bash title="Command syntax"
+beacon cloud cursor print-setup
+```
+
+Paste the generated script into the Cursor cloud environment setup step. It
+installs `beacon` and `beacon-hooks` into `/tmp/beacon/bin`.
+
+The generated script does not write or merge `.cursor/hooks.json`. Generate
+project hooks with [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-hooks),
+commit `.cursor/hooks.json` to the repository, then start Cursor Cloud Agents
+from a commit that contains that file.
+
+Cursor cloud agents do not run prompt or session lifecycle hooks such as
+`beforeSubmitPrompt`, `sessionStart`, `sessionEnd`, and `stop`. Beacon refreshes
+the uploaded `runtime.jsonl` object as supported hook events run. See
+[Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
+for the current platform support list.
+
+## Examples
+
+Print setup for a specific Beacon release:
+
+```bash title="Print setup for a specific Beacon release"
+beacon cloud cursor print-setup --version v0.0.66
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud" icon="cloud" href="/cli/cloud">
+    Review cloud command group behavior.
+  </Card>
+  <Card title="beacon cloud cursor print-hooks" icon="plug" href="/cli/cloud-cursor-print-hooks">
+    Print project-level Cursor hook settings for a cloud sandbox.
+  </Card>
+  <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
+    Configure Cursor cloud agent telemetry and GCS upload end to end.
+  </Card>
+</Columns>

@@ -1,0 +1,176 @@
+---
+title: "beacon endpoint sentinel"
+description: "Generate Microsoft Sentinel Azure Monitor Agent forwarding content and validation events for Beacon endpoint events."
+---
+
+## Forwarding Command
+
+Use `beacon endpoint sentinel` to generate Microsoft Sentinel forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps Azure Monitor Agent tail `runtime.jsonl` into a Log Analytics custom table through a Data Collection Rule.
+
+Beacon does not store Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, ingestion endpoints, or Azure Monitor Agent configuration. Keep those values in Azure, endpoint-management policy, or deployment tooling.
+
+```bash title="Command syntax"
+beacon endpoint sentinel [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint sentinel print-config" icon="file-lines" href="#beacon-endpoint-sentinel-print-config">
+    Print the Sentinel DCR transform for Beacon endpoint events.
+  </Card>
+  <Card title="beacon endpoint sentinel install-pack" icon="box-archive" href="#beacon-endpoint-sentinel-install-pack">
+    Write Microsoft Sentinel forwarding content to a directory.
+  </Card>
+  <Card title="beacon endpoint sentinel validate" icon="check" href="#beacon-endpoint-sentinel-validate">
+    Write and describe a Beacon Microsoft Sentinel validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+## beacon endpoint sentinel print-config
+
+`beacon endpoint sentinel print-config` prints the KQL transform used by the Microsoft Sentinel Data Collection Rule. The output starts with the Azure Monitor Agent file pattern selected from the active Beacon runtime log path.
+
+```bash title="Print the configuration"
+beacon endpoint sentinel print-config
+```
+
+Use this command when you want to inspect or copy the transform into an existing DCR workflow.
+
+### Examples
+
+Print the DCR transform for the default per-user Beacon install:
+
+```bash title="Print the DCR transform for the default per-user Beacon install"
+beacon endpoint sentinel print-config
+```
+
+Print the DCR transform for a system-mode MDM deployment:
+
+```bash title="Print the DCR transform for a system-mode MDM deployment"
+sudo /opt/beacon/bin/beacon endpoint sentinel print-config --system
+```
+
+Print the DCR transform for a custom runtime log:
+
+```bash title="Print the DCR transform for a custom runtime log"
+beacon endpoint sentinel print-config --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint sentinel install-pack
+
+`beacon endpoint sentinel install-pack` writes Microsoft Sentinel forwarding content to a directory.
+
+```bash title="Generate the integration pack"
+beacon endpoint sentinel install-pack --output ./beacon-sentinel-pack
+```
+
+The pack includes setup instructions, the `BeaconRuntime_CL` table schema, a DCR template, the DCR transform, starter hunting queries, example detection logic, and sample Beacon endpoint events.
+
+### Examples
+
+Generate a content pack for the default per-user install:
+
+```bash title="Generate a content pack for the default per-user install"
+beacon endpoint sentinel install-pack --output ./beacon-sentinel-pack
+```
+
+Generate a content pack for a system-mode deployment:
+
+```bash title="Generate a content pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint sentinel install-pack \
+  --system \
+  --output ./beacon-sentinel-pack
+```
+
+Generate a content pack for a custom runtime log:
+
+```bash title="Generate a content pack for a custom runtime log"
+beacon endpoint sentinel install-pack \
+  --output ./beacon-sentinel-pack \
+  --log-path /path/to/runtime.jsonl
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the Microsoft Sentinel content pack. Defaults to `beacon-sentinel-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint sentinel validate
+
+`beacon endpoint sentinel validate` writes a Beacon validation event to the runtime JSONL log and prints the expected Microsoft Sentinel table and validation query.
+
+```bash title="Run the validation check"
+beacon endpoint sentinel validate
+```
+
+### Examples
+
+Write a validation event for the default per-user install:
+
+```bash title="Write a validation event for the default per-user install"
+beacon endpoint sentinel validate
+```
+
+Write a validation event for a system-mode deployment:
+
+```bash title="Write a validation event for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint sentinel validate --system
+```
+
+Write a validation event to a custom runtime log:
+
+```bash title="Write a validation event to a custom runtime log"
+beacon endpoint sentinel validate --log-path /path/to/runtime.jsonl
+```
+
+The validation command prints the expected Sentinel table and query:
+
+```text
+Expected Sentinel table: BeaconRuntime_CL
+Expected validation query: BeaconRuntime_CL | where Message has "Beacon endpoint Sentinel validation event"
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Microsoft Sentinel forwarding" icon="chart-line" href="/log-forwarding/microsoft-sentinel">
+    Configure Azure Monitor Agent and Data Collection Rules for Beacon events.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

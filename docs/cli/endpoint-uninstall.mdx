@@ -1,0 +1,71 @@
+---
+title: "beacon endpoint uninstall"
+description: "Remove Beacon endpoint service files while optionally preserving logs or runtime configuration"
+---
+
+## Command Overview
+
+`beacon endpoint uninstall` unloads the local Beacon service and removes managed endpoint files.
+
+```bash title="Command syntax"
+beacon endpoint uninstall
+```
+
+Use retention flags when you want to keep local evidence or preserve harness telemetry configuration.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--keep-logs` | Keep runtime logs during uninstall |
+| `--keep-config` | Keep harness telemetry configuration during uninstall |
+
+## Examples
+
+Remove the default per-user install:
+
+```bash title="Remove the default per-user install"
+beacon endpoint uninstall
+```
+
+Remove Beacon but keep runtime logs:
+
+```bash title="Remove Beacon but keep runtime logs"
+beacon endpoint uninstall --keep-logs
+```
+
+Remove Beacon but keep harness telemetry configuration:
+
+```bash title="Remove Beacon but keep harness telemetry configuration"
+beacon endpoint uninstall --keep-config
+```
+
+Keep both logs and harness configuration:
+
+```bash title="Keep both logs and harness configuration"
+beacon endpoint uninstall --keep-logs --keep-config
+```
+
+Remove a system-mode deployment:
+
+```bash title="Remove a system-mode deployment"
+sudo beacon endpoint uninstall --system --keep-logs
+```
+
+## Removed paths
+
+Beacon removes files listed in its install manifest, including managed config, collector config, and service files. Unless `--keep-logs` is set, it also removes the configured runtime JSONL log.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Reinstall the local endpoint collector and runtime telemetry.
+  </Card>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Check endpoint state before or after uninstalling.
+  </Card>
+</Columns>

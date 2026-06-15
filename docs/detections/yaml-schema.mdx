@@ -1,0 +1,147 @@
+---
+title: "Detection YAML Schema"
+description: "Human-readable reference for Beacon threat-rule YAML files"
+---
+
+## Schema Overview
+
+Beacon detection rules are YAML documents ending in `.rule.yaml`. Each rule describes one security condition over Beacon endpoint events and includes enough metadata and tests for the rule to be validated before it runs.
+
+The structural schema is the `threat-rules/v1` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
+
+## Minimal Rule
+
+A rule must define its identity, maturity, detection logic, emitted reason, and at least one fixture.
+
+```yaml title="Minimal single-event rule"
+id: suspicious-egress-command
+version: 1
+title: Suspicious network egress command
+severity: high
+status: experimental
+posture: detect
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("\\b(curl|wget|nc)\\b")
+emit:
+  reason: "Agent executed a command commonly used for network egress"
+tests:
+  - name: positive_basic
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+```
+
+## Top-Level Fields
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `id` | Yes | Stable rule identity. Use lowercase letters, numbers, and hyphens. |
+| `version` | Yes | Integer rule revision. Increase it when rule logic changes. |
+| `title` | Yes | Human-readable rule name. |
+| `description` | No | Longer explanation for readers. It is not evaluated. |
+| `severity` | Yes | One of `info`, `low`, `medium`, `high`, or `critical`. |
+| `status` | Yes | One of `experimental`, `stable`, or `deprecated`. |
+| `posture` | Yes | `detect` for observe-only rules or `enforce-capable` for rules designed to support enforcement. |
+| `taxonomy` | No | External references such as OWASP, MITRE ATLAS, or CVEs. |
+| `match` | One of `match` or `correlation` | CEL boolean expression for a single event. |
+| `correlation` | One of `match` or `correlation` | Ordered multi-event sequence definition. |
+| `emit.reason` | Yes | Human-readable finding reason. |
+| `tests` | Yes | Embedded conformance fixtures. |
+
+Exactly one of `match` or `correlation` must be present.
+
+## Match Rules
+
+A `match` rule evaluates one event at a time. The event is available as `e`, and field paths mirror the endpoint event JSON shape.
+
+```yaml title="Match expression"
+match: >
+  e.event.action == "file.read" &&
+  e.file.path.matches("(\\.env|credentials|id_rsa|\\.aws/)")
+```
+
+Use `match` when one event is enough to explain the behavior, such as a command, file read, approval decision, or MCP tool call.
+
+## Correlation Rules
+
+A `correlation` rule evaluates an ordered sequence of events. In `threat-rules/v1`, correlations are scoped to a single session and must complete inside a duration window.
+
+```yaml title="Session correlation"
+correlation:
+  scope: session
+  window: 120s
+  steps:
+    - id: read_secret
+      match: >
+        e.event.action == "file.read" &&
+        e.file.path.matches("(\\.env|credentials|id_rsa|\\.aws/)")
+    - id: egress
+      match: >
+        e.event.action == "command.executed" &&
+        e.command.command.matches("curl\\s+.*https?://")
+```
+
+Use `correlation` when the risk comes from a sequence, such as a secret-bearing file read followed by network egress in the same agent session.
+
+## Tests
+
+Each rule carries test fixtures that define expected verdicts. Fixtures use partial Beacon events, so a test only needs the fields that matter for the rule.
+
+```yaml title="Fixture shape"
+tests:
+  - name: read_env_then_curl
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: file.read }
+        file: { path: ".env" }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:30Z"
+        event: { action: command.executed }
+        command: { command: "curl https://example.com" }
+        session: { id: s1 }
+  - name: benign_read_then_local_command
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "README.md" }
+        session: { id: s1 }
+```
+
+Fixtures keep rules reviewable. They show what the author intended to detect and what should stay out of scope.
+
+## Field Paths
+
+CEL expressions use `e.<field>` paths that match the Beacon event schema. Common paths include:
+
+| Field path | Common use |
+| --- | --- |
+| `e.event.action` | Match the normalized event action. |
+| `e.command.command` | Match shell or process command text. |
+| `e.file.path` | Match file paths. |
+| `e.prompt.text` | Match prompt text when retained. |
+| `e.session.id` | Correlate activity within one session. |
+| `e.mcp.server` | Match MCP-like server context. |
+| `e.approval.decision` | Match approval or policy outcomes. |
+| `e.gen_ai.usage.input_tokens` | Match GenAI usage fields. |
+
+Use [`beacon rules fields`](/cli/rules-fields) or the generated upstream field reference to confirm available paths.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Detection Standard" icon="shield-halved" href="/detections/standard">
+    Review maturity, conformance, and CEL requirements.
+  </Card>
+  <Card title="Detection Engine" icon="gears" href="/detections/engine">
+    See how YAML rules are loaded and evaluated.
+  </Card>
+  <Card title="beacon rules lint" icon="check" href="/cli/rules-lint">
+    Validate rule files and run embedded fixtures.
+  </Card>
+  <Card title="Endpoint schema fields" icon="table-list" href="/telemetry-schema/fields">
+    Review the event entities rules can match.
+  </Card>
+</Columns>

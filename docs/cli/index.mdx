@@ -1,0 +1,366 @@
+---
+title: "Command Reference"
+description: "Agent Beacon CLI command manual organized by command group"
+---
+
+## Commands
+
+Use this reference to browse Beacon commands by hierarchy. Each command links to the consolidated guide section with examples, flags, and operational notes.
+
+## Install and Upgrade
+
+Install the Beacon CLI, check for released updates, and repair endpoint configuration after upgrades:
+
+<Columns cols={2}>
+  <Card title="Install Beacon" icon="download" href="/cli/install">
+    Install Beacon with Homebrew or platform archives.
+  </Card>
+  <Card title="Upgrade Beacon" icon="arrow-up" href="/cli/upgrade">
+    Check for updates and upgrade the Beacon CLI.
+  </Card>
+  <Card title="Manual CLI Installation" icon="file-zipper" href="/cli/manual-install">
+    Install from platform archives or build Beacon from source.
+  </Card>
+</Columns>
+
+## beacon
+
+```bash title="Command syntax"
+beacon [command]
+```
+
+Top-level Agent Beacon CLI commands.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon version`](/cli/version) | Display the installed Agent Beacon CLI version. |
+| [`beacon login`](/cli/login) | Log in to the Asymptote dashboard from the Beacon CLI. |
+| [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
+| [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
+| [`beacon ci`](/cli/ci) | Run ephemeral AI runtime telemetry collection in CI. |
+| [`beacon cloud`](/cli/cloud) | Configure provider-managed cloud agent telemetry setup helpers. |
+| [`beacon mcp`](/cli/mcp) | Expose local Beacon activity to MCP clients. |
+| [`beacon ingest`](/cli/ingest) | Upload Beacon telemetry to configured ingest destinations. |
+| [`beacon endpoint`](/cli/endpoint) | Manage local endpoint telemetry, runtime logs, and integrations. |
+| [`beacon status`](/cli/endpoint-status) | Alias for `beacon endpoint status`. |
+| [`beacon doctor`](/cli/endpoint-doctor) | Alias for `beacon endpoint doctor`. |
+| [`beacon inventory`](/cli/endpoint-inventory) | Alias for `beacon endpoint inventory`. |
+
+## beacon version
+
+```bash title="Command syntax"
+beacon version [command]
+```
+
+Display the installed Beacon version or check for released updates.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon version check`](/cli/version#beacon-version-check) | Check whether a newer Beacon CLI release is available. |
+
+## beacon scan
+
+```bash title="Command syntax"
+beacon scan [flags]
+```
+
+Run threat-detection rules over local endpoint telemetry without network access.
+
+| Page | Description |
+|------|-------------|
+| [`beacon scan`](/cli/scan) | Scan the runtime JSONL log with active rules and report findings. |
+| [`Run local scans`](/cli/scan-local) | Choose logs, rules, sessions, and output formats. |
+| [`Use scan gates`](/cli/scan-ci-gates) | Fail automation when findings meet a severity threshold. |
+
+## beacon rules
+
+```bash title="Command syntax"
+beacon rules [command]
+```
+
+Manage local threat-detection rules and author rule packs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon rules list`](/cli/rules-list) | List the active threat-detection rules. |
+| [`beacon rules add`](/cli/rules-add) | Install local rule files into the store. |
+| [`beacon rules remove`](/cli/rules-remove) | Remove a rule from the store by id. |
+| [`beacon rules pull`](/cli/rules-pull) | Fetch an explicit rule pack URL into the store. |
+| [`beacon rules lint`](/cli/rules-lint) | Validate rule files and run embedded conformance fixtures. |
+| [`beacon rules fields`](/cli/rules-fields) | Print event fields available to rule CEL expressions. |
+
+## beacon ci
+
+```bash title="Command syntax"
+beacon ci [command]
+```
+
+Run ephemeral Beacon telemetry collection for CI jobs without installing a persistent endpoint service.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon ci exec`](/cli/ci-exec) | Run a command with agent telemetry captured for CI. |
+| [`beacon ci start`](/cli/ci-start) | Start a detached telemetry session for later CI steps. |
+| [`beacon ci finish`](/cli/ci-finish) | Stop, validate, and export a detached telemetry session. |
+| [`beacon ci validate`](/cli/ci-validate) | Validate CI runtime telemetry artifacts. |
+
+## beacon cloud
+
+```bash title="Command syntax"
+beacon cloud [command]
+```
+
+Configure provider-managed cloud agent telemetry setup helpers.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon cloud claude-web print-setup`](/cli/cloud-claude-web-print-setup) | Print a Claude Code cloud environment setup script. |
+| [`beacon cloud claude-web print-hooks`](/cli/cloud-claude-web-print-hooks) | Print Claude hook settings for a cloud sandbox. |
+| [`beacon cloud cursor print-setup`](/cli/cloud-cursor-print-setup) | Print a Cursor cloud agent binary setup script. |
+| [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-hooks) | Print Cursor project hook settings to commit for cloud agents. |
+| [`beacon cloud gcs setup`](/cli/cloud-gcs-setup) | Create or print GCS setup commands for cloud-agent telemetry. |
+
+## beacon mcp
+
+```bash title="Command syntax"
+beacon mcp [command]
+```
+
+Expose local Beacon runtime activity through MCP.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon mcp serve`](/cli/mcp-serve) | Run the local Beacon MCP server over stdio or loopback HTTP JSON-RPC. |
+| [`beacon mcp doctor`](/cli/mcp-doctor) | Validate local Beacon MCP setup and print client configuration. |
+
+## beacon ingest
+
+```bash title="Command syntax"
+beacon ingest [command]
+```
+
+Upload Beacon telemetry to configured ingest destinations.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon ingest status`](/cli/ingest#beacon-ingest-status) | Show configured ingest status. |
+| [`beacon ingest endpoint status`](/cli/ingest-endpoint#beacon-ingest-endpoint-status) | Show endpoint telemetry upload status. |
+| [`beacon ingest endpoint upload`](/cli/ingest-endpoint#beacon-ingest-endpoint-upload) | Upload endpoint telemetry to managed ingest. |
+
+## beacon endpoint
+
+```bash title="Command syntax"
+beacon endpoint [command]
+```
+
+Manage the local endpoint agent and inspect supported agent harness telemetry.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint install`](/cli/endpoint-install) | Install or update the local endpoint collector, runtime telemetry configuration, and optional Splunk HEC or Falcon LogScale HEC forwarding. |
+| [`beacon endpoint status`](/cli/endpoint-status) | Inspect collector health, runtime log state, configured harnesses, diagnostics, and forwarding readiness. |
+| [`beacon endpoint doctor`](/cli/endpoint-doctor) | Run local endpoint health checks with pass/fail exit behavior and optional safe remediation. |
+| [`beacon endpoint inventory`](/cli/endpoint-inventory) | Show configured, detected, hook, and observed endpoint inventory. |
+| [`beacon endpoint discover`](/cli/endpoint-discover) | Discover supported local [agent harnesses](/runtimes) and their telemetry configuration state. |
+| [`beacon endpoint test-event`](/cli/endpoint-test-event) | Write a synthetic endpoint validation event to the runtime JSONL log. |
+| [`beacon endpoint bundle-diagnostics`](/cli/endpoint-bundle-diagnostics) | Write a redacted local diagnostics bundle for support and troubleshooting. |
+| [`beacon endpoint repair`](/cli/endpoint-repair) | Repair Beacon endpoint service files, telemetry configuration, and optional collector forwarding destinations. |
+| [`beacon endpoint uninstall`](/cli/endpoint-uninstall) | Remove Beacon endpoint service files, with an option to keep local logs. |
+| [`beacon endpoint config`](/cli/endpoint-config) | Inspect, validate, and update endpoint configuration. |
+| [`beacon endpoint tokens`](/cli/endpoint-tokens) | Report token usage and attribution from the endpoint runtime log. |
+| [`beacon endpoint dashboard`](/cli/dashboard#beacon-endpoint-dashboard) | Run the local dashboard over Beacon runtime logs for endpoint inspection. |
+| [`beacon endpoint wazuh`](/cli/wazuh) | Configure Wazuh ingestion for Beacon endpoint events. |
+| [`beacon endpoint elastic`](/cli/elastic) | Generate Elastic content and run a local Elasticsearch, Kibana, and Filebeat validation stack. |
+| [`beacon endpoint datadog`](/cli/datadog) | Generate Datadog Agent custom log collection content for Beacon endpoint events. |
+| [`beacon endpoint sumo`](/cli/sumo) | Generate Sumo Logic HTTP Source forwarding content for Beacon endpoint events. |
+| [`beacon endpoint rapid7`](/cli/rapid7) | Generate Rapid7 InsightIDR Custom Logs forwarding content for Beacon endpoint events. |
+| [`beacon endpoint sentinel`](/cli/sentinel) | Generate Microsoft Sentinel Azure Monitor Agent forwarding content for Beacon endpoint events. |
+| [`beacon endpoint cloudwatch`](/cli/cloudwatch) | Generate AWS CloudWatch Logs forwarding content for Beacon endpoint events. |
+| [`beacon endpoint s3`](/cli/s3) | Generate AWS S3 forwarding content for Beacon endpoint events. |
+| [`beacon endpoint gcs`](/cli/gcs) | Generate Google Cloud Storage forwarding content for Beacon endpoint events. |
+| [`beacon endpoint hooks`](/cli/hooks) | Manage supported hook-based endpoint telemetry. |
+| [`beacon endpoint integrations openclaw`](/cli/openclaw) | Set up and validate OpenClaw Gateway OTLP export. |
+| [`beacon endpoint integrations claude-cowork`](/cli/claude-cowork) | Set up and validate Claude Cowork OTLP export. |
+
+## beacon endpoint config
+
+```bash title="Command syntax"
+beacon endpoint config [command]
+```
+
+Inspect, validate, and update endpoint configuration.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint config show`](/cli/endpoint-config#beacon-endpoint-config-show) | Print endpoint configuration with secrets redacted. |
+| [`beacon endpoint config validate`](/cli/endpoint-config#beacon-endpoint-config-validate) | Validate endpoint configuration and destination settings. |
+
+## beacon endpoint wazuh
+
+```bash title="Command syntax"
+beacon endpoint wazuh [command]
+```
+
+Generate Wazuh configuration, content packs, and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint wazuh print-config`](/cli/wazuh#beacon-endpoint-wazuh-print-config) | Print a Wazuh `localfile` snippet for Beacon endpoint events. |
+| [`beacon endpoint wazuh install-pack`](/cli/wazuh#beacon-endpoint-wazuh-install-pack) | Generate Beacon Wazuh rules, sample events, and config snippets into a directory. |
+| [`beacon endpoint wazuh validate`](/cli/wazuh#beacon-endpoint-wazuh-validate) | Write and describe a known-good Beacon Wazuh validation event. |
+
+## beacon endpoint elastic
+
+```bash title="Command syntax"
+beacon endpoint elastic [command]
+```
+
+Generate Elastic configuration, content packs, and local validation stacks for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint elastic print-config`](/cli/elastic#beacon-endpoint-elastic-print-config) | Print a Filebeat config for Beacon endpoint events. |
+| [`beacon endpoint elastic install-pack`](/cli/elastic#beacon-endpoint-elastic-install-pack) | Generate Elasticsearch, Kibana, Filebeat, and Elastic Agent content into a directory. |
+| [`beacon endpoint elastic up`](/cli/elastic#beacon-endpoint-elastic-up) | Start a local Elasticsearch, Kibana, and Filebeat validation stack. |
+| [`beacon endpoint elastic down`](/cli/elastic#beacon-endpoint-elastic-down) | Stop the local Elastic validation stack. |
+
+## beacon endpoint datadog
+
+```bash title="Command syntax"
+beacon endpoint datadog [command]
+```
+
+Generate Datadog Agent custom log collection content and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint datadog print-config`](/cli/datadog#beacon-endpoint-datadog-print-config) | Print a Datadog Agent custom log config for Beacon endpoint events. |
+| [`beacon endpoint datadog install-pack`](/cli/datadog#beacon-endpoint-datadog-install-pack) | Generate Datadog Agent custom log integration content into a directory. |
+| [`beacon endpoint datadog validate`](/cli/datadog#beacon-endpoint-datadog-validate) | Write and describe a known-good Beacon Datadog validation event. |
+
+## beacon endpoint sumo
+
+```bash title="Command syntax"
+beacon endpoint sumo [command]
+```
+
+Generate Sumo Logic HTTP Source forwarding content and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint sumo print-config`](/cli/sumo#beacon-endpoint-sumo-print-config) | Print a Sumo HTTP Source smoke-test uploader for Beacon endpoint events. |
+| [`beacon endpoint sumo install-pack`](/cli/sumo#beacon-endpoint-sumo-install-pack) | Generate Sumo Logic HTTP Source forwarding content into a directory. |
+| [`beacon endpoint sumo validate`](/cli/sumo#beacon-endpoint-sumo-validate) | Write and describe a known-good Beacon Sumo Logic validation event. |
+
+## beacon endpoint rapid7
+
+```bash title="Command syntax"
+beacon endpoint rapid7 [command]
+```
+
+Generate Rapid7 InsightIDR Custom Logs forwarding content and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint rapid7 print-config`](/cli/rapid7#beacon-endpoint-rapid7-print-config) | Print a Rapid7 Custom Logs webhook smoke-test uploader for Beacon endpoint events. |
+| [`beacon endpoint rapid7 install-pack`](/cli/rapid7#beacon-endpoint-rapid7-install-pack) | Generate Rapid7 InsightIDR Custom Logs forwarding content into a directory. |
+| [`beacon endpoint rapid7 validate`](/cli/rapid7#beacon-endpoint-rapid7-validate) | Write and describe a known-good Beacon Rapid7 validation event. |
+
+## beacon endpoint sentinel
+
+```bash title="Command syntax"
+beacon endpoint sentinel [command]
+```
+
+Generate Microsoft Sentinel Azure Monitor Agent forwarding content and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint sentinel print-config`](/cli/sentinel#beacon-endpoint-sentinel-print-config) | Print a Sentinel DCR transform for Beacon endpoint events. |
+| [`beacon endpoint sentinel install-pack`](/cli/sentinel#beacon-endpoint-sentinel-install-pack) | Generate Microsoft Sentinel forwarding content into a directory. |
+| [`beacon endpoint sentinel validate`](/cli/sentinel#beacon-endpoint-sentinel-validate) | Write and describe a known-good Beacon Microsoft Sentinel validation event. |
+
+## beacon endpoint cloudwatch
+
+```bash title="Command syntax"
+beacon endpoint cloudwatch [command]
+```
+
+Generate AWS CloudWatch Logs forwarding content and validation events for Beacon endpoint events.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint cloudwatch print-config`](/cli/cloudwatch#beacon-endpoint-cloudwatch-print-config) | Print a Vector AWS CloudWatch Logs forwarding template for Beacon endpoint events. |
+| [`beacon endpoint cloudwatch install-pack`](/cli/cloudwatch#beacon-endpoint-cloudwatch-install-pack) | Generate AWS CloudWatch Logs forwarding content into a directory. |
+| [`beacon endpoint cloudwatch validate`](/cli/cloudwatch#beacon-endpoint-cloudwatch-validate) | Write and describe a known-good Beacon AWS CloudWatch Logs validation event. |
+
+## beacon endpoint s3
+
+```bash title="Command syntax"
+beacon endpoint s3 [command]
+```
+
+Generate AWS S3 forwarding content and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint s3 print-config`](/cli/s3#beacon-endpoint-s3-print-config) | Print a Vector AWS S3 forwarding template for Beacon endpoint events. |
+| [`beacon endpoint s3 install-pack`](/cli/s3#beacon-endpoint-s3-install-pack) | Generate AWS S3 forwarding content into a directory. |
+| [`beacon endpoint s3 validate`](/cli/s3#beacon-endpoint-s3-validate) | Write and describe a known-good Beacon AWS S3 validation event. |
+
+## beacon endpoint gcs
+
+```bash title="Command syntax"
+beacon endpoint gcs [command]
+```
+
+Generate Google Cloud Storage forwarding content and validation events for Beacon endpoint logs.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint gcs print-config`](/cli/gcs#beacon-endpoint-gcs-print-config) | Print a Vector Google Cloud Storage forwarding template for Beacon endpoint events. |
+| [`beacon endpoint gcs install-pack`](/cli/gcs#beacon-endpoint-gcs-install-pack) | Generate Google Cloud Storage forwarding content into a directory. |
+| [`beacon endpoint gcs validate`](/cli/gcs#beacon-endpoint-gcs-validate) | Write and describe a known-good Beacon Google Cloud Storage validation event. |
+
+## beacon endpoint hooks
+
+```bash title="Command syntax"
+beacon endpoint hooks [command]
+```
+
+Install, inspect, and remove hook-based telemetry for supported local runtimes.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint hooks install`](/cli/hooks#beacon-endpoint-hooks-install) | Install Beacon endpoint hooks for supported hook harnesses. |
+| [`beacon endpoint hooks status`](/cli/hooks#beacon-endpoint-hooks-status) | Show Beacon endpoint hook integration status for a supported harness. |
+| [`beacon endpoint hooks uninstall`](/cli/hooks#beacon-endpoint-hooks-uninstall) | Remove Beacon endpoint hooks for supported harnesses. |
+
+## beacon endpoint integrations claude-cowork
+
+```bash title="Command syntax"
+beacon endpoint integrations claude-cowork [command]
+```
+
+Configure and validate Claude Cowork OpenTelemetry export.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint integrations claude-cowork print-config`](/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-print-config) | Print Claude Cowork OTLP setup guidance for organization administrators. |
+| [`beacon endpoint integrations claude-cowork setup`](/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-setup) | Print or create Claude Cowork OTLP admin settings. |
+| [`beacon endpoint integrations claude-cowork status`](/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-status) | Show Claude Cowork endpoint integration status. |
+| [`beacon endpoint integrations claude-cowork validate`](/cli/claude-cowork#beacon-endpoint-integrations-claude-cowork-validate) | Validate whether Claude Cowork events are arriving at the configured collector. |
+
+## beacon endpoint integrations openclaw
+
+```bash title="Command syntax"
+beacon endpoint integrations openclaw [command]
+```
+
+Configure and validate OpenClaw Gateway OpenTelemetry export.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint integrations openclaw print-config`](/cli/openclaw#beacon-endpoint-integrations-openclaw-print-config) | Print OpenClaw Gateway OTLP setup guidance. |
+| [`beacon endpoint integrations openclaw status`](/cli/openclaw#beacon-endpoint-integrations-openclaw-status) | Show OpenClaw Gateway endpoint integration status. |
+| [`beacon endpoint integrations openclaw validate`](/cli/openclaw#beacon-endpoint-integrations-openclaw-validate) | Validate whether OpenClaw OTLP-derived events are arriving. |

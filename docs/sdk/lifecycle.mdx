@@ -1,0 +1,77 @@
+---
+title: "SDK Lifecycle"
+description: "Flush and shut down Asymptote Observe tracing"
+---
+
+## Lifecycle Overview
+
+Use `Observe.flush()` and `Observe.shutdown()` to control when finished spans are exported and when the SDK releases tracing resources.
+
+## Flush
+
+`Observe.flush()` forces the current provider to export finished spans.
+
+```typescript title="Flush spans" lines
+await Observe.flush();
+```
+
+Use `flush()` when the process may terminate before the batch exporter sends spans in the background:
+
+| Environment | Guidance |
+| --- | --- |
+| CLI scripts | Flush before process exit |
+| CI jobs | Flush before the job step exits |
+| Serverless handlers | Flush before returning when spans were created immediately before exit |
+| Long-running web servers | Prefer graceful shutdown hooks instead of flushing on every request |
+
+Flushing inside every web request can add latency. In long-running services, let the batch processor export normally and flush during shutdown.
+
+## Shutdown
+
+`Observe.shutdown()` disables instrumentations, shuts down the provider, and clears SDK state so the process can initialize again with different options.
+
+```typescript title="Shut down tracing" lines
+await Observe.shutdown();
+```
+
+Use shutdown when the process owns the provider lifecycle:
+
+```typescript title="Handle graceful shutdown" lines
+import { Observe } from "@asymptote/sdk";
+
+process.on("SIGTERM", async () => {
+  await Observe.shutdown();
+  process.exit(0);
+});
+```
+
+## Reinitialization
+
+`Observe.initialize()` rejects conflicting reinitialization while the SDK is active. To change exporter settings, shut down first:
+
+```typescript title="Reinitialize with a new exporter" lines
+await Observe.shutdown();
+
+Observe.initialize({
+  otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+});
+```
+
+If the SDK is already initialized, a later `Observe.initialize({ instrumentModules })` call patches additional modules without replacing the provider.
+
+## Short-Lived Example
+
+```typescript title="Short-lived job example" lines
+import { Observe } from "@asymptote/sdk";
+
+Observe.initialize({
+  apiKey: process.env.ASYMPTOTE_API_KEY,
+});
+
+const run = Observe.observe({ name: "agent.job" }, async () => {
+  return runAgentJob();
+});
+
+await run();
+await Observe.flush();
+```

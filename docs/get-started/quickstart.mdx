@@ -1,0 +1,64 @@
+---
+title: "Quickstart"
+description: "Choose the right Asymptote path for a local, managed, or private rollout"
+---
+
+Start here if you are deciding how to introduce Asymptote across a team. Asymptote can begin as open-source Agent Beacon telemetry across supported local, CI, and cloud surfaces, move into managed visibility and governance, or run in a private deployment for stricter infrastructure requirements.
+
+## Choose a Deployment Path
+
+| Hosting Option | Use it when | Next step |
+| -------------- | ----------- | --------- |
+| Asymptote Open Source | You want open-source telemetry across supported agent surfaces, local JSONL where applicable, and customer-managed forwarding into your SIEM or observability stack. | Start with the [Security & IT quickstart](/get-started/quickstart-security-it) or [developer quickstart](/get-started/quickstart-developers). |
+| Asymptote Managed | You need centralized ingest, fleet-wide visibility, policy controls, investigations, SSO/RBAC, audit trails, and rollout support. | Review [Asymptote Managed](/deployment/managed) or [contact us](https://asymptotelabs.ai/contact). |
+| Asymptote Private Deployment | You want managed capabilities with dedicated infrastructure, stricter data boundaries, or residency requirements. | [Contact us](https://asymptotelabs.ai/contact) to discuss deployment requirements. |
+
+See [Hosting Options](/deployment/hosting-options) for the full comparison.
+
+## Open Source Rollout Strategy
+
+For most Security and IT teams, the safest open-source path is staged. Local endpoint collection is usually the first evaluation path, then teams can add CI and cloud-agent surfaces where those agents run:
+
+1. **Evaluate locally** with a small pilot group using supported [agent harnesses](/runtimes).
+2. **Validate health and visibility** with endpoint status, runtime log freshness, and expected event coverage.
+3. **Add CI or cloud surfaces** with the relevant Beacon setup paths when agent activity also runs in build jobs or hosted sandboxes.
+4. **Decide where events should live**: local JSONL only, Wazuh localfile, a supported SIEM/log destination, object storage, or a customer-managed pipeline.
+5. **Expand through MDM** once install coverage, collector health, and forwarding checks are stable.
+
+The open-source path is local-only by default. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection.
+
+## Managed or Private Path
+
+Move to Managed when a small pilot becomes an operating program: multiple teams, centralized search, governance, investigations, access control, and rollout support.
+
+Private Deployment is the path for regulated teams that need managed capabilities with dedicated infrastructure, stronger isolation, custom retention, or residency requirements.
+
+[Contact us](https://asymptotelabs.ai/contact) to discuss Managed or Private Deployment.
+
+## Pick Your Quickstart
+
+<Columns cols={2}>
+  <Card title="For Security & IT Teams" icon="building-shield" href="/get-started/quickstart-security-it">
+    Plan an open-source pilot, validate endpoint telemetry, and decide when to centralize or move to Managed.
+  </Card>
+  <Card title="For Individual Developers" icon="user" href="/get-started/quickstart-developers">
+    Install Beacon locally, confirm collection health, and inspect agent activity on your machine.
+  </Card>
+</Columns>
+
+## Deeper Guides
+
+<Columns cols={2}>
+  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+    Install Beacon and configure the open-source telemetry path.
+  </Card>
+  <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
+    Expand from pilot to managed endpoint rollout, validation, and forwarding.
+  </Card>
+  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
+    Review managed visibility, policy controls, investigations, and rollout support.
+  </Card>
+  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
+    See supported runtimes, deployment modes, destinations, and boundaries.
+  </Card>
+</Columns>

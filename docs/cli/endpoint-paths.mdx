@@ -1,0 +1,44 @@
+---
+title: "Endpoint Paths and Ports"
+description: "Review Beacon user-mode and system-mode paths, ports, and hook locations"
+---
+
+## File Locations
+
+Beacon manages different paths depending on whether you install in user mode or system mode. The active runtime log stays at `runtime.jsonl` and rotates at 10 MiB, retaining five numbered local archives by default.
+
+| Item | User mode | System mode |
+|------|-----------|-------------|
+| Config | `~/.beacon/endpoint/config.json` | `/Library/Application Support/Beacon/Endpoint/config.json` |
+| Base directory | `~/.beacon/endpoint` | `/Library/Application Support/Beacon/Endpoint` |
+| Runtime log | `~/.beacon/endpoint/logs/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` |
+| Rotated runtime archives | `~/.beacon/endpoint/logs/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` |
+| Threat rule store | `~/.beacon/endpoint/rules` | `/Library/Application Support/Beacon/Endpoint/rules` |
+| Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` |
+| OTLP gRPC | `127.0.0.1:4317` | `127.0.0.1:4317` |
+| OTLP HTTP | `127.0.0.1:4318` | `127.0.0.1:4318` |
+
+Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks install an embedded `beacon-hooks` adapter under the Beacon endpoint base directory.
+
+Hook and plugin configuration is written to:
+
+- Antigravity CLI: `~/.gemini/config/hooks.json` or `./.agents/hooks.json`
+- Claude Code: `~/.claude/settings.json` or `./.claude/settings.json`
+- Cursor: `~/.cursor/hooks.json` or `./.cursor/hooks.json`
+- Devin CLI: `~/.config/devin/config.json` or `./.devin/hooks.v1.json`
+- Devin Desktop: `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json`
+- Factory: `~/.factory/settings.json` or `./.factory/settings.json`
+- Grok Build: `~/.grok/hooks/beacon-endpoint.json` or `./.grok/hooks/beacon-endpoint.json`
+- Hermes Agent: `~/.hermes/config.yaml`
+- OpenCode: `~/.config/opencode/plugins/beacon.ts` or `./.opencode/plugins/beacon.ts`
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint telemetry" icon="satellite-dish" href="/deployment/open-source#configure-endpoint-telemetry">
+    Configure the local endpoint agent and harnesses.
+  </Card>
+  <Card title="beacon endpoint" icon="terminal" href="/cli/endpoint">
+    Review endpoint command behavior and common paths.
+  </Card>
+</Columns>

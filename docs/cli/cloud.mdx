@@ -1,0 +1,71 @@
+---
+title: "beacon cloud"
+description: "Configure Beacon telemetry for provider-managed cloud agents"
+---
+
+## Overview
+
+`beacon cloud` prints setup helpers for provider-managed cloud agent
+environments. Supported flows capture Claude Code or Cursor cloud agent
+telemetry and upload the cloud session's `runtime.jsonl` to customer-managed
+Google Cloud Storage.
+
+For complete walkthroughs, see [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents)
+and [Cursor Cloud Agents](/runtimes/cursor-cloud-agents).
+
+## Commands
+
+<span id="beacon-cloud-claude-web-print-setup" />
+<span id="beacon-cloud-claude-web-print-hooks" />
+<span id="beacon-cloud-cursor-print-setup" />
+<span id="beacon-cloud-cursor-print-hooks" />
+<span id="beacon-cloud-gcs-setup" />
+
+<Columns cols={2}>
+  <Card title="beacon cloud claude-web print-setup" icon="cloud" href="/cli/cloud-claude-web-print-setup">
+    Print a Claude Code cloud environment setup script.
+  </Card>
+  <Card title="beacon cloud claude-web print-hooks" icon="plug" href="/cli/cloud-claude-web-print-hooks">
+    Print Claude hook settings for a cloud sandbox.
+  </Card>
+  <Card title="beacon cloud cursor print-setup" icon="cloud" href="/cli/cloud-cursor-print-setup">
+    Print a Cursor cloud agent binary setup script.
+  </Card>
+  <Card title="beacon cloud cursor print-hooks" icon="plug" href="/cli/cloud-cursor-print-hooks">
+    Print Cursor project hook settings to commit for cloud agents.
+  </Card>
+  <Card title="beacon cloud gcs setup" icon="database" href="/cli/cloud-gcs-setup">
+    Create or print self-serve GCS setup commands for cloud-agent telemetry.
+  </Card>
+</Columns>
+
+## GCS Setup Note
+
+The helper creates or validates a bucket, creates a dedicated uploader service
+account, grants object upload access, creates a service-account key, and prints
+the `BEACON_CLOUD_GCS_*` environment variables for cloud agents.
+
+<Warning>
+  This self-serve flow passes a scoped Google service-account key into the
+  provider-managed cloud agent environment. Use it for proof-of-concept testing
+  and prototyping. For production enterprise deployments, use
+  [Asymptote Managed](/deployment/managed) or contact Asymptote about secure
+  forwarding in customer-managed infrastructure.
+</Warning>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud gcs setup" icon="database" href="/cli/cloud-gcs-setup">
+    Create or print self-serve GCS setup commands for cloud-agent telemetry.
+  </Card>
+  <Card title="Claude Code Cloud Agents" icon="cloud" href="/runtimes/claude-code-cloud-agents">
+    Configure Claude Code cloud agent telemetry and GCS upload end to end.
+  </Card>
+  <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
+    Configure Cursor cloud agent telemetry and GCS upload end to end.
+  </Card>
+  <Card title="Google Cloud Storage forwarding" icon="database" href="/log-forwarding/gcs">
+    Review local endpoint GCS forwarding for persistent endpoint deployments.
+  </Card>
+</Columns>
