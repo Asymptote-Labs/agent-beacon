@@ -6,8 +6,7 @@ description: >
   GitLab CI, CircleCI, k8s/kustomize manifest, fly.toml, vercel.json, render.yaml).
   These run with deploy/push privileges, so an edit here can reach production or
   inject a build-time step. The k8s/kubernetes/.circleci directory branch matches at
-  repo root or nested. Ported from blastradius is_deploy_path
-  (modified_production_deploy / production_deployment_path).
+  repo root or nested.
 severity: medium
 status: stable
 posture: detect

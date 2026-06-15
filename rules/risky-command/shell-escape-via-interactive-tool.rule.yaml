@@ -6,8 +6,7 @@ description: >
   BEGIN{system()}, perl exec/system of a shell, python pty.spawn, an editor
   (vim -c :!/:shell), find -exec sh, a tar checkpoint action, or ssh ProxyCommand. In
   a sandboxed or restricted-shell context these break out to arbitrary command
-  execution. Inspired by the ATR privilege-escalation "shell escape" category
-  (GTFObins); OWASP LLM06.
+  execution.
 severity: medium
 status: stable
 posture: detect

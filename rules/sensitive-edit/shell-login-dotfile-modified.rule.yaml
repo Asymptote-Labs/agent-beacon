@@ -6,8 +6,7 @@ description: >
   .profile, .zshrc, .zprofile, .zshenv, .kshrc, .login, or fish config.fish).
   These run on every new shell or login session, outside any agent sandbox, so an
   edit here is durable user-level persistence (e.g. an injected command, alias, or
-  PATH change). Ported from blastradius host.deferred_exec_sinks / write_reach
-  login-dotfile surface.
+  PATH change).
 severity: high
 status: stable
 posture: detect

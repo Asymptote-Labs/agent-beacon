@@ -5,9 +5,7 @@ description: >
   A command lists the private keys loaded in the running ssh-agent (`ssh-add -l`
   / `ssh-add -L`) or sets SSH_AUTH_SOCK to probe an agent socket. The agent holds
   decrypted private keys in memory; enumerating them is a reconnaissance step
-  toward using them for lateral movement. Derived from blastradius
-  process_introspect.rs, which flags that same-uid code can reach ssh-agent
-  in-memory keys when ptrace_scope is unrestricted.
+  toward using them for lateral movement.
 severity: medium
 status: stable
 posture: detect

@@ -7,8 +7,6 @@ description: >
   (curl/wget body, scp/rsync to a remote, or netcat). A bundle is a complete,
   portable copy of a repo's objects and history, so bundling followed by egress is
   a clean whole-repository exfiltration shape that evades per-file read heuristics.
-  Extends the blastradius egress-mediation residual-exfil concern
-  (src/probes/egress_mediation.rs) to source-tree theft.
 severity: high
 status: stable
 posture: detect

@@ -6,8 +6,7 @@ description: >
   loopback, a unix socket, or stdio). External MCP servers are an egress and
   data-handoff path that the operator may not have vetted. The local-server check uses
   exact matches for local/localhost/::1 (so a look-alike host such as localhost.evil.com
-  is still flagged) and prefix matches for stdio/unix:/local:/127. Ported from
-  blastradius is_local_mcp_server / external_mcp_call.
+  is still flagged) and prefix matches for stdio/unix:/local:/127.
 severity: low
 status: stable
 posture: detect

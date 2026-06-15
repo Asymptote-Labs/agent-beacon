@@ -7,8 +7,7 @@ description: >
   known browser profile directory — Chrome/Chromium/Brave/Edge/Firefox/Safari). These
   carry live session material that can hijack a SaaS session past password + MFA. The
   browser-dir requirement keeps a non-browser file named "cookies" from firing, and
-  matches the read step of the browser-session-read-then-egress correlation. Ported
-  from blastradius is_browser_session_path.
+  matches the read step of the browser-session-read-then-egress correlation.
 severity: high
 status: stable
 posture: detect

@@ -8,7 +8,7 @@ description: >
   cookies.sqlite / logins.json by name, or the ambiguous basenames cookies / "login
   data" only inside a known browser profile directory (Chrome/Chromium/Brave/Edge/
   Firefox/Safari, including their real on-disk dir names) so a project file named
-  "cookies" does not trip it. Ported from blastradius saas_session_hijack.
+  "cookies" does not trip it.
 severity: high
 status: stable
 posture: detect

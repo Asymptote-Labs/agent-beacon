@@ -6,8 +6,7 @@ description: >
   session: a CLAUDE.md or AGENTS.md guidance file, or an entry under .claude/skills,
   .claude/commands, or .claude/agents. Writing these is durable prompt-injection
   persistence — instructions planted here ride along on later runs with no further
-  prompt. Ported from blastradius claude_code.writable_control_surface
-  (instruction-kind targets).
+  prompt.
 severity: high
 status: stable
 posture: detect

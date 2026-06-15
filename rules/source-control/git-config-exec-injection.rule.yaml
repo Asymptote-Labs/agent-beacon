@@ -7,8 +7,7 @@ description: >
   the true/false boolean), a content filter (clean/smudge/process), or a shell-escape
   alias (alias.<name>=!...). Matches the `git config ...` and inline `git -c key=`
   set forms and excludes read subcommands (--get/--unset/--list/...), so a directive
-  name appearing in a commit message, a path, or a read does not fire. Ported from
-  blastradius git_config dangerous-directive probe.
+  name appearing in a commit message, a path, or a read does not fire.
 severity: high
 status: stable
 posture: detect

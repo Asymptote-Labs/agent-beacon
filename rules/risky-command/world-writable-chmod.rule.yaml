@@ -6,8 +6,7 @@ description: >
   (via + or =) that grants write to other or all (e.g. o+w, a+rwx, a=rwx, o=rwx,
   ugo+rwx). Owner- or group-only grants (u+w, g=rw) are intentionally excluded because
   they are not world-writable. chmod is anchored to the acting command position so it
-  is not matched as an argument to another program. Ported from blastradius
-  DangerousCategory::WorldWritableChmod, broadened to the = symbolic form.
+  is not matched as an argument to another program.
 severity: medium
 status: stable
 posture: detect

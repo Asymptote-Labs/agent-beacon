@@ -6,8 +6,7 @@ description: >
   pre-push, post-merge, prepare-commit-msg, etc.). Git hooks execute on the next
   matching git operation, outside any agent sandbox and with no further prompt, so
   planting one is durable code-execution persistence triggered by ordinary
-  developer git activity. Derived from blastradius deferred-execution sink
-  analysis (.git/hooks).
+  developer git activity.
 severity: high
 status: stable
 posture: detect

@@ -8,7 +8,6 @@ description: >
   code to an attacker-controlled destination or overwrite remote history. Every clause
   is git-anchored to a command boundary and kept within one command segment, so a
   benign mention, a `grep insteadOf`, or a read-only `git config --get` does not fire.
-  Ported from blastradius is_git_write_shape (source_control_mutation_path).
 severity: high
 status: stable
 posture: detect

@@ -7,8 +7,6 @@ description: >
   time a developer cd's into the directory (or an editor/terminal opens it),
   outside any agent sandbox and with no further prompt. An injected command,
   export, or PATH manipulation here is durable, ambient-triggered code execution.
-  Derived from blastradius host.deferred_exec_sinks (.envrc deferred-execution
-  sink).
 severity: high
 status: stable
 posture: detect

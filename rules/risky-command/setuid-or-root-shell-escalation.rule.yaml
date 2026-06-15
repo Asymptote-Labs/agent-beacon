@@ -8,8 +8,7 @@ description: >
   `su - root` / `su root` / `su -` or `pkexec` (polkit). Setuid root binaries and
   pkexec are classic local-privilege-escalation primitives. The setuid mode is
   anchored to the chmod command position, and su is required to target root so that
-  `su someuser` does not match. Ported from blastradius host.privilege_escalation
-  (pkexec presence) and the setuid/setgid escalation surface.
+  `su someuser` does not match.
 severity: high
 status: stable
 posture: detect

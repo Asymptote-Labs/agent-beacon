@@ -6,9 +6,8 @@ description: >
   past human review — Unicode Tag characters (U+E0000–U+E007F, the "ASCII smuggling"
   range), bidirectional overrides (U+202A–U+202E / U+2066–U+2069), or zero-width
   spacing (ZWSP, word joiner, BOM). Legitimate prompts almost never contain these.
-  Inspired by the encoded/obfuscated prompt-injection family in the ATR corpus
-  (github.com/Agent-Threat-Rule/agent-threat-rules); OWASP LLM01. The zero-width
-  joiner/non-joiner used by emoji and some scripts are intentionally excluded.
+  The zero-width joiner/non-joiner used by emoji and some scripts are intentionally
+  excluded.
 severity: high
 status: stable
 posture: detect

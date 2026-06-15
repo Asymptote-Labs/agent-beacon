@@ -5,7 +5,7 @@ description: >
   The agent modified a dependency manifest or lockfile (package.json, lockfiles,
   Cargo.toml, requirements.txt, go.mod, Gemfile, composer.json, …). A changed
   dependency edge is a supply-chain insertion point — a malicious or typosquatted
-  package can run install-time code. Ported from blastradius is_dependency_manifest_path.
+  package can run install-time code.
 severity: medium
 status: stable
 posture: detect

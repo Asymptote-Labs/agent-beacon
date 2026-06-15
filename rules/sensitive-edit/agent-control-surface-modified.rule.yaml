@@ -6,8 +6,7 @@ description: >
   Code settings file (.claude/settings.json, .claude/settings.local.json,
   .claude.json) or an MCP server registration (.mcp.json). Writing these can
   disable the sandbox, add an excludedCommands entry, register a hook, or wire in
-  a new MCP server that runs on every future session. Ported from blastradius
-  claude_code.writable_control_surface (control-kind targets).
+  a new MCP server that runs on every future session.
 severity: high
 status: stable
 posture: detect
