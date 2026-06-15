@@ -1,0 +1,74 @@
+{
+  "PermissionRequest": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin permission-request"
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin post-tool"
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin pre-tool"
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin session-end"
+        }
+      ]
+    }
+  ],
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin session-start"
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin stop",
+          "timeout": 45
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "BEACON_ENDPOINT_MODE=1 BEACON_ORIGIN=cloud BEACON_RUN_PROVIDER=devin_cloud BEACON_RUN_EPHEMERAL=true BEACON_ENDPOINT_LOG='/tmp/beacon/runtime.jsonl' '/usr/local/bin/beacon-hooks' --platform devin prompt-submit",
+          "timeout": 30
+        }
+      ]
+    }
+  ]
+}
