@@ -92,6 +92,28 @@ func TestEndedEventCarriesMetadata(t *testing.T) {
 	}
 }
 
+func TestMessageDedupIDHandlesEmptyAndDuplicate(t *testing.T) {
+	// Empty and duplicate event_ids must still yield unique dedup ids, or the
+	// dedup set would silently drop messages.
+	msgs := []Message{
+		{EventID: "", Source: "user", Message: "a", CreatedAt: 10},
+		{EventID: "", Source: "devin", Message: "b", CreatedAt: 11},
+		{EventID: "dup", Source: "user", Message: "c", CreatedAt: 12},
+		{EventID: "dup", Source: "devin", Message: "d", CreatedAt: 13},
+	}
+	mapped := MapSession(Session{SessionID: "s", Status: "working", CreatedAt: 5}, msgs)
+	if len(mapped) != 5 { // started + 4 messages
+		t.Fatalf("got %d events, want 5", len(mapped))
+	}
+	ids := map[string]bool{}
+	for _, me := range mapped {
+		if ids[me.DedupID] {
+			t.Fatalf("duplicate dedup id %q would drop a message", me.DedupID)
+		}
+		ids[me.DedupID] = true
+	}
+}
+
 func TestMapSessionHasNoEndedRegardlessOfStatus(t *testing.T) {
 	for _, st := range []string{"working", "suspended", "finished"} {
 		mapped := MapSession(Session{SessionID: "s", Status: st, CreatedAt: 10}, nil)

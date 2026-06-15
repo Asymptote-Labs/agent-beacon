@@ -59,6 +59,56 @@ func TestUploadEnabledLaterStillUploads(t *testing.T) {
 	}
 }
 
+type flakyUploader struct {
+	failFirst int
+	calls     int
+}
+
+func (f *flakyUploader) Upload(_ context.Context, _ string, _ []byte) error {
+	f.calls++
+	if f.calls <= f.failFirst {
+		return fmt.Errorf("transient upload failure")
+	}
+	return nil
+}
+
+func TestPartialFailureRetriedThenSkipped(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "state.json")
+	client := pullTestServer(t) // one suspended session, one user message
+	up := &flakyUploader{failFirst: 1}
+	opts := PullOptions{Write: true, LogPath: logPath, StatePath: statePath, Upload: up, UploadPrefix: "agent-traces"}
+
+	// Sweep 1: local emit succeeds, upload fails -> session left unsynced.
+	if _, err := PullOnce(context.Background(), client, opts); err == nil {
+		t.Fatal("expected upload error on first sweep")
+	}
+	lines1 := len(nonEmptyLines(t, logPath))
+
+	// Sweep 2: not skipped (SyncedAt never advanced); reprocess + upload succeeds,
+	// with no duplicate local lines.
+	sum2, err := PullOnce(context.Background(), client, opts)
+	if err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if sum2.SessionsChanged != 1 || sum2.Uploaded != 1 {
+		t.Fatalf("partial-failed session should retry+upload, got %+v", sum2)
+	}
+	if got := len(nonEmptyLines(t, logPath)); got != lines1 {
+		t.Fatalf("retry duplicated local lines: %d -> %d", lines1, got)
+	}
+
+	// Sweep 3: now fully synced and uploaded -> skipped.
+	sum3, err := PullOnce(context.Background(), client, opts)
+	if err != nil {
+		t.Fatalf("third sweep: %v", err)
+	}
+	if sum3.SessionsChanged != 0 {
+		t.Fatalf("fully synced session should be skipped, got %+v", sum3)
+	}
+}
+
 func pullTestServer(t *testing.T) *Client {
 	srv := fakeDevinAPI(t, `{"items":[
 		{"session_id":"s1","status":"suspended","user_id":"user-1","created_at":1000,"updated_at":1600,"acus_consumed":1}

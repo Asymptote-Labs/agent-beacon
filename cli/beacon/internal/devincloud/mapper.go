@@ -1,6 +1,7 @@
 package devincloud
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -67,22 +68,38 @@ func MapSession(s Session, msgs []Message) []MappedEvent {
 		Event:   sessionLifecycleEvent(s, "session.started", "Devin Cloud session started", s.CreatedAt),
 	}}
 
-	for _, m := range msgs {
+	seen := map[string]bool{}
+	for i, m := range msgs {
+		dedupID := messageDedupID(s.SessionID, m, i, seen)
 		switch strings.ToLower(m.Source) {
 		case "user":
 			ev := baseEvent(s, "prompt.submitted", "prompt", schema.SeverityInfo, m.CreatedAt)
 			ev.Prompt = &schema.PromptInfo{Text: m.Message}
 			ev.Content = &schema.ContentInfo{Retention: schema.ContentRetentionFull, Included: true}
 			ev.Message = "Devin Cloud user prompt"
-			out = append(out, MappedEvent{DedupID: m.EventID, Event: ev})
+			out = append(out, MappedEvent{DedupID: dedupID, Event: ev})
 		default: // "devin" (assistant) and any future agent-side source
 			ev := baseEvent(s, "agent.message", "session", schema.SeverityInfo, m.CreatedAt)
 			ev.Content = &schema.ContentInfo{Retention: schema.ContentRetentionFull, Included: true}
 			ev.Message = m.Message
-			out = append(out, MappedEvent{DedupID: m.EventID, Event: ev})
+			out = append(out, MappedEvent{DedupID: dedupID, Event: ev})
 		}
 	}
 	return out
+}
+
+// messageDedupID returns a stable, unique dedup id for a message. It prefers the
+// Devin event_id, but synthesizes one from the session, index, and created_at
+// when event_id is empty or duplicated — otherwise messages sharing (or missing)
+// an event_id would be silently dropped by the dedup set. Messages are
+// append-only and ordered, so the synthesized index is stable across re-polls.
+func messageDedupID(sessionID string, m Message, index int, seen map[string]bool) string {
+	id := strings.TrimSpace(m.EventID)
+	if id == "" || seen[id] {
+		id = fmt.Sprintf("%s:msg:%d:%d", sessionID, index, m.CreatedAt)
+	}
+	seen[id] = true
+	return id
 }
 
 // EndedEvent builds the session.ended event for a terminal session, carrying

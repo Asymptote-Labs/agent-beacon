@@ -82,10 +82,14 @@ func PullOnce(ctx context.Context, client *Client, opts PullOptions) (sum Summar
 		// earlier run and is now enabled) is never skipped on the upload account.
 		if !opts.ForceRefresh {
 			uploadSatisfied := opts.Upload == nil || ss.UploadedAt == s.UpdatedAt
+			// SyncedAt == updated_at means a prior sweep FULLY processed this
+			// exact cursor; a partial failure leaves SyncedAt unadvanced so the
+			// session is retried rather than treated as complete.
+			fullySynced := ss.SyncedAt == s.UpdatedAt && ss.Status == s.Status
 			if ss.Done && uploadSatisfied {
 				continue
 			}
-			if _, seen := state.Sessions[s.SessionID]; seen && ss.UpdatedAt == s.UpdatedAt && ss.Status == s.Status && len(ss.Emitted) > 0 && uploadSatisfied {
+			if fullySynced && uploadSatisfied {
 				continue
 			}
 		}
@@ -109,6 +113,10 @@ func PullOnce(ctx context.Context, client *Client, opts PullOptions) (sum Summar
 // Status / Done) is advanced only on full success, so a partial failure causes
 // a retry on the next sweep.
 func processSession(ctx context.Context, client *Client, s Session, ss *SessionState, opts PullOptions, sum *Summary) error {
+	// Mark this session incomplete until the whole sweep succeeds, so any early
+	// return below leaves it eligible for retry on the next sweep.
+	ss.SyncedAt = 0
+
 	msgs, err := client.SessionMessages(ctx, s.SessionID)
 	if err != nil {
 		return fmt.Errorf("messages: %w", err)
@@ -169,6 +177,7 @@ func processSession(ctx context.Context, client *Client, s Session, ss *SessionS
 
 	ss.UpdatedAt = s.UpdatedAt
 	ss.Status = s.Status
+	ss.SyncedAt = s.UpdatedAt // fully processed this cursor
 	// A final session (finished/expired) can never resume, so stop polling it.
 	// Suspended stays pollable in case it resumes.
 	if IsFinal(s.Status) {

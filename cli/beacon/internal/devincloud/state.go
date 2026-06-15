@@ -16,6 +16,7 @@ type State struct {
 type SessionState struct {
 	UpdatedAt    int64           `json:"updated_at"`
 	Status       string          `json:"status"`
+	SyncedAt     int64           `json:"synced_at"`     // updated_at at which a sweep last FULLY processed this session; 0 while incomplete
 	Done         bool            `json:"done"`          // final status; skip henceforth
 	EndedEmitted bool            `json:"ended_emitted"` // session.ended emitted for the current terminal episode
 	UploadedAt   int64           `json:"uploaded_at"`   // updated_at at which this session's snapshot was last uploaded to GCS
