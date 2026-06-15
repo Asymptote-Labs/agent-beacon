@@ -77,12 +77,15 @@ func PullOnce(ctx context.Context, client *Client, opts PullOptions) (sum Summar
 		// Skip sessions already finalized, or unchanged since the last sweep.
 		// "Unchanged" relies on updated_at as the session's last-modified signal
 		// (new messages bump it); --full-resync (ForceRefresh) bypasses both
-		// skips when that assumption can't be trusted or for a backfill.
+		// skips when that assumption can't be trusted or for a backfill. A session
+		// whose snapshot still needs uploading (e.g. upload was disabled on an
+		// earlier run and is now enabled) is never skipped on the upload account.
 		if !opts.ForceRefresh {
-			if ss.Done {
+			uploadSatisfied := opts.Upload == nil || ss.UploadedAt == s.UpdatedAt
+			if ss.Done && uploadSatisfied {
 				continue
 			}
-			if _, seen := state.Sessions[s.SessionID]; seen && ss.UpdatedAt == s.UpdatedAt && ss.Status == s.Status && len(ss.Emitted) > 0 {
+			if _, seen := state.Sessions[s.SessionID]; seen && ss.UpdatedAt == s.UpdatedAt && ss.Status == s.Status && len(ss.Emitted) > 0 && uploadSatisfied {
 				continue
 			}
 		}
@@ -160,6 +163,7 @@ func processSession(ctx context.Context, client *Client, s Session, ss *SessionS
 		if err := opts.Upload.Upload(ctx, obj, data); err != nil {
 			return fmt.Errorf("upload: %w", err)
 		}
+		ss.UploadedAt = s.UpdatedAt
 		sum.Uploaded++
 	}
 

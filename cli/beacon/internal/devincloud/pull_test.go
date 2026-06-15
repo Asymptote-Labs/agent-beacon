@@ -25,6 +25,40 @@ func (f *fakeUploader) Upload(_ context.Context, objectName string, data []byte)
 	return nil
 }
 
+func TestUploadEnabledLaterStillUploads(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "state.json")
+	client := pullTestServer(t)
+
+	// First sweep with upload disabled: local sync only.
+	if _, err := PullOnce(context.Background(), client, PullOptions{Write: true, LogPath: logPath, StatePath: statePath}); err != nil {
+		t.Fatalf("first (no upload): %v", err)
+	}
+
+	// Second sweep, session unchanged, upload now enabled: must NOT be skipped.
+	up := &fakeUploader{}
+	if _, err := PullOnce(context.Background(), client, PullOptions{
+		Write: true, LogPath: logPath, StatePath: statePath, Upload: up, UploadPrefix: "agent-traces",
+	}); err != nil {
+		t.Fatalf("second (upload on): %v", err)
+	}
+	if up.calls != 1 {
+		t.Fatalf("expected unchanged session to upload once upload was enabled, got %d uploads", up.calls)
+	}
+
+	// Third sweep, still unchanged and already uploaded: now skipped (no re-upload).
+	up2 := &fakeUploader{}
+	if _, err := PullOnce(context.Background(), client, PullOptions{
+		Write: true, LogPath: logPath, StatePath: statePath, Upload: up2, UploadPrefix: "agent-traces",
+	}); err != nil {
+		t.Fatalf("third: %v", err)
+	}
+	if up2.calls != 0 {
+		t.Fatalf("expected no re-upload once UploadedAt matches updated_at, got %d", up2.calls)
+	}
+}
+
 func pullTestServer(t *testing.T) *Client {
 	srv := fakeDevinAPI(t, `{"items":[
 		{"session_id":"s1","status":"suspended","user_id":"user-1","created_at":1000,"updated_at":1600,"acus_consumed":1}

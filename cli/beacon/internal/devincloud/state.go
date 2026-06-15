@@ -18,6 +18,7 @@ type SessionState struct {
 	Status       string          `json:"status"`
 	Done         bool            `json:"done"`          // final status; skip henceforth
 	EndedEmitted bool            `json:"ended_emitted"` // session.ended emitted for the current terminal episode
+	UploadedAt   int64           `json:"uploaded_at"`   // updated_at at which this session's snapshot was last uploaded to GCS
 	Emitted      map[string]bool `json:"emitted"`       // dedup ids for started + message events
 }
 
