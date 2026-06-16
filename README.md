@@ -35,7 +35,7 @@
 
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for AI agents wherever they run: locally, in CI, or in the cloud.
 
-Beacon started with local endpoint telemetry for security and IT teams that need visibility into AI agent activity on employee machines. It now captures supported runtime activity across local agents, CI agents, and cloud agents, then normalizes that activity into events your team can inspect, retain, and forward under your control.
+The problem is that AI agent activity is fragmented across runtimes, leaving teams without a consistent way to get visibility into what agents are doing. Agent Beacon solves this by extending the OpenTelemetry GenAI standard and normalizing runtime events into a unified data model.
 
 Beacon is built to be easy to deploy for Security and IT teams through
 [MDM deployment](#mdm-deployment), CI workflows, and cloud-agent setup paths, and to
@@ -166,77 +166,21 @@ through standard MDM workflows.
 | [Fleet](https://docs.asymptotelabs.ai/cli/fleet) | macOS package and user-context deployment helpers |
 | [Jamf Pro](https://docs.asymptotelabs.ai/cli/jamf) | macOS package, policy scripts, validation, and Extension Attributes |
 
-## Dashboard
+## Dashboard and Local Detection
 
 Beacon includes a local, read-only dashboard for validating endpoint activity
-without a hosted backend. The overview screen summarizes recent runtime events
-and collection status, while log search helps teams inspect normalized event
-records during rollout, testing, and investigations. The token usage screen
-breaks captured token telemetry down by model, session (with per-step
-drilldown), CI run, and harness, including context-window utilization and
-runtime-reported cost. The detections screen lists the active threat-detection
-rules (the local store when present, otherwise the embedded baseline), and the
-findings screen runs those rules over the runtime log on load and links each hit
-back to its rule — the same read-only, offline detection as `beacon scan`.
+without a hosted backend. See the [dashboard docs](https://docs.asymptotelabs.ai/cli/dashboard)
+for overview, log search, and runtime JSONL inspection.
 
-For scripted or CI reporting, `beacon endpoint tokens` prints the same token
-usage rollups as text or JSON from any runtime JSONL log, for example
-`beacon endpoint tokens --log-path "$BEACON_CI_LOG_PATH" --json` after a CI
-session.
+Beacon writes endpoint activity to `runtime.jsonl`; local log storage and
+retention behavior are summarized in the
+[local testing and logs docs](https://docs.asymptotelabs.ai/cli/local-testing-logs).
 
-Beacon writes endpoint activity to a stable local `runtime.jsonl` file. The
-active file rotates at 10 MiB with five numbered local archives, keeping the
-endpoint handoff file bounded while external SIEM forwarders continue tailing
-the active path. The dashboard reads the active log plus retained numbered
-archives for local triage; SIEM destinations remain the source of truth for
-long-term retention and search.
-
-<p align="center">
-  <img src="images/dashboard-overview.png" alt="Beacon dashboard overview" width="860">
-</p>
-
-<p align="center">
-  <img src="images/dashboard-log-search.png" alt="Beacon dashboard log search" width="860">
-</p>
-
-## Detect threats in local telemetry
-
-`beacon scan` runs threat-detection rules over the local runtime log and reports
-findings — read-only, with no network access. Rules are an open, versioned format
-([`spec/threat-rules`](spec/threat-rules/SPEC.md)) whose match conditions are
-[CEL](https://cel.dev) expressions over the endpoint event schema, and each rule ships
-its own conformance fixtures.
-
-```bash
-beacon scan                       # run the active rules over the runtime log
-beacon scan --json                # machine-readable findings
-beacon scan --min-severity high   # only high/critical findings
-beacon scan --fail-on high        # non-zero exit for CI gating
-```
-
-The detection engine ships in the binary, but the rule corpus is **external data** loaded
-from a local store (`~/.beacon/endpoint/rules`), so a growing rule set never enlarges the
-agent. A small baseline is built in; manage the store with `beacon rules`:
-
-```bash
-beacon rules list                 # active rules (baseline or store)
-beacon rules add ./my-rules       # install local rule files (validated before install)
-beacon rules pull <url>           # explicit, user-initiated fetch of a rule pack
-beacon rules lint ./rules         # validate + run a rule pack's fixtures (authoring)
-beacon rules fields               # list event fields a rule can match on
-```
-
-The full rule pack ships as a release asset (`threat-rules.tar.gz`), not inside the
-binary, so the corpus grows without enlarging `beacon`. Install it with one command:
-
-```bash
-beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/latest/download/threat-rules.tar.gz
-beacon scan
-```
-
-`beacon rules pull` is the only command that reaches the network, and only when you run
-it against a URL you supply — the agent never fetches rules on its own. Offline or
-air-gapped users can instead `git clone` the repo and run `beacon rules add ./rules`.
+For offline threat detection, `beacon scan` runs open threat rules over local
+telemetry with no network access. See the
+[Threat Rules spec](spec/threat-rules/SPEC.md) and generated
+[rule field reference](spec/threat-rules/FIELDS.md) for rule format, CEL
+matching, fixtures, and supported event fields.
 
 ## Start Here
 
