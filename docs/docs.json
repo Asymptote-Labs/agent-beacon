@@ -93,21 +93,21 @@
             "icon": "sliders",
             "pages": [
               {
-                "group": "Detections",
-                "root": "detections/index",
-                "pages": [
-                  "detections/yaml-schema",
-                  "detections/standard",
-                  "detections/engine"
-                ]
-              },
-              {
                 "group": "Inventory",
                 "root": "guides/inventory",
                 "pages": [
                   "inventory/agent-harnesses",
                   "inventory/mcp-servers",
                   "inventory/skills"
+                ]
+              },
+              {
+                "group": "Detections",
+                "root": "detections/index",
+                "pages": [
+                  "detections/yaml-schema",
+                  "detections/standard",
+                  "detections/engine"
                 ]
               }
             ]

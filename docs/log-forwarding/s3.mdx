@@ -5,7 +5,7 @@ description: "Forward Beacon endpoint events into AWS S3 with customer-managed V
 
 ## Forwarding Overview
 
-Beacon `v0.0.37` added AWS S3 support for teams that want Beacon endpoint events stored in an S3 bucket for data lake, SIEM, archive, or downstream detection workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Your customer-managed Vector agent tails that file and uploads gzip-compressed NDJSON objects to S3.
+Beacon `v0.0.37` added the [AWS S3 content pack](/concepts/core-concepts#aws-s3-content-pack) for teams that want Beacon endpoint events stored in an S3 bucket for data lake, SIEM, archive, or downstream detection workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Your customer-managed [Vector forwarding](/concepts/core-concepts#vector-forwarding) agent tails that file and uploads gzip-compressed NDJSON objects to S3.
 
 Use this path when you want Beacon events forwarded to S3 without storing AWS credentials, bucket policy, lifecycle, retention, or encryption settings in Beacon endpoint configuration.
 
