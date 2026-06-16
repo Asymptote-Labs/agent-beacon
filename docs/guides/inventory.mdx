@@ -5,9 +5,25 @@ description: "Inventory local agent runtimes, skills, MCP servers, and Beacon-ob
 
 ## Overview
 
-This guide shows how to inventory the AI agent footprint on an endpoint: installed runtimes, local skills, MCP servers, local config files, telemetry hooks, OTLP settings, and recent observed activity.
+Inventory shows the local AI agent footprint on an endpoint: installed runtimes, local skills, MCP servers, local config files, telemetry hooks, OTLP settings, and recent observed activity.
 
 Use it when you need to answer what is installed, what an agent may be able to access, and whether Beacon has recently observed activity from each runtime.
+
+Inventory explains what is present and observable on the host. [Detections](/detections) evaluate the observed event stream and emit findings when local rules match risky behavior.
+
+## Inventory Areas
+
+<Columns cols={3}>
+  <Card title="Agent Harnesses" icon="list-check" href="/inventory/agent-harnesses">
+    Review installed, configured, managed, and observed state for supported agent harnesses.
+  </Card>
+  <Card title="MCP Servers" icon="server" href="/inventory/mcp-servers">
+    Review local MCP server configuration and compare expected and unexpected tool access.
+  </Card>
+  <Card title="Skills" icon="puzzle-piece" href="/inventory/skills">
+    Review local skill manifests as an agent extension and configuration surface.
+  </Card>
+</Columns>
 
 ## Setup
 

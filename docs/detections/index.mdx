@@ -21,6 +21,8 @@ Detections focus on risky agent behavior that is hard to understand from one raw
 
 Because rules run over the shared Beacon event model, the same rule vocabulary can apply across supported harnesses when those harnesses emit the required fields.
 
+[Inventory](/guides/inventory) helps explain which harnesses, local config, MCP servers, and skills are present and observable on an endpoint. Detection coverage depends on the telemetry fields emitted by those supported harnesses and visible local configuration.
+
 ## Detection Flow
 
 1. A supported agent harness emits runtime telemetry.
@@ -104,6 +106,9 @@ Beacon does not fetch rules automatically during scans. Pulling a remote rule pa
 <Columns cols={2}>
   <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
     Review the normalized JSON fields that detections evaluate.
+  </Card>
+  <Card title="Inventory" icon="clipboard-list" href="/guides/inventory">
+    Review local harness, MCP server, skill, and configuration visibility.
   </Card>
   <Card title="beacon rules" icon="list-check" href="/cli/rules">
     Manage, install, lint, and inspect local detection rules.

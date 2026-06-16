@@ -100,6 +100,15 @@
                   "detections/standard",
                   "detections/engine"
                 ]
+              },
+              {
+                "group": "Inventory",
+                "root": "guides/inventory",
+                "pages": [
+                  "inventory/agent-harnesses",
+                  "inventory/mcp-servers",
+                  "inventory/skills"
+                ]
               }
             ]
           },
