@@ -397,7 +397,6 @@
             "icon": "clipboard-list",
             "root": "guides/use-cases",
             "pages": [
-              "guides/inventory",
               "guides/agent-runtime-telemetry"
             ]
           },
