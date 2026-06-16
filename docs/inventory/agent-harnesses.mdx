@@ -1,0 +1,81 @@
+---
+title: "Agent Harness Inventory"
+description: "Review installed, configured, managed, and observed state for supported local agent harnesses"
+---
+
+## Overview
+
+Agent harness inventory shows the supported local agent runtimes Beacon can see on an endpoint and how complete their telemetry coverage appears to be.
+
+Use it to answer:
+
+- Which supported [agent harnesses](/runtimes) are installed locally?
+- Which harnesses have local telemetry config, hooks, OTLP settings, or launch environment entries?
+- Which harnesses appear Beacon-managed versus customer-managed?
+- Which harnesses have recently emitted Beacon endpoint events?
+
+## Coverage States
+
+`beacon endpoint inventory` summarizes each supported harness with coverage states that are useful for deployment review:
+
+| State | Meaning |
+|-------|---------|
+| Installed | The runtime or executable appears to be present locally. |
+| Configured | Beacon can inspect a local telemetry setting, hook entry, launch environment, plugin, or runtime config for the harness. |
+| Managed | The telemetry surface appears to be configured by Beacon. |
+| Observed | Recent events in the configured runtime log reference the harness. |
+
+A harness can be installed but not configured, configured but not observed, or observed in a different user-mode or system-mode runtime log than the one you are reading.
+
+## Review Workflow
+
+Start with the fleet-friendly inventory view:
+
+```bash title="Show harness inventory"
+beacon endpoint inventory
+```
+
+Use `--all` when you want to compare all supported harnesses, including runtimes that are not detected on the endpoint:
+
+```bash title="Show all supported harnesses"
+beacon endpoint inventory --all
+```
+
+Use the narrower discovery command when you only need supported runtime detection and telemetry state:
+
+```bash title="Discover supported harnesses"
+beacon endpoint discover --all
+```
+
+For hook-based harnesses, inspect hook status directly:
+
+```bash title="Check hook telemetry"
+beacon endpoint hooks status --all
+```
+
+## What To Look For
+
+- Expected harnesses that are installed but not configured.
+- Harnesses configured through customer-managed settings instead of Beacon-managed hooks or OTLP configuration.
+- Harnesses that are configured but not observed after a user has generated activity.
+- User-mode and system-mode mismatches, especially when a system collector writes `/var/log/beacon-agent/runtime.jsonl` while a user command reads `~/.beacon/endpoint/logs/runtime.jsonl`.
+- Hook-based runtimes that need a restart before new hook configuration is loaded.
+
+Inventory is local-only. It reads supported local paths and the configured runtime log; it does not authenticate to hosted agent accounts to enumerate remote sessions or cloud workspaces.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Runtime Surface Overview" icon="list-check" href="/runtimes">
+    Compare supported harnesses and collection paths.
+  </Card>
+  <Card title="beacon endpoint inventory" icon="clipboard-list" href="/cli/endpoint-inventory">
+    Review inventory flags, filtering, and JSON output.
+  </Card>
+  <Card title="beacon endpoint discover" icon="magnifying-glass" href="/cli/endpoint-discover">
+    Discover supported harnesses and telemetry state.
+  </Card>
+  <Card title="beacon endpoint hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall hook-based telemetry.
+  </Card>
+</Columns>
