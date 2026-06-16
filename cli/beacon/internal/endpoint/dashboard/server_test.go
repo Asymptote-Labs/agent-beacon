@@ -422,6 +422,13 @@ func TestInventoryEndpointReturnsConfigsAndMCPServers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0644); err != nil {
 		t.Fatalf("write claude settings: %v", err)
 	}
+	skillDir := filepath.Join(claudeDir, "skills", "deploy")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("mkdir claude skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Deploy\nDo not retain this body."), 0644); err != nil {
+		t.Fatalf("write claude skill: %v", err)
+	}
 
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {
@@ -476,6 +483,21 @@ func TestInventoryEndpointReturnsConfigsAndMCPServers(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected a local-fs MCP server, got %#v", resp.MCPServers)
+	}
+	foundSkill := false
+	for _, skill := range resp.Skills {
+		if skill.Runtime == "claude_code" && skill.SkillName == "deploy" {
+			foundSkill = true
+			if !skill.Exists || !skill.Readable || skill.FileSHA256 == "" {
+				t.Fatalf("skill metadata = %#v, want readable skill with hash", skill)
+			}
+		}
+	}
+	if !foundSkill {
+		t.Fatalf("expected deploy skill, got %#v", resp.Skills)
+	}
+	if strings.Contains(rec.Body.String(), "Do not retain this body") {
+		t.Fatalf("inventory response retained skill body: %s", rec.Body.String())
 	}
 }
 

@@ -23,6 +23,18 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Claude Cowork | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
 | OpenClaw Gateway | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
+## Local Inventory Metadata
+
+`beacon endpoint inventory` can also report local agent configuration metadata that is not emitted by a runtime event:
+
+| Inventory area | Data retained |
+|----------------|---------------|
+| Configuration files | Runtime, scope, parser status, path/path hash, file hash, modified time, Beacon-managed state, and MCP server counts |
+| MCP servers | Runtime, source path hash, server name/hash, transport, command name/hash, argument count, safe env-key names/counts, and definition hash |
+| Agent skills | Runtime/source family, scope, skill name/hash, root and manifest path/hash, file hash, modified time, and parser status |
+
+Skill inventory is metadata-only. Beacon hashes `SKILL.md` manifests for change detection but does not retain skill instruction bodies in inventory JSON, dashboard responses, or `skill.inventory` events.
+
 ## Required Fields
 
 | Field | Meaning |

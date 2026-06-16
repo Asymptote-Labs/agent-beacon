@@ -749,6 +749,30 @@ func TestWriteInventoryEventsAppendsConfigInventory(t *testing.T) {
 				Redaction:      endpointinventory.RedactionFull,
 			},
 		},
+		Skills: []endpointinventory.Skill{
+			{
+				Runtime:          "claude_code",
+				SkillName:        "deploy",
+				SkillNameHash:    "sha256:skill",
+				RootPathHash:     "sha256:root",
+				SourceScope:      endpointinventory.ScopeUser,
+				ManifestPath:     filepath.Join(t.TempDir(), ".claude", "skills", "deploy", "SKILL.md"),
+				ManifestPathHash: "sha256:manifest",
+				Exists:           true,
+				Readable:         true,
+				ParserStatus:     endpointinventory.StatusOK,
+				FileSHA256:       "sha256:body",
+				Redaction:        endpointinventory.RedactionFull,
+			},
+			{
+				Runtime:      "cursor",
+				RootPathHash: "sha256:missing-skill-root",
+				SourceScope:  endpointinventory.ScopeUser,
+				Exists:       false,
+				ParserStatus: endpointinventory.StatusNotFound,
+				Redaction:    endpointinventory.RedactionFull,
+			},
+		},
 	}
 
 	if err := writeInventoryEvents(cfg, result); err != nil {
@@ -762,8 +786,17 @@ func TestWriteInventoryEventsAppendsConfigInventory(t *testing.T) {
 	if strings.Count(text, "config.inventory") != 1 {
 		t.Fatalf("inventory events = %d, want 1; log=%s", strings.Count(text, "config.inventory"), text)
 	}
+	if strings.Count(text, "skill.inventory") != 1 {
+		t.Fatalf("skill inventory events = %d, want 1; log=%s", strings.Count(text, "skill.inventory"), text)
+	}
 	if !strings.Contains(text, "filesystem") {
 		t.Fatalf("inventory log missing MCP server summary: %s", text)
+	}
+	if !strings.Contains(text, "deploy") {
+		t.Fatalf("inventory log missing skill summary: %s", text)
+	}
+	if strings.Contains(text, "missing-skill-root") {
+		t.Fatalf("inventory log should not include missing skill roots: %s", text)
 	}
 }
 

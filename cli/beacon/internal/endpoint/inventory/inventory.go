@@ -61,6 +61,7 @@ type Result struct {
 	GeneratedAt string      `json:"generated_at"`
 	Configs     []Config    `json:"configs"`
 	MCPServers  []MCPServer `json:"mcp_servers"`
+	Skills      []Skill     `json:"skills"`
 	UserScope   UserScope   `json:"user_scope"`
 }
 
@@ -147,6 +148,7 @@ func Scan(opts Options) Result {
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}
+	result.Skills = scanSkills(home, wd, redaction)
 	return result
 }
 

@@ -23,10 +23,11 @@ Inventory can include:
 - Detected supported runtimes and telemetry status, including MDM-managed launch-environment state for GitHub Copilot CLI and Factory Droid
 - Hook integration status for Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, and OpenCode
 - Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally
+- Local agent skill manifests discovered under supported skill roots, reported as metadata and hashes only
 - Recently observed Beacon runtime events when the runtime log exists
 - Admin-configured integration observations such as Claude Cowork and OpenClaw Gateway events
 
-Human-readable and JSON inventory use the same default filtering: configuration records and MCP server context are shown when they are relevant to the local endpoint state. Use `--all` with `--json` when you need the complete supported inventory surface for fleet comparison or troubleshooting.
+Human-readable and JSON inventory use the same default filtering: configuration records, MCP server context, and skill manifests are shown when they are relevant to the local endpoint state. Use `--all` with `--json` when you need the complete supported inventory surface for fleet comparison or troubleshooting.
 
 ## Flags
 
