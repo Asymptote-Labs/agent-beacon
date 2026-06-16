@@ -1,8 +1,10 @@
 package inventory
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -335,6 +337,93 @@ func TestCopilotManagedDetectionFalsePositives(t *testing.T) {
 	}
 }
 
+func TestScanCurrentUserAndProjectSkillInventory(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	claudeSkillPath := filepath.Join(home, ".claude", "skills", "deploy", "SKILL.md")
+	agentSkillPath := filepath.Join(work, ".agents", "skills", "review", "SKILL.md")
+	writeFile(t, claudeSkillPath, "---\ndescription: do not retain\n---\nSECRET INSTRUCTIONS")
+	writeFile(t, agentSkillPath, "# Review\nKeep this instruction body out of inventory.")
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Now:        fixedNow,
+	})
+
+	deploy := findSkill(result.Skills, "claude_code", "deploy", claudeSkillPath)
+	if deploy == nil {
+		t.Fatalf("Claude skill not found in %#v", result.Skills)
+	}
+	if deploy.SourceScope != ScopeUser || !deploy.Exists || !deploy.Readable || deploy.ParserStatus != StatusOK {
+		t.Fatalf("Claude skill status = %#v", deploy)
+	}
+	if deploy.FileSHA256 == "" || deploy.SkillNameHash == "" || deploy.RootPathHash == "" || deploy.ManifestPathHash == "" {
+		t.Fatalf("Claude skill missing hashes: %#v", deploy)
+	}
+	review := findSkill(result.Skills, "agent_skills", "review", agentSkillPath)
+	if review == nil || review.SourceScope != ScopeProject {
+		t.Fatalf("project agent skill = %#v, want project scope", review)
+	}
+
+	data, err := json.Marshal(result.Skills)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, forbidden := range []string{"SECRET INSTRUCTIONS", "Keep this instruction body", "do not retain"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("skill inventory retained manifest content %q in %s", forbidden, text)
+		}
+	}
+}
+
+func TestMissingSkillRootsAreReportedAsNotFound(t *testing.T) {
+	result := Scan(Options{
+		HomeDir:    t.TempDir(),
+		WorkingDir: t.TempDir(),
+		Now:        fixedNow,
+	})
+	if len(result.Skills) == 0 {
+		t.Fatal("expected missing skill roots to be reported")
+	}
+	for _, skill := range result.Skills {
+		if skill.Exists {
+			continue
+		}
+		if skill.ParserStatus != StatusNotFound {
+			t.Fatalf("missing skill status = %s, want %s", skill.ParserStatus, StatusNotFound)
+		}
+		if skill.RootPathHash == "" {
+			t.Fatal("missing skill root should still include a path hash")
+		}
+	}
+}
+
+func TestSkillScanIsBoundedToDirectSkillManifests(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".cursor", "skills", "direct", "SKILL.md"), "# Direct")
+	writeFile(t, filepath.Join(home, ".cursor", "skills", "nested", "child", "SKILL.md"), "# Nested")
+	writeFile(t, filepath.Join(home, ".cursor", "skills", "node_modules", "package", "SKILL.md"), "# Vendor")
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Now:        fixedNow,
+	})
+
+	if findSkill(result.Skills, "cursor", "direct", filepath.Join(home, ".cursor", "skills", "direct", "SKILL.md")) == nil {
+		t.Fatal("direct Cursor skill not found")
+	}
+	if findSkill(result.Skills, "cursor", "child", filepath.Join(home, ".cursor", "skills", "nested", "child", "SKILL.md")) != nil {
+		t.Fatal("nested skill manifest should not be discovered")
+	}
+	if findSkill(result.Skills, "cursor", "package", filepath.Join(home, ".cursor", "skills", "node_modules", "package", "SKILL.md")) != nil {
+		t.Fatal("vendor skill manifest should not be discovered")
+	}
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 5, 7, 0, 0, 0, time.UTC)
 }
@@ -382,6 +471,16 @@ func findConfig(configs []Config, runtime, path string) *Config {
 	for i := range configs {
 		if configs[i].Runtime == runtime && configs[i].PathHash == pathHash {
 			return &configs[i]
+		}
+	}
+	return nil
+}
+
+func findSkill(skills []Skill, runtime, name, manifestPath string) *Skill {
+	manifestPathHash := hashString(manifestPath)
+	for i := range skills {
+		if skills[i].Runtime == runtime && skills[i].SkillName == name && skills[i].ManifestPathHash == manifestPathHash {
+			return &skills[i]
 		}
 	}
 	return nil

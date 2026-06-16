@@ -51,6 +51,7 @@ type InventoryResponse struct {
 	Harnesses   interface{}           `json:"harnesses"`
 	Configs     []inventory.Config    `json:"configs"`
 	MCPServers  []inventory.MCPServer `json:"mcp_servers"`
+	Skills      []inventory.Skill     `json:"skills"`
 }
 
 var (
@@ -101,6 +102,7 @@ func Handler(opts Options) (http.Handler, error) {
 			Harnesses:   status.Harnesses,
 			Configs:     scan.Configs,
 			MCPServers:  scan.MCPServers,
+			Skills:      scan.Skills,
 		})
 	})
 	mux.HandleFunc("/api/summary", func(w http.ResponseWriter, r *http.Request) {

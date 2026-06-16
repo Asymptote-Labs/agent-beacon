@@ -48,6 +48,7 @@ type inventoryResult struct {
 	LastEventObserved bool                          `json:"last_event_observed"`
 	Configs           []endpointinventory.Config    `json:"configs,omitempty"`
 	MCPServers        []endpointinventory.MCPServer `json:"mcp_servers,omitempty"`
+	Skills            []endpointinventory.Skill     `json:"skills,omitempty"`
 	UserScope         endpointinventory.UserScope   `json:"user_scope"`
 }
 
@@ -222,6 +223,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		LastEventObserved: status.LastEvent != "",
 		Configs:           configInventory.Configs,
 		MCPServers:        configInventory.MCPServers,
+		Skills:            configInventory.Skills,
 		UserScope:         configInventory.UserScope,
 	}
 	if endpointOpts.jsonOutput {
@@ -251,6 +253,14 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 				}
 			}
 			result.MCPServers = filteredServers
+
+			filteredSkills := []endpointinventory.Skill{}
+			for _, s := range result.Skills {
+				if s.Exists {
+					filteredSkills = append(filteredSkills, s)
+				}
+			}
+			result.Skills = filteredSkills
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			return err
@@ -290,6 +300,23 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
 	}
+	for _, skill := range result.Skills {
+		if !endpointOpts.allTargets && !skill.Exists {
+			continue
+		}
+		name := skill.SkillName
+		if name == "" {
+			name = skill.SkillNameHash
+		}
+		path := skill.ManifestPath
+		if path == "" {
+			path = skill.RootPath
+		}
+		if path == "" {
+			path = skill.ManifestPathHash
+		}
+		fmt.Printf("Skill: %s %s scope=%s status=%s path=%s\n", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
+	}
 	if endpointOpts.writeInventoryEvent {
 		return writeInventoryEvents(effectiveCfg, configInventory)
 	}
@@ -317,6 +344,30 @@ func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Re
 			"inventory": map[string]interface{}{
 				"config":      config,
 				"mcp_servers": servers,
+			},
+		}
+		if _, err := writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {
+			return err
+		}
+	}
+	for _, skill := range result.Skills {
+		if !skill.Exists {
+			continue
+		}
+		event := schema.NewEvent(schema.NewEventOptions{
+			Action:       "skill.inventory",
+			Category:     "inventory",
+			Severity:     schema.SeverityInfo,
+			AgentVersion: version.GetVersion(),
+			Harness: schema.HarnessInfo{
+				Name:       skill.Runtime,
+				ConfigPath: skill.ManifestPath,
+			},
+			Message: fmt.Sprintf("%s skill inventory observed", skill.Runtime),
+		})
+		event.Raw = map[string]interface{}{
+			"inventory": map[string]interface{}{
+				"skill": skill,
 			},
 		}
 		if _, err := writer.AppendEvent(event, writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode}); err != nil {

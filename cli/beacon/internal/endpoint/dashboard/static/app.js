@@ -271,16 +271,19 @@ function renderInventory(resp) {
   const harnesses = resp?.harnesses || [];
   const configs = resp?.configs || [];
   const servers = resp?.mcp_servers || [];
+  const skills = resp?.skills || [];
   const existingConfigs = configs.filter((config) => config.exists);
+  const existingSkills = skills.filter((skill) => skill.exists);
   setText("#inventory-meta", resp?.generated_at ? `Scanned ${formatTime(resp.generated_at)}` : "");
-  renderInventoryCards(harnesses, existingConfigs, servers);
+  renderInventoryCards(harnesses, existingConfigs, servers, existingSkills);
   renderInventoryHarnesses(harnesses);
   renderInventoryConfigs(configs);
   renderInventoryMCP(servers);
+  renderInventorySkills(existingSkills);
   renderInventoryScope(resp?.user_scope || {});
 }
 
-function renderInventoryCards(harnesses, configs, servers) {
+function renderInventoryCards(harnesses, configs, servers, skills = []) {
   if (!$("#inventory-cards")) return;
   const detected = harnesses.filter((harness) => harness.detected).length;
   const enabled = harnesses.filter((harness) => harness.telemetry_status === "enabled").length;
@@ -290,6 +293,7 @@ function renderInventoryCards(harnesses, configs, servers) {
     { label: "Telemetry Enabled", value: enabled, hint: "reporting to Beacon" },
     { label: "Config Files", value: configs.length, hint: `${managed} Beacon-managed` },
     { label: "MCP Servers", value: servers.length, hint: "across all configs" },
+    { label: "Agent Skills", value: skills.length, hint: "local manifests" },
   ];
   $("#inventory-cards").innerHTML = cards
     .map((card) => `
@@ -383,6 +387,27 @@ function renderInventoryMCP(servers) {
     .join("");
 }
 
+function renderInventorySkills(skills) {
+  const tbody = $("#inventory-skills");
+  if (!tbody) return;
+  if (!skills.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No agent skills discovered in supported local roots.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = skills
+    .map((skill) => `
+      <tr>
+        <td>${escapeHTML(runtimeLabel(skill.runtime))}</td>
+        <td>${escapeHTML(skill.skill_name || skill.skill_name_hash || "")}</td>
+        <td>${badge(skill.source_scope || "unknown", "badge-muted")}</td>
+        <td>${parserBadge(skill)}</td>
+        <td class="nowrap">${skill.modified_at ? escapeHTML(formatTime(skill.modified_at)) : `<span class="muted">-</span>`}</td>
+        <td class="mono path-cell">${escapeHTML(skill.manifest_path || skill.manifest_path_hash || skill.root_path || skill.root_path_hash || "")}</td>
+      </tr>
+    `)
+    .join("");
+}
+
 function renderInventoryScope(scope) {
   const el = $("#inventory-scope");
   if (!el) return;
@@ -444,6 +469,7 @@ function runtimeLabel(value) {
     "devin-cli": "Devin CLI",
     "devin-desktop": "Devin Desktop",
     grok: "Grok",
+    agent_skills: "Agent Skills",
   };
   return labels[value] || harnessLabel(value);
 }

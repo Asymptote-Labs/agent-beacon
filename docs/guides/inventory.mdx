@@ -1,11 +1,11 @@
 ---
 title: "Inventory Local Agent Runtimes"
-description: "Inventory local agent runtimes, MCP servers, and Beacon-observable configuration"
+description: "Inventory local agent runtimes, skills, MCP servers, and Beacon-observable configuration"
 ---
 
 ## Overview
 
-This guide shows how to inventory the AI agent footprint on an endpoint: installed runtimes, MCP servers, local config files, telemetry hooks, OTLP settings, and recent observed activity.
+This guide shows how to inventory the AI agent footprint on an endpoint: installed runtimes, local skills, MCP servers, local config files, telemetry hooks, OTLP settings, and recent observed activity.
 
 Use it when you need to answer what is installed, what an agent may be able to access, and whether Beacon has recently observed activity from each runtime.
 
@@ -35,13 +35,14 @@ Claude Code      installed  configured  observed
 Codex CLI        installed  managed     observed
 Cursor           installed  hooks: not installed
 MCP servers      3 configured
+Agent skills     2 discovered
 Runtime log      ~/.beacon/endpoint/logs/runtime.jsonl
 ```
 </Accordion>
 
 ## 2. Include All Local Signals
 
-Use `--all` when you want local config files, MCP servers, hooks, OTLP settings, and observed runtime coverage in one report:
+Use `--all` when you want local config files, skill manifests, MCP servers, hooks, OTLP settings, and observed runtime coverage in one report:
 
 ```bash title="Show full local inventory"
 beacon endpoint inventory --all
@@ -86,6 +87,7 @@ beacon endpoint inventory --json
 ## Key Questions Answered
 
 - Which supported agent runtimes are installed or configured on this machine?
+- Which local agent skills are present under supported skill roots?
 - Which MCP servers are referenced by local agent configuration?
 - Which runtime config files can Beacon inspect locally?
 - Which hooks, OTLP settings, or launch environment entries are present?
@@ -97,12 +99,13 @@ beacon endpoint inventory --json
 |--------|----------------|
 | Installed runtimes | Shows the local AI tools present on the endpoint. |
 | Config files | Identifies where runtime behavior and integrations are defined. |
+| Agent skills | Identifies local skill manifests by name/path/hash without retaining instruction bodies. |
 | MCP servers | Shows external tools an agent may be able to call. |
 | Hooks and OTLP settings | Confirms whether Beacon can collect telemetry. |
 | Managed state | Distinguishes Beacon-managed collection from customer-managed config. |
 | Observed events | Confirms the runtime has recently emitted Beacon telemetry. |
 
-Inventory reads local endpoint state only. It does not authenticate to remote SaaS accounts or MCP servers.
+Inventory reads local endpoint state only. It does not authenticate to remote SaaS accounts, skill marketplaces, or MCP servers.
 
 ## View Results
 
@@ -124,6 +127,17 @@ Use MCP inventory to spot tool exposure from local agent configs:
 - Server references introduced by a specific runtime config
 - User-mode versus system-mode config differences
 
+### Agent Skills
+
+Use skill inventory to spot durable local instruction surfaces:
+
+- Expected skill packs missing after workstation setup
+- Unexpected local skills on sensitive endpoints
+- User-scope versus project-scope skill differences
+- Recent skill manifest changes through file hash and modified-time metadata
+
+Beacon reports skill names, paths, hashes, scope, and parser status. It does not retain `SKILL.md` instruction bodies in inventory output or inventory events.
+
 ## 4. Open Dashboard Inventory
 
 Open the dashboard for a quick visual check alongside top harnesses, models, repositories, MCP servers, and risk signals:
@@ -135,7 +149,7 @@ beacon endpoint dashboard --open
 ## Key Features Demonstrated
 
 - Local runtime discovery without remote SaaS authentication.
-- MCP server and config inventory from supported local paths.
+- Skill, MCP server, and config inventory from supported local paths.
 - Coverage state comparison across installed, configured, managed, and observed runtimes.
 - Dashboard handoff for visual review.
 
@@ -145,6 +159,7 @@ Check whether:
 
 - The runtime is installed on the endpoint
 - Beacon can detect the runtime or its configuration file
+- The skill exists under a supported one-level skill root with a `SKILL.md` manifest
 - The MCP server is defined in a supported local config path
 - Hooks, OTLP settings, or launch environment entries are configured for that runtime
 - User mode or system mode is reading the config and runtime log you expect
