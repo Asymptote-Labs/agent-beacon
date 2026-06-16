@@ -10,8 +10,8 @@ Asymptote supports multiple [runtime surfaces](/concepts/core-concepts#runtime-s
 These integrations are grouped by where the agent runs and how telemetry is collected:
 
 - **Local**: Agent harnesses running on an endpoint write telemetry to Asymptote's local collector, hook adapter, plugin, or gateway path.
-- **CI**: Ephemeral CI jobs use a temporary collector and write normalized runtime JSONL as a build artifact or upload target instead of installing a persistent endpoint service.
-- **Cloud**: Provider-managed cloud agents can write session telemetry from the cloud sandbox to customer-managed storage, while SDK integrations instrument agent applications that run in servers, serverless functions, workers, and hosted agent platforms.
+- **[CI](/concepts/core-concepts#ci-telemetry)**: Ephemeral CI jobs use a temporary collector and write normalized runtime JSONL as a build artifact or upload target instead of installing a persistent endpoint service.
+- **[Cloud](/concepts/core-concepts#cloud-agent-telemetry)**: Provider-managed cloud agents can write session telemetry from the cloud sandbox to customer-managed storage, while [SDK integrations](/concepts/core-concepts#observe-sdk) instrument agent applications that run in servers, serverless functions, workers, and hosted agent platforms.
 
 ## Support matrix
 

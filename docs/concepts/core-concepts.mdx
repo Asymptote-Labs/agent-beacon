@@ -3,9 +3,25 @@ title: "Core Concepts"
 description: "Core concepts for Asymptote, Agent Beacon, and agent runtime telemetry"
 ---
 
-Beacon observes agent harness activity across supported local, CI, and cloud surfaces, normalizes it into a shared event model, and gives security teams records they can inspect, retain, or forward into existing pipelines.
+Asymptote observes AI agent runtime activity across supported local endpoints, CI jobs, cloud-agent sandboxes, and SDK-instrumented applications. Agent Beacon is the open-source foundation for local-first collection and customer-controlled forwarding. Asymptote Managed builds on that foundation with hosted ingest, retention, search, detections, governance, and investigations.
 
-Use this page as a quick reference for the concepts used across Asymptote and Agent Beacon docs.
+Use this page as a quick reference for terms used across Asymptote and Agent Beacon docs.
+
+## Asymptote Open Source
+
+**Asymptote Open Source** is the open-source telemetry path built on Agent Beacon. It collects supported agent activity across local endpoints, CI jobs, and cloud-agent surfaces, normalizes that activity into Beacon-compatible records, and leaves storage and forwarding under customer control. See [Open Source deployment](/deployment/open-source).
+
+## Agent Beacon
+
+**Agent Beacon** is the local-first endpoint telemetry agent in the `agent-beacon` repository. Beacon configures supported agent harnesses, receives OTLP or hook telemetry, writes local JSONL, serves the local dashboard, and can generate forwarding content for customer-managed destinations.
+
+## Asymptote Managed
+
+**Asymptote Managed** is the hosted Asymptote operating model for centralized ingest, retention, search, detections, fleet visibility, policy controls, identity mapping, approvals, SSO, RBAC, audit trails, and investigation workflows. See [Managed deployment](/deployment/managed).
+
+## Private Deployment
+
+**Private Deployment** applies managed capabilities with stronger infrastructure ownership, data isolation, residency, or custom retention requirements. See [Hosting Options](/deployment/hosting-options).
 
 ## Endpoint Agent
 
@@ -13,11 +29,23 @@ The **endpoint agent** is the local Beacon service and configuration managed by 
 
 ## Runtime Surface
 
-A **runtime surface** is the telemetry interface exposed by an agent harness. Beacon supports different surfaces because each [agent harness](/runtimes) exposes activity differently, including local OpenTelemetry configuration, hook adapters, CI wrappers, cloud sandbox hooks, SDK instrumentation, admin-configured OpenTelemetry, and gateway-configured OTLP/HTTP export.
+A **runtime surface** is the telemetry interface exposed by an agent harness. Beacon supports different surfaces because each [agent harness](/runtimes) exposes activity differently, including local OpenTelemetry configuration, hook adapters, CI wrappers, cloud sandbox hooks, SDK instrumentation, admin-configured OpenTelemetry, and gateway-configured OTLP/HTTP export. See [Runtime Surface Overview](/runtimes).
 
 ## Agent Harness
 
 An **agent harness** is the runtime or integration that produced an event. It can be a local coding agent, a CI job, a cloud-agent surface, an SDK-instrumented application, an admin-configured service integration, or a gateway-managed runtime surface. Examples include `claude`, `codex`, `gemini_cli`, `grok`, `opencode`, `devin-cli`, `devin-desktop`, `factory`, `cursor`, `claude_cowork`, and `openclaw_gateway`. Beacon stores harness context in normalized events so investigators can filter by the source that generated the activity.
+
+## CI Telemetry
+
+**CI telemetry** is agent runtime telemetry captured during ephemeral build jobs. Beacon can run a temporary collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish`, write a completed `runtime.jsonl`, and export that file as an artifact or upload target. See [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports).
+
+## Cloud-Agent Telemetry
+
+**Cloud-agent telemetry** is activity captured from provider-managed cloud agent sandboxes. Beacon cloud helpers print hook and storage setup so cloud sessions can produce Beacon-compatible `runtime.jsonl` artifacts, currently with self-serve Google Cloud Storage upload paths for supported cloud agents.
+
+## Observe SDK
+
+The **Observe SDK** is the `@asymptote/sdk` TypeScript package for instrumenting cloud-hosted agent applications, services, workers, serverless functions, and agent SDK integrations. It can export to Asymptote Managed hosted Observe or to a customer-managed OTLP collector. See [Asymptote Observe SDK](/sdk).
 
 ## Local Collector
 
@@ -33,11 +61,19 @@ The **local collector** is Beacon's OpenTelemetry Collector pipeline on the endp
 
 ## Endpoint Event
 
-An **endpoint event** is one normalized Beacon JSON object describing runtime activity on a local machine. Endpoint events include a stable `event` action, endpoint context, harness context, severity, and any optional entities the source provides. CI and cloud telemetry paths use the same Beacon-compatible event model where their collection path emits normalized records.
+An **endpoint event** is one normalized Beacon JSON object describing runtime activity. Endpoint events include a stable `event` action, endpoint context, harness context, severity, and any optional entities the source provides. CI and cloud telemetry paths use the same Beacon-compatible event model where their collection path emits normalized records. See [Endpoint event schema](/telemetry-schema/event-schema).
 
 ## Entity Model
 
-The **entity model** is Beacon's shared shape for runtime-specific payloads. Each event has an action plus typed context such as `endpoint`, `user`, `harness`, `origin`, `run`, `session`, `tool`, `file`, `command`, `mcp`, `approval`, `policy`, `prompt`, `content`, `gen_ai`, `destination`, and `health`.
+The **entity model** is Beacon's shared shape for runtime-specific payloads. Each event has an action plus typed context such as `endpoint`, `user`, `harness`, `origin`, `run`, `session`, `tool`, `file`, `command`, `mcp`, `approval`, `policy`, `prompt`, `content`, `gen_ai`, `destination`, and `health`. See [Telemetry fields](/telemetry-schema/fields).
+
+## Threat Rules
+
+**Threat rules** are local detection rules that match Beacon endpoint events and produce findings. Beacon's `scan` command runs the active rule corpus over local or CI JSONL without requiring hosted ingest. See [Detections](/detections).
+
+## Findings
+
+**Findings** are detection results produced when threat rules match runtime activity. They summarize the matched event, rule metadata, severity, and evidence so operators can review suspicious agent behavior in the local dashboard or downstream systems.
 
 ## Runtime JSONL Log
 
@@ -63,6 +99,14 @@ The **Elastic content pack** is Beacon's generated Filebeat, standalone Elastic 
 
 The **Datadog content pack** is Beacon's generated Datadog Agent custom log collection content for shipping local Beacon JSONL into Datadog Logs. The pack reads the runtime log; Beacon itself does not store Datadog API keys or site configuration.
 
+## Microsoft Sentinel Content Pack
+
+The **Microsoft Sentinel content pack** is Beacon's generated Azure Monitor Agent and Log Analytics custom log content for shipping local Beacon JSONL into Microsoft Sentinel. The pack reads the runtime log; Beacon itself does not store Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, or ingestion endpoints.
+
+## AWS CloudWatch Logs Content Pack
+
+The **AWS CloudWatch Logs content pack** is Beacon's generated Vector forwarding template, setup guidance, and sample events for shipping local Beacon JSONL into a customer-managed CloudWatch Logs log group. The pack reads the runtime log; Beacon itself does not store AWS credentials, IAM roles, log group retention, stream naming, or encryption settings.
+
 ## Sumo Logic Content Pack
 
 The **Sumo Logic content pack** is Beacon's generated setup guidance, upload smoke-test script, Vector forwarding template, and sample events for shipping local Beacon JSONL into a Sumo Logic Hosted Collector HTTP Logs & Metrics Source. The pack reads the runtime log; Beacon itself does not store Sumo Source URLs, tokens, or collector configuration.
@@ -78,6 +122,10 @@ The **AWS S3 content pack** is Beacon's generated setup guidance, AWS CLI smoke-
 ## Google Cloud Storage Content Pack
 
 The **Google Cloud Storage content pack** is Beacon's generated setup guidance, GCS upload smoke-test script, Vector `gcp_cloud_storage` forwarding template, and sample events for shipping local Beacon JSONL into a GCS bucket. The pack reads the runtime log; Beacon itself does not store Google Cloud credentials, service accounts, workload identity settings, bucket IAM, lifecycle rules, retention policies, or encryption settings.
+
+## Vector Forwarding
+
+**Vector forwarding** means a customer-managed Vector host agent tails Beacon's local `runtime.jsonl`, parses each JSON line, and delivers events to a downstream destination such as Sumo Logic, Rapid7 InsightIDR, Falcon LogScale, AWS CloudWatch Logs, AWS S3, or Google Cloud Storage. Vector owns checkpointing, batching, retries, credentials, and destination-specific settings.
 
 ## Customer-Managed Forwarding
 
@@ -102,6 +150,9 @@ The **dashboard** is a loopback-only local view over Beacon runtime logs. It inc
 ## Related
 
 <Columns cols={2}>
+  <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
+    Compare Asymptote Open Source, Managed, and Private Deployment paths.
+  </Card>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     See how runtime telemetry flows through collection, normalization, and local outputs.
   </Card>
@@ -119,5 +170,8 @@ The **dashboard** is a loopback-only local view over Beacon runtime logs. It inc
   </Card>
   <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
     Forward Beacon events into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, Microsoft Sentinel, AWS S3, Google Cloud Storage, or customer-managed pipelines.
+  </Card>
+  <Card title="Asymptote Observe SDK" icon="code" href="/sdk">
+    Instrument cloud-hosted agent applications with hosted or customer-managed export.
   </Card>
 </Columns>

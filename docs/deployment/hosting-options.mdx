@@ -3,13 +3,13 @@ title: "Hosting Options"
 description: "Choose between Open Source, Managed, and Private Deployment paths"
 ---
 
-Asymptote can start local-first with the open-source Agent Beacon endpoint agent, run as Managed Asymptote Cloud, or deploy privately for teams with stricter infrastructure requirements.
+Asymptote can start local-first with the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) [endpoint agent](/concepts/core-concepts#endpoint-agent), run as [Asymptote Managed](/concepts/core-concepts#asymptote-managed), or deploy privately for teams with stricter infrastructure requirements.
 
 | Hosting Option | Use it when | Data and operations model |
 | -------------- | ----------- | ------------------------- |
-| Asymptote Open Source | You want endpoint telemetry, local JSONL, and customer-managed forwarding. | Beacon runs on the endpoint and writes local logs by default. |
-| Asymptote Managed | You need centralized visibility, policy controls, investigations, SSO/RBAC, audit trails, and rollout support. | Asymptote provides managed ingest, retention, search, detections, and enterprise operations. |
-| Asymptote Private Deployment | You want Managed capabilities with stronger isolation, residency, or infrastructure ownership requirements. | Asymptote works with you on dedicated infrastructure and custom deployment boundaries. |
+| [Asymptote Open Source](/concepts/core-concepts#asymptote-open-source) | You want endpoint telemetry, local JSONL, and customer-managed forwarding. | Beacon runs on the endpoint and writes local logs by default. |
+| [Asymptote Managed](/concepts/core-concepts#asymptote-managed) | You need centralized visibility, policy controls, investigations, SSO/RBAC, audit trails, and rollout support. | Asymptote provides managed ingest, retention, search, detections, and enterprise operations. |
+| [Asymptote Private Deployment](/concepts/core-concepts#private-deployment) | You want Managed capabilities with stronger isolation, residency, or infrastructure ownership requirements. | Asymptote works with you on dedicated infrastructure and custom deployment boundaries. |
 
 ## Asymptote Open Source
 
@@ -47,7 +47,7 @@ Use Managed when you want hosted visibility, governance, and enterprise rollout 
 
 Managed adds centralized ingest, retention, search, detections, fleet-wide visibility, policy controls, identity mapping, approvals, investigation workflows, SSO, RBAC, audit trails, and enterprise onboarding on top of the open-source Agent Beacon foundation.
 
-For cloud-hosted agent applications, install the SDK and initialize hosted export with an Asymptote API key:
+For cloud-hosted agent applications, install the [Observe SDK](/concepts/core-concepts#observe-sdk) and initialize hosted export with an Asymptote API key:
 
 ```bash title="Set the hosted Observe API key"
 export ASYMPTOTE_API_KEY=...

@@ -5,7 +5,7 @@ description: "Forward Beacon endpoint events into AWS CloudWatch Logs with custo
 
 ## Forwarding Overview
 
-Beacon `v0.0.42` added AWS CloudWatch Logs support for teams that want Beacon endpoint events forwarded into a customer-managed CloudWatch Logs log group for observability, security search, subscriptions, exports, or downstream detection workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Your customer-managed Vector agent tails that file and writes parsed Beacon events to CloudWatch Logs.
+Beacon `v0.0.42` added the [AWS CloudWatch Logs content pack](/concepts/core-concepts#aws-cloudwatch-logs-content-pack) for teams that want Beacon endpoint events forwarded into a customer-managed CloudWatch Logs log group for observability, security search, subscriptions, exports, or downstream detection workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Your customer-managed [Vector forwarding](/concepts/core-concepts#vector-forwarding) agent tails that file and writes parsed Beacon events to CloudWatch Logs.
 
 Use this path when you want Beacon events forwarded to AWS CloudWatch Logs without storing AWS credentials, profiles, IAM roles, log group retention settings, stream names, or encryption settings in Beacon endpoint configuration.
 

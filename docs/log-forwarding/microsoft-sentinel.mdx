@@ -5,7 +5,7 @@ description: "Forward Beacon endpoint events into Microsoft Sentinel with Azure 
 
 ## Forwarding Overview
 
-Beacon `v0.0.32` added Microsoft Sentinel support for teams that want Beacon endpoint events in Log Analytics and Sentinel hunting workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Azure Monitor Agent tails that file and sends new records through a Data Collection Rule (DCR) into a custom Log Analytics table.
+Beacon `v0.0.32` added the [Microsoft Sentinel content pack](/concepts/core-concepts#microsoft-sentinel-content-pack) for teams that want Beacon endpoint events in Log Analytics and Sentinel hunting workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Azure Monitor Agent tails that file and sends new records through a Data Collection Rule (DCR) into a custom Log Analytics table.
 
 Use this path when you want Sentinel ingestion without storing Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, or ingestion endpoints in Beacon endpoint configuration.
 

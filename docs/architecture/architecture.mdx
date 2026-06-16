@@ -5,7 +5,7 @@ description: "How Beacon collects, normalizes, stores, and forwards agent harnes
 
 ## Overview
 
-Agent Beacon is the open-source telemetry layer for AI agents wherever they run: locally, in CI, or in the cloud. Supported [agent harnesses](/runtimes) emit activity through [OpenTelemetry](/concepts/core-concepts#otlp), native [hook](/concepts/core-concepts#hooks) payloads, CI wrappers, cloud sandbox hooks, or SDK instrumentation. Beacon collects those runtime-specific signals and normalizes them into a shared event model for inspection, retention, and customer-controlled forwarding.
+Agent Beacon is the open-source telemetry layer for AI agents wherever they run: locally, in [CI](/concepts/core-concepts#ci-telemetry), or in the [cloud](/concepts/core-concepts#cloud-agent-telemetry). Supported [agent harnesses](/runtimes) emit activity through [OpenTelemetry](/concepts/core-concepts#otlp), native [hook](/concepts/core-concepts#hooks) payloads, CI wrappers, cloud sandbox hooks, or [SDK instrumentation](/concepts/core-concepts#observe-sdk). Beacon collects those runtime-specific signals and normalizes them into a shared [endpoint event](/concepts/core-concepts#endpoint-event) model for inspection, retention, and customer-controlled forwarding.
 
 The endpoint architecture is local-first: local endpoint telemetry can be inspected and forwarded without sending it to a hosted Beacon backend. CI and cloud-agent paths use the same normalized event model through surface-specific setup paths rather than a persistent endpoint service.
 
@@ -16,8 +16,8 @@ The endpoint architecture is local-first: local endpoint telemetry can be inspec
 1. **Runtime surfaces:** Supported [agent harnesses](/runtimes) expose different [telemetry surfaces](/concepts/core-concepts#runtime-surface). Beacon uses the strongest surface available for each runtime instead of forcing every tool through one adapter.
 2. **Local collection:** Beacon receives OTLP gRPC, OTLP HTTP, or native hook payloads on the endpoint, depending on the runtime.
 3. **Normalization:** Logs, traces, metrics, resource attributes, and hook payloads are mapped into one endpoint event model with consistent event, endpoint, harness, session, tool, command, file, approval, policy, content, and destination context.
-4. **Local storage and inspection:** Beacon writes one JSON object per line to `runtime.jsonl`. The local [dashboard](/cli/dashboard) reads recent runtime logs over a loopback-only service for rollout validation and investigation.
-5. **Forwarding:** External SIEM, log, and storage destinations consume the same normalized JSONL stream, or receive events directly from optional collector exporters.
+4. **Local storage and inspection:** Beacon writes one JSON object per line to the [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). The local [dashboard](/concepts/core-concepts#dashboard) reads recent runtime logs over a loopback-only service for rollout validation and investigation.
+5. **Forwarding:** External SIEM, log, and storage destinations consume the same normalized JSONL stream through [customer-managed forwarding](/concepts/core-concepts#customer-managed-forwarding), or receive events directly from optional collector exporters.
 
 ## End-to-End Flow
 
@@ -53,7 +53,7 @@ On macOS, the collector runs under `launchd` in [user mode or system mode](/conc
 
 ### Vector forwarding
 
-Use Vector when you want a customer-managed host agent to tail `runtime.jsonl` and forward Beacon events without storing destination secrets in Beacon endpoint configuration.
+Use [Vector forwarding](/concepts/core-concepts#vector-forwarding) when you want a customer-managed host agent to tail `runtime.jsonl` and forward Beacon events without storing destination secrets in Beacon endpoint configuration.
 
 - Beacon remains the local JSONL producer.
 - Vector tails the active log path, checkpoints offsets, batches events, and retries delivery.

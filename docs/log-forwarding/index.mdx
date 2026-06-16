@@ -5,13 +5,13 @@ description: "Forward Beacon endpoint events from local JSONL into SIEMs, log ag
 
 ## Forwarding Overview
 
-Beacon writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) as JSONL. The active [runtime log](/concepts/core-concepts#runtime-jsonl-log) is the handoff point for local review, customer-managed log pipelines, log aggregators, object storage exporters, and most SIEM content packs. Beacon can also enable optional collector exporters for [Splunk HTTP Event Collector (HEC)](/concepts/core-concepts#splunk-hec) and [CrowdStrike Falcon LogScale HEC](/concepts/core-concepts#falcon-logscale-hec) during endpoint install or repair.
+Beacon writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) as JSONL. The active [runtime log](/concepts/core-concepts#runtime-jsonl-log) is the handoff point for local review, [customer-managed log pipelines](/concepts/core-concepts#customer-managed-forwarding), log aggregators, object storage exporters, and most SIEM content packs. Beacon can also enable optional collector exporters for [Splunk HTTP Event Collector (HEC)](/concepts/core-concepts#splunk-hec) and [CrowdStrike Falcon LogScale HEC](/concepts/core-concepts#falcon-logscale-hec) during endpoint install or repair.
 
 Use the subpages below by destination category. SIEM pages are for destinations that become investigation or detection systems. Log aggregation pages are for customer-owned pipelines and observability stores that tail local JSONL. Object storage pages are for archival or data lake export. Local pages cover the default runtime log and dashboard source.
 
-For ephemeral CI jobs, see [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports) for workflow artifacts, S3/GCS upload, and downstream handoff patterns over the completed CI `runtime.jsonl` file.
+For [ephemeral CI jobs](/concepts/core-concepts#ci-telemetry), see [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports) for workflow artifacts, S3/GCS upload, and downstream handoff patterns over the completed CI `runtime.jsonl` file.
 
-For provider-managed cloud agents, see
+For [provider-managed cloud agents](/concepts/core-concepts#cloud-agent-telemetry), see
 [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) or
 [Cursor Cloud Agents](/runtimes/cursor-cloud-agents). Cloud agents currently support
 Google Cloud Storage as the self-serve artifact destination; AWS S3 and SIEM
@@ -239,7 +239,7 @@ See [Google Cloud Storage forwarding](/log-forwarding/gcs) for IAM, object layou
 
 ### Vector log forwarding
 
-Beacon `v0.0.26` added generated Vector configs to the Sumo Logic and Rapid7 content packs, Beacon `v0.0.37` added a Vector AWS S3 content pack, Beacon `v0.0.38` added a Vector Google Cloud Storage content pack, Beacon `v0.0.42` added a Vector AWS CloudWatch Logs content pack, and Beacon `v0.0.49` added a CrowdStrike Falcon Vector path. Use these templates when you want a customer-managed host agent to tail Beacon's local `runtime.jsonl` and forward events without storing destination secrets in Beacon endpoint configuration.
+Beacon `v0.0.26` added generated Vector configs to the Sumo Logic and Rapid7 content packs, Beacon `v0.0.37` added a Vector [AWS S3 content pack](/concepts/core-concepts#aws-s3-content-pack), Beacon `v0.0.38` added a Vector [Google Cloud Storage content pack](/concepts/core-concepts#google-cloud-storage-content-pack), Beacon `v0.0.42` added a Vector [AWS CloudWatch Logs content pack](/concepts/core-concepts#aws-cloudwatch-logs-content-pack), and Beacon `v0.0.49` added a CrowdStrike Falcon Vector path. Use these templates when you want [Vector forwarding](/concepts/core-concepts#vector-forwarding) to tail Beacon's local `runtime.jsonl` and forward events without storing destination secrets in Beacon endpoint configuration.
 
 ```bash title="Generate the integration pack"
 beacon endpoint sumo install-pack --system --output ./beacon-sumo-pack
@@ -256,7 +256,7 @@ For managed endpoint deployments, install Vector through your normal endpoint to
 
 ### Customer-managed forwarding
 
-For another SIEM, observability store, archive, or pipeline, configure a customer-managed forwarder to read the Beacon runtime log and preserve each JSONL line as one event. See [Customer-managed log pipelines](/log-forwarding/customer-managed) for the dedicated forwarding contract.
+For another SIEM, observability store, archive, or pipeline, configure a [customer-managed forwarder](/concepts/core-concepts#customer-managed-forwarding) to read the Beacon runtime log and preserve each JSONL line as one event. See [Customer-managed log pipelines](/log-forwarding/customer-managed) for the dedicated forwarding contract.
 
 Recommended settings:
 

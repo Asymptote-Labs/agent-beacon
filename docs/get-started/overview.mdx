@@ -35,9 +35,9 @@ In practice, teams usually run into a few problems:
 
 Asymptote is built as a progression rather than a single all-or-nothing product.
 
-- **Asymptote Open Source** is the open-source foundation, built on Agent Beacon. It captures supported agent activity across local endpoints, CI jobs, and cloud-agent surfaces, then normalizes prompts, tool calls, file edits, commands, and related session events into records teams can inspect or forward into their own security tools.
-- **Asymptote Managed** builds on that foundation with centralized ingest, retention, detections, fleet-wide visibility, policy controls, identity mapping, approvals, and investigation workflows.
-- **Private Deployment** is for teams that need dedicated infrastructure, tighter data boundaries, or residency controls.
+- **[Asymptote Open Source](/concepts/core-concepts#asymptote-open-source)** is the open-source foundation, built on [Agent Beacon](/concepts/core-concepts#agent-beacon). It captures supported agent activity across local endpoints, CI jobs, and cloud-agent surfaces, then normalizes prompts, tool calls, file edits, commands, and related session events into records teams can inspect or forward into their own security tools.
+- **[Asymptote Managed](/concepts/core-concepts#asymptote-managed)** builds on that foundation with centralized ingest, retention, detections, fleet-wide visibility, policy controls, identity mapping, approvals, and investigation workflows.
+- **[Private Deployment](/concepts/core-concepts#private-deployment)** is for teams that need dedicated infrastructure, tighter data boundaries, or residency controls.
 
 That gives teams a practical path:
 
@@ -50,7 +50,7 @@ That gives teams a practical path:
 
 Use these rules of thumb:
 
-- Choose **Asymptote Open Source** if you want open-source telemetry across supported local, CI, and cloud agent surfaces, normalized records you control, and customer-managed forwarding into your SIEM or observability stack.
+- Choose **Asymptote Open Source** if you want open-source telemetry across supported local, [CI](/concepts/core-concepts#ci-telemetry), and [cloud agent](/concepts/core-concepts#cloud-agent-telemetry) surfaces, normalized records you control, and [customer-managed forwarding](/concepts/core-concepts#customer-managed-forwarding) into your SIEM or observability stack.
 - Choose **Asymptote Managed** if you need centralized operations across endpoints, users, and teams.
 - Choose **Private Deployment** if managed capabilities are right, but you need stronger infrastructure ownership or data-isolation requirements.
 
