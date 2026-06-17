@@ -13,9 +13,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 sh -n "$INSTALL_SCRIPT"
 sh -n "$UNINSTALL_SCRIPT"
 sh -n "$PKG_BUILD_SCRIPT"
-for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/jamf/scripts/*.sh "$ROOT_DIR"/packaging/macos/jamf/extension-attributes/*.sh "$ROOT_DIR"/packaging/macos/fleet/scripts/*.sh; do
+for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/jamf/scripts/*.sh "$ROOT_DIR"/packaging/macos/jamf/claude/*/*.sh "$ROOT_DIR"/packaging/macos/jamf/extension-attributes/*.sh "$ROOT_DIR"/packaging/macos/fleet/scripts/*.sh; do
   case "$script" in
-    */repair-falcon-claude-hooks.sh)
+    */repair-hooks.sh)
       bash -n "$script"
       ;;
     *)
@@ -23,6 +23,91 @@ for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/
       ;;
   esac
 done
+
+PKG_TEST_BIN="$TMP_DIR/pkg-bin"
+PKG_TEST_ROOT="$TMP_DIR/pkg-root"
+PKG_TEST_OUT="$TMP_DIR/pkg-out"
+PKG_TEST_LOG="$TMP_DIR/pkgbuild.log"
+PKG_CODESIGN_LOG="$TMP_DIR/codesign.log"
+mkdir -p "$PKG_TEST_BIN" "$PKG_TEST_ROOT/cli/beacon" "$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64" "$PKG_TEST_OUT"
+cat >"$PKG_TEST_ROOT/cli/beacon/beacon" <<'STUB'
+#!/bin/sh
+echo beacon
+STUB
+cat >"$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol" <<'STUB'
+#!/bin/sh
+echo beacon-otelcol
+STUB
+cat >"$PKG_TEST_ROOT/vector" <<'STUB'
+#!/bin/sh
+echo vector
+STUB
+chmod +x "$PKG_TEST_ROOT/cli/beacon/beacon" "$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol" "$PKG_TEST_ROOT/vector"
+cat >"$PKG_TEST_BIN/git" <<'STUB'
+#!/bin/sh
+echo test-version
+STUB
+cat >"$PKG_TEST_BIN/go" <<'STUB'
+#!/bin/sh
+case "$1 $2" in
+  "env GOOS")
+    echo darwin
+    ;;
+  "env GOARCH")
+    echo arm64
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+STUB
+cat >"$PKG_TEST_BIN/pkgbuild" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$PKG_TEST_LOG"
+out=""
+for arg in "$@"; do
+  out="$arg"
+done
+mkdir -p "$(dirname "$out")"
+printf 'pkg\n' > "$out"
+STUB
+cat >"$PKG_TEST_BIN/codesign" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$PKG_CODESIGN_LOG"
+STUB
+chmod +x "$PKG_TEST_BIN/git" "$PKG_TEST_BIN/go" "$PKG_TEST_BIN/pkgbuild" "$PKG_TEST_BIN/codesign"
+
+PATH="$PKG_TEST_BIN:$PATH" \
+OUT_DIR="$PKG_TEST_OUT" \
+BEACON_BIN="$PKG_TEST_ROOT/cli/beacon/beacon" \
+BEACON_COLLECTOR="$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol" \
+BEACON_VECTOR_BIN="$PKG_TEST_ROOT/vector" \
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
+PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
+PKG_TEST_LOG="$PKG_TEST_LOG" \
+PKG_CODESIGN_LOG="$PKG_CODESIGN_LOG" \
+"$PKG_BUILD_SCRIPT" >/dev/null
+
+if [ "$(wc -l < "$PKG_CODESIGN_LOG" | tr -d ' ')" != "3" ]; then
+  echo "expected codesign to sign beacon, beacon-otelcol, and vector" >&2
+  exit 1
+fi
+if ! grep -q -- '--options runtime' "$PKG_CODESIGN_LOG"; then
+  echo "codesign missing hardened runtime option" >&2
+  exit 1
+fi
+if ! grep -q -- '--timestamp' "$PKG_CODESIGN_LOG"; then
+  echo "codesign missing timestamp option" >&2
+  exit 1
+fi
+if ! grep -q 'Developer ID Application: Example Corp (TEAMID)' "$PKG_CODESIGN_LOG"; then
+  echo "codesign missing app signing identity" >&2
+  exit 1
+fi
+if ! grep -q 'Developer ID Installer: Example Corp (TEAMID)' "$PKG_TEST_LOG"; then
+  echo "pkgbuild missing installer signing identity" >&2
+  exit 1
+fi
 
 STUB_BIN="$TMP_DIR/beacon-stub"
 STUB_LOG="$TMP_DIR/argv.log"
@@ -285,11 +370,11 @@ FORWARDER_BASE="$TMP_DIR/forwarders"
 LAUNCHDAEMONS_DIR="$TMP_DIR/launchdaemons"
 mkdir -p "$LAUNCHDAEMONS_DIR"
 BEACON_VECTOR_BIN="$FAKE_VECTOR" \
-BEACON_FALCON_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/run-falcon-forwarder.sh" \
+BEACON_FALCON_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/falcon/run-forwarder.sh" \
 BEACON_FORWARDER_BASE_DIR="$FORWARDER_BASE" \
 BEACON_LAUNCHDAEMONS_DIR="$LAUNCHDAEMONS_DIR" \
 BEACON_NO_START="1" \
-"$ROOT_DIR/packaging/macos/jamf/scripts/install-falcon-vector-forwarder.sh" _ _ _ "https://falcon.example/services/collector" "falcon-token" "beacon-source" "json" "beacon-index" "$TMP_DIR/runtime.jsonl,/Users/*/.beacon/endpoint/logs/runtime.jsonl" "end" >/dev/null
+"$ROOT_DIR/packaging/macos/jamf/claude/falcon/install-forwarder.sh" _ _ _ "https://falcon.example/services/collector" "falcon-token" "beacon-source" "json" "beacon-index" "$TMP_DIR/runtime.jsonl,/Users/*/.beacon/endpoint/logs/runtime.jsonl" "end" >/dev/null
 
 if [ ! -f "$FORWARDER_BASE/falcon-vector.toml" ]; then
   echo "Falcon Vector config was not written" >&2
@@ -347,11 +432,106 @@ BEACON_FALCON_VECTOR_SCRIPT="$FAKE_FORWARDER" \
 BEACON_FALCON_HEC_ENDPOINT="https://falcon.example/services/collector" \
 BEACON_FALCON_HEC_TOKEN="falcon-token" \
 FORWARDER_MARKER="$FORWARDER_MARKER" \
-"$ROOT_DIR/packaging/macos/jamf/scripts/repair-falcon-claude-hooks-vector.sh" >/dev/null 2>&1 && {
+"$ROOT_DIR/packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh" >/dev/null 2>&1 && {
   echo "combined Falcon Vector repair should return the failing repair status" >&2
   exit 1
 }
 if [ ! -f "$FORWARDER_MARKER" ]; then
   echo "combined Falcon Vector repair should run forwarder before failing repair" >&2
+  exit 1
+fi
+
+S3_FORWARDER_BASE="$TMP_DIR/s3-forwarders"
+S3_LAUNCHDAEMONS_DIR="$TMP_DIR/s3-launchdaemons"
+mkdir -p "$S3_LAUNCHDAEMONS_DIR"
+BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+BEACON_S3_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/s3/run-forwarder.sh" \
+BEACON_FORWARDER_BASE_DIR="$S3_FORWARDER_BASE" \
+BEACON_LAUNCHDAEMONS_DIR="$S3_LAUNCHDAEMONS_DIR" \
+BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/s3-runtime.jsonl" \
+BEACON_NO_START="1" \
+AWS_SECRET_ACCESS_KEY="dont-write-me" \
+"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude" "STANDARD_IA" "end" >/dev/null
+
+if [ ! -f "$S3_FORWARDER_BASE/s3-vector.toml" ]; then
+  echo "S3 Vector config was not written" >&2
+  exit 1
+fi
+if [ ! -f "$S3_FORWARDER_BASE/s3-vector.env" ]; then
+  echo "S3 Vector env was not written" >&2
+  exit 1
+fi
+if [ ! -f "$S3_LAUNCHDAEMONS_DIR/com.beacon.endpoint.s3-forwarder.plist" ]; then
+  echo "S3 Vector plist was not written" >&2
+  exit 1
+fi
+if ! grep -q 'sinks.beacon_s3' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing sink" >&2
+  exit 1
+fi
+if ! grep -q 'compression = "gzip"' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing gzip compression" >&2
+  exit 1
+fi
+if ! grep -q 'filename_append_uuid = true' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing non-overwriting object keys" >&2
+  exit 1
+fi
+if ! grep -q 'bucket = "${BEACON_S3_BUCKET}"' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config should reference bucket env var" >&2
+  exit 1
+fi
+if grep -q 'beacon-test-bucket\|dont-write-me' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config should not contain bucket values or AWS secrets" >&2
+  exit 1
+fi
+if ! grep -q "beacon-test-bucket" "$S3_FORWARDER_BASE/s3-vector.env"; then
+  echo "S3 Vector env missing bucket" >&2
+  exit 1
+fi
+if ! grep -q "us-west-2" "$S3_FORWARDER_BASE/s3-vector.env"; then
+  echo "S3 Vector env missing region" >&2
+  exit 1
+fi
+if grep -q "dont-write-me" "$S3_FORWARDER_BASE/s3-vector.env"; then
+  echo "S3 Vector env should not contain AWS secrets" >&2
+  exit 1
+fi
+case "$(ls -l "$S3_FORWARDER_BASE/s3-vector.env" | awk '{print $1}')" in
+  -rw-------*) ;;
+  *)
+    echo "S3 Vector env should be 0600" >&2
+    exit 1
+    ;;
+esac
+if ! grep -q 'RunAtLoad' "$S3_LAUNCHDAEMONS_DIR/com.beacon.endpoint.s3-forwarder.plist"; then
+  echo "S3 Vector plist missing RunAtLoad" >&2
+  exit 1
+fi
+
+S3_FAKE_REPAIR="$TMP_DIR/fake-s3-repair-fails.sh"
+S3_FAKE_FORWARDER="$TMP_DIR/fake-s3-forwarder-runs.sh"
+S3_FORWARDER_MARKER="$TMP_DIR/s3-forwarder-ran"
+cat >"$S3_FAKE_REPAIR" <<'STUB'
+#!/bin/sh
+exit 9
+STUB
+cat >"$S3_FAKE_FORWARDER" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$S3_FORWARDER_MARKER"
+STUB
+chmod +x "$S3_FAKE_REPAIR" "$S3_FAKE_FORWARDER"
+
+BEACON_REPAIR_HOOKS_SCRIPT="$S3_FAKE_REPAIR" \
+BEACON_S3_VECTOR_SCRIPT="$S3_FAKE_FORWARDER" \
+BEACON_S3_BUCKET="beacon-test-bucket" \
+AWS_REGION="us-west-2" \
+S3_FORWARDER_MARKER="$S3_FORWARDER_MARKER" \
+"$ROOT_DIR/packaging/macos/jamf/claude/s3/repair-hooks-and-forwarder.sh" >/dev/null 2>&1 && {
+  echo "combined S3 Vector repair should return the failing repair status" >&2
+  exit 1
+}
+if [ ! -f "$S3_FORWARDER_MARKER" ]; then
+  echo "combined S3 Vector repair should run forwarder before failing repair" >&2
   exit 1
 fi

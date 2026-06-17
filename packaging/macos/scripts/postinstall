@@ -17,17 +17,29 @@ BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}" \
 BEACON_NO_START=1 \
   /opt/beacon/scripts/install-endpoint.sh
 
+restart_optional_forwarder() {
+  label="$1"
+  plist_path="$2"
+
+  if [ ! -f "$plist_path" ]; then
+    return 0
+  fi
+
+  launchctl bootout "system/$label" >/dev/null 2>&1 || true
+  launchctl bootstrap system "$plist_path" >/dev/null 2>&1 || {
+    if ! launchctl print "system/$label" >/dev/null 2>&1; then
+      echo "Warning: could not restart optional forwarder $label" >&2
+    fi
+  }
+}
+
 if command -v launchctl >/dev/null 2>&1; then
   launchctl bootout system/com.beacon.endpoint.collector >/dev/null 2>&1 || true
   launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.collector.plist >/dev/null 2>&1 || {
     launchctl print system/com.beacon.endpoint.collector >/dev/null 2>&1 || exit 1
   }
-  if [ -f /Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist ]; then
-    launchctl bootout system/com.beacon.endpoint.falcon-forwarder >/dev/null 2>&1 || true
-    launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist >/dev/null 2>&1 || {
-      launchctl print system/com.beacon.endpoint.falcon-forwarder >/dev/null 2>&1 || exit 1
-    }
-  fi
+  restart_optional_forwarder "com.beacon.endpoint.falcon-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist"
+  restart_optional_forwarder "com.beacon.endpoint.s3-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
 fi
 
 exit 0

@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-REPAIR_SCRIPT="${BEACON_REPAIR_HOOKS_SCRIPT:-/opt/beacon/jamf/scripts/repair-falcon-claude-hooks.sh}"
-FORWARDER_SCRIPT="${BEACON_FALCON_VECTOR_SCRIPT:-/opt/beacon/jamf/scripts/install-falcon-vector-forwarder.sh}"
+REPAIR_SCRIPT="${BEACON_REPAIR_HOOKS_SCRIPT:-/opt/beacon/jamf/claude/common/repair-hooks.sh}"
+FORWARDER_SCRIPT="${BEACON_FALCON_VECTOR_SCRIPT:-/opt/beacon/jamf/claude/falcon/install-forwarder.sh}"
 
 FALCON_HEC_ENDPOINT="${BEACON_FALCON_HEC_ENDPOINT:-${4:-}}"
 FALCON_HEC_TOKEN="${BEACON_FALCON_HEC_TOKEN:-${5:-}}"
@@ -26,4 +26,4 @@ echo "Installing Falcon Vector runtime-log forwarder..."
 "$FORWARDER_SCRIPT" _ _ _ "$FALCON_HEC_ENDPOINT" "$FALCON_HEC_TOKEN" "$FALCON_SOURCE" "$FALCON_SOURCETYPE" "$FALCON_INDEX"
 
 echo "Repairing endpoint and Claude hooks without collector-based Falcon forwarding..."
-"$REPAIR_SCRIPT" _ _ _ "" "" "" "" "$OTLP_GRPC_PORT" "$OTLP_HTTP_PORT" ""
+"$REPAIR_SCRIPT" _ _ _ "$OTLP_GRPC_PORT" "$OTLP_HTTP_PORT"

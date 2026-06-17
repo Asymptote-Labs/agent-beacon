@@ -59,6 +59,7 @@ sh packaging/macos/build-pkg.sh
 Create a signed package:
 
 ```bash
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
   sh packaging/macos/build-pkg.sh
 ```
@@ -66,6 +67,7 @@ PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
 Create, submit, and staple a signed/notarized package:
 
 ```bash
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
 NOTARYTOOL_PROFILE="beacon-notary-profile" \
   sh packaging/macos/build-pkg.sh
@@ -144,12 +146,12 @@ multi-repository ingest tokens. Repository-scoped ingest tokens already choose
 the target repository.
 
 The packaged Jamf samples also include
-`/opt/beacon/jamf/scripts/repair-falcon-claude-hooks.sh` for pilots that need a
-single policy to repair the system endpoint, configure Falcon LogScale HEC,
-prepare the shared runtime log for user-run hooks, reinstall Claude Code hooks
-for the console user, and run a manual hook smoke test. It accepts Falcon HEC
-settings as Jamf parameters 4-7, OTLP ports as parameters 8-9, and an optional
-Falcon repository/index as parameter 10.
+`/opt/beacon/jamf/claude/common/repair-hooks.sh` for pilots that need a
+single policy to repair the system endpoint, prepare the shared runtime log for
+user-run hooks, reinstall Claude Code hooks for the console user, and run a
+manual hook smoke test. Destination-specific forwarding policies live under
+`/opt/beacon/jamf/claude/<destination>`, sourced from
+[`packaging/macos/jamf/claude/<destination>`](https://github.com/Asymptote-Labs/agent-beacon/tree/main/packaging/macos/jamf/claude).
 
 Upload Extension Attributes from
 `packaging/macos/jamf/extension-attributes` and build Smart Groups for missing,

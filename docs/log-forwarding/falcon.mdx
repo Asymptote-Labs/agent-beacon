@@ -194,10 +194,16 @@ The package installs:
 
 ```text
 /opt/beacon/bin/vector
-/opt/beacon/jamf/scripts/install-falcon-vector-forwarder.sh
-/opt/beacon/jamf/scripts/repair-falcon-claude-hooks-vector.sh
-/opt/beacon/scripts/run-falcon-forwarder.sh
+/opt/beacon/jamf/claude/falcon/install-forwarder.sh
+/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh
+/opt/beacon/jamf/claude/falcon/run-forwarder.sh
 ```
+
+These packaged helpers come from the repository paths:
+
+- [`packaging/macos/jamf/claude/falcon/install-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/install-forwarder.sh)
+- [`packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh)
+- [`packaging/macos/jamf/claude/falcon/run-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/run-forwarder.sh)
 
 ### Manual setup without Jamf
 
@@ -207,7 +213,7 @@ To simulate the Jamf setup on one Mac, install the Beacon package, then run the 
 export FALCON_HEC_ENDPOINT="https://<tenant>.ingest.<region>.crowdstrike.com/services/collector"
 export FALCON_HEC_TOKEN="PASTE_TOKEN_HERE"
 
-sudo /opt/beacon/jamf/scripts/repair-falcon-claude-hooks-vector.sh \
+sudo /opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh \
   _ _ _ \
   "$FALCON_HEC_ENDPOINT" \
   "$FALCON_HEC_TOKEN" \
@@ -225,7 +231,7 @@ The script:
 
 ### Jamf parameters
 
-Use `repair-falcon-claude-hooks-vector.sh` when one policy should repair Beacon, install Claude hooks, and start the Vector forwarder.
+Use `/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh` when one policy should repair Beacon, install Claude hooks, and start the Vector forwarder.
 
 | Parameter | Value |
 |-----------|-------|
@@ -237,7 +243,7 @@ Use `repair-falcon-claude-hooks-vector.sh` when one policy should repair Beacon,
 | 9 | OTLP HTTP port, default `4318` |
 | 10 | Optional repository/index |
 
-For a forwarder-only policy, use `install-falcon-vector-forwarder.sh` with the same endpoint and token.
+For a forwarder-only policy, use `/opt/beacon/jamf/claude/falcon/install-forwarder.sh` with the same endpoint and token.
 
 ### Validate hook-only forwarding
 
