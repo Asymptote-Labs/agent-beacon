@@ -11,6 +11,20 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.69 · June 17, 2026
+
+- **Reorganized Jamf Claude deployment scripts** · Jamf-managed [Claude](/mdm/jamf/claude) deployments now use a structured `jamf/claude/{common,falcon,s3}/` script layout. Existing Jamf policies that reference the old flat `jamf/scripts/*` paths must be updated to point at the new locations.
+- **S3 forwarder for Claude on Jamf** · Added a Vector-based [S3 forwarding path](/mdm/jamf/claude) that tails `runtime.jsonl` and ships endpoint events to a customer-managed AWS S3 bucket as gzipped NDJSON, alongside the existing Falcon forwarder option.
+- **Falcon hook-only flows via Vector** · `beacon endpoint repair` no longer manages Falcon HEC settings directly. Falcon delivery now runs through the dedicated Vector forwarder, keeping hook repair and log forwarding cleanly separated.
+- **Optional macOS codesigning** · The macOS package build can codesign `beacon`, `beacon-otelcol`, and `vector` with a hardened runtime when `BEACON_APP_SIGN_IDENTITY` is set, simplifying notarized fleet rollouts.
+
+### v0.0.68 · June 16, 2026
+
+- **Agent skills inventory** · `beacon endpoint inventory` now discovers local agent skill manifests for Claude Code, Cursor, and `.agents/skills`, reporting names, paths, and content hashes for change detection. See the [Skills inventory guide](/inventory/skills).
+- **Skills in the local dashboard** · The Agent Inventory view in the local dashboard shows an Agent Skills table and summary card alongside agent harnesses and MCP servers, so operators can see installed skills at a glance.
+- **Metadata-only by design** · Skill discovery records hashes and file paths only — `SKILL.md` instruction bodies are never read or stored, consistent with Beacon's [data inventory](/security/data-inventory) posture.
+- **Optional `skill.inventory` events** · Running inventory with `--write-event` appends a `skill.inventory` event to the runtime log so installed-skill state can be forwarded to any configured SIEM destination.
+
 ### v0.0.67 · June 15, 2026
 
 - **Devin Cloud agent telemetry** · Added `beacon cloud devin pull` to capture autonomous [Devin Cloud agent](/runtimes/devin-cloud-agents) telemetry org-wide. Using a Devin organization service key, one central run pulls every user's cloud sessions from the Devin API, normalizes them into Beacon endpoint events (`provider=devin_cloud`), writes the runtime JSONL, and optionally uploads a per-session snapshot to a customer-managed GCS bucket. No per-user or per-sandbox setup is required.
