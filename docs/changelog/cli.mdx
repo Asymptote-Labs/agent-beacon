@@ -11,13 +11,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
-### v0.0.70 · June 17, 2026
+### v0.0.69 · June 17, 2026
 
 - **Persistent S3 forwarder credentials on macOS** · Fixed an issue where MDM-injected AWS provider-chain settings for the [S3 log forwarder](/log-forwarding/s3) were lost across `launchd` restarts. Provider env vars now persist in a root-owned env file so the managed `com.beacon.endpoint.s3-forwarder` job keeps shipping events after reboots and policy refreshes.
 - **Credentials kept out of Vector config** · AWS provider settings stay in the root-owned env file rather than `s3-vector.toml`, so packaged Vector configs remain free of customer credentials. See the [Jamf Claude S3 deployment guide](/mdm/jamf/claude) for the supported MDM injection flow.
-
-### v0.0.69 · June 17, 2026
-
 - **Reorganized Jamf Claude deployment scripts** · Jamf-managed [Claude](/mdm/jamf/claude) deployments now use a structured `jamf/claude/{common,falcon,s3}/` script layout. Existing Jamf policies that reference the old flat `jamf/scripts/*` paths must be updated to point at the new locations.
 - **S3 forwarder for Claude on Jamf** · Added a Vector-based [S3 forwarding path](/mdm/jamf/claude) that tails `runtime.jsonl` and ships endpoint events to a customer-managed AWS S3 bucket as gzipped NDJSON, alongside the existing Falcon forwarder option.
 - **Falcon hook-only flows via Vector** · `beacon endpoint repair` no longer manages Falcon HEC settings directly. Falcon delivery now runs through the dedicated Vector forwarder, keeping hook repair and log forwarding cleanly separated.
