@@ -59,6 +59,7 @@ sh packaging/macos/build-pkg.sh
 Create a signed package:
 
 ```bash
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
   sh packaging/macos/build-pkg.sh
 ```
@@ -66,6 +67,7 @@ PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
 Create, submit, and staple a signed/notarized package:
 
 ```bash
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
 NOTARYTOOL_PROFILE="beacon-notary-profile" \
   sh packaging/macos/build-pkg.sh

@@ -43,12 +43,13 @@ When building from source, pass a Vector binary into the package build:
 
 ```bash
 BEACON_VECTOR_BIN=/path/to/vector \
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Team" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Team" \
 NOTARYTOOL_PROFILE="notarytool-profile" \
   sh packaging/macos/build-pkg.sh
 ```
 
-`PKG_SIGN_IDENTITY` signs the package with `pkgbuild`. `NOTARYTOOL_PROFILE` submits the package to Apple notary service and staples the result.
+`BEACON_APP_SIGN_IDENTITY` signs the payload binaries with hardened runtime. `PKG_SIGN_IDENTITY` signs the package with `pkgbuild`. `NOTARYTOOL_PROFILE` submits the package to Apple notary service and staples the result.
 
 ## AWS Setup
 

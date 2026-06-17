@@ -24,6 +24,91 @@ for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/
   esac
 done
 
+PKG_TEST_BIN="$TMP_DIR/pkg-bin"
+PKG_TEST_ROOT="$TMP_DIR/pkg-root"
+PKG_TEST_OUT="$TMP_DIR/pkg-out"
+PKG_TEST_LOG="$TMP_DIR/pkgbuild.log"
+PKG_CODESIGN_LOG="$TMP_DIR/codesign.log"
+mkdir -p "$PKG_TEST_BIN" "$PKG_TEST_ROOT/cli/beacon" "$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64" "$PKG_TEST_OUT"
+cat >"$PKG_TEST_ROOT/cli/beacon/beacon" <<'STUB'
+#!/bin/sh
+echo beacon
+STUB
+cat >"$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol" <<'STUB'
+#!/bin/sh
+echo beacon-otelcol
+STUB
+cat >"$PKG_TEST_ROOT/vector" <<'STUB'
+#!/bin/sh
+echo vector
+STUB
+chmod +x "$PKG_TEST_ROOT/cli/beacon/beacon" "$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol" "$PKG_TEST_ROOT/vector"
+cat >"$PKG_TEST_BIN/git" <<'STUB'
+#!/bin/sh
+echo test-version
+STUB
+cat >"$PKG_TEST_BIN/go" <<'STUB'
+#!/bin/sh
+case "$1 $2" in
+  "env GOOS")
+    echo darwin
+    ;;
+  "env GOARCH")
+    echo arm64
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+STUB
+cat >"$PKG_TEST_BIN/pkgbuild" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$PKG_TEST_LOG"
+out=""
+for arg in "$@"; do
+  out="$arg"
+done
+mkdir -p "$(dirname "$out")"
+printf 'pkg\n' > "$out"
+STUB
+cat >"$PKG_TEST_BIN/codesign" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$PKG_CODESIGN_LOG"
+STUB
+chmod +x "$PKG_TEST_BIN/git" "$PKG_TEST_BIN/go" "$PKG_TEST_BIN/pkgbuild" "$PKG_TEST_BIN/codesign"
+
+PATH="$PKG_TEST_BIN:$PATH" \
+OUT_DIR="$PKG_TEST_OUT" \
+BEACON_BIN="$PKG_TEST_ROOT/cli/beacon/beacon" \
+BEACON_COLLECTOR="$PKG_TEST_ROOT/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol" \
+BEACON_VECTOR_BIN="$PKG_TEST_ROOT/vector" \
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
+PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
+PKG_TEST_LOG="$PKG_TEST_LOG" \
+PKG_CODESIGN_LOG="$PKG_CODESIGN_LOG" \
+"$PKG_BUILD_SCRIPT" >/dev/null
+
+if [ "$(wc -l < "$PKG_CODESIGN_LOG" | tr -d ' ')" != "3" ]; then
+  echo "expected codesign to sign beacon, beacon-otelcol, and vector" >&2
+  exit 1
+fi
+if ! grep -q -- '--options runtime' "$PKG_CODESIGN_LOG"; then
+  echo "codesign missing hardened runtime option" >&2
+  exit 1
+fi
+if ! grep -q -- '--timestamp' "$PKG_CODESIGN_LOG"; then
+  echo "codesign missing timestamp option" >&2
+  exit 1
+fi
+if ! grep -q 'Developer ID Application: Example Corp (TEAMID)' "$PKG_CODESIGN_LOG"; then
+  echo "codesign missing app signing identity" >&2
+  exit 1
+fi
+if ! grep -q 'Developer ID Installer: Example Corp (TEAMID)' "$PKG_TEST_LOG"; then
+  echo "pkgbuild missing installer signing identity" >&2
+  exit 1
+fi
+
 STUB_BIN="$TMP_DIR/beacon-stub"
 STUB_LOG="$TMP_DIR/argv.log"
 cat >"$STUB_BIN" <<'STUB'

@@ -49,9 +49,10 @@ cd ..
 sh packaging/macos/build-pkg.sh
 ```
 
-Set `PKG_SIGN_IDENTITY` to sign with `pkgbuild`, and set
-`NOTARYTOOL_PROFILE` to submit and staple the package with Apple's notary
-service.
+Set `BEACON_APP_SIGN_IDENTITY` to sign payload binaries with a Developer ID
+Application certificate, set `PKG_SIGN_IDENTITY` to sign the package with a
+Developer ID Installer certificate, and set `NOTARYTOOL_PROFILE` to submit and
+staple the package with Apple's notary service.
 
 ## Manual Install
 
