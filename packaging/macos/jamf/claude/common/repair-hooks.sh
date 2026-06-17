@@ -1,20 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-BEACON_BIN="/opt/beacon/bin/beacon"
-BEACON_COLLECTOR="/opt/beacon/bin/beacon-otelcol"
+BEACON_BIN="${BEACON_BIN:-/opt/beacon/bin/beacon}"
+BEACON_COLLECTOR="${BEACON_COLLECTOR:-/opt/beacon/bin/beacon-otelcol}"
 
-RUNTIME_LOG="/var/log/beacon-agent/runtime.jsonl"
+RUNTIME_LOG="${BEACON_RUNTIME_LOG:-/var/log/beacon-agent/runtime.jsonl}"
 RUNTIME_DIR="$(dirname "$RUNTIME_LOG")"
 RUNTIME_LOCK="${RUNTIME_LOG}.lock"
 
-FALCON_HEC_ENDPOINT="${4:-}"
-FALCON_HEC_TOKEN="${5:-}"
-FALCON_SOURCE="${6:-beacon-endpoint-agent}"
-FALCON_SOURCETYPE="${7:-json}"
-OTLP_GRPC_PORT="${8:-4317}"
-OTLP_HTTP_PORT="${9:-4318}"
-FALCON_INDEX="${10:-}"
+OTLP_GRPC_PORT="${BEACON_OTLP_GRPC_PORT:-${4:-4317}}"
+OTLP_HTTP_PORT="${BEACON_OTLP_HTTP_PORT:-${5:-4318}}"
 
 if [ ! -x "$BEACON_BIN" ]; then
   echo "Beacon binary not found or not executable at $BEACON_BIN" >&2
@@ -35,25 +30,6 @@ ARGS=(
   --otlp-grpc-port "$OTLP_GRPC_PORT"
   --otlp-http-port "$OTLP_HTTP_PORT"
 )
-
-if [ -n "$FALCON_HEC_ENDPOINT" ]; then
-  ARGS+=(--falcon-hec-endpoint "$FALCON_HEC_ENDPOINT")
-fi
-
-if [ -n "$FALCON_HEC_TOKEN" ]; then
-  ARGS+=(--falcon-hec-token "$FALCON_HEC_TOKEN")
-fi
-
-if [ -n "$FALCON_INDEX" ]; then
-  ARGS+=(--falcon-index "$FALCON_INDEX")
-fi
-
-if [ -n "$FALCON_HEC_ENDPOINT" ] || [ -n "$FALCON_HEC_TOKEN" ] || [ -n "$FALCON_INDEX" ]; then
-  ARGS+=(
-    --falcon-source "$FALCON_SOURCE"
-    --falcon-sourcetype "$FALCON_SOURCETYPE"
-  )
-fi
 
 echo "Repairing Beacon system endpoint..."
 "$BEACON_BIN" "${ARGS[@]}"
@@ -117,10 +93,10 @@ sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$RUNTIME_LOG"
 sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$RUNTIME_LOCK'"
 
 echo "Running manual Claude hook smoke test..."
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -lc '
-printf "{\"session_id\":\"jamf-smoke\"}" | \
+sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" BEACON_SMOKE_RUNTIME_LOG="$RUNTIME_LOG" sh -lc '
+printf "{\"session_id\":\"jamf-claude-smoke\"}" | \
 BEACON_ENDPOINT_MODE=1 \
-BEACON_ENDPOINT_LOG="/var/log/beacon-agent/runtime.jsonl" \
+BEACON_ENDPOINT_LOG="$BEACON_SMOKE_RUNTIME_LOG" \
 BEACON_ENDPOINT_CONFIG="/Library/Application Support/Beacon/Endpoint/config.json" \
 "$HOME/.beacon/endpoint/hooks/beacon-hooks" --platform claude session-start
 '

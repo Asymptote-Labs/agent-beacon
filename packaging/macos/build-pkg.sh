@@ -44,7 +44,6 @@ copy_file "$BEACON_BIN" "$PKG_ROOT/opt/beacon/bin/beacon"
 copy_file "$COLLECTOR_BIN" "$PKG_ROOT/opt/beacon/bin/beacon-otelcol"
 copy_file "$ROOT_DIR/packaging/macos/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh"
 copy_file "$ROOT_DIR/packaging/macos/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
-copy_file "$ROOT_DIR/packaging/macos/run-falcon-forwarder.sh" "$PKG_ROOT/opt/beacon/scripts/run-falcon-forwarder.sh"
 copy_file "$ROOT_DIR/packaging/macos/scripts/postinstall" "$PKG_SCRIPTS/postinstall"
 copy_file "$ROOT_DIR/packaging/macos/scripts/preinstall" "$PKG_SCRIPTS/preinstall"
 
@@ -79,7 +78,7 @@ chmod 755 "$PKG_ROOT/opt/beacon/bin/beacon" "$PKG_ROOT/opt/beacon/bin/beacon-ote
 if [ -n "$VECTOR_BIN" ]; then
   chmod 755 "$PKG_ROOT/opt/beacon/bin/vector"
 fi
-chmod 755 "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/run-falcon-forwarder.sh"
+chmod 755 "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
 find "$PKG_ROOT/opt/beacon/jamf" -type f -name '*.sh' -exec chmod 755 {} \;
 find "$PKG_ROOT/opt/beacon/fleet" -type f -name '*.sh' -exec chmod 755 {} \;
 chmod 755 "$PKG_SCRIPTS/postinstall" "$PKG_SCRIPTS/preinstall"

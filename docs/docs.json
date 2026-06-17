@@ -189,6 +189,7 @@
                 "root": "mdm/index",
                 "pages": [
                   "mdm/jamf",
+                  "mdm/claude/s3",
                   "mdm/fleet"
                 ]
               },

@@ -144,7 +144,7 @@ config, a direct HEC smoke test, sample events, and validation search guidance:
 
 For Jamf-managed hook-only Claude deployments, the Beacon package can include a
 Vector binary at `/opt/beacon/bin/vector` and run
-`/opt/beacon/jamf/scripts/install-falcon-vector-forwarder.sh`. Provide the exact
+`/opt/beacon/jamf/claude/falcon/install-forwarder.sh`. Provide the exact
 CrowdStrike connector URL shown by Falcon, for example
 `https://<tenant>.ingest.<region>.crowdstrike.com/services/collector` for
 Next-Gen SIEM HEC connectors or `/api/v1/ingest/hec` for LogScale-style HEC
@@ -322,30 +322,24 @@ policy for hook telemetry. Set
 integrations; the helper writes hook events to
 `/var/log/beacon-agent/runtime.jsonl` by default.
 
-Use `/opt/beacon/jamf/scripts/repair-falcon-claude-hooks.sh` when a Jamf policy
-needs to repair the system endpoint, configure Falcon LogScale HEC forwarding,
-prepare `/var/log/beacon-agent/runtime.jsonl` for user-run hooks, reinstall
-Claude Code hooks for the interactive console user, and run a manual Claude hook
-smoke test in one step.
+Use `/opt/beacon/jamf/claude/common/repair-hooks.sh` when a Jamf policy
+needs only to repair the system endpoint, prepare
+`/var/log/beacon-agent/runtime.jsonl` for user-run hooks, reinstall Claude Code
+hooks for the interactive console user, and run a manual Claude hook smoke test.
 
-`repair-falcon-claude-hooks.sh` Jamf script parameters:
+`repair-hooks.sh` Jamf script parameters:
 
 ```text
-Parameter 4: Falcon LogScale HEC endpoint
-Parameter 5: Falcon LogScale HEC token
-Parameter 6: Falcon source, default beacon-endpoint-agent
-Parameter 7: Falcon sourcetype, default json
-Parameter 8: OTLP gRPC port, default 4317
-Parameter 9: OTLP HTTP port, default 4318
-Parameter 10: Falcon repository/index
+Parameter 4: OTLP gRPC port, default 4317
+Parameter 5: OTLP HTTP port, default 4318
 ```
 
-Use `/opt/beacon/jamf/scripts/install-falcon-vector-forwarder.sh` when a Jamf
+Use `/opt/beacon/jamf/claude/falcon/install-forwarder.sh` when a Jamf
 policy should install only the Vector runtime-log forwarder. This is the
 recommended path when Claude events are produced by user-level hooks and the
 customer's managed Claude OTLP settings bypass Beacon's local collector.
 
-`install-falcon-vector-forwarder.sh` Jamf script parameters:
+`install-forwarder.sh` Jamf script parameters:
 
 ```text
 Parameter 4: Falcon HEC endpoint, exact connector URL
@@ -357,10 +351,20 @@ Parameter 9: Runtime log paths, default /var/log/beacon-agent/runtime.jsonl,/Use
 Parameter 10: Vector read_from, default end
 ```
 
-Use `/opt/beacon/jamf/scripts/repair-falcon-claude-hooks-vector.sh` when one
+Use `/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh` when one
 policy should repair Beacon, prepare `/var/log/beacon-agent/runtime.jsonl`,
 install Claude hooks for the console user, and install the Falcon Vector
 forwarder without relying on collector-based Falcon forwarding.
+
+The Jamf Claude helper source paths map into the package as:
+
+- [`packaging/macos/jamf/claude/common/repair-hooks.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/common/repair-hooks.sh) -> `/opt/beacon/jamf/claude/common/repair-hooks.sh`
+- [`packaging/macos/jamf/claude/falcon/install-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/install-forwarder.sh) -> `/opt/beacon/jamf/claude/falcon/install-forwarder.sh`
+- [`packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh) -> `/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh`
+- [`packaging/macos/jamf/claude/falcon/run-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/run-forwarder.sh) -> `/opt/beacon/jamf/claude/falcon/run-forwarder.sh`
+- [`packaging/macos/jamf/claude/s3/install-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/s3/install-forwarder.sh) -> `/opt/beacon/jamf/claude/s3/install-forwarder.sh`
+- [`packaging/macos/jamf/claude/s3/repair-hooks-and-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/s3/repair-hooks-and-forwarder.sh) -> `/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh`
+- [`packaging/macos/jamf/claude/s3/run-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/s3/run-forwarder.sh) -> `/opt/beacon/jamf/claude/s3/run-forwarder.sh`
 
 The managed forwarder writes:
 

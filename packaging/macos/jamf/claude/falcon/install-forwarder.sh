@@ -3,7 +3,7 @@ set -eu
 
 LABEL="${BEACON_FALCON_FORWARDER_LABEL:-com.beacon.endpoint.falcon-forwarder}"
 VECTOR_BIN="${BEACON_VECTOR_BIN:-/opt/beacon/bin/vector}"
-WRAPPER="${BEACON_FALCON_FORWARDER_WRAPPER:-/opt/beacon/scripts/run-falcon-forwarder.sh}"
+WRAPPER="${BEACON_FALCON_FORWARDER_WRAPPER:-/opt/beacon/jamf/claude/falcon/run-forwarder.sh}"
 BASE_DIR="${BEACON_FORWARDER_BASE_DIR:-/Library/Application Support/Beacon/Forwarders}"
 LAUNCHDAEMONS_DIR="${BEACON_LAUNCHDAEMONS_DIR:-/Library/LaunchDaemons}"
 CONFIG_PATH="${BEACON_FALCON_VECTOR_CONFIG:-$BASE_DIR/falcon-vector.toml}"
