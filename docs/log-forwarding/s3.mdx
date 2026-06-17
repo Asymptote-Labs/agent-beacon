@@ -113,7 +113,7 @@ vector validate /etc/vector/beacon-s3.toml
 vector --config /etc/vector/beacon-s3.toml
 ```
 
-In managed deployments, provide `BEACON_S3_BUCKET`, optional `BEACON_S3_PREFIX`, `AWS_REGION`, optional `BEACON_S3_STORAGE_CLASS`, and any AWS credential-provider settings through the Vector service environment, host identity, or MDM/secret tooling. Do not store AWS destination secrets in Beacon endpoint configuration.
+In managed deployments, provide `BEACON_S3_BUCKET`, optional `BEACON_S3_PREFIX`, `AWS_REGION`, optional `BEACON_S3_STORAGE_CLASS`, and any AWS credential-provider settings through the Vector service environment, host identity, or MDM/secret tooling. The packaged macOS S3 helper persists set AWS provider-chain environment variables such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE`, and `AWS_ROLE_ARN` to `/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600` for the launchd-managed Vector process. Do not store AWS destination secrets in Beacon endpoint configuration.
 
 The template expects a Vector version with the `file` source, `remap` transform, and `aws_s3` sink. It parses each Beacon JSONL line and re-encodes the original Beacon event as JSON with newline-delimited framing so S3 receives one Beacon event per line, without a Vector wrapper.
 

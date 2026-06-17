@@ -45,6 +45,14 @@ shell_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+write_env_if_set() {
+  name="$1"
+  eval "value=\${$name:-}"
+  if [ -n "$value" ]; then
+    printf 'export %s=%s\n' "$name" "$(shell_quote "$value")"
+  fi
+}
+
 toml_quote() {
   printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 }
@@ -139,6 +147,14 @@ chmod 0644 "$CONFIG_PATH"
   printf 'export BEACON_S3_PREFIX=%s\n' "$(shell_quote "$S3_PREFIX")"
   printf 'export BEACON_S3_STORAGE_CLASS=%s\n' "$(shell_quote "$S3_STORAGE_CLASS")"
   printf 'export BEACON_VECTOR_READ_FROM=%s\n' "$(shell_quote "$VECTOR_READ_FROM")"
+  write_env_if_set AWS_ACCESS_KEY_ID
+  write_env_if_set AWS_SECRET_ACCESS_KEY
+  write_env_if_set AWS_SESSION_TOKEN
+  write_env_if_set AWS_PROFILE
+  write_env_if_set AWS_SHARED_CREDENTIALS_FILE
+  write_env_if_set AWS_CONFIG_FILE
+  write_env_if_set AWS_WEB_IDENTITY_TOKEN_FILE
+  write_env_if_set AWS_ROLE_ARN
 } >"$ENV_PATH"
 chmod 0600 "$ENV_PATH"
 
