@@ -156,12 +156,6 @@ Expected validation fields:
 vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl
 ```
 
-## macOS MDM Credential Injection
-
-For a managed macOS package, run `/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh` from MDM or a root shell with destination settings in the environment. The helper writes non-secret forwarding settings and any set AWS provider-chain variables to `/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600`, then starts `com.beacon.endpoint.s3-forwarder`.
-
-Supported provider-chain variables include `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE`, and `AWS_ROLE_ARN`. These values are not written to Beacon endpoint config or `s3-vector.toml`.
-
 ### Flags
 
 | Flag | Description |
@@ -169,6 +163,12 @@ Supported provider-chain variables include `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCE
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
+
+## macOS MDM Credential Injection
+
+For a managed macOS package, run `/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh` from MDM or a root shell with destination settings in the environment. The helper writes non-secret forwarding settings and any set AWS provider-chain variables to `/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600`, then starts `com.beacon.endpoint.s3-forwarder`.
+
+Supported provider-chain variables include `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE`, and `AWS_ROLE_ARN`. These values are not written to Beacon endpoint config or `s3-vector.toml`.
 
 ## Related
 
