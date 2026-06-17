@@ -133,6 +133,29 @@ credential-provider settings through the Vector service environment, host
 identity, MDM, or secret tooling. Keep AWS credentials, IAM roles, log group
 retention, and encryption outside Beacon endpoint configuration.
 
+For AWS S3, keep Beacon as the local JSONL producer and deploy Vector to tail
+`/var/log/beacon-agent/runtime.jsonl` into a customer-managed bucket. Generate
+Beacon's S3 content pack for setup guidance, a Vector config, sample events, and
+validation commands:
+
+```bash
+/opt/beacon/bin/beacon endpoint s3 install-pack --system --output ./beacon-s3-pack
+/opt/beacon/bin/beacon endpoint s3 validate --system
+```
+
+For Jamf-managed Claude deployments, the Beacon package can include Vector and
+run `/opt/beacon/jamf/claude/s3/install-forwarder.sh` or the combined
+`/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh`. Provide
+`BEACON_S3_BUCKET`, `AWS_REGION`, optional `BEACON_S3_PREFIX`, and AWS
+provider-chain values through MDM secret tooling or a root environment. The
+helper persists set AWS provider-chain variables such as `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`,
+`AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`, and `AWS_ROLE_ARN` to
+`/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600`
+for the launchd-managed Vector process. Keep bucket policy, IAM, lifecycle, and
+encryption in AWS.
+
 For CrowdStrike Falcon, use Beacon as the local JSONL producer and deploy Vector
 to tail hook-written or OTLP-written `runtime.jsonl` events into the Falcon HEC
 connector. Generate Beacon's Falcon content pack for setup guidance, a Vector

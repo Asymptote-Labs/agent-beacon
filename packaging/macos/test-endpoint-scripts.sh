@@ -450,7 +450,14 @@ BEACON_FORWARDER_BASE_DIR="$S3_FORWARDER_BASE" \
 BEACON_LAUNCHDAEMONS_DIR="$S3_LAUNCHDAEMONS_DIR" \
 BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/s3-runtime.jsonl" \
 BEACON_NO_START="1" \
-AWS_SECRET_ACCESS_KEY="dont-write-me" \
+AWS_ACCESS_KEY_ID="test-access-key" \
+AWS_SECRET_ACCESS_KEY="test-secret-key" \
+AWS_SESSION_TOKEN="test-session-token" \
+AWS_PROFILE="test-profile" \
+AWS_SHARED_CREDENTIALS_FILE="/tmp/test-aws-credentials" \
+AWS_CONFIG_FILE="/tmp/test-aws-config" \
+AWS_WEB_IDENTITY_TOKEN_FILE="/tmp/test-web-identity-token" \
+AWS_ROLE_ARN="arn:aws:iam::123456789012:role/beacon-demo" \
 "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude" "STANDARD_IA" "end" >/dev/null
 
 if [ ! -f "$S3_FORWARDER_BASE/s3-vector.toml" ]; then
@@ -481,8 +488,8 @@ if ! grep -q 'bucket = "${BEACON_S3_BUCKET}"' "$S3_FORWARDER_BASE/s3-vector.toml
   echo "S3 Vector config should reference bucket env var" >&2
   exit 1
 fi
-if grep -q 'beacon-test-bucket\|dont-write-me' "$S3_FORWARDER_BASE/s3-vector.toml"; then
-  echo "S3 Vector config should not contain bucket values or AWS secrets" >&2
+if grep -q 'beacon-test-bucket\|test-access-key\|test-secret-key\|test-session-token' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config should not contain bucket values or AWS credentials" >&2
   exit 1
 fi
 if ! grep -q "beacon-test-bucket" "$S3_FORWARDER_BASE/s3-vector.env"; then
@@ -493,10 +500,21 @@ if ! grep -q "us-west-2" "$S3_FORWARDER_BASE/s3-vector.env"; then
   echo "S3 Vector env missing region" >&2
   exit 1
 fi
-if grep -q "dont-write-me" "$S3_FORWARDER_BASE/s3-vector.env"; then
-  echo "S3 Vector env should not contain AWS secrets" >&2
-  exit 1
-fi
+for expected in \
+  "AWS_ACCESS_KEY_ID='test-access-key'" \
+  "AWS_SECRET_ACCESS_KEY='test-secret-key'" \
+  "AWS_SESSION_TOKEN='test-session-token'" \
+  "AWS_PROFILE='test-profile'" \
+  "AWS_SHARED_CREDENTIALS_FILE='/tmp/test-aws-credentials'" \
+  "AWS_CONFIG_FILE='/tmp/test-aws-config'" \
+  "AWS_WEB_IDENTITY_TOKEN_FILE='/tmp/test-web-identity-token'" \
+  "AWS_ROLE_ARN='arn:aws:iam::123456789012:role/beacon-demo'"
+do
+  if ! grep -q "$expected" "$S3_FORWARDER_BASE/s3-vector.env"; then
+    echo "S3 Vector env missing AWS provider setting: $expected" >&2
+    exit 1
+  fi
+done
 case "$(ls -l "$S3_FORWARDER_BASE/s3-vector.env" | awk '{print $1}')" in
   -rw-------*) ;;
   *)

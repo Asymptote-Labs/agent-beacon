@@ -7,7 +7,7 @@ description: "Generate AWS S3 forwarding content and validation events for Beaco
 
 Use `beacon endpoint s3` to generate AWS S3 forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload `runtime.jsonl` to an S3 bucket as gzip-compressed NDJSON.
 
-Beacon does not store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules, or encryption settings. Keep those values in AWS, Vector, endpoint-management policy, or deployment tooling.
+Beacon does not store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules, or encryption settings in endpoint configuration. Keep those values in AWS, Vector, endpoint-management policy, or deployment tooling. For packaged macOS MDM deployments, the managed S3 helper can persist MDM-injected AWS provider-chain environment variables to the root-owned Vector environment file used by launchd.
 
 ```bash title="Command syntax"
 beacon endpoint s3 [command]
@@ -155,6 +155,12 @@ Expected validation fields:
 ```text
 vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl
 ```
+
+## macOS MDM Credential Injection
+
+For a managed macOS package, run `/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh` from MDM or a root shell with destination settings in the environment. The helper writes non-secret forwarding settings and any set AWS provider-chain variables to `/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600`, then starts `com.beacon.endpoint.s3-forwarder`.
+
+Supported provider-chain variables include `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE`, and `AWS_ROLE_ARN`. These values are not written to Beacon endpoint config or `s3-vector.toml`.
 
 ### Flags
 

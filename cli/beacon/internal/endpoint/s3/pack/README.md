@@ -111,7 +111,14 @@ vector --config /etc/vector/beacon-s3.toml
 In managed deployments, provide `BEACON_S3_BUCKET`, optional
 `BEACON_S3_PREFIX`, `AWS_REGION`, and any AWS credential-provider settings
 through the Vector service environment, host identity, or MDM/secret tooling.
-Do not store AWS destination secrets in Beacon endpoint configuration.
+For the packaged macOS helper, set AWS provider-chain variables in the MDM
+script environment; the helper persists set values such as `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`,
+`AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`, and `AWS_ROLE_ARN` to
+`/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode
+`0600` so launchd-started Vector can authenticate. Do not store AWS
+destination secrets in Beacon endpoint configuration or `s3-vector.toml`.
 
 The Vector template is intentionally simple and expects a Vector version with
 the `file` source, `remap` transform, and `aws_s3` sink. It parses each Beacon
