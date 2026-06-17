@@ -189,7 +189,7 @@
                 "root": "mdm/index",
                 "pages": [
                   "mdm/jamf",
-                  "mdm/claude/s3",
+                  "mdm/jamf/claude",
                   "mdm/fleet"
                 ]
               },
@@ -618,6 +618,10 @@
     {
       "source": "/cli/mdm-deployment",
       "destination": "/mdm"
+    },
+    {
+      "source": "/mdm/claude/s3",
+      "destination": "/mdm/jamf/claude"
     },
     {
       "source": "/cli/overview",

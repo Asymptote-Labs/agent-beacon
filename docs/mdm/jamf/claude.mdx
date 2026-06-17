@@ -1,9 +1,9 @@
 ---
-title: "Claude to S3 with Jamf"
-description: "Run an end-to-end Jamf pilot that installs Claude Code hooks and forwards Beacon runtime JSONL to AWS S3 with Vector."
+title: "Claude with Jamf"
+description: "Run Jamf pilots that install Claude Code hooks and forward Beacon runtime JSONL to destinations such as AWS S3."
 ---
 
-## Overview
+## S3 Forwarding Overview
 
 Use this flow to test a managed Claude Code deployment on a pilot Mac where Beacon writes local endpoint events to `/var/log/beacon-agent/runtime.jsonl` and a packaged Vector service forwards those events to AWS S3.
 
@@ -18,7 +18,7 @@ flowchart LR
   jamfPolicy["Jamf policy"] -->|"bucket, region, prefix"| vectorForwarder
 ```
 
-## Package requirements
+## Package Requirements
 
 Build or obtain a signed and notarized Beacon macOS package that includes:
 
@@ -50,7 +50,7 @@ NOTARYTOOL_PROFILE="notarytool-profile" \
 
 `PKG_SIGN_IDENTITY` signs the package with `pkgbuild`. `NOTARYTOOL_PROFILE` submits the package to Apple notary service and staples the result.
 
-## AWS setup
+## AWS Setup
 
 Create a dedicated bucket prefix for the pilot and grant the identity used by the Vector process permission to write only that prefix:
 
@@ -69,7 +69,7 @@ Create a dedicated bucket prefix for the pilot and grant the identity used by th
 
 Provide AWS credentials through host identity, MDM secret tooling, or the standard AWS credential provider chain available to the LaunchDaemon. Do not place AWS access keys in Beacon endpoint configuration.
 
-## Jamf policy
+## Jamf Policy
 
 Install the Beacon package first, then run the combined helper from a policy scoped to the pilot Mac:
 
@@ -99,7 +99,7 @@ The helper:
 - installs Claude Code hooks for the interactive console user
 - writes a manual Claude hook smoke event
 
-## Manual pilot command
+## Manual Pilot Command
 
 For a one-Mac pilot without Jamf policy parameters, install the signed package and run:
 
@@ -112,7 +112,7 @@ sudo BEACON_S3_BUCKET="example-security-logs" \
 
 Fully restart Claude Code after the hook install, then start a new Claude session to generate real hook events.
 
-## Validate delivery
+## Validate Delivery
 
 Confirm local state on the Mac:
 
