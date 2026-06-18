@@ -90,6 +90,7 @@ func TestVectorConfigUsesAWSS3SinkAndPreservesJSONShape(t *testing.T) {
 		`include = ["{{LOG_PATH}}"]`,
 		`include = ["{{INVENTORY_LOG_PATH}}"]`,
 		`read_from = "end"`,
+		`read_from = "beginning"`,
 		`. = parse_json!(.message)`,
 		`type = "aws_s3"`,
 		`bucket = "${BEACON_S3_BUCKET}"`,
