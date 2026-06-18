@@ -195,6 +195,7 @@
                 "pages": [
                   "mdm/jamf",
                   "mdm/jamf/claude",
+                  "guides/jamf-s3-mdm",
                   "mdm/fleet"
                 ]
               },
