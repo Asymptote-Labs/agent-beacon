@@ -713,7 +713,7 @@ func TestRobustEndpointCommandsRegistered(t *testing.T) {
 	}
 }
 
-func TestWriteInventoryEventsAppendsConfigInventory(t *testing.T) {
+func TestWriteInventoryEventsAppendsInventorySnapshot(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	cfg := endpointconfig.Default(true, logPath)
 	result := endpointinventory.Result{
@@ -778,16 +778,20 @@ func TestWriteInventoryEventsAppendsConfigInventory(t *testing.T) {
 	if err := writeInventoryEvents(cfg, result); err != nil {
 		t.Fatalf("writeInventoryEvents returned error: %v", err)
 	}
-	data, err := os.ReadFile(logPath)
+	if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), "inventory.") {
+		t.Fatalf("runtime log should not contain inventory events: %s", string(data))
+	}
+	inventoryLogPath := endpointinventory.LogPath(logPath, cfg.UserMode)
+	data, err := os.ReadFile(inventoryLogPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if strings.Count(text, "config.inventory") != 1 {
-		t.Fatalf("inventory events = %d, want 1; log=%s", strings.Count(text, "config.inventory"), text)
+	if strings.Count(text, "inventory.heartbeat") != 1 {
+		t.Fatalf("heartbeat events = %d, want 1; log=%s", strings.Count(text, "inventory.heartbeat"), text)
 	}
-	if strings.Count(text, "skill.inventory") != 1 {
-		t.Fatalf("skill inventory events = %d, want 1; log=%s", strings.Count(text, "skill.inventory"), text)
+	if strings.Count(text, "inventory.snapshot") != 1 {
+		t.Fatalf("snapshot events = %d, want 1; log=%s", strings.Count(text, "inventory.snapshot"), text)
 	}
 	if !strings.Contains(text, "filesystem") {
 		t.Fatalf("inventory log missing MCP server summary: %s", text)
@@ -797,6 +801,74 @@ func TestWriteInventoryEventsAppendsConfigInventory(t *testing.T) {
 	}
 	if strings.Contains(text, "missing-skill-root") {
 		t.Fatalf("inventory log should not include missing skill roots: %s", text)
+	}
+}
+
+func TestInventoryHeartbeatTTLAndSnapshotDigest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"}}}`)
+	cfg := endpointconfig.Default(true, logPath)
+	enabled := true
+	cfg.Inventory = &endpointconfig.Inventory{Enabled: &enabled, TTLSeconds: 86400, Runtimes: []string{"cursor", "claude_code"}}
+	settings := endpointconfig.InventoryConfig(cfg)
+
+	first, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	if err != nil {
+		t.Fatalf("first heartbeat returned error: %v", err)
+	}
+	if !first.Written || !first.SnapshotWritten || first.SnapshotDigest == "" {
+		t.Fatalf("first heartbeat = %#v, want heartbeat and snapshot", first)
+	}
+	second, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	if err != nil {
+		t.Fatalf("second heartbeat returned error: %v", err)
+	}
+	if second.Written || second.SkippedReason != "ttl_active" {
+		t.Fatalf("second heartbeat = %#v, want TTL skip", second)
+	}
+	forced, err := writeInventoryHeartbeat(cfg, settings, true, work, "hook", "cursor")
+	if err != nil {
+		t.Fatalf("forced heartbeat returned error: %v", err)
+	}
+	if !forced.Written || forced.SnapshotWritten {
+		t.Fatalf("forced unchanged heartbeat = %#v, want heartbeat only", forced)
+	}
+
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"},"two":{"command":"uvx"}}}`)
+	changed, err := writeInventoryHeartbeat(cfg, settings, true, work, "hook", "cursor")
+	if err != nil {
+		t.Fatalf("changed heartbeat returned error: %v", err)
+	}
+	if !changed.Written || !changed.SnapshotWritten || changed.SnapshotDigest == forced.SnapshotDigest {
+		t.Fatalf("changed heartbeat = %#v, want new snapshot digest", changed)
+	}
+
+	if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), "inventory.") {
+		t.Fatalf("runtime log should not contain inventory events: %s", string(data))
+	}
+	inventoryLogPath := endpointinventory.LogPath(logPath, cfg.UserMode)
+	data, err := os.ReadFile(inventoryLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Count(text, "inventory.heartbeat") != 3 {
+		t.Fatalf("heartbeat count = %d, want 3; log=%s", strings.Count(text, "inventory.heartbeat"), text)
+	}
+	if strings.Count(text, "inventory.snapshot") != 2 {
+		t.Fatalf("snapshot count = %d, want 2; log=%s", strings.Count(text, "inventory.snapshot"), text)
+	}
+	if !strings.Contains(text, `"server_name":"two"`) {
+		t.Fatalf("changed snapshot missing new MCP server: %s", text)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(logPath), "inventory-state.json")); err != nil {
+		t.Fatalf("inventory state should live beside inventory log: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".beacon", "endpoint", "inventory-state.json")); !os.IsNotExist(err) {
+		t.Fatalf("inventory state should not use endpoint config base, err=%v", err)
 	}
 }
 
@@ -812,6 +884,16 @@ func TestTopLevelAliasesRegistered(t *testing.T) {
 		if cmd.Flags().Lookup("user") == nil || cmd.Flags().Lookup("log-path") == nil {
 			t.Fatalf("top-level %s alias missing endpoint flags", name)
 		}
+	}
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

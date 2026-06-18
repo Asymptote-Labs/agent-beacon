@@ -70,6 +70,11 @@ var endpointOpts struct {
 	includeEventSummaries    bool
 	includeRawEvents         bool
 	writeInventoryEvent      bool
+	inventoryHeartbeatForce  bool
+	inventoryHeartbeatConfig string
+	inventoryWorkingDir      string
+	inventoryTrigger         string
+	inventoryTriggerHarness  string
 }
 
 var endpointCmd = &cobra.Command{
@@ -91,6 +96,14 @@ var endpointInventoryCmd = &cobra.Command{
 	Short:        "Show installed, configured, and observed endpoint inventory",
 	SilenceUsage: true,
 	RunE:         runEndpointInventory,
+}
+
+var endpointInventoryHeartbeatCmd = &cobra.Command{
+	Use:          "heartbeat",
+	Short:        "Write endpoint inventory heartbeat events",
+	Hidden:       true,
+	SilenceUsage: true,
+	RunE:         runEndpointInventoryHeartbeat,
 }
 
 var endpointTestEventCmd = &cobra.Command{
@@ -349,6 +362,7 @@ func init() {
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
 	endpointCmd.AddCommand(endpointConfigCmd)
+	endpointInventoryCmd.AddCommand(endpointInventoryHeartbeatCmd)
 	endpointConfigCmd.AddCommand(endpointConfigShowCmd)
 	endpointConfigCmd.AddCommand(endpointConfigValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointIntegrationsValidateCmd)
@@ -370,7 +384,7 @@ func init() {
 	endpointVSCodeCmd.AddCommand(endpointVSCodeStatusCmd)
 	endpointVSCodeCmd.AddCommand(endpointVSCodeValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -416,6 +430,12 @@ func init() {
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
+	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.inventoryHeartbeatForce, "force", false, "Write inventory heartbeat even when TTL has not expired")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryHeartbeatConfig, "config", "", "Endpoint config path")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryWorkingDir, "working-dir", "", "Working directory for project inventory")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTrigger, "trigger", "manual", "Inventory trigger source")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTriggerHarness, "trigger-harness", "", "Harness that triggered inventory")
+	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print heartbeat result as JSON")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.fix, "fix", false, "Apply safe endpoint doctor remediations")
 	topLevelStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")

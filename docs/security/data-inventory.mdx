@@ -33,7 +33,14 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | MCP servers | Runtime, source path hash, server name/hash, transport, command name/hash, argument count, safe env-key names/counts, and definition hash |
 | Agent skills | Runtime/source family, scope, skill name/hash, root and manifest path/hash, file hash, modified time, and parser status |
 
-Skill inventory is metadata-only. Beacon hashes `SKILL.md` manifests for change detection but does not retain skill instruction bodies in inventory JSON, dashboard responses, or `skill.inventory` events.
+Skill inventory is metadata-only. Beacon hashes `SKILL.md` manifests for change detection but does not retain skill instruction bodies in inventory JSON, dashboard responses, or inventory snapshot events.
+
+Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. For Cursor and Claude Code, normal hook execution can periodically write:
+
+- `inventory.heartbeat`, a small event showing that Beacon checked local agent configuration inventory and recording counts plus a snapshot digest.
+- `inventory.snapshot`, a metadata-only snapshot written when the digest changes or inventory is first initialized.
+
+Snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
 
 ## Required Fields
 

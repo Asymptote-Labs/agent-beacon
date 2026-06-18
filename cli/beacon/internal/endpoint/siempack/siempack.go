@@ -10,6 +10,7 @@ import (
 )
 
 const logPathToken = "{{LOG_PATH}}"
+const inventoryLogPathToken = "{{INVENTORY_LOG_PATH}}"
 
 type File struct {
 	Name            string
@@ -27,7 +28,15 @@ func ReadFile(fsys fs.FS, path string) (string, error) {
 }
 
 func RenderLogPath(content, logPath string) string {
-	return strings.ReplaceAll(content, logPathToken, logPath)
+	content = strings.ReplaceAll(content, logPathToken, logPath)
+	return strings.ReplaceAll(content, inventoryLogPathToken, InventoryLogPath(logPath))
+}
+
+func InventoryLogPath(logPath string) string {
+	if logPath == "" {
+		return "inventory_state.jsonl"
+	}
+	return filepath.Join(filepath.Dir(logPath), "inventory_state.jsonl")
 }
 
 // JSONEscapeForString escapes s for safe embedding inside a JSON string literal

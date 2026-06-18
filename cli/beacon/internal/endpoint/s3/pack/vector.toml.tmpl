@@ -11,19 +11,31 @@ type = "file"
 include = ["{{LOG_PATH}}"]
 read_from = "end"
 
-[transforms.beacon_json]
+[sources.beacon_inventory]
+type = "file"
+include = ["{{INVENTORY_LOG_PATH}}"]
+read_from = "end"
+
+[transforms.beacon_runtime_json]
 type = "remap"
 inputs = ["beacon_runtime"]
 source = '''
 . = parse_json!(.message)
 '''
 
-[sinks.beacon_s3]
+[transforms.beacon_inventory_json]
+type = "remap"
+inputs = ["beacon_inventory"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.beacon_runtime_s3]
 type = "aws_s3"
-inputs = ["beacon_json"]
+inputs = ["beacon_runtime_json"]
 bucket = "${BEACON_S3_BUCKET}"
 region = "${AWS_REGION:-us-east-1}"
-key_prefix = "${BEACON_S3_PREFIX:-beacon/runtime}/date=%F/"
+key_prefix = "${BEACON_S3_PREFIX:-beacon}/runtime/date=%F/"
 filename_time_format = "%s"
 filename_append_uuid = true
 filename_extension = "jsonl.gz"
@@ -32,17 +44,46 @@ content_encoding = "gzip"
 content_type = "application/x-ndjson"
 storage_class = "${BEACON_S3_STORAGE_CLASS:-STANDARD}"
 
-[sinks.beacon_s3.encoding]
+[sinks.beacon_runtime_s3.encoding]
 codec = "json"
 
-[sinks.beacon_s3.framing]
+[sinks.beacon_runtime_s3.framing]
 method = "newline_delimited"
 
-[sinks.beacon_s3.batch]
+[sinks.beacon_runtime_s3.batch]
 max_bytes = 10000000
 timeout_secs = 300
 
-[sinks.beacon_s3.request]
+[sinks.beacon_runtime_s3.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300
+
+[sinks.beacon_inventory_s3]
+type = "aws_s3"
+inputs = ["beacon_inventory_json"]
+bucket = "${BEACON_S3_BUCKET}"
+region = "${AWS_REGION:-us-east-1}"
+key_prefix = "${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"
+filename_time_format = "%s"
+filename_append_uuid = true
+filename_extension = "jsonl.gz"
+compression = "gzip"
+content_encoding = "gzip"
+content_type = "application/x-ndjson"
+storage_class = "${BEACON_S3_STORAGE_CLASS:-STANDARD}"
+
+[sinks.beacon_inventory_s3.encoding]
+codec = "json"
+
+[sinks.beacon_inventory_s3.framing]
+method = "newline_delimited"
+
+[sinks.beacon_inventory_s3.batch]
+max_bytes = 10000000
+timeout_secs = 300
+
+[sinks.beacon_inventory_s3.request]
 retry_attempts = 10
 retry_initial_backoff_secs = 1
 retry_max_duration_secs = 300

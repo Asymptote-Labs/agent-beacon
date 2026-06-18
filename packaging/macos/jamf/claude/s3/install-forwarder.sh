@@ -13,7 +13,7 @@ PLIST_PATH="$LAUNCHDAEMONS_DIR/$LABEL.plist"
 
 S3_BUCKET="${BEACON_S3_BUCKET:-${4:-}}"
 AWS_REGION_VALUE="${AWS_REGION:-${5:-}}"
-S3_PREFIX="${BEACON_S3_PREFIX:-${6:-beacon/runtime}}"
+S3_PREFIX="${BEACON_S3_PREFIX:-${6:-beacon}}"
 S3_STORAGE_CLASS="${BEACON_S3_STORAGE_CLASS:-${7:-STANDARD}}"
 VECTOR_READ_FROM="${BEACON_VECTOR_READ_FROM:-${8:-end}}"
 RUNTIME_LOG_PATHS="${BEACON_RUNTIME_LOG_PATHS:-/var/log/beacon-agent/runtime.jsonl}"
@@ -62,11 +62,12 @@ xml_escape() {
 }
 
 include_array() {
+  paths="$1"
   old_ifs="$IFS"
   IFS=,
   first=1
   printf '['
-  for raw in $RUNTIME_LOG_PATHS; do
+  for raw in $paths; do
     path="$(printf '%s' "$raw" | sed 's/^ *//; s/ *$//')"
     [ -n "$path" ] || continue
     if [ "$first" -eq 0 ]; then
@@ -87,10 +88,29 @@ include_array() {
   IFS="$old_ifs"
 }
 
+inventory_paths() {
+  old_ifs="$IFS"
+  IFS=,
+  first=1
+  for raw in $RUNTIME_LOG_PATHS; do
+    path="$(printf '%s' "$raw" | sed 's/^ *//; s/ *$//')"
+    [ -n "$path" ] || continue
+    dir="$(dirname "$path")"
+    if [ "$first" -eq 0 ]; then
+      printf ','
+    fi
+    printf '%s/inventory_state.jsonl' "$dir"
+    first=0
+  done
+  IFS="$old_ifs"
+}
+
 mkdir -p "$BASE_DIR" "$DATA_DIR" "$LAUNCHDAEMONS_DIR"
 chmod 0755 "$BASE_DIR" "$DATA_DIR" "$LAUNCHDAEMONS_DIR" 2>/dev/null || true
 
-INCLUDES="$(include_array)"
+RUNTIME_INCLUDES="$(include_array "$RUNTIME_LOG_PATHS")"
+INVENTORY_LOG_PATHS="$(inventory_paths)"
+INVENTORY_INCLUDES="$(include_array "$INVENTORY_LOG_PATHS")"
 
 cat >"$CONFIG_PATH" <<EOF
 # Managed by Beacon. Do not edit by hand.
@@ -99,22 +119,34 @@ data_dir = "$(printf '%s' "$DATA_DIR" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 
 [sources.beacon_runtime]
 type = "file"
-include = $INCLUDES
+include = $RUNTIME_INCLUDES
 read_from = "\${BEACON_VECTOR_READ_FROM:-end}"
 
-[transforms.beacon_json]
+[sources.beacon_inventory]
+type = "file"
+include = $INVENTORY_INCLUDES
+read_from = "\${BEACON_VECTOR_READ_FROM:-end}"
+
+[transforms.beacon_runtime_json]
 type = "remap"
 inputs = ["beacon_runtime"]
 source = '''
 . = parse_json!(.message)
 '''
 
-[sinks.beacon_s3]
+[transforms.beacon_inventory_json]
+type = "remap"
+inputs = ["beacon_inventory"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.beacon_runtime_s3]
 type = "aws_s3"
-inputs = ["beacon_json"]
+inputs = ["beacon_runtime_json"]
 bucket = "\${BEACON_S3_BUCKET}"
 region = "\${AWS_REGION}"
-key_prefix = "\${BEACON_S3_PREFIX:-beacon/runtime}/date=%F/"
+key_prefix = "\${BEACON_S3_PREFIX:-beacon}/runtime/date=%F/"
 filename_time_format = "%s"
 filename_append_uuid = true
 filename_extension = "jsonl.gz"
@@ -123,17 +155,46 @@ content_encoding = "gzip"
 content_type = "application/x-ndjson"
 storage_class = "\${BEACON_S3_STORAGE_CLASS:-STANDARD}"
 
-[sinks.beacon_s3.encoding]
+[sinks.beacon_runtime_s3.encoding]
 codec = "json"
 
-[sinks.beacon_s3.framing]
+[sinks.beacon_runtime_s3.framing]
 method = "newline_delimited"
 
-[sinks.beacon_s3.batch]
+[sinks.beacon_runtime_s3.batch]
 max_bytes = 10000000
 timeout_secs = 300
 
-[sinks.beacon_s3.request]
+[sinks.beacon_runtime_s3.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300
+
+[sinks.beacon_inventory_s3]
+type = "aws_s3"
+inputs = ["beacon_inventory_json"]
+bucket = "\${BEACON_S3_BUCKET}"
+region = "\${AWS_REGION}"
+key_prefix = "\${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"
+filename_time_format = "%s"
+filename_append_uuid = true
+filename_extension = "jsonl.gz"
+compression = "gzip"
+content_encoding = "gzip"
+content_type = "application/x-ndjson"
+storage_class = "\${BEACON_S3_STORAGE_CLASS:-STANDARD}"
+
+[sinks.beacon_inventory_s3.encoding]
+codec = "json"
+
+[sinks.beacon_inventory_s3.framing]
+method = "newline_delimited"
+
+[sinks.beacon_inventory_s3.batch]
+max_bytes = 10000000
+timeout_secs = 300
+
+[sinks.beacon_inventory_s3.request]
 retry_attempts = 10
 retry_initial_backoff_secs = 1
 retry_max_duration_secs = 300

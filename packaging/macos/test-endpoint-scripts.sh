@@ -23,6 +23,10 @@ for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/
       ;;
   esac
 done
+if ! grep -q 'INVENTORY_STATE' "$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"; then
+  echo "repair-hooks should prepare inventory heartbeat state files" >&2
+  exit 1
+fi
 
 PKG_TEST_BIN="$TMP_DIR/pkg-bin"
 PKG_TEST_ROOT="$TMP_DIR/pkg-root"
@@ -472,8 +476,28 @@ if [ ! -f "$S3_LAUNCHDAEMONS_DIR/com.beacon.endpoint.s3-forwarder.plist" ]; then
   echo "S3 Vector plist was not written" >&2
   exit 1
 fi
-if ! grep -q 'sinks.beacon_s3' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+if ! grep -q 'sinks.beacon_runtime_s3' "$S3_FORWARDER_BASE/s3-vector.toml"; then
   echo "S3 Vector config missing sink" >&2
+  exit 1
+fi
+if ! grep -q 'sinks.beacon_inventory_s3' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing inventory sink" >&2
+  exit 1
+fi
+if ! grep -q "$TMP_DIR/s3-runtime.jsonl" "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing runtime log path" >&2
+  exit 1
+fi
+if ! grep -q "$TMP_DIR/inventory_state.jsonl" "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing derived inventory log path" >&2
+  exit 1
+fi
+if ! grep -q 'key_prefix = "${BEACON_S3_PREFIX:-beacon}/runtime/date=%F/"' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing runtime prefix" >&2
+  exit 1
+fi
+if ! grep -q 'key_prefix = "${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config missing inventory prefix" >&2
   exit 1
 fi
 if ! grep -q 'compression = "gzip"' "$S3_FORWARDER_BASE/s3-vector.toml"; then

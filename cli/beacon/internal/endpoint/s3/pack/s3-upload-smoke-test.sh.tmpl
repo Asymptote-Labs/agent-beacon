@@ -2,7 +2,8 @@
 set -eu
 
 BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
-BEACON_S3_PREFIX="${BEACON_S3_PREFIX:-beacon/runtime}"
+BEACON_INVENTORY_LOG="${BEACON_INVENTORY_LOG:-{{INVENTORY_LOG_PATH}}}"
+BEACON_S3_PREFIX="${BEACON_S3_PREFIX:-beacon}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
 if [ -z "${BEACON_S3_BUCKET:-}" ]; then
@@ -22,12 +23,23 @@ fi
 
 prefix="${BEACON_S3_PREFIX%/}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-key="${prefix}/smoke-tests/beacon-runtime-${timestamp}.jsonl"
+runtime_key="${prefix}/runtime/smoke-tests/beacon-runtime-${timestamp}.jsonl"
 
-aws s3 cp "$BEACON_LOG" "s3://${BEACON_S3_BUCKET}/${key}" \
+aws s3 cp "$BEACON_LOG" "s3://${BEACON_S3_BUCKET}/${runtime_key}" \
   --region "$AWS_REGION" \
   --content-type "application/x-ndjson"
 
-echo "Uploaded one-shot Beacon log copy to s3://${BEACON_S3_BUCKET}/${key}"
+echo "Uploaded one-shot Beacon runtime log copy to s3://${BEACON_S3_BUCKET}/${runtime_key}"
+
+if [ -r "$BEACON_INVENTORY_LOG" ]; then
+  inventory_key="${prefix}/inventory/smoke-tests/beacon-inventory-${timestamp}.jsonl"
+  aws s3 cp "$BEACON_INVENTORY_LOG" "s3://${BEACON_S3_BUCKET}/${inventory_key}" \
+    --region "$AWS_REGION" \
+    --content-type "application/x-ndjson"
+  echo "Uploaded one-shot Beacon inventory log copy to s3://${BEACON_S3_BUCKET}/${inventory_key}"
+else
+  echo "Beacon inventory log is not readable yet, skipping optional upload: $BEACON_INVENTORY_LOG"
+fi
+
 echo "AWS credentials were resolved by the standard AWS credential provider chain."
 echo "This script is for validation only; use vector.toml for production forwarding."

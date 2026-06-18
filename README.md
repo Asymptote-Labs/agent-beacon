@@ -147,7 +147,7 @@ management (SIEM), log aggregation, and object storage destinations.
 
 | Destination | Support path |
 | --- | --- |
-| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector content pack over local JSONL using customer-managed AWS credentials |
+| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector content pack over local runtime and inventory JSONL using customer-managed AWS credentials |
 | [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector content pack over local JSONL using customer-managed Google credentials |
 
 #### Local
@@ -172,8 +172,9 @@ Beacon includes a local, read-only dashboard for validating endpoint activity
 without a hosted backend. See the [dashboard docs](https://docs.asymptotelabs.ai/cli/dashboard)
 for overview, log search, and runtime JSONL inspection.
 
-Beacon writes endpoint activity to `runtime.jsonl`; local log storage and
-retention behavior are summarized in the
+Beacon writes endpoint activity to `runtime.jsonl` and periodic Cursor/Claude
+Code configuration inventory metadata to the sibling `inventory_state.jsonl`.
+Local log storage and retention behavior are summarized in the
 [local testing and logs docs](https://docs.asymptotelabs.ai/cli/local-testing-logs).
 
 For offline threat detection, `beacon scan` runs open threat rules over local

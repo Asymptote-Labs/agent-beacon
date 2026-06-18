@@ -27,6 +27,7 @@ type Config struct {
 	Collector       Collector      `json:"collector"`
 	Harnesses       []string       `json:"harnesses"`
 	EventCategories []string       `json:"event_categories,omitempty"`
+	Inventory       *Inventory     `json:"inventory_heartbeat,omitempty"`
 	Destinations    *Destinations  `json:"destinations,omitempty"`
 	ManagedUpload   *ManagedUpload `json:"managed_upload,omitempty"`
 }
@@ -39,6 +40,18 @@ type Collector struct {
 	SpoolPath             string `json:"spool_path,omitempty"`
 	IncludeRuntimeMetrics bool   `json:"include_runtime_metrics,omitempty"`
 	IncludeCodexSpans     bool   `json:"include_codex_spans,omitempty"`
+}
+
+type Inventory struct {
+	Enabled    *bool    `json:"enabled,omitempty"`
+	TTLSeconds int      `json:"ttl_seconds,omitempty"`
+	Runtimes   []string `json:"runtimes,omitempty"`
+}
+
+type InventorySettings struct {
+	Enabled    bool
+	TTLSeconds int
+	Runtimes   []string
 }
 
 type Destinations struct {
@@ -89,6 +102,31 @@ func Default(userMode bool, logPath string) Config {
 			SpoolPath:  filepath.Join(base, "spool", "otlp.jsonl"),
 		},
 	}
+}
+
+func InventoryDefaults() InventorySettings {
+	return InventorySettings{
+		Enabled:    true,
+		TTLSeconds: 24 * 60 * 60,
+		Runtimes:   []string{"cursor", "claude_code"},
+	}
+}
+
+func InventoryConfig(cfg Config) InventorySettings {
+	settings := InventoryDefaults()
+	if cfg.Inventory == nil {
+		return settings
+	}
+	if cfg.Inventory.Enabled != nil {
+		settings.Enabled = *cfg.Inventory.Enabled
+	}
+	if cfg.Inventory.TTLSeconds > 0 {
+		settings.TTLSeconds = cfg.Inventory.TTLSeconds
+	}
+	if len(cfg.Inventory.Runtimes) > 0 {
+		settings.Runtimes = append([]string(nil), cfg.Inventory.Runtimes...)
+	}
+	return settings
 }
 
 func BaseDir(userMode bool) string {

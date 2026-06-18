@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
+
+var runInventoryHeartbeatCommand = exec.CommandContext
 
 func emitHookEvent(logger *logging.Logger, action, category, severity, message string, input map[string]interface{}, fields map[string]interface{}) {
 	if fields == nil {
@@ -76,6 +79,55 @@ func maybeUploadCursorCloudTelemetry(logger *logging.Logger) {
 		return
 	}
 	uploadCloudTelemetry(logger, true)
+}
+
+func maybeEmitInventoryHeartbeat(logger *logging.Logger, input map[string]interface{}) {
+	if platformFlag != "cursor" && platformFlag != "claude" {
+		return
+	}
+	cliPath := strings.TrimSpace(os.Getenv("BEACON_ENDPOINT_CLI"))
+	if cliPath == "" {
+		return
+	}
+	args := []string{"endpoint", "inventory", "heartbeat", "--trigger", "hook", "--trigger-harness", platformFlag}
+	if configPath := strings.TrimSpace(os.Getenv("BEACON_ENDPOINT_CONFIG")); configPath != "" {
+		args = append(args, "--config", configPath)
+	}
+	if logPath := inventoryEndpointLogPath(); logPath != "" {
+		args = append(args, "--log-path", logPath)
+	}
+	if cwd := resolveCwd(input, platformFlag); cwd != "" {
+		args = append(args, "--working-dir", cwd)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := runInventoryHeartbeatCommand(ctx, cliPath, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		logger.Warn("Inventory heartbeat failed", "error", err.Error(), "output", strings.TrimSpace(string(out)))
+	}
+}
+
+func inventoryEndpointLogPath() string {
+	if path := firstHookEnv("BEACON_ENDPOINT_LOG", "BEACON_CLOUD_LOG_PATH", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"); path != "" {
+		return path
+	}
+	if os.Getenv("BEACON_ENDPOINT_MODE") == "" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+}
+
+func firstHookEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func sessionFields(sessionID string, input map[string]interface{}) map[string]interface{} {
