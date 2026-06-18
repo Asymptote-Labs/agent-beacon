@@ -475,6 +475,20 @@ func TestInventoryLogAndStatePathsFollowRuntimeLog(t *testing.T) {
 	}
 }
 
+func TestReadStateTreatsEmptyFileAsFreshState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inventory-state.json")
+	if err := os.WriteFile(path, []byte(" \n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	state, err := ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState returned error for empty state file: %v", err)
+	}
+	if state != (State{}) {
+		t.Fatalf("state = %#v, want empty", state)
+	}
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 5, 7, 0, 0, 0, time.UTC)
 }

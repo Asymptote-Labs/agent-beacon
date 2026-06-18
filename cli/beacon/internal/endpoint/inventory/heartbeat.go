@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -108,6 +109,9 @@ func ReadState(path string) (State, error) {
 			return State{}, nil
 		}
 		return State{}, err
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return State{}, nil
 	}
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil {
