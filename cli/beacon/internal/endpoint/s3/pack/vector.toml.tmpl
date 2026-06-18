@@ -14,7 +14,7 @@ read_from = "end"
 [sources.beacon_inventory]
 type = "file"
 include = ["{{INVENTORY_LOG_PATH}}"]
-read_from = "end"
+read_from = "beginning"
 
 [transforms.beacon_runtime_json]
 type = "remap"

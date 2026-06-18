@@ -500,6 +500,10 @@ if ! grep -q 'key_prefix = "${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"' "$S
   echo "S3 Vector config missing inventory prefix" >&2
   exit 1
 fi
+if ! grep -q 'read_from = "beginning"' "$S3_FORWARDER_BASE/s3-vector.toml"; then
+  echo "S3 Vector config should read inventory log from beginning" >&2
+  exit 1
+fi
 if ! grep -q 'compression = "gzip"' "$S3_FORWARDER_BASE/s3-vector.toml"; then
   echo "S3 Vector config missing gzip compression" >&2
   exit 1

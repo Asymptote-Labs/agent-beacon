@@ -138,7 +138,7 @@ read_from = "\${BEACON_VECTOR_READ_FROM:-end}"
 [sources.beacon_inventory]
 type = "file"
 include = $INVENTORY_INCLUDES
-read_from = "\${BEACON_VECTOR_READ_FROM:-end}"
+read_from = "beginning"
 
 [transforms.beacon_runtime_json]
 type = "remap"
