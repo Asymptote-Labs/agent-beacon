@@ -405,7 +405,8 @@
             "icon": "clipboard-list",
             "root": "guides/use-cases",
             "pages": [
-              "guides/agent-runtime-telemetry"
+              "guides/agent-runtime-telemetry",
+              "guides/jamf-s3-mdm"
             ]
           },
           {
