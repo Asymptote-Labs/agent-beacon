@@ -51,26 +51,21 @@ GITHUB_TOKEN = "secret"
 	assertServer(t, result.MCPServers, "codex_cli", "github", TransportStdio, true, 2, 0, 1)
 	assertServer(t, result.MCPServers, "cursor", "remote", TransportSSE, false, 0, 0, 0)
 
-	foundClaudeConfig := false
-	for _, config := range result.Configs {
-		if config.Runtime == "claude_code" && config.Scope == ScopeUser {
-			foundClaudeConfig = true
-			if !config.Exists || !config.Readable || config.ParserStatus != StatusOK {
-				t.Fatalf("Claude config status = exists:%t readable:%t parser:%s", config.Exists, config.Readable, config.ParserStatus)
-			}
-			if config.MCPServerCount != 1 {
-				t.Fatalf("Claude MCPServerCount = %d, want 1", config.MCPServerCount)
-			}
-			if config.FileSHA256 == "" || config.PathHash == "" {
-				t.Fatal("Claude config missing hashes")
-			}
-			if config.ParserMode != formatJSON || config.ConfigKind != KindNativeConfig {
-				t.Fatalf("Claude config mode/kind = %s/%s, want %s/%s", config.ParserMode, config.ConfigKind, formatJSON, KindNativeConfig)
-			}
-		}
+	claudeSettings := findConfig(result.Configs, "claude_code", filepath.Join(home, ".claude", "settings.json"))
+	if claudeSettings == nil {
+		t.Fatal("Claude settings config not found in inventory")
 	}
-	if !foundClaudeConfig {
-		t.Fatal("Claude user config not found in inventory")
+	if !claudeSettings.Exists || !claudeSettings.Readable || claudeSettings.ParserStatus != StatusOK {
+		t.Fatalf("Claude config status = exists:%t readable:%t parser:%s", claudeSettings.Exists, claudeSettings.Readable, claudeSettings.ParserStatus)
+	}
+	if claudeSettings.MCPServerCount != 1 {
+		t.Fatalf("Claude MCPServerCount = %d, want 1", claudeSettings.MCPServerCount)
+	}
+	if claudeSettings.FileSHA256 == "" || claudeSettings.PathHash == "" {
+		t.Fatal("Claude config missing hashes")
+	}
+	if claudeSettings.ParserMode != formatJSON || claudeSettings.ConfigKind != KindNativeConfig {
+		t.Fatalf("Claude config mode/kind = %s/%s, want %s/%s", claudeSettings.ParserMode, claudeSettings.ConfigKind, formatJSON, KindNativeConfig)
 	}
 }
 
@@ -103,6 +98,36 @@ func TestScanIncludesNamesAndPaths(t *testing.T) {
 		if config.Exists && config.Path == "" {
 			t.Fatalf("config missing path: %#v", config)
 		}
+	}
+}
+
+func TestScanClaudeJSONMCPInventory(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{
+  "mcpServers": {
+    "github": {
+      "command": "gh",
+      "args": ["mcp", "serve"],
+      "env": {"GITHUB_TOKEN": "secret", "GH_HOST": "github.com"}
+    }
+  }
+}`)
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Runtimes:   []string{"claude_code"},
+		Now:        fixedNow,
+	})
+
+	assertServer(t, result.MCPServers, "claude_code", "github", TransportStdio, true, 2, 1, 2)
+	config := findConfig(result.Configs, "claude_code", filepath.Join(home, ".claude.json"))
+	if config == nil {
+		t.Fatalf("Claude ~/.claude.json config not found in %#v", result.Configs)
+	}
+	if config.MCPServerCount != 1 || config.ParserStatus != StatusOK {
+		t.Fatalf("Claude ~/.claude.json status = %#v, want one MCP server", config)
 	}
 }
 
@@ -162,17 +187,12 @@ command = "gh"
 		Now:        fixedNow,
 	})
 
-	var malformedFound bool
-	for _, config := range result.Configs {
-		if config.Runtime == "claude_code" && config.Scope == ScopeUser {
-			malformedFound = true
-			if config.ParserStatus != StatusParseFailed {
-				t.Fatalf("malformed Claude parser status = %s, want %s", config.ParserStatus, StatusParseFailed)
-			}
-		}
-	}
-	if !malformedFound {
+	malformed := findConfig(result.Configs, "claude_code", filepath.Join(home, ".claude", "settings.json"))
+	if malformed == nil {
 		t.Fatal("malformed Claude config result not found")
+	}
+	if malformed.ParserStatus != StatusParseFailed {
+		t.Fatalf("malformed Claude parser status = %s, want %s", malformed.ParserStatus, StatusParseFailed)
 	}
 	assertServer(t, result.MCPServers, "codex_cli", "github", TransportStdio, true, 0, 0, 0)
 }
@@ -211,6 +231,7 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	})
 
 	expected := []candidate{
+		{runtime: "claude_code", path: filepath.Join(home, ".claude.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: filepath.Join(home, ".claude", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: filepath.Join(work, ".claude", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged, format: formatJSON, kind: KindManagedConfig},
@@ -462,6 +483,35 @@ func TestSkillScanIsBoundedToDirectSkillManifests(t *testing.T) {
 	}
 	if findSkill(result.Skills, "cursor", "package", filepath.Join(home, ".cursor", "skills", "node_modules", "package", "SKILL.md")) != nil {
 		t.Fatal("vendor skill manifest should not be discovered")
+	}
+}
+
+func TestSkillScanFollowsSymlinkedSkillDirectories(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	target := filepath.Join(home, ".agents", "skills", "find-skills")
+	writeFile(t, filepath.Join(target, "SKILL.md"), "# Find Skills")
+	linkRoot := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(linkRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(linkRoot, "find-skills")); err != nil {
+		t.Fatal(err)
+	}
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Runtimes:   []string{"claude_code"},
+		Now:        fixedNow,
+	})
+
+	skill := findSkill(result.Skills, "claude_code", "find-skills", filepath.Join(linkRoot, "find-skills", "SKILL.md"))
+	if skill == nil {
+		t.Fatalf("symlinked Claude skill not found in %#v", result.Skills)
+	}
+	if !skill.Exists || !skill.Readable || skill.ParserStatus != StatusOK {
+		t.Fatalf("symlinked Claude skill status = %#v", skill)
 	}
 }
 

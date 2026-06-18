@@ -210,6 +210,7 @@ func candidates(home, wd string) []candidate {
 
 func claudeCandidates(home, wd string) []candidate {
 	return []candidate{
+		{runtime: "claude_code", path: filepath.Join(home, ".claude.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: filepath.Join(home, ".claude", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: filepath.Join(wd, ".claude", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged, format: formatJSON, kind: KindManagedConfig},
