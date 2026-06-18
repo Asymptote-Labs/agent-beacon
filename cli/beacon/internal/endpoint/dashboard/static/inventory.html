@@ -74,6 +74,7 @@
                 <th>MCP</th>
                 <th>Beacon Managed</th>
                 <th>Modified</th>
+                <th>Manifest SHA</th>
                 <th>Path</th>
               </tr>
             </thead>
@@ -100,6 +101,8 @@
                 <th>Command</th>
                 <th>Args</th>
                 <th>Env Keys</th>
+                <th>Source SHA</th>
+                <th>Definition SHA</th>
                 <th>Source</th>
               </tr>
             </thead>
@@ -124,10 +127,36 @@
                 <th>Scope</th>
                 <th>Status</th>
                 <th>Modified</th>
+                <th>Manifest SHA</th>
                 <th>Manifest</th>
               </tr>
             </thead>
             <tbody id="inventory-skills"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Hook Configurations</h2>
+            <p class="muted">Hook manifests discovered across supported runtimes. Hook command bodies are not shown here.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Scope</th>
+                <th>Status</th>
+                <th>Beacon Managed</th>
+                <th>Modified</th>
+                <th>Manifest SHA</th>
+                <th>Manifest</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-hooks"></tbody>
           </table>
         </div>
       </section>

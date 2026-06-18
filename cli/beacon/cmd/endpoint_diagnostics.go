@@ -207,7 +207,7 @@ func printDoctorChecks(checks []diagnostics.Check, status string) {
 func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	effectiveCfg := loadConfigForMode(status.RuntimeLog.EffectiveUserMode, status.LogPath)
-	hookTargetNames, err := hookTargets()
+	hookTargetNames, err := inventoryHookTargets()
 	if err != nil {
 		return err
 	}
@@ -227,41 +227,8 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		UserScope:         configInventory.UserScope,
 	}
 	if endpointOpts.jsonOutput {
-		if !endpointOpts.allTargets {
-			filtered := []harness.Harness{}
-			for _, h := range result.Harnesses {
-				if h.Detected {
-					filtered = append(filtered, h)
-				}
-			}
-			result.Harnesses = filtered
-
-			filteredConfigs := []endpointinventory.Config{}
-			existingPaths := map[string]bool{}
-			for _, c := range result.Configs {
-				if c.Exists {
-					filteredConfigs = append(filteredConfigs, c)
-					existingPaths[c.PathHash] = true
-				}
-			}
-			result.Configs = filteredConfigs
-
-			filteredServers := []endpointinventory.MCPServer{}
-			for _, s := range result.MCPServers {
-				if existingPaths[s.SourcePathHash] {
-					filteredServers = append(filteredServers, s)
-				}
-			}
-			result.MCPServers = filteredServers
-
-			filteredSkills := []endpointinventory.Skill{}
-			for _, s := range result.Skills {
-				if s.Exists {
-					filteredSkills = append(filteredSkills, s)
-				}
-			}
-			result.Skills = filteredSkills
-		}
+		result = filterInventoryDefaults(result)
+		result = filterInventorySections(result)
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			return err
 		}
@@ -270,21 +237,29 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	fmt.Printf("Config: %s\n", result.ConfigPath)
-	fmt.Printf("Runtime log: %s\n", result.LogPath)
-	for _, h := range result.Harnesses {
-		if !endpointOpts.allTargets && !h.Detected {
-			continue
+	showAllInventorySections := !inventorySectionFilterActive()
+	if showAllInventorySections {
+		fmt.Printf("Config: %s\n", result.ConfigPath)
+		fmt.Printf("Runtime log: %s\n", result.LogPath)
+		for _, h := range result.Harnesses {
+			if !endpointOpts.allTargets && !h.Detected {
+				continue
+			}
+			fmt.Printf("Harness: %s detected=%t telemetry=%s\n", h.DisplayName, h.Detected, h.TelemetryStatus)
 		}
-		fmt.Printf("Harness: %s detected=%t telemetry=%s\n", h.DisplayName, h.Detected, h.TelemetryStatus)
 	}
-	for _, name := range hookTargetNames {
-		if hook, ok := result.Hooks[name]; ok {
-			fmt.Printf("Hook: %s status=%s installed=%t\n", name, hook.Status, hook.Installed)
+	if showAllInventorySections || endpointOpts.inventoryHooks {
+		for _, name := range hookTargetNames {
+			if hook, ok := result.Hooks[name]; ok {
+				fmt.Printf("Hook: %s status=%s installed=%t\n", name, hook.Status, hook.Installed)
+			}
 		}
 	}
 	for _, config := range result.Configs {
 		if !endpointOpts.allTargets && !config.Exists {
+			continue
+		}
+		if !inventoryConfigIncluded(config) {
 			continue
 		}
 		path := config.Path
@@ -293,34 +268,114 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Config: %s scope=%s status=%s mcp_servers=%d path=%s\n", config.Runtime, config.Scope, config.ParserStatus, config.MCPServerCount, path)
 	}
-	for _, server := range result.MCPServers {
-		name := server.ServerName
-		if name == "" {
-			name = server.ServerNameHash
+	if showAllInventorySections || endpointOpts.inventoryMCP {
+		for _, server := range result.MCPServers {
+			name := server.ServerName
+			if name == "" {
+				name = server.ServerNameHash
+			}
+			fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
 		}
-		fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
 	}
-	for _, skill := range result.Skills {
-		if !endpointOpts.allTargets && !skill.Exists {
-			continue
+	if showAllInventorySections || endpointOpts.inventorySkills {
+		for _, skill := range result.Skills {
+			if !endpointOpts.allTargets && !skill.Exists {
+				continue
+			}
+			name := skill.SkillName
+			if name == "" {
+				name = skill.SkillNameHash
+			}
+			path := skill.ManifestPath
+			if path == "" {
+				path = skill.RootPath
+			}
+			if path == "" {
+				path = skill.ManifestPathHash
+			}
+			fmt.Printf("Skill: %s %s scope=%s status=%s path=%s\n", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
 		}
-		name := skill.SkillName
-		if name == "" {
-			name = skill.SkillNameHash
-		}
-		path := skill.ManifestPath
-		if path == "" {
-			path = skill.RootPath
-		}
-		if path == "" {
-			path = skill.ManifestPathHash
-		}
-		fmt.Printf("Skill: %s %s scope=%s status=%s path=%s\n", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
 	}
 	if endpointOpts.writeInventoryEvent {
 		return writeInventoryEvents(effectiveCfg, configInventory)
 	}
 	return nil
+}
+
+func filterInventoryDefaults(result inventoryResult) inventoryResult {
+	if endpointOpts.allTargets {
+		return result
+	}
+	filtered := []harness.Harness{}
+	for _, h := range result.Harnesses {
+		if h.Detected {
+			filtered = append(filtered, h)
+		}
+	}
+	result.Harnesses = filtered
+
+	filteredConfigs := []endpointinventory.Config{}
+	existingPaths := map[string]bool{}
+	for _, c := range result.Configs {
+		if c.Exists {
+			filteredConfigs = append(filteredConfigs, c)
+			existingPaths[c.PathHash] = true
+		}
+	}
+	result.Configs = filteredConfigs
+
+	filteredServers := []endpointinventory.MCPServer{}
+	for _, s := range result.MCPServers {
+		if existingPaths[s.SourcePathHash] {
+			filteredServers = append(filteredServers, s)
+		}
+	}
+	result.MCPServers = filteredServers
+
+	filteredSkills := []endpointinventory.Skill{}
+	for _, s := range result.Skills {
+		if s.Exists {
+			filteredSkills = append(filteredSkills, s)
+		}
+	}
+	result.Skills = filteredSkills
+	return result
+}
+
+func inventorySectionFilterActive() bool {
+	return endpointOpts.inventoryMCP || endpointOpts.inventorySkills || endpointOpts.inventoryHooks
+}
+
+func filterInventorySections(result inventoryResult) inventoryResult {
+	if !inventorySectionFilterActive() {
+		return result
+	}
+	result.Harnesses = nil
+	if !endpointOpts.inventoryHooks {
+		result.Hooks = nil
+	}
+	if !endpointOpts.inventoryMCP {
+		result.MCPServers = nil
+	}
+	if !endpointOpts.inventorySkills {
+		result.Skills = nil
+	}
+	filteredConfigs := []endpointinventory.Config{}
+	for _, config := range result.Configs {
+		if inventoryConfigIncluded(config) {
+			filteredConfigs = append(filteredConfigs, config)
+		}
+	}
+	result.Configs = filteredConfigs
+	return result
+}
+
+func inventoryConfigIncluded(config endpointinventory.Config) bool {
+	if !inventorySectionFilterActive() {
+		return true
+	}
+	return (endpointOpts.inventoryMCP && config.MCPServerCount > 0) ||
+		(endpointOpts.inventoryHooks && config.ConfigKind == endpointinventory.KindHookConfig)
 }
 
 func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Result) error {
@@ -753,22 +808,33 @@ func printPlannedAction(action plannedAction) {
 	fmt.Println()
 }
 
+func inventoryHookTargets() ([]string, error) {
+	if endpointOpts.inventoryHooks && !endpointOpts.allTargets && strings.TrimSpace(endpointOpts.hookHarnesses) == "" {
+		return allHookTargetsForLevel(), nil
+	}
+	return hookTargets()
+}
+
 func hookTargets() ([]string, error) {
 	if endpointOpts.allTargets {
-		all := []string{"cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
-		if endpointOpts.hookLevel == "project" {
-			filtered := all[:0:0]
-			for _, t := range all {
-				if t == "hermes" {
-					continue
-				}
-				filtered = append(filtered, t)
-			}
-			return filtered, nil
-		}
-		return all, nil
+		return allHookTargetsForLevel(), nil
 	}
 	return canonicalHookTargets(splitCSV(endpointOpts.hookHarnesses))
+}
+
+func allHookTargetsForLevel() []string {
+	all := []string{"cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	if endpointOpts.hookLevel != "project" {
+		return all
+	}
+	filtered := all[:0:0]
+	for _, t := range all {
+		if t == "hermes" {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
 }
 
 func hookStatuses(targets []string) map[string]hookTargetResult {

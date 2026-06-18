@@ -272,18 +272,21 @@ function renderInventory(resp) {
   const configs = resp?.configs || [];
   const servers = resp?.mcp_servers || [];
   const skills = resp?.skills || [];
+  const hooks = resp?.hooks || [];
   const existingConfigs = configs.filter((config) => config.exists);
   const existingSkills = skills.filter((skill) => skill.exists);
+  const hookConfigs = existingConfigs.filter((config) => config.config_kind === "hook_config");
   setText("#inventory-meta", resp?.generated_at ? `Scanned ${formatTime(resp.generated_at)}` : "");
-  renderInventoryCards(harnesses, existingConfigs, servers, existingSkills);
+  renderInventoryCards(harnesses, existingConfigs, servers, existingSkills, hookConfigs);
   renderInventoryHarnesses(harnesses);
   renderInventoryConfigs(configs);
-  renderInventoryMCP(servers);
+  renderInventoryMCP(servers, configs);
   renderInventorySkills(existingSkills);
+  renderInventoryHooks(hooks, hookConfigs);
   renderInventoryScope(resp?.user_scope || {});
 }
 
-function renderInventoryCards(harnesses, configs, servers, skills = []) {
+function renderInventoryCards(harnesses, configs, servers, skills = [], hooks = []) {
   if (!$("#inventory-cards")) return;
   const detected = harnesses.filter((harness) => harness.detected).length;
   const enabled = harnesses.filter((harness) => harness.telemetry_status === "enabled").length;
@@ -294,6 +297,7 @@ function renderInventoryCards(harnesses, configs, servers, skills = []) {
     { label: "Config Files", value: configs.length, hint: `${managed} Beacon-managed` },
     { label: "MCP Servers", value: servers.length, hint: "across all configs" },
     { label: "Agent Skills", value: skills.length, hint: "local manifests" },
+    { label: "Hook Configs", value: hooks.length, hint: "discovered manifests" },
   ];
   $("#inventory-cards").innerHTML = cards
     .map((card) => `
@@ -345,7 +349,7 @@ function renderInventoryConfigs(configs) {
   const showAll = $("#inventory-show-all")?.checked;
   const rows = (configs || []).filter((config) => showAll || config.exists);
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">No configuration files discovered.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="muted">No configuration files discovered.</td></tr>`;
     return;
   }
   tbody.innerHTML = rows
@@ -358,19 +362,21 @@ function renderInventoryConfigs(configs) {
         <td>${config.exists ? escapeHTML(config.mcp_server_count ?? 0) : `<span class="muted">-</span>`}</td>
         <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
         <td class="nowrap">${config.modified_at ? escapeHTML(formatTime(config.modified_at)) : `<span class="muted">-</span>`}</td>
+        <td class="mono sha-cell">${hashCell(config.file_sha256)}</td>
         <td class="mono path-cell">${escapeHTML(config.path || config.path_hash || "")}</td>
       </tr>
     `)
     .join("");
 }
 
-function renderInventoryMCP(servers) {
+function renderInventoryMCP(servers, configs = []) {
   const tbody = $("#inventory-mcp");
   if (!tbody) return;
   if (!servers.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">No MCP servers declared in discovered configs.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="muted">No MCP servers declared in discovered configs.</td></tr>`;
     return;
   }
+  const sourceSHAs = configSHAsByPathHash(configs);
   tbody.innerHTML = servers
     .map((server) => `
       <tr>
@@ -381,6 +387,8 @@ function renderInventoryMCP(servers) {
         <td class="mono">${server.command_present ? escapeHTML(server.command_name || "yes") : `<span class="muted">-</span>`}</td>
         <td>${escapeHTML(server.args_count ?? 0)}</td>
         <td>${envKeysCell(server)}</td>
+        <td class="mono sha-cell">${hashCell(sourceSHAs.get(server.source_path_hash))}</td>
+        <td class="mono sha-cell">${hashCell(server.definition_hash)}</td>
         <td class="mono path-cell">${escapeHTML(server.source_path || server.source_path_hash || "")}</td>
       </tr>
     `)
@@ -391,7 +399,7 @@ function renderInventorySkills(skills) {
   const tbody = $("#inventory-skills");
   if (!tbody) return;
   if (!skills.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="muted">No agent skills discovered in supported local roots.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No agent skills discovered in supported local roots.</td></tr>`;
     return;
   }
   tbody.innerHTML = skills
@@ -402,9 +410,43 @@ function renderInventorySkills(skills) {
         <td>${badge(skill.source_scope || "unknown", "badge-muted")}</td>
         <td>${parserBadge(skill)}</td>
         <td class="nowrap">${skill.modified_at ? escapeHTML(formatTime(skill.modified_at)) : `<span class="muted">-</span>`}</td>
+        <td class="mono sha-cell">${hashCell(skill.file_sha256)}</td>
         <td class="mono path-cell">${escapeHTML(skill.manifest_path || skill.manifest_path_hash || skill.root_path || skill.root_path_hash || "")}</td>
       </tr>
     `)
+    .join("");
+}
+
+function renderInventoryHooks(hooks, configs = []) {
+  const tbody = $("#inventory-hooks");
+  if (!tbody) return;
+  const rows = hooks?.length ? hooks : configs.map((config) => ({
+    target: config.runtime,
+    status: config.exists ? "configured" : "not_installed",
+    installed: config.exists,
+    path: config.path,
+    message: "",
+  }));
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No hook configuration manifests discovered.</td></tr>`;
+    return;
+  }
+  const configByPath = configsByPath(configs);
+  tbody.innerHTML = rows
+    .map((hook) => {
+      const config = configByPath.get(hook.path) || {};
+      return `
+        <tr class="${hook.installed ? "" : "row-absent"}">
+          <td>${escapeHTML(runtimeLabel(hook.target))}</td>
+          <td>${config.scope ? badge(config.scope, "badge-muted") : `<span class="muted">-</span>`}</td>
+          <td>${badge(hook.status || (hook.installed ? "configured" : "not_installed"), hook.installed ? "badge-ok" : "badge-muted")}</td>
+          <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
+          <td class="nowrap">${config.modified_at ? escapeHTML(formatTime(config.modified_at)) : `<span class="muted">-</span>`}</td>
+          <td class="mono sha-cell">${hashCell(config.file_sha256)}</td>
+          <td class="mono path-cell">${escapeHTML(hook.path || config.path || config.path_hash || "")}${hook.message ? `<br /><span class="muted">${escapeHTML(hook.message)}</span>` : ""}</td>
+        </tr>
+      `;
+    })
     .join("");
 }
 
@@ -454,12 +496,38 @@ function envKeysCell(server) {
   return chips + (filtered ? ` <span class="muted">+${filtered} filtered</span>` : "");
 }
 
+function hashCell(value) {
+  if (!value) return `<span class="muted">-</span>`;
+  return escapeHTML(value);
+}
+
+function configSHAsByPathHash(configs) {
+  const values = new Map();
+  for (const config of configs || []) {
+    if (config.path_hash && config.file_sha256) {
+      values.set(config.path_hash, config.file_sha256);
+    }
+  }
+  return values;
+}
+
+function configsByPath(configs) {
+  const values = new Map();
+  for (const config of configs || []) {
+    if (config.path) {
+      values.set(config.path, config);
+    }
+  }
+  return values;
+}
+
 function runtimeLabel(value) {
   const labels = {
     claude_code: "Claude Code",
     codex_cli: "Codex CLI",
     cursor: "Cursor",
     gemini_cli: "Gemini CLI",
+    antigravity: "Antigravity CLI",
     antigravity_cli: "Antigravity CLI",
     vscode: "VS Code",
     factory: "Factory Droid",

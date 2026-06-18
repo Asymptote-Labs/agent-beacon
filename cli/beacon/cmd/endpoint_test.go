@@ -1004,6 +1004,88 @@ func TestRobustCLIFlagsRegistered(t *testing.T) {
 			t.Fatalf("%s should not register --dry-run", cmd.Use)
 		}
 	}
+	for _, cmd := range []*cobra.Command{endpointInventoryCmd, topLevelInventoryCmd} {
+		for _, name := range []string{"mcp", "skills", "hooks"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("%s missing --%s", cmd.Use, name)
+			}
+		}
+	}
+}
+
+func TestFilterInventorySectionsKeepsOnlyRequestedBuckets(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	result := inventoryResult{
+		Hooks: map[string]hookTargetResult{
+			"cursor": {Target: "cursor", Status: "ok"},
+		},
+		Configs: []endpointinventory.Config{
+			{Runtime: "cursor", ConfigKind: endpointinventory.KindNativeConfig, MCPServerCount: 1},
+			{Runtime: "cursor", ConfigKind: endpointinventory.KindHookConfig},
+			{Runtime: "claude_code", ConfigKind: endpointinventory.KindNativeConfig},
+		},
+		MCPServers: []endpointinventory.MCPServer{
+			{Runtime: "cursor", ServerName: "filesystem"},
+		},
+		Skills: []endpointinventory.Skill{
+			{Runtime: "cursor", SkillName: "review"},
+		},
+	}
+
+	endpointOpts.inventoryMCP = true
+	filtered := filterInventorySections(result)
+	if len(filtered.MCPServers) != 1 || len(filtered.Configs) != 1 {
+		t.Fatalf("mcp filter kept wrong inventory: %#v", filtered)
+	}
+	if filtered.Hooks != nil || filtered.Skills != nil {
+		t.Fatalf("mcp filter should drop hooks and skills: %#v", filtered)
+	}
+	if filtered.Configs[0].MCPServerCount != 1 {
+		t.Fatalf("mcp filter kept wrong config: %#v", filtered.Configs)
+	}
+
+	endpointOpts.inventoryMCP = false
+	endpointOpts.inventoryHooks = true
+	endpointOpts.inventorySkills = true
+	filtered = filterInventorySections(result)
+	if len(filtered.Skills) != 1 || len(filtered.Hooks) != 1 {
+		t.Fatalf("hooks+skills filter dropped requested inventory: %#v", filtered)
+	}
+	if len(filtered.MCPServers) != 0 {
+		t.Fatalf("hooks+skills filter should drop MCP servers: %#v", filtered.MCPServers)
+	}
+	if len(filtered.Configs) != 1 || filtered.Configs[0].ConfigKind != endpointinventory.KindHookConfig {
+		t.Fatalf("hooks filter kept wrong configs: %#v", filtered.Configs)
+	}
+}
+
+func TestEndpointInventoryHooksJSONIncludesDefaultHookStatuses(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	t.Setenv("HOME", t.TempDir())
+	endpointOpts.userMode = true
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.jsonOutput = true
+	endpointOpts.inventoryHooks = true
+	endpointOpts.hookHarnesses = ""
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointInventory(endpointInventoryCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runEndpointInventory returned error: %v", err)
+	}
+	var result inventoryResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("inventory JSON did not decode: %v output=%s", err, output)
+	}
+	if len(result.Hooks) == 0 {
+		t.Fatalf("hooks inventory was empty: %#v", result)
+	}
+	if hook, ok := result.Hooks["cursor"]; !ok || hook.Target != "cursor" {
+		t.Fatalf("hooks inventory missing cursor status: %#v", result.Hooks)
+	}
 }
 
 func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
