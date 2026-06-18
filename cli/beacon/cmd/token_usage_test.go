@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
 func TestTokenUsageCommandRegistered(t *testing.T) {

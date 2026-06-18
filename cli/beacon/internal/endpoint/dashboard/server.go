@@ -15,7 +15,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
 const DefaultAddr = "127.0.0.1:8765"

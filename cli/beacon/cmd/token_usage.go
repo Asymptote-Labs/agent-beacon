@@ -9,7 +9,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
 type tokenUsageOptions struct {
@@ -32,7 +32,7 @@ var tokenUsageOpts tokenUsageOptions
 
 var tokenUsageCmd = &cobra.Command{
 	Use:          "token-usage",
-	Short:        "Report token usage and attribution from the endpoint runtime log",
+	Short:        "Report token usage and attribution from Beacon runtime logs",
 	SilenceUsage: true,
 	RunE:         runTokenUsage,
 }
@@ -93,7 +93,7 @@ func init() {
 	rootCmd.AddCommand(tokenUsageCmd)
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.userMode, "user", true, "Use per-user endpoint paths")
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
-	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.logPath, "log-path", "", "Runtime JSONL log path (defaults to the endpoint runtime log; in CI point at the session log)")
+	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.logPath, "log-path", "", "Runtime JSONL log path (defaults to the local runtime log; in CI point at the session log)")
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.jsonOutput, "json", false, "Print the token usage report as JSON")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.since, "since", "", "Only include events at or after this RFC3339 timestamp")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.until, "until", "", "Only include events at or before this RFC3339 timestamp")
