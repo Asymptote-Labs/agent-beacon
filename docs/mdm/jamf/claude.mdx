@@ -3,11 +3,16 @@ title: "Claude with Jamf"
 description: "Deploy Claude Code endpoint telemetry with Jamf Pro and route Beacon logs to managed destinations."
 ---
 
-Use this page as the Claude-specific Jamf entry point. For the complete AWS S3 forwarding setup, follow the canonical self-serve guide:
+Use this page as the Claude-specific Jamf entry point. For complete managed forwarding setup, follow the destination-specific self-serve guide:
 
-<Card title="Deploy Beacon With Jamf And S3" icon="bucket" href="/guides/jamf-s3-mdm">
-  Install Beacon with Jamf Pro, inject AWS provider settings through MDM, configure Claude Code hooks, and forward runtime plus inventory JSONL to S3.
-</Card>
+<Columns cols={2}>
+  <Card title="Deploy Beacon With Jamf And S3" icon="bucket" href="/guides/jamf-s3-mdm">
+    Install Beacon with Jamf Pro, inject AWS provider settings through MDM, configure Claude Code hooks, and forward runtime plus inventory JSONL to S3.
+  </Card>
+  <Card title="Deploy Beacon With Jamf And CrowdStrike Falcon" icon="shield-halved" href="/guides/jamf-falcon-mdm">
+    Install Beacon with Jamf Pro, configure Claude Code hooks, and forward runtime JSONL to CrowdStrike Falcon LogScale HEC.
+  </Card>
+</Columns>
 
 ## What The Jamf Claude Flow Installs
 
@@ -30,11 +35,16 @@ The macOS package includes these Claude-specific helpers:
 /opt/beacon/jamf/claude/s3/install-forwarder.sh
 /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
 /opt/beacon/jamf/claude/s3/run-forwarder.sh
+/opt/beacon/jamf/claude/falcon/install-forwarder.sh
+/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh
+/opt/beacon/jamf/claude/falcon/run-forwarder.sh
 ```
 
 Use `repair-hooks.sh` when you only need to repair the system endpoint and reinstall Claude hooks.
 
 Use `s3/repair-hooks-and-forwarder.sh` when one Jamf policy should repair the endpoint, reinstall Claude hooks, and configure S3 forwarding.
+
+Use `falcon/repair-hooks-and-forwarder.sh` when one Jamf policy should repair the endpoint, reinstall Claude hooks, and configure CrowdStrike Falcon LogScale HEC forwarding.
 
 ## Related
 
@@ -44,5 +54,8 @@ Use `s3/repair-hooks-and-forwarder.sh` when one Jamf policy should repair the en
   </Card>
   <Card title="S3 Log Forwarding" icon="bucket" href="/log-forwarding/s3">
     Review the generated S3 content pack and Vector forwarding behavior.
+  </Card>
+  <Card title="CrowdStrike Falcon LogScale" icon="shield-halved" href="/log-forwarding/falcon">
+    Review Falcon parser setup, HEC settings, and validation steps.
   </Card>
 </Columns>

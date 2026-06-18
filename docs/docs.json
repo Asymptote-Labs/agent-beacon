@@ -198,6 +198,7 @@
                   "mdm/jamf",
                   "mdm/jamf/claude",
                   "guides/jamf-s3-mdm",
+                  "guides/jamf-falcon-mdm",
                   "mdm/fleet"
                 ]
               },
@@ -407,7 +408,8 @@
             "root": "guides/use-cases",
             "pages": [
               "guides/agent-runtime-telemetry",
-              "guides/jamf-s3-mdm"
+              "guides/jamf-s3-mdm",
+              "guides/jamf-falcon-mdm"
             ]
           },
           {
