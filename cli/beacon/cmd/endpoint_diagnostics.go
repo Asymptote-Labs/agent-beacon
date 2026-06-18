@@ -325,6 +325,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 
 func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Result) error {
 	settings := endpointconfig.InventoryConfig(cfg)
+	result = filterInventoryResult(result, settings.Runtimes)
 	_, err := writeInventorySnapshotEvents(cfg, settings, result, "manual", "", true, endpointinventory.State{})
 	return err
 }
@@ -395,14 +396,16 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 		Now:        func() time.Time { return now },
 	}
 	inventoryResult := endpointinventory.Scan(scanOpts)
-	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, triggerHarness, state.LastSnapshotDigest != endpointinventory.SnapshotDigest(inventoryResult), state)
-	if err != nil {
-		return writeResult, err
-	}
+	digest := endpointinventory.SnapshotDigest(inventoryResult)
+	writeSnapshot := state.LastSnapshotDigest != digest
 	if err := locked.Save(endpointinventory.State{
 		LastEmittedAt:      now.Format(time.RFC3339),
-		LastSnapshotDigest: writeResult.SnapshotDigest,
+		LastSnapshotDigest: digest,
 	}); err != nil {
+		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: state.LastSnapshotDigest}, err
+	}
+	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, triggerHarness, writeSnapshot, state)
+	if err != nil {
 		return writeResult, err
 	}
 	return writeResult, nil
@@ -495,6 +498,41 @@ func existingInventorySkills(skills []endpointinventory.Skill) []endpointinvento
 		}
 	}
 	return out
+}
+
+func filterInventoryResult(result endpointinventory.Result, runtimes []string) endpointinventory.Result {
+	allowed := map[string]bool{}
+	for _, runtime := range runtimes {
+		runtime = strings.TrimSpace(runtime)
+		if runtime != "" {
+			allowed[runtime] = true
+		}
+	}
+	if len(allowed) == 0 {
+		return result
+	}
+	configs := make([]endpointinventory.Config, 0, len(result.Configs))
+	for _, config := range result.Configs {
+		if allowed[config.Runtime] {
+			configs = append(configs, config)
+		}
+	}
+	servers := make([]endpointinventory.MCPServer, 0, len(result.MCPServers))
+	for _, server := range result.MCPServers {
+		if allowed[server.Runtime] {
+			servers = append(servers, server)
+		}
+	}
+	skills := make([]endpointinventory.Skill, 0, len(result.Skills))
+	for _, skill := range result.Skills {
+		if allowed[skill.Runtime] {
+			skills = append(skills, skill)
+		}
+	}
+	result.Configs = configs
+	result.MCPServers = servers
+	result.Skills = skills
+	return result
 }
 
 func runEndpointTestEvent(cmd *cobra.Command, args []string) error {

@@ -19,6 +19,19 @@ VECTOR_READ_FROM="${BEACON_VECTOR_READ_FROM:-${8:-end}}"
 RUNTIME_LOG_PATHS="${BEACON_RUNTIME_LOG_PATHS:-/var/log/beacon-agent/runtime.jsonl}"
 NO_START="${BEACON_NO_START:-0}"
 
+case "$S3_PREFIX" in
+  */runtime)
+    S3_PREFIX="${S3_PREFIX%/runtime}"
+    ;;
+  */inventory)
+    S3_PREFIX="${S3_PREFIX%/inventory}"
+    ;;
+esac
+S3_PREFIX="${S3_PREFIX%/}"
+if [ -z "$S3_PREFIX" ]; then
+  S3_PREFIX="beacon"
+fi
+
 if [ -z "$S3_BUCKET" ]; then
   echo "S3 bucket is required (BEACON_S3_BUCKET or Jamf parameter 4)" >&2
   exit 1

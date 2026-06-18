@@ -22,6 +22,15 @@ if [ ! -r "$BEACON_LOG" ]; then
 fi
 
 prefix="${BEACON_S3_PREFIX%/}"
+case "$prefix" in
+  */runtime)
+    prefix="${prefix%/runtime}"
+    ;;
+  */inventory)
+    prefix="${prefix%/inventory}"
+    ;;
+esac
+[ -n "$prefix" ] || prefix="beacon"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 runtime_key="${prefix}/runtime/smoke-tests/beacon-runtime-${timestamp}.jsonl"
 

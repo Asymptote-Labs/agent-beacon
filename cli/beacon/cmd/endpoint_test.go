@@ -804,6 +804,45 @@ func TestWriteInventoryEventsAppendsInventorySnapshot(t *testing.T) {
 	}
 }
 
+func TestWriteInventoryEventsHonorsConfiguredRuntimes(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	cfg := endpointconfig.Default(true, logPath)
+	cfg.Inventory = &endpointconfig.Inventory{Runtimes: []string{"cursor"}}
+	result := endpointinventory.Result{
+		Configs: []endpointinventory.Config{
+			{Runtime: "cursor", PathHash: "sha256:cursor", Exists: true, ParserStatus: endpointinventory.StatusOK, Redaction: endpointinventory.RedactionFull},
+			{Runtime: "claude_code", PathHash: "sha256:claude", Exists: true, ParserStatus: endpointinventory.StatusOK, Redaction: endpointinventory.RedactionFull},
+		},
+		MCPServers: []endpointinventory.MCPServer{
+			{Runtime: "cursor", ServerName: "cursor-server", SourcePathHash: "sha256:cursor", DefinitionHash: "sha256:cursor-def", ParserStatus: endpointinventory.StatusOK, Redaction: endpointinventory.RedactionFull},
+			{Runtime: "claude_code", ServerName: "claude-server", SourcePathHash: "sha256:claude", DefinitionHash: "sha256:claude-def", ParserStatus: endpointinventory.StatusOK, Redaction: endpointinventory.RedactionFull},
+		},
+		Skills: []endpointinventory.Skill{
+			{Runtime: "cursor", SkillName: "cursor-skill", Exists: true, ParserStatus: endpointinventory.StatusOK, Redaction: endpointinventory.RedactionFull},
+			{Runtime: "claude_code", SkillName: "claude-skill", Exists: true, ParserStatus: endpointinventory.StatusOK, Redaction: endpointinventory.RedactionFull},
+		},
+	}
+
+	if err := writeInventoryEvents(cfg, result); err != nil {
+		t.Fatalf("writeInventoryEvents returned error: %v", err)
+	}
+	data, err := os.ReadFile(endpointinventory.LogPath(logPath, cfg.UserMode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"cursor-server", "cursor-skill"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inventory log missing %q: %s", want, text)
+		}
+	}
+	for _, forbidden := range []string{"claude-server", "claude-skill"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("inventory log should not include filtered runtime %q: %s", forbidden, text)
+		}
+	}
+}
+
 func TestInventoryHeartbeatTTLAndSnapshotDigest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

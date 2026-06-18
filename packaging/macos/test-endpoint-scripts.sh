@@ -462,7 +462,7 @@ AWS_SHARED_CREDENTIALS_FILE="/tmp/test-aws-credentials" \
 AWS_CONFIG_FILE="/tmp/test-aws-config" \
 AWS_WEB_IDENTITY_TOKEN_FILE="/tmp/test-web-identity-token" \
 AWS_ROLE_ARN="arn:aws:iam::123456789012:role/beacon-demo" \
-"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude" "STANDARD_IA" "end" >/dev/null
+"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime" "STANDARD_IA" "end" >/dev/null
 
 if [ ! -f "$S3_FORWARDER_BASE/s3-vector.toml" ]; then
   echo "S3 Vector config was not written" >&2
@@ -522,6 +522,10 @@ if ! grep -q "beacon-test-bucket" "$S3_FORWARDER_BASE/s3-vector.env"; then
 fi
 if ! grep -q "us-west-2" "$S3_FORWARDER_BASE/s3-vector.env"; then
   echo "S3 Vector env missing region" >&2
+  exit 1
+fi
+if ! grep -q "BEACON_S3_PREFIX='beacon/claude'" "$S3_FORWARDER_BASE/s3-vector.env"; then
+  echo "S3 Vector env should normalize old runtime suffix from prefix" >&2
   exit 1
 fi
 for expected in \
