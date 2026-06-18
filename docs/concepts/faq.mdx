@@ -1,0 +1,65 @@
+---
+title: "FAQ"
+description: "Common questions about Asymptote Open Source, Agent Beacon, local telemetry, inventory, and forwarding"
+---
+
+## What telemetry does open-source Beacon capture?
+
+Open-source Beacon captures supported AI agent activity from configured local, CI, and cloud-agent surfaces. Depending on the runtime and integration mode, endpoint telemetry can include prompts, tool calls, shell commands, file activity, approvals, MCP-like tool use, model/session context, token usage, runtime-reported cost, and related event metadata.
+
+Beacon can also capture metadata-only local inventory for supported agent harnesses. Inventory can include detected runtimes, hook/config status, local MCP server metadata, and skill manifest metadata. For example, Beacon can inventory Cursor MCP servers from `mcp.json`, Claude Code MCP servers from `~/.claude.json`, and local skills under Cursor or Claude Code skill roots.
+
+Inventory is intentionally metadata-only. Beacon does not retain `SKILL.md` instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config contents in inventory events.
+
+## Where does open-source Beacon write data?
+
+For endpoint installs, Beacon writes runtime activity to `runtime.jsonl`.
+
+Inventory heartbeat telemetry is written separately to `inventory_state.jsonl` so runtime activity and configuration inventory can be routed or reviewed independently.
+
+Default user-mode paths:
+
+```text
+~/.beacon/endpoint/logs/runtime.jsonl
+~/.beacon/endpoint/logs/inventory_state.jsonl
+```
+
+Default system-mode paths:
+
+```text
+/var/log/beacon-agent/runtime.jsonl
+/var/log/beacon-agent/inventory_state.jsonl
+```
+
+## Does open-source Beacon require a hosted account?
+
+No. Beacon endpoint collection is local-only by default. It does not require a hosted Beacon account, remote policy fetch, or external network dependency during normal local hook execution.
+
+You can keep logs local, inspect them with the local dashboard and CLI, or forward them to customer-managed destinations such as S3, Wazuh, Elastic, Datadog, Sumo Logic, Rapid7, Falcon LogScale, Splunk HEC, or Microsoft Sentinel.
+
+## Does Beacon send secrets or skill contents downstream?
+
+Beacon applies redaction, sanitization, truncation, and event-size controls before writing endpoint events.
+
+Inventory records are conservative by design:
+
+- Skill inventory includes names, paths, hashes, scope, modified time, and parser status, but not skill instruction bodies.
+- MCP inventory includes server name, source config path, transport, command basename, argument count, safe environment key names/counts, and hashes, but not secret values or full environment values.
+- Config inventory includes file metadata, hashes, parser status, and counts, but not full unrelated config contents.
+
+## How do I forward Beacon logs to S3?
+
+Use the Beacon S3 content pack or the packaged Jamf helper for managed macOS deployments.
+
+The S3 forwarder writes runtime and inventory logs to separate prefixes under the same bucket root:
+
+```text
+s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<object>.jsonl.gz
+s3://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<object>.jsonl.gz
+```
+
+For Jamf Pro deployments with MDM secret injection, see [Deploy Beacon With Jamf And S3](/guides/jamf-s3-mdm).
+
+## When should I use Asymptote Managed instead?
+
+Use open-source Beacon when you want local telemetry and customer-managed forwarding. Consider Asymptote Managed when you need centralized ingest, retention, search, detections, fleet-wide visibility, policy controls, identity mapping, approvals, SSO/RBAC, or investigation workflows operated as a managed service.

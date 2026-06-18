@@ -11,6 +11,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.72 · June 18, 2026
+
+- **Inventory state separated from runtime activity** · Inventory heartbeat and snapshot telemetry now write to `inventory_state.jsonl`, keeping agent runtime activity in `runtime.jsonl` while preserving customer-managed forwarding paths.
+- **Claude Code MCP and skill inventory fixes** · Beacon inventories Claude Code MCP servers from `~/.claude.json` and follows symlinked Claude skill directories, so shared skill stores such as `.agents/skills` appear in endpoint inventory.
+- **Jamf S3 runtime and inventory forwarding** · The Jamf S3 Vector flow now forwards runtime and inventory JSONL to distinct S3 prefixes, supports MDM-injected AWS provider settings, normalizes older `.../runtime` prefixes, and reads initial inventory snapshots reliably.
+
 ### v0.0.71 · June 18, 2026
 
 - **Inventory heartbeat telemetry** · Beacon can now emit metadata-only inventory heartbeat events for local agent harnesses, hooks, MCP servers, and skills, making endpoint coverage drift easier to inspect from the runtime log without collecting skill contents.

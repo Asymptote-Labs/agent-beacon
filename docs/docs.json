@@ -69,6 +69,7 @@
             "icon": "book-open",
             "pages": [
               "concepts/core-concepts",
+              "concepts/faq",
               {
                 "group": "System Architecture",
                 "root": "architecture/system-architecture",
