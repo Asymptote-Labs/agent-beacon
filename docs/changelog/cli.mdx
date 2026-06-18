@@ -32,7 +32,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Agent skills inventory** · `beacon endpoint inventory` now discovers local agent skill manifests for Claude Code, Cursor, and `.agents/skills`, reporting names, paths, and content hashes for change detection. See the [Skills inventory guide](/inventory/skills).
 - **Skills in the local dashboard** · The Agent Inventory view in the local dashboard shows an Agent Skills table and summary card alongside agent harnesses and MCP servers, so operators can see installed skills at a glance.
 - **Metadata-only by design** · Skill discovery records hashes and file paths only — `SKILL.md` instruction bodies are never read or stored, consistent with Beacon's [data inventory](/security/data-inventory) posture.
-- **Optional `skill.inventory` events** · Running inventory with `--write-event` appends a `skill.inventory` event to the runtime log so installed-skill state can be forwarded to any configured SIEM destination.
+- **Optional inventory snapshot events** · Running inventory with `--write-event` appends metadata-only inventory heartbeat and snapshot events to `inventory_state.jsonl` so installed-skill state can be kept separate from runtime activity telemetry.
 
 ### v0.0.67 · June 15, 2026
 

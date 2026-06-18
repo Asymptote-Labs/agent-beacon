@@ -35,6 +35,7 @@ func runSessionStart(cmd *cobra.Command, args []string) {
 	if err := cloudshuttle.ResetFromEnv(); err != nil {
 		platformLogger.Warn("Failed to reset cloud telemetry log", "error", err.Error())
 	}
+	maybeEmitInventoryHeartbeat(platformLogger, input)
 	if sessionID == "" {
 		if isDevinLikePlatform(platformFlag) {
 			logger := logging.NewLoggerForPlatform("session-start", platformFlag)

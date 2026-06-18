@@ -18,6 +18,9 @@ func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
 	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("script did not include configured path: %s", got)
 	}
+	if !strings.Contains(got, "/tmp/beacon/inventory_state.jsonl") {
+		t.Fatalf("script did not include derived inventory path: %s", got)
+	}
 	if strings.Contains(got, "{{LOG_PATH}}") {
 		t.Fatalf("script still contains template token: %s", got)
 	}
@@ -69,6 +72,9 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if !strings.Contains(string(vectorConfig), "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("generated vector config missing configured log path: %s", vectorConfig)
 	}
+	if !strings.Contains(string(vectorConfig), "/tmp/beacon/inventory_state.jsonl") {
+		t.Fatalf("generated vector config missing derived inventory log path: %s", vectorConfig)
+	}
 	info, err = os.Stat(vectorPath)
 	if err != nil {
 		t.Fatal(err)
@@ -82,12 +88,14 @@ func TestVectorConfigUsesAWSS3SinkAndPreservesJSONShape(t *testing.T) {
 	got := mustRead("pack/vector.toml.tmpl")
 	for _, want := range []string{
 		`include = ["{{LOG_PATH}}"]`,
+		`include = ["{{INVENTORY_LOG_PATH}}"]`,
 		`read_from = "end"`,
 		`. = parse_json!(.message)`,
 		`type = "aws_s3"`,
 		`bucket = "${BEACON_S3_BUCKET}"`,
 		`region = "${AWS_REGION:-us-east-1}"`,
-		`key_prefix = "${BEACON_S3_PREFIX:-beacon/runtime}/date=%F/"`,
+		`key_prefix = "${BEACON_S3_PREFIX:-beacon}/runtime/date=%F/"`,
+		`key_prefix = "${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"`,
 		`filename_time_format = "%s"`,
 		`filename_append_uuid = true`,
 		`filename_extension = "jsonl.gz"`,
@@ -142,6 +150,7 @@ func TestPackREADMEMentionsS3SetupAndProductionForwarding(t *testing.T) {
 		"BEACON_S3_PREFIX",
 		"aws s3 ls",
 		"aws s3 cp",
+		"inventory_state.jsonl",
 		"Beacon endpoint S3 validation event",
 		"vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3_jsonl",
 		"vector.toml",
@@ -149,6 +158,7 @@ func TestPackREADMEMentionsS3SetupAndProductionForwarding(t *testing.T) {
 		"without a Vector wrapper",
 		"Content Handling",
 		"/var/log/beacon-agent/runtime.jsonl",
+		"/var/log/beacon-agent/inventory_state.jsonl",
 		"Beacon does not store AWS credentials",
 		"server-side encryption",
 	} {

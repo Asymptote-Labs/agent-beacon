@@ -29,6 +29,29 @@ Inventory can include:
 
 Human-readable and JSON inventory use the same default filtering: configuration records, MCP server context, and skill manifests are shown when they are relevant to the local endpoint state. Use `--all` with `--json` when you need the complete supported inventory surface for fleet comparison or troubleshooting.
 
+## Inventory Heartbeats
+
+Cursor and Claude Code endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`:
+
+- `inventory.heartbeat` records that Beacon checked local agent configuration inventory, including counts and a snapshot digest.
+- `inventory.snapshot` records the current metadata-only inventory when the snapshot changed or when inventory is first initialized.
+
+Inventory snapshots include config file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
+
+The heartbeat TTL is configured in the existing endpoint config file:
+
+```json title="~/.beacon/endpoint/config.json"
+{
+  "inventory_heartbeat": {
+    "enabled": true,
+    "ttl_seconds": 86400,
+    "runtimes": ["cursor", "claude_code"]
+  }
+}
+```
+
+For a manual smoke test, temporarily lower `ttl_seconds`, start a Cursor or Claude Code session with Beacon hooks installed, add a harmless test MCP server to `~/.cursor/mcp.json`, `.cursor/mcp.json`, `~/.claude/settings.json`, or `.claude/settings.json`, then trigger another hook action. `inventory_state.jsonl` should contain an `inventory.heartbeat` event and, when the digest changes, an `inventory.snapshot` event with the new MCP server metadata under `raw.inventory.mcp_servers`. `runtime.jsonl` should remain limited to agent runtime activity.
+
 ## Flags
 
 | Flag | Description |

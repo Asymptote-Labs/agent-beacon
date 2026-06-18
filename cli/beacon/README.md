@@ -415,10 +415,11 @@ Beacon endpoint configuration.
 ```
 
 The S3 pack keeps Beacon as a local JSONL producer and documents forwarding
-`runtime.jsonl` into an AWS S3 bucket with a customer-managed Vector host agent.
-Store AWS credentials, profiles, IAM roles, bucket policies, lifecycle rules,
-and encryption settings in AWS, Vector, or deployment tooling, not in Beacon
-endpoint configuration.
+`runtime.jsonl` and the sibling `inventory_state.jsonl` into separate
+`runtime/` and `inventory/` S3 prefixes with a customer-managed Vector host
+agent. Store AWS credentials, profiles, IAM roles, bucket policies, lifecycle
+rules, and encryption settings in AWS, Vector, or deployment tooling, not in
+Beacon endpoint configuration.
 
 ## AWS CloudWatch Logs
 

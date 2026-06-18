@@ -33,12 +33,26 @@ type skillRoot struct {
 	scope   string
 }
 
-func scanSkills(home, wd, redaction string) []Skill {
+func scanSkills(home, wd, redaction string, runtimes []string) []Skill {
 	var skills []Skill
-	for _, root := range skillRoots(home, wd) {
+	for _, root := range filterSkillRoots(skillRoots(home, wd), runtimes) {
 		skills = append(skills, inspectSkillRoot(root, redaction)...)
 	}
 	return dedupeSkills(skills)
+}
+
+func filterSkillRoots(items []skillRoot, runtimes []string) []skillRoot {
+	allowed := runtimeSet(runtimes)
+	if len(allowed) == 0 {
+		return items
+	}
+	out := make([]skillRoot, 0, len(items))
+	for _, item := range items {
+		if allowed[item.runtime] {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func skillRoots(home, wd string) []skillRoot {

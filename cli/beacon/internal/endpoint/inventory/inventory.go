@@ -54,6 +54,7 @@ const (
 type Options struct {
 	HomeDir    string
 	WorkingDir string
+	Runtimes   []string
 	Now        func() time.Time
 }
 
@@ -143,13 +144,41 @@ func Scan(opts Options) Result {
 			WorkDirHash: hashString(wd),
 		},
 	}
-	for _, item := range candidates(home, wd) {
+	for _, item := range filterCandidates(candidates(home, wd), opts.Runtimes) {
 		config, servers := inspectCandidate(item, redaction)
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}
-	result.Skills = scanSkills(home, wd, redaction)
+	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes)
 	return result
+}
+
+func filterCandidates(items []candidate, runtimes []string) []candidate {
+	allowed := runtimeSet(runtimes)
+	if len(allowed) == 0 {
+		return items
+	}
+	out := make([]candidate, 0, len(items))
+	for _, item := range items {
+		if allowed[item.runtime] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func runtimeSet(runtimes []string) map[string]bool {
+	if len(runtimes) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, runtime := range runtimes {
+		runtime = strings.TrimSpace(runtime)
+		if runtime != "" {
+			out[runtime] = true
+		}
+	}
+	return out
 }
 
 func candidates(home, wd string) []candidate {

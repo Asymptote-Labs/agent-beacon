@@ -111,7 +111,11 @@ func isRuntimeInstalled(runtime hookRuntime, opts RuntimeOptions) bool {
 }
 
 func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) string {
-	return fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s %s --platform %s", shellQuote(logPath), shellQuote(configPath), shellQuote(binaryPath), platform)
+	cliEnv := ""
+	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
+		cliEnv = " BEACON_ENDPOINT_CLI=" + shellQuote(cliPath)
+	}
+	return fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s%s %s --platform %s", shellQuote(logPath), shellQuote(configPath), cliEnv, shellQuote(binaryPath), platform)
 }
 
 func isEndpointHookCommand(command, platform string) bool {

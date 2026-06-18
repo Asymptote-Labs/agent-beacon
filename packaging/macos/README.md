@@ -134,9 +134,12 @@ identity, MDM, or secret tooling. Keep AWS credentials, IAM roles, log group
 retention, and encryption outside Beacon endpoint configuration.
 
 For AWS S3, keep Beacon as the local JSONL producer and deploy Vector to tail
-`/var/log/beacon-agent/runtime.jsonl` into a customer-managed bucket. Generate
-Beacon's S3 content pack for setup guidance, a Vector config, sample events, and
-validation commands:
+`/var/log/beacon-agent/runtime.jsonl` and
+`/var/log/beacon-agent/inventory_state.jsonl` into a customer-managed bucket.
+The generated S3 config writes runtime activity under `runtime/date=.../` and
+inventory telemetry under `inventory/date=.../` below the same
+`BEACON_S3_PREFIX`. Generate Beacon's S3 content pack for setup guidance, a
+Vector config, sample events, and validation commands:
 
 ```bash
 /opt/beacon/bin/beacon endpoint s3 install-pack --system --output ./beacon-s3-pack
@@ -348,8 +351,10 @@ integrations; the helper writes hook events to
 
 Use `/opt/beacon/jamf/claude/common/repair-hooks.sh` when a Jamf policy
 needs only to repair the system endpoint, prepare
-`/var/log/beacon-agent/runtime.jsonl` for user-run hooks, reinstall Claude Code
-hooks for the interactive console user, and run a manual Claude hook smoke test.
+`/var/log/beacon-agent/runtime.jsonl`,
+`/var/log/beacon-agent/inventory_state.jsonl`, and the inventory heartbeat state
+file for user-run hooks, reinstall Claude Code hooks for the interactive console
+user, and run a manual Claude hook smoke test.
 
 `repair-hooks.sh` Jamf script parameters:
 
@@ -376,9 +381,24 @@ Parameter 10: Vector read_from, default end
 ```
 
 Use `/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh` when one
-policy should repair Beacon, prepare `/var/log/beacon-agent/runtime.jsonl`,
-install Claude hooks for the console user, and install the Falcon Vector
-forwarder without relying on collector-based Falcon forwarding.
+policy should repair Beacon, prepare `/var/log/beacon-agent/runtime.jsonl` and
+the sibling inventory log/state files, install Claude hooks for the console
+user, and install the Falcon Vector forwarder without relying on collector-based
+Falcon forwarding.
+
+`s3/install-forwarder.sh` Jamf script parameters:
+
+```text
+Parameter 4: S3 bucket
+Parameter 5: AWS region
+Parameter 6: S3 prefix root, default beacon
+Parameter 7: S3 storage class, default STANDARD
+Parameter 8: Vector read_from, default end
+```
+
+Set `BEACON_RUNTIME_LOG_PATHS` to override the tailed runtime logs. The S3
+forwarder derives an `inventory_state.jsonl` path beside each runtime path and
+ships those inventory files under the `inventory/` S3 folder.
 
 The Jamf Claude helper source paths map into the package as:
 

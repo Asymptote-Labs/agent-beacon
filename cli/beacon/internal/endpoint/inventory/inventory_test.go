@@ -106,6 +106,47 @@ func TestScanIncludesNamesAndPaths(t *testing.T) {
 	}
 }
 
+func TestScanFiltersRuntimes(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{"mcpServers":{"filesystem":{"command":"npx"}}}`)
+	writeFile(t, filepath.Join(home, ".codex", "config.toml"), `[mcp_servers.github]
+command = "gh"
+`)
+	writeFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"remote":{"url":"https://example.test/sse"}}}`)
+	writeFile(t, filepath.Join(home, ".cursor", "skills", "direct", "SKILL.md"), "# Direct")
+	writeFile(t, filepath.Join(home, ".agents", "skills", "agent", "SKILL.md"), "# Agent")
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Runtimes:   []string{"cursor", "claude_code"},
+		Now:        fixedNow,
+	})
+
+	for _, config := range result.Configs {
+		if config.Runtime != "cursor" && config.Runtime != "claude_code" {
+			t.Fatalf("unexpected config runtime after filter: %#v", config)
+		}
+	}
+	for _, server := range result.MCPServers {
+		if server.Runtime != "cursor" && server.Runtime != "claude_code" {
+			t.Fatalf("unexpected MCP runtime after filter: %#v", server)
+		}
+	}
+	for _, skill := range result.Skills {
+		if skill.Runtime != "cursor" && skill.Runtime != "claude_code" {
+			t.Fatalf("unexpected skill runtime after filter: %#v", skill)
+		}
+	}
+	if assertServerPresent(result.MCPServers, "codex_cli", "github") {
+		t.Fatalf("codex server should be filtered out: %#v", result.MCPServers)
+	}
+	if findSkill(result.Skills, "agent_skills", "agent", filepath.Join(home, ".agents", "skills", "agent", "SKILL.md")) != nil {
+		t.Fatalf("agent_skills root should be filtered out: %#v", result.Skills)
+	}
+}
+
 func TestScanKeepsPartialResultsWhenAConfigIsMalformed(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
@@ -424,6 +465,16 @@ func TestSkillScanIsBoundedToDirectSkillManifests(t *testing.T) {
 	}
 }
 
+func TestInventoryLogAndStatePathsFollowRuntimeLog(t *testing.T) {
+	runtimeLog := filepath.Join("/tmp", "beacon", "runtime.jsonl")
+	if got, want := LogPath(runtimeLog, true), filepath.Join("/tmp", "beacon", "inventory_state.jsonl"); got != want {
+		t.Fatalf("LogPath = %q, want %q", got, want)
+	}
+	if got, want := StatePathForLog(runtimeLog, true), filepath.Join("/tmp", "beacon", "inventory-state.json"); got != want {
+		t.Fatalf("StatePathForLog = %q, want %q", got, want)
+	}
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 5, 7, 0, 0, 0, time.UTC)
 }
@@ -464,6 +515,15 @@ func assertServer(t *testing.T, servers []MCPServer, runtime, name, transport st
 		}
 	}
 	t.Fatalf("server %s/%s not found in %#v", runtime, name, servers)
+}
+
+func assertServerPresent(servers []MCPServer, runtime, name string) bool {
+	for _, server := range servers {
+		if server.Runtime == runtime && server.ServerName == name {
+			return true
+		}
+	}
+	return false
 }
 
 func findConfig(configs []Config, runtime, path string) *Config {
