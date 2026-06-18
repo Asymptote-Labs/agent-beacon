@@ -270,6 +270,7 @@
               "cli/version",
               "cli/login",
               "cli/scan",
+              "cli/token-usage",
               {
                 "group": "beacon rules",
                 "root": "cli/rules",
@@ -333,7 +334,6 @@
                   "cli/endpoint-repair",
                   "cli/endpoint-uninstall",
                   "cli/endpoint-config",
-                  "cli/endpoint-tokens",
                   "cli/dashboard",
                   "cli/wazuh",
                   "cli/elastic",

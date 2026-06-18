@@ -15,7 +15,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
 )
 
@@ -134,30 +133,15 @@ func Handler(opts Options) (http.Handler, error) {
 			methodNotAllowed(w)
 			return
 		}
-		// Token rollups need the full matching log, not the latest page.
-		query := parseQuery(r, maxEventLimit)
-		query.NoLimit = true
-		result, err := ReadEvents(opts.LogPath, query)
+		// Token rollups need the full matching log in append order, not the
+		// latest page. tokenOptions carries the session, so AggregateScoped
+		// applies the exact session filter; the dashboard never scopes by run.
+		events, err := ReadEventsAppendOrder(opts.LogPath, parseQuery(r, maxEventLimit))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		// Feed Aggregate in chronological (append) order so cumulative metric
-		// series resolve correctly when a batch of datapoints shares the same
-		// second-resolution timestamp.
-		SortRecordsAppendOrder(result.Events)
-		session := strings.TrimSpace(query.Session)
-		events := make([]schema.Event, 0, len(result.Events))
-		for _, record := range result.Events {
-			// Match the session case-insensitively (consistent with the
-			// case-insensitive event query) so totals/grouping stay aligned
-			// with the per-step drilldown.
-			if session != "" && (record.Event.Session == nil || !strings.EqualFold(record.Event.Session.ID, session)) {
-				continue
-			}
-			events = append(events, record.Event)
-		}
-		writeJSON(w, tokens.Aggregate(events, tokenOptions(r)))
+		writeJSON(w, tokens.AggregateScoped(events, "", tokenOptions(r)))
 	})
 	mux.HandleFunc("/api/detections", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

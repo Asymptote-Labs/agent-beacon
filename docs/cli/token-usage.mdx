@@ -1,14 +1,14 @@
 ---
-title: "beacon endpoint tokens"
+title: "beacon token-usage"
 description: "Report token usage and attribution from the Beacon endpoint runtime log"
 ---
 
 ## Command Overview
 
-`beacon endpoint tokens` reads Beacon endpoint events from the runtime JSONL log and summarizes token usage, cost, models, sessions, runs, harnesses, and repositories.
+`beacon token-usage` reads Beacon endpoint events from the runtime JSONL log and summarizes token usage, cost, models, sessions, runs, harnesses, and repositories.
 
 ```bash title="Command syntax"
-beacon endpoint tokens [flags]
+beacon token-usage [flags]
 ```
 
 Use this command when you need a local report before opening the dashboard, sending diagnostics, or validating token attribution for a specific agent session.
@@ -38,31 +38,31 @@ A few rules shape how the numbers read:
 Show token usage from the default per-user endpoint log:
 
 ```bash title="Show local token usage"
-beacon endpoint tokens
+beacon token-usage
 ```
 
 Print a machine-readable report:
 
 ```bash title="Print JSON"
-beacon endpoint tokens --json
+beacon token-usage --json
 ```
 
 Filter to one session and include per-step detail:
 
 ```bash title="Filter by session"
-beacon endpoint tokens --session claude-session-123
+beacon token-usage --session claude-session-123
 ```
 
 Group usage into hourly time buckets:
 
 ```bash title="Bucket usage over time"
-beacon endpoint tokens --bucket 1h
+beacon token-usage --bucket 1h
 ```
 
 Inspect a CI runtime log and filter to a run:
 
 ```bash title="Inspect a CI run"
-beacon endpoint tokens --log-path ./beacon-runtime.jsonl --run-id github/123456 --json
+beacon token-usage --log-path ./beacon-runtime.jsonl --run-id github/123456 --json
 ```
 
 ## Filters

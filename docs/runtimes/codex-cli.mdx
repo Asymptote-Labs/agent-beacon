@@ -31,7 +31,7 @@ Two attribution limits are specific to Codex and follow from what Codex emits, n
 - **No cost.** Codex does not emit a cost signal, so `gen_ai.usage.cost_usd` is empty for Codex turns. Beacon never derives cost from local pricing tables.
 - **No per-session attribution.** Codex's usage metric carries no conversation id, so Codex turns do not roll up by session. Model, harness, repository, and run attribution work normally.
 
-See [How token attribution works](/cli/endpoint-tokens#how-token-attribution-works) for the cross-runtime model.
+See [How token attribution works](/cli/token-usage#how-token-attribution-works) for the cross-runtime model.
 
 ## CI support
 
