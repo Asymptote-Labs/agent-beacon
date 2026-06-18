@@ -29,6 +29,14 @@ Inventory can include:
 
 Human-readable and JSON inventory use the same default filtering: configuration records, MCP server context, and skill manifests are shown when they are relevant to the local endpoint state. Use `--all` with `--json` when you need the complete supported inventory surface for fleet comparison or troubleshooting.
 
+Use the section filters when you only need one inventory surface:
+
+- `--mcp` shows MCP server inventory and the source config files that define MCP servers.
+- `--skills` shows local agent skill manifests.
+- `--hooks` shows hook integration status and hook config files.
+
+The section filters can be combined. For example, `--mcp --skills --json` prints only MCP and skill inventory buckets in the JSON output.
+
 ## Inventory Heartbeats
 
 Cursor and Claude Code endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`:
@@ -61,6 +69,9 @@ For a manual smoke test, temporarily lower `ttl_seconds`, start a Cursor or Clau
 | `--log-path <path>` | Runtime JSONL log path |
 | `--json` | Print inventory as JSON |
 | `--all` | Include all supported targets, not only configured, detected, or observed targets |
+| `--mcp` | Show only MCP server inventory and source configs |
+| `--skills` | Show only local agent skill inventory |
+| `--hooks` | Show only hook integration and hook config inventory |
 
 ## Examples
 
@@ -80,6 +91,18 @@ Print machine-readable inventory:
 
 ```bash title="Print machine-readable inventory"
 beacon endpoint inventory --json
+```
+
+Show only MCP server inventory:
+
+```bash title="Show MCP inventory"
+beacon endpoint inventory --mcp
+```
+
+Show only skill manifests and hook configuration:
+
+```bash title="Show skills and hooks"
+beacon endpoint inventory --skills --hooks --json
 ```
 
 Inventory a system-mode endpoint:

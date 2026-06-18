@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
@@ -48,9 +49,19 @@ type InventoryResponse struct {
 	GeneratedAt string                `json:"generated_at"`
 	UserScope   inventory.UserScope   `json:"user_scope"`
 	Harnesses   interface{}           `json:"harnesses"`
+	Hooks       []HookStatus          `json:"hooks"`
 	Configs     []inventory.Config    `json:"configs"`
 	MCPServers  []inventory.MCPServer `json:"mcp_servers"`
 	Skills      []inventory.Skill     `json:"skills"`
+}
+
+type HookStatus struct {
+	Target     string `json:"target"`
+	Status     string `json:"status"`
+	Installed  bool   `json:"installed"`
+	Path       string `json:"path,omitempty"`
+	BinaryPath string `json:"binary_path,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 var (
@@ -99,6 +110,7 @@ func Handler(opts Options) (http.Handler, error) {
 			GeneratedAt: scan.GeneratedAt,
 			UserScope:   scan.UserScope,
 			Harnesses:   status.Harnesses,
+			Hooks:       hookStatuses(opts.LogPath, opts.UserMode),
 			Configs:     scan.Configs,
 			MCPServers:  scan.MCPServers,
 			Skills:      scan.Skills,
@@ -291,6 +303,44 @@ func tokenOptions(r *http.Request) tokens.Options {
 		opts.TopLimit = top
 	}
 	return opts
+}
+
+func hookStatuses(logPath string, userMode bool) []HookStatus {
+	out := []HookStatus{}
+	add := func(target string, installed bool, path, binaryPath, message string) {
+		status := "not_installed"
+		if installed {
+			status = "configured"
+		}
+		out = append(out, HookStatus{
+			Target:     target,
+			Status:     status,
+			Installed:  installed,
+			Path:       path,
+			BinaryPath: binaryPath,
+			Message:    message,
+		})
+	}
+	level := endpointhooks.LevelUser
+	antigravity := endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("antigravity", antigravity.Installed, antigravity.ConfigPath, antigravity.BinaryPath, antigravity.Message)
+	cursor := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("cursor", cursor.Installed, cursor.HooksJSONPath, cursor.BinaryPath, cursor.Message)
+	devin := endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("devin-cli", devin.Installed, devin.ConfigPath, devin.BinaryPath, devin.Message)
+	devinDesktop := endpointhooks.DevinDesktopHookStatus(endpointhooks.DevinDesktopOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("devin-desktop", devinDesktop.Installed, devinDesktop.ConfigPath, devinDesktop.BinaryPath, devinDesktop.Message)
+	factory := endpointhooks.FactoryHookStatus(endpointhooks.FactoryOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("factory", factory.Installed, factory.SettingsPath, factory.BinaryPath, factory.Message)
+	grok := endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("grok", grok.Installed, grok.HooksPath, grok.BinaryPath, grok.Message)
+	hermes := endpointhooks.HermesHookStatus(endpointhooks.HermesOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("hermes", hermes.Installed, hermes.ConfigPath, hermes.BinaryPath, hermes.Message)
+	opencode := endpointhooks.OpenCodeHookStatus(endpointhooks.OpenCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("opencode", opencode.Installed, opencode.PluginPath, opencode.BinaryPath, opencode.Message)
+	vscode := endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("vscode", vscode.Installed, vscode.HooksPath, vscode.BinaryPath, vscode.Message)
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, value interface{}) {

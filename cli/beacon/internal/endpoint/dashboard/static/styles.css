@@ -793,6 +793,10 @@ pre {
   max-width: 26rem;
 }
 
+.sha-cell {
+  max-width: 18rem;
+}
+
 .scope-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
