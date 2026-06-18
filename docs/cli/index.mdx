@@ -33,18 +33,19 @@ Top-level Agent Beacon CLI commands.
 
 | Command | Description |
 |---------|-------------|
-| [`beacon version`](/cli/version) | Display the installed Agent Beacon CLI version. |
-| [`beacon login`](/cli/login) | Log in to the Asymptote dashboard from the Beacon CLI. |
-| [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
-| [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
 | [`beacon ci`](/cli/ci) | Run ephemeral AI runtime telemetry collection in CI. |
 | [`beacon cloud`](/cli/cloud) | Configure provider-managed cloud agent telemetry setup helpers. |
-| [`beacon mcp`](/cli/mcp) | Expose local Beacon activity to MCP clients. |
-| [`beacon ingest`](/cli/ingest) | Upload Beacon telemetry to configured ingest destinations. |
-| [`beacon endpoint`](/cli/endpoint) | Manage local endpoint telemetry, runtime logs, and integrations. |
-| [`beacon status`](/cli/endpoint-status) | Alias for `beacon endpoint status`. |
 | [`beacon doctor`](/cli/endpoint-doctor) | Alias for `beacon endpoint doctor`. |
+| [`beacon endpoint`](/cli/endpoint) | Manage local endpoint telemetry, runtime logs, and integrations. |
+| [`beacon ingest`](/cli/ingest) | Upload Beacon telemetry to configured ingest destinations. |
 | [`beacon inventory`](/cli/endpoint-inventory) | Alias for `beacon endpoint inventory`. |
+| [`beacon login`](/cli/login) | Log in to the Asymptote dashboard from the Beacon CLI. |
+| [`beacon mcp`](/cli/mcp) | Expose local Beacon activity to MCP clients. |
+| [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
+| [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
+| [`beacon status`](/cli/endpoint-status) | Alias for `beacon endpoint status`. |
+| [`beacon token-usage`](/cli/token-usage) | Report token usage and attribution from Beacon runtime logs. |
+| [`beacon version`](/cli/version) | Display the installed Agent Beacon CLI version. |
 
 ## beacon version
 
@@ -167,7 +168,6 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint repair`](/cli/endpoint-repair) | Repair Beacon endpoint service files, telemetry configuration, and optional collector forwarding destinations. |
 | [`beacon endpoint uninstall`](/cli/endpoint-uninstall) | Remove Beacon endpoint service files, with an option to keep local logs. |
 | [`beacon endpoint config`](/cli/endpoint-config) | Inspect, validate, and update endpoint configuration. |
-| [`beacon endpoint tokens`](/cli/endpoint-tokens) | Report token usage and attribution from the endpoint runtime log. |
 | [`beacon endpoint dashboard`](/cli/dashboard#beacon-endpoint-dashboard) | Run the local dashboard over Beacon runtime logs for endpoint inspection. |
 | [`beacon endpoint wazuh`](/cli/wazuh) | Configure Wazuh ingestion for Beacon endpoint events. |
 | [`beacon endpoint elastic`](/cli/elastic) | Generate Elastic content and run a local Elasticsearch, Kibana, and Filebeat validation stack. |

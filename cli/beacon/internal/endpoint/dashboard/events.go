@@ -83,6 +83,27 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	return result, nil
 }
 
+// ReadEventsAppendOrder reads the full matching log (NoLimit) and returns the
+// events in chronological (log append) order. Token aggregation needs append
+// order because runtime timestamps are second-resolution, so a batch of
+// cumulative datapoints from one export commonly shares a timestamp; the
+// cumulative dedup then relies on append order to recover the emission sequence.
+// The newest-first ReadEvents sort breaks such ties on lexicographic line IDs,
+// which mis-orders line-9 vs line-10 within a second.
+func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error) {
+	query.NoLimit = true
+	result, err := ReadEvents(path, query)
+	if err != nil {
+		return nil, err
+	}
+	SortRecordsAppendOrder(result.Events)
+	events := make([]schema.Event, 0, len(result.Events))
+	for _, record := range result.Events {
+		events = append(events, record.Event)
+	}
+	return events, nil
+}
+
 // StreamEvents reads every event from the runtime log and its rotated archives in
 // chronological (append) order and invokes fn for each, with no limit and no result
 // buffering. Rule evaluation (beacon scan) needs the full, ordered stream — ReadEvents

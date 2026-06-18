@@ -8,20 +8,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
-func TestEndpointTokensCommandRegistered(t *testing.T) {
-	cmd, _, err := endpointCmd.Find([]string{"tokens"})
+func TestTokenUsageCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"token-usage"})
 	if err != nil {
-		t.Fatalf("Find tokens returned error: %v", err)
+		t.Fatalf("Find token-usage returned error: %v", err)
 	}
-	if cmd == nil || cmd.Use != "tokens" {
-		t.Fatalf("tokens command not registered: %#v", cmd)
+	if cmd == nil || cmd.Use != "token-usage" {
+		t.Fatalf("token-usage command not registered: %#v", cmd)
 	}
 	for _, flag := range []string{"log-path", "json", "since", "until", "session", "model", "harness", "repository", "run-id", "bucket", "top"} {
 		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("tokens command missing --%s flag", flag)
+			t.Fatalf("token-usage command missing --%s flag", flag)
 		}
 	}
 }
@@ -40,38 +40,24 @@ func writeTokensFixtureLog(t *testing.T) string {
 	return logPath
 }
 
-func runTokensCommand(t *testing.T, args ...string) string {
+func runTokenUsageCommand(t *testing.T, args ...string) string {
 	t.Helper()
-	endpointTokensOpts = struct {
-		userMode   bool
-		systemMode bool
-		logPath    string
-		jsonOutput bool
-		since      string
-		until      string
-		session    string
-		model      string
-		harness    string
-		repository string
-		runID      string
-		bucket     string
-		top        int
-	}{userMode: true}
-	if err := endpointTokensCmd.Flags().Parse(args); err != nil {
+	tokenUsageOpts = tokenUsageOptions{userMode: true}
+	if err := tokenUsageCmd.Flags().Parse(args); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
 	var out bytes.Buffer
-	endpointTokensCmd.SetOut(&out)
-	defer endpointTokensCmd.SetOut(nil)
-	if err := runEndpointTokens(endpointTokensCmd, nil); err != nil {
-		t.Fatalf("runEndpointTokens returned error: %v", err)
+	tokenUsageCmd.SetOut(&out)
+	defer tokenUsageCmd.SetOut(nil)
+	if err := runTokenUsage(tokenUsageCmd, nil); err != nil {
+		t.Fatalf("runTokenUsage returned error: %v", err)
 	}
 	return out.String()
 }
 
-func TestEndpointTokensTextReport(t *testing.T) {
+func TestTokenUsageTextReport(t *testing.T) {
 	logPath := writeTokensFixtureLog(t)
-	output := runTokensCommand(t, "--log-path", logPath)
+	output := runTokenUsageCommand(t, "--log-path", logPath)
 	for _, want := range []string{
 		"3 of 3 events carry usage",
 		"claude-sonnet-4-5",
@@ -86,9 +72,9 @@ func TestEndpointTokensTextReport(t *testing.T) {
 	}
 }
 
-func TestEndpointTokensJSONReport(t *testing.T) {
+func TestTokenUsageJSONReport(t *testing.T) {
 	logPath := writeTokensFixtureLog(t)
-	output := runTokensCommand(t, "--log-path", logPath, "--json", "--session", "session-1")
+	output := runTokenUsageCommand(t, "--log-path", logPath, "--json", "--session", "session-1")
 	var report tokens.Report
 	if err := json.Unmarshal([]byte(output), &report); err != nil {
 		t.Fatalf("unmarshal JSON report: %v\n%s", err, output)
@@ -104,12 +90,12 @@ func TestEndpointTokensJSONReport(t *testing.T) {
 	}
 }
 
-func TestEndpointTokensRunIDFilterAcceptsBareAndCompositeKeys(t *testing.T) {
+func TestTokenUsageRunIDFilterAcceptsBareAndCompositeKeys(t *testing.T) {
 	logPath := writeTokensFixtureLog(t)
 	// The BY RUN rollup labels this run "github_actions/777"; both that
 	// composite key and the bare run id must select the run's usage.
 	for _, runID := range []string{"777", "github_actions/777"} {
-		output := runTokensCommand(t, "--log-path", logPath, "--json", "--run-id", runID)
+		output := runTokenUsageCommand(t, "--log-path", logPath, "--json", "--run-id", runID)
 		var report tokens.Report
 		if err := json.Unmarshal([]byte(output), &report); err != nil {
 			t.Fatalf("unmarshal JSON report for %q: %v\n%s", runID, err, output)
@@ -123,9 +109,9 @@ func TestEndpointTokensRunIDFilterAcceptsBareAndCompositeKeys(t *testing.T) {
 	}
 }
 
-func TestEndpointTokensEmptyLogSucceeds(t *testing.T) {
+func TestTokenUsageEmptyLogSucceeds(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	output := runTokensCommand(t, "--log-path", logPath)
+	output := runTokenUsageCommand(t, "--log-path", logPath)
 	if !strings.Contains(output, "0 of 0 events carry usage") {
 		t.Fatalf("empty report = %q", output)
 	}

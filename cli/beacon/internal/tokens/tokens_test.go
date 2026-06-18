@@ -189,6 +189,44 @@ func TestAggregateRunKeyWithoutProvider(t *testing.T) {
 	}
 }
 
+func TestAggregateScopedFiltersSessionAndRun(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "Session-1", "claude-sonnet-4-5", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(100)
+			e.Run = &schema.RunInfo{Provider: "github_actions", RunID: "777"}
+		}),
+		usageEventFixture("2026-06-11T10:01:00Z", "claude_code", "session-2", "claude-sonnet-4-5", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(50)
+			e.Run = &schema.RunInfo{Provider: "github_actions", RunID: "888"}
+		}),
+	}
+
+	// Session match is exact but case-insensitive.
+	report := AggregateScoped(events, "", Options{SessionID: "session-1"})
+	if report.Totals.InputTokens != 100 || report.TotalEvents != 1 {
+		t.Fatalf("session scope totals = %#v (events=%d), want only session-1", report.Totals, report.TotalEvents)
+	}
+	if report.SessionDetail == nil || report.SessionDetail.SessionID != "session-1" {
+		t.Fatalf("session detail = %#v", report.SessionDetail)
+	}
+
+	// Run id accepts both the bare id and the composite provider/run_id key.
+	for _, runID := range []string{"888", "github_actions/888"} {
+		got := AggregateScoped(events, runID, Options{})
+		if got.Totals.InputTokens != 50 || got.TotalEvents != 1 {
+			t.Fatalf("run scope %q totals = %#v (events=%d), want only run 888", runID, got.Totals, got.TotalEvents)
+		}
+		if len(got.ByRun) != 1 || got.ByRun[0].Key != "github_actions/888" {
+			t.Fatalf("run scope %q by_run = %#v", runID, got.ByRun)
+		}
+	}
+
+	// No scope keeps every event.
+	if all := AggregateScoped(events, "", Options{}); all.Totals.InputTokens != 150 || all.TotalEvents != 2 {
+		t.Fatalf("unscoped totals = %#v (events=%d), want all events", all.Totals, all.TotalEvents)
+	}
+}
+
 func TestAggregateBuildsSessionStepTree(t *testing.T) {
 	spanEvent := func(ts, span, parent string, input int64) schema.Event {
 		return usageEventFixture(ts, "asymptote_observe", "s1", "gpt-4o-mini", func(e *schema.Event) {

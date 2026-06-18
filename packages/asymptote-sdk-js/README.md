@@ -136,7 +136,7 @@ Call `Observe.flush()` before short-lived scripts exit, or
 
 The OpenLLMetry instrumentations record `gen_ai.usage.*` token counts on every
 supported model call, and the Beacon collector normalizes them into endpoint
-JSONL for the token usage dashboard and `beacon endpoint tokens` reports. Two
+JSONL for the token usage dashboard and `beacon token-usage` reports. Two
 notes:
 
 - Streaming responses report usage only after the stream is fully consumed;

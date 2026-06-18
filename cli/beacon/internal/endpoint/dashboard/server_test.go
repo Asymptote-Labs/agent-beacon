@@ -12,7 +12,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/tokens"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
 func TestStatusUsesExplicitRuntimeLogPath(t *testing.T) {

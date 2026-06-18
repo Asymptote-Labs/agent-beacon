@@ -188,6 +188,37 @@ func Aggregate(events []schema.Event, opts Options) Report {
 	return report
 }
 
+// AggregateScoped narrows events to a single session and optional CI run before
+// aggregating. The session filter uses opts.SessionID and matches exactly
+// (case-insensitive) so totals and grouping stay aligned with the per-step
+// drilldown, which keys on the exact session id; the broader substring match used
+// by the event query is intentionally not reused here. When runID != "" only the
+// matching run is kept, accepting either the bare run id or the composite
+// provider/run_id key shown in the BY RUN rollup. Pass runID == "" to skip run
+// filtering. Events should already be in chronological (append) order; see
+// Aggregate.
+func AggregateScoped(events []schema.Event, runID string, opts Options) Report {
+	session := strings.TrimSpace(opts.SessionID)
+	runID = strings.TrimSpace(runID)
+	if session == "" && runID == "" {
+		return Aggregate(events, opts)
+	}
+	filtered := make([]schema.Event, 0, len(events))
+	for _, event := range events {
+		if session != "" && (event.Session == nil || !strings.EqualFold(event.Session.ID, session)) {
+			continue
+		}
+		if runID != "" {
+			run := event.Run
+			if run == nil || (run.RunID != runID && RunKey(run.Provider, run.RunID) != runID) {
+				continue
+			}
+		}
+		filtered = append(filtered, event)
+	}
+	return Aggregate(filtered, opts)
+}
+
 func collectUsageEvents(events []schema.Event) []*usageEvent {
 	var out []*usageEvent
 	for i, event := range events {
