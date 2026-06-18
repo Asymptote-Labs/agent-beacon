@@ -140,7 +140,11 @@ under `${BEACON_S3_PREFIX}/inventory/date=.../`.
 
 The template uses date-partitioned `key_prefix`, `filename_time_format = "%s"`,
 and `filename_append_uuid = true` so production forwarding does not overwrite
-previous S3 objects. It also sets `compression = "gzip"`,
+previous S3 objects. Runtime log forwarding starts at the end of the active log
+to avoid backfilling historical session activity when Vector is first installed.
+Inventory forwarding starts at the beginning of `inventory_state.jsonl` so the
+first snapshot is not missed if the file was created before Vector began
+watching it. The template also sets `compression = "gzip"`,
 `content_encoding = "gzip"`, and `content_type = "application/x-ndjson"`.
 
 If you adapt the config or use another forwarder, it should:
