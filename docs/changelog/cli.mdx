@@ -11,6 +11,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.71 · June 18, 2026
+
+- **Inventory heartbeat telemetry** · Beacon can now emit metadata-only inventory heartbeat events for local agent harnesses, hooks, MCP servers, and skills, making endpoint coverage drift easier to inspect from the runtime log without collecting skill contents.
+- **Dashboard hook coverage breakdowns** · The local inventory dashboard now shows hook status and coverage summaries by runtime so operators can quickly spot missing or stale telemetry setup.
+- **Expanded inventory CLI filters** · `beacon endpoint inventory` adds focused flags for showing harnesses, hooks, MCP servers, skills, and telemetry state independently during audits and support workflows.
+- **Managed S3 forwarder hardening** · Jamf Claude S3 deployment scripts and generated Vector configs now better preserve managed environment settings and make forwarder smoke testing clearer.
+
 ### v0.0.70 · June 18, 2026
 
 - **Top-level token usage command** · `beacon token-usage` replaces the previous `beacon endpoint tokens` command path for local token, cost, model, session, run, harness, and repository attribution from Beacon runtime logs. Update scripts and runbooks that still call the old endpoint subcommand.
