@@ -24,6 +24,7 @@ type Counts struct {
 type State struct {
 	LastEmittedAt      string `json:"last_emitted_at,omitempty"`
 	LastSnapshotDigest string `json:"last_snapshot_digest,omitempty"`
+	LastAttemptAt      string `json:"last_attempt_at,omitempty"`
 }
 
 type LockedState struct {
@@ -152,6 +153,17 @@ func TTLExpired(state State, now time.Time, ttlSeconds int) bool {
 		return true
 	}
 	return !now.Before(last.Add(time.Duration(ttlSeconds) * time.Second))
+}
+
+func AttemptBackoffActive(state State, now time.Time, backoff time.Duration) bool {
+	if backoff <= 0 || state.LastAttemptAt == "" {
+		return false
+	}
+	last, err := time.Parse(time.RFC3339, state.LastAttemptAt)
+	if err != nil {
+		return false
+	}
+	return now.Before(last.Add(backoff))
 }
 
 func existingConfigs(configs []Config) []Config {

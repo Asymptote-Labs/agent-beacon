@@ -911,6 +911,49 @@ func TestInventoryHeartbeatTTLAndSnapshotDigest(t *testing.T) {
 	}
 }
 
+func TestInventoryHeartbeatAppendFailureRecordsAttemptOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	logDir := t.TempDir()
+	logPath := filepath.Join(logDir, "runtime.jsonl")
+	inventoryLogPath := endpointinventory.LogPath(logPath, true)
+	if err := os.MkdirAll(inventoryLogPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"}}}`)
+	cfg := endpointconfig.Default(true, logPath)
+	cfg.Inventory = &endpointconfig.Inventory{TTLSeconds: 86400, Runtimes: []string{"cursor"}}
+	settings := endpointconfig.InventoryConfig(cfg)
+
+	first, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	if err == nil {
+		t.Fatal("writeInventoryHeartbeat should fail when inventory log path is a directory")
+	}
+	if first.SnapshotDigest == "" {
+		t.Fatalf("failed heartbeat should still report snapshot digest: %#v", first)
+	}
+	statePath := endpointinventory.StatePathForLog(logPath, true)
+	state, err := endpointinventory.ReadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.LastAttemptAt == "" {
+		t.Fatalf("failed append should persist attempt timestamp: %#v", state)
+	}
+	if state.LastEmittedAt != "" || state.LastSnapshotDigest != "" {
+		t.Fatalf("failed append should not mark emission complete: %#v", state)
+	}
+
+	second, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	if err != nil {
+		t.Fatalf("second heartbeat should be skipped by attempt backoff, got error: %v", err)
+	}
+	if second.SkippedReason != "attempt_backoff" {
+		t.Fatalf("second heartbeat = %#v, want attempt_backoff", second)
+	}
+}
+
 func TestTopLevelAliasesRegistered(t *testing.T) {
 	for _, name := range []string{"doctor", "status", "inventory"} {
 		cmd, _, err := rootCmd.Find([]string{name})

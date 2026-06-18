@@ -338,6 +338,8 @@ type inventoryHeartbeatWriteResult struct {
 	PreviousDigest  string `json:"previous_snapshot_digest,omitempty"`
 }
 
+const inventoryAttemptBackoff = 5 * time.Minute
+
 func runEndpointInventoryHeartbeat(cmd *cobra.Command, args []string) error {
 	cfg, err := loadInventoryHeartbeatConfig(endpointUserMode(), endpointOpts.logPath, endpointOpts.inventoryHeartbeatConfig)
 	if err != nil {
@@ -390,6 +392,9 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 	if !force && !endpointinventory.TTLExpired(state, now, settings.TTLSeconds) {
 		return inventoryHeartbeatWriteResult{SkippedReason: "ttl_active", PreviousDigest: state.LastSnapshotDigest}, nil
 	}
+	if !force && endpointinventory.AttemptBackoffActive(state, now, inventoryAttemptBackoff) {
+		return inventoryHeartbeatWriteResult{SkippedReason: "attempt_backoff", PreviousDigest: state.LastSnapshotDigest}, nil
+	}
 	scanOpts := endpointinventory.Options{
 		WorkingDir: workingDir,
 		Runtimes:   settings.Runtimes,
@@ -399,14 +404,21 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 	digest := endpointinventory.SnapshotDigest(inventoryResult)
 	writeSnapshot := state.LastSnapshotDigest != digest
 	if err := locked.Save(endpointinventory.State{
-		LastEmittedAt:      now.Format(time.RFC3339),
-		LastSnapshotDigest: digest,
+		LastEmittedAt:      state.LastEmittedAt,
+		LastSnapshotDigest: state.LastSnapshotDigest,
+		LastAttemptAt:      now.Format(time.RFC3339),
 	}); err != nil {
 		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: state.LastSnapshotDigest}, err
 	}
 	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, triggerHarness, writeSnapshot, state)
 	if err != nil {
 		return writeResult, err
+	}
+	if err := locked.Save(endpointinventory.State{
+		LastEmittedAt:      now.Format(time.RFC3339),
+		LastSnapshotDigest: digest,
+	}); err != nil {
+		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: state.LastSnapshotDigest}, err
 	}
 	return writeResult, nil
 }
