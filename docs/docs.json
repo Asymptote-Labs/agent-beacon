@@ -69,6 +69,7 @@
             "icon": "book-open",
             "pages": [
               "concepts/core-concepts",
+              "concepts/vector-forwarding",
               {
                 "group": "System Architecture",
                 "root": "architecture/system-architecture",
@@ -85,7 +86,8 @@
                   "telemetry-schema/fields",
                   "telemetry-schema/examples"
                 ]
-              }
+              },
+              "concepts/faq"
             ]
           },
           {

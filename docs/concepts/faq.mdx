@@ -1,0 +1,207 @@
+---
+title: "FAQ"
+description: "Clear answers about Agent Beacon open source telemetry and Asymptote Managed architecture"
+---
+
+This FAQ answers common architecture, telemetry, and deployment questions about
+Asymptote and the open-source [Agent Beacon](https://github.com/Asymptote-Labs/agent-beacon)
+project.
+
+## Asymptote Open Source: Agent Beacon
+
+Agent Beacon is the local-first, open-source telemetry path. It collects
+supported agent runtime activity, writes normalized local JSONL, and supports
+customer-managed forwarding.
+
+### What telemetry does open-source Beacon capture?
+
+Beacon captures activity that supported runtimes expose through OTLP or hooks:
+prompts and content fields when emitted and retention allows, tool calls and
+tool results, shell commands, file activity, approvals, MCP-like activity,
+session metadata, model metadata, repository context, and endpoint health.
+
+Coverage depends on the runtime surface. See the [agent harness integration
+model](/runtimes/integration-model) and [data inventory](/security/data-inventory)
+for runtime-specific details.
+
+### Can Beacon see the agent's full context window?
+
+Only when the runtime exposes context-bearing telemetry. Beacon can retain
+prompt text, tool results, command output, file activity, and related content
+where supported and allowed by retention settings, but it does not have hidden
+access to a model's private context window.
+
+For cloud-agent surfaces, context coverage is often narrower than local endpoint
+coverage because the cloud provider controls which hooks or telemetry events are
+available.
+
+### Can Beacon detect unexpected data entering the agent context?
+
+Beacon can help investigate this when the data appears in emitted prompts, tool
+results, command output, file activity, or retained content. That can make it
+possible to spot data from an unexpected source in a session timeline.
+
+Beacon is not a browser monitor, email collector, SaaS audit log collector,
+kernel monitor, or universal data-origin tracker. If a runtime does not expose
+the source content or action, Beacon cannot reconstruct it from outside the
+runtime.
+
+### Does Beacon only log tool calls and tool results?
+
+No. Tool calls and tool results are important, but Beacon also captures supported
+prompt, command, file, approval, MCP-like, session, model, repository, and health
+signals. The exact fields depend on what each runtime emits.
+
+### Does Beacon retain the full conversation history?
+
+Beacon builds a local session timeline from the events it receives. That can
+include prompts, tool activity, command output, file activity, approvals, and
+content fields where the runtime emits them and retention allows.
+
+It should not be described as guaranteed full conversation history for every
+runtime. Some runtimes expose complete context-rich events; others expose only a
+subset.
+
+### Is the Beacon hook adapter installed locally on endpoints?
+
+For supported hook runtimes, yes. The `beacon-hooks` adapter is installed into
+local or project-level runtime hook configuration. The runtime invokes it when
+supported events occur, such as prompt submission, tool use, command execution,
+approvals, or file edits.
+
+Beacon uses the runtime's native hook points. It does not replace the model,
+proxy all traffic, or require a hosted service for normal local hook execution.
+
+### Can open-source Beacon forward logs through AWS S3?
+
+Yes, for endpoint and CI telemetry. Beacon writes local `runtime.jsonl`, and a
+customer-managed Vector forwarder can tail that file and upload gzip-compressed
+NDJSON objects to AWS S3.
+
+For provider-managed cloud-agent proof-of-concept flows, the current self-serve
+path uses Google Cloud Storage. Production cloud-agent ingest is handled through
+Asymptote Managed or a customer-approved forwarding design.
+
+### Can open-source Beacon forward logs to Datadog or a SIEM?
+
+Yes. Beacon supports local JSONL forwarding into customer-managed destinations
+such as Datadog, Elastic, Wazuh, Microsoft Sentinel, Rapid7 InsightIDR, Sumo
+Logic, Splunk HEC, Falcon LogScale HEC, AWS S3, Google Cloud Storage, AWS
+CloudWatch Logs, and custom pipelines.
+
+For file-tailing destinations, Beacon remains the local JSONL producer.
+Destination URLs, credentials, retries, routing, and retention stay in the
+customer-managed shipper or platform.
+
+### Who handles retries if log forwarding fails?
+
+Beacon preserves the local `runtime.jsonl` audit log and rotates it locally.
+Delivery retry behavior is owned by the shipper, such as Vector, Datadog Agent,
+Filebeat, Azure Monitor Agent, or another customer-managed pipeline.
+
+For Vector-based paths, Vector owns checkpointing, batching, retries, and
+destination delivery. Beacon's responsibility is to keep writing normalized
+events to the local handoff file.
+
+### Does open-source Beacon require a hosted Asymptote backend?
+
+No. The open-source endpoint path is local-first. Normal local hook execution,
+local collection, local JSONL, the local dashboard, local scans, and
+customer-managed forwarding do not require a hosted Asymptote account.
+
+## Asymptote Managed
+
+Asymptote Managed adds centralized ingest, retention, search, detections,
+governance, identity, approvals, access control, and investigation workflows on
+top of the open-source Beacon foundation.
+
+### Does Asymptote Managed provide a central console?
+
+Yes. Asymptote Managed provides the centralized operating layer for fleet-wide
+visibility, search, detections, investigations, policy workflows, identity
+mapping, approvals, SSO, RBAC, and audit trails.
+
+Use Managed when local JSONL and customer-managed forwarding are not enough for
+company-wide operations.
+
+### Should telemetry point to Asymptote or directly to the SIEM?
+
+Both patterns are valid.
+
+With Agent Beacon open source, telemetry can go directly from local JSONL into
+customer-controlled SIEM, log, or object-storage destinations. With Asymptote
+Managed, telemetry is sent to Asymptote for centralized search, detections,
+governance, and investigations, with downstream forwarding available as part of
+the deployment design.
+
+### Does Asymptote Managed replace the SIEM?
+
+No. Asymptote is focused on agent-specific visibility, governance, and
+investigation workflows. SIEMs and log platforms remain important downstream
+destinations for broader security operations, retention, and correlation.
+
+### How does Asymptote capture telemetry from cloud-hosted agent apps?
+
+Cloud-hosted agent applications use the Asymptote Observe SDK and managed
+ingest. The SDK instruments services, workers, serverless functions, and agent
+SDK integrations so agent activity can be captured from application code.
+
+Provider-managed cloud agents use surface-specific setup paths where supported.
+Those paths depend on the hooks, setup scripts, storage exports, or OTLP
+surfaces the provider exposes.
+
+### How does Asymptote collect Claude Cowork telemetry?
+
+Claude Cowork is configured in the Claude organization admin settings. Anthropic's
+service exports OTLP telemetry to a durable collector endpoint, and Asymptote
+normalizes the received events into the shared event model.
+
+Claude Cowork is not a local hook integration. Production deployments should use
+a durable HTTPS collector endpoint rather than a laptop or temporary tunnel.
+
+### Where should a cloud AI tenant send OTLP telemetry?
+
+In a Managed deployment, the cloud service or tenant can export OTLP to an
+Asymptote-managed collector endpoint when that runtime supports it.
+
+In a private or customer-managed design, the OTLP endpoint may instead point to a
+customer-controlled collector or forwarding layer. The right target depends on
+the deployment model, data-boundary requirements, and destination architecture.
+
+### Does Managed require a customer-hosted management server?
+
+Not necessarily. In Asymptote Managed, Asymptote operates the managed ingest and
+control-plane services. For private deployments or stricter infrastructure
+requirements, Asymptote can work with the customer on dedicated or
+customer-controlled deployment boundaries.
+
+Open-source Beacon does not require a management server. It can write local JSONL
+and forward through customer-managed shippers.
+
+### Why is telemetry useful for cloud and non-engineering agents?
+
+It is useful when the agent platform, OTLP export, hooks, or SDK instrumentation
+emits prompts, tools, files, commands, approvals, or workflow metadata. Managed
+investigations can then reconstruct what the agent did, which tools it used, what
+content was retained, and which user or workflow it maps to.
+
+If a cloud or non-engineering surface does not expose the relevant context,
+Asymptote cannot infer it from outside the platform. The value comes from the
+runtime signals the platform or instrumented application emits.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="System Architecture" icon="diagram-project" href="/architecture/system-architecture">
+    Compare the open-source Agent Beacon architecture with Asymptote Managed.
+  </Card>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    Review local collection, normalization, storage, and forwarding.
+  </Card>
+  <Card title="Managed Architecture" icon="cloud" href="/architecture/managed-architecture">
+    Review centralized ingest, governance, detections, and investigations.
+  </Card>
+  <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events into SIEMs, log platforms, object storage, or custom pipelines.
+  </Card>
+</Columns>
