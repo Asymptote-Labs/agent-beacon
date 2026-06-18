@@ -14,7 +14,7 @@ Use it to review the tool surface an agent may be able to call from local config
 - Server references introduced by user-level, project-level, or runtime-specific config.
 - User-mode versus system-mode differences when Beacon reads different endpoint paths and runtime logs.
 
-Inventory reads local config and runtime state only. It does not authenticate to MCP servers, call their tools, or verify remote service permissions.
+Inventory reads local config and runtime state only. It does not authenticate to MCP servers, call their tools, or verify remote service permissions. For Claude Code, user-scoped MCP servers are commonly stored in `~/.claude.json`; project-scoped servers may also appear in project MCP/config files. For Cursor, Beacon inspects user and project `mcp.json` files.
 
 ## Run MCP Inventory
 

@@ -22,8 +22,8 @@ Inventory can include:
 - Endpoint config path, runtime log path, and configured OTLP harnesses
 - Detected supported runtimes and telemetry status, including MDM-managed launch-environment state for GitHub Copilot CLI and Factory Droid
 - Hook integration status for Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, and OpenCode
-- Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally
-- Local agent skill manifests discovered under supported skill roots, reported as metadata and hashes only
+- Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally, including Claude Code `~/.claude.json` and Cursor `mcp.json`
+- Local agent skill manifests discovered under supported skill roots, including symlinked Claude Code skill directories, reported as metadata and hashes only
 - Recently observed Beacon runtime events when the runtime log exists
 - Admin-configured integration observations such as Claude Cowork and OpenClaw Gateway events
 
@@ -58,7 +58,7 @@ The heartbeat TTL is configured in the existing endpoint config file:
 }
 ```
 
-For a manual smoke test, temporarily lower `ttl_seconds`, start a Cursor or Claude Code session with Beacon hooks installed, add a harmless test MCP server to `~/.cursor/mcp.json`, `.cursor/mcp.json`, `~/.claude/settings.json`, or `.claude/settings.json`, then trigger another hook action. `inventory_state.jsonl` should contain an `inventory.heartbeat` event and, when the digest changes, an `inventory.snapshot` event with the new MCP server metadata under `raw.inventory.mcp_servers`. `runtime.jsonl` should remain limited to agent runtime activity.
+For a manual smoke test, temporarily lower `ttl_seconds`, start a Cursor or Claude Code session with Beacon hooks installed, add a harmless test MCP server to `~/.cursor/mcp.json`, `.cursor/mcp.json`, `~/.claude.json`, or `.claude/settings.json`, then trigger another hook action. `inventory_state.jsonl` should contain an `inventory.heartbeat` event and, when the digest changes, an `inventory.snapshot` event with the new MCP server metadata under `raw.inventory.mcp_servers`. `runtime.jsonl` should remain limited to agent runtime activity.
 
 ## Flags
 

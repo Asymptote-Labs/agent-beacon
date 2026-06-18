@@ -7,7 +7,7 @@ description: "Review local agent skills as an extension and configuration surfac
 
 Skills are a local agent extension and configuration surface. A skill can add durable instructions, scripts, workflows, or tool guidance that changes how an agent behaves when the runtime loads it.
 
-Beacon inventory can help identify local skill manifests under supported skill roots. It reports metadata such as names, paths, hashes, scope, modified time, and parser status. It does not retain `SKILL.md` instruction bodies in inventory output, dashboard responses, or inventory events.
+Beacon inventory can help identify local skill manifests under supported skill roots. It follows symlinked skill directories, which is common for Claude Code skills linked from a shared `.agents/skills` store. It reports metadata such as names, paths, hashes, scope, modified time, and parser status. It does not retain `SKILL.md` instruction bodies in inventory output, dashboard responses, or inventory events.
 
 ## What Inventory Can Infer Today
 
