@@ -1,65 +1,240 @@
 ---
 title: "FAQ"
-description: "Common questions about Asymptote Open Source, Agent Beacon, local telemetry, inventory, and forwarding"
+description: "Clear answers about Agent Beacon open source telemetry and Asymptote Managed architecture"
 ---
 
-## What telemetry does open-source Beacon capture?
+This FAQ answers common architecture, telemetry, and deployment questions about
+Asymptote and the open-source [Agent Beacon](https://github.com/Asymptote-Labs/agent-beacon)
+project.
 
-Open-source Beacon captures supported AI agent activity from configured local, CI, and cloud-agent surfaces. Depending on the runtime and integration mode, endpoint telemetry can include prompts, tool calls, shell commands, file activity, approvals, MCP-like tool use, model/session context, token usage, runtime-reported cost, and related event metadata.
+## Asymptote Open Source: Agent Beacon
 
-Beacon can also capture metadata-only local inventory for supported agent harnesses. Inventory can include detected runtimes, hook/config status, local MCP server metadata, and skill manifest metadata. For example, Beacon can inventory Cursor MCP servers from `mcp.json`, Claude Code MCP servers from `~/.claude.json`, and local skills under Cursor or Claude Code skill roots.
+Agent Beacon is the local-first, open-source telemetry path. It collects
+supported agent runtime activity, writes normalized local JSONL, and supports
+customer-managed forwarding.
 
-Inventory is intentionally metadata-only. Beacon does not retain `SKILL.md` instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config contents in inventory events.
+### What telemetry does open-source Beacon capture?
 
-## Where does open-source Beacon write data?
+Beacon captures activity that supported runtimes expose through OTLP or hooks:
+prompts and content fields when emitted and retention allows, tool calls and
+tool results, shell commands, file activity, approvals, MCP-like activity,
+session metadata, model metadata, repository context, and endpoint health.
 
-For endpoint installs, Beacon writes runtime activity to `runtime.jsonl`.
+Beacon also captures metadata-only local inventory where supported. Inventory can
+include detected runtimes, hook/config status, MCP server metadata, and skill
+manifest metadata. For example, Beacon can inventory Cursor MCP servers from
+`mcp.json`, Claude Code MCP servers from `~/.claude.json`, and local skills under
+Cursor or Claude Code skill roots.
 
-Inventory heartbeat telemetry is written separately to `inventory_state.jsonl` so runtime activity and configuration inventory can be routed or reviewed independently.
+Coverage depends on the runtime surface. See the [agent harness integration
+model](/runtimes/integration-model) and [data inventory](/security/data-inventory)
+for runtime-specific details.
 
-Default user-mode paths:
+### Can Beacon see the agent's full context window?
 
-```text
-~/.beacon/endpoint/logs/runtime.jsonl
-~/.beacon/endpoint/logs/inventory_state.jsonl
-```
+Only when the runtime exposes context-bearing telemetry. Beacon can retain
+prompt text, tool results, command output, file activity, and related content
+where supported and allowed by retention settings, but it does not have hidden
+access to a model's private context window.
 
-Default system-mode paths:
+For cloud-agent surfaces, context coverage is often narrower than local endpoint
+coverage because the cloud provider controls which hooks or telemetry events are
+available.
 
-```text
-/var/log/beacon-agent/runtime.jsonl
-/var/log/beacon-agent/inventory_state.jsonl
-```
+### Can Beacon detect unexpected data entering the agent context?
 
-## Does open-source Beacon require a hosted account?
+Beacon can help investigate this when the data appears in emitted prompts, tool
+results, command output, file activity, or retained content. That can make it
+possible to spot data from an unexpected source in a session timeline.
 
-No. Beacon endpoint collection is local-only by default. It does not require a hosted Beacon account, remote policy fetch, or external network dependency during normal local hook execution.
+Beacon is not a browser monitor, email collector, SaaS audit log collector,
+kernel monitor, or universal data-origin tracker. If a runtime does not expose
+the source content or action, Beacon cannot reconstruct it from outside the
+runtime.
 
-You can keep logs local, inspect them with the local dashboard and CLI, or forward them to customer-managed destinations such as S3, Wazuh, Elastic, Datadog, Sumo Logic, Rapid7, Falcon LogScale, Splunk HEC, or Microsoft Sentinel.
+### Does Beacon only log tool calls and tool results?
 
-## Does Beacon send secrets or skill contents downstream?
+No. Tool calls and tool results are important, but Beacon also captures supported
+prompt, command, file, approval, MCP-like, session, model, repository, and health
+signals. The exact fields depend on what each runtime emits.
 
-Beacon applies redaction, sanitization, truncation, and event-size controls before writing endpoint events.
+### Does Beacon retain the full conversation history?
 
-Inventory records are conservative by design:
+Beacon builds a local session timeline from the events it receives. That can
+include prompts, tool activity, command output, file activity, approvals, and
+content fields where the runtime emits them and retention allows.
 
-- Skill inventory includes names, paths, hashes, scope, modified time, and parser status, but not skill instruction bodies.
-- MCP inventory includes server name, source config path, transport, command basename, argument count, safe environment key names/counts, and hashes, but not secret values or full environment values.
-- Config inventory includes file metadata, hashes, parser status, and counts, but not full unrelated config contents.
+It should not be described as guaranteed full conversation history for every
+runtime. Some runtimes expose complete context-rich events; others expose only a
+subset.
 
-## How do I forward Beacon logs to S3?
+### Is the Beacon hook adapter installed locally on endpoints?
 
-Use the Beacon S3 content pack or the packaged Jamf helper for managed macOS deployments.
+For supported hook runtimes, yes. The `beacon-hooks` adapter is installed into
+local or project-level runtime hook configuration. The runtime invokes it when
+supported events occur, such as prompt submission, tool use, command execution,
+approvals, or file edits.
 
-The S3 forwarder writes runtime and inventory logs to separate prefixes under the same bucket root:
+Beacon uses the runtime's native hook points. It does not replace the model,
+proxy all traffic, or require a hosted service for normal local hook execution.
+
+### Can open-source Beacon forward logs through AWS S3?
+
+Yes, for endpoint and CI telemetry. Beacon writes local `runtime.jsonl` for
+runtime activity. Endpoint inventory heartbeat telemetry is written separately to
+`inventory_state.jsonl` so runtime and configuration inventory can be routed or
+reviewed independently. A customer-managed Vector forwarder can tail these files
+and upload gzip-compressed NDJSON objects to AWS S3.
+
+For endpoint S3 forwarding, runtime and inventory objects use separate prefixes:
 
 ```text
 s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<object>.jsonl.gz
 s3://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<object>.jsonl.gz
 ```
 
-For Jamf Pro deployments with MDM secret injection, see [Deploy Beacon With Jamf And S3](/guides/jamf-s3-mdm).
+For Jamf Pro deployments with MDM secret injection, see [Deploy Beacon With Jamf
+And S3](/guides/jamf-s3-mdm).
 
-## When should I use Asymptote Managed instead?
+For provider-managed cloud-agent proof-of-concept flows, the current self-serve
+path uses Google Cloud Storage. Production cloud-agent ingest is handled through
+Asymptote Managed or a customer-approved forwarding design.
 
-Use open-source Beacon when you want local telemetry and customer-managed forwarding. Consider Asymptote Managed when you need centralized ingest, retention, search, detections, fleet-wide visibility, policy controls, identity mapping, approvals, SSO/RBAC, or investigation workflows operated as a managed service.
+### Can open-source Beacon forward logs to Datadog or a SIEM?
+
+Yes. Beacon supports local JSONL forwarding into customer-managed destinations
+such as Datadog, Elastic, Wazuh, Microsoft Sentinel, Rapid7 InsightIDR, Sumo
+Logic, Splunk HEC, Falcon LogScale HEC, AWS S3, Google Cloud Storage, AWS
+CloudWatch Logs, and custom pipelines.
+
+For file-tailing destinations, Beacon remains the local JSONL producer.
+Destination URLs, credentials, retries, routing, and retention stay in the
+customer-managed shipper or platform.
+
+### Does Beacon send secrets or skill contents downstream?
+
+Beacon applies redaction, sanitization, truncation, and event-size controls
+before writing endpoint events.
+
+Inventory records are conservative by design:
+
+- Skill inventory includes names, paths, hashes, scope, modified time, and parser
+  status, but not skill instruction bodies.
+- MCP inventory includes server name, source config path, transport, command
+  basename, argument count, safe environment key names/counts, and hashes, but
+  not secret values or full environment values.
+- Config inventory includes file metadata, hashes, parser status, and counts,
+  but not full unrelated config contents.
+
+### Who handles retries if log forwarding fails?
+
+Beacon preserves the local `runtime.jsonl` audit log and rotates it locally.
+Delivery retry behavior is owned by the shipper, such as Vector, Datadog Agent,
+Filebeat, Azure Monitor Agent, or another customer-managed pipeline.
+
+For Vector-based paths, Vector owns checkpointing, batching, retries, and
+destination delivery. Beacon's responsibility is to keep writing normalized
+events to the local handoff file.
+
+### Does open-source Beacon require a hosted Asymptote backend?
+
+No. The open-source endpoint path is local-first. Normal local hook execution,
+local collection, local JSONL, the local dashboard, local scans, and
+customer-managed forwarding do not require a hosted Asymptote account.
+
+## Asymptote Managed
+
+Asymptote Managed adds centralized ingest, retention, search, detections,
+governance, identity, approvals, access control, and investigation workflows on
+top of the open-source Beacon foundation.
+
+### Does Asymptote Managed provide a central console?
+
+Yes. Asymptote Managed provides the centralized operating layer for fleet-wide
+visibility, search, detections, investigations, policy workflows, identity
+mapping, approvals, SSO, RBAC, and audit trails.
+
+Use Managed when local JSONL and customer-managed forwarding are not enough for
+company-wide operations.
+
+### Should telemetry point to Asymptote or directly to the SIEM?
+
+Both patterns are valid.
+
+With Agent Beacon open source, telemetry can go directly from local JSONL into
+customer-controlled SIEM, log, or object-storage destinations. With Asymptote
+Managed, telemetry is sent to Asymptote for centralized search, detections,
+governance, and investigations, with downstream forwarding available as part of
+the deployment design.
+
+### Does Asymptote Managed replace the SIEM?
+
+No. Asymptote is focused on agent-specific visibility, governance, and
+investigation workflows. SIEMs and log platforms remain important downstream
+destinations for broader security operations, retention, and correlation.
+
+### How does Asymptote capture telemetry from cloud-hosted agent apps?
+
+Cloud-hosted agent applications use the Asymptote Observe SDK and managed
+ingest. The SDK instruments services, workers, serverless functions, and agent
+SDK integrations so agent activity can be captured from application code.
+
+Provider-managed cloud agents use surface-specific setup paths where supported.
+Those paths depend on the hooks, setup scripts, storage exports, or OTLP
+surfaces the provider exposes.
+
+### How does Asymptote collect Claude Cowork telemetry?
+
+Claude Cowork is configured in the Claude organization admin settings. Anthropic's
+service exports OTLP telemetry to a durable collector endpoint, and Asymptote
+normalizes the received events into the shared event model.
+
+Claude Cowork is not a local hook integration. Production deployments should use
+a durable HTTPS collector endpoint rather than a laptop or temporary tunnel.
+
+### Where should a cloud AI tenant send OTLP telemetry?
+
+In a Managed deployment, the cloud service or tenant can export OTLP to an
+Asymptote-managed collector endpoint when that runtime supports it.
+
+In a private or customer-managed design, the OTLP endpoint may instead point to a
+customer-controlled collector or forwarding layer. The right target depends on
+the deployment model, data-boundary requirements, and destination architecture.
+
+### Does Managed require a customer-hosted management server?
+
+Not necessarily. In Asymptote Managed, Asymptote operates the managed ingest and
+control-plane services. For private deployments or stricter infrastructure
+requirements, Asymptote can work with the customer on dedicated or
+customer-controlled deployment boundaries.
+
+Open-source Beacon does not require a management server. It can write local JSONL
+and forward through customer-managed shippers.
+
+### Why is telemetry useful for cloud and non-engineering agents?
+
+It is useful when the agent platform, OTLP export, hooks, or SDK instrumentation
+emits prompts, tools, files, commands, approvals, or workflow metadata. Managed
+investigations can then reconstruct what the agent did, which tools it used, what
+content was retained, and which user or workflow it maps to.
+
+If a cloud or non-engineering surface does not expose the relevant context,
+Asymptote cannot infer it from outside the platform. The value comes from the
+runtime signals the platform or instrumented application emits.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="System Architecture" icon="diagram-project" href="/architecture/system-architecture">
+    Compare the open-source Agent Beacon architecture with Asymptote Managed.
+  </Card>
+  <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
+    Review local collection, normalization, storage, and forwarding.
+  </Card>
+  <Card title="Managed Architecture" icon="cloud" href="/architecture/managed-architecture">
+    Review centralized ingest, governance, detections, and investigations.
+  </Card>
+  <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Forward Beacon events into SIEMs, log platforms, object storage, or custom pipelines.
+  </Card>
+</Columns>
