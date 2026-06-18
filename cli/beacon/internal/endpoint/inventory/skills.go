@@ -113,7 +113,10 @@ func inspectSkillRoot(root skillRoot, redaction string) []Skill {
 		if len(skills) >= maxSkillsPerRoot {
 			break
 		}
-		if !entry.IsDir() || skipSkillDir(entry.Name()) {
+		if skipSkillDir(entry.Name()) {
+			continue
+		}
+		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
 			continue
 		}
 		manifestPath := filepath.Join(root.path, entry.Name(), "SKILL.md")
