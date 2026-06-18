@@ -207,7 +207,7 @@ func printDoctorChecks(checks []diagnostics.Check, status string) {
 func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	status := lifecycle.GetStatus(endpointUserMode(), endpointOpts.logPath)
 	effectiveCfg := loadConfigForMode(status.RuntimeLog.EffectiveUserMode, status.LogPath)
-	hookTargetNames, err := hookTargets()
+	hookTargetNames, err := inventoryHookTargets()
 	if err != nil {
 		return err
 	}
@@ -808,22 +808,33 @@ func printPlannedAction(action plannedAction) {
 	fmt.Println()
 }
 
+func inventoryHookTargets() ([]string, error) {
+	if endpointOpts.inventoryHooks && !endpointOpts.allTargets && strings.TrimSpace(endpointOpts.hookHarnesses) == "" {
+		return allHookTargetsForLevel(), nil
+	}
+	return hookTargets()
+}
+
 func hookTargets() ([]string, error) {
 	if endpointOpts.allTargets {
-		all := []string{"cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
-		if endpointOpts.hookLevel == "project" {
-			filtered := all[:0:0]
-			for _, t := range all {
-				if t == "hermes" {
-					continue
-				}
-				filtered = append(filtered, t)
-			}
-			return filtered, nil
-		}
-		return all, nil
+		return allHookTargetsForLevel(), nil
 	}
 	return canonicalHookTargets(splitCSV(endpointOpts.hookHarnesses))
+}
+
+func allHookTargetsForLevel() []string {
+	all := []string{"cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	if endpointOpts.hookLevel != "project" {
+		return all
+	}
+	filtered := all[:0:0]
+	for _, t := range all {
+		if t == "hermes" {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
 }
 
 func hookStatuses(targets []string) map[string]hookTargetResult {

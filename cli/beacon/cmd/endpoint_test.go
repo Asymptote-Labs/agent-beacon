@@ -1060,6 +1060,34 @@ func TestFilterInventorySectionsKeepsOnlyRequestedBuckets(t *testing.T) {
 	}
 }
 
+func TestEndpointInventoryHooksJSONIncludesDefaultHookStatuses(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	t.Setenv("HOME", t.TempDir())
+	endpointOpts.userMode = true
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.jsonOutput = true
+	endpointOpts.inventoryHooks = true
+	endpointOpts.hookHarnesses = ""
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointInventory(endpointInventoryCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runEndpointInventory returned error: %v", err)
+	}
+	var result inventoryResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("inventory JSON did not decode: %v output=%s", err, output)
+	}
+	if len(result.Hooks) == 0 {
+		t.Fatalf("hooks inventory was empty: %#v", result)
+	}
+	if hook, ok := result.Hooks["cursor"]; !ok || hook.Target != "cursor" {
+		t.Fatalf("hooks inventory missing cursor status: %#v", result.Hooks)
+	}
+}
+
 func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
 	for _, name := range []string{"completion", "docs"} {
 		cmd, _, err := rootCmd.Find([]string{name})

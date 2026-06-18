@@ -277,7 +277,7 @@ function renderInventory(resp) {
   const existingSkills = skills.filter((skill) => skill.exists);
   const hookConfigs = existingConfigs.filter((config) => config.config_kind === "hook_config");
   setText("#inventory-meta", resp?.generated_at ? `Scanned ${formatTime(resp.generated_at)}` : "");
-  renderInventoryCards(harnesses, existingConfigs, servers, existingSkills, hooks.length ? hooks.filter((hook) => hook.installed) : hookConfigs);
+  renderInventoryCards(harnesses, existingConfigs, servers, existingSkills, hookConfigs);
   renderInventoryHarnesses(harnesses);
   renderInventoryConfigs(configs);
   renderInventoryMCP(servers, configs);
