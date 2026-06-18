@@ -20,6 +20,12 @@ prompts and content fields when emitted and retention allows, tool calls and
 tool results, shell commands, file activity, approvals, MCP-like activity,
 session metadata, model metadata, repository context, and endpoint health.
 
+Beacon also captures metadata-only local inventory where supported. Inventory can
+include detected runtimes, hook/config status, MCP server metadata, and skill
+manifest metadata. For example, Beacon can inventory Cursor MCP servers from
+`mcp.json`, Claude Code MCP servers from `~/.claude.json`, and local skills under
+Cursor or Claude Code skill roots.
+
 Coverage depends on the runtime surface. See the [agent harness integration
 model](/runtimes/integration-model) and [data inventory](/security/data-inventory)
 for runtime-specific details.
@@ -74,9 +80,21 @@ proxy all traffic, or require a hosted service for normal local hook execution.
 
 ### Can open-source Beacon forward logs through AWS S3?
 
-Yes, for endpoint and CI telemetry. Beacon writes local `runtime.jsonl`, and a
-customer-managed Vector forwarder can tail that file and upload gzip-compressed
-NDJSON objects to AWS S3.
+Yes, for endpoint and CI telemetry. Beacon writes local `runtime.jsonl` for
+runtime activity. Endpoint inventory heartbeat telemetry is written separately to
+`inventory_state.jsonl` so runtime and configuration inventory can be routed or
+reviewed independently. A customer-managed Vector forwarder can tail these files
+and upload gzip-compressed NDJSON objects to AWS S3.
+
+For endpoint S3 forwarding, runtime and inventory objects use separate prefixes:
+
+```text
+s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<object>.jsonl.gz
+s3://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<object>.jsonl.gz
+```
+
+For Jamf Pro deployments with MDM secret injection, see [Deploy Beacon With Jamf
+And S3](/guides/jamf-s3-mdm).
 
 For provider-managed cloud-agent proof-of-concept flows, the current self-serve
 path uses Google Cloud Storage. Production cloud-agent ingest is handled through
@@ -92,6 +110,21 @@ CloudWatch Logs, and custom pipelines.
 For file-tailing destinations, Beacon remains the local JSONL producer.
 Destination URLs, credentials, retries, routing, and retention stay in the
 customer-managed shipper or platform.
+
+### Does Beacon send secrets or skill contents downstream?
+
+Beacon applies redaction, sanitization, truncation, and event-size controls
+before writing endpoint events.
+
+Inventory records are conservative by design:
+
+- Skill inventory includes names, paths, hashes, scope, modified time, and parser
+  status, but not skill instruction bodies.
+- MCP inventory includes server name, source config path, transport, command
+  basename, argument count, safe environment key names/counts, and hashes, but
+  not secret values or full environment values.
+- Config inventory includes file metadata, hashes, parser status, and counts,
+  but not full unrelated config contents.
 
 ### Who handles retries if log forwarding fails?
 

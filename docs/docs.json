@@ -70,6 +70,7 @@
             "pages": [
               "concepts/core-concepts",
               "concepts/vector-forwarding",
+              "concepts/faq",
               {
                 "group": "System Architecture",
                 "root": "architecture/system-architecture",
@@ -86,8 +87,7 @@
                   "telemetry-schema/fields",
                   "telemetry-schema/examples"
                 ]
-              },
-              "concepts/faq"
+              }
             ]
           },
           {
@@ -197,6 +197,7 @@
                 "pages": [
                   "mdm/jamf",
                   "mdm/jamf/claude",
+                  "guides/jamf-s3-mdm",
                   "mdm/fleet"
                 ]
               },
@@ -405,7 +406,8 @@
             "icon": "clipboard-list",
             "root": "guides/use-cases",
             "pages": [
-              "guides/agent-runtime-telemetry"
+              "guides/agent-runtime-telemetry",
+              "guides/jamf-s3-mdm"
             ]
           },
           {
