@@ -11,6 +11,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.70 · June 18, 2026
+
+- **Top-level token usage command** · `beacon token-usage` replaces the previous `beacon endpoint tokens` command path for local token, cost, model, session, run, harness, and repository attribution from Beacon runtime logs. Update scripts and runbooks that still call the old endpoint subcommand.
+- **Consistent token rollups across CLI and dashboard** · The CLI and local dashboard now share the same token aggregation helpers, read the full filtered runtime log in append order, and apply exact case-insensitive session filtering so cumulative metrics and per-session drilldowns stay aligned.
+- **CI run filtering improvements** · `--run-id` accepts either a bare run id or the composite `provider/run_id` key shown in the report, making copied CI runtime logs easier to inspect.
+- **Docs navigation cleanup** · The docs now separate Agent SDK integration pages from cloud-agent runtime pages and move CLI resources closer to install and upgrade guidance. Endpoint hook paths are presented in a runtime/global/project-local table for quicker deployment review.
+
 ### v0.0.69 · June 17, 2026
 
 - **Persistent S3 forwarder credentials on macOS** · Fixed an issue where MDM-injected AWS provider-chain settings for the [S3 log forwarder](/log-forwarding/s3) were lost across `launchd` restarts. Provider env vars now persist in a root-owned env file so the managed `com.beacon.endpoint.s3-forwarder` job keeps shipping events after reboots and policy refreshes.

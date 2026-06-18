@@ -267,22 +267,6 @@
             "icon": "terminal",
             "pages": [
               "cli/index",
-              "cli/version",
-              "cli/login",
-              "cli/scan",
-              "cli/token-usage",
-              {
-                "group": "beacon rules",
-                "root": "cli/rules",
-                "pages": [
-                  "cli/rules-list",
-                  "cli/rules-add",
-                  "cli/rules-remove",
-                  "cli/rules-pull",
-                  "cli/rules-lint",
-                  "cli/rules-fields"
-                ]
-              },
               {
                 "group": "beacon ci",
                 "root": "cli/ci",
@@ -302,22 +286,6 @@
                   "cli/cloud-cursor-print-setup",
                   "cli/cloud-cursor-print-hooks",
                   "cli/cloud-gcs-setup"
-                ]
-              },
-              {
-                "group": "beacon mcp",
-                "root": "cli/mcp",
-                "pages": [
-                  "cli/mcp-serve",
-                  "cli/mcp-doctor"
-                ]
-              },
-              {
-                "group": "beacon ingest",
-                "root": "cli/ingest",
-                "tag": "Enterprise",
-                "pages": [
-                  "cli/ingest-endpoint"
                 ]
               },
               {
@@ -354,7 +322,39 @@
                     ]
                   }
                 ]
-              }
+              },
+              {
+                "group": "beacon ingest",
+                "root": "cli/ingest",
+                "tag": "Enterprise",
+                "pages": [
+                  "cli/ingest-endpoint"
+                ]
+              },
+              "cli/login",
+              {
+                "group": "beacon mcp",
+                "root": "cli/mcp",
+                "pages": [
+                  "cli/mcp-serve",
+                  "cli/mcp-doctor"
+                ]
+              },
+              {
+                "group": "beacon rules",
+                "root": "cli/rules",
+                "pages": [
+                  "cli/rules-list",
+                  "cli/rules-add",
+                  "cli/rules-remove",
+                  "cli/rules-pull",
+                  "cli/rules-lint",
+                  "cli/rules-fields"
+                ]
+              },
+              "cli/scan",
+              "cli/token-usage",
+              "cli/version"
             ]
           }
         ]

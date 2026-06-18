@@ -13,6 +13,10 @@ beacon token-usage [flags]
 
 Use this command when you need a local report before opening the dashboard, sending diagnostics, or validating token attribution for a specific agent session.
 
+<Note>
+  In Beacon `v0.0.70`, token reporting moved from `beacon endpoint tokens` to the top-level `beacon token-usage` command. Update scripts, CI jobs, and runbooks that still invoke the old endpoint subcommand.
+</Note>
+
 ## How token attribution works
 
 Beacon normalizes token telemetry from every runtime into one canonical [`gen_ai.usage`](/telemetry-schema/normalization#usage-metadata) representation, then aggregates it locally from the runtime JSONL log. There are no per-harness token fields — a report over mixed runtimes uses the same vocabulary throughout.
