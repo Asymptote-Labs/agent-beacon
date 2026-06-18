@@ -79,11 +79,18 @@ That file is mode `0600` and is sourced by the Vector LaunchDaemon wrapper.
 
 ## Jamf Policy Setup
 
-Create a Jamf Pro policy scoped to the target Macs.
+Jamf Pro separates package installation from script execution. Use the Packages payload to install the Beacon `.pkg`, then use a Scripts payload to run a small wrapper that calls Beacon's packaged Jamf helper.
 
-### 1. Install The Beacon Package
+For the most reliable rollout, use two policies:
 
-Add the signed Beacon endpoint package to the policy.
+- **Policy 1: Install Beacon package.** Installs the signed `.pkg`.
+- **Policy 2: Configure Beacon S3 forwarding.** Runs after the package is installed and calls the packaged helper.
+
+You can also combine package and script payloads in one policy if your Jamf workflow guarantees the package is installed before the script runs. The two-policy approach is easier to reason about and troubleshoot.
+
+### 1. Upload The Beacon Package
+
+Upload the signed Beacon endpoint package to Jamf Pro and add it to a policy using the Packages payload with the install action.
 
 The package installs:
 
@@ -97,15 +104,63 @@ The package installs:
 /opt/beacon/jamf/claude/s3/run-forwarder.sh
 ```
 
-### 2. Run The Combined Jamf Helper
+### 2. Add A Jamf Script Wrapper
 
-Add a script step after the package install:
+Add a script to Jamf Pro that invokes Beacon's packaged helper. The script must exist in Jamf Pro before it can be added to a policy.
 
 ```bash
+#!/bin/bash
+set -euo pipefail
+
+BEACON_S3_BUCKET="${4:-}"
+AWS_REGION="${5:-}"
+BEACON_S3_PREFIX="${6:-beacon}"
+BEACON_S3_STORAGE_CLASS="${7:-STANDARD}"
+BEACON_VECTOR_READ_FROM="${8:-end}"
+
+export BEACON_S3_BUCKET
+export AWS_REGION
+export BEACON_S3_PREFIX
+export BEACON_S3_STORAGE_CLASS
+export BEACON_VECTOR_READ_FROM
+
+# Use your Jamf secret injection mechanism or managed credential delivery here.
+# The Beacon helper will persist any AWS provider-chain variables that are set.
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
+export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}"
+export AWS_PROFILE="${AWS_PROFILE:-}"
+export AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-}"
+export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-}"
+export AWS_WEB_IDENTITY_TOKEN_FILE="${AWS_WEB_IDENTITY_TOKEN_FILE:-}"
+export AWS_ROLE_ARN="${AWS_ROLE_ARN:-}"
+
 /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
 ```
 
-Pass the S3 settings and AWS provider values through Jamf script environment variables or Jamf secret injection:
+Use Jamf script parameter labels so policy editors know what each value means:
+
+| Parameter | Label | Example |
+| --- | --- | --- |
+| 4 | S3 bucket | `example-security-logs` |
+| 5 | AWS region | `us-west-2` |
+| 6 | S3 prefix root | `beacon-prod` |
+| 7 | S3 storage class | `STANDARD` |
+| 8 | Vector read position | `end` |
+
+Jamf script parameters are convenient for non-secret values such as bucket, region, and prefix. For AWS credentials, prefer your Jamf secret injection mechanism, device identity, AWS profiles, web identity, or managed credential files. Avoid putting long-lived access keys directly in ordinary policy parameter fields or policy logs.
+
+### 3. Inject AWS Provider Settings
+
+The Beacon helper persists any AWS provider-chain variables it receives. Use one of these patterns:
+
+| Credential pattern | Variables to provide |
+| --- | --- |
+| Access key | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` |
+| AWS profile | `AWS_PROFILE`, optional `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE` |
+| Web identity | `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN` |
+
+For a local test, this is equivalent to:
 
 ```bash
 BEACON_S3_BUCKET="example-security-logs"
@@ -113,22 +168,7 @@ AWS_REGION="us-west-2"
 BEACON_S3_PREFIX="beacon-prod"
 AWS_ACCESS_KEY_ID="..."
 AWS_SECRET_ACCESS_KEY="..."
-```
-
-If you use temporary credentials, also pass:
-
-```bash
-AWS_SESSION_TOKEN="..."
-```
-
-If you use AWS profiles or shared credential files, pass the relevant provider-chain variables instead:
-
-```bash
-AWS_PROFILE="..."
-AWS_SHARED_CREDENTIALS_FILE="..."
-AWS_CONFIG_FILE="..."
-AWS_WEB_IDENTITY_TOKEN_FILE="..."
-AWS_ROLE_ARN="..."
+/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
 ```
 
 ## What The Helper Does
