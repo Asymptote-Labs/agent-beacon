@@ -1,0 +1,114 @@
+---
+title: "Onboarding"
+description: "Configure read-only S3 access for Asymptote ingestion."
+tag: "Enterprise"
+---
+
+## Overview
+
+Asymptote can ingest customer-hosted event files from a private AWS S3 prefix. Grant Asymptote's ingestion worker read-only access to the exact bucket prefix that contains the event files.
+
+Do not make the bucket public. Do not grant write or delete permissions.
+
+## Customer Steps
+
+1. Send Asymptote the S3 location details.
+
+   Include:
+
+   - AWS account ID
+   - S3 bucket name
+   - AWS region
+   - Prefix/path for the event files, such as `s3://your-bucket/asymptote/events/`
+   - File format, ideally JSONL or JSONEachRow
+   - Delivery cadence and approximate event volume
+   - Encryption type, either SSE-S3 or SSE-KMS
+   - KMS key ARN, only if SSE-KMS is enabled
+
+2. Create a dedicated IAM role.
+
+   Create a role in your AWS account named something like `asymptote-s3-read`. This role will be assumed by Asymptote's ingestion worker.
+
+3. Attach a read-only S3 policy.
+
+   ```json title="Read-only S3 prefix policy"
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "ListEventPrefix",
+         "Effect": "Allow",
+         "Action": "s3:ListBucket",
+         "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME",
+         "Condition": {
+           "StringLike": {
+             "s3:prefix": [
+               "YOUR_PREFIX",
+               "YOUR_PREFIX/*"
+             ]
+           }
+         }
+       },
+       {
+         "Sid": "ReadEventObjects",
+         "Effect": "Allow",
+         "Action": "s3:GetObject",
+         "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/YOUR_PREFIX/*"
+       }
+     ]
+   }
+   ```
+
+   Replace `YOUR_PREFIX` with the object key prefix only, without a leading or trailing slash. For `s3://your-bucket/asymptote/events/`, use `asymptote/events`.
+
+4. Add KMS decrypt permission if needed.
+
+   If the bucket uses SSE-KMS, add this statement to the role policy:
+
+   ```json title="SSE-KMS decrypt statement"
+   {
+     "Sid": "DecryptEventObjects",
+     "Effect": "Allow",
+     "Action": "kms:Decrypt",
+     "Resource": "YOUR_KMS_KEY_ARN"
+   }
+   ```
+
+   The KMS key policy must also allow this IAM role to use `kms:Decrypt`.
+
+5. Configure the role trust policy.
+
+   After Asymptote receives the bucket details, Asymptote will send the AWS principal and external ID for the ingestion worker. Add those values to the IAM role trust relationship.
+
+6. Send Asymptote the final onboarding details.
+
+   Send:
+
+   - IAM role ARN
+   - S3 URL/prefix
+   - AWS region
+   - KMS key ARN, if applicable
+   - A small sample event file or example JSONL row
+
+## Event File Requirements
+
+Use newline-delimited JSON, with one complete JSON object per line. Each event should include a UTC-compatible timestamp and stable fields for user, host, repository, branch, agent runtime, event action, and event category when available.
+
+Share a representative sample file before production ingestion. The sample should show realistic field names and value shapes, but should not include secrets.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
+    Review managed visibility, governance, and investigation workflows.
+  </Card>
+  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized event fields and example payloads.
+  </Card>
+  <Card title="AWS S3 Forwarding" icon="bucket" href="/log-forwarding/s3">
+    Configure customer-managed Beacon event forwarding into S3.
+  </Card>
+  <Card title="Data Inventory" icon="table-list" href="/security/data-inventory">
+    Review the endpoint event fields Beacon can write.
+  </Card>
+</Columns>

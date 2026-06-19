@@ -94,6 +94,7 @@
             "group": "Manage Asymptote",
             "icon": "sliders",
             "pages": [
+              "manage/onboarding",
               {
                 "group": "Inventory",
                 "root": "guides/inventory",
