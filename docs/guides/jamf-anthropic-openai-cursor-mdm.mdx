@@ -5,14 +5,16 @@ description: "Deploy Beacon with Jamf Pro for supported Anthropic, OpenAI, and C
 
 ## Overview
 
-Use this guide when you want one Jamf Pro rollout to cover the supported Anthropic, OpenAI, and Cursor telemetry surfaces on managed Macs.
+Use this guide when you want a Jamf Pro rollout to cover supported Anthropic, OpenAI, and Cursor endpoint telemetry on managed Macs.
+
+This guide is for products that run locally on the Mac. Anthropic and OpenAI also have cloud, CI, and SDK surfaces; those are covered in the runtime-specific pages and are not fully configured by a Mac endpoint MDM policy.
 
 The end state is:
 
 - Beacon is installed under `/opt/beacon`.
 - The system endpoint collector runs as `com.beacon.endpoint.collector`.
-- Claude Code and Codex CLI are configured for local OTLP telemetry.
 - Claude Code and Cursor hooks are installed for the logged-in console user.
+- Codex CLI is pointed at the local collector through per-user or managed Codex configuration.
 - Runtime activity is written to `/var/log/beacon-agent/runtime.jsonl`.
 - Optional forwarding is configured separately for S3, Falcon LogScale, Splunk HEC, or another supported destination.
 
@@ -20,9 +22,9 @@ The end state is:
 flowchart LR
   JamfPolicy[Jamf policy] --> Package[Beacon pkg]
   Package --> Collector[Endpoint collector]
-  Package --> Config[Claude Code and Codex CLI OTLP config]
   HookPolicy[User-context hook policy] --> Hooks[Claude Code and Cursor hooks]
-  Config --> RuntimeLog["runtime.jsonl"]
+  CodexPolicy[Codex config policy] --> CodexConfig["~/.codex/config.toml"]
+  CodexConfig --> RuntimeLog["runtime.jsonl"]
   Hooks --> RuntimeLog
   RuntimeLog --> Forwarding[Optional forwarding]
 ```
@@ -33,10 +35,10 @@ Jamf can configure local endpoint telemetry for supported products that run on t
 
 | Product surface | Jamf-managed path | Notes |
 | --- | --- | --- |
-| Claude Code | Endpoint install with `claude`; optional user hooks with `claude` | Captures local OTLP telemetry and richer hook lifecycle/tool events where Claude Code emits them. |
+| Claude Code | User-context hooks with `claude`; optional managed/user Claude settings for native OTLP | The packaged hook helper can install Claude Code hooks for the console user. Do not assume a root package postinstall modifies the console user's `~/.claude/settings.json`. |
 | Claude Cowork | Not installed by Jamf | Configure OTLP in Claude organization settings with a durable customer-managed collector endpoint. |
 | Claude Code CI and cloud agents | Not installed by endpoint Jamf policy | Use CI or cloud-agent setup paths instead of a persistent Mac endpoint service. |
-| Codex CLI | Endpoint install with `codex` | Captures local Codex semantic logs and token usage metrics. |
+| Codex CLI | Per-user or managed Codex config pointing at the local collector | Codex is not hook-based. Configure `~/.codex/config.toml` or an equivalent managed config for each user. |
 | OpenAI SDK applications | Not installed by Jamf | Instrument the application with the Asymptote SDK or OpenTelemetry. |
 | Cursor | User-context hooks with `cursor` | Captures local Cursor hook payloads. Restart Cursor after hook installation. |
 | Cursor Cloud Agents | Not installed by endpoint Jamf policy | Use the Cursor cloud-agent setup path for cloud sandbox telemetry. |
@@ -53,10 +55,11 @@ Before creating the Jamf policies, prepare:
 
 ## Jamf Policy Setup
 
-Use two Jamf policies:
+Use at least two Jamf policies:
 
-- **Policy 1: Install Beacon endpoint.** Runs as root and configures system-mode endpoint telemetry for Claude Code and Codex CLI.
+- **Policy 1: Install Beacon endpoint.** Runs as root and installs the system collector and runtime log.
 - **Policy 2: Install user hooks.** Runs only when an interactive console user is present and configures Claude Code plus Cursor hooks in that user's home directory.
+- **Optional Policy 3: Configure Codex CLI.** Runs in a user-aware context or deploys managed Codex settings so Codex sends logs and metrics to the local collector.
 
 ### 1. Upload The Beacon Package
 
@@ -74,9 +77,13 @@ The package installs:
 
 The package postinstall performs the default system install. Use the explicit install helper when you want policy parameters or a reinstall action.
 
+<Note>
+  The endpoint install policy runs as root. It prepares the system collector and endpoint paths, but it should not be treated as the only step for user-home configuration. Claude Code hooks, Cursor hooks, and Codex CLI user settings need a user-aware policy or managed settings.
+</Note>
+
 ### 2. Configure Endpoint Harnesses
 
-For Anthropic Claude Code and OpenAI Codex CLI, keep the default endpoint harness list:
+For the system endpoint collector, keep the default endpoint harness list:
 
 ```text
 claude,codex
@@ -103,7 +110,7 @@ Use Jamf script parameter labels so policy editors know what each value means:
 | 6 | OTLP HTTP port | `4318` |
 | 7 | Collector path | `/opt/beacon/bin/beacon-otelcol` |
 
-The endpoint policy runs as root. It should not install Cursor hooks because Cursor hook configuration is per user.
+The endpoint policy runs as root. It should not install Cursor hooks because Cursor hook configuration is per user. For the same reason, validate the user-facing Claude and Codex configuration from the logged-in user's account, not only from root.
 
 ### 3. Add A User-Context Hook Policy
 
@@ -116,6 +123,22 @@ set -euo pipefail
 export BEACON_HOOK_HARNESSES="${4:-claude,cursor}"
 export BEACON_HOOK_LEVEL="${5:-user}"
 export BEACON_HOOK_LOG_PATH="${6:-/var/log/beacon-agent/runtime.jsonl}"
+
+CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || echo "")"
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" = "loginwindow" ]; then
+  echo "No interactive console user found for hook installation." >&2
+  exit 1
+fi
+
+RUNTIME_DIR="$(dirname "$BEACON_HOOK_LOG_PATH")"
+mkdir -p "$RUNTIME_DIR"
+touch "$BEACON_HOOK_LOG_PATH" "$BEACON_HOOK_LOG_PATH.lock"
+chown root:wheel "$RUNTIME_DIR" "$BEACON_HOOK_LOG_PATH" "$BEACON_HOOK_LOG_PATH.lock"
+chmod 755 "$RUNTIME_DIR"
+chmod 644 "$BEACON_HOOK_LOG_PATH" "$BEACON_HOOK_LOG_PATH.lock"
+chmod +a "$CONSOLE_USER allow list,search,add_file,readattr,writeattr" "$RUNTIME_DIR" || true
+chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$BEACON_HOOK_LOG_PATH" || true
+chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$BEACON_HOOK_LOG_PATH.lock" || true
 
 /opt/beacon/jamf/scripts/install-cursor-hooks.sh
 ```
@@ -139,6 +162,26 @@ The helper resolves the interactive console user, switches to that user's home d
 
 Restart Claude Code and Cursor after the hook policy runs so new sessions load the updated hook configuration.
 
+### 4. Configure Codex CLI
+
+Codex CLI is configured through `~/.codex/config.toml`, not through Beacon hooks. If Codex is in scope, deploy a per-user Codex config policy or an equivalent managed configuration that points Codex at Beacon's local OTLP gRPC receiver.
+
+For a single user, the Beacon-generated Codex block looks like:
+
+```toml
+[otel]
+environment = "dev"
+log_user_prompt = true
+
+[otel.exporter."otlp-grpc"]
+endpoint = "http://127.0.0.1:4317"
+
+[otel.metrics_exporter."otlp-grpc"]
+endpoint = "http://127.0.0.1:4317"
+```
+
+If you use Jamf to write this file, preserve any existing non-OTel Codex settings and ensure the final file is owned by the console user.
+
 ## What The Policies Do
 
 The endpoint install policy:
@@ -146,8 +189,6 @@ The endpoint install policy:
 - Creates `/Library/Application Support/Beacon/Endpoint/config.json`.
 - Creates `/Library/Application Support/Beacon/Endpoint/otelcol.yaml`.
 - Loads `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist`.
-- Configures Claude Code OTLP export to the local collector.
-- Configures Codex CLI OTLP logs and metrics to the local collector.
 - Writes normalized events to `/var/log/beacon-agent/runtime.jsonl`.
 
 The user-context hook policy:
@@ -157,9 +198,15 @@ The user-context hook policy:
 - Points hook events at the system runtime log.
 - Leaves existing non-Beacon hook settings intact where the runtime supports merged hook config.
 
+The Codex config policy:
+
+- Writes or manages the user's Codex `[otel]` tables.
+- Points Codex logs and token usage metrics at `http://127.0.0.1:4317`.
+- Preserves existing non-OTel Codex settings.
+
 ## Validate A Deployed Mac
 
-Run these commands on a target Mac after both Jamf policies complete.
+Run these commands on a target Mac after the relevant Jamf policies complete.
 
 ### Check Endpoint State
 
@@ -168,7 +215,7 @@ sudo /opt/beacon/bin/beacon endpoint status --system --json
 sudo launchctl print system/com.beacon.endpoint.collector
 ```
 
-The collector should be running, and the endpoint harness list should include `claude` and `codex`.
+The collector should be running and the runtime log should resolve to `/var/log/beacon-agent/runtime.jsonl`.
 
 ### Check Runtime Log
 
@@ -276,7 +323,7 @@ Confirm Codex CLI is installed for the user and that Beacon configured Codex as 
 
 ```bash
 command -v codex
-sudo /opt/beacon/bin/beacon endpoint status --system --json
+grep -n 'otel' ~/.codex/config.toml
 ```
 
 Codex CLI is not hook-based in Beacon. Its events arrive through local OTLP logs and metrics.
