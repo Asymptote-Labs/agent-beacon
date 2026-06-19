@@ -1,126 +1,241 @@
 ---
-title: "Anthropic, OpenAI, and Cursor with Jamf"
-description: "Deploy Beacon with Jamf Pro for supported Anthropic, OpenAI, and Cursor endpoint telemetry on managed Macs"
+title: "Anthropic, OpenAI, and Cursor with Jamf and S3"
+description: "Deploy Beacon with Jamf Pro and forward supported Anthropic, OpenAI, and Cursor endpoint telemetry to AWS S3"
 ---
 
 ## Overview
 
-Use this guide when you want a Jamf Pro rollout to cover supported Anthropic, OpenAI, and Cursor endpoint telemetry on managed Macs.
+Use this runbook when your security team wants Jamf Pro to deploy Beacon on managed Macs and forward supported Anthropic, OpenAI, and Cursor endpoint telemetry to AWS S3.
 
-This guide is for products that run locally on the Mac. Anthropic and OpenAI also have cloud, CI, and SDK surfaces; those are covered in the runtime-specific pages and are not fully configured by a Mac endpoint MDM policy.
+This guide is intentionally specific to S3. It covers local products that run on the Mac:
 
-The end state is:
+- Anthropic Claude Code
+- OpenAI Codex CLI
+- Cursor
 
-- Beacon is installed under `/opt/beacon`.
-- The system endpoint collector runs as `com.beacon.endpoint.collector`.
-- Claude Code and Cursor hooks are installed for the logged-in console user.
-- Codex CLI is pointed at the local collector through per-user or managed Codex configuration.
-- Runtime activity is written to `/var/log/beacon-agent/runtime.jsonl`.
-- Optional forwarding is configured separately for S3, Falcon LogScale, Splunk HEC, or another supported destination.
+It does not configure Claude Cowork, Claude Code cloud agents, Cursor Cloud Agents, CI agents, or SDK-instrumented server applications. Those use separate collection paths.
 
 ```mermaid
 flowchart LR
-  JamfPolicy[Jamf policy] --> Package[Beacon pkg]
-  Package --> Collector[Endpoint collector]
-  HookPolicy[User-context hook policy] --> Hooks[Claude Code and Cursor hooks]
-  CodexPolicy[Codex config policy] --> CodexConfig["~/.codex/config.toml"]
-  CodexConfig --> RuntimeLog["runtime.jsonl"]
-  Hooks --> RuntimeLog
-  RuntimeLog --> Forwarding[Optional forwarding]
+  JamfPackage[Jamf package policy] --> Beacon["/opt/beacon"]
+  JamfS3[Jamf S3 policy] --> Collector[Endpoint collector]
+  JamfS3 --> ClaudeHooks[Claude Code hooks]
+  JamfCursor[Jamf user hook policy] --> CursorHooks[Cursor hooks]
+  JamfCodex[Jamf user config policy] --> CodexConfig["~/.codex/config.toml"]
+  ClaudeHooks --> RuntimeLog["runtime.jsonl"]
+  CursorHooks --> RuntimeLog
+  CodexConfig --> Collector
+  Collector --> RuntimeLog
+  RuntimeLog --> Vector[Vector S3 forwarder]
+  Inventory["inventory_state.jsonl"] --> Vector
+  Vector --> S3[AWS S3]
 ```
 
-## Coverage
+## Security Outcome
 
-Jamf can configure local endpoint telemetry for supported products that run on the managed Mac. Cloud, CI, and server-side SDK telemetry use separate collection paths.
+After rollout:
 
-| Product surface | Jamf-managed path | Notes |
+- Beacon is installed under `/opt/beacon`.
+- The local collector runs as `com.beacon.endpoint.collector`.
+- The S3 forwarder runs as `com.beacon.endpoint.s3-forwarder`.
+- Claude Code hooks write local runtime telemetry.
+- Cursor hooks write local runtime telemetry.
+- Codex CLI sends OTLP logs and token metrics to Beacon's local collector.
+- Runtime telemetry is written locally to `/var/log/beacon-agent/runtime.jsonl`.
+- Inventory telemetry is written locally to `/var/log/beacon-agent/inventory_state.jsonl`.
+- Vector uploads both JSONL streams to your S3 bucket.
+
+Expected S3 prefixes:
+
+```text
+s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+s3://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+```
+
+Runtime objects contain agent activity. Inventory objects contain agent configuration inventory such as known hooks, MCP servers, and skills where Beacon can inspect them locally.
+
+## Product Coverage
+
+| Product surface | Jamf step | What security receives |
 | --- | --- | --- |
-| Claude Code | User-context hooks with `claude`; optional managed/user Claude settings for native OTLP | The packaged hook helper can install Claude Code hooks for the console user. Do not assume a root package postinstall modifies the console user's `~/.claude/settings.json`. |
-| Claude Cowork | Not installed by Jamf | Configure OTLP in Claude organization settings with a durable customer-managed collector endpoint. |
-| Claude Code CI and cloud agents | Not installed by endpoint Jamf policy | Use CI or cloud-agent setup paths instead of a persistent Mac endpoint service. |
-| Codex CLI | Per-user or managed Codex config pointing at the local collector | Codex is not hook-based. Configure `~/.codex/config.toml` or an equivalent managed config for each user. |
-| OpenAI SDK applications | Not installed by Jamf | Instrument the application with the Asymptote SDK or OpenTelemetry. |
-| Cursor | User-context hooks with `cursor` | Captures local Cursor hook payloads. Restart Cursor after hook installation. |
-| Cursor Cloud Agents | Not installed by endpoint Jamf policy | Use the Cursor cloud-agent setup path for cloud sandbox telemetry. |
+| Claude Code | S3 helper installs Claude Code hooks for the console user | Prompt, lifecycle, tool, permission, command, file, and inventory telemetry where Claude Code exposes it |
+| Cursor | Separate user hook policy installs Cursor hooks | Prompt, tool, shell command, MCP-like, approval, file edit, and inventory telemetry where Cursor exposes it |
+| Codex CLI | Separate user config policy writes `~/.codex/config.toml` | Codex semantic logs and token usage metrics emitted through local OTLP |
+| Claude Cowork, cloud agents, CI, SDK apps | Out of scope for this Mac MDM runbook | Configure those from their runtime-specific pages |
 
 ## Prerequisites
 
-Before creating the Jamf policies, prepare:
+Prepare these before touching Jamf:
 
-- A signed and notarized Beacon endpoint `.pkg`.
+- A signed and notarized Beacon endpoint `.pkg` that includes `/opt/beacon/bin/vector`.
 - Claude Code, Codex CLI, and Cursor installed on the target Macs where those products are in scope.
-- A pilot Smart Group for Macs with at least one interactive console user.
-- A forwarding destination if runtime JSONL should leave the endpoint.
-- A content handling decision for prompt, command, tool, file, and model telemetry.
+- A pilot Jamf Smart Group.
+- A target AWS S3 bucket.
+- An S3 prefix root such as `beacon-prod`.
+- AWS credentials, profile, web identity, or role material available to the Jamf S3 policy at install time.
+- `s3:PutObject` permission for the selected bucket prefix.
+- A security decision that prompt, command, tool, file, model, and inventory telemetry may be written to customer-controlled S3.
 
-## Jamf Policy Setup
+Use a root prefix. Do not include `runtime` or `inventory`:
 
-Use at least two Jamf policies:
+```bash
+BEACON_S3_PREFIX="beacon-prod" # good
+BEACON_S3_PREFIX="beacon-prod/runtime" # avoid
+```
 
-- **Policy 1: Install Beacon endpoint.** Runs as root and installs the system collector and runtime log.
-- **Policy 2: Install user hooks.** Runs only when an interactive console user is present and configures Claude Code plus Cursor hooks in that user's home directory.
-- **Optional Policy 3: Configure Codex CLI.** Runs in a user-aware context or deploys managed Codex settings so Codex sends logs and metrics to the local collector.
+## AWS Permission
 
-### 1. Upload The Beacon Package
+Scope write access to the Beacon prefix:
 
-Upload the signed Beacon endpoint package to Jamf Pro and add it to a policy using the Packages payload with the install action.
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::example-security-logs/beacon-prod/*"
+    }
+  ]
+}
+```
+
+Beacon does not store AWS credentials in endpoint configuration. The S3 helper writes only the AWS provider-chain values it receives into:
+
+```text
+/Library/Application Support/Beacon/Forwarders/s3-vector.env
+```
+
+That file is owned by root and mode `0600`.
+
+## Jamf Policy Plan
+
+Create these policies in order:
+
+| Order | Policy | Runs as | Purpose |
+| --- | --- | --- | --- |
+| 1 | Install Beacon package | root | Installs Beacon binaries, Vector, and packaged Jamf helpers |
+| 2 | Configure S3 and Claude Code | root, with console user present | Repairs the endpoint, installs Claude Code hooks, prepares local logs, and starts S3 forwarding |
+| 3 | Configure Cursor hooks | root wrapper, switches to console user | Installs Cursor hooks for the logged-in user and points them at the system runtime log |
+| 4 | Configure Codex CLI | user-aware policy or managed config | Writes Codex OTLP settings for each user |
+
+Keep policies 2, 3, and 4 separate during rollout. That makes failures easier to triage and avoids hiding user-context failures behind package installation success.
+
+## Step 1: Install Beacon Package
+
+In Jamf Pro:
+
+1. Upload the signed Beacon endpoint `.pkg`.
+2. Create a policy named `Beacon - Install Package`.
+3. Add the package with the install action.
+4. Scope it to your pilot Smart Group.
+5. Run it before the S3, Cursor, or Codex policies.
 
 The package installs:
 
 ```text
 /opt/beacon/bin/beacon
 /opt/beacon/bin/beacon-otelcol
-/opt/beacon/jamf/scripts/install.sh
-/opt/beacon/jamf/scripts/repair.sh
+/opt/beacon/bin/vector
+/opt/beacon/jamf/claude/common/repair-hooks.sh
+/opt/beacon/jamf/claude/s3/install-forwarder.sh
+/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
+/opt/beacon/jamf/claude/s3/run-forwarder.sh
 /opt/beacon/jamf/scripts/install-cursor-hooks.sh
 ```
 
-The package postinstall performs the default system install. Use the explicit install helper when you want policy parameters or a reinstall action.
+## Step 2: Configure S3 And Claude Code
 
-<Note>
-  The endpoint install policy runs as root. It prepares the system collector and endpoint paths, but it should not be treated as the only step for user-home configuration. Claude Code hooks, Cursor hooks, and Codex CLI user settings need a user-aware policy or managed settings.
-</Note>
+Create a Jamf script named `Beacon - Configure S3 Forwarding`.
 
-### 2. Configure Endpoint Harnesses
-
-For the system endpoint collector, keep the default endpoint harness list:
-
-```text
-claude,codex
-```
-
-If you call the install helper from a Jamf Scripts payload, set parameter 4 to that value:
+Use this wrapper:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 
-BEACON_ENDPOINT_HARNESSES="${4:-claude,codex}"
-export BEACON_ENDPOINT_HARNESSES
+BEACON_S3_BUCKET="${4:-}"
+AWS_REGION="${5:-}"
+BEACON_S3_PREFIX="${6:-beacon}"
+BEACON_S3_STORAGE_CLASS="${7:-STANDARD}"
+BEACON_VECTOR_READ_FROM="${8:-end}"
+BEACON_OTLP_GRPC_PORT="${9:-4317}"
+BEACON_OTLP_HTTP_PORT="${10:-4318}"
 
-/opt/beacon/jamf/scripts/install.sh "$@"
+export BEACON_S3_BUCKET
+export AWS_REGION
+export BEACON_S3_PREFIX
+export BEACON_S3_STORAGE_CLASS
+export BEACON_VECTOR_READ_FROM
+export BEACON_OTLP_GRPC_PORT
+export BEACON_OTLP_HTTP_PORT
+
+# Use your Jamf secret injection mechanism, identity provider, or managed credential delivery.
+# The helper persists any AWS provider-chain variables that are set.
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
+export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}"
+export AWS_PROFILE="${AWS_PROFILE:-}"
+export AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-}"
+export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-}"
+export AWS_WEB_IDENTITY_TOKEN_FILE="${AWS_WEB_IDENTITY_TOKEN_FILE:-}"
+export AWS_ROLE_ARN="${AWS_ROLE_ARN:-}"
+
+/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
 ```
 
-Use Jamf script parameter labels so policy editors know what each value means:
+Set Jamf parameter labels:
 
 | Parameter | Label | Example |
 | --- | --- | --- |
-| 4 | Endpoint harnesses | `claude,codex` |
-| 5 | OTLP gRPC port | `4317` |
-| 6 | OTLP HTTP port | `4318` |
-| 7 | Collector path | `/opt/beacon/bin/beacon-otelcol` |
+| 4 | S3 bucket | `example-security-logs` |
+| 5 | AWS region | `us-west-2` |
+| 6 | S3 prefix root | `beacon-prod` |
+| 7 | S3 storage class | `STANDARD` |
+| 8 | Vector read position | `end` |
+| 9 | OTLP gRPC port | `4317` |
+| 10 | OTLP HTTP port | `4318` |
 
-The endpoint policy runs as root. It should not install Cursor hooks because Cursor hook configuration is per user. For the same reason, validate the user-facing Claude and Codex configuration from the logged-in user's account, not only from root.
+Create a policy named `Beacon - Configure S3 and Claude Code`:
 
-### 3. Add A User-Context Hook Policy
+1. Scope it to Macs where the package has installed.
+2. Run it only when a normal interactive console user is logged in.
+3. Add the script above.
+4. Fill parameters 4-10.
+5. Deliver AWS credentials through your approved Jamf secret or identity mechanism.
 
-Create a second Jamf policy that runs the packaged hook helper after the package is installed and a user is logged in:
+The S3 helper can persist these AWS provider-chain settings for the Vector LaunchDaemon:
+
+| Credential pattern | Variables to provide |
+| --- | --- |
+| Access key | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` |
+| AWS profile | `AWS_PROFILE`, optional `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE` |
+| Web identity | `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN` |
+
+Use Jamf parameters for non-secret values such as bucket, region, and prefix. Avoid putting long-lived access keys directly in ordinary policy parameter fields or policy logs.
+
+This policy:
+
+- Installs the S3 Vector forwarder.
+- Repairs the Beacon system endpoint.
+- Starts `com.beacon.endpoint.collector`.
+- Creates `/var/log/beacon-agent/runtime.jsonl`.
+- Creates `/var/log/beacon-agent/inventory_state.jsonl`.
+- Grants the console user append access to Beacon logs.
+- Installs Claude Code hooks for the console user.
+- Starts `com.beacon.endpoint.s3-forwarder`.
+
+## Step 3: Configure Cursor Hooks
+
+Create a Jamf script named `Beacon - Configure Cursor Hooks`.
+
+Use this wrapper:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 
-export BEACON_HOOK_HARNESSES="${4:-claude,cursor}"
+export BEACON_HOOK_HARNESSES="${4:-cursor}"
 export BEACON_HOOK_LEVEL="${5:-user}"
 export BEACON_HOOK_LOG_PATH="${6:-/var/log/beacon-agent/runtime.jsonl}"
 
@@ -143,30 +258,36 @@ chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,w
 /opt/beacon/jamf/scripts/install-cursor-hooks.sh
 ```
 
-Use these Jamf script parameter labels:
+Set Jamf parameter labels:
 
 | Parameter | Label | Example |
 | --- | --- | --- |
-| 4 | Hook harnesses | `claude,cursor` |
+| 4 | Hook harnesses | `cursor` |
 | 5 | Hook level | `user` |
 | 6 | Runtime log path | `/var/log/beacon-agent/runtime.jsonl` |
 
-The helper resolves the interactive console user, switches to that user's home directory, and runs:
+Create a policy named `Beacon - Configure Cursor Hooks`:
+
+1. Scope it to Macs where the package has installed.
+2. Run it only when a normal interactive console user is logged in.
+3. Add the script above.
+4. Set parameter 4 to `cursor`.
+5. Ask users to fully restart Cursor after the policy runs.
+
+The helper switches to the console user and runs:
 
 ```bash
 /opt/beacon/bin/beacon endpoint hooks install \
-  --harness "claude,cursor" \
+  --harness "cursor" \
   --level user \
   --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
-Restart Claude Code and Cursor after the hook policy runs so new sessions load the updated hook configuration.
+## Step 4: Configure Codex CLI
 
-### 4. Configure Codex CLI
+Codex CLI is not hook-based. It reads OTLP settings from `~/.codex/config.toml`.
 
-Codex CLI is configured through `~/.codex/config.toml`, not through Beacon hooks. If Codex is in scope, deploy a per-user Codex config policy or an equivalent managed configuration that points Codex at Beacon's local OTLP gRPC receiver.
-
-For a single user, the Beacon-generated Codex block looks like:
+Use your standard Jamf user-context mechanism or managed config approach to ensure each Codex user has this block:
 
 ```toml
 [otel]
@@ -180,68 +301,90 @@ endpoint = "http://127.0.0.1:4317"
 endpoint = "http://127.0.0.1:4317"
 ```
 
-If you use Jamf to write this file, preserve any existing non-OTel Codex settings and ensure the final file is owned by the console user.
-
-## What The Policies Do
-
-The endpoint install policy:
-
-- Creates `/Library/Application Support/Beacon/Endpoint/config.json`.
-- Creates `/Library/Application Support/Beacon/Endpoint/otelcol.yaml`.
-- Loads `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist`.
-- Writes normalized events to `/var/log/beacon-agent/runtime.jsonl`.
-
-The user-context hook policy:
-
-- Installs Claude Code hooks into the logged-in user's Claude settings.
-- Installs Cursor hooks into the logged-in user's Cursor hook configuration.
-- Points hook events at the system runtime log.
-- Leaves existing non-Beacon hook settings intact where the runtime supports merged hook config.
-
-The Codex config policy:
-
-- Writes or manages the user's Codex `[otel]` tables.
-- Points Codex logs and token usage metrics at `http://127.0.0.1:4317`.
-- Preserves existing non-OTel Codex settings.
+Preserve existing non-OTel Codex settings and ensure the final file is owned by the user. This step is required for Codex telemetry; the S3 helper does not install Codex hooks.
 
 ## Validate A Deployed Mac
 
-Run these commands on a target Mac after the relevant Jamf policies complete.
+Run these checks on a target Mac after each policy completes.
 
-### Check Endpoint State
+### 1. Confirm Services
 
 ```bash
-sudo /opt/beacon/bin/beacon endpoint status --system --json
 sudo launchctl print system/com.beacon.endpoint.collector
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder
 ```
 
-The collector should be running and the runtime log should resolve to `/var/log/beacon-agent/runtime.jsonl`.
+Both services should be `running`.
 
-### Check Runtime Log
+### 2. Confirm Local Files
 
 ```bash
 ls -l /var/log/beacon-agent/runtime.jsonl
+ls -l /var/log/beacon-agent/inventory_state.jsonl
+ls -l "/Library/Application Support/Beacon/Forwarders/s3-vector.toml"
+sudo test -r "/Library/Application Support/Beacon/Forwarders/s3-vector.env"
+```
+
+### 3. Confirm S3 Forwarder Config
+
+```bash
+sudo grep -E 'runtime.jsonl|inventory_state.jsonl|runtime/date|inventory/date|read_from' \
+  "/Library/Application Support/Beacon/Forwarders/s3-vector.toml"
+```
+
+Expected lines include:
+
+```text
+include = ["/var/log/beacon-agent/runtime.jsonl"]
+read_from = "${BEACON_VECTOR_READ_FROM:-end}"
+include = ["/var/log/beacon-agent/inventory_state.jsonl"]
+read_from = "beginning"
+key_prefix = "${BEACON_S3_PREFIX:-beacon}/runtime/date=%F/"
+key_prefix = "${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"
+```
+
+### 4. Confirm Hook And Codex Config
+
+Run as the logged-in user:
+
+```bash
+grep -n 'BEACON_ENDPOINT_CLI\|beacon-hooks' ~/.claude/settings.json
+grep -n 'beacon-hooks' ~/.cursor/hooks.json
+grep -n 'otel' ~/.codex/config.toml
+```
+
+Claude and Cursor should reference `beacon-hooks`. Codex should include `[otel]`, `[otel.exporter."otlp-grpc"]`, and `[otel.metrics_exporter."otlp-grpc"]`.
+
+### 5. Generate Local Test Events
+
+Write a synthetic endpoint event:
+
+```bash
 sudo /opt/beacon/bin/beacon endpoint test-event \
   --system \
   --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
-### Check Hook Status
-
-Run hook status as the logged-in user:
+Write an inventory heartbeat:
 
 ```bash
-/opt/beacon/bin/beacon endpoint hooks status --harness claude,cursor
+sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
+  --system \
+  --force \
+  --trigger manual \
+  --trigger-harness claude \
+  --working-dir /Users/Shared \
+  --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
-If you need to inspect the files directly:
+Confirm both local files have events:
 
 ```bash
-grep -n 'BEACON_ENDPOINT_CLI\|beacon-hooks' ~/.claude/settings.json
-grep -n 'beacon-hooks' ~/.cursor/hooks.json
+tail -n 5 /var/log/beacon-agent/runtime.jsonl
+tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
 ```
 
-### Generate Product Events
+### 6. Generate Product Events
 
 Generate a Claude Code event:
 
@@ -259,45 +402,48 @@ codex exec "$MARKER"
 sudo grep "$MARKER" /var/log/beacon-agent/runtime.jsonl
 ```
 
-Generate a Cursor event by starting a new Cursor session after restart and sending a prompt with a unique marker. Then confirm the marker appears in the runtime log:
+Generate a Cursor event by starting a new Cursor session after restart and sending a prompt with a unique marker:
 
 ```bash
 sudo grep "beacon jamf cursor test" /var/log/beacon-agent/runtime.jsonl
 ```
 
-## Forwarding Options
+### 7. Confirm S3 Delivery
 
-This guide configures collection. Forwarding is destination-specific:
+Vector batches uploads. Production configs use `timeout_secs = 300`, so allow up to five minutes.
 
-<Columns cols={2}>
-  <Card title="Jamf and S3" icon="bucket" href="/guides/jamf-s3-mdm">
-    Forward runtime and inventory JSONL to AWS S3 from a Jamf-managed Mac.
-  </Card>
-  <Card title="Jamf and CrowdStrike Falcon" icon="shield-halved" href="/guides/jamf-falcon-mdm">
-    Forward runtime JSONL to CrowdStrike Falcon LogScale HEC.
-  </Card>
-  <Card title="Splunk HEC" icon="tower-broadcast" href="/log-forwarding/splunk">
-    Configure endpoint forwarding to Splunk HEC through install or repair parameters.
-  </Card>
-  <Card title="Local JSONL" icon="file-lines" href="/log-forwarding/local-jsonl">
-    Keep events local and collect them with your own file-based pipeline.
-  </Card>
-</Columns>
+```bash
+aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/" \
+  --recursive \
+  --region "$AWS_REGION"
+
+aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/inventory/" \
+  --recursive \
+  --region "$AWS_REGION"
+```
+
+Inspect an object:
+
+```bash
+aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" - \
+  --region "$AWS_REGION" | gzip -dc | head
+```
 
 ## Troubleshooting
 
-### Endpoint Harnesses Are Missing
+### No S3 Objects
 
-Check Jamf parameter 4 on the endpoint install policy. For this guide, the value should be:
-
-```text
-claude,codex
-```
-
-Then run the repair helper from a Jamf remediation policy:
+Check the forwarder:
 
 ```bash
-/opt/beacon/jamf/scripts/repair.sh "$@"
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder
+sudo tail -n 100 /tmp/com.beacon.endpoint.s3-forwarder.err
+```
+
+Verify that the env file has non-secret settings without printing credentials:
+
+```bash
+sudo sh -c 'sed -E "s/(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|BEACON_S3_BUCKET|AWS_REGION|BEACON_S3_PREFIX)=.*/\1=<redacted>/" "/Library/Application Support/Beacon/Forwarders/s3-vector.env"'
 ```
 
 ### Cursor Hooks Are Missing
@@ -308,35 +454,50 @@ Run the hook policy again after login, then restart Cursor.
 
 ### Claude Code Events Are Missing
 
-Confirm both the endpoint harness and optional hook are configured:
+Confirm the S3 helper ran while a user was logged in, then check Claude settings as that user:
 
 ```bash
-sudo /opt/beacon/bin/beacon endpoint status --system --json
-/opt/beacon/bin/beacon endpoint hooks status --harness claude
+grep -n 'BEACON_ENDPOINT_CLI\|beacon-hooks' ~/.claude/settings.json
 ```
 
 Fully restart Claude Code after installing hooks.
 
 ### Codex Events Are Missing
 
-Confirm Codex CLI is installed for the user and that Beacon configured Codex as an endpoint harness:
+Confirm Codex CLI is installed and the user config includes OTel:
 
 ```bash
 command -v codex
-grep -n 'otel' ~/.codex/config.toml
+grep -n 'otel\|otlp-grpc\|127.0.0.1:4317' ~/.codex/config.toml
 ```
 
-Codex CLI is not hook-based in Beacon. Its events arrive through local OTLP logs and metrics.
+Codex CLI is not hook-based. Re-run the Codex config policy for the logged-in user if the OTel block is missing.
+
+### Inventory Is Empty
+
+Force inventory and inspect the local file:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
+  --system \
+  --force \
+  --trigger manual \
+  --trigger-harness claude \
+  --working-dir /Users/Shared \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+
+tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
+```
 
 ### Cloud Or Admin Products Are Missing
 
-Claude Cowork, Claude Code cloud agents, Cursor Cloud Agents, and SDK-instrumented OpenAI or Anthropic applications are not configured by the endpoint Jamf policy. Use their runtime-specific setup pages and validate those events at the collector or destination they target.
+Claude Cowork, Claude Code cloud agents, Cursor Cloud Agents, CI agents, and SDK-instrumented OpenAI or Anthropic applications are not configured by this Mac MDM policy. Use their runtime-specific setup pages and validate those events at the collector or destination they target.
 
 ## Related
 
 <Columns cols={2}>
-  <Card title="Jamf Pro Overview" icon="laptop" href="/mdm/jamf">
-    Review the general Beacon Jamf deployment model and package layout.
+  <Card title="Claude with Jamf and S3" icon="bucket" href="/guides/jamf-s3-mdm">
+    Review the Claude-specific S3 helper and validation flow.
   </Card>
   <Card title="Claude Code" icon="terminal" href="/runtimes/claude-code">
     Review Claude Code endpoint telemetry coverage.
