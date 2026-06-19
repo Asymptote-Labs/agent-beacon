@@ -200,6 +200,7 @@
                     "root": "mdm/jamf",
                     "pages": [
                       "mdm/jamf/claude",
+                      "guides/jamf-anthropic-openai-cursor-mdm",
                       "guides/jamf-s3-mdm",
                       "guides/jamf-falcon-mdm"
                     ]
@@ -443,6 +444,7 @@
                 "root": "mdm/jamf",
                 "pages": [
                   "mdm/jamf/claude",
+                  "guides/jamf-anthropic-openai-cursor-mdm",
                   "guides/jamf-s3-mdm",
                   "guides/jamf-falcon-mdm"
                 ]
