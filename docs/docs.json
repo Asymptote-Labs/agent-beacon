@@ -69,14 +69,13 @@
             "icon": "book-open",
             "pages": [
               "concepts/core-concepts",
-              "concepts/vector-forwarding",
-              "concepts/faq",
               {
                 "group": "System Architecture",
                 "root": "architecture/system-architecture",
                 "pages": [
                   "architecture/architecture",
-                  "architecture/managed-architecture"
+                  "architecture/managed-architecture",
+                  "concepts/vector-forwarding"
                 ]
               },
               {
@@ -87,7 +86,8 @@
                   "telemetry-schema/fields",
                   "telemetry-schema/examples"
                 ]
-              }
+              },
+              "concepts/faq"
             ]
           },
           {
@@ -195,10 +195,15 @@
                 "group": "MDM Deployment",
                 "root": "mdm/index",
                 "pages": [
-                  "mdm/jamf",
-                  "mdm/jamf/claude",
-                  "guides/jamf-s3-mdm",
-                  "guides/jamf-falcon-mdm",
+                  {
+                    "group": "Jamf",
+                    "root": "mdm/jamf",
+                    "pages": [
+                      "mdm/jamf/claude",
+                      "guides/jamf-s3-mdm",
+                      "guides/jamf-falcon-mdm"
+                    ]
+                  },
                   "mdm/fleet"
                 ]
               },
@@ -407,9 +412,7 @@
             "icon": "clipboard-list",
             "root": "guides/use-cases",
             "pages": [
-              "guides/agent-runtime-telemetry",
-              "guides/jamf-s3-mdm",
-              "guides/jamf-falcon-mdm"
+              "guides/agent-runtime-telemetry"
             ]
           },
           {
@@ -428,6 +431,22 @@
               },
               "guides/local-testing/dashboard",
               "guides/local-testing/mcp"
+            ]
+          },
+          {
+            "group": "MDM Deployments",
+            "icon": "building-shield",
+            "root": "mdm/index",
+            "pages": [
+              {
+                "group": "Jamf",
+                "root": "mdm/jamf",
+                "pages": [
+                  "mdm/jamf/claude",
+                  "guides/jamf-s3-mdm",
+                  "guides/jamf-falcon-mdm"
+                ]
+              }
             ]
           }
         ]
