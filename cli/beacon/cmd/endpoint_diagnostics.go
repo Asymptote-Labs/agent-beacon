@@ -1343,7 +1343,7 @@ func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
 	if err := writeJSONFile(filepath.Join(out, "event-summaries.json"), summaries); err != nil {
 		return err
 	}
-	if includeRaw {
+	if includeRaw && len(rawBuf) > 0 {
 		return os.WriteFile(filepath.Join(out, "runtime.raw.jsonl"), rawBuf, 0600)
 	}
 	return nil
