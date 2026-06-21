@@ -45,20 +45,6 @@ var endpointOpts struct {
 	elasticPackDir           string
 	hookLevel                string
 	contentRetention         string
-	splunkHECEndpoint        string
-	splunkHECToken           string
-	splunkIndex              string
-	splunkSource             string
-	splunkSourcetype         string
-	splunkInsecureSkipVerify bool
-	splunkCAFile             string
-	falconHECEndpoint        string
-	falconHECToken           string
-	falconIndex              string
-	falconSource             string
-	falconSourcetype         string
-	falconInsecureSkipVerify bool
-	falconCAFile             string
 	includeEventSummaries    bool
 	includeRawEvents         bool
 	writeInventoryEvent      bool
@@ -88,6 +74,27 @@ var coworkOpts struct {
 	ngrok              bool
 	open               bool
 	since              string
+}
+
+// splunkOpts and falconOpts hold the Splunk and Falcon LogScale HEC destination flags.
+var splunkOpts struct {
+	hecEndpoint        string
+	hecToken           string
+	index              string
+	source             string
+	sourcetype         string
+	insecureSkipVerify bool
+	caFile             string
+}
+
+var falconOpts struct {
+	hecEndpoint        string
+	hecToken           string
+	index              string
+	source             string
+	sourcetype         string
+	insecureSkipVerify bool
+	caFile             string
 }
 
 var endpointCmd = &cobra.Command{
@@ -686,63 +693,63 @@ func splitHarnessCSV(value string) []string {
 }
 
 func registerSplunkFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&endpointOpts.splunkHECEndpoint, "splunk-hec-endpoint", "", "Splunk HEC endpoint URL")
-	cmd.Flags().StringVar(&endpointOpts.splunkHECToken, "splunk-hec-token", "", "Splunk HEC token")
-	cmd.Flags().StringVar(&endpointOpts.splunkIndex, "splunk-index", "", "Optional Splunk index")
-	cmd.Flags().StringVar(&endpointOpts.splunkSource, "splunk-source", endpointconfig.DefaultSplunkSource, "Optional Splunk source")
-	cmd.Flags().StringVar(&endpointOpts.splunkSourcetype, "splunk-sourcetype", endpointconfig.DefaultSplunkSourcetype, "Optional Splunk sourcetype")
-	cmd.Flags().BoolVar(&endpointOpts.splunkInsecureSkipVerify, "splunk-insecure-skip-verify", false, "Skip Splunk HEC TLS certificate verification")
-	cmd.Flags().StringVar(&endpointOpts.splunkCAFile, "splunk-ca-file", "", "Optional CA certificate path for Splunk HEC TLS verification")
+	cmd.Flags().StringVar(&splunkOpts.hecEndpoint, "splunk-hec-endpoint", "", "Splunk HEC endpoint URL")
+	cmd.Flags().StringVar(&splunkOpts.hecToken, "splunk-hec-token", "", "Splunk HEC token")
+	cmd.Flags().StringVar(&splunkOpts.index, "splunk-index", "", "Optional Splunk index")
+	cmd.Flags().StringVar(&splunkOpts.source, "splunk-source", endpointconfig.DefaultSplunkSource, "Optional Splunk source")
+	cmd.Flags().StringVar(&splunkOpts.sourcetype, "splunk-sourcetype", endpointconfig.DefaultSplunkSourcetype, "Optional Splunk sourcetype")
+	cmd.Flags().BoolVar(&splunkOpts.insecureSkipVerify, "splunk-insecure-skip-verify", false, "Skip Splunk HEC TLS certificate verification")
+	cmd.Flags().StringVar(&splunkOpts.caFile, "splunk-ca-file", "", "Optional CA certificate path for Splunk HEC TLS verification")
 }
 
 func registerFalconFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&endpointOpts.falconHECEndpoint, "falcon-hec-endpoint", "", "Falcon LogScale HEC endpoint URL")
-	cmd.Flags().StringVar(&endpointOpts.falconHECToken, "falcon-hec-token", "", "Falcon LogScale ingest token")
-	cmd.Flags().StringVar(&endpointOpts.falconIndex, "falcon-index", "", "Optional Falcon LogScale repository for multi-repository tokens")
-	cmd.Flags().StringVar(&endpointOpts.falconSource, "falcon-source", endpointconfig.DefaultFalconSource, "Optional Falcon LogScale source")
-	cmd.Flags().StringVar(&endpointOpts.falconSourcetype, "falcon-sourcetype", endpointconfig.DefaultFalconSourcetype, "Optional Falcon LogScale parser or sourcetype")
-	cmd.Flags().BoolVar(&endpointOpts.falconInsecureSkipVerify, "falcon-insecure-skip-verify", false, "Skip Falcon LogScale HEC TLS certificate verification")
-	cmd.Flags().StringVar(&endpointOpts.falconCAFile, "falcon-ca-file", "", "Optional CA certificate path for Falcon LogScale HEC TLS verification")
+	cmd.Flags().StringVar(&falconOpts.hecEndpoint, "falcon-hec-endpoint", "", "Falcon LogScale HEC endpoint URL")
+	cmd.Flags().StringVar(&falconOpts.hecToken, "falcon-hec-token", "", "Falcon LogScale ingest token")
+	cmd.Flags().StringVar(&falconOpts.index, "falcon-index", "", "Optional Falcon LogScale repository for multi-repository tokens")
+	cmd.Flags().StringVar(&falconOpts.source, "falcon-source", endpointconfig.DefaultFalconSource, "Optional Falcon LogScale source")
+	cmd.Flags().StringVar(&falconOpts.sourcetype, "falcon-sourcetype", endpointconfig.DefaultFalconSourcetype, "Optional Falcon LogScale parser or sourcetype")
+	cmd.Flags().BoolVar(&falconOpts.insecureSkipVerify, "falcon-insecure-skip-verify", false, "Skip Falcon LogScale HEC TLS certificate verification")
+	cmd.Flags().StringVar(&falconOpts.caFile, "falcon-ca-file", "", "Optional CA certificate path for Falcon LogScale HEC TLS verification")
 }
 
 func splunkHECOptions() *endpointconfig.SplunkHEC {
-	if endpointOpts.splunkHECEndpoint == "" &&
-		endpointOpts.splunkHECToken == "" &&
-		endpointOpts.splunkIndex == "" &&
-		endpointOpts.splunkSource == endpointconfig.DefaultSplunkSource &&
-		endpointOpts.splunkSourcetype == endpointconfig.DefaultSplunkSourcetype &&
-		!endpointOpts.splunkInsecureSkipVerify &&
-		endpointOpts.splunkCAFile == "" {
+	if splunkOpts.hecEndpoint == "" &&
+		splunkOpts.hecToken == "" &&
+		splunkOpts.index == "" &&
+		splunkOpts.source == endpointconfig.DefaultSplunkSource &&
+		splunkOpts.sourcetype == endpointconfig.DefaultSplunkSourcetype &&
+		!splunkOpts.insecureSkipVerify &&
+		splunkOpts.caFile == "" {
 		return nil
 	}
 	return &endpointconfig.SplunkHEC{
-		Endpoint:           endpointOpts.splunkHECEndpoint,
-		Token:              endpointOpts.splunkHECToken,
-		Index:              endpointOpts.splunkIndex,
-		Source:             endpointOpts.splunkSource,
-		Sourcetype:         endpointOpts.splunkSourcetype,
-		InsecureSkipVerify: endpointOpts.splunkInsecureSkipVerify,
-		CAFile:             endpointOpts.splunkCAFile,
+		Endpoint:           splunkOpts.hecEndpoint,
+		Token:              splunkOpts.hecToken,
+		Index:              splunkOpts.index,
+		Source:             splunkOpts.source,
+		Sourcetype:         splunkOpts.sourcetype,
+		InsecureSkipVerify: splunkOpts.insecureSkipVerify,
+		CAFile:             splunkOpts.caFile,
 	}
 }
 
 func falconHECOptions() *endpointconfig.FalconHEC {
-	if endpointOpts.falconHECEndpoint == "" &&
-		endpointOpts.falconHECToken == "" &&
-		endpointOpts.falconIndex == "" &&
-		endpointOpts.falconSource == endpointconfig.DefaultFalconSource &&
-		endpointOpts.falconSourcetype == endpointconfig.DefaultFalconSourcetype &&
-		!endpointOpts.falconInsecureSkipVerify &&
-		endpointOpts.falconCAFile == "" {
+	if falconOpts.hecEndpoint == "" &&
+		falconOpts.hecToken == "" &&
+		falconOpts.index == "" &&
+		falconOpts.source == endpointconfig.DefaultFalconSource &&
+		falconOpts.sourcetype == endpointconfig.DefaultFalconSourcetype &&
+		!falconOpts.insecureSkipVerify &&
+		falconOpts.caFile == "" {
 		return nil
 	}
 	return &endpointconfig.FalconHEC{
-		Endpoint:           endpointOpts.falconHECEndpoint,
-		Token:              endpointOpts.falconHECToken,
-		Index:              endpointOpts.falconIndex,
-		Source:             endpointOpts.falconSource,
-		Sourcetype:         endpointOpts.falconSourcetype,
-		InsecureSkipVerify: endpointOpts.falconInsecureSkipVerify,
-		CAFile:             endpointOpts.falconCAFile,
+		Endpoint:           falconOpts.hecEndpoint,
+		Token:              falconOpts.hecToken,
+		Index:              falconOpts.index,
+		Source:             falconOpts.source,
+		Sourcetype:         falconOpts.sourcetype,
+		InsecureSkipVerify: falconOpts.insecureSkipVerify,
+		CAFile:             falconOpts.caFile,
 	}
 }
