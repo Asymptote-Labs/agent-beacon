@@ -2,6 +2,7 @@ package writer
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -101,6 +102,54 @@ func LastLine(path string) (string, error) {
 
 func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 	return asymptoteobserve.SanitizeEvent(event, maxBytes)
+}
+
+// ScanEventsBufferSize bounds the largest JSONL line ScanEvents will read. It sits well
+// above MaxEventBytes (the write-time per-event cap) so any event the agent wrote can be
+// read back, including logs from before the cap existed.
+const ScanEventsBufferSize = 4 * 1024 * 1024
+
+// ScanEvents reads the JSONL event log at path and invokes fn once per well-formed event,
+// passing a copy of the raw (newline-stripped, trimmed) line and the decoded event. Blank
+// lines and lines that fail to decode are skipped. A missing file is not an error: fn is
+// simply never called. This centralizes the open/scan/trim/skip-malformed boilerplate that
+// several callers previously duplicated.
+func ScanEvents(path string, fn func(raw []byte, event schema.Event) error) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), ScanEventsBufferSize)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var event schema.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			continue
+		}
+		if err := fn(append([]byte(nil), line...), event); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
+// ReadEvents returns all well-formed events from the JSONL log at path. A missing file
+// yields a nil slice and no error.
+func ReadEvents(path string) ([]schema.Event, error) {
+	var events []schema.Event
+	err := ScanEvents(path, func(_ []byte, event schema.Event) error {
+		events = append(events, event)
+		return nil
+	})
+	return events, err
 }
 
 func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
