@@ -42,6 +42,21 @@ const (
 	ActionMCPToolInvoked    = "mcp.tool_invoked"
 )
 
+// Ordered attribute-key precedence lists for resolving a tool name from the differing
+// conventions emitted by runtimes. The orderings are deliberate and context-specific, so
+// they are named here (rather than repeated as inline literals) to make the precedence
+// explicit and reviewable:
+//   - toolNameKeys: general resolution for the top-level Tool.Name (OTel tool.name first).
+//   - genAIToolNameKeys: GenAI tool info prefers the gen_ai.* name.
+//   - mcpToolNameKeys: MCP activity prefers the mcp.* name.
+//   - codexToolNameKeys: Codex tool-result records use their own field set.
+var (
+	toolNameKeys      = []string{"tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"}
+	genAIToolNameKeys = []string{"gen_ai.tool.name", "tool.name"}
+	mcpToolNameKeys   = []string{"mcp.tool.name", "tool.name", "function_name"}
+	codexToolNameKeys = []string{"tool.name", "tool_name", "function_name", "tool", "mcp_server"}
+)
+
 var allowedCodexLogEvents = map[string]struct{}{
 	CodexConversationStarts: {},
 	CodexUserPrompt:         {},
@@ -378,7 +393,7 @@ func CodexLogEventName(attrs map[string]interface{}) string {
 }
 
 func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
-	toolName := FirstString(attrs, "tool.name", "tool_name", "function_name", "tool", "mcp_server")
+	toolName := FirstString(attrs, codexToolNameKeys...)
 	args := FirstString(attrs, "arguments", "function_args", "tool.command", "command")
 	event.Event.Action = ActionToolInvoked
 	event.Event.Category = "tool"
@@ -641,7 +656,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 			WorkingDirectory: FirstString(attrs, "cwd", "working_directory", "beacon.session.working_directory", "process.command_args.cwd", "workspace"),
 		}
 	}
-	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || ToolCommandString(attrs) != "" {
+	if name := FirstString(attrs, toolNameKeys...); name != "" || ToolCommandString(attrs) != "" {
 		event.Tool = &ToolInfo{
 			Name:    name,
 			Command: FirstNonEmpty(ToolCommandString(attrs), FirstString(attrs, "process.command_line")),
@@ -834,7 +849,7 @@ func GenAIResponseFromAttrs(attrs map[string]interface{}) *GenAIResponseInfo {
 func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 	tool := &GenAIToolInfo{
 		Description: FirstString(attrs, "gen_ai.tool.description"),
-		Name:        FirstString(attrs, "gen_ai.tool.name", "tool.name"),
+		Name:        FirstString(attrs, genAIToolNameKeys...),
 		Type:        FirstString(attrs, "gen_ai.tool.type"),
 	}
 	if definitions, ok := AnyAttr(attrs, "gen_ai.tool.definitions"); ok {
@@ -890,7 +905,7 @@ func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 
 func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 	server := FirstString(attrs, "mcp.server.name", "mcp.server", "gen_ai.mcp.server", "mcp_server_name")
-	tool := FirstString(attrs, "mcp.tool.name", "tool.name", "function_name")
+	tool := FirstString(attrs, mcpToolNameKeys...)
 	method := FirstString(attrs, "mcp.method.name")
 	protocol := FirstString(attrs, "mcp.protocol.version")
 	resource := FirstString(attrs, "mcp.resource.uri")
@@ -1376,7 +1391,7 @@ func NormalizeHarnessName(name string) string {
 }
 
 func InferAction(attrs map[string]interface{}, fallback string) string {
-	tool := strings.ToLower(FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"))
+	tool := strings.ToLower(FirstString(attrs, toolNameKeys...))
 	operation := strings.ToLower(FirstString(attrs, "gen_ai.operation.name"))
 	mcpMethod := strings.ToLower(FirstString(attrs, "mcp.method.name"))
 	harness := HarnessName(attrs, fallback)
