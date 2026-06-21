@@ -41,7 +41,7 @@ func enforcePolicy(logger *logging.Logger, input map[string]interface{}, session
 	if reason == "" {
 		reason = "Tool call denied by policy provider"
 	}
-	deny := policyDenyResponse(phase, reason)
+	deny := policyDenyResponse(reason)
 	if deny == nil {
 		// Platform has no deny shape: honor "unknown platform -> allow".
 		return nil, false
@@ -151,9 +151,11 @@ func emitPolicyDenied(logger *logging.Logger, input map[string]interface{}, c po
 }
 
 // policyDenyResponse returns the runtime-specific hook response that denies the
-// tool call. A nil return means the platform has no confirmed deny shape for this
-// phase, so the caller allows (unknown platform -> allow).
-func policyDenyResponse(phase policycontract.Phase, reason string) map[string]interface{} {
+// tool call. A nil return means the platform has no confirmed deny shape, so the
+// caller allows (unknown platform -> allow). It is phase-independent: a platform
+// with a confirmed deny shape honors a deny in every phase the seam runs in, so a
+// provider deny is never silently dropped for a platform we enforce on.
+func policyDenyResponse(reason string) map[string]interface{} {
 	switch {
 	case platformFlag == "cursor":
 		return map[string]interface{}{"permission": "deny"}
@@ -161,7 +163,7 @@ func policyDenyResponse(phase policycontract.Phase, reason string) map[string]in
 		return map[string]interface{}{"decision": "reject"}
 	case platformFlag == "antigravity" || platformFlag == "grok":
 		return map[string]interface{}{"decision": "deny"}
-	case platformFlag == "claude" && phase == policycontract.PhasePreTool:
+	case platformFlag == "claude":
 		return map[string]interface{}{
 			"hookSpecificOutput": map[string]interface{}{
 				"hookEventName":            "PreToolUse",

@@ -116,6 +116,26 @@ func TestPreToolPolicyAllowProceedsNormally(t *testing.T) {
 	}
 }
 
+func TestPermissionRequestPolicyDenyClaude(t *testing.T) {
+	// Regression: Claude is a confirmed-deny platform, so a provider deny on the
+	// permission-request hook must be honored (not silently allowed) just like on
+	// pre-tool.
+	logPath := setupPolicyTest(t, "claude", denyResponse)
+	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
+		"session_id": "s-claude-perm",
+		"tool_name":  "Bash",
+		"tool_input": map[string]interface{}{"command": "claude --dangerously-skip-permissions"},
+	})
+	hso, ok := out["hookSpecificOutput"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("claude permission-request deny = %#v, want hookSpecificOutput", out)
+	}
+	if hso["permissionDecision"] != "deny" {
+		t.Fatalf("hookSpecificOutput = %#v, want permissionDecision=deny", hso)
+	}
+	assertDenialEvent(t, logPath)
+}
+
 func TestPermissionRequestPolicyDenyDevin(t *testing.T) {
 	logPath := setupPolicyTest(t, "devin", denyResponse)
 	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
