@@ -615,6 +615,23 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 // Codex's "total" rollup type is left unmapped so it never sums on top of the
 // per-type counts. Unknown types only record the type so the raw value stays
 // inspectable without polluting usage totals.
+// gen_ai.usage field setters centralize how each canonical token type maps onto the
+// usage struct (including the nested cache/reasoning shapes and pointer handling). They
+// are shared by ApplyTokenUsage (metric datapoints, one token type per call) and
+// GenAIUsageFromAttrs (span/log attributes, all token types at once) so the mapping lives
+// in exactly one place. Each takes value by copy, so &v is safe per call.
+func setUsageInput(u *GenAIUsageInfo, v int64)  { u.InputTokens = &v }
+func setUsageOutput(u *GenAIUsageInfo, v int64) { u.OutputTokens = &v }
+func setUsageCacheRead(u *GenAIUsageInfo, v int64) {
+	u.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &v}
+}
+func setUsageCacheCreation(u *GenAIUsageInfo, v int64) {
+	u.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &v}
+}
+func setUsageReasoning(u *GenAIUsageInfo, v int64) {
+	u.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &v}
+}
+
 func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 	if event.GenAI == nil {
 		event.GenAI = &GenAIInfo{}
@@ -625,15 +642,15 @@ func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 	usage := event.GenAI.Usage
 	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(tokenType)), "_", "") {
 	case "input", "prompt":
-		usage.InputTokens = &value
+		setUsageInput(usage, value)
 	case "output", "completion":
-		usage.OutputTokens = &value
+		setUsageOutput(usage, value)
 	case "cacheread", "cachedinput":
-		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
+		setUsageCacheRead(usage, value)
 	case "cachecreation":
-		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
+		setUsageCacheCreation(usage, value)
 	case "reasoning", "reasoningoutput":
-		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
+		setUsageReasoning(usage, value)
 	default:
 		if event.GenAI.Token == nil && tokenType != "" {
 			event.GenAI.Token = &GenAITokenInfo{Type: tokenType}
@@ -880,19 +897,19 @@ func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 	usage := &GenAIUsageInfo{}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"); ok {
-		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
+		setUsageCacheCreation(usage, value)
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_read_input_tokens", "cache_read_tokens"); ok {
-		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
+		setUsageCacheRead(usage, value)
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.input_tokens", "llm.usage.prompt_tokens", "gen_ai.usage.prompt_tokens", "input_tokens"); ok {
-		usage.InputTokens = &value
+		setUsageInput(usage, value)
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.output_tokens", "llm.usage.completion_tokens", "gen_ai.usage.completion_tokens", "output_tokens"); ok {
-		usage.OutputTokens = &value
+		setUsageOutput(usage, value)
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.reasoning.output_tokens"); ok {
-		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
+		setUsageReasoning(usage, value)
 	}
 	if value, ok := FloatAttr(attrs, "gen_ai.usage.cost"); ok {
 		usage.CostUSD = &value
