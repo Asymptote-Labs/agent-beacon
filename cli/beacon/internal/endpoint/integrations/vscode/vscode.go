@@ -105,12 +105,7 @@ func GetStatusForConfig(logPath, expectedEndpoint string, cfg Config) Status {
 	if settingsPath != "" {
 		status.TelemetryStatus, status.Message = harness.VSCodeOTelStatus(settingsPath, expectedEndpoint)
 	}
-	if last, ok := LastVSCodeEvent(logPath); ok {
-		status.LastEventObserved = true
-		if !last.IsZero() {
-			status.LastEventObservedAt = last.UTC().Format(time.RFC3339)
-		}
-	}
+	status.LastEventObserved, status.LastEventObservedAt = integrations.LastEventStatus(LastVSCodeEvent(logPath))
 	if status.LastEventObserved {
 		status.Message = "VS Code events have been observed in the endpoint runtime log"
 	}

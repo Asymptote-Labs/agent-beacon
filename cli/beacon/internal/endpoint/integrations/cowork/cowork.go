@@ -98,12 +98,7 @@ func GetStatus(logPath string) Status {
 			}
 		}
 	}
-	if last, ok := LastCoworkEvent(logPath); ok {
-		status.LastEventObserved = true
-		if !last.IsZero() {
-			status.LastEventObservedAt = last.UTC().Format(time.RFC3339)
-		}
-	}
+	status.LastEventObserved, status.LastEventObservedAt = integrations.LastEventStatus(LastCoworkEvent(logPath))
 	if status.LastEventObserved {
 		status.Message = "Claude Cowork events have been observed in the endpoint runtime log"
 	}
