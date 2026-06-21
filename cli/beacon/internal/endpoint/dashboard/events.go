@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 const (
@@ -129,32 +130,10 @@ func StreamEvents(path string, fn func(schema.Event) error) error {
 }
 
 func streamSource(source eventSource, fn func(schema.Event) error) error {
-	file, err := os.Open(source.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		var event schema.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue // skip malformed
-		}
+	return writer.ScanEvents(source.path, func(_ []byte, event schema.Event) error {
 		normalizeDashboardEvent(&event)
-		if err := fn(event); err != nil {
-			return err
-		}
-	}
-	return scanner.Err()
+		return fn(event)
+	})
 }
 
 // SortRecordsAppendOrder orders records oldest-first in log append order: by

@@ -119,12 +119,7 @@ func GetStatus(logPath string) Status {
 		Configuration: "gateway_configured",
 		Message:       "Configure OpenClaw Gateway diagnostics-otel to export OTLP/HTTP to Beacon's local collector",
 	}
-	if last, ok := LastOpenClawEvent(logPath); ok {
-		status.LastEventObserved = true
-		if !last.IsZero() {
-			status.LastEventObservedAt = last.UTC().Format(time.RFC3339)
-		}
-	}
+	status.LastEventObserved, status.LastEventObservedAt = integrations.LastEventStatus(LastOpenClawEvent(logPath))
 	if status.LastEventObserved {
 		status.Message = "OpenClaw OTLP-derived events have been observed in the endpoint runtime log"
 	}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -1319,24 +1320,14 @@ func writeJSONFile(path string, value interface{}) error {
 }
 
 func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return writeJSONFile(filepath.Join(out, "event-summaries.json"), []map[string]interface{}{})
-		}
-		return err
+	logExists := true
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		logExists = false
 	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	summaries := []map[string]interface{}{}
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		var event schema.Event
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
-		}
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(line)))
+	var rawBuf []byte
+	err := writer.ScanEvents(logPath, func(raw []byte, event schema.Event) error {
+		hash := fmt.Sprintf("%x", sha256.Sum256(raw))
 		summaries = append(summaries, map[string]interface{}{
 			"timestamp": event.Timestamp,
 			"category":  event.Event.Category,
@@ -1345,12 +1336,20 @@ func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
 			"harness":   event.Harness.Name,
 			"hash":      hash,
 		})
+		if includeRaw {
+			rawBuf = append(rawBuf, raw...)
+			rawBuf = append(rawBuf, '\n')
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, bufio.ErrTooLong) {
+		return err
 	}
 	if err := writeJSONFile(filepath.Join(out, "event-summaries.json"), summaries); err != nil {
 		return err
 	}
-	if includeRaw {
-		return os.WriteFile(filepath.Join(out, "runtime.raw.jsonl"), data, 0600)
+	if includeRaw && logExists {
+		return os.WriteFile(filepath.Join(out, "runtime.raw.jsonl"), rawBuf, 0600)
 	}
 	return nil
 }
