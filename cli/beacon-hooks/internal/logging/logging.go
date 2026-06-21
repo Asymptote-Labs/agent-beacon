@@ -71,11 +71,13 @@ func (l *Logger) formatEntry(level, message string, fields ...interface{}) map[s
 func (l *Logger) write(entry map[string]interface{}) {
 	data, err := json.Marshal(entry)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "logging: failed to marshal log entry: %v\n", err)
 		return
 	}
 
 	f, err := os.OpenFile(l.logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "logging: failed to open log file %s: %v\n", l.logFile, err)
 		return
 	}
 	defer func() {
