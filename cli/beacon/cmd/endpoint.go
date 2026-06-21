@@ -18,38 +18,43 @@ import (
 )
 
 var endpointOpts struct {
-	userMode                 bool
-	systemMode               bool
-	logPath                  string
-	harnesses                string
-	hookHarnesses            string
-	outputDir                string
-	jsonOutput               bool
-	grpcPort                 int
-	httpPort                 int
-	collectorPath            string
-	includeRuntimeMetrics    bool
-	includeCodexSpans        bool
-	keepLogs                 bool
-	keepConfig               bool
-	noStart                  bool
-	dryRun                   bool
-	fix                      bool
-	allTargets               bool
-	elasticPackDir           string
-	hookLevel                string
-	contentRetention         string
-	includeEventSummaries    bool
-	includeRawEvents         bool
-	writeInventoryEvent      bool
-	inventoryMCP             bool
-	inventorySkills          bool
-	inventoryHooks           bool
-	inventoryHeartbeatForce  bool
-	inventoryHeartbeatConfig string
-	inventoryWorkingDir      string
-	inventoryTrigger         string
-	inventoryTriggerHarness  string
+	userMode              bool
+	systemMode            bool
+	logPath               string
+	harnesses             string
+	hookHarnesses         string
+	outputDir             string
+	jsonOutput            bool
+	grpcPort              int
+	httpPort              int
+	collectorPath         string
+	includeRuntimeMetrics bool
+	includeCodexSpans     bool
+	keepLogs              bool
+	keepConfig            bool
+	noStart               bool
+	dryRun                bool
+	fix                   bool
+	allTargets            bool
+	elasticPackDir        string
+	hookLevel             string
+	contentRetention      string
+	includeEventSummaries bool
+	includeRawEvents      bool
+}
+
+// inventoryOpts holds the flags for the `endpoint inventory` and inventory heartbeat
+// subcommands.
+var inventoryOpts struct {
+	writeEvent      bool
+	mcp             bool
+	skills          bool
+	hooks           bool
+	heartbeatForce  bool
+	heartbeatConfig string
+	workingDir      string
+	trigger         string
+	triggerHarness  string
 }
 
 // dashboardOpts holds the flags for the `endpoint dashboard` command. It is a per-command
@@ -457,25 +462,25 @@ func init() {
 	endpointDoctorCmd.Flags().BoolVar(&endpointOpts.fix, "fix", false, "Apply safe endpoint doctor remediations")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")
-	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryMCP, "mcp", false, "Show only MCP server inventory and source configs")
-	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventorySkills, "skills", false, "Show only local agent skill inventory")
-	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryHooks, "hooks", false, "Show only hook integration and hook config inventory")
-	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
-	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.inventoryHeartbeatForce, "force", false, "Write inventory heartbeat even when TTL has not expired")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryHeartbeatConfig, "config", "", "Endpoint config path")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryWorkingDir, "working-dir", "", "Working directory for project inventory")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTrigger, "trigger", "manual", "Inventory trigger source")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTriggerHarness, "trigger-harness", "", "Harness that triggered inventory")
+	endpointInventoryCmd.Flags().BoolVar(&inventoryOpts.mcp, "mcp", false, "Show only MCP server inventory and source configs")
+	endpointInventoryCmd.Flags().BoolVar(&inventoryOpts.skills, "skills", false, "Show only local agent skill inventory")
+	endpointInventoryCmd.Flags().BoolVar(&inventoryOpts.hooks, "hooks", false, "Show only hook integration and hook config inventory")
+	endpointInventoryCmd.Flags().BoolVar(&inventoryOpts.writeEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
+	endpointInventoryHeartbeatCmd.Flags().BoolVar(&inventoryOpts.heartbeatForce, "force", false, "Write inventory heartbeat even when TTL has not expired")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&inventoryOpts.heartbeatConfig, "config", "", "Endpoint config path")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&inventoryOpts.workingDir, "working-dir", "", "Working directory for project inventory")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&inventoryOpts.trigger, "trigger", "manual", "Inventory trigger source")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&inventoryOpts.triggerHarness, "trigger-harness", "", "Harness that triggered inventory")
 	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print heartbeat result as JSON")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.fix, "fix", false, "Apply safe endpoint doctor remediations")
 	topLevelStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print inventory as JSON")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Include all supported targets")
-	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryMCP, "mcp", false, "Show only MCP server inventory and source configs")
-	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventorySkills, "skills", false, "Show only local agent skill inventory")
-	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryHooks, "hooks", false, "Show only hook integration and hook config inventory")
-	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
+	topLevelInventoryCmd.Flags().BoolVar(&inventoryOpts.mcp, "mcp", false, "Show only MCP server inventory and source configs")
+	topLevelInventoryCmd.Flags().BoolVar(&inventoryOpts.skills, "skills", false, "Show only local agent skill inventory")
+	topLevelInventoryCmd.Flags().BoolVar(&inventoryOpts.hooks, "hooks", false, "Show only hook integration and hook config inventory")
+	topLevelInventoryCmd.Flags().BoolVar(&inventoryOpts.writeEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
 	endpointTestEventCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print validation stages as JSON")
 	endpointBundleDiagnosticsCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for diagnostics bundle")
 	endpointBundleDiagnosticsCmd.Flags().BoolVar(&endpointOpts.includeEventSummaries, "include-event-summaries", false, "Include redacted event summaries")

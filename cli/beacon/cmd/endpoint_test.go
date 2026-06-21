@@ -1033,7 +1033,7 @@ func TestFilterInventorySectionsKeepsOnlyRequestedBuckets(t *testing.T) {
 		},
 	}
 
-	endpointOpts.inventoryMCP = true
+	inventoryOpts.mcp = true
 	filtered := filterInventorySections(result)
 	if len(filtered.MCPServers) != 1 || len(filtered.Configs) != 1 {
 		t.Fatalf("mcp filter kept wrong inventory: %#v", filtered)
@@ -1045,9 +1045,9 @@ func TestFilterInventorySectionsKeepsOnlyRequestedBuckets(t *testing.T) {
 		t.Fatalf("mcp filter kept wrong config: %#v", filtered.Configs)
 	}
 
-	endpointOpts.inventoryMCP = false
-	endpointOpts.inventoryHooks = true
-	endpointOpts.inventorySkills = true
+	inventoryOpts.mcp = false
+	inventoryOpts.hooks = true
+	inventoryOpts.skills = true
 	filtered = filterInventorySections(result)
 	if len(filtered.Skills) != 1 || len(filtered.Hooks) != 1 {
 		t.Fatalf("hooks+skills filter dropped requested inventory: %#v", filtered)
@@ -1067,7 +1067,7 @@ func TestEndpointInventoryHooksJSONIncludesDefaultHookStatuses(t *testing.T) {
 	endpointOpts.userMode = true
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.jsonOutput = true
-	endpointOpts.inventoryHooks = true
+	inventoryOpts.hooks = true
 	endpointOpts.hookHarnesses = ""
 
 	output, err := captureStdout(t, func() error {
