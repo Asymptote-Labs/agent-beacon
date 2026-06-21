@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
 
 var preToolCmd = &cobra.Command{
@@ -44,6 +45,10 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	}
 
 	logger.Debug("Pre-tool observed")
+	if deny, denied := enforcePolicy(logger, input, sessionID, policycontract.PhasePreTool); denied {
+		outputJSON(deny)
+		return
+	}
 	if platformFlag == "cursor" && emitCursorPreHook(logger, input, sessionID) {
 		maybeUploadCursorCloudTelemetry(logger)
 	} else if platformFlag == "antigravity" {

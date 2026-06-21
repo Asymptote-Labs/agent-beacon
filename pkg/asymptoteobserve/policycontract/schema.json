@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asymptote.sh/schemas/beacon/policy-provider/v1.json",
+  "title": "Beacon policy provider contract (v1)",
+  "description": "Wire contract between a Beacon hook and an external policy provider named by BEACON_POLICY_PROVIDER. The hook writes a Request to the provider's stdin and reads a Response from its stdout.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["version", "phase", "platform", "event"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "1",
+          "description": "Contract version."
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["pre-tool", "permission-request"],
+          "description": "Which hook is consulting the provider."
+        },
+        "platform": {
+          "type": "string",
+          "description": "Agent runtime platform (e.g. claude, cursor, devin)."
+        },
+        "event": {
+          "type": "object",
+          "description": "Beacon endpoint Event describing the imminent tool call. Uses the same field names as the runtime JSONL log and the open Threat Rules schema."
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": ["decision"],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": ["allow", "deny"],
+          "description": "Verdict. Any value other than \"deny\" is treated as allow (fail-open)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable explanation surfaced to the runtime and telemetry."
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Identifier of the provider rule that produced the decision."
+        },
+        "severity": {
+          "type": "string",
+          "description": "Provider-reported severity (e.g. low, medium, high, critical)."
+        },
+        "mode": {
+          "type": "string",
+          "description": "Provider-reported posture (e.g. audit, enforce)."
+        }
+      }
+    }
+  }
+}
