@@ -1358,36 +1358,41 @@ func HarnessName(attrs map[string]interface{}, hints ...string) string {
 	return "otel"
 }
 
+// harnessNameRules maps substring aliases to a canonical harness name. Rules are
+// evaluated in order and the first whose lower-cased input contains any alias wins, so
+// more specific names (e.g. "claude_code", "copilot-chat") must precede the broader
+// catch-alls ("claude", "copilot"). This replaces a hand-written switch ladder; the
+// classification characterization tests pin the resulting mappings.
+var harnessNameRules = []struct {
+	aliases []string
+	name    string
+}{
+	{[]string{"cowork", "co-work"}, "claude_cowork"},
+	{[]string{"claude_agent_sdk", "claude-agent-sdk", "claude agent sdk"}, "claude_agent_sdk"},
+	{[]string{"claude_code", "claude-code", "claude code"}, "claude_code"},
+	{[]string{"claude"}, "claude_code"},
+	{[]string{"openclaw", "open-claw"}, "openclaw_gateway"},
+	{[]string{"antigravity", "anti-gravity"}, "antigravity_cli"},
+	{[]string{"codex"}, "codex_cli"},
+	{[]string{"gemini"}, "gemini_cli"},
+	{[]string{"copilot-chat"}, "vscode_copilot"},
+	{[]string{"github-copilot", "copilot_cli", "copilot"}, "copilot_cli"},
+}
+
 func NormalizeHarnessName(name string) string {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case lower == "":
-		return ""
-	case strings.Contains(lower, "cowork") || strings.Contains(lower, "co-work"):
-		return "claude_cowork"
-	case strings.Contains(lower, "claude_agent_sdk") || strings.Contains(lower, "claude-agent-sdk") || strings.Contains(lower, "claude agent sdk"):
-		return "claude_agent_sdk"
-	case strings.Contains(lower, "claude_code") || strings.Contains(lower, "claude-code") || strings.Contains(lower, "claude code") || strings.HasPrefix(lower, "claude_code."):
-		return "claude_code"
-	case lower == "claude" || strings.Contains(lower, "claude"):
-		return "claude_code"
-	case strings.Contains(lower, "openclaw") || strings.Contains(lower, "open-claw"):
-		return "openclaw_gateway"
-	case strings.Contains(lower, "antigravity") || strings.Contains(lower, "anti-gravity"):
-		return "antigravity_cli"
-	case strings.Contains(lower, "codex"):
-		return "codex_cli"
-	case strings.Contains(lower, "gemini"):
-		return "gemini_cli"
-	case strings.Contains(lower, "copilot-chat"):
-		return "vscode_copilot"
-	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
-		return "copilot_cli"
-	case name != "":
-		return name
-	default:
+	if lower == "" {
 		return ""
 	}
+	for _, rule := range harnessNameRules {
+		for _, alias := range rule.aliases {
+			if strings.Contains(lower, alias) {
+				return rule.name
+			}
+		}
+	}
+	// Unrecognized but non-empty: return the original (untrimmed) name verbatim.
+	return name
 }
 
 func InferAction(attrs map[string]interface{}, fallback string) string {
