@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+// LastEventStatus translates a LastHarnessEvent result into the (observed, observedAt)
+// pair every integration Status carries, applying the shared RFC3339 formatting. Call it
+// with a Last*Event result directly, e.g.:
+//
+//	status.LastEventObserved, status.LastEventObservedAt = integrations.LastEventStatus(LastCoworkEvent(logPath))
+func LastEventStatus(last time.Time, ok bool) (observed bool, observedAt string) {
+	if ok {
+		observed = true
+		if !last.IsZero() {
+			observedAt = last.UTC().Format(time.RFC3339)
+		}
+	}
+	return observed, observedAt
+}
+
 func HasRecentHarnessEvent(logPath, harnessName string) bool {
 	_, ok := LastHarnessEvent(logPath, harnessName)
 	return ok
