@@ -21,6 +21,42 @@ type = "remap"
 inputs = ["beacon_runtime"]
 source = '''
 . = parse_json!(.message)
+if exists(.gen_ai.usage.input_tokens) {
+  value, err = to_int(.gen_ai.usage.input_tokens)
+  if err == null {
+    .input_tokens = value
+  }
+}
+if exists(.gen_ai.usage.output_tokens) {
+  value, err = to_int(.gen_ai.usage.output_tokens)
+  if err == null {
+    .output_tokens = value
+  }
+}
+if exists(.gen_ai.usage.cache_read.input_tokens) {
+  value, err = to_int(.gen_ai.usage.cache_read.input_tokens)
+  if err == null {
+    .cache_read_input_tokens = value
+  }
+}
+if exists(.gen_ai.usage.cache_creation.input_tokens) {
+  value, err = to_int(.gen_ai.usage.cache_creation.input_tokens)
+  if err == null {
+    .cache_creation_input_tokens = value
+  }
+}
+if exists(.gen_ai.usage.reasoning.output_tokens) {
+  value, err = to_int(.gen_ai.usage.reasoning.output_tokens)
+  if err == null {
+    .reasoning_output_tokens = value
+  }
+}
+if exists(.gen_ai.usage.cost_usd) {
+  value, err = to_float(.gen_ai.usage.cost_usd)
+  if err == null {
+    .cost_usd = value
+  }
+}
 '''
 
 [transforms.beacon_inventory_json]
