@@ -1320,6 +1320,7 @@ func writeJSONFile(path string, value interface{}) error {
 
 func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
 	summaries := []map[string]interface{}{}
+	var rawBuf []byte
 	err := writer.ScanEvents(logPath, func(raw []byte, event schema.Event) error {
 		hash := fmt.Sprintf("%x", sha256.Sum256(raw))
 		summaries = append(summaries, map[string]interface{}{
@@ -1330,6 +1331,10 @@ func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
 			"harness":   event.Harness.Name,
 			"hash":      hash,
 		})
+		if includeRaw {
+			rawBuf = append(rawBuf, raw...)
+			rawBuf = append(rawBuf, '\n')
+		}
 		return nil
 	})
 	if err != nil {
@@ -1339,14 +1344,7 @@ func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
 		return err
 	}
 	if includeRaw {
-		data, err := os.ReadFile(logPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		return os.WriteFile(filepath.Join(out, "runtime.raw.jsonl"), data, 0600)
+		return os.WriteFile(filepath.Join(out, "runtime.raw.jsonl"), rawBuf, 0600)
 	}
 	return nil
 }
