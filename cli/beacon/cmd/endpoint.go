@@ -36,12 +36,6 @@ var endpointOpts struct {
 	dryRun                   bool
 	fix                      bool
 	allTargets               bool
-	openClawEndpoint         string
-	openClawSince            string
-	vscodeEndpoint           string
-	vscodeSince              string
-	vscodeWorkspace          string
-	vscodeCaptureContent     bool
 	elasticPackDir           string
 	hookLevel                string
 	contentRetention         string
@@ -95,6 +89,20 @@ var falconOpts struct {
 	sourcetype         string
 	insecureSkipVerify bool
 	caFile             string
+}
+
+// openClawOpts and vscodeOpts hold the flags for the openclaw and vscode integration
+// print-config/validate subcommands.
+var openClawOpts struct {
+	endpoint string
+	since    string
+}
+
+var vscodeOpts struct {
+	endpoint       string
+	since          string
+	workspace      string
+	captureContent bool
 }
 
 var endpointCmd = &cobra.Command{
@@ -261,7 +269,7 @@ var endpointOpenClawPrintConfigCmd = &cobra.Command{
 	Short: "Print OpenClaw Gateway OTLP setup guidance",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := loadOrDefaultConfig()
-		endpoint := endpointOpts.openClawEndpoint
+		endpoint := openClawOpts.endpoint
 		if endpoint == "" {
 			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 		}
@@ -309,14 +317,14 @@ var endpointVSCodePrintConfigCmd = &cobra.Command{
 	Short: "Print VS Code Copilot OpenTelemetry setup guidance",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := loadOrDefaultConfig()
-		endpoint := endpointOpts.vscodeEndpoint
+		endpoint := vscodeOpts.endpoint
 		if endpoint == "" {
 			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 		}
 		fmt.Print(vscode.PrintConfig(vscode.Config{
 			Endpoint:       endpoint,
-			CaptureContent: endpointOpts.vscodeCaptureContent,
-			WorkspacePath:  endpointOpts.vscodeWorkspace,
+			CaptureContent: vscodeOpts.captureContent,
+			WorkspacePath:  vscodeOpts.workspace,
 		}))
 	},
 }
@@ -333,12 +341,12 @@ var endpointVSCodeStatusCmd = &cobra.Command{
 	Short: "Show VS Code endpoint integration status",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := loadOrDefaultConfig()
-		endpoint := endpointOpts.vscodeEndpoint
+		endpoint := vscodeOpts.endpoint
 		if endpoint == "" {
 			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 		}
 		status := vscode.GetStatusForConfig(cfg.LogPath, endpoint, vscode.Config{
-			WorkspacePath: endpointOpts.vscodeWorkspace,
+			WorkspacePath: vscodeOpts.workspace,
 		})
 		if endpointOpts.jsonOutput {
 			_ = json.NewEncoder(os.Stdout).Encode(status)
@@ -497,20 +505,20 @@ func init() {
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
-	endpointOpenClawPrintConfigCmd.Flags().StringVar(&endpointOpts.openClawEndpoint, "endpoint", "", "OTLP HTTP endpoint to show in setup guidance")
-	endpointOpenClawValidateCmd.Flags().StringVar(&endpointOpts.openClawEndpoint, "endpoint", "", "OTLP HTTP endpoint to show when validation fails")
-	endpointOpenClawValidateCmd.Flags().StringVar(&endpointOpts.openClawSince, "since", "", "Require an OpenClaw event within this duration, such as 10m")
+	endpointOpenClawPrintConfigCmd.Flags().StringVar(&openClawOpts.endpoint, "endpoint", "", "OTLP HTTP endpoint to show in setup guidance")
+	endpointOpenClawValidateCmd.Flags().StringVar(&openClawOpts.endpoint, "endpoint", "", "OTLP HTTP endpoint to show when validation fails")
+	endpointOpenClawValidateCmd.Flags().StringVar(&openClawOpts.since, "since", "", "Require an OpenClaw event within this duration, such as 10m")
 	endpointOpenClawStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointVSCodePrintConfigCmd, endpointVSCodeSetupCmd, endpointVSCodeStatusCmd, endpointVSCodeValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
-		c.Flags().StringVar(&endpointOpts.vscodeEndpoint, "endpoint", "", "OTLP HTTP endpoint for VS Code Copilot")
-		c.Flags().StringVar(&endpointOpts.vscodeWorkspace, "workspace", "", "Workspace path for .vscode/settings.json")
-		c.Flags().BoolVar(&endpointOpts.vscodeCaptureContent, "capture-content", false, "Enable full Copilot prompt, response, tool argument, and tool result capture")
+		c.Flags().StringVar(&vscodeOpts.endpoint, "endpoint", "", "OTLP HTTP endpoint for VS Code Copilot")
+		c.Flags().StringVar(&vscodeOpts.workspace, "workspace", "", "Workspace path for .vscode/settings.json")
+		c.Flags().BoolVar(&vscodeOpts.captureContent, "capture-content", false, "Enable full Copilot prompt, response, tool argument, and tool result capture")
 	}
 	endpointVSCodeSetupCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print VS Code setup guidance without changing settings")
-	endpointVSCodeValidateCmd.Flags().StringVar(&endpointOpts.vscodeSince, "since", "", "Require a VS Code event within this duration, such as 10m")
+	endpointVSCodeValidateCmd.Flags().StringVar(&vscodeOpts.since, "since", "", "Require a VS Code event within this duration, such as 10m")
 	endpointVSCodeStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointHooksStatusCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
@@ -533,7 +541,7 @@ func init() {
 func runEndpointOpenClawValidate() error {
 	cfg := loadOrDefaultConfig()
 	setup := func() {
-		endpoint := endpointOpts.openClawEndpoint
+		endpoint := openClawOpts.endpoint
 		if endpoint == "" {
 			endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 		}
@@ -543,8 +551,8 @@ func runEndpointOpenClawValidate() error {
 			ServiceName: "openclaw-gateway",
 		}))
 	}
-	if endpointOpts.openClawSince != "" {
-		duration, err := time.ParseDuration(endpointOpts.openClawSince)
+	if openClawOpts.since != "" {
+		duration, err := time.ParseDuration(openClawOpts.since)
 		if err != nil {
 			return fmt.Errorf("--since must be a duration such as 10m: %w", err)
 		}
@@ -573,14 +581,14 @@ func runEndpointOpenClawValidate() error {
 
 func runEndpointVSCodeSetup() error {
 	cfg := loadOrDefaultConfig()
-	endpoint := endpointOpts.vscodeEndpoint
+	endpoint := vscodeOpts.endpoint
 	if endpoint == "" {
 		endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 	}
 	setup := vscode.Config{
 		Endpoint:       endpoint,
-		CaptureContent: endpointOpts.vscodeCaptureContent,
-		WorkspacePath:  endpointOpts.vscodeWorkspace,
+		CaptureContent: vscodeOpts.captureContent,
+		WorkspacePath:  vscodeOpts.workspace,
 	}
 	if endpointOpts.dryRun {
 		fmt.Print(vscode.PrintConfig(setup))
@@ -596,19 +604,19 @@ func runEndpointVSCodeSetup() error {
 
 func runEndpointVSCodeValidate() error {
 	cfg := loadOrDefaultConfig()
-	endpoint := endpointOpts.vscodeEndpoint
+	endpoint := vscodeOpts.endpoint
 	if endpoint == "" {
 		endpoint = fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 	}
 	setup := func() {
 		fmt.Print(vscode.PrintConfig(vscode.Config{
 			Endpoint:       endpoint,
-			CaptureContent: endpointOpts.vscodeCaptureContent,
-			WorkspacePath:  endpointOpts.vscodeWorkspace,
+			CaptureContent: vscodeOpts.captureContent,
+			WorkspacePath:  vscodeOpts.workspace,
 		}))
 	}
-	if endpointOpts.vscodeSince != "" {
-		duration, err := time.ParseDuration(endpointOpts.vscodeSince)
+	if vscodeOpts.since != "" {
+		duration, err := time.ParseDuration(vscodeOpts.since)
 		if err != nil {
 			return fmt.Errorf("--since must be a duration such as 10m: %w", err)
 		}
@@ -622,7 +630,7 @@ func runEndpointVSCodeValidate() error {
 		return nil
 	}
 	status := vscode.GetStatusForConfig(cfg.LogPath, endpoint, vscode.Config{
-		WorkspacePath: endpointOpts.vscodeWorkspace,
+		WorkspacePath: vscodeOpts.workspace,
 	})
 	if !status.LastEventObserved {
 		setup()
