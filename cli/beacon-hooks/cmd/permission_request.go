@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
 
 var permissionRequestCmd = &cobra.Command{
@@ -36,6 +37,11 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 		logger = logging.NewSessionLogger("permission-request", platformFlag, sessionID)
 	} else {
 		logger = logging.NewLoggerForPlatform("permission-request", platformFlag)
+	}
+
+	if deny, denied := enforcePolicy(logger, input, sessionID, policycontract.PhasePermissionRequest); denied {
+		outputJSON(deny)
+		return
 	}
 
 	if isDevinLikePlatform(platformFlag) {
