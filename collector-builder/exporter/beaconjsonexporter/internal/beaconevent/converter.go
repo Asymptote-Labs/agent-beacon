@@ -24,6 +24,24 @@ const (
 	CodexToolResult         = "codex.tool_result"
 )
 
+// Beacon event action vocabulary. These are the canonical "<category>.<verb>" action
+// values the converter emits and matches against; they are de-facto schema identifiers,
+// so reference these constants rather than repeating the string literals.
+const (
+	ActionSessionStarted    = "session.started"
+	ActionSessionActivity   = "session.activity"
+	ActionPromptSubmitted   = "prompt.submitted"
+	ActionApprovalRequested = "approval.requested"
+	ActionApprovalDenied    = "approval.denied"
+	ActionToolInvoked       = "tool.invoked"
+	ActionToolFailed        = "tool.failed"
+	ActionCommandExecuted   = "command.executed"
+	ActionFileRead          = "file.read"
+	ActionFileModified      = "file.modified"
+	ActionFileCreated       = "file.created"
+	ActionMCPToolInvoked    = "mcp.tool_invoked"
+)
+
 var allowedCodexLogEvents = map[string]struct{}{
 	CodexConversationStarts: {},
 	CodexUserPrompt:         {},
@@ -328,19 +346,19 @@ func (c Converter) NormalizeCodexLogEvent(event *Event, attrs map[string]interfa
 	}
 	switch CodexLogEventName(attrs) {
 	case CodexConversationStarts:
-		event.Event.Action = "session.started"
+		event.Event.Action = ActionSessionStarted
 		event.Event.Category = "session"
 		event.Message = "Codex session started"
 	case CodexUserPrompt:
-		event.Event.Action = "prompt.submitted"
+		event.Event.Action = ActionPromptSubmitted
 		event.Event.Category = "prompt"
 		event.Message = "Codex prompt submitted"
 	case CodexToolDecision:
 		decision := FirstString(attrs, "decision")
 		if strings.EqualFold(decision, "denied") || strings.EqualFold(decision, "deny") {
-			event.Event.Action = "approval.denied"
+			event.Event.Action = ActionApprovalDenied
 		} else {
-			event.Event.Action = "approval.requested"
+			event.Event.Action = ActionApprovalRequested
 		}
 		event.Event.Category = "approval"
 		event.Message = "Codex tool decision"
@@ -362,7 +380,7 @@ func CodexLogEventName(attrs map[string]interface{}) string {
 func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
 	toolName := FirstString(attrs, "tool.name", "tool_name", "function_name", "tool", "mcp_server")
 	args := FirstString(attrs, "arguments", "function_args", "tool.command", "command")
-	event.Event.Action = "tool.invoked"
+	event.Event.Action = ActionToolInvoked
 	event.Event.Category = "tool"
 	if event.Tool == nil {
 		event.Tool = &ToolInfo{}
@@ -370,7 +388,7 @@ func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
 	event.Tool.Name = toolName
 	event.Tool.Command = args
 	if command := codexShellCommand(toolName, args); command != "" {
-		event.Event.Action = "command.executed"
+		event.Event.Action = ActionCommandExecuted
 		event.Event.Category = "command"
 		event.Command = &CommandInfo{Command: command}
 	}
@@ -634,7 +652,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	operation := FirstString(attrs, "file.operation", "operation")
 	if path == "" {
 		path = FilePathFromURI(FirstString(attrs, "mcp.resource.uri"))
-		if path != "" && operation == "" && event.Event.Action == "file.read" {
+		if path != "" && operation == "" && event.Event.Action == ActionFileRead {
 			operation = "read"
 		}
 	}
@@ -1373,35 +1391,35 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 	case harness == "copilot_cli" || harness == "vscode_copilot":
 		return CopilotAction(attrs, operation, text)
 	case mcpMethod == "tools/call":
-		return "mcp.tool_invoked"
+		return ActionMCPToolInvoked
 	case mcpMethod == "resources/read" && IsFileURI(FirstString(attrs, "mcp.resource.uri")):
-		return "file.read"
+		return ActionFileRead
 	case operation == "execute_tool":
-		return "tool.invoked"
+		return ActionToolInvoked
 	case (operation == "chat" || operation == "generate_content" || operation == "text_completion") && HasPromptLikeContent(attrs):
-		return "prompt.submitted"
+		return ActionPromptSubmitted
 	case HasToolCall(attrs):
-		return "tool.invoked"
+		return ActionToolInvoked
 	case strings.Contains(text, "gemini_cli.user_prompt"):
-		return "prompt.submitted"
+		return ActionPromptSubmitted
 	case strings.Contains(text, "gemini_cli.tool_call"):
 		return GeminiToolAction(attrs)
 	case strings.Contains(text, "gemini_cli.file_operation"):
 		return GeminiFileAction(attrs)
 	case strings.Contains(text, "approval_mode_switch") || strings.Contains(text, "approval_mode_duration") || strings.Contains(text, "plan_execution"):
-		return "approval.requested"
+		return ActionApprovalRequested
 	case strings.Contains(text, "prompt") || strings.Contains(text, "user_input"):
-		return "prompt.submitted"
+		return ActionPromptSubmitted
 	case strings.Contains(text, "mcp"):
-		return "mcp.tool_invoked"
+		return ActionMCPToolInvoked
 	case strings.Contains(text, "command") || strings.Contains(text, "shell") || strings.Contains(text, "exec"):
-		return "command.executed"
+		return ActionCommandExecuted
 	case strings.Contains(text, "file") || strings.Contains(text, "write") || strings.Contains(text, "edit"):
-		return "file.modified"
+		return ActionFileModified
 	case strings.Contains(text, "approval"):
-		return "approval.requested"
+		return ActionApprovalRequested
 	default:
-		return "tool.invoked"
+		return ActionToolInvoked
 	}
 }
 
@@ -1467,54 +1485,54 @@ func CopilotAction(attrs map[string]interface{}, operation, text string) string 
 	if eventName := FirstString(attrs, "event.name", "name"); eventName != "" {
 		switch eventName {
 		case "copilot_chat.session.start", "copilot_chat.cloud.session.invoke":
-			return "session.activity"
+			return ActionSessionActivity
 		case "copilot_chat.tool.call":
 			if strings.EqualFold(FirstString(attrs, "success"), "false") || FirstString(attrs, "error.type") != "" {
-				return "tool.failed"
+				return ActionToolFailed
 			}
-			return "tool.invoked"
+			return ActionToolInvoked
 		case "copilot_chat.edit.feedback", "copilot_chat.edit.hunk.action", "copilot_chat.inline.done":
-			return "file.modified"
+			return ActionFileModified
 		}
 	}
 	switch {
 	case operation == "invoke_agent" && FirstString(attrs, "copilot_chat.user_request") != "":
-		return "prompt.submitted"
+		return ActionPromptSubmitted
 	case operation == "invoke_agent":
-		return "session.activity"
+		return ActionSessionActivity
 	case operation == "execute_hook":
-		return "approval.requested"
+		return ActionApprovalRequested
 	case operation == "chat":
 		initiator := strings.ToLower(FirstString(attrs, "github.copilot.initiator"))
 		turnID := FirstString(attrs, "github.copilot.turn_id")
 		if initiator == "agent" || (turnID != "" && turnID != "0") {
-			return "session.activity"
+			return ActionSessionActivity
 		}
-		return "prompt.submitted"
+		return ActionPromptSubmitted
 	case operation == "execute_tool":
-		return "tool.invoked"
+		return ActionToolInvoked
 	case strings.Contains(text, "permission"):
-		return "approval.requested"
+		return ActionApprovalRequested
 	default:
-		return "tool.invoked"
+		return ActionToolInvoked
 	}
 }
 
 func GeminiToolAction(attrs map[string]interface{}) string {
 	if FirstString(attrs, "tool_type") == "mcp" || FirstString(attrs, "mcp_server_name") != "" {
-		return "mcp.tool_invoked"
+		return ActionMCPToolInvoked
 	}
-	return "tool.invoked"
+	return ActionToolInvoked
 }
 
 func GeminiFileAction(attrs map[string]interface{}) string {
 	switch strings.ToLower(FirstString(attrs, "operation")) {
 	case "read":
-		return "file.read"
+		return ActionFileRead
 	case "create":
-		return "file.created"
+		return ActionFileCreated
 	default:
-		return "file.modified"
+		return ActionFileModified
 	}
 }
 
