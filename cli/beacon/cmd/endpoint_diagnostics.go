@@ -639,34 +639,53 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 		}
 		switch check.Name {
 		case "runtime_log", "runtime_log_permissions", "last_event":
-			if check.Evidence == "missing_optional_file" || check.Evidence == "runtime_log_missing" {
-				addFix(plannedAction{Action: "create_runtime_log", Target: status.LogPath, Message: "create runtime log file and parent directory"})
-			} else if check.Evidence == "last_event_missing" {
-				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
-			}
+			planRuntimeLogFix(check, status, addFix, addSkip)
 		case "collector_config", "launchd_plist", "collector_health", "collector_reachability", "service":
-			if runtime.GOOS != "darwin" {
-				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "launchd service repair is only available on macOS"})
-			} else if configUsable {
-				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and launchd service"})
-			} else {
-				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "skipped because endpoint config is invalid"})
-			}
+			planCollectorServiceFix(check, status, configUsable, addFix, addSkip)
 		case "config", "config_valid":
-			if check.Status == diagnostics.StatusFail {
-				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "review endpoint config or run " + doctorInstallCommand(status.RuntimeLog.EffectiveUserMode)})
-			}
+			planConfigFix(check, status, addSkip)
 		case "harness":
-			message := "review harness configuration manually"
-			if check.Action != "" {
-				message = "run " + check.Action
-			}
-			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: message})
+			planHarnessFix(check, addSkip)
 		case "runtime_log_source":
 			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: check.Action})
 		}
 	}
 	return plan
+}
+
+func planRuntimeLogFix(check diagnostics.Check, status lifecycle.Status, addFix, addSkip func(plannedAction)) {
+	switch check.Evidence {
+	case "missing_optional_file", "runtime_log_missing":
+		addFix(plannedAction{Action: "create_runtime_log", Target: status.LogPath, Message: "create runtime log file and parent directory"})
+	case "last_event_missing":
+		addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
+	}
+}
+
+func planCollectorServiceFix(check diagnostics.Check, status lifecycle.Status, configUsable bool, addFix, addSkip func(plannedAction)) {
+	target := endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode)
+	switch {
+	case runtime.GOOS != "darwin":
+		addSkip(plannedAction{Action: "repair_collector_service", Target: target, Message: "launchd service repair is only available on macOS"})
+	case configUsable:
+		addFix(plannedAction{Action: "repair_collector_service", Target: target, Message: "recreate managed collector config and launchd service"})
+	default:
+		addSkip(plannedAction{Action: "repair_collector_service", Target: target, Message: "skipped because endpoint config is invalid"})
+	}
+}
+
+func planConfigFix(check diagnostics.Check, status lifecycle.Status, addSkip func(plannedAction)) {
+	if check.Status == diagnostics.StatusFail {
+		addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "review endpoint config or run " + doctorInstallCommand(status.RuntimeLog.EffectiveUserMode)})
+	}
+}
+
+func planHarnessFix(check diagnostics.Check, addSkip func(plannedAction)) {
+	message := "review harness configuration manually"
+	if check.Action != "" {
+		message = "run " + check.Action
+	}
+	addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: message})
 }
 
 func applyDoctorFixes(plan doctorFixPlan, status lifecycle.Status) error {
