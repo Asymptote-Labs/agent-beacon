@@ -21,7 +21,7 @@ Do not recreate or depend on removed `asymptote` mirror trees. Keep new work foc
 - Do not add dependency vulnerability scanning, OSV/GHSA lookups, package remediation, or other vulnerability-enforcement flows to the public hook path.
 - Do not add broad runtime enforcement unless explicitly requested. Current control behavior is limited to hook-native approvals/denials exposed by supported agent runtimes.
 - Keep direct destination support scoped to local JSONL/Wazuh unless explicitly requested. Elastic support is a file-tailing pack over local JSONL; Beacon itself must not store Elastic credentials or require a hosted Elastic dependency.
-- Beacon writes retained prompt text, command output, raw tool inputs, raw OTLP attributes, and raw diffs to local or customer-controlled logs, subject to local redaction and size limits where supported.
+- Beacon writes retained prompt text, command output, raw tool inputs, raw OTLP attributes, and raw diffs to local or customer-controlled logs, subject to local redaction and size limits where supported. Prompt body retention is operator-selectable via the `redaction.prompt_mode` endpoint config (`full` default, `redacted`, or `metadata`), read from the trusted config file (never from process environment) and applied in both the hook and CLI persistence paths; secret-pattern redaction always applies as a floor.
 - The Asymptote Observe TypeScript SDK may default to the hosted `/v1/observe` endpoint as an opt-in cloud SDK contract. Beacon endpoint execution stays local-only/no-network.
 
 ## Telemetry Scope

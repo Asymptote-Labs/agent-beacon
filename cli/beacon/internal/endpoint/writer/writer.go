@@ -29,6 +29,9 @@ type Options struct {
 	MaxBytes       int
 	RotateSize     int64
 	RotateArchives int
+	// PromptRetention controls how prompt text is persisted: "" / "full" keeps the
+	// body, "redacted" replaces it with a placeholder, "metadata" drops the body.
+	PromptRetention string
 }
 
 func DefaultPath(userMode bool) string {
@@ -54,6 +57,13 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	}
 	if opts.RotateArchives < 1 {
 		opts.RotateArchives = DefaultRotateArchives
+	}
+	if event.Prompt != nil {
+		prompt, content := asymptoteobserve.RetainPrompt(opts.PromptRetention, event.Prompt.Text)
+		event.Prompt = prompt
+		if content != nil {
+			event.Content = content
+		}
 	}
 	event = SanitizeEvent(event, opts.MaxBytes)
 	if err := event.Validate(); err != nil {

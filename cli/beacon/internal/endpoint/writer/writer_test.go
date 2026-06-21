@@ -62,6 +62,60 @@ func TestAppendEventRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestAppendEventAppliesPromptRetention(t *testing.T) {
+	cases := []struct {
+		mode        string
+		wantText    string
+		wantDigest  bool
+		wantContent string // "" means no content marker expected
+	}{
+		{mode: "", wantText: "summarize the diff", wantDigest: false, wantContent: ""},
+		{mode: "full", wantText: "summarize the diff", wantDigest: false, wantContent: ""},
+		{mode: "redacted", wantText: "[REDACTED]", wantDigest: true, wantContent: "redacted"},
+		{mode: "metadata", wantText: "", wantDigest: true, wantContent: "metadata"},
+	}
+	for _, tc := range cases {
+		t.Run("mode="+tc.mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "runtime.jsonl")
+			event := schema.NewEvent(schema.NewEventOptions{
+				Action:  "prompt.submitted",
+				Harness: schema.HarnessInfo{Name: "test"},
+			})
+			event.Prompt = &schema.PromptInfo{Text: "summarize the diff"}
+			if _, err := AppendEvent(event, Options{Path: path, PromptRetention: tc.mode}); err != nil {
+				t.Fatalf("AppendEvent returned error: %v", err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read log: %v", err)
+			}
+			var decoded map[string]interface{}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &decoded); err != nil {
+				t.Fatalf("line is not JSON: %v", err)
+			}
+			prompt, _ := decoded["prompt"].(map[string]interface{})
+			if prompt == nil {
+				t.Fatalf("prompt missing: %s", string(data))
+			}
+			if got, _ := prompt["text"].(string); got != tc.wantText {
+				t.Fatalf("prompt.text = %q, want %q", got, tc.wantText)
+			}
+			_, hasHash := prompt["hash"]
+			if hasHash != tc.wantDigest {
+				t.Fatalf("prompt.hash present = %v, want %v", hasHash, tc.wantDigest)
+			}
+			content, _ := decoded["content"].(map[string]interface{})
+			if tc.wantContent == "" {
+				if content != nil {
+					t.Fatalf("unexpected content marker: %#v", content)
+				}
+			} else if content == nil || content["retention"] != tc.wantContent {
+				t.Fatalf("content marker = %#v, want retention=%q", content, tc.wantContent)
+			}
+		})
+	}
+}
+
 func TestAppendEventRedactsNestedSlices(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	event := schema.NewEvent(schema.NewEventOptions{

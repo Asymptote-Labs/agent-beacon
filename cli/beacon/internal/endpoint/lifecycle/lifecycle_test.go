@@ -86,6 +86,21 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 }
 
+func TestBuildConfigSetsPromptRetention(t *testing.T) {
+	cfg := buildConfig(InstallOptions{UserMode: true, PromptRetention: "redacted"})
+	if cfg.Redaction == nil || cfg.Redaction.PromptMode != "redacted" {
+		t.Fatalf("Redaction = %#v, want prompt_mode=redacted", cfg.Redaction)
+	}
+	if got := endpointconfig.PromptRetentionMode(cfg); got != "redacted" {
+		t.Fatalf("PromptRetentionMode = %q, want redacted", got)
+	}
+
+	defaultCfg := buildConfig(InstallOptions{UserMode: true})
+	if defaultCfg.Redaction != nil {
+		t.Fatalf("default Redaction = %#v, want nil (full)", defaultCfg.Redaction)
+	}
+}
+
 func TestBuildConfigPreservesExplicitEmptyHarnesses(t *testing.T) {
 	cfg := buildConfig(InstallOptions{UserMode: true, Harnesses: []string{}})
 	if cfg.Harnesses == nil || len(cfg.Harnesses) != 0 {

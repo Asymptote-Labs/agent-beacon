@@ -64,7 +64,21 @@ sudo beacon endpoint config show --system
 beacon endpoint config validate
 ```
 
-Validation checks endpoint and destination configuration. For example, Splunk HEC and Falcon LogScale HEC forwarding require both an endpoint URL and token when configured.
+Validation checks endpoint and destination configuration. For example, Splunk HEC and Falcon LogScale HEC forwarding require both an endpoint URL and token when configured, and `redaction.prompt_mode` must be `full`, `redacted`, or `metadata`.
+
+## Prompt Redaction
+
+The optional `redaction` block controls how much of the prompt body is persisted to the local runtime log. Set it during install with `beacon endpoint install --prompt-redaction <mode>`, or edit the config file directly:
+
+```json title="Redact prompt bodies in the local log"
+{
+  "redaction": {
+    "prompt_mode": "redacted"
+  }
+}
+```
+
+`prompt_mode` accepts `full` (default — retain the body, secrets redacted), `redacted` (replace the body with `[REDACTED]` and keep a hash/length digest), or `metadata` (drop the body, keep the digest). See [Redaction and Size Limits](/security/retention-redaction) for the full behavior.
 
 ### Examples
 

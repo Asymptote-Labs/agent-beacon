@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Uploader uploads one session's full JSONL snapshot to a destination (GCS).
@@ -26,6 +27,10 @@ type PullOptions struct {
 	LogPath   string    // runtime JSONL path (resolved by caller)
 	UserMode  bool      // writer user/system mode
 	StatePath string    // dedup state file (empty = no persistence)
+
+	// PromptRetention controls how prompt bodies are persisted and uploaded: ""/"full"
+	// keeps the body, "redacted" replaces it with a placeholder, "metadata" drops it.
+	PromptRetention string
 
 	Upload       Uploader // optional GCS uploader
 	UploadPrefix string   // GCS object prefix (e.g. "agent-traces")
@@ -163,7 +168,7 @@ func processSession(ctx context.Context, client *Client, s Session, ss *SessionS
 		if terminal {
 			snapshot = append(snapshot, MappedEvent{Event: EndedEvent(s)})
 		}
-		data, err := marshalEvents(snapshot)
+		data, err := marshalEvents(snapshot, opts.PromptRetention)
 		if err != nil {
 			return err
 		}
@@ -197,7 +202,7 @@ func emit(ev schema.Event, opts PullOptions) error {
 		}
 	}
 	if opts.Write {
-		if _, err := writer.AppendEvent(ev, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode}); err != nil {
+		if _, err := writer.AppendEvent(ev, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, PromptRetention: opts.PromptRetention}); err != nil {
 			return err
 		}
 	}
@@ -207,10 +212,18 @@ func emit(ev schema.Event, opts PullOptions) error {
 // marshalEvents builds the per-session JSONL snapshot for upload. Events are run
 // through the same redaction/truncation/size controls as the local writer so
 // the GCS snapshot never carries more raw content than the local log.
-func marshalEvents(mapped []MappedEvent) ([]byte, error) {
+func marshalEvents(mapped []MappedEvent, promptRetention string) ([]byte, error) {
 	var buf []byte
 	for _, me := range mapped {
-		data, err := json.Marshal(writer.SanitizeEvent(me.Event, writer.MaxEventBytes))
+		ev := me.Event
+		if ev.Prompt != nil {
+			prompt, content := asymptoteobserve.RetainPrompt(promptRetention, ev.Prompt.Text)
+			ev.Prompt = prompt
+			if content != nil {
+				ev.Content = content
+			}
+		}
+		data, err := json.Marshal(writer.SanitizeEvent(ev, writer.MaxEventBytes))
 		if err != nil {
 			return nil, err
 		}

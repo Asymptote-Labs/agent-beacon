@@ -162,7 +162,9 @@ type PolicyInfo struct {
 }
 
 type PromptInfo struct {
-	Text string `json:"text,omitempty"`
+	Text   string `json:"text,omitempty"`
+	Hash   string `json:"hash,omitempty"`
+	Length int    `json:"length,omitempty"`
 }
 
 type ContentInfo struct {

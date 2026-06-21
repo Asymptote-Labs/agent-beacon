@@ -15,10 +15,35 @@ Beacon can write supported prompt, command, tool, file, approval, policy, and ru
 | Sanitization | Runtime payloads are normalized into typed event fields instead of storing source payloads verbatim wherever possible |
 | Truncation | Oversized fields are shortened and marked with truncation metadata |
 | Event-size limits | Events are bounded before they are written to `runtime.jsonl` or sent to configured destinations |
+| Prompt retention mode | An operator-selected mode controls how much of the prompt body is persisted |
+
+## Prompt Retention Mode
+
+Secret-pattern redaction always applies to prompt text as a floor. On top of that, operators can choose how much of the prompt body is persisted to the local runtime log with the `redaction.prompt_mode` endpoint config setting (or `beacon endpoint install --prompt-redaction <mode>`):
+
+| Mode | `prompt.text` | Digest (`prompt.hash` + `prompt.length`) | `content` marker |
+|------|---------------|------------------------------------------|------------------|
+| `full` (default) | Retained, secret-redacted | — | none |
+| `redacted` | Replaced with `[REDACTED]` | Retained | `retention: redacted`, `redacted: true` |
+| `metadata` | Dropped | Retained | `retention: metadata`, `included: false` |
+
+The digest is a SHA-256 hash and character length of the original prompt. It lets operators correlate and deduplicate prompts in `redacted` and `metadata` modes without retaining the prompt body.
+
+The mode is read from the trusted endpoint config file, not from process environment, so a monitored runtime cannot relax its own redaction. It applies to local hook telemetry and to CLI-side prompt events (such as the Devin Cloud connector) and their uploaded snapshots.
+
+Example endpoint config:
+
+```json
+{
+  "redaction": {
+    "prompt_mode": "redacted"
+  }
+}
+```
 
 ## Prompt Event Example
 
-Prompt content is included only when the source runtime emits it. Secret-like values are redacted before the event is written:
+Prompt content is included only when the source runtime emits it. Secret-like values are redacted before the event is written. In the default `full` mode, the prompt body is retained (with secrets redacted):
 
 ```json
 {
@@ -31,8 +56,25 @@ Prompt content is included only when the source runtime emits it. Secret-like va
   },
   "prompt": {
     "text": "Review this API client. Token: [REDACTED]"
+  }
+}
+```
+
+In `redacted` mode the body is replaced with a placeholder and a digest is retained so prompts can still be correlated:
+
+```json
+{
+  "event": {
+    "action": "prompt.submitted",
+    "category": "prompt"
+  },
+  "prompt": {
+    "text": "[REDACTED]",
+    "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "length": 142
   },
   "content": {
+    "retention": "redacted",
     "included": true,
     "redacted": true
   }

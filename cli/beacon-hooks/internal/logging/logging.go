@@ -102,6 +102,7 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 	if severity == "" {
 		severity = "info"
 	}
+	applyPromptRetention(fields)
 	event := l.baseEndpointEvent(action, category, severity, message)
 	for key, value := range fields {
 		if value == nil {

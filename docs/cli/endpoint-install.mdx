@@ -27,6 +27,7 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--no-start` | Write files without starting the launchd service |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
 | `--include-codex-spans` | Include high-volume Codex OTLP spans for troubleshooting. By default, Beacon records Codex semantic logs and suppresses raw Codex spans |
+| `--prompt-redaction <mode>` | How much of the prompt body is persisted to the local log: `full` (default), `redacted` (replace the body with `[REDACTED]` and keep a hash/length digest), or `metadata` (drop the body, keep the digest). Secret-pattern redaction always applies regardless of mode |
 | `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
 | `--splunk-hec-token <token>` | Splunk HEC token |
 | `--splunk-index <index>` | Optional Splunk index |

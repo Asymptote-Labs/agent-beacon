@@ -176,6 +176,10 @@ Beacon writes endpoint activity to `runtime.jsonl` and periodic Cursor/Claude
 Code configuration inventory metadata to the sibling `inventory_state.jsonl`.
 Local log storage and retention behavior are summarized in the
 [local testing and logs docs](https://docs.asymptotelabs.ai/cli/local-testing-logs).
+Prompt bodies are persisted in full by default (with secrets redacted); set
+`beacon endpoint install --prompt-redaction redacted` (or `metadata`) to replace
+or drop prompt bodies while keeping a correlation digest. See
+[redaction and size limits](https://docs.asymptotelabs.ai/security/retention-redaction).
 
 For offline threat detection, `beacon scan` runs open threat rules over local
 telemetry with no network access. See the

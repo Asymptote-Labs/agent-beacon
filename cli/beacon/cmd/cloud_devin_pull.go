@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devincloud"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/spf13/cobra"
 )
@@ -84,12 +85,13 @@ func runCloudDevinPull(cmd *cobra.Command, args []string) error {
 
 	userMode := endpointDevinUserMode()
 	opts := devincloud.PullOptions{
-		Print:        devinPullOpts.print,
-		Out:          cmd.OutOrStdout(),
-		Write:        !devinPullOpts.print,
-		UserMode:     userMode,
-		UploadPrefix: devincloud.GCSPrefixFromEnv(),
-		ForceRefresh: devinPullOpts.fullResync,
+		Print:           devinPullOpts.print,
+		Out:             cmd.OutOrStdout(),
+		Write:           !devinPullOpts.print,
+		UserMode:        userMode,
+		UploadPrefix:    devincloud.GCSPrefixFromEnv(),
+		ForceRefresh:    devinPullOpts.fullResync,
+		PromptRetention: devinPromptRetention(userMode),
 	}
 	// --print is a dry run: do not read or write dedup state (so every event is
 	// shown on each run) and do not resolve a log path to write to.
@@ -159,6 +161,17 @@ func endpointDevinUserMode() bool {
 		return false
 	}
 	return devinPullOpts.userMode
+}
+
+// devinPromptRetention resolves the prompt retention mode from the local endpoint
+// config, defaulting to full when no config is present so the connector keeps
+// working on hosts that only run the cloud pull.
+func devinPromptRetention(userMode bool) string {
+	cfg, err := endpointconfig.Load(userMode)
+	if err != nil {
+		return ""
+	}
+	return endpointconfig.PromptRetentionMode(cfg)
 }
 
 // resolveDevinStatePath always returns a non-empty path so dedup state is

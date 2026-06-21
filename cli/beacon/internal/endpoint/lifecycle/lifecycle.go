@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	beaconauth "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
@@ -37,6 +38,7 @@ type InstallOptions struct {
 	StartService          bool
 	IncludeRuntimeMetrics bool
 	IncludeCodexSpans     bool
+	PromptRetention       string
 	SplunkHEC             *endpointconfig.SplunkHEC
 	FalconHEC             *endpointconfig.FalconHEC
 }
@@ -373,6 +375,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
+	if mode := strings.TrimSpace(opts.PromptRetention); mode != "" {
+		cfg.Redaction = &endpointconfig.Redaction{PromptMode: mode}
+	}
 	if opts.SplunkHEC != nil {
 		if cfg.Destinations == nil {
 			cfg.Destinations = &endpointconfig.Destinations{}

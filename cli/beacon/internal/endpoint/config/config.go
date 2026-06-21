@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -30,6 +32,17 @@ type Config struct {
 	Inventory       *Inventory     `json:"inventory_heartbeat,omitempty"`
 	Destinations    *Destinations  `json:"destinations,omitempty"`
 	ManagedUpload   *ManagedUpload `json:"managed_upload,omitempty"`
+	Redaction       *Redaction     `json:"redaction,omitempty"`
+}
+
+// Redaction controls how retained content is transformed before it is written to
+// the local runtime log. It is read from the trusted endpoint config file (not from
+// process environment) so a monitored runtime cannot relax its own redaction.
+type Redaction struct {
+	// PromptMode selects how prompt text is persisted: "full" (default) keeps the
+	// prompt body, "redacted" replaces it with a placeholder while keeping a digest,
+	// and "metadata" drops the body and keeps only the digest.
+	PromptMode string `json:"prompt_mode,omitempty"`
 }
 
 type Collector struct {
@@ -165,12 +178,18 @@ func Load(userMode bool) (Config, error) {
 	if err := ValidateDestinations(cfg.Destinations); err != nil {
 		return Config{}, err
 	}
+	if err := ValidateRedaction(cfg.Redaction); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
 func Save(cfg Config) (string, error) {
 	NormalizeDestinations(&cfg)
 	if err := ValidateDestinations(cfg.Destinations); err != nil {
+		return "", err
+	}
+	if err := ValidateRedaction(cfg.Redaction); err != nil {
 		return "", err
 	}
 	path := ConfigPath(cfg.UserMode)
@@ -269,6 +288,35 @@ func ValidateDestinations(destinations *Destinations) error {
 		}
 	}
 	return nil
+}
+
+// ValidateRedaction rejects unknown prompt retention modes so a typo fails closed at
+// load/save time rather than silently defaulting at write time.
+func ValidateRedaction(r *Redaction) error {
+	if r == nil {
+		return nil
+	}
+	switch r.PromptMode {
+	case "",
+		asymptoteobserve.ContentRetentionFull,
+		asymptoteobserve.ContentRetentionRedacted,
+		asymptoteobserve.ContentRetentionMetadata:
+		return nil
+	default:
+		return fmt.Errorf("redaction.prompt_mode must be %q, %q, or %q",
+			asymptoteobserve.ContentRetentionFull,
+			asymptoteobserve.ContentRetentionRedacted,
+			asymptoteobserve.ContentRetentionMetadata)
+	}
+}
+
+// PromptRetentionMode returns the configured prompt retention mode, defaulting to
+// full when redaction is unset.
+func PromptRetentionMode(cfg Config) string {
+	if cfg.Redaction == nil {
+		return asymptoteobserve.ContentRetentionFull
+	}
+	return asymptoteobserve.NormalizePromptRetention(cfg.Redaction.PromptMode)
 }
 
 func HasSecretDestinations(cfg Config) bool {

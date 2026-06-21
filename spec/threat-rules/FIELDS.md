@@ -100,6 +100,8 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.policy.name` | string |
 | `e.policy.reason` | string |
 | `e.product` | string |
+| `e.prompt.hash` | string |
+| `e.prompt.length` | int |
 | `e.prompt.text` | string |
 | `e.repository` | string |
 | `e.run.actor` | string |

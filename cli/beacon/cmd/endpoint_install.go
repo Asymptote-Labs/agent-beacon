@@ -106,6 +106,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		StartService:          !endpointOpts.noStart,
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
+		PromptRetention:       endpointOpts.promptRetention,
 		SplunkHEC:             splunkHECOptions(),
 		FalconHEC:             falconHECOptions(),
 	})
@@ -244,6 +245,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		StartService:          !endpointOpts.noStart,
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
+		PromptRetention:       endpointOpts.promptRetention,
 		SplunkHEC:             splunkHECOptions(),
 		FalconHEC:             falconHECOptions(),
 	})

@@ -215,6 +215,61 @@ func TestLoadIgnoresLegacyContentRetention(t *testing.T) {
 	}
 }
 
+func TestRedactionRoundTripAndPromptRetentionMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := Default(true, "")
+	cfg.Redaction = &Redaction{PromptMode: "redacted"}
+	if _, err := Save(cfg); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Redaction == nil || loaded.Redaction.PromptMode != "redacted" {
+		t.Fatalf("loaded redaction = %#v, want prompt_mode=redacted", loaded.Redaction)
+	}
+	if got := PromptRetentionMode(loaded); got != "redacted" {
+		t.Fatalf("PromptRetentionMode = %q, want redacted", got)
+	}
+}
+
+func TestPromptRetentionModeDefaultsToFull(t *testing.T) {
+	if got := PromptRetentionMode(Config{}); got != "full" {
+		t.Fatalf("PromptRetentionMode(nil redaction) = %q, want full", got)
+	}
+	if got := PromptRetentionMode(Config{Redaction: &Redaction{PromptMode: ""}}); got != "full" {
+		t.Fatalf("PromptRetentionMode(empty mode) = %q, want full", got)
+	}
+}
+
+func TestSaveRejectsUnknownPromptRetentionMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := Default(true, "")
+	cfg.Redaction = &Redaction{PromptMode: "bogus"}
+	if _, err := Save(cfg); err == nil {
+		t.Fatal("Save accepted unknown prompt_mode, want error")
+	}
+}
+
+func TestLoadRejectsUnknownPromptRetentionMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, UserConfigPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"user_mode":true,"redaction":{"prompt_mode":"bogus"}}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(true); err == nil {
+		t.Fatal("Load accepted unknown prompt_mode, want error")
+	}
+}
+
 func TestLoadRejectsCorruptJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

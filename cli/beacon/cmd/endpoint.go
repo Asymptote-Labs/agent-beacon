@@ -51,6 +51,7 @@ var endpointOpts struct {
 	elasticPackDir           string
 	hookLevel                string
 	contentRetention         string
+	promptRetention          string
 	splunkHECEndpoint        string
 	splunkHECToken           string
 	splunkIndex              string
@@ -404,6 +405,7 @@ func init() {
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "", "Deprecated no-op; Beacon always captures full content subject to redaction and size limits")
 	_ = endpointInstallCmd.Flags().MarkHidden("content-retention")
 	_ = endpointInstallCmd.Flags().MarkDeprecated("content-retention", "Beacon now always captures full content; this flag is ignored")
+	endpointInstallCmd.Flags().StringVar(&endpointOpts.promptRetention, "prompt-redaction", "", "Prompt body retention in the local log: full (default), redacted, or metadata")
 	registerSplunkFlags(endpointInstallCmd)
 	registerFalconFlags(endpointInstallCmd)
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
@@ -417,6 +419,7 @@ func init() {
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "", "Deprecated no-op; Beacon always captures full content subject to redaction and size limits")
 	_ = endpointRepairCmd.Flags().MarkHidden("content-retention")
 	_ = endpointRepairCmd.Flags().MarkDeprecated("content-retention", "Beacon now always captures full content; this flag is ignored")
+	endpointRepairCmd.Flags().StringVar(&endpointOpts.promptRetention, "prompt-redaction", "", "Prompt body retention in the local log: full (default), redacted, or metadata")
 	registerSplunkFlags(endpointRepairCmd)
 	registerFalconFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
