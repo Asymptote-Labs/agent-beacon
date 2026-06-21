@@ -82,6 +82,12 @@ beacon endpoint s3 install-pack --output ./beacon-s3-pack
 
 The pack includes setup instructions, a one-shot AWS CLI smoke-test script, a Vector `aws_s3` forwarding template, and sample Beacon endpoint events.
 
+The generated Vector template preserves each Beacon event's canonical
+`gen_ai.usage` payload and also flattens token and runtime-reported cost fields
+to top-level JSON columns for downstream analytics: `input_tokens`,
+`output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`,
+`reasoning_output_tokens`, and `cost_usd`.
+
 ### Examples
 
 Generate a content pack for the default per-user install:

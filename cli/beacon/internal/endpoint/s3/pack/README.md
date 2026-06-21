@@ -138,6 +138,14 @@ Beacon event per line, without a Vector wrapper. Runtime activity is written
 under `${BEACON_S3_PREFIX}/runtime/date=.../`; inventory telemetry is written
 under `${BEACON_S3_PREFIX}/inventory/date=.../`.
 
+When an event contains canonical token or cost attribution under
+`gen_ai.usage`, the Vector template preserves the original nested payload and
+also emits top-level analytics fields for downstream warehouses such as
+ClickHouse: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+`cache_creation_input_tokens`, `reasoning_output_tokens`, and `cost_usd`.
+`cost_usd` is runtime-reported only; Beacon does not derive cost from local
+pricing tables.
+
 The template uses date-partitioned `key_prefix`, `filename_time_format = "%s"`,
 and `filename_append_uuid = true` so production forwarding does not overwrite
 previous S3 objects. Runtime log forwarding starts at the end of the active log
