@@ -32,9 +32,9 @@ var ngrokURLPattern = regexp.MustCompile(`url="?((?:https)://[^"\s]+)`)
 
 func runEndpointCoworkSetup(cmdCtx context.Context) error {
 	cfg := loadOrDefaultConfig()
-	resourceAttributes := endpointOpts.coworkResourceAttributes
-	if endpointOpts.coworkNgrok {
-		if endpointOpts.coworkEndpoint != "" {
+	resourceAttributes := coworkOpts.resourceAttributes
+	if coworkOpts.ngrok {
+		if coworkOpts.endpoint != "" {
 			return fmt.Errorf("--endpoint cannot be combined with --ngrok")
 		}
 		if resourceAttributes == "" {
@@ -58,7 +58,7 @@ func runEndpointCoworkSetup(cmdCtx context.Context) error {
 			Headers:            headers,
 			ResourceAttributes: resourceAttributes,
 		})
-		if endpointOpts.coworkOpen {
+		if coworkOpts.open {
 			if err := dashboard.OpenBrowser(cowork.AdminURL); err != nil {
 				_ = tunnel.Stop()
 				return err
@@ -68,22 +68,22 @@ func runEndpointCoworkSetup(cmdCtx context.Context) error {
 		return tunnel.Wait()
 	}
 
-	if endpointOpts.coworkEndpoint == "" {
+	if coworkOpts.endpoint == "" {
 		return fmt.Errorf("--endpoint is required unless --ngrok is set")
 	}
-	if !strings.HasPrefix(strings.ToLower(endpointOpts.coworkEndpoint), "https://") {
+	if !strings.HasPrefix(strings.ToLower(coworkOpts.endpoint), "https://") {
 		return fmt.Errorf("--endpoint must be a public HTTPS URL reachable by Claude Cowork")
 	}
 	if resourceAttributes == "" {
 		resourceAttributes = defaultCoworkProdResourceAttributes
 	}
 	printCoworkSetup(cowork.Config{
-		Endpoint:           endpointOpts.coworkEndpoint,
+		Endpoint:           coworkOpts.endpoint,
 		Protocol:           defaultCoworkProtocol,
-		Headers:            endpointOpts.coworkHeaders,
+		Headers:            coworkOpts.headers,
 		ResourceAttributes: resourceAttributes,
 	})
-	if endpointOpts.coworkOpen {
+	if coworkOpts.open {
 		return dashboard.OpenBrowser(cowork.AdminURL)
 	}
 	return nil
@@ -92,18 +92,18 @@ func runEndpointCoworkSetup(cmdCtx context.Context) error {
 func runEndpointCoworkValidate() error {
 	cfg := loadOrDefaultConfig()
 	status := cowork.GetStatus(cfg.LogPath)
-	if endpointOpts.coworkSince != "" {
-		duration, err := time.ParseDuration(endpointOpts.coworkSince)
+	if coworkOpts.since != "" {
+		duration, err := time.ParseDuration(coworkOpts.since)
 		if err != nil {
 			return fmt.Errorf("--since must be a duration such as 10m: %w", err)
 		}
 		since := time.Now().Add(-duration)
 		if !cowork.HasCoworkEventSince(cfg.LogPath, since) {
 			fmt.Print(cowork.PrintConfig(cowork.Config{
-				Endpoint:           endpointOpts.coworkEndpoint,
+				Endpoint:           coworkOpts.endpoint,
 				Protocol:           defaultCoworkProtocol,
-				Headers:            endpointOpts.coworkHeaders,
-				ResourceAttributes: endpointOpts.coworkResourceAttributes,
+				Headers:            coworkOpts.headers,
+				ResourceAttributes: coworkOpts.resourceAttributes,
 			}))
 			return fmt.Errorf("no Claude Cowork events observed in %s since %s", cfg.LogPath, since.UTC().Format(time.RFC3339))
 		}
@@ -112,10 +112,10 @@ func runEndpointCoworkValidate() error {
 	}
 	if !status.LastEventObserved {
 		fmt.Print(cowork.PrintConfig(cowork.Config{
-			Endpoint:           endpointOpts.coworkEndpoint,
+			Endpoint:           coworkOpts.endpoint,
 			Protocol:           defaultCoworkProtocol,
-			Headers:            endpointOpts.coworkHeaders,
-			ResourceAttributes: endpointOpts.coworkResourceAttributes,
+			Headers:            coworkOpts.headers,
+			ResourceAttributes: coworkOpts.resourceAttributes,
 		}))
 		return fmt.Errorf("no Claude Cowork events observed in %s", cfg.LogPath)
 	}
