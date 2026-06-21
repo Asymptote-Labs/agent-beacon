@@ -360,7 +360,7 @@ func printPlannedAction(action plannedAction) {
 }
 
 func inventoryHookTargets() ([]string, error) {
-	if endpointOpts.inventoryHooks && !endpointOpts.allTargets && strings.TrimSpace(endpointOpts.hookHarnesses) == "" {
+	if inventoryOpts.hooks && !endpointOpts.allTargets && strings.TrimSpace(endpointOpts.hookHarnesses) == "" {
 		return allHookTargetsForLevel(), nil
 	}
 	return hookTargets()

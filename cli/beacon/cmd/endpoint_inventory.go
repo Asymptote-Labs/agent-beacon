@@ -60,7 +60,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			return err
 		}
-		if endpointOpts.writeInventoryEvent {
+		if inventoryOpts.writeEvent {
 			return writeInventoryEvents(effectiveCfg, configInventory)
 		}
 		return nil
@@ -76,7 +76,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Harness: %s detected=%t telemetry=%s\n", h.DisplayName, h.Detected, h.TelemetryStatus)
 		}
 	}
-	if showAllInventorySections || endpointOpts.inventoryHooks {
+	if showAllInventorySections || inventoryOpts.hooks {
 		for _, name := range hookTargetNames {
 			if hook, ok := result.Hooks[name]; ok {
 				fmt.Printf("Hook: %s status=%s installed=%t\n", name, hook.Status, hook.Installed)
@@ -96,7 +96,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Config: %s scope=%s status=%s mcp_servers=%d path=%s\n", config.Runtime, config.Scope, config.ParserStatus, config.MCPServerCount, path)
 	}
-	if showAllInventorySections || endpointOpts.inventoryMCP {
+	if showAllInventorySections || inventoryOpts.mcp {
 		for _, server := range result.MCPServers {
 			name := server.ServerName
 			if name == "" {
@@ -105,7 +105,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
 		}
 	}
-	if showAllInventorySections || endpointOpts.inventorySkills {
+	if showAllInventorySections || inventoryOpts.skills {
 		for _, skill := range result.Skills {
 			if !endpointOpts.allTargets && !skill.Exists {
 				continue
@@ -124,7 +124,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Skill: %s %s scope=%s status=%s path=%s\n", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
 		}
 	}
-	if endpointOpts.writeInventoryEvent {
+	if inventoryOpts.writeEvent {
 		return writeInventoryEvents(effectiveCfg, configInventory)
 	}
 	return nil
@@ -171,7 +171,7 @@ func filterInventoryDefaults(result inventoryResult) inventoryResult {
 }
 
 func inventorySectionFilterActive() bool {
-	return endpointOpts.inventoryMCP || endpointOpts.inventorySkills || endpointOpts.inventoryHooks
+	return inventoryOpts.mcp || inventoryOpts.skills || inventoryOpts.hooks
 }
 
 func filterInventorySections(result inventoryResult) inventoryResult {
@@ -179,13 +179,13 @@ func filterInventorySections(result inventoryResult) inventoryResult {
 		return result
 	}
 	result.Harnesses = nil
-	if !endpointOpts.inventoryHooks {
+	if !inventoryOpts.hooks {
 		result.Hooks = nil
 	}
-	if !endpointOpts.inventoryMCP {
+	if !inventoryOpts.mcp {
 		result.MCPServers = nil
 	}
-	if !endpointOpts.inventorySkills {
+	if !inventoryOpts.skills {
 		result.Skills = nil
 	}
 	filteredConfigs := []endpointinventory.Config{}
@@ -202,8 +202,8 @@ func inventoryConfigIncluded(config endpointinventory.Config) bool {
 	if !inventorySectionFilterActive() {
 		return true
 	}
-	return (endpointOpts.inventoryMCP && config.MCPServerCount > 0) ||
-		(endpointOpts.inventoryHooks && config.ConfigKind == endpointinventory.KindHookConfig)
+	return (inventoryOpts.mcp && config.MCPServerCount > 0) ||
+		(inventoryOpts.hooks && config.ConfigKind == endpointinventory.KindHookConfig)
 }
 
 func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Result) error {
@@ -224,12 +224,12 @@ type inventoryHeartbeatWriteResult struct {
 const inventoryAttemptBackoff = 5 * time.Minute
 
 func runEndpointInventoryHeartbeat(cmd *cobra.Command, args []string) error {
-	cfg, err := loadInventoryHeartbeatConfig(endpointUserMode(), endpointOpts.logPath, endpointOpts.inventoryHeartbeatConfig)
+	cfg, err := loadInventoryHeartbeatConfig(endpointUserMode(), endpointOpts.logPath, inventoryOpts.heartbeatConfig)
 	if err != nil {
 		return err
 	}
 	settings := endpointconfig.InventoryConfig(cfg)
-	result, err := writeInventoryHeartbeat(cfg, settings, endpointOpts.inventoryHeartbeatForce, endpointOpts.inventoryWorkingDir, endpointOpts.inventoryTrigger, endpointOpts.inventoryTriggerHarness)
+	result, err := writeInventoryHeartbeat(cfg, settings, inventoryOpts.heartbeatForce, inventoryOpts.workingDir, inventoryOpts.trigger, inventoryOpts.triggerHarness)
 	if endpointOpts.jsonOutput {
 		_ = json.NewEncoder(os.Stdout).Encode(result)
 	}
