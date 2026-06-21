@@ -63,6 +63,18 @@ func DiscoverAll() []Harness {
 	}
 }
 
+// applyConfigStatus is the common tail shared by the file-based Discover* functions:
+// when ConfigPath exists it adopts the (status, message) reported by statusFn, otherwise
+// it marks the harness missing with missingMsg.
+func (h *Harness) applyConfigStatus(statusFn func(string) (TelemetryStatus, string), missingMsg string) {
+	if fileExists(h.ConfigPath) {
+		h.TelemetryStatus, h.Message = statusFn(h.ConfigPath)
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = missingMsg
+	}
+}
+
 func DiscoverAntigravity() Harness {
 	h := Harness{Name: "antigravity_cli", DisplayName: "Antigravity CLI", Capability: "hooks"}
 	detectExecutable(&h, "antigravity", "antigravity-cli")
@@ -76,14 +88,7 @@ func DiscoverAntigravity() Harness {
 	if !h.Detected && (dirExists(filepath.Join(home, ".gemini", "config")) || dirExists(".agents")) {
 		h.Detected = true
 	}
-	if fileExists(h.ConfigPath) {
-		status, msg := antigravityStatus(h.ConfigPath)
-		h.TelemetryStatus = status
-		h.Message = msg
-	} else {
-		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Antigravity hooks.json was not found"
-	}
+	h.applyConfigStatus(antigravityStatus, "Antigravity hooks.json was not found")
 	return h
 }
 
@@ -119,14 +124,7 @@ func DiscoverCodex() Harness {
 	detectExecutable(&h, "codex")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = filepath.Join(home, ".codex", "config.toml")
-	if fileExists(h.ConfigPath) {
-		status, msg := codexStatus(h.ConfigPath)
-		h.TelemetryStatus = status
-		h.Message = msg
-	} else {
-		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Codex config file was not found"
-	}
+	h.applyConfigStatus(codexStatus, "Codex config file was not found")
 	return h
 }
 
@@ -135,14 +133,7 @@ func DiscoverFactory() Harness {
 	detectExecutable(&h, "droid")
 	home, _ := os.UserHomeDir()
 	h.ConfigPath = factoryProfilePath(home)
-	if fileExists(h.ConfigPath) {
-		status, msg := factoryStatus(h.ConfigPath)
-		h.TelemetryStatus = status
-		h.Message = msg
-	} else {
-		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Factory Droid telemetry is configured by the launch environment; set OTEL_TELEMETRY_ENDPOINT to the local OTLP HTTP receiver"
-	}
+	h.applyConfigStatus(factoryStatus, "Factory Droid telemetry is configured by the launch environment; set OTEL_TELEMETRY_ENDPOINT to the local OTLP HTTP receiver")
 	return h
 }
 
@@ -179,14 +170,7 @@ func DiscoverHermes() Harness {
 	if !h.Detected && dirExists(filepath.Join(home, ".hermes")) {
 		h.Detected = true
 	}
-	if fileExists(h.ConfigPath) {
-		status, msg := hermesStatus(h.ConfigPath)
-		h.TelemetryStatus = status
-		h.Message = msg
-	} else {
-		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Hermes config.yaml was not found"
-	}
+	h.applyConfigStatus(hermesStatus, "Hermes config.yaml was not found")
 	return h
 }
 
@@ -227,14 +211,10 @@ func DiscoverDevin() Harness {
 	if !h.Detected && (dirExists(filepath.Join(home, ".config", "devin")) || dirExists(".devin")) {
 		h.Detected = true
 	}
-	if fileExists(h.ConfigPath) {
-		status, msg := devinStatus(h.ConfigPath, "devin", "devin-cli")
-		h.TelemetryStatus = status
-		h.Message = msg
-	} else {
-		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Devin CLI endpoint hooks were not found"
-	}
+	h.applyConfigStatus(
+		func(path string) (TelemetryStatus, string) { return devinStatus(path, "devin", "devin-cli") },
+		"Devin CLI endpoint hooks were not found",
+	)
 	return h
 }
 
