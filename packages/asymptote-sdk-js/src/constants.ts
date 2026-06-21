@@ -34,3 +34,5 @@ export const ATTR_BEACON_CONTENT_RETENTION = "beacon.content.retention";
 export const ATTR_ASYMPTOTE_INTEGRATION_NAME = "asymptote.observe.integration.name";
 export const ATTR_ASYMPTOTE_INTEGRATION_VERSION = "asymptote.observe.integration.version";
 export const ATTR_ASYMPTOTE_SDK_MODE = "asymptote.observe.sdk.mode";
+export const ATTR_ASYMPTOTE_INPUT_COUNT = "asymptote.observe.input.count";
+export const ATTR_ASYMPTOTE_OUTPUT_TYPE = "asymptote.observe.output.type";
