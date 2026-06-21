@@ -1,0 +1,90 @@
+id: agent-permission-bypass-spawn
+version: 1
+title: Agent runtime spawned with permission/approval gating disabled
+description: >
+  A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
+  Cursor Agent, Aider, Goose, OpenCode, Gemini) with a flag that disables the runtime's
+  own permission/approval gate — for example --dangerously-skip-permissions,
+  --dangerously-bypass-approvals-and-sandbox, --permission-mode bypassPermissions,
+  --sandbox danger-full-access, --ask-for-approval never, --full-auto, or --yolo.
+  Spawning a nested agent with its approval gate turned off is a control-bypass signal:
+  whatever guardrails the parent runtime enforces (interactive approvals, sandboxing) do
+  not apply inside the spawned agent, so the child can run arbitrary tools and commands
+  unattended. This is the detect twin of the enforce-side bypass-spawn control; it flags
+  the pattern in the runtime log without blocking anything.
+severity: high
+status: stable
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+
+# The agent binary must appear as a command head (start of line, after a shell
+# separator, or after a launcher like sudo/env/npx) AND the command must carry a
+# permission-bypass flag. Requiring both keeps the rule off ordinary uses of a bare
+# --force on non-agent commands (e.g. git push --force, npm install --force).
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
+  e.command.command.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|--sandbox[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)")
+
+emit:
+  reason: "AI agent runtime spawned with its permission/approval gate disabled"
+
+tests:
+  - name: claude_dangerously_skip_permissions
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: command.executed }
+        command: { command: "claude --dangerously-skip-permissions -p \"refactor the repo\"" }
+        session: { id: s1 }
+  - name: codex_full_auto_via_npx
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:01:00Z"
+        event: { action: command.executed }
+        command: { command: "npx codex exec --full-auto \"apply the patch\"" }
+        session: { id: s1 }
+  - name: cursor_agent_force
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:02:00Z"
+        event: { action: command.executed }
+        command: { command: "cursor-agent --force -m \"do the thing\"" }
+        session: { id: s1 }
+  - name: codex_bypass_approvals_and_sandbox
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:03:00Z"
+        event: { action: command.executed }
+        command: { command: "codex --dangerously-bypass-approvals-and-sandbox" }
+        session: { id: s1 }
+  - name: claude_permission_mode_bypass
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:04:00Z"
+        event: { action: command.executed }
+        command: { command: "claude -p --permission-mode bypassPermissions \"go\"" }
+        session: { id: s1 }
+  - name: claude_normal_invocation_no_bypass
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-13T10:05:00Z"
+        event: { action: command.executed }
+        command: { command: "claude -p \"summarize the diff\"" }
+        session: { id: s1 }
+  - name: non_agent_command_with_force
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-13T10:06:00Z"
+        event: { action: command.executed }
+        command: { command: "git push --force origin main" }
+        session: { id: s1 }
+  - name: bypass_flag_text_but_not_a_command_execution
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-13T10:07:00Z"
+        event: { action: file.read }
+        command: { command: "claude --dangerously-skip-permissions" }
+        file: { path: "/notes/agent-cheatsheet.md" }
+        session: { id: s1 }
