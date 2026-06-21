@@ -65,8 +65,6 @@ var endpointOpts struct {
 	falconSourcetype         string
 	falconInsecureSkipVerify bool
 	falconCAFile             string
-	dashboardAddr            string
-	dashboardOpen            bool
 	includeEventSummaries    bool
 	includeRawEvents         bool
 	writeInventoryEvent      bool
@@ -78,6 +76,14 @@ var endpointOpts struct {
 	inventoryWorkingDir      string
 	inventoryTrigger         string
 	inventoryTriggerHarness  string
+}
+
+// dashboardOpts holds the flags for the `endpoint dashboard` command. It is a per-command
+// options struct (rather than another field group on the monolithic endpointOpts) as the
+// first step of migrating CLI flags off the shared global.
+var dashboardOpts struct {
+	addr string
+	open bool
 }
 
 var endpointCmd = &cobra.Command{
@@ -422,8 +428,8 @@ func init() {
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
-	endpointDashboardCmd.Flags().StringVar(&endpointOpts.dashboardAddr, "addr", dashboard.DefaultAddr, "Local dashboard listen address")
-	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.dashboardOpen, "open", false, "Open the dashboard in a browser")
+	endpointDashboardCmd.Flags().StringVar(&dashboardOpts.addr, "addr", dashboard.DefaultAddr, "Local dashboard listen address")
+	endpointDashboardCmd.Flags().BoolVar(&dashboardOpts.open, "open", false, "Open the dashboard in a browser")
 
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print discovery as JSON")
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Discover all supported runtime targets")

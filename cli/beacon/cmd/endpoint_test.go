@@ -680,7 +680,7 @@ func TestRunEndpointDashboardPassesRequestedLogPathToHandler(t *testing.T) {
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = false
 	endpointOpts.logPath = ""
-	endpointOpts.dashboardAddr = "127.0.0.1:0"
+	dashboardOpts.addr = "127.0.0.1:0"
 
 	if err := runEndpointDashboard(nil, nil); err != nil {
 		t.Fatalf("runEndpointDashboard returned error: %v", err)
