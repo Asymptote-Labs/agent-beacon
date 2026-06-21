@@ -21,7 +21,11 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import {
+  ATTR_SERVICE_NAME,
+  ATTR_TELEMETRY_SDK_NAME,
+  ATTR_TELEMETRY_SDK_VERSION,
+} from "@opentelemetry/semantic-conventions";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +39,8 @@ import {
 } from "@traceloop/instrumentation-openai";
 
 import {
+  ATTR_ASYMPTOTE_INPUT_COUNT,
+  ATTR_ASYMPTOTE_OUTPUT_TYPE,
   ATTR_ASYMPTOTE_SDK_MODE,
   ATTR_BEACON_EVENT_ACTION,
   ATTR_BEACON_EVENT_CATEGORY,
@@ -197,8 +203,8 @@ export function initialize(options: InitializeOptions = {}): void {
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME,
-      "telemetry.sdk.name": "asymptote-sdk-js",
-      "telemetry.sdk.version": SDK_VERSION,
+      [ATTR_TELEMETRY_SDK_NAME]: "asymptote-sdk-js",
+      [ATTR_TELEMETRY_SDK_VERSION]: SDK_VERSION,
       [ATTR_BEACON_ORIGIN]: "cloud",
       [ATTR_BEACON_HARNESS_NAME]: "asymptote_observe",
       [ATTR_ASYMPTOTE_SDK_MODE]: resolved.mode,
@@ -242,7 +248,7 @@ export function observe<T extends (...args: any[]) => any>(options: ObserveOptio
       },
     });
     if (!options.ignoreInput) {
-      span.setAttribute("asymptote.observe.input.count", args.length);
+      span.setAttribute(ATTR_ASYMPTOTE_INPUT_COUNT, args.length);
     }
     return context.with(trace.setSpan(context.active(), span), () => {
       try {
@@ -474,7 +480,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
     return result.then(
       value => {
         if (!options?.ignoreOutput) {
-          span.setAttribute("asymptote.observe.output.type", typeof value);
+          span.setAttribute(ATTR_ASYMPTOTE_OUTPUT_TYPE, typeof value);
         }
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();
@@ -490,7 +496,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
     return finishAsyncIterable(result, span);
   }
   if (!options?.ignoreOutput) {
-    span.setAttribute("asymptote.observe.output.type", typeof result);
+    span.setAttribute(ATTR_ASYMPTOTE_OUTPUT_TYPE, typeof result);
   }
   span.setStatus({ code: SpanStatusCode.OK });
   span.end();
