@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -1319,6 +1320,10 @@ func writeJSONFile(path string, value interface{}) error {
 }
 
 func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
+	logExists := true
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		logExists = false
+	}
 	summaries := []map[string]interface{}{}
 	var rawBuf []byte
 	err := writer.ScanEvents(logPath, func(raw []byte, event schema.Event) error {
@@ -1337,13 +1342,13 @@ func writeEventBundleFiles(out, logPath string, includeRaw bool) error {
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, bufio.ErrTooLong) {
 		return err
 	}
 	if err := writeJSONFile(filepath.Join(out, "event-summaries.json"), summaries); err != nil {
 		return err
 	}
-	if includeRaw && len(rawBuf) > 0 {
+	if includeRaw && logExists {
 		return os.WriteFile(filepath.Join(out, "runtime.raw.jsonl"), rawBuf, 0600)
 	}
 	return nil
