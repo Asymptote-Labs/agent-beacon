@@ -129,8 +129,8 @@ func TestEndpointInstallAndRepairRegisterFalconFlags(t *testing.T) {
 func TestFalconHECOptionsDefaultIsNil(t *testing.T) {
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
-	endpointOpts.falconSource = endpointconfig.DefaultFalconSource
-	endpointOpts.falconSourcetype = endpointconfig.DefaultFalconSourcetype
+	falconOpts.source = endpointconfig.DefaultFalconSource
+	falconOpts.sourcetype = endpointconfig.DefaultFalconSourcetype
 	if got := falconHECOptions(); got != nil {
 		t.Fatalf("falconHECOptions() = %#v, want nil", got)
 	}
