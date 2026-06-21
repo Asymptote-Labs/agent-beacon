@@ -6,9 +6,11 @@ tag: "Enterprise"
 
 ## Overview
 
-Asymptote can ingest customer-hosted event files from a private AWS S3 prefix. Grant Asymptote's ingestion worker read-only access to the exact bucket prefix that contains the event files.
+Asymptote can ingest customer-hosted event files from a private AWS S3 bucket or prefix. Grant Asymptote's ingestion worker read-only access to the bucket that contains the event files.
 
 Do not make the bucket public. Do not grant write or delete permissions.
+
+At the end of setup, send Asymptote the full IAM role ARN for the role you create.
 
 ## Customer Steps
 
@@ -25,43 +27,62 @@ Do not make the bucket public. Do not grant write or delete permissions.
    - Encryption type, either SSE-S3 or SSE-KMS
    - KMS key ARN, only if SSE-KMS is enabled
 
-2. Create a dedicated IAM role.
+2. Create a dedicated IAM role in AWS.
 
-   Create a role in your AWS account named something like `asymptote-s3-read`. This role will be assumed by Asymptote's ingestion worker.
+   Sign in to the AWS account that owns the S3 bucket with an IAM user that can create and manage IAM roles. Open the IAM service console, then create a new role named something like `asymptote-s3-read`.
 
-3. Attach a read-only S3 policy.
+3. Configure the role trust policy.
 
-   ```json title="Read-only S3 prefix policy"
+   Use the IAM ARN Asymptote gives you as the trusted principal. Replace `ASYMPTOTE_IAM_ARN` with that ARN.
+
+   ```json title="IAM role trust policy"
    {
      "Version": "2012-10-17",
      "Statement": [
        {
-         "Sid": "ListEventPrefix",
          "Effect": "Allow",
-         "Action": "s3:ListBucket",
-         "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME",
-         "Condition": {
-           "StringLike": {
-             "s3:prefix": [
-               "YOUR_PREFIX",
-               "YOUR_PREFIX/*"
-             ]
-           }
-         }
-       },
-       {
-         "Sid": "ReadEventObjects",
-         "Effect": "Allow",
-         "Action": "s3:GetObject",
-         "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/YOUR_PREFIX/*"
+         "Principal": {
+           "AWS": "ASYMPTOTE_IAM_ARN"
+         },
+         "Action": "sts:AssumeRole"
        }
      ]
    }
    ```
 
-   Replace `YOUR_PREFIX` with the object key prefix only, without a leading or trailing slash. For `s3://your-bucket/asymptote/events/`, use `asymptote/events`.
+4. Attach a read-only S3 policy.
 
-4. Add KMS decrypt permission if needed.
+   ```json title="Read-only S3 policy"
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": [
+           "s3:GetBucketLocation",
+           "s3:ListBucket"
+         ],
+         "Resource": [
+           "arn:aws:s3:::YOUR_BUCKET_NAME"
+         ]
+       },
+       {
+         "Effect": "Allow",
+         "Action": [
+           "s3:Get*",
+           "s3:List*"
+         ],
+         "Resource": [
+           "arn:aws:s3:::YOUR_BUCKET_NAME/*"
+         ]
+       }
+     ]
+   }
+   ```
+
+   Replace `YOUR_BUCKET_NAME` with the name of the S3 bucket that contains the event files.
+
+5. Add KMS decrypt permission if needed.
 
    If the bucket uses SSE-KMS, add this statement to the role policy:
 
@@ -76,15 +97,11 @@ Do not make the bucket public. Do not grant write or delete permissions.
 
    The KMS key policy must also allow this IAM role to use `kms:Decrypt`.
 
-5. Configure the role trust policy.
-
-   After Asymptote receives the bucket details, Asymptote will send the AWS principal and external ID for the ingestion worker. Add those values to the IAM role trust relationship.
-
 6. Send Asymptote the final onboarding details.
 
    Send:
 
-   - IAM role ARN
+   - IAM role ARN for the role you created
    - S3 URL/prefix
    - AWS region
    - KMS key ARN, if applicable
