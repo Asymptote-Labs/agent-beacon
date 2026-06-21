@@ -1407,6 +1407,9 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 		mcpMethod,
 		FirstString(attrs, "event.name", "codex.op", "rpc.method"),
 	}, " "))
+	// Structured, heterogeneous matchers run first and short-circuit. Their order is
+	// significant relative to the keyword fallback below: e.g. the gemini_cli.file_operation
+	// case must precede the "file" keyword rule, which would otherwise claim it.
 	switch {
 	case harness == "copilot_cli" || harness == "vscode_copilot":
 		return CopilotAction(attrs, operation, text)
@@ -1426,21 +1429,31 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 		return GeminiToolAction(attrs)
 	case strings.Contains(text, "gemini_cli.file_operation"):
 		return GeminiFileAction(attrs)
-	case strings.Contains(text, "approval_mode_switch") || strings.Contains(text, "approval_mode_duration") || strings.Contains(text, "plan_execution"):
-		return ActionApprovalRequested
-	case strings.Contains(text, "prompt") || strings.Contains(text, "user_input"):
-		return ActionPromptSubmitted
-	case strings.Contains(text, "mcp"):
-		return ActionMCPToolInvoked
-	case strings.Contains(text, "command") || strings.Contains(text, "shell") || strings.Contains(text, "exec"):
-		return ActionCommandExecuted
-	case strings.Contains(text, "file") || strings.Contains(text, "write") || strings.Contains(text, "edit"):
-		return ActionFileModified
-	case strings.Contains(text, "approval"):
-		return ActionApprovalRequested
-	default:
-		return ActionToolInvoked
 	}
+
+	// Ordered substring fallback over the joined text. First rule with a matching keyword wins.
+	for _, rule := range textKeywordActionRules {
+		for _, keyword := range rule.keywords {
+			if strings.Contains(text, keyword) {
+				return rule.action
+			}
+		}
+	}
+	return ActionToolInvoked
+}
+
+// textKeywordActionRules is the ordered substring-match fallback for InferAction, applied
+// after the structured matchers above. Order matters: earlier rules take precedence.
+var textKeywordActionRules = []struct {
+	keywords []string
+	action   string
+}{
+	{[]string{"approval_mode_switch", "approval_mode_duration", "plan_execution"}, ActionApprovalRequested},
+	{[]string{"prompt", "user_input"}, ActionPromptSubmitted},
+	{[]string{"mcp"}, ActionMCPToolInvoked},
+	{[]string{"command", "shell", "exec"}, ActionCommandExecuted},
+	{[]string{"file", "write", "edit"}, ActionFileModified},
+	{[]string{"approval"}, ActionApprovalRequested},
 }
 
 func HasToolCall(attrs map[string]interface{}) bool {
