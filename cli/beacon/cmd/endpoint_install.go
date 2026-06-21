@@ -64,25 +64,25 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	runtimeLog := lifecycle.ResolveRuntimeLog(userMode, endpointOpts.logPath)
 	cfg.UserMode = runtimeLog.EffectiveUserMode
 	cfg.LogPath = runtimeLog.EffectiveLogPath
-	if endpointOpts.dashboardAddr == "" {
-		endpointOpts.dashboardAddr = dashboard.DefaultAddr
+	if dashboardOpts.addr == "" {
+		dashboardOpts.addr = dashboard.DefaultAddr
 	}
-	if err := dashboard.ValidateLoopbackAddr(endpointOpts.dashboardAddr); err != nil {
+	if err := dashboard.ValidateLoopbackAddr(dashboardOpts.addr); err != nil {
 		return err
 	}
-	url := dashboard.URL(endpointOpts.dashboardAddr)
+	url := dashboard.URL(dashboardOpts.addr)
 	fmt.Printf("Beacon endpoint dashboard: %s\n", url)
 	fmt.Printf("Runtime log: %s\n", cfg.LogPath)
 	if runtimeLog.Warning != "" {
 		fmt.Printf("Runtime log source: %s\n", runtimeLog.Warning)
 	}
-	if endpointOpts.dashboardOpen {
+	if dashboardOpts.open {
 		if err := dashboard.OpenBrowser(url); err != nil {
 			return err
 		}
 	}
 	return dashboardListenAndServe(dashboard.Options{
-		Addr:     endpointOpts.dashboardAddr,
+		Addr:     dashboardOpts.addr,
 		LogPath:  endpointOpts.logPath,
 		UserMode: userMode,
 	})
