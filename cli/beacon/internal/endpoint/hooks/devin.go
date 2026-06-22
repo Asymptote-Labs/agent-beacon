@@ -235,20 +235,7 @@ func readWindsurfHooks(path string) (windsurfHooksFile, error) {
 }
 
 func (config windsurfHooksFile) marshal() ([]byte, error) {
-	out := make(map[string]json.RawMessage, len(config.values)+1)
-	for key, value := range config.values {
-		if key != "hooks" {
-			out[key] = value
-		}
-	}
-	if len(config.hooks) > 0 {
-		data, err := json.Marshal(config.hooks)
-		if err != nil {
-			return nil, err
-		}
-		out["hooks"] = data
-	}
-	return json.MarshalIndent(out, "", "  ")
+	return marshalHookConfig(config.values, config.hooks, len(config.hooks) > 0)
 }
 
 func (config devinConfig) marshal() ([]byte, error) {
@@ -258,14 +245,21 @@ func (config devinConfig) marshal() ([]byte, error) {
 		}
 		return json.MarshalIndent(config.hooks, "", "  ")
 	}
-	out := make(map[string]json.RawMessage, len(config.values)+1)
-	for key, value := range config.values {
+	return marshalHookConfig(config.values, config.hooks, len(config.hooks) > 0)
+}
+
+// marshalHookConfig re-marshals a hook config file's preserved top-level values,
+// replacing the "hooks" key with the freshly marshaled hooks when present. It is
+// shared by the windsurf and devin (non-standalone) marshalers.
+func marshalHookConfig(values map[string]json.RawMessage, hooks any, hasHooks bool) ([]byte, error) {
+	out := make(map[string]json.RawMessage, len(values)+1)
+	for key, value := range values {
 		if key != "hooks" {
 			out[key] = value
 		}
 	}
-	if len(config.hooks) > 0 {
-		data, err := json.Marshal(config.hooks)
+	if hasHooks {
+		data, err := json.Marshal(hooks)
 		if err != nil {
 			return nil, err
 		}
@@ -402,10 +396,6 @@ func filterDevinEndpointHooks(group devinHookGroup, platforms ...string) (devinH
 		filtered.Hooks = append(filtered.Hooks, hook)
 	}
 	return filtered, changed
-}
-
-func isDevinInstalledAt(path string) bool {
-	return isDevinInstalledAtPlatforms(path, "devin")
 }
 
 func isDevinCLIInstalledAt(path string) bool {
