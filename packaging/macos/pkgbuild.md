@@ -70,8 +70,13 @@ Create, submit, and staple a signed/notarized package:
 BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
 NOTARYTOOL_PROFILE="beacon-notary-profile" \
-  sh packaging/macos/build-pkg.sh
+  sh packaging/macos/build-signed-notarized-pkg.sh
 ```
+
+The wrapper delegates package assembly to `build-pkg.sh`, so payload binaries
+are signed before they are sealed into the installer. It then verifies the
+package signature with `pkgutil`, validates the stapled notarization ticket,
+runs Gatekeeper's install assessment, and rewrites the SHA-256 checksum.
 
 The package installs files under `/opt/beacon` and runs
 `/opt/beacon/scripts/install-endpoint.sh` in `postinstall` with explicit

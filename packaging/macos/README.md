@@ -54,6 +54,17 @@ Application certificate, set `PKG_SIGN_IDENTITY` to sign the package with a
 Developer ID Installer certificate, and set `NOTARYTOOL_PROFILE` to submit and
 staple the package with Apple's notary service.
 
+For release artifacts, use the signing wrapper so required identities are checked
+up front and the final package signature, stapled ticket, Gatekeeper assessment,
+and checksum are verified:
+
+```bash
+BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
+PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
+NOTARYTOOL_PROFILE="beacon-notary-profile" \
+  sh packaging/macos/build-signed-notarized-pkg.sh
+```
+
 ## Manual Install
 
 ```bash

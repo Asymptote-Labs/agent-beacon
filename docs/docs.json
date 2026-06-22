@@ -94,7 +94,14 @@
             "group": "Manage Asymptote",
             "icon": "sliders",
             "pages": [
-              "manage/onboarding",
+              {
+                "group": "Onboarding",
+                "root": "manage/onboarding",
+                "pages": [
+                  "manage/configure-s3-data-connector",
+                  "manage/connect-okta"
+                ]
+              },
               {
                 "group": "Inventory",
                 "root": "guides/inventory",
