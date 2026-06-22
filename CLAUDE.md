@@ -158,6 +158,13 @@ cd ../..
 sh packaging/macos/test-endpoint-scripts.sh
 ```
 
+When building macOS `.pkg` artifacts, always include the Vector binary by
+setting `BEACON_VECTOR_BIN` (or `VECTOR_BIN`) to the release Vector executable
+before running `packaging/macos/build-pkg.sh` or
+`packaging/macos/build-signed-notarized-pkg.sh`. The package should install
+`/opt/beacon/bin/vector` so packaged Jamf/Fleet forwarder helpers work without a
+separate Vector install.
+
 ### Preferred CI Release
 
 CI release automation should:
