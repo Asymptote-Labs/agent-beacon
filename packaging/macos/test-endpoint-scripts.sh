@@ -5,6 +5,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 INSTALL_SCRIPT="$ROOT_DIR/packaging/macos/install-endpoint.sh"
 UNINSTALL_SCRIPT="$ROOT_DIR/packaging/macos/uninstall-endpoint.sh"
 PKG_BUILD_SCRIPT="$ROOT_DIR/packaging/macos/build-pkg.sh"
+PKG_SIGN_NOTARIZE_SCRIPT="$ROOT_DIR/packaging/macos/build-signed-notarized-pkg.sh"
 REPAIR_SCRIPT="$ROOT_DIR/packaging/macos/jamf/scripts/repair.sh"
 FLEET_REPAIR_SCRIPT="$ROOT_DIR/packaging/macos/fleet/scripts/repair.sh"
 TMP_DIR="$(mktemp -d)"
@@ -13,6 +14,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 sh -n "$INSTALL_SCRIPT"
 sh -n "$UNINSTALL_SCRIPT"
 sh -n "$PKG_BUILD_SCRIPT"
+sh -n "$PKG_SIGN_NOTARIZE_SCRIPT"
 for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/jamf/scripts/*.sh "$ROOT_DIR"/packaging/macos/jamf/claude/*/*.sh "$ROOT_DIR"/packaging/macos/jamf/extension-attributes/*.sh "$ROOT_DIR"/packaging/macos/fleet/scripts/*.sh; do
   case "$script" in
     */repair-hooks.sh)

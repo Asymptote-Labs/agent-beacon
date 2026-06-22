@@ -1,131 +1,16 @@
 ---
 title: "Onboarding"
-description: "Configure read-only S3 access for Asymptote ingestion."
+description: "Onboarding guides for Asymptote managed connectors."
 tag: "Enterprise"
 ---
 
-## Overview
-
-Asymptote can ingest customer-hosted event files from a private AWS S3 bucket or prefix. Grant Asymptote's ingestion worker read-only access to the bucket that contains the event files.
-
-Do not make the bucket public. Do not grant write or delete permissions.
-
-At the end of setup, send Asymptote the full IAM role ARN for the role you create.
-
-## Customer Steps
-
-1. Send Asymptote the S3 location details.
-
-   Include:
-
-   - AWS account ID
-   - S3 bucket name
-   - AWS region
-   - Prefix/path for the event files, such as `s3://your-bucket/asymptote/events/`
-   - File format, ideally JSONL or JSONEachRow
-   - Delivery cadence and approximate event volume
-   - Encryption type, either SSE-S3 or SSE-KMS
-   - KMS key ARN, only if SSE-KMS is enabled
-
-2. Create a dedicated IAM role in AWS.
-
-   Sign in to the AWS account that owns the S3 bucket with an IAM user that can create and manage IAM roles. Open the IAM service console, then create a new role named something like `asymptote-s3-read`.
-
-3. Configure the role trust policy.
-
-   Use the IAM ARN Asymptote gives you as the trusted principal. Replace `ASYMPTOTE_IAM_ARN` with that ARN.
-
-   ```json title="IAM role trust policy"
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Effect": "Allow",
-         "Principal": {
-           "AWS": "ASYMPTOTE_IAM_ARN"
-         },
-         "Action": "sts:AssumeRole"
-       }
-     ]
-   }
-   ```
-
-4. Attach a read-only S3 policy.
-
-   ```json title="Read-only S3 policy"
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Effect": "Allow",
-         "Action": [
-           "s3:GetBucketLocation",
-           "s3:ListBucket"
-         ],
-         "Resource": [
-           "arn:aws:s3:::YOUR_BUCKET_NAME"
-         ]
-       },
-       {
-         "Effect": "Allow",
-         "Action": [
-           "s3:Get*",
-           "s3:List*"
-         ],
-         "Resource": [
-           "arn:aws:s3:::YOUR_BUCKET_NAME/*"
-         ]
-       }
-     ]
-   }
-   ```
-
-   Replace `YOUR_BUCKET_NAME` with the name of the S3 bucket that contains the event files.
-
-5. Add KMS decrypt permission if needed.
-
-   If the bucket uses SSE-KMS, add this statement to the role policy:
-
-   ```json title="SSE-KMS decrypt statement"
-   {
-     "Sid": "DecryptEventObjects",
-     "Effect": "Allow",
-     "Action": "kms:Decrypt",
-     "Resource": "YOUR_KMS_KEY_ARN"
-   }
-   ```
-
-   The KMS key policy must also allow this IAM role to use `kms:Decrypt`.
-
-6. Send Asymptote the final onboarding details.
-
-   Send:
-
-   - IAM role ARN for the role you created
-   - S3 URL/prefix
-   - AWS region
-   - KMS key ARN, if applicable
-   - A small sample event file or example JSONL row
-
-## Event File Requirements
-
-Use newline-delimited JSON, with one complete JSON object per line. Each event should include a UTC-compatible timestamp and stable fields for user, host, repository, branch, agent runtime, event action, and event category when available.
-
-Share a representative sample file before production ingestion. The sample should show realistic field names and value shapes, but should not include secrets.
-
-## Related
+Use these guides to connect managed data sources during Asymptote onboarding.
 
 <Columns cols={2}>
-  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
-    Review managed visibility, governance, and investigation workflows.
+  <Card title="Connect Okta" icon="users" href="/manage/connect-okta">
+    Populate users, groups, and devices from Okta.
   </Card>
-  <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">
-    Review normalized event fields and example payloads.
-  </Card>
-  <Card title="AWS S3 Forwarding" icon="bucket" href="/log-forwarding/s3">
-    Configure customer-managed Beacon event forwarding into S3.
-  </Card>
-  <Card title="Data Inventory" icon="table-list" href="/security/data-inventory">
-    Review the endpoint event fields Beacon can write.
+  <Card title="Configure S3 Data Connector" icon="bucket" href="/manage/configure-s3-data-connector">
+    Grant read-only access for managed event ingestion from S3.
   </Card>
 </Columns>
