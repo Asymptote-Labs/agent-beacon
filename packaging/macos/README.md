@@ -35,7 +35,8 @@ The endpoint install creates system configuration and runtime state:
 
 ## Build A Test Package
 
-Build Beacon and `beacon-otelcol`, then assemble the macOS package:
+Build Beacon, `beacon-otelcol`, and have the release Vector binary available,
+then assemble the macOS package:
 
 ```bash
 cd cli/beacon
@@ -46,13 +47,15 @@ cd collector-builder
 ocb --config builder.yaml
 cd ..
 
-sh packaging/macos/build-pkg.sh
+BEACON_VECTOR_BIN="$(command -v vector)" \
+  sh packaging/macos/build-pkg.sh
 ```
 
 Set `BEACON_APP_SIGN_IDENTITY` to sign payload binaries with a Developer ID
 Application certificate, set `PKG_SIGN_IDENTITY` to sign the package with a
-Developer ID Installer certificate, and set `NOTARYTOOL_PROFILE` to submit and
-staple the package with Apple's notary service.
+Developer ID Installer certificate, set `BEACON_VECTOR_BIN` to include the
+Vector binary at `/opt/beacon/bin/vector`, and set `NOTARYTOOL_PROFILE` to
+submit and staple the package with Apple's notary service.
 
 For release artifacts, use the signing wrapper so required identities are checked
 up front and the final package signature, stapled ticket, Gatekeeper assessment,
@@ -61,6 +64,7 @@ and checksum are verified:
 ```bash
 BEACON_APP_SIGN_IDENTITY="Developer ID Application: Example Corp (TEAMID)" \
 PKG_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID)" \
+BEACON_VECTOR_BIN="$(command -v vector)" \
 NOTARYTOOL_PROFILE="beacon-notary-profile" \
   sh packaging/macos/build-signed-notarized-pkg.sh
 ```
