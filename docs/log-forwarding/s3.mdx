@@ -117,7 +117,7 @@ In managed deployments, provide `BEACON_S3_BUCKET`, optional `BEACON_S3_PREFIX`,
 
 The template expects a Vector version with the `file` source, `remap` transform, and `aws_s3` sink. It parses each Beacon JSONL line and re-encodes the original Beacon event as JSON with newline-delimited framing so S3 receives one Beacon event per line, without a Vector wrapper.
 
-When a runtime event includes canonical token or cost attribution under `gen_ai.usage`, the generated Vector config preserves that nested payload and also emits top-level analytics fields for downstream warehouses such as ClickHouse: `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `reasoning_output_tokens`, and `cost_usd`. `cost_usd` is runtime-reported only; Beacon does not derive cost from local pricing tables.
+When a runtime event includes canonical token or cost attribution under `gen_ai.usage`, the generated Vector config preserves that nested payload and also emits top-level analytics fields for downstream warehouses: `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `reasoning_output_tokens`, and `cost_usd`. `cost_usd` is runtime-reported only; Beacon does not derive cost from local pricing tables.
 
 The template uses date-partitioned `key_prefix`, `filename_time_format = "%s"`, and `filename_append_uuid = true` so production forwarding does not overwrite previous S3 objects. It also sets `compression = "gzip"`, `content_encoding = "gzip"`, and `content_type = "application/x-ndjson"`.
 
