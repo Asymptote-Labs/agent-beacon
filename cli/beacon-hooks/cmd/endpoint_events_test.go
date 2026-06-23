@@ -105,6 +105,20 @@ func TestToolFieldsMapsMCPTransportContext(t *testing.T) {
 	}
 }
 
+func TestToolFieldsDoesNotTreatMCPArgumentIDAsJSONRPCRequestID(t *testing.T) {
+	fields := toolFields("MCP:get_issue", map[string]interface{}{
+		"id":   "issue-123",
+		"name": "Release blocker",
+	})
+	jsonrpc, ok := fields["jsonrpc"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if request, ok := jsonrpc["request"]; ok {
+		t.Fatalf("jsonrpc.request = %#v, want no request from generic tool argument id", request)
+	}
+}
+
 func TestToolFieldsIgnoresFalseMCPErrorField(t *testing.T) {
 	fields := toolFieldsWithResponse("MCP:get_organizations", map[string]interface{}{}, map[string]interface{}{
 		"error": false,

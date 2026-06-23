@@ -280,7 +280,7 @@ func mcpStandardFields(toolInput, toolResponse map[string]interface{}) map[strin
 		fields["error"] = map[string]interface{}{"type": errorType}
 	}
 	jsonrpc := map[string]interface{}{}
-	if id := firstToolStringAcross(maps, "jsonrpc.request.id", "jsonrpc_request_id", "request_id", "id"); id != "" {
+	if id := firstToolStringAcross(maps, "jsonrpc.request.id", "jsonrpc_request_id", "request_id"); id != "" {
 		jsonrpc["request"] = map[string]interface{}{"id": id}
 	}
 	if version := firstToolStringAcross(maps, "jsonrpc.protocol.version", "jsonrpc_protocol_version", "jsonrpc"); version != "" {
