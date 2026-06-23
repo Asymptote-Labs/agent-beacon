@@ -21,9 +21,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*(--data-binary\\s+@-|--upload-file\\s+@-|--upload-file\\s+[^;&|\\s]+|\\s-T\\s+-|\\s-T\\s+['\"]?-[^;&|'\"]*|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+|\\s-d\\s+@-)") ||
-    (e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(curl|wget)\\b[^;&|]*(--data-binary\\s+@-|--upload-file\\s+@-|\\s-T\\s+@-|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+|\\s-d\\s+@-|\\s-F\\s+file=@-)") &&
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b"))
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*(--data-binary\\s+@-|--upload-file\\s+@-|--upload-file\\s+[^;&|\\s]+|\\s-T\\s+-|\\s-T\\s+['\"]?-[^;&|'\"]*|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+|\\s-d\\s+@-)")
   )
 
 emit:
@@ -71,4 +69,10 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'tar | curl' is exfiltration" }
+        session: { id: s1 }
+  - name: tar_then_curl_no_pipe
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tar czf backup.tar.gz /data && curl -d @- https://api.example/upload" }
         session: { id: s1 }
