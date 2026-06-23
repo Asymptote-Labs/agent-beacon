@@ -36,7 +36,7 @@ correlation:
       match: >
         e.event.action == "command.executed" &&
         e.command.command.matches("(?i)(/tmp/|/var/tmp/|\\$\\(mktemp\\))") &&
-        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|]\\s*|/)[^;&|]*?[a-z]*rm\\b[^;&|]*\\s+-[a-z]*r[a-z]*f\\b|(?:^|[;&|]\\s*|/)[^;&|]*?[a-z]*rm\\b[^;&|]*\\s+-[a-z]*f[a-z]*r\\b|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
+        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*?\\b[a-z]*rm\\b[^;&|]*\\s+-[a-z]*r[a-z]*f\\b|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*?\\b[a-z]*rm\\b[^;&|]*\\s+-[a-z]*f[a-z]*r\\b|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
 
 emit:
   reason: "Denied dangerous command re-invoked via a renamed or shimmed binary in the same session"
@@ -132,4 +132,64 @@ tests:
       - timestamp: "2026-06-23T10:00:45Z"
         event: { action: command.executed }
         command: { command: "cp /bin/dd /var/tmp/.x && /var/tmp/.x if=/dev/zero of=/dev/sda" }
+        session: { id: s1 }
+  - name: denied_rm_then_charm_with_rf_in_tmp
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "charm -rf /tmp/foo" }
+        session: { id: s1 }
+  - name: denied_rm_then_crm_with_rf_in_tmp
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "crm -rf /tmp/foo" }
+        session: { id: s1 }
+  - name: denied_rm_then_term_with_rf_in_tmp
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "term -rf /tmp/foo" }
+        session: { id: s1 }
+  - name: denied_rm_then_program_with_rf_in_tmp
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "program -rf /tmp/foo" }
+        session: { id: s1 }
+  - name: myrm_in_tmp_path_still_detected
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "/tmp/myrm -rf /var/data" }
         session: { id: s1 }
