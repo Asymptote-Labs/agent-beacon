@@ -259,6 +259,51 @@ func TestRunPostToolEmitsCursorPostToolFailure(t *testing.T) {
 	}
 }
 
+func TestRunPostToolEmitsCursorMCPFailureResponseFields(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-mcp-failure",
+		"hook_event_name": "postToolUseFailure",
+		"tool_name":       "MCP:get_organizations",
+		"tool_input": map[string]interface{}{
+			"jsonrpc_request_id": "req-1",
+		},
+		"tool_response": map[string]interface{}{
+			"error": true,
+			"mcp_server": "linear",
+			"mcp_tool":   "get_organizations",
+		},
+		"error_message": "MCP tool failed",
+		"failure_type":  "tool_error",
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
+		t.Fatalf("event.action = %q, want tool.failed", action)
+	}
+	errorFields := event["error"].(map[string]interface{})
+	if got := errorFields["type"]; got != "tool_error" {
+		t.Fatalf("error.type = %q, want tool_error", got)
+	}
+	mcp := event["mcp"].(map[string]interface{})
+	if mcp["server"] != "linear" || mcp["tool"] != "get_organizations" {
+		t.Fatalf("mcp = %#v, want linear get_organizations", mcp)
+	}
+	genAI := event["gen_ai"].(map[string]interface{})
+	tool := genAI["tool"].(map[string]interface{})
+	call := tool["call"].(map[string]interface{})
+	if call["result"] == nil {
+		t.Fatalf("gen_ai.tool.call = %#v, want result", call)
+	}
+}
+
 func TestRunPostToolEmitsAntigravityFileModifiedEvent(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "antigravity"
