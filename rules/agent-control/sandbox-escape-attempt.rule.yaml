@@ -25,10 +25,10 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*pivot_root\\b")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*pivot_root\\b")
   )
 
 emit:
@@ -139,4 +139,53 @@ tests:
       - timestamp: "2026-06-23T10:14:00Z"
         event: { action: command.executed }
         command: { command: "sudo unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: nohup_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:15:00Z"
+        event: { action: command.executed }
+        command: { command: "nohup unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: setsid_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:16:00Z"
+        event: { action: command.executed }
+        command: { command: "setsid unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: command_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:17:00Z"
+        event: { action: command.executed }
+        command: { command: "command unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: exec_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:18:00Z"
+        event: { action: command.executed }
+        command: { command: "exec unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: nohup_nsenter_with_pid_target
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:19:00Z"
+        event: { action: command.executed }
+        command: { command: "nohup nsenter -t 1 -m -p -n -- /bin/bash" }
+        session: { id: s1 }
+  - name: nohup_chroot_to_directory
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:20:00Z"
+        event: { action: command.executed }
+        command: { command: "nohup chroot /tmp/attacker-root /bin/bash" }
+        session: { id: s1 }
+  - name: setsid_pivot_root_invocation
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:21:00Z"
+        event: { action: command.executed }
+        command: { command: "setsid pivot_root /new-root /old-root" }
         session: { id: s1 }
