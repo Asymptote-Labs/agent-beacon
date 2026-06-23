@@ -10,9 +10,12 @@ description: >
   — when an agent is supposed to be sandboxed, using them is a control-bypass
   signal. The rule is anchored to a command boundary (start of line, after a shell
   separator, or after a launcher like sudo/env) and looks only for the dangerous
-  shapes (nsenter with a target, unshare with a non-user-namespace flag, chroot
-  with a non-`/` argument), so benign `unshare -U` for normal user-namespace apps
-  does not fire.
+  shapes (nsenter with a target, unshare with a non-user-namespace flag — long
+  form `--mount`/`-m`/etc. or short-flag combinations with `-U` excluded when
+  `-U` is the only flag, chroot with a non-`/` argument), so benign
+  `unshare -U` for normal user-namespace apps does not fire. RE2's lack of
+  negative lookahead forces the short-flag combinations to be enumerated
+  explicitly (single non-U flag, U-then-non-U, non-U-then-U).
 severity: critical
 status: experimental
 posture: detect
@@ -23,7 +26,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*unshare\\b\\s+--(mount|net|ipc|uts|pid|all|cgroup)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*pivot_root\\b")
   )
@@ -94,4 +97,46 @@ tests:
       - timestamp: "2026-06-23T10:08:00Z"
         event: { action: command.executed }
         command: { command: "grep -r 'unshare --mount' /usr/share/man" }
+        session: { id: s1 }
+  - name: unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:09:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_short_net
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:10:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -n ip link" }
+        session: { id: s1 }
+  - name: unshare_short_pid
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:11:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -p --fork --mount-proc" }
+        session: { id: s1 }
+  - name: unshare_combined_mount_user
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:12:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -mU /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_combined_user_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:13:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -Um /bin/sh" }
+        session: { id: s1 }
+  - name: sudo_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:14:00Z"
+        event: { action: command.executed }
+        command: { command: "sudo unshare -m /bin/sh" }
         session: { id: s1 }
