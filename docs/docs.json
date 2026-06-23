@@ -97,6 +97,7 @@
               {
                 "group": "Onboarding",
                 "root": "manage/onboarding",
+                "tag": "Enterprise",
                 "pages": [
                   "manage/configure-s3-data-connector",
                   "manage/connect-okta"
@@ -1006,10 +1007,6 @@
     {
       "source": "/devin-cloud-agents",
       "destination": "/runtimes/devin-cloud-agents"
-    },
-    {
-      "source": "/detections",
-      "destination": "/detections"
     },
     {
       "source": "/detections-engine",
