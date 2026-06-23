@@ -129,6 +129,10 @@ release:
     name: agent-beacon
   draft: false
   prerelease: auto
+  # The macOS package job in .github/workflows/release.yml attaches signed .pkg
+  # assets + update-manifest.json to the same release. append keeps reruns or
+  # future job ordering changes from failing on an existing release.
+  mode: append
   name_template: "v{{.Version}}"
   extra_files:
     # The threat-rule pack ships as a separate asset, not embedded in the binary,

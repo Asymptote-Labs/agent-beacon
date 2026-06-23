@@ -1,0 +1,234 @@
+name: Release
+
+# Full hands-off release on a pushed v* tag:
+#   1. goreleaser  — builds tarballs, publishes the GitHub release + changelog,
+#                    and updates the Homebrew tap.
+#   2. package     — (after goreleaser) builds, signs, notarizes, and staples the
+#                    macOS .pkg for both arches and attaches them plus the
+#                    package update manifest to the same release.
+#
+# Triggered only by pushed version tags, so outside contributors (whose fork PRs
+# never receive secrets) cannot run it. All release secrets live in the protected
+# `release` environment, restricted to v* tags.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "v2.13.3"
+          install-only: true
+
+      - name: Install OpenTelemetry Collector Builder
+        run: go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+
+      - name: Build collector distributions
+        run: bash collector-builder/build-release-collectors.sh
+
+      - name: Validate native collector binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          collector=collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol
+          test -x "$collector"
+          "$collector" components | awk '
+            /name: beaconjson/ { beaconjson = 1 }
+            /name: falcon_hec/ { falcon_hec = 1 }
+            END { exit !(beaconjson && falcon_hec) }
+          '
+
+      - name: Check GoReleaser config
+        working-directory: cli/beacon
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: goreleaser check
+
+      # Run from cli/beacon because the release pre-hook writes target-specific
+      # beacon-hooks binaries to a shared embedded path; --parallelism 1 avoids
+      # racing on it.
+      - name: Publish release (tarballs, GitHub release, Homebrew tap)
+        working-directory: cli/beacon
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: goreleaser release --clean --parallelism 1
+
+  package:
+    needs: goreleaser
+    runs-on: macos-latest
+    environment: release
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      NOTARYTOOL_PROFILE: beacon-notary-ci
+      BEACON_APP_SIGN_IDENTITY: ${{ vars.DEVELOPER_ID_APP_IDENTITY }}
+      PKG_SIGN_IDENTITY: ${{ vars.DEVELOPER_ID_INSTALLER_IDENTITY }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      VECTOR_VERSION: "0.56.0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      - name: Compute version
+        id: ver
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install OpenTelemetry Collector Builder
+        run: go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+
+      - name: Build collector distributions
+        run: bash collector-builder/build-release-collectors.sh
+
+      - name: Download Vector binaries (per arch)
+        run: |
+          set -euo pipefail
+          mkdir -p dist/vector
+          curl -fsSLO "https://packages.timber.io/vector/${VECTOR_VERSION}/vector-${VECTOR_VERSION}-SHA256SUMS"
+          for ARCH in arm64 amd64; do
+            case "$ARCH" in
+              arm64) VECTOR_ARCH="arm64" ;;
+              amd64) VECTOR_ARCH="x86_64" ;;
+              *) echo "unsupported Vector arch: $ARCH" >&2; exit 1 ;;
+            esac
+            archive="vector-${VECTOR_VERSION}-${VECTOR_ARCH}-apple-darwin.tar.gz"
+            curl -fsSLO "https://packages.timber.io/vector/${VECTOR_VERSION}/${archive}"
+            checksum_line="$(awk -v archive="$archive" '$2 == archive { print }' "vector-${VECTOR_VERSION}-SHA256SUMS")"
+            if [ -z "$checksum_line" ]; then
+              echo "checksum not found for $archive" >&2
+              exit 1
+            fi
+            printf '%s\n' "$checksum_line" | shasum -a 256 -c -
+            mkdir -p "dist/vector/${ARCH}"
+            tar -xzf "$archive" -C "dist/vector/${ARCH}" --strip-components=2 "./vector-${VECTOR_ARCH}-apple-darwin/bin/vector"
+            "dist/vector/${ARCH}/vector" --version
+          done
+
+      - name: Build beacon binaries (per arch, with embedded hooks)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          BEACON_LD="github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+          HOOKS_LD="github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version"
+          mkdir -p dist/pkgbins
+          for ARCH in arm64 amd64; do
+            # Embed the arch-matched hooks binary, then build beacon for that arch.
+            (cd cli/beacon-hooks && GOOS=darwin GOARCH="$ARCH" \
+              go build -ldflags "-s -w -X ${HOOKS_LD}.Version=${VERSION}" \
+              -o ../beacon/internal/embedded/hooks.bin .)
+            (cd cli/beacon && GOOS=darwin GOARCH="$ARCH" CGO_ENABLED=0 \
+              go build -a -ldflags "-s -w -X ${BEACON_LD}.Version=${VERSION} -X ${BEACON_LD}.GitCommit=$(git rev-parse --short HEAD) -X ${BEACON_LD}.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -o "../../dist/pkgbins/beacon-${ARCH}" .)
+          done
+
+      - name: Set up signing keychain
+        env:
+          DEVELOPER_ID_APP_CERT_P12: ${{ secrets.DEVELOPER_ID_APP_CERT_P12 }}
+          DEVELOPER_ID_APP_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_APP_CERT_PASSWORD }}
+          DEVELOPER_ID_INSTALLER_CERT_P12: ${{ secrets.DEVELOPER_ID_INSTALLER_CERT_P12 }}
+          DEVELOPER_ID_INSTALLER_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_INSTALLER_CERT_PASSWORD }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/beacon-signing.keychain-db"
+          KEYCHAIN_PW="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          # Make the new keychain searchable while keeping the login keychain.
+          security list-keychains -d user -s "$KEYCHAIN" "$(security default-keychain -d user | tr -d ' "')"
+
+          echo "$DEVELOPER_ID_APP_CERT_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
+          echo "$DEVELOPER_ID_INSTALLER_CERT_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+          security import "$RUNNER_TEMP/app.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_APP_CERT_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_INSTALLER_CERT_PASSWORD" -T /usr/bin/pkgbuild
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN"
+
+          # Store notarization credentials as the profile build-pkg.sh expects.
+          echo "$NOTARY_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool store-credentials "$NOTARYTOOL_PROFILE" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_API_KEY_ID" \
+            --issuer "$NOTARY_API_ISSUER" \
+            --keychain "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12" "$RUNNER_TEMP/notary.p8"
+          echo "BEACON_SIGNING_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          # Carry the keychain password so later steps can keep it unlocked.
+          echo "::add-mask::$KEYCHAIN_PW"
+          echo "BEACON_SIGNING_KEYCHAIN_PW=$KEYCHAIN_PW" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, and staple packages (per arch)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          security unlock-keychain -p "$BEACON_SIGNING_KEYCHAIN_PW" "$BEACON_SIGNING_KEYCHAIN"
+          for ARCH in arm64 amd64; do
+            BEACON_VERSION="$VERSION" \
+            BEACON_PKG_ARCH="$ARCH" \
+            BEACON_BIN="$PWD/dist/pkgbins/beacon-${ARCH}" \
+            BEACON_COLLECTOR="$PWD/collector-builder/dist/beacon-otelcol/darwin_${ARCH}/beacon-otelcol" \
+            BEACON_VECTOR_BIN="$PWD/dist/vector/${ARCH}/vector" \
+            OUT_DIR="$PWD/dist/macos" \
+              sh packaging/macos/build-signed-notarized-pkg.sh
+          done
+          ls -la dist/macos
+
+      - name: Generate update manifest
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          ARM_PKG="$(ls dist/macos/*-${VERSION}-arm64.pkg)"
+          AMD_PKG="$(ls dist/macos/*-${VERSION}-amd64.pkg)"
+          sh packaging/macos/gen-update-manifest.sh \
+            "$VERSION" "$TAG" "$REPO" "$APPLE_TEAM_ID" \
+            "arm64=$ARM_PKG" "amd64=$AMD_PKG" > dist/macos/update-manifest.json
+          cat dist/macos/update-manifest.json
+
+      - name: Attach packages + manifest to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # goreleaser (the needs: dependency) has already created the release.
+          # create-if-missing is a safety net for a re-run before goreleaser.
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" --title "$TAG" \
+              --notes "Release $TAG" --verify-tag
+          fi
+          gh release upload "$TAG" \
+            dist/macos/*.pkg \
+            dist/macos/*.pkg.sha256 \
+            dist/macos/update-manifest.json \
+            --repo "$REPO" --clobber
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          security delete-keychain "$BEACON_SIGNING_KEYCHAIN" 2>/dev/null || true

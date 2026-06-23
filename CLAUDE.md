@@ -132,6 +132,26 @@ Prefer a CI-based release workflow triggered by an annotated version tag. Use a
 local GoReleaser publish only as a fallback when CI release automation is not
 available or the maintainer explicitly asks for a local release.
 
+A pushed `v*` tag runs the full release end-to-end via
+`.github/workflows/release.yml` (no local publish steps required), with two jobs
+in the protected `release` GitHub Environment:
+
+1. `goreleaser` (ubuntu) builds the collector dists, publishes the GitHub release
+   + changelog and tarballs, and updates the Homebrew tap.
+2. `package` (macOS, `needs: goreleaser`) builds `beacon`/`beacon-hooks` plus
+   arch-matched collector and Vector binaries for `darwin_arm64` and
+   `darwin_amd64`, then signs, notarizes, staples, and uploads the `.pkg`
+   artifacts, `.sha256`s, and `update-manifest.json`.
+
+Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
+`DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_APP_CERT_PASSWORD`,
+`DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
+`NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
+`DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
+Keep one-time Apple-side onboarding steps out of the repo and share them with
+the release maintainer directly. Never use `pull_request_target` or build
+untrusted PR code in the signing job.
+
 Use the next semver tag requested by the maintainer, usually the next `v0.0.x`
 tag unless they explicitly decide Beacon is ready for `v1.0.0`.
 
@@ -181,20 +201,21 @@ CI release automation should:
 - Provide `GITHUB_TOKEN` for the GitHub release and `HOMEBREW_TAP_TOKEN` with
   write access to `asymptote-labs/homebrew-tap`.
 
-Once release CI exists, the normal deployment flow is:
+The normal deployment flow is:
 
 ```bash
 git fetch --tags origin
 git status -sb --untracked-files=all
 git tag -a <tag> -m "<tag>"
 git push origin <tag>
-gh run list --workflow <release-workflow-name> --limit 5
+gh run list --workflow release.yml --limit 5
 ```
 
-After the workflow succeeds, verify both the GitHub release and the Homebrew tap:
+After the workflow succeeds, verify the GitHub release assets and the Homebrew
+tap:
 
 ```bash
-gh release view <tag> --json url,tagName,assets --jq '.tagName + " " + .url + " assets=" + (.assets | length | tostring)'
+gh release view <tag> --json url,tagName,assets --jq '.tagName + " " + .url + " assets=" + (.assets | map(.name) | join(","))'
 gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.content' | base64 --decode | sed -n '1,70p'
 gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
 ```

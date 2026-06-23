@@ -10,13 +10,26 @@ trap 'rm -rf "$WORK_DIR"' EXIT INT TERM
 VERSION="${BEACON_VERSION:-$(cd "$ROOT_DIR" && git describe --tags --always --dirty 2>/dev/null || echo dev)}"
 PKG_IDENTIFIER="${PKG_IDENTIFIER:-ai.asymptote.beacon.endpoint}"
 PKG_NAME="${PKG_NAME:-BeaconEndpointAgent}"
+# When BEACON_PKG_ARCH is set (e.g. arm64/amd64 in CI), default the collector
+# target to that arch and append the arch to the package name so a release can
+# carry one package per Mac architecture. The caller is responsible for passing
+# an arch-matched BEACON_BIN. Unset preserves the host-arch default and name.
+ARCH="${BEACON_PKG_ARCH:-}"
 BEACON_BIN="${BEACON_BIN:-$ROOT_DIR/cli/beacon/beacon}"
-COLLECTOR_TARGET="${BEACON_COLLECTOR_TARGET:-$(go env GOOS)_$(go env GOARCH)}"
+DEFAULT_COLLECTOR_TARGET="$(go env GOOS)_$(go env GOARCH)"
+if [ -n "$ARCH" ]; then
+  DEFAULT_COLLECTOR_TARGET="darwin_$ARCH"
+fi
+COLLECTOR_TARGET="${BEACON_COLLECTOR_TARGET:-$DEFAULT_COLLECTOR_TARGET}"
 COLLECTOR_BIN="${BEACON_COLLECTOR:-$ROOT_DIR/collector-builder/dist/beacon-otelcol/$COLLECTOR_TARGET/beacon-otelcol}"
 VECTOR_BIN="${BEACON_VECTOR_BIN:-${VECTOR_BIN:-}}"
 PKG_ROOT="$WORK_DIR/pkgroot"
 PKG_SCRIPTS="$WORK_DIR/scripts"
-PKG_PATH="$OUT_DIR/$PKG_NAME-$VERSION.pkg"
+if [ -n "$ARCH" ]; then
+  PKG_PATH="$OUT_DIR/$PKG_NAME-$VERSION-$ARCH.pkg"
+else
+  PKG_PATH="$OUT_DIR/$PKG_NAME-$VERSION.pkg"
+fi
 
 copy_file() {
   if cp -X "$1" "$2" 2>/dev/null; then
