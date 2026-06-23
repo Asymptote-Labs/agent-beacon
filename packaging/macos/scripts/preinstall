@@ -6,6 +6,8 @@ set -eu
 if command -v launchctl >/dev/null 2>&1; then
   launchctl bootout system/com.beacon.endpoint.collector >/dev/null 2>&1 || true
   launchctl bootout system/com.beacon.endpoint.falcon-forwarder >/dev/null 2>&1 || true
+  # Stop the self-updater so its binary can be replaced during payload swap.
+  launchctl bootout system/com.beacon.endpoint.updater >/dev/null 2>&1 || true
 fi
 
 exit 0

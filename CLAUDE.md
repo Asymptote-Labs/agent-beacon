@@ -38,6 +38,7 @@ Supported runtime surfaces today:
 - Token usage and runtime-reported cost capture across spans, logs, and metric datapoints, normalized into `gen_ai.usage`, with attribution rollups served by the dashboard token view (`/api/tokens`) and the `beacon token-usage` report command for local and CI logs.
 - Local threat detection via `beacon scan`, which runs the open Threat Rules format (`spec/threat-rules`; CEL match conditions over the endpoint event schema, with embedded conformance fixtures) over the runtime JSONL. The engine (`pkg/asymptoteobserve/threatrules`) ships in the binary; the rule corpus is external data loaded from a local store (`~/.beacon/endpoint/rules`) managed by `beacon rules`, so the corpus can grow without enlarging the binary. `scan` is read-only and offline; only the explicit, user-initiated `beacon rules pull <url>` reaches the network. A small frozen baseline is embedded so `scan` works before any rules are installed.
 - An optional, off-by-default policy seam in the hook path (`cli/beacon-hooks/internal/policy`) governed by the stable contract in `pkg/asymptoteobserve/policycontract`. When `BEACON_POLICY_PROVIDER` names an executable, the `pre-tool` and `permission-request` hooks send it a JSON request describing the imminent tool call and honor an allow/deny response, returning the runtime's native deny shape and `policy.enforcement=enforce` telemetry on a deny. The seam is inert when unset and fail-open on any error (timeout, non-zero exit, malformed output), so the open build ships no enforcement of its own; all audit/enforce decision logic lives in the external provider. `rules/agent-control/agent-permission-bypass-spawn` is the open detect twin that flags the same pattern in `beacon scan`.
+- A built-in, **opt-in** self-updater for the macOS system package install (`cli/beacon/internal/endpoint/selfupdate`, surfaced as `beacon endpoint update`). It is **off by default**; once enabled, a root `launchd` job (`com.beacon.endpoint.updater`) periodically fetches a release `update-manifest.json`, and when a newer version exists it downloads the signed/notarized/**stapled** `.pkg`, verifies it (sha256 always, plus `pkgutil --check-signature` + `stapler validate` + `spctl --assess --type install`), applies it via `installer -pkg -target /` (reusing the package pre/postinstall to restart the collector), health-checks, and rolls back the binaries on failure. The update path's network access lives only in the updater job and `beacon endpoint update` — never in the hook/`pre-tool`/`permission-request` path, preserving the local-only hook posture. Mode is `off` (default) / `auto` / `check-only`, resolved env (`BEACON_AUTO_UPDATE`) > managed profile (`/Library/Application Support/Beacon/Endpoint/managed.json`, also overrides the manifest URL via `BEACON_UPDATE_MANIFEST_URL`) > local config (`auto_update.mode`); a managed/MDM layer can therefore turn on or replace updates without a code change. Enable locally with `beacon endpoint update enable` (or `--check-only`). Homebrew/other installs are detected and pointed at `brew upgrade` instead of self-applying. Updates emit `update.applied`/`update.failed` events into the runtime JSONL.
 
 Current non-goals unless explicitly requested:
 
@@ -131,6 +132,37 @@ Homebrew releases are published by GoReleaser from `cli/beacon/.goreleaser.yaml`
 Prefer a CI-based release workflow triggered by an annotated version tag. Use a
 local GoReleaser publish only as a fallback when CI release automation is not
 available or the maintainer explicitly asks for a local release.
+
+A pushed `v*` tag now runs the full release end-to-end via
+`.github/workflows/release.yml` (no local steps required), with two jobs, both in
+the protected `release` GitHub Environment (restricted to `v*` tags):
+
+1. `goreleaser` (ubuntu) — builds the collector dists, publishes the GitHub
+   release + changelog and the tarballs, and updates the Homebrew tap
+   (`goreleaser release --clean --parallelism 1`, `HOMEBREW_TAP_TOKEN` from the
+   environment). `cli/beacon/.goreleaser.yaml` sets `release.mode: append` so it
+   coexists with assets the package job adds, in any order. CI must use a
+   dedicated `HOMEBREW_TAP_TOKEN` secret (a token with Contents: write on
+   `asymptote-labs/homebrew-tap`); the `gh auth token` fallback below works only
+   for local runs, where the maintainer is interactively logged in.
+2. `package` (macOS, `needs: goreleaser`) — builds `beacon`/`beacon-hooks`/`vector`
+   for `darwin_arm64` + `darwin_amd64`, imports the Developer ID certs into an
+   ephemeral keychain, runs `packaging/macos/build-signed-notarized-pkg.sh` (with
+   `BEACON_PKG_ARCH`) per arch to sign → notarize → staple, generates
+   `update-manifest.json` via `packaging/macos/gen-update-manifest.sh`, and
+   attaches the two `.pkg`s, their `.sha256`s, and the manifest to the release.
+
+Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
+`DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_APP_CERT_PASSWORD`,
+`DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
+`NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
+`DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
+The one-time Apple-side onboarding steps (exporting the certs, creating the
+notary key) are kept out of the repo and shared with the release maintainer
+directly. `release-check.yml` no longer runs on tags — it validates the
+GoReleaser/packaging config on PRs that touch those paths. Never use
+`pull_request_target` or build untrusted PR code in the signing job. The local
+GoReleaser flow below remains a fallback only.
 
 Use the next semver tag requested by the maintainer, usually the next `v0.0.x`
 tag unless they explicitly decide Beacon is ready for `v1.0.0`.

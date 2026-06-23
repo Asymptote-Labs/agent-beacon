@@ -129,6 +129,11 @@ release:
     name: agent-beacon
   draft: false
   prerelease: auto
+  # The macOS signing workflow (.github/workflows/release-pkg.yml) may create the
+  # release and attach the signed .pkg + update-manifest.json first. append lets
+  # GoReleaser add the tarballs/Homebrew artifacts to that same release in any
+  # order instead of failing on an existing release.
+  mode: append
   name_template: "v{{.Version}}"
   extra_files:
     # The threat-rule pack ships as a separate asset, not embedded in the binary,

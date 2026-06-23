@@ -1,10 +1,18 @@
 name: Release Check
 
+# Validates that the release build is healthy WITHOUT publishing. The real
+# release now runs from release.yml on a v* tag, so this only needs to guard
+# against release-config breakage before a tag is cut: it runs on PRs that touch
+# release-relevant paths and on manual dispatch.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+  pull_request:
+    paths:
+      - "cli/beacon/.goreleaser.yaml"
+      - "collector-builder/**"
+      - "packaging/macos/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-check.yml"
 
 permissions:
   contents: read
