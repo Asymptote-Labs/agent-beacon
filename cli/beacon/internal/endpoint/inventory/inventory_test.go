@@ -539,6 +539,158 @@ func TestReadStateTreatsEmptyFileAsFreshState(t *testing.T) {
 	}
 }
 
+func TestScanOmitsContentsByDefault(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{"mcpServers":{"fs":{"command":"npx","env":{"GITHUB_TOKEN":"ghp_secret"}}}}`)
+	writeFile(t, filepath.Join(home, ".cursor", "skills", "deploy", "SKILL.md"), "# Deploy\nbody")
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	for _, config := range result.Configs {
+		if config.Content != nil {
+			t.Fatalf("config %s retained content by default: %#v", config.Runtime, config.Content)
+		}
+	}
+	for _, server := range result.MCPServers {
+		if server.Definition != nil {
+			t.Fatalf("server %s retained definition by default: %#v", server.ServerName, server.Definition)
+		}
+	}
+	for _, skill := range result.Skills {
+		if skill.Content != nil {
+			t.Fatalf("skill %s retained content by default: %#v", skill.SkillName, skill.Content)
+		}
+	}
+}
+
+func TestScanCapturesRedactedContentsWhenRequested(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	claudePath := filepath.Join(home, ".claude", "settings.json")
+	skillPath := filepath.Join(home, ".cursor", "skills", "deploy", "SKILL.md")
+	writeFile(t, claudePath, `{
+  "mcpServers": {
+    "github": {
+      "command": "gh",
+      "args": ["mcp", "serve"],
+      "env": {"GITHUB_TOKEN": "ghp_supersecret", "GH_HOST": "github.com"}
+    }
+  }
+}`)
+	writeFile(t, skillPath, "---\napi_key: sk-live-skillsecret\n---\n# Deploy instructions")
+
+	result := Scan(Options{
+		HomeDir:         home,
+		WorkingDir:      work,
+		Runtimes:        []string{"claude_code", "cursor"},
+		IncludeContents: true,
+		Now:             fixedNow,
+	})
+
+	config := findConfig(result.Configs, "claude_code", claudePath)
+	if config == nil || config.Content == nil {
+		t.Fatalf("expected captured content for claude config, got %#v", config)
+	}
+	if config.Content.Bytes == 0 || config.Content.RedactedCount < 1 {
+		t.Fatalf("content metadata = %#v, want bytes>0 and redactions>=1", config.Content)
+	}
+	if strings.Contains(config.Content.Text, "ghp_supersecret") {
+		t.Fatalf("captured content leaked secret: %s", config.Content.Text)
+	}
+	if !strings.Contains(config.Content.Text, redactedPlaceholder) {
+		t.Fatalf("captured content missing redaction placeholder: %s", config.Content.Text)
+	}
+	if !strings.Contains(config.Content.Text, "github.com") {
+		t.Fatalf("captured content dropped non-secret value: %s", config.Content.Text)
+	}
+
+	server := findServer(result.MCPServers, "claude_code", "github")
+	if server == nil || server.Definition == nil {
+		t.Fatalf("expected captured definition for github server, got %#v", server)
+	}
+	envBlock, ok := server.Definition["env"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("definition env block missing: %#v", server.Definition)
+	}
+	if envBlock["GITHUB_TOKEN"] != redactedPlaceholder {
+		t.Fatalf("definition GITHUB_TOKEN not redacted: %#v", envBlock)
+	}
+	if envBlock["GH_HOST"] != "github.com" {
+		t.Fatalf("definition GH_HOST altered: %#v", envBlock)
+	}
+	if args, ok := server.Definition["args"].([]interface{}); !ok || len(args) != 2 {
+		t.Fatalf("definition args not preserved in full: %#v", server.Definition["args"])
+	}
+
+	skill := findSkill(result.Skills, "cursor", "deploy", skillPath)
+	if skill == nil || skill.Content == nil {
+		t.Fatalf("expected captured skill content, got %#v", skill)
+	}
+	if strings.Contains(skill.Content.Text, "sk-live-skillsecret") {
+		t.Fatalf("skill content leaked secret: %s", skill.Content.Text)
+	}
+	if !strings.Contains(skill.Content.Text, "Deploy instructions") {
+		t.Fatalf("skill content dropped instruction body: %s", skill.Content.Text)
+	}
+}
+
+func TestCapturedContentTruncatesToSizeLimit(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	claudePath := filepath.Join(home, ".claude", "settings.json")
+	writeFile(t, claudePath, `{"note":"`+strings.Repeat("a", 500)+`"}`)
+
+	result := Scan(Options{
+		HomeDir:         home,
+		WorkingDir:      work,
+		Runtimes:        []string{"claude_code"},
+		IncludeContents: true,
+		MaxContentBytes: 64,
+		Now:             fixedNow,
+	})
+
+	config := findConfig(result.Configs, "claude_code", claudePath)
+	if config == nil || config.Content == nil {
+		t.Fatalf("expected captured content, got %#v", config)
+	}
+	if !config.Content.Truncated {
+		t.Fatal("expected content to be marked truncated")
+	}
+	if len(config.Content.Text) > 64 {
+		t.Fatalf("truncated text len = %d, want <= 64", len(config.Content.Text))
+	}
+	if config.Content.Bytes <= 64 {
+		t.Fatalf("Bytes should reflect original size, got %d", config.Content.Bytes)
+	}
+}
+
+func TestRedactSecretsAcrossFormats(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		forbidden string
+		wantCount int
+	}{
+		{"json", `{"api_token": "ghp_x", "host": "h"}`, "ghp_x", 1},
+		{"toml", "GITHUB_TOKEN = \"tk_x\"\nname = \"ok\"", "tk_x", 1},
+		{"yaml", "password: hunter2\nuser: bob", "hunter2", 1},
+		{"shell", "export AWS_SECRET_ACCESS_KEY=abc123\nexport PATH=/bin", "abc123", 1},
+		{"none", `{"host": "example.com", "port": 8080}`, "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, count := redactSecrets(tc.input)
+			if count != tc.wantCount {
+				t.Fatalf("redaction count = %d, want %d (out=%q)", count, tc.wantCount, out)
+			}
+			if tc.forbidden != "" && strings.Contains(out, tc.forbidden) {
+				t.Fatalf("redacted output leaked %q: %s", tc.forbidden, out)
+			}
+		})
+	}
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 5, 7, 0, 0, 0, time.UTC)
 }
@@ -588,6 +740,15 @@ func assertServerPresent(servers []MCPServer, runtime, name string) bool {
 		}
 	}
 	return false
+}
+
+func findServer(servers []MCPServer, runtime, name string) *MCPServer {
+	for i := range servers {
+		if servers[i].Runtime == runtime && servers[i].ServerName == name {
+			return &servers[i]
+		}
+	}
+	return nil
 }
 
 func findConfig(configs []Config, runtime, path string) *Config {

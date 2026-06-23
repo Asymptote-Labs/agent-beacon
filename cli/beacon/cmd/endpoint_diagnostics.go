@@ -211,7 +211,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	configInventory := endpointinventory.Scan(endpointinventory.Options{})
+	configInventory := endpointinventory.Scan(endpointinventory.Options{IncludeContents: endpointOpts.inventoryContents})
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,
@@ -267,6 +267,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 			path = config.PathHash
 		}
 		fmt.Printf("Config: %s scope=%s status=%s mcp_servers=%d path=%s\n", config.Runtime, config.Scope, config.ParserStatus, config.MCPServerCount, path)
+		printInventoryContent(config.Content)
 	}
 	if showAllInventorySections || endpointOpts.inventoryMCP {
 		for _, server := range result.MCPServers {
@@ -275,6 +276,7 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 				name = server.ServerNameHash
 			}
 			fmt.Printf("MCP: %s %s scope=%s transport=%s command_present=%t args=%d env_keys=%d\n", server.Runtime, name, server.SourceScope, server.Transport, server.CommandPresent, server.ArgsCount, server.EnvKeyCount)
+			printInventoryDefinition(server.Definition)
 		}
 	}
 	if showAllInventorySections || endpointOpts.inventorySkills {
@@ -294,12 +296,35 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 				path = skill.ManifestPathHash
 			}
 			fmt.Printf("Skill: %s %s scope=%s status=%s path=%s\n", skill.Runtime, name, skill.SourceScope, skill.ParserStatus, path)
+			printInventoryContent(skill.Content)
 		}
 	}
 	if endpointOpts.writeInventoryEvent {
 		return writeInventoryEvents(effectiveCfg, configInventory)
 	}
 	return nil
+}
+
+func printInventoryContent(content *endpointinventory.CapturedContent) {
+	if content == nil {
+		return
+	}
+	fmt.Printf("  --- content (%d bytes, redactions=%d, truncated=%t) ---\n", content.Bytes, content.RedactedCount, content.Truncated)
+	for _, line := range strings.Split(content.Text, "\n") {
+		fmt.Printf("  %s\n", line)
+	}
+	fmt.Println("  --- end content ---")
+}
+
+func printInventoryDefinition(def map[string]interface{}) {
+	if len(def) == 0 {
+		return
+	}
+	encoded, err := json.MarshalIndent(def, "  ", "  ")
+	if err != nil {
+		return
+	}
+	fmt.Printf("  --- definition ---\n  %s\n  --- end definition ---\n", string(encoded))
 }
 
 func filterInventoryDefaults(result inventoryResult) inventoryResult {
@@ -451,9 +476,11 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 		return inventoryHeartbeatWriteResult{SkippedReason: "attempt_backoff", PreviousDigest: state.LastSnapshotDigest}, nil
 	}
 	scanOpts := endpointinventory.Options{
-		WorkingDir: workingDir,
-		Runtimes:   settings.Runtimes,
-		Now:        func() time.Time { return now },
+		WorkingDir:      workingDir,
+		Runtimes:        settings.Runtimes,
+		Now:             func() time.Time { return now },
+		IncludeContents: settings.IncludeContents,
+		MaxContentBytes: settings.MaxContentBytes,
 	}
 	inventoryResult := endpointinventory.Scan(scanOpts)
 	digest := endpointinventory.SnapshotDigest(inventoryResult)

@@ -43,15 +43,19 @@ type Collector struct {
 }
 
 type Inventory struct {
-	Enabled    *bool    `json:"enabled,omitempty"`
-	TTLSeconds int      `json:"ttl_seconds,omitempty"`
-	Runtimes   []string `json:"runtimes,omitempty"`
+	Enabled         *bool    `json:"enabled,omitempty"`
+	TTLSeconds      int      `json:"ttl_seconds,omitempty"`
+	Runtimes        []string `json:"runtimes,omitempty"`
+	IncludeContents *bool    `json:"include_contents,omitempty"`
+	MaxContentBytes int      `json:"max_content_bytes,omitempty"`
 }
 
 type InventorySettings struct {
-	Enabled    bool
-	TTLSeconds int
-	Runtimes   []string
+	Enabled         bool
+	TTLSeconds      int
+	Runtimes        []string
+	IncludeContents bool
+	MaxContentBytes int
 }
 
 type Destinations struct {
@@ -125,6 +129,12 @@ func InventoryConfig(cfg Config) InventorySettings {
 	}
 	if len(cfg.Inventory.Runtimes) > 0 {
 		settings.Runtimes = append([]string(nil), cfg.Inventory.Runtimes...)
+	}
+	if cfg.Inventory.IncludeContents != nil {
+		settings.IncludeContents = *cfg.Inventory.IncludeContents
+	}
+	if cfg.Inventory.MaxContentBytes > 0 {
+		settings.MaxContentBytes = cfg.Inventory.MaxContentBytes
 	}
 	return settings
 }

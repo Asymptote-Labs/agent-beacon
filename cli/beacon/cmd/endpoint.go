@@ -73,6 +73,7 @@ var endpointOpts struct {
 	inventoryMCP             bool
 	inventorySkills          bool
 	inventoryHooks           bool
+	inventoryContents        bool
 	inventoryHeartbeatForce  bool
 	inventoryHeartbeatConfig string
 	inventoryWorkingDir      string
@@ -435,6 +436,7 @@ func init() {
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryMCP, "mcp", false, "Show only MCP server inventory and source configs")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventorySkills, "skills", false, "Show only local agent skill inventory")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryHooks, "hooks", false, "Show only hook integration and hook config inventory")
+	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryContents, "contents", false, "Include redacted, size-limited config/hook/skill file contents and full MCP server definitions")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
 	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.inventoryHeartbeatForce, "force", false, "Write inventory heartbeat even when TTL has not expired")
 	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryHeartbeatConfig, "config", "", "Endpoint config path")
@@ -450,6 +452,7 @@ func init() {
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryMCP, "mcp", false, "Show only MCP server inventory and source configs")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventorySkills, "skills", false, "Show only local agent skill inventory")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryHooks, "hooks", false, "Show only hook integration and hook config inventory")
+	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryContents, "contents", false, "Include redacted, size-limited config/hook/skill file contents and full MCP server definitions")
 	topLevelInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
 	endpointTestEventCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print validation stages as JSON")
 	endpointBundleDiagnosticsCmd.Flags().StringVar(&endpointOpts.outputDir, "output", "", "Output directory for diagnostics bundle")

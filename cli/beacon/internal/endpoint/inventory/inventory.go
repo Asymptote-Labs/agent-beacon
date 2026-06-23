@@ -56,6 +56,12 @@ type Options struct {
 	WorkingDir string
 	Runtimes   []string
 	Now        func() time.Time
+	// IncludeContents opts into capturing redacted, size-limited raw bodies of
+	// config, hook, and skill files plus full (redacted) MCP server definitions.
+	// When false (the default) inventory stays metadata- and hash-only.
+	IncludeContents bool
+	// MaxContentBytes caps retained content per file. Zero uses DefaultMaxContentBytes.
+	MaxContentBytes int
 }
 
 type Result struct {
@@ -87,9 +93,10 @@ type Config struct {
 	ParserStatus   string `json:"parser_status"`
 	FileSHA256     string `json:"file_sha256,omitempty"`
 	ModifiedAt     string `json:"modified_at,omitempty"`
-	MCPServerCount int    `json:"mcp_server_count"`
-	BeaconManaged  bool   `json:"beacon_managed"`
-	Redaction      string `json:"redaction"`
+	MCPServerCount int              `json:"mcp_server_count"`
+	BeaconManaged  bool             `json:"beacon_managed"`
+	Redaction      string           `json:"redaction"`
+	Content        *CapturedContent `json:"content,omitempty"`
 }
 
 type MCPServer struct {
@@ -107,9 +114,10 @@ type MCPServer struct {
 	URLPresent      bool     `json:"url_present"`
 	EnvKeys         []string `json:"env_keys,omitempty"`
 	EnvKeyCount     int      `json:"env_key_count,omitempty"`
-	DefinitionHash  string   `json:"definition_hash"`
-	ParserStatus    string   `json:"parser_status"`
-	Redaction       string   `json:"redaction"`
+	DefinitionHash  string                 `json:"definition_hash"`
+	ParserStatus    string                 `json:"parser_status"`
+	Redaction       string                 `json:"redaction"`
+	Definition      map[string]interface{} `json:"definition,omitempty"`
 }
 
 type candidate struct {
@@ -144,12 +152,13 @@ func Scan(opts Options) Result {
 			WorkDirHash: hashString(wd),
 		},
 	}
+	co := contentOptions{include: opts.IncludeContents, maxBytes: opts.MaxContentBytes}
 	for _, item := range filterCandidates(candidates(home, wd), opts.Runtimes) {
-		config, servers := inspectCandidate(item, redaction)
+		config, servers := inspectCandidate(item, redaction, co)
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}
-	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes)
+	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes, co)
 	return result
 }
 
@@ -317,7 +326,7 @@ func shellProfilePath(home string) string {
 	}
 }
 
-func inspectCandidate(item candidate, redaction string) (Config, []MCPServer) {
+func inspectCandidate(item candidate, redaction string, co contentOptions) (Config, []MCPServer) {
 	config := Config{
 		Runtime:      item.runtime,
 		Path:         valueForPath(item.path, redaction),
@@ -352,8 +361,11 @@ func inspectCandidate(item candidate, redaction string) (Config, []MCPServer) {
 	config.Readable = true
 	config.FileSHA256 = hashBytes(data)
 	config.BeaconManaged = beaconManaged(item, data)
+	if co.include {
+		config.Content = captureContent(data, co.limit())
+	}
 
-	servers, parseErr := parseMCPServers(item, data, redaction)
+	servers, parseErr := parseMCPServers(item, data, redaction, co)
 	config.MCPServerCount = len(servers)
 	config.ParserStatus = StatusOK
 	if parseErr != nil {
@@ -363,7 +375,7 @@ func inspectCandidate(item candidate, redaction string) (Config, []MCPServer) {
 	return config, servers
 }
 
-func parseMCPServers(item candidate, data []byte, redaction string) ([]MCPServer, error) {
+func parseMCPServers(item candidate, data []byte, redaction string, co contentOptions) ([]MCPServer, error) {
 	switch item.format {
 	case formatMetadataOnly:
 		return nil, nil
@@ -372,38 +384,38 @@ func parseMCPServers(item candidate, data []byte, redaction string) ([]MCPServer
 		if err := json.Unmarshal(data, &root); err != nil {
 			return nil, err
 		}
-		return serversFromMap(item, root, redaction), nil
+		return serversFromMap(item, root, redaction, co), nil
 	case formatTOML:
 		var root map[string]interface{}
 		if err := toml.Unmarshal(data, &root); err != nil {
 			return nil, err
 		}
-		return serversFromMap(item, root, redaction), nil
+		return serversFromMap(item, root, redaction, co), nil
 	case formatYAML:
 		var root map[string]interface{}
 		if err := yaml.Unmarshal(data, &root); err != nil {
 			return nil, err
 		}
-		return serversFromMap(item, root, redaction), nil
+		return serversFromMap(item, root, redaction, co), nil
 	default:
 		return nil, fmt.Errorf("unsupported config format %q", item.format)
 	}
 }
 
-func serversFromMap(item candidate, root map[string]interface{}, redaction string) []MCPServer {
+func serversFromMap(item candidate, root map[string]interface{}, redaction string, co contentOptions) []MCPServer {
 	var servers []MCPServer
 	for _, key := range []string{"mcpServers", "mcp_servers", "servers"} {
 		if raw, ok := root[key]; ok {
-			servers = append(servers, serversFromBlock(item, raw, redaction)...)
+			servers = append(servers, serversFromBlock(item, raw, redaction, co)...)
 		}
 	}
 	if raw, ok := root["mcp"]; ok {
-		servers = append(servers, serversFromBlock(item, raw, redaction)...)
+		servers = append(servers, serversFromBlock(item, raw, redaction, co)...)
 	}
 	return dedupeServers(servers)
 }
 
-func serversFromBlock(item candidate, raw interface{}, redaction string) []MCPServer {
+func serversFromBlock(item candidate, raw interface{}, redaction string, co contentOptions) []MCPServer {
 	block, ok := raw.(map[string]interface{})
 	if !ok {
 		return nil
@@ -415,13 +427,13 @@ func serversFromBlock(item candidate, raw interface{}, redaction string) []MCPSe
 			continue
 		}
 		if looksLikeServerDefinition(def) {
-			servers = append(servers, serverFromDefinition(item, name, def, redaction))
+			servers = append(servers, serverFromDefinition(item, name, def, redaction, co))
 			continue
 		}
 		for nestedName, nestedValue := range def {
 			nestedDef, ok := nestedValue.(map[string]interface{})
 			if ok && looksLikeServerDefinition(nestedDef) {
-				servers = append(servers, serverFromDefinition(item, nestedName, nestedDef, redaction))
+				servers = append(servers, serverFromDefinition(item, nestedName, nestedDef, redaction, co))
 			}
 		}
 	}
@@ -437,7 +449,7 @@ func looksLikeServerDefinition(def map[string]interface{}) bool {
 	return false
 }
 
-func serverFromDefinition(item candidate, name string, def map[string]interface{}, redaction string) MCPServer {
+func serverFromDefinition(item candidate, name string, def map[string]interface{}, redaction string, co contentOptions) MCPServer {
 	command := firstString(def["command"])
 	url := firstString(def["url"])
 	envKeys := mapKeys(def["env"])
@@ -461,6 +473,9 @@ func serverFromDefinition(item candidate, name string, def map[string]interface{
 	}
 	if command != "" {
 		server.CommandNameHash = hashString(filepath.Base(command))
+	}
+	if co.include {
+		server.Definition = redactStructuredMap(def)
 	}
 	return server
 }
@@ -528,13 +543,7 @@ func valuesForEnvKeys(keys []string, redaction string) []string {
 }
 
 func safeEnvKey(key string) bool {
-	upper := strings.ToUpper(key)
-	for _, marker := range []string{"TOKEN", "SECRET", "PASSWORD", "KEY", "AUTH", "CREDENTIAL"} {
-		if strings.Contains(upper, marker) {
-			return false
-		}
-	}
-	return true
+	return !containsSecretMarker(key)
 }
 
 func mapKeys(raw interface{}) []string {

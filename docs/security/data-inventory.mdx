@@ -33,14 +33,16 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | MCP servers | Runtime, source path hash, server name/hash, transport, command name/hash, argument count, safe env-key names/counts, and definition hash |
 | Agent skills | Runtime/source family, scope, skill name/hash, root and manifest path/hash, file hash, modified time, and parser status |
 
-Skill inventory is metadata-only. Beacon hashes `SKILL.md` manifests for change detection but does not retain skill instruction bodies in inventory JSON, dashboard responses, or inventory snapshot events.
+By default, inventory is metadata- and hash-only. Beacon hashes config, hook, and `SKILL.md` files for change detection but does not retain file bodies, full MCP server definitions, or skill instruction bodies in inventory JSON, dashboard responses, or inventory snapshot events.
+
+Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction — values under keys matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL` are replaced with `***REDACTED***` — and a per-file size cap (64 KiB by default, configurable via `max_content_bytes`).
 
 Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. For Cursor and Claude Code, normal hook execution can periodically write:
 
 - `inventory.heartbeat`, a small event showing that Beacon checked local agent configuration inventory and recording counts plus a snapshot digest.
-- `inventory.snapshot`, a metadata-only snapshot written when the digest changes or inventory is first initialized.
+- `inventory.snapshot`, a snapshot written when the digest changes or inventory is first initialized. Metadata-only unless `include_contents` is enabled.
 
-Snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
+By default, snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content. When `include_contents` is enabled, snapshots additionally carry redacted, size-limited `content` and `definition` blocks as described above.
 
 ## Required Fields
 
