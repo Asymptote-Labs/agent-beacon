@@ -12,7 +12,11 @@ description: >
   security module (e.g. apparmor, selinux, audit) is a defence-
   evasion signal. The rule is anchored on the modutils binary name
   (insmod, modprobe, rmmod, modinfo) at a command boundary, and
-  excludes benign uses (kmod version, kmod list).
+  excludes benign uses (kmod version, kmod list). The modprobe
+  load signature requires a module-shaped basename (starts with a
+  letter) or a `.ko`/`.ko.xz`/`.ko.gz` path, so read-only
+  subcommands such as `--version`, `--help`, `-V`, and `-l` do not
+  fire.
 severity: high
 status: experimental
 posture: detect
@@ -23,7 +27,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*insmod\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)$|[^;&|]+$)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)$|\\s+[a-zA-Z][a-zA-Z0-9_-]+$)") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*rmmod\\b")
   )
 
@@ -72,4 +76,40 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo modprobe is restricted" }
+        session: { id: s1 }
+  - name: modprobe_version_readonly
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe --version" }
+        session: { id: s1 }
+  - name: modprobe_help_readonly
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe --help" }
+        session: { id: s1 }
+  - name: modprobe_short_version_readonly
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe -V" }
+        session: { id: s1 }
+  - name: modprobe_list_readonly
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe -l" }
+        session: { id: s1 }
+  - name: modprobe_module_with_hyphen
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe usb-storage" }
+        session: { id: s1 }
+  - name: modprobe_force_module
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe -f br_netfilter" }
         session: { id: s1 }
