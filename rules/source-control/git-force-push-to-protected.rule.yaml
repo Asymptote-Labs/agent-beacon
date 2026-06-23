@@ -1,0 +1,81 @@
+id: git-force-push-to-protected
+version: 1
+title: Force-push directed at a protected branch
+description: >
+  A git push with --force, --force-with-lease, -f, or a leading +
+  refspec targets a protected branch (main, master, develop,
+  release/*, production). Force-pushing a protected branch can
+  rewrite the canonical project history, drop commits, or land
+  unreviewed code into the production line. From an agent session
+  this is almost always unauthorized and indicates either an
+  attacker forcibly overwriting the protected history or a
+  misconfigured agent bypassing the branch-protection gate. The
+  rule requires BOTH a force flag (--force, --force-with-lease, -f,
+  or + refspec) AND a target in the protected-branch list. A force
+  push to a feature branch (which git itself permits and many teams
+  allow) does not fire; nor does an ordinary push to main.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*\\b(main|master|develop|production|release/[^\\s;&|]+)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\b(main|master|develop|production|release/[^\\s;&|]+)\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*(main|master|develop|production|release/[^\\s;&|]+)\\b")
+  )
+
+emit:
+  reason: "Force-push directed at a protected branch (main / master / develop / production / release/*)"
+
+tests:
+  - name: force_push_to_main
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin main" }
+        session: { id: s1 }
+  - name: force_push_to_master_f
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push -f origin master" }
+        session: { id: s1 }
+  - name: force_push_force_with_lease_to_main
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force-with-lease origin main" }
+        session: { id: s1 }
+  - name: force_push_to_release_branch
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin release/v1.2" }
+        session: { id: s1 }
+  - name: plus_refspec_to_main
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin +main" }
+        session: { id: s1 }
+  - name: force_push_to_feature_branch
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin feature/x" }
+        session: { id: s1 }
+  - name: ordinary_push_to_main
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin main" }
+        session: { id: s1 }
+  - name: force_push_mention
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'never git push -f main' > notes.md" }
+        session: { id: s1 }

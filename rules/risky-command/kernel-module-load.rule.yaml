@@ -1,0 +1,75 @@
+id: kernel-module-load
+version: 1
+title: Kernel module loaded, probed, or removed
+description: >
+  A kernel module was loaded (insmod), probed (modprobe), or removed
+  (rmmod). Loading a kernel module from an agent session is a
+  high-privilege primitive — a malicious module gains ring-0 access
+  on the host, can hide processes and files (rootkit), and survives
+  reboots via initramfs hooks. modprobe can also auto-resolve and
+  load modules from a /etc/modprobe.d/ drop-in, which is a
+  persistence primitive. rmmod is included because disabling a
+  security module (e.g. apparmor, selinux, audit) is a defence-
+  evasion signal. The rule is anchored on the modutils binary name
+  (insmod, modprobe, rmmod, modinfo) at a command boundary, and
+  excludes benign uses (kmod version, kmod list).
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*insmod\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)$|[^;&|]+$)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*rmmod\\b")
+  )
+
+emit:
+  reason: "Kernel module loaded, probed, or removed (insmod / modprobe / rmmod) — rootkit or defence-evasion primitive"
+
+tests:
+  - name: insmod_explicit_module
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo insmod /tmp/evil.ko" }
+        session: { id: s1 }
+  - name: modprobe_module
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe br_netfilter" }
+        session: { id: s1 }
+  - name: modprobe_remove
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo modprobe -r apparmor" }
+        session: { id: s1 }
+  - name: rmmod
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rmmod usb_storage" }
+        session: { id: s1 }
+  - name: modinfo_readonly
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modinfo br_netfilter" }
+        session: { id: s1 }
+  - name: lsmod_readonly
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "lsmod" }
+        session: { id: s1 }
+  - name: ordinary_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo modprobe is restricted" }
+        session: { id: s1 }

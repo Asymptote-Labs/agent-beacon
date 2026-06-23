@@ -1,0 +1,87 @@
+id: git-history-rewrite
+version: 1
+title: Git history rewritten (filter-branch / filter-repo / interactive rebase)
+description: >
+  A history-rewriting git subcommand was invoked: filter-branch,
+  filter-repo, an interactive rebase (rebase -i / --interactive), a
+  commit amend after a previous commit (commit --amend) of HEAD
+  rather than a fresh root, or a replace operation. Rewriting
+  published history is a forensics-evasion primitive — once pushed,
+  the new history no longer contains evidence of the original
+  commits, and a re-clone by an unsuspecting collaborator pulls the
+  rewritten history. The rule is anchored on the git binary at a
+  command boundary and matches the well-known history-rewriting
+  subcommands. A `git rebase` without --interactive (fast-forward
+  merge) does not rewrite authored history and is excluded.
+severity: medium
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")
+  )
+
+emit:
+  reason: "Git history rewritten (filter-branch / filter-repo / rebase -i / commit --amend / replace)"
+
+tests:
+  - name: filter_branch
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git filter-branch --tree-filter 'rm -f credentials' HEAD" }
+        session: { id: s1 }
+  - name: filter_repo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git filter-repo --path secrets.txt --invert-paths" }
+        session: { id: s1 }
+  - name: interactive_rebase
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git rebase -i HEAD~5" }
+        session: { id: s1 }
+  - name: interactive_rebase_long
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git rebase --interactive origin/main" }
+        session: { id: s1 }
+  - name: commit_amend
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit --amend -m 'fix typo'" }
+        session: { id: s1 }
+  - name: git_replace
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git replace --edit oldsha newsha" }
+        session: { id: s1 }
+  - name: ordinary_rebase
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git rebase origin/main" }
+        session: { id: s1 }
+  - name: ordinary_commit
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m 'add feature'" }
+        session: { id: s1 }
+  - name: echo_mention
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'git filter-branch rewrites history' > notes.md" }
+        session: { id: s1 }
