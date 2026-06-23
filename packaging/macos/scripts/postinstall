@@ -42,4 +42,8 @@ if command -v launchctl >/dev/null 2>&1; then
   restart_optional_forwarder "com.beacon.endpoint.s3-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
 fi
 
+# Install/refresh the on-by-default self-updater. This reconciles the launchd job
+# with the configured mode, so a prior `off` is respected across package updates.
+"${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint update install-daemon >/dev/null 2>&1 || true
+
 exit 0

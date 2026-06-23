@@ -30,6 +30,14 @@ type Config struct {
 	Inventory       *Inventory     `json:"inventory_heartbeat,omitempty"`
 	Destinations    *Destinations  `json:"destinations,omitempty"`
 	ManagedUpload   *ManagedUpload `json:"managed_upload,omitempty"`
+	AutoUpdate      *AutoUpdate    `json:"auto_update,omitempty"`
+}
+
+// AutoUpdate controls the built-in self-updater. Mode is one of "auto"
+// (check and apply), "check-only" (surface but do not apply), or "off"
+// (no background updater). An empty mode means use the built-in default.
+type AutoUpdate struct {
+	Mode string `json:"mode,omitempty"`
 }
 
 type Collector struct {
