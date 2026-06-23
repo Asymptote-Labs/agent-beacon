@@ -180,6 +180,15 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 }
 
 func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface{}) map[string]interface{} {
+	maps := []map[string]interface{}{toolInput, toolResponse}
+	mcpServer := firstToolStringAcross(maps, "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
+	mcpTool := firstToolStringAcross(maps, "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name")
+	mcpMethod := firstToolStringAcross(maps, "mcp.method.name", "mcp_method_name", "mcp_method")
+	mcpProtocol := firstToolStringAcross(maps, "mcp.protocol.version", "mcp_protocol_version")
+	mcpResource := firstToolStringAcross(maps, "mcp.resource.uri", "mcp_resource_uri")
+	mcpSession := firstToolStringAcross(maps, "mcp.session.id", "mcp_session_id")
+	hasCascadeServerToolPair := isCascadePlatform(platformFlag) && firstToolStringAcross(maps, "server_name") != "" && firstToolStringAcross(maps, "tool_name") != ""
+
 	server := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "server", "server_name", "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
 	tool := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "tool", "tool_name", "function_name", "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name", "gen_ai.tool.name")
 	genericToolName := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "name")
@@ -197,7 +206,7 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 		}
 	}
 
-	isMCP := server != "" || tool != "" || method != "" || protocol != "" || resource != "" || session != "" || strings.Contains(strings.ToLower(toolName), "mcp")
+	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || strings.Contains(strings.ToLower(toolName), "mcp")
 	if !isMCP {
 		return nil
 	}
@@ -323,10 +332,21 @@ func mcpErrorType(toolResponse map[string]interface{}) string {
 	if isError := firstToolString(toolResponse, "isError", "is_error"); strings.EqualFold(isError, "true") {
 		return "tool_error"
 	}
-	if errorText := firstToolString(toolResponse, "error"); errorText != "" {
+	if mcpHasErrorValue(toolResponse, "error") {
 		return "tool_error"
 	}
 	return ""
+}
+
+func mcpHasErrorValue(toolResponse map[string]interface{}, key string) bool {
+	value, ok := toolResponse[key]
+	if !ok || value == nil {
+		return false
+	}
+	if boolValue, ok := value.(bool); ok {
+		return boolValue
+	}
+	return normalizeToolString(value) != ""
 }
 
 func diffFields(filePath, diffStr string) map[string]interface{} {

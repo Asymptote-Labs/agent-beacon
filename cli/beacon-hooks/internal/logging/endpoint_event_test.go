@@ -148,6 +148,28 @@ func TestEndpointEventRotatesRuntimeLog(t *testing.T) {
 	}
 }
 
+func TestAppendEndpointJSONLDedupesRuntimeEvents(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	existing := []byte(`{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"cursor"},"session":{"id":"s1"},"mcp":{"server":"clickhouse","tool":"execute_sql"},"message":"Tool execution observed"}` + "\n")
+	candidate := []byte(`{"timestamp":"2026-06-18T21:11:25Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"claude"},"session":{"id":"s1"},"mcp":{"server":"clickhouse","tool":"execute_sql"},"message":"Tool execution observed"}` + "\n")
+
+	if err := appendEndpointJSONL(logPath, existing, defaultEndpointRotateBytes, defaultEndpointRotateArchives); err != nil {
+		t.Fatalf("first appendEndpointJSONL returned error: %v", err)
+	}
+	if err := appendEndpointJSONL(logPath, candidate, defaultEndpointRotateBytes, defaultEndpointRotateArchives); err != nil {
+		t.Fatalf("second appendEndpointJSONL returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read endpoint log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected duplicate event to be suppressed, got %d lines: %s", len(lines), string(data))
+	}
+}
+
 func TestEndpointEventSurfacesWriteFailure(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "runtime.jsonl")

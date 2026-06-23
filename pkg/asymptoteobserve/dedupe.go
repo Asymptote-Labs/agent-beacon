@@ -17,9 +17,10 @@ const (
 )
 
 type endpointDedupeEvent struct {
-	action string
-	key    string
-	ts     time.Time
+	action  string
+	harness string
+	key     string
+	ts      time.Time
 }
 
 // IsDuplicateEndpointEvent reports whether candidateLine duplicates a recently
@@ -38,6 +39,9 @@ func IsDuplicateEndpointEvent(path string, candidateLine []byte, window time.Dur
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		existing, ok := endpointDedupeCandidate(line)
 		if !ok || existing.key != candidate.key {
+			continue
+		}
+		if existing.harness == candidate.harness {
 			continue
 		}
 		diff := candidate.ts.Sub(existing.ts)
@@ -95,6 +99,7 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 	if err != nil || ts.IsZero() {
 		return endpointDedupeEvent{}, false
 	}
+	harness := strings.ToLower(nestedString(event, "harness", "name"))
 	target := dedupeTarget(action, event)
 	if target == "" {
 		return endpointDedupeEvent{}, false
@@ -109,7 +114,7 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 		strings.ToLower(workspace),
 		target,
 	}, "\x00")
-	return endpointDedupeEvent{action: strings.ToLower(action), key: key, ts: ts.UTC()}, true
+	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, key: key, ts: ts.UTC()}, true
 }
 
 func endpointDedupeWindow(action string, fallback time.Duration) time.Duration {

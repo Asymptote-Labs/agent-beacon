@@ -138,6 +138,9 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	defer lock.Close()
+	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
+		return nil
+	}
 	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
 		return err
 	}

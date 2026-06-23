@@ -32,6 +32,19 @@ func TestIsDuplicateEndpointEventKeepsSeparateCallsOutsideWindow(t *testing.T) {
 	}
 }
 
+func TestIsDuplicateEndpointEventKeepsSameHarnessCalls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"cursor"},"session":{"id":"s1"},"mcp":{"server":"clickhouse","tool":"execute_sql"}}`
+	candidate := []byte(`{"timestamp":"2026-06-18T21:11:25Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"cursor"},"session":{"id":"s1"},"mcp":{"server":"clickhouse","tool":"execute_sql"}}`)
+	if err := os.WriteFile(path, []byte(existing+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if IsDuplicateEndpointEvent(path, candidate, EndpointDuplicateWindow) {
+		t.Fatal("same-harness events should not dedupe")
+	}
+}
+
 func TestIsDuplicateEndpointEventRequiresSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"cursor"},"mcp":{"tool":"list_tables"}}`

@@ -105,6 +105,29 @@ func TestToolFieldsMapsMCPTransportContext(t *testing.T) {
 	}
 }
 
+func TestToolFieldsIgnoresFalseMCPErrorField(t *testing.T) {
+	fields := toolFieldsWithResponse("MCP:get_organizations", map[string]interface{}{}, map[string]interface{}{
+		"error": false,
+		"ok":    true,
+	})
+	if _, ok := fields["error"]; ok {
+		t.Fatalf("fields should not include error for false MCP error field: %#v", fields["error"])
+	}
+}
+
+func TestToolFieldsMapsTruthyMCPErrorField(t *testing.T) {
+	fields := toolFieldsWithResponse("MCP:get_organizations", map[string]interface{}{}, map[string]interface{}{
+		"error": true,
+	})
+	errorFields, ok := fields["error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("fields error missing or wrong type: %#v", fields["error"])
+	}
+	if got := errorFields["type"]; got != "tool_error" {
+		t.Fatalf("error.type = %q, want tool_error", got)
+	}
+}
+
 func TestToolFieldsDoesNotTreatGenericNameAsMCP(t *testing.T) {
 	fields := toolFields("Write", map[string]interface{}{"name": "README.md"})
 	if _, ok := fields["mcp"]; ok {
@@ -112,6 +135,58 @@ func TestToolFieldsDoesNotTreatGenericNameAsMCP(t *testing.T) {
 	}
 	if _, ok := fields["gen_ai"]; ok {
 		t.Fatalf("non-MCP tool should not include gen_ai fields: %#v", fields)
+	}
+}
+
+func TestToolFieldsDoesNotTreatGenericFlatTransportKeysAsMCP(t *testing.T) {
+	fields := toolFieldsWithResponse("HTTPClient", map[string]interface{}{
+		"method":           "GET",
+		"protocol_version": "HTTP/2",
+		"uri":              "https://example.com/report",
+	}, map[string]interface{}{
+		"status_code": "200",
+	})
+	if _, ok := fields["mcp"]; ok {
+		t.Fatalf("non-MCP tool should not include mcp fields: %#v", fields)
+	}
+	if _, ok := fields["gen_ai"]; ok {
+		t.Fatalf("non-MCP tool should not include gen_ai fields: %#v", fields)
+	}
+}
+
+func TestToolFieldsDoesNotTreatGenericServerToolPairAsMCP(t *testing.T) {
+	oldPlatform := platformFlag
+	defer func() {
+		platformFlag = oldPlatform
+	}()
+	platformFlag = "cursor"
+	fields := toolFields("HTTPClient", map[string]interface{}{
+		"server_name": "api",
+		"tool_name":   "request",
+	})
+	if _, ok := fields["mcp"]; ok {
+		t.Fatalf("non-MCP tool should not include mcp fields: %#v", fields)
+	}
+	if _, ok := fields["gen_ai"]; ok {
+		t.Fatalf("non-MCP tool should not include gen_ai fields: %#v", fields)
+	}
+}
+
+func TestToolFieldsMapsGenericFlatTransportKeysForKnownMCP(t *testing.T) {
+	fields := toolFields("MCP:read_resource", map[string]interface{}{
+		"method":           "resources/read",
+		"protocol_version": "2025-06-18",
+		"uri":              "file:///tmp/report.md",
+	})
+	mcp := fields["mcp"].(map[string]interface{})
+	if got := mcp["method"].(map[string]interface{})["name"]; got != "resources/read" {
+		t.Fatalf("mcp.method.name = %q, want resources/read", got)
+	}
+	if got := mcp["protocol"].(map[string]interface{})["version"]; got != "2025-06-18" {
+		t.Fatalf("mcp.protocol.version = %q, want 2025-06-18", got)
+	}
+	if got := mcp["resource"].(map[string]interface{})["uri"]; got != "file:///tmp/report.md" {
+		t.Fatalf("mcp.resource.uri = %q, want file URI", got)
 	}
 }
 
