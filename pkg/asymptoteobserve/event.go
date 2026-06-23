@@ -83,6 +83,41 @@ type TraceInfo struct {
 	ParentSpanID string `json:"parent_span_id,omitempty"`
 }
 
+type ErrorInfo struct {
+	Type string `json:"type,omitempty"`
+}
+
+type JSONRPCRequestInfo struct {
+	ID string `json:"id,omitempty"`
+}
+
+type JSONRPCProtocolInfo struct {
+	Version string `json:"version,omitempty"`
+}
+
+type JSONRPCInfo struct {
+	Request  *JSONRPCRequestInfo  `json:"request,omitempty"`
+	Protocol *JSONRPCProtocolInfo `json:"protocol,omitempty"`
+}
+
+type NetworkProtocolInfo struct {
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
+type NetworkInfo struct {
+	Protocol  *NetworkProtocolInfo `json:"protocol,omitempty"`
+	Transport string               `json:"transport,omitempty"`
+}
+
+type RPCResponseInfo struct {
+	StatusCode string `json:"status_code,omitempty"`
+}
+
+type RPCInfo struct {
+	Response *RPCResponseInfo `json:"response,omitempty"`
+}
+
 type RunInfo struct {
 	Provider   string `json:"provider,omitempty"`
 	RunID      string `json:"run_id,omitempty"`
@@ -336,6 +371,11 @@ type HealthInfo struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+type ServerInfo struct {
+	Address string `json:"address,omitempty"`
+	Port    *int   `json:"port,omitempty"`
+}
+
 type Event struct {
 	Timestamp     string                 `json:"timestamp"`
 	Vendor        string                 `json:"vendor"`
@@ -347,9 +387,14 @@ type Event struct {
 	User          UserInfo               `json:"user,omitempty"`
 	Harness       HarnessInfo            `json:"harness"`
 	Origin        Origin                 `json:"origin,omitempty"`
+	Error         *ErrorInfo             `json:"error,omitempty"`
 	Run           *RunInfo               `json:"run,omitempty"`
 	Session       *SessionInfo           `json:"session,omitempty"`
 	Trace         *TraceInfo             `json:"trace,omitempty"`
+	JSONRPC       *JSONRPCInfo           `json:"jsonrpc,omitempty"`
+	Network       *NetworkInfo           `json:"network,omitempty"`
+	RPC           *RPCInfo               `json:"rpc,omitempty"`
+	Server        *ServerInfo            `json:"server,omitempty"`
 	Tool          *ToolInfo              `json:"tool,omitempty"`
 	File          *FileInfo              `json:"file,omitempty"`
 	Command       *CommandInfo           `json:"command,omitempty"`

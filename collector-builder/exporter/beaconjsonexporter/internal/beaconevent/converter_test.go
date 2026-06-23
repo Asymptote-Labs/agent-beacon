@@ -609,6 +609,113 @@ func TestPopulateCommonMapsBeaconSessionAttributes(t *testing.T) {
 	}
 }
 
+func TestEventsFromTracesMapsMCPGenAIClientSpanAttributes(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("tools/call get_organizations")
+	attrs := span.Attributes()
+	attrs.PutStr("gen_ai.operation.name", "execute_tool")
+	attrs.PutStr("gen_ai.tool.name", "get_organizations")
+	attrs.PutStr("gen_ai.tool.call.id", "call-1")
+	attrs.PutStr("gen_ai.tool.call.arguments", `{"org":"meulo"}`)
+	attrs.PutStr("gen_ai.tool.call.result", `{"ok":true}`)
+	attrs.PutStr("mcp.method.name", "tools/call")
+	attrs.PutStr("mcp.protocol.version", "2025-06-18")
+	attrs.PutStr("mcp.resource.uri", "file:///tmp/report.md")
+	attrs.PutStr("mcp.session.id", "mcp-session")
+	attrs.PutStr("jsonrpc.request.id", "request-7")
+	attrs.PutStr("jsonrpc.protocol.version", "2.0")
+	attrs.PutStr("rpc.response.status_code", "OK")
+	attrs.PutStr("network.protocol.name", "HTTP")
+	attrs.PutStr("network.protocol.version", "2")
+	attrs.PutStr("network.transport", "TCP")
+	attrs.PutStr("server.address", "example.com")
+	attrs.PutInt("server.port", 443)
+	attrs.PutStr("error.type", "tool_error")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.Event.Action != "mcp.tool_invoked" || event.Event.Category != "mcp" {
+		t.Fatalf("event = %#v, want mcp.tool_invoked/mcp", event.Event)
+	}
+	if event.GenAI == nil || event.GenAI.Operation == nil || event.GenAI.Operation.Name != "execute_tool" {
+		t.Fatalf("gen_ai operation = %#v, want execute_tool", event.GenAI)
+	}
+	if event.GenAI.Tool == nil || event.GenAI.Tool.Name != "get_organizations" || event.GenAI.Tool.Call == nil {
+		t.Fatalf("gen_ai tool = %#v, want get_organizations call", event.GenAI.Tool)
+	}
+	if event.MCP == nil || event.MCP.Method == nil || event.MCP.Method.Name != "tools/call" || event.MCP.Protocol == nil || event.MCP.Protocol.Version != "2025-06-18" {
+		t.Fatalf("mcp = %#v, want method/protocol", event.MCP)
+	}
+	if event.JSONRPC == nil || event.JSONRPC.Request == nil || event.JSONRPC.Request.ID != "request-7" || event.JSONRPC.Protocol == nil || event.JSONRPC.Protocol.Version != "2.0" {
+		t.Fatalf("jsonrpc = %#v, want request/protocol", event.JSONRPC)
+	}
+	if event.Network == nil || event.Network.Protocol == nil || event.Network.Protocol.Name != "http" || event.Network.Transport != "tcp" {
+		t.Fatalf("network = %#v, want lower-cased protocol/transport", event.Network)
+	}
+	if event.RPC == nil || event.RPC.Response == nil || event.RPC.Response.StatusCode != "OK" {
+		t.Fatalf("rpc = %#v, want OK response status", event.RPC)
+	}
+	if event.Server == nil || event.Server.Address != "example.com" || event.Server.Port == nil || *event.Server.Port != 443 {
+		t.Fatalf("server = %#v, want example.com:443", event.Server)
+	}
+	if event.Error == nil || event.Error.Type != "tool_error" {
+		t.Fatalf("error = %#v, want tool_error", event.Error)
+	}
+}
+
+func TestEventsFromTracesMapsBeaconMCPAliases(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("beacon mcp tool")
+	attrs := span.Attributes()
+	attrs.PutStr("beacon.tool.name", "alias_tool")
+	attrs.PutStr("beacon.tool.command", "alias command")
+	attrs.PutStr("beacon.tool.path", "/tmp/input.txt")
+	attrs.PutStr("beacon.mcp.server", "clickhouse")
+	attrs.PutStr("beacon.mcp.tool", "query")
+	attrs.PutStr("mcp.method.name", "tools/call")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.Event.Action != "mcp.tool_invoked" {
+		t.Fatalf("event.action = %q, want mcp.tool_invoked", event.Event.Action)
+	}
+	if event.Tool == nil || event.Tool.Name != "alias_tool" || event.Tool.Command != "alias command" || event.Tool.Path != "/tmp/input.txt" {
+		t.Fatalf("tool = %#v, want beacon.tool aliases", event.Tool)
+	}
+	if event.MCP == nil || event.MCP.Server != "clickhouse" || event.MCP.Tool != "query" {
+		t.Fatalf("mcp = %#v, want beacon.mcp aliases", event.MCP)
+	}
+	if event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Name != "alias_tool" {
+		t.Fatalf("gen_ai tool = %#v, want beacon.tool.name fallback", event.GenAI)
+	}
+}
+
+func TestEventsFromTracesDoesNotPromotePlainGenAIToolToMCP(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("execute_tool plain_tool")
+	attrs := span.Attributes()
+	attrs.PutStr("gen_ai.operation.name", "execute_tool")
+	attrs.PutStr("gen_ai.tool.name", "plain_tool")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.Event.Action != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", event.Event.Action)
+	}
+	if event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Name != "plain_tool" {
+		t.Fatalf("gen_ai tool = %#v, want plain_tool", event.GenAI)
+	}
+	if event.MCP != nil {
+		t.Fatalf("plain GenAI tool should not populate MCP: %#v", event.MCP)
+	}
+}
+
 func newObserveSDKTraceSpan(name string) (ptrace.Span, ptrace.Traces) {
 	traces := ptrace.NewTraces()
 	resourceSpans := traces.ResourceSpans().AppendEmpty()

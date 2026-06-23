@@ -126,6 +126,40 @@ func TestJSONLWriterRotatesAndPrunesArchives(t *testing.T) {
 	}
 }
 
+func TestJSONLWriterDedupesRuntimeEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writer := jsonlWriter{
+		path:           path,
+		maxEventBytes:  defaultMaxEventBytes,
+		rotateBytes:    defaultRotateBytes,
+		rotateArchives: defaultRotateArchives,
+		redactSecrets:  true,
+	}
+	event := newBeaconEvent("mcp.tool_invoked", "mcp", "info", "cursor", time.Date(2026, 6, 18, 21, 11, 24, 0, time.UTC))
+	event.Message = "Tool execution observed"
+	event.Session = &sessionInfo{ID: "s1"}
+	event.MCP = &mcpInfo{Server: "clickhouse", Tool: "execute_sql"}
+	duplicate := event
+	duplicate.Harness.Name = "claude"
+	duplicate.Timestamp = time.Date(2026, 6, 18, 21, 11, 25, 0, time.UTC).Format(time.RFC3339)
+
+	if err := writer.append(event); err != nil {
+		t.Fatalf("first append returned error: %v", err)
+	}
+	if err := writer.append(duplicate); err != nil {
+		t.Fatalf("second append returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected duplicate event to be suppressed, got %d lines: %s", len(lines), string(data))
+	}
+}
+
 func TestConsumeLogsWritesBeaconJSONL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{

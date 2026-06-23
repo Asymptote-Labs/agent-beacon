@@ -149,6 +149,37 @@ func TestAppendEventPrunesNumberedArchives(t *testing.T) {
 	}
 }
 
+func TestAppendEventDedupesRuntimeEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "mcp.tool_invoked",
+		Harness: schema.HarnessInfo{Name: "cursor"},
+		Message: "Tool execution observed",
+	})
+	event.Timestamp = "2026-06-18T21:11:24Z"
+	event.Session = &schema.SessionInfo{ID: "s1"}
+	event.MCP = &schema.MCPInfo{Server: "clickhouse", Tool: "execute_sql"}
+	duplicate := event
+	duplicate.Harness.Name = "claude"
+	duplicate.Timestamp = "2026-06-18T21:11:25Z"
+
+	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+		t.Fatalf("first AppendEvent returned error: %v", err)
+	}
+	if _, err := AppendEvent(duplicate, Options{Path: path}); err != nil {
+		t.Fatalf("second AppendEvent returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected duplicate event to be suppressed, got %d lines: %s", len(lines), string(data))
+	}
+}
+
 func TestAppendEventSerializesConcurrentWrites(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	event := schema.NewEvent(schema.NewEventOptions{

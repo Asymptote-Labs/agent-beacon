@@ -25,6 +25,25 @@ export const ATTR_BEACON_FILE_LANGUAGE = "beacon.file.language";
 export const ATTR_BEACON_MCP_SERVER = "beacon.mcp.server";
 export const ATTR_BEACON_MCP_TOOL = "beacon.mcp.tool";
 
+export const ATTR_GEN_AI_OPERATION_NAME = "gen_ai.operation.name";
+export const ATTR_GEN_AI_TOOL_NAME = "gen_ai.tool.name";
+export const ATTR_GEN_AI_TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments";
+export const ATTR_GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
+export const ATTR_GEN_AI_TOOL_CALL_RESULT = "gen_ai.tool.call.result";
+export const ATTR_MCP_METHOD_NAME = "mcp.method.name";
+export const ATTR_MCP_PROTOCOL_VERSION = "mcp.protocol.version";
+export const ATTR_MCP_RESOURCE_URI = "mcp.resource.uri";
+export const ATTR_MCP_SESSION_ID = "mcp.session.id";
+export const ATTR_JSONRPC_REQUEST_ID = "jsonrpc.request.id";
+export const ATTR_JSONRPC_PROTOCOL_VERSION = "jsonrpc.protocol.version";
+export const ATTR_RPC_RESPONSE_STATUS_CODE = "rpc.response.status_code";
+export const ATTR_NETWORK_PROTOCOL_NAME = "network.protocol.name";
+export const ATTR_NETWORK_PROTOCOL_VERSION = "network.protocol.version";
+export const ATTR_NETWORK_TRANSPORT = "network.transport";
+export const ATTR_SERVER_ADDRESS = "server.address";
+export const ATTR_SERVER_PORT = "server.port";
+export const ATTR_ERROR_TYPE = "error.type";
+
 export const ATTR_BEACON_APPROVAL_DECISION = "beacon.approval.decision";
 export const ATTR_BEACON_APPROVAL_REASON = "beacon.approval.reason";
 

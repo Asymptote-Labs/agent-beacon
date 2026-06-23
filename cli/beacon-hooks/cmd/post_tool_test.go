@@ -114,6 +114,62 @@ func TestRunPostToolEmitsCursorAfterShellExecution(t *testing.T) {
 	}
 }
 
+func TestRunPostToolEmitsCursorMCPGenAIFields(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-mcp",
+		"hook_event_name": "postToolUse",
+		"tool_name":       "MCP:get_organizations",
+		"tool_input": map[string]interface{}{
+			"jsonrpc_request_id":   "req-1",
+			"mcp_protocol_version": "2025-06-18",
+			"mcp_session_id":       "mcp-session",
+			"network_transport":    "pipe",
+		},
+		"tool_response": map[string]interface{}{"organizations": []interface{}{"meulo"}},
+		"cwd":           "/repo",
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "mcp.tool_invoked" {
+		t.Fatalf("event.action = %q, want mcp.tool_invoked", action)
+	}
+	if tool := event["tool"].(map[string]interface{})["name"]; tool != "MCP:get_organizations" {
+		t.Fatalf("tool.name = %q, want raw Cursor MCP tool name", tool)
+	}
+	mcp := event["mcp"].(map[string]interface{})
+	if mcp["tool"] != "get_organizations" {
+		t.Fatalf("mcp = %#v, want get_organizations", mcp)
+	}
+	if method := mcp["method"].(map[string]interface{})["name"]; method != "tools/call" {
+		t.Fatalf("mcp.method.name = %q, want tools/call", method)
+	}
+	genAI := event["gen_ai"].(map[string]interface{})
+	if operation := genAI["operation"].(map[string]interface{})["name"]; operation != "execute_tool" {
+		t.Fatalf("gen_ai.operation.name = %q, want execute_tool", operation)
+	}
+	genAITool := genAI["tool"].(map[string]interface{})
+	if genAITool["name"] != "get_organizations" {
+		t.Fatalf("gen_ai.tool = %#v, want get_organizations", genAITool)
+	}
+	if result := genAITool["call"].(map[string]interface{})["result"]; result == nil {
+		t.Fatalf("gen_ai.tool.call.result missing: %#v", genAITool)
+	}
+	if transport := event["network"].(map[string]interface{})["transport"]; transport != "pipe" {
+		t.Fatalf("network.transport = %q, want pipe", transport)
+	}
+	if requestID := event["jsonrpc"].(map[string]interface{})["request"].(map[string]interface{})["id"]; requestID != "req-1" {
+		t.Fatalf("jsonrpc.request.id = %q, want req-1", requestID)
+	}
+}
+
 func TestRunPostToolSuppressesCursorCloudReadPostToolDuplicate(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
@@ -200,6 +256,51 @@ func TestRunPostToolEmitsCursorPostToolFailure(t *testing.T) {
 	tool := event["tool"].(map[string]interface{})
 	if tool["name"] != "Shell" || tool["failure_type"] != "timeout" {
 		t.Fatalf("tool = %#v, want Shell timeout", tool)
+	}
+}
+
+func TestRunPostToolEmitsCursorMCPFailureResponseFields(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-mcp-failure",
+		"hook_event_name": "postToolUseFailure",
+		"tool_name":       "MCP:get_organizations",
+		"tool_input": map[string]interface{}{
+			"jsonrpc_request_id": "req-1",
+		},
+		"tool_response": map[string]interface{}{
+			"error": true,
+			"mcp_server": "linear",
+			"mcp_tool":   "get_organizations",
+		},
+		"error_message": "MCP tool failed",
+		"failure_type":  "tool_error",
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
+		t.Fatalf("event.action = %q, want tool.failed", action)
+	}
+	errorFields := event["error"].(map[string]interface{})
+	if got := errorFields["type"]; got != "tool_error" {
+		t.Fatalf("error.type = %q, want tool_error", got)
+	}
+	mcp := event["mcp"].(map[string]interface{})
+	if mcp["server"] != "linear" || mcp["tool"] != "get_organizations" {
+		t.Fatalf("mcp = %#v, want linear get_organizations", mcp)
+	}
+	genAI := event["gen_ai"].(map[string]interface{})
+	tool := genAI["tool"].(map[string]interface{})
+	call := tool["call"].(map[string]interface{})
+	if call["result"] == nil {
+		t.Fatalf("gen_ai.tool.call = %#v, want result", call)
 	}
 }
 
@@ -538,8 +639,23 @@ func TestRunPostToolEmitsClaudeToolEvents(t *testing.T) {
 	if severity := events[2]["severity"]; severity != "high" {
 		t.Fatalf("failure severity = %q, want high", severity)
 	}
-	if mcp := events[3]["mcp"].(map[string]interface{}); mcp["tool"] != "remember" {
-		t.Fatalf("mcp = %#v, want tool remember", mcp)
+	mcp := events[3]["mcp"].(map[string]interface{})
+	if mcp["server"] != "memory" || mcp["tool"] != "write" {
+		t.Fatalf("mcp = %#v, want server memory tool write", mcp)
+	}
+	if method := mcp["method"].(map[string]interface{})["name"]; method != "tools/call" {
+		t.Fatalf("mcp.method.name = %q, want tools/call", method)
+	}
+	genAI := events[3]["gen_ai"].(map[string]interface{})
+	if operation := genAI["operation"].(map[string]interface{})["name"]; operation != "execute_tool" {
+		t.Fatalf("gen_ai.operation.name = %q, want execute_tool", operation)
+	}
+	genAITool := genAI["tool"].(map[string]interface{})
+	if genAITool["name"] != "write" {
+		t.Fatalf("gen_ai.tool = %#v, want write", genAITool)
+	}
+	if result := genAITool["call"].(map[string]interface{})["result"]; result == nil {
+		t.Fatalf("gen_ai.tool.call.result missing: %#v", genAITool)
 	}
 }
 

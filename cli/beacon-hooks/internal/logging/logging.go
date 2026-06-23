@@ -283,6 +283,9 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	defer lock.Close()
+	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
+		return nil
+	}
 	if err := rotateEndpointLogIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
 		return err
 	}

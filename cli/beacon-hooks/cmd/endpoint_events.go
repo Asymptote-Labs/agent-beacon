@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,6 +148,10 @@ func sessionFields(sessionID string, input map[string]interface{}) map[string]in
 }
 
 func toolFields(toolName string, toolInput map[string]interface{}) map[string]interface{} {
+	return toolFieldsWithResponse(toolName, toolInput, nil)
+}
+
+func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]interface{}) map[string]interface{} {
 	fields := map[string]interface{}{}
 	if toolName != "" {
 		fields["tool"] = map[string]interface{}{"name": toolName}
@@ -163,13 +168,185 @@ func toolFields(toolName string, toolInput map[string]interface{}) map[string]in
 		}
 		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"path": path})
 	}
-	if server := firstToolString(toolInput, "server", "server_name", "mcp_server"); server != "" || strings.Contains(strings.ToLower(toolName), "mcp") {
-		fields["mcp"] = map[string]interface{}{
-			"server": server,
-			"tool":   firstToolString(toolInput, "tool", "tool_name", "name"),
+	if mcp := mcpToolFields(toolName, toolInput, toolResponse); len(mcp) > 0 {
+		fields["mcp"] = mcp
+		tool := firstNestedString(mcp, "tool")
+		fields["gen_ai"] = genAIToolFields(tool, toolInput, toolResponse)
+		for key, value := range mcpStandardFields(toolInput, toolResponse) {
+			fields[key] = value
 		}
 	}
 	return fields
+}
+
+func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface{}) map[string]interface{} {
+	maps := []map[string]interface{}{toolInput, toolResponse}
+	mcpServer := firstToolStringAcross(maps, "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
+	mcpTool := firstToolStringAcross(maps, "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name")
+	mcpMethod := firstToolStringAcross(maps, "mcp.method.name", "mcp_method_name", "mcp_method")
+	mcpProtocol := firstToolStringAcross(maps, "mcp.protocol.version", "mcp_protocol_version")
+	mcpResource := firstToolStringAcross(maps, "mcp.resource.uri", "mcp_resource_uri")
+	mcpSession := firstToolStringAcross(maps, "mcp.session.id", "mcp_session_id")
+	hasCascadeServerToolPair := isCascadePlatform(platformFlag) && firstToolStringAcross(maps, "server_name") != "" && firstToolStringAcross(maps, "tool_name") != ""
+
+	server := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "server", "server_name", "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
+	tool := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "tool", "tool_name", "function_name", "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name", "gen_ai.tool.name")
+	genericToolName := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "name")
+	method := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "mcp.method.name", "mcp_method_name", "mcp_method", "method_name", "method")
+	protocol := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "mcp.protocol.version", "mcp_protocol_version", "protocol_version")
+	resource := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "mcp.resource.uri", "mcp_resource_uri", "resource_uri", "uri")
+	session := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "mcp.session.id", "mcp_session_id")
+
+	if derivedServer, derivedTool := deriveMCPServerTool(toolName); derivedServer != "" || derivedTool != "" {
+		if server == "" {
+			server = derivedServer
+		}
+		if tool == "" {
+			tool = derivedTool
+		}
+	}
+
+	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || strings.Contains(strings.ToLower(toolName), "mcp")
+	if !isMCP {
+		return nil
+	}
+	if tool == "" {
+		tool = genericToolName
+	}
+	if method == "" {
+		method = "tools/call"
+	}
+	out := map[string]interface{}{"server": server, "tool": tool}
+	if method != "" {
+		out["method"] = map[string]interface{}{"name": method}
+	}
+	if protocol != "" {
+		out["protocol"] = map[string]interface{}{"version": protocol}
+	}
+	if resource != "" {
+		out["resource"] = map[string]interface{}{"uri": resource}
+	}
+	if session != "" {
+		out["session"] = map[string]interface{}{"id": session}
+	}
+	return out
+}
+
+func deriveMCPServerTool(toolName string) (string, string) {
+	trimmed := strings.TrimSpace(toolName)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "mcp:") {
+		return "", strings.TrimSpace(trimmed[len("MCP:"):])
+	}
+	if strings.HasPrefix(lower, "mcp__") {
+		parts := strings.Split(trimmed, "__")
+		if len(parts) >= 3 {
+			return parts[1], strings.Join(parts[2:], "__")
+		}
+	}
+	return "", ""
+}
+
+func genAIToolFields(tool string, toolInput, toolResponse map[string]interface{}) map[string]interface{} {
+	genAI := map[string]interface{}{
+		"operation": map[string]interface{}{"name": "execute_tool"},
+	}
+	toolInfo := map[string]interface{}{}
+	if tool != "" {
+		toolInfo["name"] = tool
+	}
+	call := map[string]interface{}{}
+	if len(toolInput) > 0 {
+		call["arguments"] = toolInput
+	}
+	if len(toolResponse) > 0 {
+		call["result"] = toolResponse
+	}
+	if len(call) > 0 {
+		toolInfo["call"] = call
+	}
+	if len(toolInfo) > 0 {
+		genAI["tool"] = toolInfo
+	}
+	return genAI
+}
+
+func mcpStandardFields(toolInput, toolResponse map[string]interface{}) map[string]interface{} {
+	fields := map[string]interface{}{}
+	maps := []map[string]interface{}{toolInput, toolResponse}
+	if errorType := mcpErrorType(toolResponse); errorType != "" {
+		fields["error"] = map[string]interface{}{"type": errorType}
+	} else if errorType := firstToolStringAcross(maps, "error.type", "error_type"); errorType != "" {
+		fields["error"] = map[string]interface{}{"type": errorType}
+	}
+	jsonrpc := map[string]interface{}{}
+	if id := firstToolStringAcross(maps, "jsonrpc.request.id", "jsonrpc_request_id", "request_id"); id != "" {
+		jsonrpc["request"] = map[string]interface{}{"id": id}
+	}
+	if version := firstToolStringAcross(maps, "jsonrpc.protocol.version", "jsonrpc_protocol_version", "jsonrpc"); version != "" {
+		jsonrpc["protocol"] = map[string]interface{}{"version": version}
+	}
+	if len(jsonrpc) > 0 {
+		fields["jsonrpc"] = jsonrpc
+	}
+	network := map[string]interface{}{}
+	networkProtocol := map[string]interface{}{}
+	if name := firstToolStringAcross(maps, "network.protocol.name", "network_protocol_name"); name != "" {
+		networkProtocol["name"] = strings.ToLower(name)
+	}
+	if version := firstToolStringAcross(maps, "network.protocol.version", "network_protocol_version"); version != "" {
+		networkProtocol["version"] = version
+	}
+	if len(networkProtocol) > 0 {
+		network["protocol"] = networkProtocol
+	}
+	if transport := firstToolStringAcross(maps, "network.transport", "network_transport", "transport"); transport != "" {
+		network["transport"] = strings.ToLower(transport)
+	}
+	if len(network) > 0 {
+		fields["network"] = network
+	}
+	if status := firstToolStringAcross(maps, "rpc.response.status_code", "rpc_response_status_code", "status_code"); status != "" {
+		fields["rpc"] = map[string]interface{}{"response": map[string]interface{}{"status_code": status}}
+	}
+	server := map[string]interface{}{}
+	if address := firstToolStringAcross(maps, "server.address", "server_address", "serverAddress", "address"); address != "" {
+		server["address"] = address
+	}
+	if port, ok := firstToolIntAcross(maps, "server.port", "server_port", "serverPort", "port"); ok {
+		server["port"] = port
+	}
+	if len(server) > 0 {
+		fields["server"] = server
+	}
+	return fields
+}
+
+func mcpErrorType(toolResponse map[string]interface{}) string {
+	if toolResponse == nil {
+		return ""
+	}
+	if errorType := firstToolString(toolResponse, "error.type", "error_type"); errorType != "" {
+		return errorType
+	}
+	if isError := firstToolString(toolResponse, "isError", "is_error"); strings.EqualFold(isError, "true") {
+		return "tool_error"
+	}
+	if mcpHasErrorValue(toolResponse, "error") {
+		return "tool_error"
+	}
+	return ""
+}
+
+func mcpHasErrorValue(toolResponse map[string]interface{}, key string) bool {
+	value, ok := toolResponse[key]
+	if !ok || value == nil {
+		return false
+	}
+	if boolValue, ok := value.(bool); ok {
+		return boolValue
+	}
+	return normalizeToolString(value) != ""
 }
 
 func diffFields(filePath, diffStr string) map[string]interface{} {
@@ -214,6 +391,57 @@ func firstToolString(input map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstToolStringAcross(inputs []map[string]interface{}, keys ...string) string {
+	for _, input := range inputs {
+		if input == nil {
+			continue
+		}
+		if value := firstToolString(input, keys...); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstToolIntAcross(inputs []map[string]interface{}, keys ...string) (int, bool) {
+	for _, input := range inputs {
+		if input == nil {
+			continue
+		}
+		for _, key := range keys {
+			value, ok := input[key]
+			if !ok {
+				continue
+			}
+			switch typed := value.(type) {
+			case int:
+				return typed, true
+			case int64:
+				return int(typed), true
+			case float64:
+				return int(typed), true
+			case string:
+				parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+				if err == nil {
+					return parsed, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+func firstNestedString(input map[string]interface{}, key string) string {
+	if input == nil {
+		return ""
+	}
+	value, ok := input[key]
+	if !ok {
+		return ""
+	}
+	return normalizeToolString(value)
 }
 
 func normalizeToolString(value interface{}) string {
