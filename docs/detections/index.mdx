@@ -51,13 +51,14 @@ beacon scan --fail-on high
 
 Detections focus on risky agent behavior that is hard to understand from one raw log line alone:
 
-- **Credential access:** reads of `.env`, SSH keys, cloud credentials, browser session stores, shell history, process tables, or other secret-bearing surfaces.
-- **Context exfiltration:** network commands, paste and transfer services, DNS tunneling, Git bundles, outbound MCP calls, or secret-bearing request bodies.
-- **Risky commands:** destructive shell operations, persistence installation, shell escapes, privileged container runs, curl-to-shell patterns, sudoers edits, or root-equivalent changes.
-- **Sensitive edits:** changes to CI pipelines, dependency manifests, shell startup files, authorization code, autostart units, agent instruction files, or control surfaces.
+- **Credential access:** reads of `.env`, SSH keys, cloud credentials, browser session stores, shell history, process tables, Kubernetes kubeconfigs and service-account tokens, GPG private keyrings, or password-manager vaults (KeePass, 1Password, Bitwarden, LastPass, pass).
+- **Context exfiltration:** network commands, paste and transfer services, DNS tunneling, Git bundles, outbound MCP calls, secret-bearing request bodies, SSH reverse-tunnel or SOCKS-proxy invocations, or archive-then-upload pipelines.
+- **Risky commands:** destructive shell operations, persistence installation (crontab, systemd timers, kernel modules), shell escapes, privileged container runs, curl-to-shell patterns, sudoers edits, root-equivalent changes, or history-rewriting git operations (filter-branch, filter-repo, rebase -i, force-push to protected branches).
+- **Sensitive edits:** changes to CI pipelines, dependency manifests, shell startup files, authorization code, autostart units, agent instruction files, SSH authorized_keys or sshd_config, /etc/hosts or hosts.allow/deny, container or IaC files (Dockerfile, Terraform, Kubernetes manifests, Helm values), or other control surfaces.
 - **Prompt injection:** instructions that try to override roles, ignore prior instructions, exfiltrate context, hide with invisible characters, or decode and execute hidden payloads.
-- **Approval and policy abuse:** denied actions that still execute, high-risk approvals without a reason, or attempts to spawn around runtime permission controls.
-- **Resource consumption:** unusually expensive single calls when token and cost telemetry are available.
+- **Approval and policy abuse:** denied actions that still execute, high-risk approvals without a reason, attempts to spawn around runtime permission controls (agent CLIs launched with permission-elevating env vars, sandbox-escape primitives like nsenter / unshare / chroot / pivot_root), or re-invocations of denied commands through a renamed binary or temp-path shim.
+- **Agent runtime control:** spawns of known agent CLIs (Claude Code, Codex, Cursor Agent, Aider, Goose, OpenCode, Gemini) that arrive with permission-elevating env vars or attempt to hand off credentials or context to a second agent.
+- **Resource consumption:** unusually expensive single calls when token and cost telemetry are available, fork-bomb patterns (`:(){ :|:& };:`, `while true; do ... & done`), or disk-fill primitives (dd of /dev/zero to large targets, fallocate, yes-piped-to-file).
 
 Because rules run over the shared Beacon event model, the same rule vocabulary can apply across supported harnesses when those harnesses emit the required fields.
 
@@ -69,14 +70,15 @@ Beacon ships with a small built-in baseline so `beacon scan` works before any ru
 
 | Category | Example behaviors |
 | --- | --- |
-| `credential-access` | Credential-file reads, browser session store reads, shell history scans, SSH agent enumeration |
-| `context-exfiltration` | Secret read then egress, credentials in curl data, upload to paste or transfer sites |
-| `risky-command` | Curl piped to shell, recursive root delete, sudoers tampering, persistence installation |
-| `sensitive-edit` | CI pipeline edits, dependency manifest edits, shell login file edits, agent control surface edits |
+| `credential-access` | Credential-file reads, browser session store reads, shell history scans, SSH agent enumeration, Kubernetes kubeconfig reads, GPG secret-key exports, password-manager vault reads |
+| `context-exfiltration` | Secret read then egress, credentials in curl data, upload to paste or transfer sites, SSH tunnel egress, archive-then-upload pipelines |
+| `risky-command` | Curl piped to shell, recursive root delete, sudoers tampering, persistence installation, crontab modification, kernel-module load |
+| `sensitive-edit` | CI pipeline edits, dependency manifest edits, shell login file edits, agent control surface edits, SSH authorized_keys edits, /etc/hosts edits, container / IaC file edits |
 | `prompt-injection` | Role override jailbreaks, hidden payloads, markdown-image exfiltration, instruction override markers |
 | `external-access` | Cloud metadata endpoint access, link-local target fetches, external MCP tool calls |
-| `approval-abuse` | Permission-bypass execution or high-risk approvals without reviewer context |
-| `source-control` | Git hook installation, remote tampering, Git config execution injection |
+| `approval-abuse` | Permission-bypass execution or high-risk approvals without reviewer context, denied-command re-invocation through renamed binaries |
+| `source-control` | Git hook installation, remote tampering, Git config execution injection, history rewriting (filter-branch / filter-repo / rebase -i), force-push to protected branches |
+| `agent-control` | Agent CLIs spawned with permission-elevating env vars, sandbox-escape primitives, inter-agent credential handoff |
 
 Rules only evaluate events that exist in the runtime log. For example, an MCP detection needs MCP-like activity to be emitted by a supported harness, and a prompt-injection rule needs retained prompt or content fields to be present under the endpoint's local data-retention settings.
 

@@ -1,0 +1,67 @@
+id: etc-hosts-modified
+version: 1
+title: /etc/hosts or hosts.allow/deny modified
+description: >
+  The agent modified a system name resolution file: /etc/hosts (the
+  primary local DNS override), /etc/hosts.allow, or /etc/hosts.deny
+  (the TCP-wrappers access control list). Modifying /etc/hosts is a
+  local DNS-hijack primitive — an attacker can redirect a known
+  hostname (e.g. github.com, an internal package registry) to an
+  attacker-controlled IP and exfiltrate credentials on the next
+  connection. Modifying hosts.allow / hosts.deny changes the
+  network-access ACL for the system. The rule matches the well-known
+  paths and excludes generic "hosts" mentions (e.g. a file named
+  "hosts" in a project tree).
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" && (
+    e.file.path.matches("(?i)(^|/)etc/hosts$") ||
+    e.file.path.matches("(?i)(^|/)etc/hosts\\.(allow|deny)$")
+  )
+
+emit:
+  reason: "/etc/hosts or hosts.allow/deny modified (local DNS hijack or ACL change)"
+
+tests:
+  - name: modify_etc_hosts
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/hosts" }
+        session: { id: s1 }
+  - name: modify_etc_hosts_allow
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/hosts.allow" }
+        session: { id: s1 }
+  - name: modify_etc_hosts_deny
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/hosts.deny" }
+        session: { id: s1 }
+  - name: read_etc_hosts
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "/etc/hosts" }
+        session: { id: s1 }
+  - name: modify_project_hosts_file
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/repo/ops/hosts" }
+        session: { id: s1 }
+  - name: modify_etc_hosts_backup
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/hosts.bak" }
+        session: { id: s1 }

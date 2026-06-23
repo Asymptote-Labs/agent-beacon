@@ -1,0 +1,129 @@
+id: disk-fill-attempt
+version: 1
+title: Disk-fill primitive executed in a command
+description: >
+  A command.executed event invokes a disk-fill primitive: writing an unbounded
+  stream of /dev/zero or /dev/urandom to a real file via dd, fallocate/truncate
+  with a large or unbounded size, yes piped to a file, or a write to a top-level
+  mount point (/tmp, /var). A disk-fill attack is a resource-DoS primitive
+  (OWASP LLM10) that exhausts filesystem capacity and is rarely a legitimate
+  agent action. The rule is anchored to a command boundary and only matches
+  the dangerous shapes (dd to a real target file, large fallocate, yes to a
+  file, direct write to /tmp or /var); small /dev/null writes and ordinary
+  redirects do not fire.
+severity: medium
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM10
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)\\bdd\\b[^;&|]*\\bif\\s*=\\s*/dev/(zero|urandom)\\b[^;&|]*\\bof\\s*=\\s*[^\\s;&|]+") ||
+    e.command.command.matches("(?i)\\b(fallocate|truncate)\\b\\s+(-[ls]\\s+([0-9]+[KMGTP]|[0-9]+M|[0-9]+G)|--size\\s+[0-9]+[KMGTP])\\s+") ||
+    e.command.command.matches("(?i)\\byes\\b[^;&|]*>\\s*\\S+") ||
+    e.command.command.matches("(?i)>\\s*/(tmp|var)\\b")
+  )
+
+emit:
+  reason: "Disk-fill primitive executed (resource-DoS via dd / fallocate / yes / /dev/zero)"
+
+tests:
+  - name: dd_dev_zero_to_root
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: command.executed }
+        command: { command: "dd if=/dev/zero of=/bigfile bs=1M count=10240" }
+        session: { id: s1 }
+  - name: dd_dev_urandom_to_tmp
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:01:00Z"
+        event: { action: command.executed }
+        command: { command: "dd if=/dev/urandom of=/tmp/junk bs=1G count=5" }
+        session: { id: s1 }
+  - name: fallocate_large_file
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:02:00Z"
+        event: { action: command.executed }
+        command: { command: "fallocate -l 100G /var/spool/big" }
+        session: { id: s1 }
+  - name: truncate_5G
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:03:00Z"
+        event: { action: command.executed }
+        command: { command: "truncate -s 5G /var/log/huge" }
+        session: { id: s1 }
+  - name: yes_piped_to_file
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:04:00Z"
+        event: { action: command.executed }
+        command: { command: "yes 'fill' > /tmp/flood" }
+        session: { id: s1 }
+  - name: dd_copy_real_file_safe
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:05:00Z"
+        event: { action: command.executed }
+        command: { command: "dd if=/etc/passwd of=/tmp/passwd_copy" }
+        session: { id: s1 }
+  - name: dd_in_manpage_grep
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:07:00Z"
+        event: { action: command.executed }
+        command: { command: "man dd | grep 'of='" }
+        session: { id: s1 }
+  - name: small_truncate
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:08:00Z"
+        event: { action: command.executed }
+        command: { command: "truncate -s 0 /var/log/app.log" }
+        session: { id: s1 }
+  - name: redirect_to_tmp
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:09:00Z"
+        event: { action: command.executed }
+        command: { command: "echo hello > /tmp/greeting.txt" }
+        session: { id: s1 }
+  - name: redirect_to_var
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:10:00Z"
+        event: { action: command.executed }
+        command: { command: "cat /dev/zero > /var/log/big" }
+        session: { id: s1 }
+  - name: redirect_to_home
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:11:00Z"
+        event: { action: command.executed }
+        command: { command: "echo hello > /home/u/greeting.txt" }
+        session: { id: s1 }
+  - name: redirect_to_dev_null
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:12:00Z"
+        event: { action: command.executed }
+        command: { command: "echo hello > /dev/null" }
+        session: { id: s1 }
+  - name: redirect_tmpdir_not_tmp
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:13:00Z"
+        event: { action: command.executed }
+        command: { command: "echo hello > /tmpdir/foo" }
+        session: { id: s1 }
+  - name: redirect_home_tmp_subpath
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:14:00Z"
+        event: { action: command.executed }
+        command: { command: "echo hello > /home/u/tmp/foo" }
+        session: { id: s1 }

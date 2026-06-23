@@ -1,0 +1,86 @@
+id: gpg-keyring-access
+version: 1
+title: Agent read a GPG private key or exported a secret key
+description: >
+  The agent either read a file under the GnuPG private-key directory
+  (private-keys-v1.d/, secring.gpg, .gnupg/openpgp-revocs.d/ certificate
+  revocation, .gnupg/trustdb.gpg trust database, .gnupg/gpg-control files) OR
+  invoked gpg with --export-secret-keys, --export-secret-subkeys, or
+  --gen-key. Private GPG keys sign commits and decrypt sensitive mail; an
+  agent touching a private keyring is a high-value exfil signal. The rule
+  is anchored on the path or on a gpg subcommand, and explicitly excludes
+  the public keyring (pubring.gpg, *.asc public keys) since reading public
+  keys is a routine signature-verification operation.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM02
+  mitre_atlas: AML.T0024
+
+match: >
+  (e.event.action == "file.read" && (
+    e.file.path.matches("(?i)(^|/)\\.gnupg/private-keys-v1\\.d/") ||
+    e.file.path.matches("(?i)(^|/)secring\\.gpg$") ||
+    e.file.path.matches("(?i)(^|/)\\.gnupg/(openpgp-revocs\\.d/|trustdb\\.gpg$)") ||
+    e.file.path.matches("(?i)(^|/)\\.gnupg/[^/]+\\.key$")
+  )) || (
+    e.event.action == "command.executed" && (
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg\\b[^;&|]*--export-secret-(keys|subkeys)\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg\\b[^;&|]*--gen-key\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg\\b[^;&|]*--card-status\\b[^;&|]*--with-keygrip\\b")
+    )
+  )
+
+emit:
+  reason: "Agent accessed a GPG private key (file read or secret-export invocation)"
+
+tests:
+  - name: read_private_keys_dir
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.gnupg/private-keys-v1.d/ABC123.key" }
+        session: { id: s1 }
+  - name: read_secring_gpg
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.gnupg/secring.gpg" }
+        session: { id: s1 }
+  - name: read_trustdb
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.gnupg/trustdb.gpg" }
+        session: { id: s1 }
+  - name: gpg_export_secret_keys
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg --export-secret-keys --armor 0xDEADBEEF" }
+        session: { id: s1 }
+  - name: gpg_export_secret_subkeys
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg --export-secret-subkeys 0xCAFEBABE > /tmp/keys.asc" }
+        session: { id: s1 }
+  - name: read_public_keyring
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.gnupg/pubring.kbx" }
+        session: { id: s1 }
+  - name: gpg_list_keys
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg --list-keys" }
+        session: { id: s1 }
+  - name: gpg_verify_signature
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg --verify release.tar.gz.asc" }
+        session: { id: s1 }

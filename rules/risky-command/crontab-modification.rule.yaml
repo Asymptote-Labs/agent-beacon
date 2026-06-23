@@ -1,0 +1,96 @@
+id: crontab-modification
+version: 1
+title: Crontab modified (user, system, or spool)
+description: >
+  A persistent-scheduling primitive was modified: the user crontab
+  (crontab -e, crontab <file>, echo '...' | crontab -, crontab -r to
+  remove), the system crontab (/etc/crontab), a drop-in under
+  /etc/cron.d/ or /etc/cron.{hourly,daily,weekly,monthly}/, or a
+  user's spool file under /var/spool/cron/. Adding a cron entry is a
+  near-universal persistence primitive — once installed, the job runs
+  on schedule even after the originating agent session ends. The rule
+  is anchored on the command binary or the file path so a `crontab -l`
+  list or a `cat /etc/crontab` read does not fire.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0011
+
+match: >
+  (e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\s+[a-zA-Z0-9_./]+\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)")
+  )) || (
+    e.event.action == "file.modified" && (
+      e.file.path.matches("(?i)(^|/)etc/crontab$") ||
+      e.file.path.matches("(?i)(^|/)etc/cron\\.d/[^/]+$") ||
+      e.file.path.matches("(?i)(^|/)etc/cron\\.(hourly|daily|weekly|monthly)/[^/]+$") ||
+      e.file.path.matches("(?i)(^|/)var/spool/cron/[^/]+$")
+    )
+  )
+
+emit:
+  reason: "Crontab modified (user crontab -e/-r, system /etc/cron.*, or spool) — persistence primitive"
+
+tests:
+  - name: crontab_edit
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -e" }
+        session: { id: s1 }
+  - name: crontab_load_from_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab /tmp/payload.cron" }
+        session: { id: s1 }
+  - name: pipe_into_crontab
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '* * * * * /tmp/x.sh' | crontab -" }
+        session: { id: s1 }
+  - name: crontab_remove
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -r" }
+        session: { id: s1 }
+  - name: write_etc_cron_d
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/cron.d/agent-persist" }
+        session: { id: s1 }
+  - name: write_etc_cron_hourly
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/cron.hourly/rotate" }
+        session: { id: s1 }
+  - name: write_var_spool_cron
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/var/spool/cron/root" }
+        session: { id: s1 }
+  - name: crontab_list_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -l" }
+        session: { id: s1 }
+  - name: read_etc_crontab
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "/etc/crontab" }
+        session: { id: s1 }
+  - name: ordinary_shell_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo hello world" }
+        session: { id: s1 }

@@ -1,0 +1,82 @@
+id: ssh-authorized-keys-modified
+version: 1
+title: SSH authorized_keys or sshd_config modified
+description: >
+  The agent modified an SSH trust file: a user authorized_keys
+  (~/.ssh/authorized_keys or the legacy authorized_keys2), the
+  system-wide sshd_config (/etc/ssh/sshd_config and any
+  sshd_config.d/* drop-in), or a known_hosts file. Modifying
+  authorized_keys adds a new persistent SSH login key for the
+  account — a strong persistence signal — and modifying sshd_config
+  can change the server's permitted auth methods (e.g. enabling
+  PermitRootLogin, PasswordAuthentication, or AuthorizedKeysFile to
+  a writable path). The rule matches the well-known paths only, so
+  benign edits to other ~/.ssh/* files (config, environment) do not
+  fire.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" && (
+    e.file.path.matches("(?i)(^|/)\\.ssh/authorized_keys(2)?$") ||
+    e.file.path.matches("(?i)(^|/)\\.ssh/known_hosts(2)?$") ||
+    e.file.path.matches("(?i)(^|/)etc/ssh/sshd_config$") ||
+    e.file.path.matches("(?i)(^|/)etc/ssh/sshd_config\\.d/[^/]+\\.conf$")
+  )
+
+emit:
+  reason: "SSH authorized_keys, known_hosts, or sshd_config modified (persistence or auth bypass)"
+
+tests:
+  - name: modify_authorized_keys
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/u/.ssh/authorized_keys" }
+        session: { id: s1 }
+  - name: modify_authorized_keys2
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/u/.ssh/authorized_keys2" }
+        session: { id: s1 }
+  - name: modify_sshd_config
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/ssh/sshd_config" }
+        session: { id: s1 }
+  - name: modify_sshd_config_d_dropin
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/etc/ssh/sshd_config.d/99-override.conf" }
+        session: { id: s1 }
+  - name: modify_known_hosts
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/u/.ssh/known_hosts" }
+        session: { id: s1 }
+  - name: modify_ssh_config
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/u/.ssh/config" }
+        session: { id: s1 }
+  - name: read_authorized_keys
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.ssh/authorized_keys" }
+        session: { id: s1 }
+  - name: modify_authorized_keys_dotbak
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/u/.ssh/authorized_keys.bak" }
+        session: { id: s1 }

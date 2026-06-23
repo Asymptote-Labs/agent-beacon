@@ -1,0 +1,191 @@
+id: sandbox-escape-attempt
+version: 1
+title: Sandbox-escape primitives invoked in an agent session
+description: >
+  A command.executed event invokes a primitive commonly used to escape a container
+  or sandbox boundary: nsenter (enter an existing namespace), unshare (create or
+  attach to a namespace, including mount/PID/net), chroot (change the apparent root
+  directory), unshare -m with mount, or pivot_root. These primitives are the
+  standard tools for breaking out of a chroot, container, or restricted namespace
+  — when an agent is supposed to be sandboxed, using them is a control-bypass
+  signal. The rule is anchored to a command boundary (start of line, after a shell
+  separator, or after a launcher like sudo/env) and looks only for the dangerous
+  shapes (nsenter with a target, unshare with a non-user-namespace flag — long
+  form `--mount`/`-m`/etc. or short-flag combinations with `-U` excluded when
+  `-U` is the only flag, chroot with a non-`/` argument), so benign
+  `unshare -U` for normal user-namespace apps does not fire. RE2's lack of
+  negative lookahead forces the short-flag combinations to be enumerated
+  explicitly (single non-U flag, U-then-non-U, non-U-then-U).
+severity: critical
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*unshare\\b\\s+(?:-[mnpiCAr]+|-U[mnpiCAr]+|-[mnpiCAr]+U|--(?:mount|net|ipc|uts|pid|all|cgroup))\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+|\\bnohup\\s+|\\bsetsid\\s+|\\bcommand\\s+|\\bexec\\s+)\\s*pivot_root\\b")
+  )
+
+emit:
+  reason: "Sandbox-escape primitive invoked (nsenter / unshare / chroot / pivot_root)"
+
+tests:
+  - name: nsenter_with_pid_target
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: command.executed }
+        command: { command: "nsenter -t 1 -m -p -n -- /bin/bash" }
+        session: { id: s1 }
+  - name: nsenter_mount_all
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:01:00Z"
+        event: { action: command.executed }
+        command: { command: "sudo nsenter --target 1234 --mount --pid --net /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_mount_namespace
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:02:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare --mount --pid --fork /bin/sh" }
+        session: { id: s1 }
+  - name: chroot_to_directory
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:03:00Z"
+        event: { action: command.executed }
+        command: { command: "chroot /tmp/attacker-root /bin/bash" }
+        session: { id: s1 }
+  - name: pivot_root_invocation
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:04:00Z"
+        event: { action: command.executed }
+        command: { command: "pivot_root /new-root /old-root" }
+        session: { id: s1 }
+  - name: unshare_user_namespace_benign
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:05:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -U --map-root-user firefox" }
+        session: { id: s1 }
+  - name: nsenter_in_documentation
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:06:00Z"
+        event: { action: command.executed }
+        command: { command: "echo 'nsenter --target 1 --mount /bin/bash is dangerous'" }
+        session: { id: s1 }
+  - name: chroot_to_root
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:07:00Z"
+        event: { action: command.executed }
+        command: { command: "chroot / /bin/bash" }
+        session: { id: s1 }
+  - name: grep_for_pattern
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:08:00Z"
+        event: { action: command.executed }
+        command: { command: "grep -r 'unshare --mount' /usr/share/man" }
+        session: { id: s1 }
+  - name: unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:09:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_short_net
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:10:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -n ip link" }
+        session: { id: s1 }
+  - name: unshare_short_pid
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:11:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -p --fork --mount-proc" }
+        session: { id: s1 }
+  - name: unshare_combined_mount_user
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:12:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -mU /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_combined_user_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:13:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -Um /bin/sh" }
+        session: { id: s1 }
+  - name: sudo_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:14:00Z"
+        event: { action: command.executed }
+        command: { command: "sudo unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: nohup_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:15:00Z"
+        event: { action: command.executed }
+        command: { command: "nohup unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: setsid_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:16:00Z"
+        event: { action: command.executed }
+        command: { command: "setsid unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: command_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:17:00Z"
+        event: { action: command.executed }
+        command: { command: "command unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: exec_unshare_short_mount
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:18:00Z"
+        event: { action: command.executed }
+        command: { command: "exec unshare -m /bin/sh" }
+        session: { id: s1 }
+  - name: nohup_nsenter_with_pid_target
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:19:00Z"
+        event: { action: command.executed }
+        command: { command: "nohup nsenter -t 1 -m -p -n -- /bin/bash" }
+        session: { id: s1 }
+  - name: nohup_chroot_to_directory
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:20:00Z"
+        event: { action: command.executed }
+        command: { command: "nohup chroot /tmp/attacker-root /bin/bash" }
+        session: { id: s1 }
+  - name: setsid_pivot_root_invocation
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:21:00Z"
+        event: { action: command.executed }
+        command: { command: "setsid pivot_root /new-root /old-root" }
+        session: { id: s1 }
