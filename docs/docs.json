@@ -1009,10 +1009,6 @@
       "destination": "/runtimes/devin-cloud-agents"
     },
     {
-      "source": "/detections",
-      "destination": "/detections"
-    },
-    {
       "source": "/detections-engine",
       "destination": "/detections/engine"
     },
