@@ -211,7 +211,11 @@ func runEndpointInventory(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	configInventory := endpointinventory.Scan(endpointinventory.Options{IncludeContents: endpointOpts.inventoryContents})
+	inventorySettings := endpointconfig.InventoryConfig(effectiveCfg)
+	configInventory := endpointinventory.Scan(endpointinventory.Options{
+		IncludeContents: endpointOpts.inventoryContents || inventorySettings.IncludeContents,
+		MaxContentBytes: inventorySettings.MaxContentBytes,
+	})
 	result := inventoryResult{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		RuntimeLog:        status.RuntimeLog,

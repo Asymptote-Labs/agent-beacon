@@ -675,6 +675,7 @@ func TestRedactSecretsAcrossFormats(t *testing.T) {
 		{"json", `{"api_token": "ghp_x", "host": "h"}`, "ghp_x", 1},
 		{"toml", "GITHUB_TOKEN = \"tk_x\"\nname = \"ok\"", "tk_x", 1},
 		{"yaml", "password: hunter2\nuser: bob", "hunter2", 1},
+		{"yaml block scalar", "api_token: |\n  ghp_first\n  ghp_second\nuser: bob", "ghp_second", 1},
 		{"shell", "export AWS_SECRET_ACCESS_KEY=abc123\nexport PATH=/bin", "abc123", 1},
 		{"none", `{"host": "example.com", "port": 8080}`, "", 0},
 	}
@@ -688,6 +689,24 @@ func TestRedactSecretsAcrossFormats(t *testing.T) {
 				t.Fatalf("redacted output leaked %q: %s", tc.forbidden, out)
 			}
 		})
+	}
+}
+
+func TestCaptureContentRedactsYAMLBlockScalarSecrets(t *testing.T) {
+	content := captureContent([]byte("api_token: |\n  ghp_first\n  ghp_second\nuser: bob"), DefaultMaxContentBytes)
+	if content == nil {
+		t.Fatal("expected captured content")
+	}
+	if content.RedactedCount != 1 {
+		t.Fatalf("redaction count = %d, want 1 (text=%q)", content.RedactedCount, content.Text)
+	}
+	for _, forbidden := range []string{"ghp_first", "ghp_second"} {
+		if strings.Contains(content.Text, forbidden) {
+			t.Fatalf("captured content leaked %q: %s", forbidden, content.Text)
+		}
+	}
+	if !strings.Contains(content.Text, "user: bob") {
+		t.Fatalf("captured content dropped non-secret YAML body: %s", content.Text)
 	}
 }
 

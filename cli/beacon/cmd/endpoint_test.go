@@ -1088,6 +1088,61 @@ func TestEndpointInventoryHooksJSONIncludesDefaultHookStatuses(t *testing.T) {
 	}
 }
 
+func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","env":{"API_TOKEN":"secret"}}}}`)
+	include := true
+	cfg := endpointconfig.Default(true, logPath)
+	cfg.Inventory = &endpointconfig.Inventory{
+		Runtimes:        []string{"cursor"},
+		IncludeContents: &include,
+		MaxContentBytes: 4096,
+	}
+	if _, err := endpointconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	endpointOpts.userMode = true
+	endpointOpts.jsonOutput = true
+	endpointOpts.writeInventoryEvent = true
+	endpointOpts.inventoryContents = false
+
+	output, err := captureStdout(t, func() error {
+		return runEndpointInventory(endpointInventoryCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runEndpointInventory returned error: %v", err)
+	}
+	var result inventoryResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("inventory JSON did not decode: %v output=%s", err, output)
+	}
+	foundContent := false
+	for _, config := range result.Configs {
+		if config.Runtime == "cursor" && config.Exists && config.Content != nil {
+			foundContent = true
+			break
+		}
+	}
+	if !foundContent {
+		t.Fatalf("manual inventory JSON did not include opted-in content: %#v", result.Configs)
+	}
+	data, err := os.ReadFile(endpointinventory.LogPath(logPath, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"content"`) || !strings.Contains(text, "mcpServers") {
+		t.Fatalf("manual inventory snapshot log did not include opted-in content: %s", text)
+	}
+	if strings.Contains(text, "secret") {
+		t.Fatalf("manual inventory snapshot log leaked secret content: %s", text)
+	}
+}
+
 func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
 	for _, name := range []string{"completion", "docs"} {
 		cmd, _, err := rootCmd.Find([]string{name})
