@@ -97,6 +97,7 @@
               {
                 "group": "Onboarding",
                 "root": "manage/onboarding",
+                "tag": "Enterprise",
                 "pages": [
                   "manage/configure-s3-data-connector",
                   "manage/connect-okta"

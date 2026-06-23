@@ -7,21 +7,78 @@ description: "How Beacon detections turn agent runtime telemetry into security f
 
 Beacon detections are threat rules for AI-agent telemetry. They read normalized [endpoint events](/telemetry-schema/event-schema), evaluate rule conditions over those events, and emit findings that explain which rule fired, why it fired, and which events were involved.
 
-The detection format is open and lives in the Agent Beacon repository. Rules are YAML documents with CEL match expressions, metadata, and embedded test fixtures. The detection engine ships with the Beacon CLI, while rule packs can be managed separately from the binary.
+Use detections when you want to review local agent activity for risky commands, sensitive file access, suspicious tool use, policy bypass attempts, prompt-injection patterns, or multi-step behavior such as a secret read followed by outbound network access.
+
+The detection format is open and lives in the Agent Beacon repository. Rules are YAML documents with CEL match expressions, metadata, and embedded test fixtures. The detection engine ships with the Beacon CLI, while rule packs are external data that can be installed, updated, and linted separately from the binary.
+
+<Note>
+  Local scanning is read-only and offline. `beacon scan` does not fetch rule packs, send telemetry to Asymptote, mutate endpoint configuration, or change the runtime log.
+</Note>
+
+## Quickstart
+
+Run active detections over the default per-user endpoint log:
+
+```bash title="Scan local endpoint telemetry"
+beacon scan
+```
+
+Print machine-readable findings for automation or downstream tooling:
+
+```bash title="JSON findings"
+beacon scan --json
+```
+
+Install the full maintained rule pack from a Beacon release:
+
+```bash title="Install the full threat-rule pack"
+beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz
+```
+
+List the active rules Beacon will use:
+
+```bash title="List active detections"
+beacon rules list
+```
+
+Run a high-severity gate, useful in local validation or CI-like checks:
+
+```bash title="Fail on high or critical findings"
+beacon scan --fail-on high
+```
 
 ## What Detections Look For
 
 Detections focus on risky agent behavior that is hard to understand from one raw log line alone:
 
-- commands that suggest network egress, credential access, or destructive activity
-- file reads or edits involving sensitive paths
-- MCP and tool activity that crosses expected boundaries
-- approval, policy, or enforcement outcomes that should be reviewed
-- sequences of events within the same agent session, such as reading a secret and then making an outbound request
+- **Credential access:** reads of `.env`, SSH keys, cloud credentials, browser session stores, shell history, process tables, or other secret-bearing surfaces.
+- **Context exfiltration:** network commands, paste and transfer services, DNS tunneling, Git bundles, outbound MCP calls, or secret-bearing request bodies.
+- **Risky commands:** destructive shell operations, persistence installation, shell escapes, privileged container runs, curl-to-shell patterns, sudoers edits, or root-equivalent changes.
+- **Sensitive edits:** changes to CI pipelines, dependency manifests, shell startup files, authorization code, autostart units, agent instruction files, or control surfaces.
+- **Prompt injection:** instructions that try to override roles, ignore prior instructions, exfiltrate context, hide with invisible characters, or decode and execute hidden payloads.
+- **Approval and policy abuse:** denied actions that still execute, high-risk approvals without a reason, or attempts to spawn around runtime permission controls.
+- **Resource consumption:** unusually expensive single calls when token and cost telemetry are available.
 
 Because rules run over the shared Beacon event model, the same rule vocabulary can apply across supported harnesses when those harnesses emit the required fields.
 
 [Inventory](/guides/inventory) helps explain which harnesses, local config, MCP servers, and skills are present and observable on an endpoint. Detection coverage depends on the telemetry fields emitted by those supported harnesses and visible local configuration.
+
+## Detection Coverage
+
+Beacon ships with a small built-in baseline so `beacon scan` works before any rule store is installed. The broader rule pack is distributed as a release asset and includes categories like these:
+
+| Category | Example behaviors |
+| --- | --- |
+| `credential-access` | Credential-file reads, browser session store reads, shell history scans, SSH agent enumeration |
+| `context-exfiltration` | Secret read then egress, credentials in curl data, upload to paste or transfer sites |
+| `risky-command` | Curl piped to shell, recursive root delete, sudoers tampering, persistence installation |
+| `sensitive-edit` | CI pipeline edits, dependency manifest edits, shell login file edits, agent control surface edits |
+| `prompt-injection` | Role override jailbreaks, hidden payloads, markdown-image exfiltration, instruction override markers |
+| `external-access` | Cloud metadata endpoint access, link-local target fetches, external MCP tool calls |
+| `approval-abuse` | Permission-bypass execution or high-risk approvals without reviewer context |
+| `source-control` | Git hook installation, remote tampering, Git config execution injection |
+
+Rules only evaluate events that exist in the runtime log. For example, an MCP detection needs MCP-like activity to be emitted by a supported harness, and a prompt-injection rule needs retained prompt or content fields to be present under the endpoint's local data-retention settings.
 
 ## Detection Flow
 
@@ -39,6 +96,29 @@ You can run the same local detection flow from the command line with [`beacon sc
 A rule is the durable detection definition. It contains an `id`, `title`, `severity`, CEL logic, and test fixtures that prove the expected behavior.
 
 A finding is the runtime result of a rule firing. Findings include the rule identity, severity, emitted reason, matched session when available, and the event evidence that caused the match.
+
+```json title="Finding shape"
+{
+  "rule_id": "secret-read-then-egress",
+  "title": "Secret-file read followed by network egress",
+  "severity": "high",
+  "posture": "detect",
+  "reason": "Secret file read then network egress within one session",
+  "session_id": "claude-session-123",
+  "events": [
+    {
+      "event": { "action": "file.read" },
+      "file": { "path": ".env" }
+    },
+    {
+      "event": { "action": "command.executed" },
+      "command": { "command": "curl https://example.com" }
+    }
+  ]
+}
+```
+
+Finding output is intended to be explainable first: analysts should be able to see the rule, the reason, and the evidence events without reconstructing the whole session by hand.
 
 ```yaml title="Single-event rule shape"
 id: suspicious-egress-command
@@ -67,19 +147,58 @@ tests:
 
 ## Rule Sources
 
-Beacon can run detections from three sources:
+Beacon can run detections from three sources, resolved in this order:
 
-- an explicit directory passed to `beacon scan --rules`
-- the local endpoint rule store managed by `beacon rules`
-- the built-in baseline when no local store is installed
+1. An explicit directory passed to `beacon scan --rules`.
+2. The local endpoint rule store managed by `beacon rules`.
+3. The built-in baseline when no local store is installed or the store is empty.
 
-The built-in baseline is intentionally small. Install the full Asymptote threat-rule pack from the current Agent Beacon release when you want the broader maintained rule set:
+Use an explicit rule directory when you are developing or testing a rule pack without installing it:
 
-```bash title="Install the full threat-rule pack"
-beacon rules pull https://github.com/asymptote-labs/agent-beacon/releases/download/v0.0.66/threat-rules.tar.gz
+```bash title="Scan with a local rule directory"
+beacon scan --rules ./rules --log-path ./runtime.jsonl
 ```
 
-Beacon does not fetch rules automatically during scans. Pulling a remote rule pack is an explicit `beacon rules pull` action.
+Use the rule store when you want Beacon's normal local scan and dashboard workflows to use the same installed rules:
+
+```bash title="Install local rules into the store"
+beacon rules add ./rules
+```
+
+The per-user store is under the endpoint base directory, commonly `~/.beacon/endpoint/rules`. System-mode installs use the system endpoint base directory.
+
+## Author And Validate Rules
+
+Threat rules are meant to be reviewed and tested like code. A new rule should start as `experimental`, include a plain-language `emit.reason`, and carry at least one fixture that proves the expected verdict.
+
+Validate a rule file or directory before installing it:
+
+```bash title="Lint rule files"
+beacon rules lint ./rules
+```
+
+Print the event fields available to CEL expressions:
+
+```bash title="List CEL field paths"
+beacon rules fields
+```
+
+Use the [Detection YAML Schema](/detections/yaml-schema) page for the rule document shape, the [Detection Standard](/detections/standard) page for maturity and conformance requirements, and the [Detection Engine](/detections/engine) page for load-time validation and evaluation behavior.
+
+## Operational Notes
+
+- `beacon scan --min-severity <level>` filters displayed findings.
+- `beacon scan --fail-on <level>` exits non-zero when any finding at or above the threshold exists.
+- `beacon scan --session <id>` narrows evaluation to events whose session ID contains the supplied value.
+- `beacon scan --log-path <path>` scans a copied or archived `runtime.jsonl` file.
+- `beacon rules pull` is the only rules workflow that reaches the network, and only for the explicit URL you provide.
+- The local dashboard mirrors `beacon scan` rule resolution and finding behavior, but stays loopback-only and read-only.
+
+## Managed Detections
+
+The open-source Beacon flow runs detections locally over endpoint JSONL. [Asymptote Managed](/deployment/managed) builds on the same telemetry foundation with centralized ingest, retention, search, detections, fleet-wide visibility, policy workflows, identity mapping, SSO/RBAC, and investigation workflows.
+
+Use local Beacon detections when you need offline endpoint checks or customer-controlled forwarding. Use Managed when you need centralized review across a fleet or organization.
 
 ## Read Next
 
