@@ -157,11 +157,12 @@ Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
 `NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
 `DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
-The maintainer onboarding steps for the Apple-side material live in
-`packaging/macos/RELEASE-SIGNING-SETUP.md`. `release-check.yml` no longer runs on
-tags — it validates the GoReleaser/packaging config on PRs that touch those
-paths. Never use `pull_request_target` or build untrusted PR code in the signing
-job. The local GoReleaser flow below remains a fallback only.
+The one-time Apple-side onboarding steps (exporting the certs, creating the
+notary key) are kept out of the repo and shared with the release maintainer
+directly. `release-check.yml` no longer runs on tags — it validates the
+GoReleaser/packaging config on PRs that touch those paths. Never use
+`pull_request_target` or build untrusted PR code in the signing job. The local
+GoReleaser flow below remains a fallback only.
 
 Use the next semver tag requested by the maintainer, usually the next `v0.0.x`
 tag unless they explicitly decide Beacon is ready for `v1.0.0`.
