@@ -11,15 +11,21 @@ import (
 func (a *Applier) emit(success bool, r ApplyResult, message string) {
 	action := "update.failed"
 	severity := schema.SeverityMedium
+	// Report the version the agent is on after this event: the newly installed
+	// version on success, the unchanged current version on failure.
+	agentVersion := a.CurrentVersion
 	if success {
 		action = "update.applied"
 		severity = schema.SeverityInfo
+		if r.ToVersion != "" {
+			agentVersion = r.ToVersion
+		}
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
 		Action:       action,
 		Category:     "update",
 		Severity:     severity,
-		AgentVersion: a.CurrentVersion,
+		AgentVersion: agentVersion,
 		Harness:      schema.HarnessInfo{Name: "beacon-self-update"},
 		Message:      message,
 	})

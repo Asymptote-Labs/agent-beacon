@@ -203,6 +203,26 @@ func TestSkipGatekeeperRequiresInsecureFlag(t *testing.T) {
 	}
 }
 
+func TestVersionLineMatches(t *testing.T) {
+	out := "beacon version 0.0.69 (abc1234) built on 2026-01-01"
+	if !versionLineMatches(out, "0.0.69") {
+		t.Error("exact version should match")
+	}
+	if !versionLineMatches(out, "v0.0.69") {
+		t.Error("v-prefixed want should match")
+	}
+	// The substring bug: an expected 0.0.6 must NOT match a 0.0.69 binary.
+	if versionLineMatches(out, "0.0.6") {
+		t.Error("0.0.6 must not match 0.0.69 (substring)")
+	}
+	if versionLineMatches("beacon version 0.0.10 (x) built on y", "0.0.101") {
+		t.Error("0.0.101 must not match 0.0.10")
+	}
+	if versionLineMatches("garbage output", "0.0.1") {
+		t.Error("unparseable output should not match")
+	}
+}
+
 func mustRead(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)

@@ -317,7 +317,7 @@ func (a *Applier) healthCheck(ctx context.Context, wantVersion string) error {
 	if err != nil {
 		return fmt.Errorf("run %s version: %s: %w", bin, strings.TrimSpace(out), err)
 	}
-	if !strings.Contains(out, wantVersion) {
+	if !versionLineMatches(out, wantVersion) {
 		return fmt.Errorf("installed binary reports %q, expected version %s", strings.TrimSpace(out), wantVersion)
 	}
 	if a.AllowInsecureTest {
@@ -341,6 +341,21 @@ func (a *Applier) restartCollector() error {
 	mgr := service.Manager{UserMode: false}
 	_ = mgr.Unload()
 	return mgr.Load()
+}
+
+// versionLineMatches reports whether `beacon version` output
+// ("beacon version <V> (<commit>) built on <date>") reports exactly wantVersion.
+// It matches the version token after "version" for equality rather than a
+// substring, so e.g. an installed 0.0.6 does not satisfy an expected 0.0.69.
+func versionLineMatches(out, want string) bool {
+	want = strings.TrimPrefix(strings.TrimSpace(want), "v")
+	fields := strings.Fields(out)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "version" {
+			return strings.TrimPrefix(fields[i+1], "v") == want
+		}
+	}
+	return false
 }
 
 func packageExt(url string) string {
