@@ -22,9 +22,9 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*\\b(main|master|develop|production|release/[^\\s;&|]+)\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\b(main|master|develop|production|release/[^\\s;&|]+)\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*(main|master|develop|production|release/[^\\s;&|]+)\\b")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s)(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s)(main|master|develop|production|release/[^\\s;&|]+)\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)")
   )
 
 emit:
@@ -61,6 +61,12 @@ tests:
       - event: { action: command.executed }
         command: { command: "git push origin +main" }
         session: { id: s1 }
+  - name: force_push_branch_then_force
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin main --force" }
+        session: { id: s1 }
   - name: force_push_to_feature_branch
     verdict: no_match
     events:
@@ -78,4 +84,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'never git push -f main' > notes.md" }
+        session: { id: s1 }
+  - name: force_push_to_feature_main
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin feature/main" }
+        session: { id: s1 }
+  - name: force_push_to_fix_main_bug
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin fix/main-bug" }
         session: { id: s1 }
