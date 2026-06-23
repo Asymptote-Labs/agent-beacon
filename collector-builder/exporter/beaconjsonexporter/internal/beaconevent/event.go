@@ -18,6 +18,14 @@ type UserInfo = asymptoteobserve.UserInfo
 type HarnessInfo = asymptoteobserve.HarnessInfo
 type SessionInfo = asymptoteobserve.SessionInfo
 type TraceInfo = asymptoteobserve.TraceInfo
+type ErrorInfo = asymptoteobserve.ErrorInfo
+type JSONRPCInfo = asymptoteobserve.JSONRPCInfo
+type JSONRPCRequestInfo = asymptoteobserve.JSONRPCRequestInfo
+type JSONRPCProtocolInfo = asymptoteobserve.JSONRPCProtocolInfo
+type NetworkInfo = asymptoteobserve.NetworkInfo
+type NetworkProtocolInfo = asymptoteobserve.NetworkProtocolInfo
+type RPCInfo = asymptoteobserve.RPCInfo
+type RPCResponseInfo = asymptoteobserve.RPCResponseInfo
 type RunInfo = asymptoteobserve.RunInfo
 type ToolInfo = asymptoteobserve.ToolInfo
 type FileInfo = asymptoteobserve.FileInfo
@@ -31,6 +39,7 @@ type ApprovalInfo = asymptoteobserve.ApprovalInfo
 type PolicyInfo = asymptoteobserve.PolicyInfo
 type PromptInfo = asymptoteobserve.PromptInfo
 type ContentInfo = asymptoteobserve.ContentInfo
+type ServerInfo = asymptoteobserve.ServerInfo
 type GenAIInfo = asymptoteobserve.GenAIInfo
 type GenAIAgentInfo = asymptoteobserve.GenAIAgentInfo
 type GenAIConversationInfo = asymptoteobserve.GenAIConversationInfo
@@ -67,9 +76,14 @@ type Event struct {
 	User          UserInfo                          `json:"user,omitempty"`
 	Harness       HarnessInfo                       `json:"harness"`
 	Origin        asymptoteobserve.Origin           `json:"origin,omitempty"`
+	Error         *ErrorInfo                        `json:"error,omitempty"`
 	Run           *RunInfo                          `json:"run,omitempty"`
 	Session       *SessionInfo                      `json:"session,omitempty"`
 	Trace         *TraceInfo                        `json:"trace,omitempty"`
+	JSONRPC       *JSONRPCInfo                      `json:"jsonrpc,omitempty"`
+	Network       *NetworkInfo                      `json:"network,omitempty"`
+	RPC           *RPCInfo                          `json:"rpc,omitempty"`
+	Server        *ServerInfo                       `json:"server,omitempty"`
 	Tool          *ToolInfo                         `json:"tool,omitempty"`
 	File          *FileInfo                         `json:"file,omitempty"`
 	Command       *CommandInfo                      `json:"command,omitempty"`

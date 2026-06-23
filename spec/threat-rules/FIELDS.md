@@ -25,6 +25,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.endpoint.agent_version` | string |
 | `e.endpoint.hostname` | string |
 | `e.endpoint.os` | string |
+| `e.error.type` | string |
 | `e.event.action` | string |
 | `e.event.category` | string |
 | `e.event.kind` | string |
@@ -85,6 +86,8 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.health.component` | string |
 | `e.health.reason` | string |
 | `e.health.status` | string |
+| `e.jsonrpc.protocol.version` | string |
+| `e.jsonrpc.request.id` | string |
 | `e.mcp.method.name` | string |
 | `e.mcp.protocol.version` | string |
 | `e.mcp.resource.uri` | string |
@@ -93,6 +96,9 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.mcp.tool` | string |
 | `e.message` | string |
 | `e.model` | string |
+| `e.network.protocol.name` | string |
+| `e.network.protocol.version` | string |
+| `e.network.transport` | string |
 | `e.origin` | string |
 | `e.policy.decision` | string |
 | `e.policy.enforcement` | string |
@@ -102,6 +108,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.product` | string |
 | `e.prompt.text` | string |
 | `e.repository` | string |
+| `e.rpc.response.status_code` | string |
 | `e.run.actor` | string |
 | `e.run.branch` | string |
 | `e.run.commit` | string |
@@ -116,6 +123,8 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.run.run_id` | string |
 | `e.run.workflow` | string |
 | `e.schema_version` | string |
+| `e.server.address` | string |
+| `e.server.port` | int |
 | `e.session.id` | string |
 | `e.session.working_directory` | string |
 | `e.severity` | string |

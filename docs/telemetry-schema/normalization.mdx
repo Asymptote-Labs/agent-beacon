@@ -12,10 +12,13 @@ Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/co
 | Source signal | Normalized field or action |
 |---------------|----------------------------|
 | `gen_ai.request.model`, `gen_ai.response.model`, `model`, `ai.model` | `model` |
-| `gen_ai.tool.name`, `tool.name`, `function_name`, `tool_name` | `tool.name` and `gen_ai.tool.name` |
+| `gen_ai.tool.name`, `tool.name`, `beacon.tool.name`, `function_name`, `tool_name` | `tool.name` and `gen_ai.tool.name` |
 | `gen_ai.tool.call.arguments`, `function_args`, `arguments` | `tool.command` when command-like, plus `gen_ai.tool.call.arguments` |
 | `gen_ai.tool.call.id`, `gen_ai.tool.call.result` | `gen_ai.tool.call.id`, `gen_ai.tool.call.result` |
-| `mcp.tool.name` | `mcp.tool` |
+| `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` |
+| `mcp.tool`, `beacon.mcp.tool`, `mcp.tool.name` | `mcp.tool` |
+| `mcp.server`, `beacon.mcp.server`, `mcp.server.name` | `mcp.server` |
+| `jsonrpc.*`, `rpc.response.status_code`, `network.*`, `server.*`, `error.type` | `jsonrpc`, `rpc`, `network`, `server`, and `error` |
 | `process.command_line` | `command.command` |
 | `file.path` | `file.path` |
 | `conversation.id` | `session.id` |

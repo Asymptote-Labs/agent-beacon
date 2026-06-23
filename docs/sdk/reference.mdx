@@ -87,6 +87,12 @@ Cloud SDKs should prefer standard OpenTelemetry attributes when they exist, espe
 | `beacon.file.language` | Language identifier |
 | `beacon.mcp.server` | MCP server name |
 | `beacon.mcp.tool` | MCP tool name |
+| `gen_ai.operation.name` | OpenTelemetry GenAI operation name, such as `execute_tool` |
+| `gen_ai.tool.name` | OpenTelemetry GenAI tool name |
+| `gen_ai.tool.call.arguments`, `gen_ai.tool.call.id`, `gen_ai.tool.call.result` | OpenTelemetry GenAI tool call details |
+| `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` | OpenTelemetry MCP request context |
+| `jsonrpc.request.id`, `jsonrpc.protocol.version`, `rpc.response.status_code` | JSON-RPC and RPC request/response context |
+| `network.protocol.name`, `network.protocol.version`, `network.transport`, `server.address`, `server.port`, `error.type` | MCP transport, peer, and error context |
 | `beacon.approval.decision` | Approval or policy decision |
 | `beacon.approval.reason` | Approval or policy reason |
 | `beacon.prompt.text` | Prompt text when available |

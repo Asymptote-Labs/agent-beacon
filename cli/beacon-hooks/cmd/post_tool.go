@@ -300,7 +300,8 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	}
 	sessionID := resolveSessionID(input, platformFlag)
 	fields := sessionFields(sessionID, input)
-	for key, value := range toolFields(toolName, toolInput) {
+	toolResponse := resolveToolResponse(input)
+	for key, value := range toolFieldsWithResponse(toolName, toolInput, toolResponse) {
 		fields[key] = value
 	}
 	if hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != "" {

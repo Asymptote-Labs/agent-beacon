@@ -38,6 +38,11 @@ func TestNewEventSetsRequiredInvariants(t *testing.T) {
 	event.File = &FileInfo{Path: "main.go", Operation: "modify"}
 	event.Command = &CommandInfo{Command: "go test ./..."}
 	event.MCP = &MCPInfo{Server: "github", Tool: "get_issue", Method: &MCPMethodInfo{Name: "tools/call"}}
+	event.JSONRPC = &JSONRPCInfo{Request: &JSONRPCRequestInfo{ID: "request-7"}, Protocol: &JSONRPCProtocolInfo{Version: "2.0"}}
+	event.Network = &NetworkInfo{Protocol: &NetworkProtocolInfo{Name: "http", Version: "2"}, Transport: "tcp"}
+	event.RPC = &RPCInfo{Response: &RPCResponseInfo{StatusCode: "OK"}}
+	event.Server = &ServerInfo{Address: "example.com", Port: intPtr(443)}
+	event.Error = &ErrorInfo{Type: "tool_error"}
 	event.Prompt = &PromptInfo{Text: "Summarize this file"}
 	event.Content = &ContentInfo{Retention: ContentRetentionMetadata, Included: false}
 	event.GenAI = &GenAIInfo{
@@ -101,6 +106,10 @@ func int64Ptr(value int64) *int64 {
 	return &value
 }
 
+func intPtr(value int) *int {
+	return &value
+}
+
 func float64Ptr(value float64) *float64 {
 	return &value
 }
@@ -134,6 +143,45 @@ func TestTraceAndUsageCostSerializeWithSemconvNames(t *testing.T) {
 		`"cache_read":{"input_tokens":90}`,
 		`"reasoning":{"output_tokens":15}`,
 		`"cost_usd":0.0123`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("JSON missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestMCPStandardContextSerializesWithSemconvNames(t *testing.T) {
+	event := NewEvent(NewEventOptions{Action: "mcp.tool_invoked", Category: "mcp", Harness: HarnessInfo{Name: "cursor"}})
+	event.MCP = &MCPInfo{
+		Method:   &MCPMethodInfo{Name: "tools/call"},
+		Protocol: &MCPProtocolInfo{Version: "2025-06-18"},
+		Resource: &MCPResourceInfo{URI: "file:///tmp/report.md"},
+		Session:  &MCPSessionInfo{ID: "mcp-session"},
+	}
+	event.GenAI = &GenAIInfo{
+		Operation: &GenAIOperationInfo{Name: "execute_tool"},
+		Tool:      &GenAIToolInfo{Name: "get_organizations", Call: &GenAIToolCallInfo{ID: "call-1"}},
+	}
+	event.JSONRPC = &JSONRPCInfo{Request: &JSONRPCRequestInfo{ID: "request-7"}, Protocol: &JSONRPCProtocolInfo{Version: "2.0"}}
+	event.Network = &NetworkInfo{Protocol: &NetworkProtocolInfo{Name: "http", Version: "2"}, Transport: "tcp"}
+	event.RPC = &RPCInfo{Response: &RPCResponseInfo{StatusCode: "OK"}}
+	event.Server = &ServerInfo{Address: "example.com", Port: intPtr(443)}
+	event.Error = &ErrorInfo{Type: "tool_error"}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`"gen_ai":{"operation":{"name":"execute_tool"}`,
+		`"tool":{"call":{"id":"call-1"},"name":"get_organizations"}`,
+		`"mcp":{"method":{"name":"tools/call"},"protocol":{"version":"2025-06-18"},"resource":{"uri":"file:///tmp/report.md"},"session":{"id":"mcp-session"}}`,
+		`"jsonrpc":{"request":{"id":"request-7"},"protocol":{"version":"2.0"}}`,
+		`"network":{"protocol":{"name":"http","version":"2"},"transport":"tcp"}`,
+		`"rpc":{"response":{"status_code":"OK"}}`,
+		`"server":{"address":"example.com","port":443}`,
+		`"error":{"type":"tool_error"}`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("JSON missing %s: %s", want, text)

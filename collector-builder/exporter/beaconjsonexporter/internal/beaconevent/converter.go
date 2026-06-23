@@ -623,11 +623,11 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 			WorkingDirectory: FirstString(attrs, "cwd", "working_directory", "beacon.session.working_directory", "process.command_args.cwd", "workspace"),
 		}
 	}
-	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || ToolCommandString(attrs) != "" {
+	if name := FirstString(attrs, "tool.name", "gen_ai.tool.name", "beacon.tool.name", "mcp.tool.name", "function_name", "tool_name"); name != "" || ToolCommandString(attrs) != "" {
 		event.Tool = &ToolInfo{
 			Name:    name,
 			Command: FirstNonEmpty(ToolCommandString(attrs), FirstString(attrs, "process.command_line")),
-			Path:    FirstString(attrs, "tool.path", "file.path", "file_path"),
+			Path:    FirstString(attrs, "tool.path", "beacon.tool.path", "file.path", "file_path"),
 		}
 	}
 	path := FirstString(attrs, "file.path", "file_path", "code.filepath")
@@ -656,6 +656,13 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	}
 	if mcp := MCPFromAttrs(attrs); mcp != nil {
 		event.MCP = mcp
+	}
+	if standard := StandardContextFromAttrs(attrs); standard != nil {
+		event.Error = standard.Error
+		event.JSONRPC = standard.JSONRPC
+		event.Network = standard.Network
+		event.RPC = standard.RPC
+		event.Server = standard.Server
 	}
 	if decision := FirstString(attrs, "approval.decision", "policy.decision", "decision"); decision != "" {
 		event.Approval = &ApprovalInfo{
@@ -709,7 +716,7 @@ func GenAIFromAttrs(attrs map[string]interface{}) *GenAIInfo {
 	} else if messages, ok := AnyAttr(attrs, "llm.prompts", "gen_ai.prompts"); ok {
 		genai.Input = &GenAIInputInfo{Messages: messages}
 	}
-	if name := FirstString(attrs, "gen_ai.operation.name"); name != "" {
+	if name := FirstString(attrs, "gen_ai.operation.name", "beacon.gen_ai.operation.name"); name != "" {
 		genai.Operation = &GenAIOperationInfo{Name: name}
 	}
 	if messages, ok := AnyAttr(attrs, "gen_ai.output.messages"); ok {
@@ -816,18 +823,18 @@ func GenAIResponseFromAttrs(attrs map[string]interface{}) *GenAIResponseInfo {
 func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 	tool := &GenAIToolInfo{
 		Description: FirstString(attrs, "gen_ai.tool.description"),
-		Name:        FirstString(attrs, "gen_ai.tool.name", "tool.name"),
+		Name:        FirstString(attrs, "gen_ai.tool.name", "beacon.gen_ai.tool.name", "beacon.tool.name", "tool.name", "mcp.tool.name", "function_name", "tool_name"),
 		Type:        FirstString(attrs, "gen_ai.tool.type"),
 	}
 	if definitions, ok := AnyAttr(attrs, "gen_ai.tool.definitions"); ok {
 		tool.Definitions = definitions
 	}
-	if args, ok := AnyAttr(attrs, "gen_ai.tool.call.arguments", "function_args", "arguments"); ok {
-		tool.Call = &GenAIToolCallInfo{Arguments: args, ID: FirstString(attrs, "gen_ai.tool.call.id")}
-	} else if id := FirstString(attrs, "gen_ai.tool.call.id"); id != "" {
+	if args, ok := AnyAttr(attrs, "gen_ai.tool.call.arguments", "beacon.gen_ai.tool.call.arguments", "function_args", "arguments"); ok {
+		tool.Call = &GenAIToolCallInfo{Arguments: args, ID: FirstString(attrs, "gen_ai.tool.call.id", "beacon.gen_ai.tool.call.id")}
+	} else if id := FirstString(attrs, "gen_ai.tool.call.id", "beacon.gen_ai.tool.call.id"); id != "" {
 		tool.Call = &GenAIToolCallInfo{ID: id}
 	}
-	if result, ok := AnyAttr(attrs, "gen_ai.tool.call.result"); ok {
+	if result, ok := AnyAttr(attrs, "gen_ai.tool.call.result", "beacon.gen_ai.tool.call.result"); ok {
 		if tool.Call == nil {
 			tool.Call = &GenAIToolCallInfo{}
 		}
@@ -871,14 +878,17 @@ func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 }
 
 func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
-	server := FirstString(attrs, "mcp.server.name", "mcp.server", "gen_ai.mcp.server", "mcp_server_name")
-	tool := FirstString(attrs, "mcp.tool.name", "tool.name", "function_name")
+	server := FirstString(attrs, "mcp.server", "beacon.mcp.server", "mcp.server.name", "gen_ai.mcp.server", "mcp_server_name")
+	tool := FirstString(attrs, "mcp.tool", "beacon.mcp.tool", "mcp.tool.name")
 	method := FirstString(attrs, "mcp.method.name")
 	protocol := FirstString(attrs, "mcp.protocol.version")
 	resource := FirstString(attrs, "mcp.resource.uri")
 	session := FirstString(attrs, "mcp.session.id")
 	if server == "" && tool == "" && method == "" && protocol == "" && resource == "" && session == "" && FirstString(attrs, "tool_type") != "mcp" {
 		return nil
+	}
+	if tool == "" {
+		tool = FirstString(attrs, "gen_ai.tool.name", "beacon.gen_ai.tool.name", "beacon.tool.name", "tool.name", "function_name", "tool_name")
 	}
 	out := &MCPInfo{Server: server, Tool: tool}
 	if method != "" {
@@ -892,6 +902,53 @@ func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 	}
 	if session != "" {
 		out.Session = &MCPSessionInfo{ID: session}
+	}
+	return out
+}
+
+type standardContext struct {
+	Error   *ErrorInfo
+	JSONRPC *JSONRPCInfo
+	Network *NetworkInfo
+	RPC     *RPCInfo
+	Server  *ServerInfo
+}
+
+func StandardContextFromAttrs(attrs map[string]interface{}) *standardContext {
+	out := &standardContext{}
+	if errorType := FirstString(attrs, "error.type"); errorType != "" {
+		out.Error = &ErrorInfo{Type: errorType}
+	}
+	if requestID := FirstString(attrs, "jsonrpc.request.id"); requestID != "" || FirstString(attrs, "jsonrpc.protocol.version") != "" {
+		out.JSONRPC = &JSONRPCInfo{}
+		if requestID != "" {
+			out.JSONRPC.Request = &JSONRPCRequestInfo{ID: requestID}
+		}
+		if version := FirstString(attrs, "jsonrpc.protocol.version"); version != "" {
+			out.JSONRPC.Protocol = &JSONRPCProtocolInfo{Version: version}
+		}
+	}
+	if protocolName := FirstString(attrs, "network.protocol.name"); protocolName != "" || FirstString(attrs, "network.protocol.version", "network.transport") != "" {
+		out.Network = &NetworkInfo{}
+		if protocolName != "" || FirstString(attrs, "network.protocol.version") != "" {
+			out.Network.Protocol = &NetworkProtocolInfo{
+				Name:    strings.ToLower(protocolName),
+				Version: FirstString(attrs, "network.protocol.version"),
+			}
+		}
+		out.Network.Transport = strings.ToLower(FirstString(attrs, "network.transport"))
+	}
+	if status := FirstString(attrs, "rpc.response.status_code"); status != "" {
+		out.RPC = &RPCInfo{Response: &RPCResponseInfo{StatusCode: status}}
+	}
+	if address := FirstString(attrs, "server.address"); address != "" || HasAttr(attrs, "server.port") {
+		out.Server = &ServerInfo{Address: address}
+		if port, ok := IntAttr(attrs, "server.port"); ok {
+			out.Server.Port = &port
+		}
+	}
+	if out.Error == nil && out.JSONRPC == nil && out.Network == nil && out.RPC == nil && out.Server == nil {
+		return nil
 	}
 	return out
 }
@@ -981,7 +1038,7 @@ func RunString(attrs map[string]interface{}, keys ...string) string {
 }
 
 func ToolCommandString(attrs map[string]interface{}) string {
-	if command := FirstString(attrs, "tool.command", "command", "function_args"); command != "" {
+	if command := FirstString(attrs, "tool.command", "beacon.tool.command", "command", "function_args"); command != "" {
 		return command
 	}
 	return FirstStringAttr(attrs, "gen_ai.tool.call.arguments")
@@ -1358,9 +1415,10 @@ func NormalizeHarnessName(name string) string {
 }
 
 func InferAction(attrs map[string]interface{}, fallback string) string {
-	tool := strings.ToLower(FirstString(attrs, "tool.name", "gen_ai.tool.name", "mcp.tool.name", "function_name", "tool_name"))
+	tool := strings.ToLower(FirstString(attrs, "tool.name", "gen_ai.tool.name", "beacon.tool.name", "beacon.gen_ai.tool.name", "mcp.tool", "beacon.mcp.tool", "mcp.tool.name", "function_name", "tool_name"))
 	operation := strings.ToLower(FirstString(attrs, "gen_ai.operation.name"))
 	mcpMethod := strings.ToLower(FirstString(attrs, "mcp.method.name"))
+	mcpServer := FirstString(attrs, "mcp.server", "beacon.mcp.server", "mcp.server.name", "mcp_server_name")
 	harness := HarnessName(attrs, fallback)
 	text := strings.ToLower(strings.Join([]string{
 		fallback,
@@ -1376,6 +1434,8 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 		return "mcp.tool_invoked"
 	case mcpMethod == "resources/read" && IsFileURI(FirstString(attrs, "mcp.resource.uri")):
 		return "file.read"
+	case mcpServer != "" || FirstString(attrs, "mcp.tool", "beacon.mcp.tool", "mcp.tool.name") != "":
+		return "mcp.tool_invoked"
 	case operation == "execute_tool":
 		return "tool.invoked"
 	case (operation == "chat" || operation == "generate_content" || operation == "text_completion") && HasPromptLikeContent(attrs):

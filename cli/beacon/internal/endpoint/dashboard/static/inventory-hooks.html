@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beacon Endpoint Hook Inventory</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="inventory-hooks">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-only</p>
+        <h1>Beacon Endpoint Hook Inventory</h1>
+      </div>
+      <nav class="nav-toggle" aria-label="Dashboard navigation">
+        <a href="/">Log Search</a>
+        <a href="/overview.html">Security Analytics</a>
+        <a href="/findings.html">Findings</a>
+        <a href="/detections.html">Detections</a>
+        <a class="active" href="/inventory-hooks.html" aria-current="page">Agent Inventory</a>
+        <a href="/tokens.html">Token Usage</a>
+      </nav>
+      <button id="refresh">Refresh</button>
+    </header>
+
+    <main>
+      <section class="panel status-panel">
+        <div>
+          <h2>Endpoint</h2>
+          <p id="log-path" class="muted">Loading runtime log...</p>
+        </div>
+        <div id="inventory-meta" class="muted"></div>
+      </section>
+
+      <section class="subnav" aria-label="Inventory views">
+        <a href="/inventory.html">Inventory Overview</a>
+        <a class="active" href="/inventory-hooks.html" aria-current="page">Hook Inventory</a>
+      </section>
+
+      <section>
+        <div class="section-head overview-head">
+          <div>
+            <h2>Hook Inventory at a Glance</h2>
+            <p class="muted">Installed hook adapters and hook manifest files discovered across supported local AI agent runtimes.</p>
+          </div>
+        </div>
+        <div class="cards" id="hook-inventory-cards"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Hook Targets</h2>
+            <p class="muted">Supported runtimes Beacon checks for local hook configuration. Command bodies and hook file contents are not shown.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Status</th>
+                <th>Scope</th>
+                <th>Beacon Managed</th>
+                <th>Binary</th>
+                <th>Manifest</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="hook-targets"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Hook Manifest Files</h2>
+            <p class="muted">Discovered hook config files with parser status, timestamps, and hashes for change tracking.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Scope</th>
+                <th>Parser</th>
+                <th>Beacon Managed</th>
+                <th>Modified</th>
+                <th>Manifest SHA</th>
+                <th>Manifest</th>
+              </tr>
+            </thead>
+            <tbody id="hook-manifests"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Scan Scope</h2>
+        <div id="inventory-scope" class="scope-grid"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

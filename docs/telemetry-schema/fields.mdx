@@ -17,10 +17,15 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 | `origin` | Event origin for local endpoint, cloud, or CI telemetry | `local`, `cloud`, `ci` |
 | `run` | CI or ephemeral run context | `provider`, `run_id`, `run_attempt`, `workflow`, `job`, `event_name`, `commit`, `repository`, `branch`, `pr`, `pr_number`, `actor`, `ephemeral` |
 | `session` | Conversation or runtime session context | `id`, `working_directory` |
+| `error` | Standard error context when an MCP/JSON-RPC/tool operation fails | `type` |
+| `jsonrpc` | JSON-RPC request and protocol context for MCP calls | `request.id`, `protocol.version` |
+| `network` | Network protocol and transport context | `protocol.name`, `protocol.version`, `transport` |
+| `rpc` | RPC response context | `response.status_code` |
+| `server` | Peer server context when available | `address`, `port` |
 | `tool` | Tool invocation context, including shell-like tools | `name`, `command`, `path` |
 | `file` | File activity context | `path`, `operation`, `language`, `diff_hash`, `diff_bytes` |
 | `command` | Shell or process execution context | `command`, `exit_code`, `duration_ms` |
-| `mcp` | MCP-like server and tool context | `server`, `tool` |
+| `mcp` | MCP server, tool, method, protocol, resource, and session context | `server`, `tool`, `method.name`, `protocol.version`, `resource.uri`, `session.id` |
 | `approval` | Approval or policy decision context | `required`, `decision`, `reason` |
 | `policy` | Policy metadata when available from a runtime or integration | `id`, `name`, `decision`, `enforcement`, `reason` |
 | `prompt` | Prompt text when the source emits it and content handling allows it | `text` |
@@ -59,7 +64,8 @@ Optional context fields add detail when available:
 | `tool` | Tool name, command, or path metadata |
 | `file` | File path, operation, language, diff hash, or diff byte counts |
 | `command` | Shell command, exit code, or duration metadata |
-| `mcp` | MCP-like server and tool metadata |
+| `mcp` | MCP server, tool, method, protocol, resource, or session metadata |
+| `jsonrpc`, `rpc`, `network`, `server`, `error` | MCP client-span context projected from OpenTelemetry semantic conventions when available |
 | `approval` | Approval requirement, decision, or reason |
 | `policy` | Policy ID, name, decision, enforcement mode, or reason |
 | `content` | Content inclusion, redaction, and truncation state |

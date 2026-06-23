@@ -10,6 +10,111 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
+func TestToolFieldsMapsMCPGenAIStandardFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		toolName   string
+		toolInput  map[string]interface{}
+		wantServer string
+		wantTool   string
+	}{
+		{
+			name:     "cursor tool name",
+			toolName: "MCP:get_organizations",
+			toolInput: map[string]interface{}{
+				"jsonrpc_request_id":       "req-1",
+				"jsonrpc_protocol_version": "2.0",
+				"mcp_protocol_version":     "2025-06-18",
+				"mcp_session_id":           "mcp-session",
+				"network_transport":        "pipe",
+			},
+			wantTool: "get_organizations",
+		},
+		{
+			name:       "claude tool name",
+			toolName:   "mcp__memory__write",
+			toolInput:  map[string]interface{}{},
+			wantServer: "memory",
+			wantTool:   "write",
+		},
+		{
+			name:       "payload server tool wins",
+			toolName:   "MCP:derived_tool",
+			toolInput:  map[string]interface{}{"server_name": "linear", "tool_name": "issue-get"},
+			wantServer: "linear",
+			wantTool:   "issue-get",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := toolFieldsWithResponse(tt.toolName, tt.toolInput, map[string]interface{}{"ok": true})
+			mcp := fields["mcp"].(map[string]interface{})
+			if mcp["server"] != tt.wantServer || mcp["tool"] != tt.wantTool {
+				t.Fatalf("mcp = %#v, want server=%q tool=%q", mcp, tt.wantServer, tt.wantTool)
+			}
+			method := mcp["method"].(map[string]interface{})
+			if method["name"] != "tools/call" {
+				t.Fatalf("mcp.method = %#v, want tools/call", method)
+			}
+			genAI := fields["gen_ai"].(map[string]interface{})
+			if op := genAI["operation"].(map[string]interface{})["name"]; op != "execute_tool" {
+				t.Fatalf("gen_ai.operation = %q, want execute_tool", op)
+			}
+			tool := genAI["tool"].(map[string]interface{})
+			if tool["name"] != tt.wantTool {
+				t.Fatalf("gen_ai.tool = %#v, want name %q", tool, tt.wantTool)
+			}
+			call := tool["call"].(map[string]interface{})
+			if len(tt.toolInput) > 0 && call["arguments"] == nil {
+				t.Fatalf("gen_ai.tool.call = %#v, want arguments", call)
+			}
+			if call["result"] == nil {
+				t.Fatalf("gen_ai.tool.call = %#v, want result", call)
+			}
+		})
+	}
+}
+
+func TestToolFieldsMapsMCPTransportContext(t *testing.T) {
+	fields := toolFields("MCP:read_resource", map[string]interface{}{
+		"resource_uri":             "file:///tmp/report.md",
+		"jsonrpc_request_id":       "request-7",
+		"jsonrpc":                  "2.0",
+		"network_protocol_name":    "HTTP",
+		"network_protocol_version": "2",
+		"network_transport":        "TCP",
+		"server_address":           "example.com",
+		"server_port":              "443",
+		"status_code":              "OK",
+	})
+	if got := fields["jsonrpc"].(map[string]interface{})["request"].(map[string]interface{})["id"]; got != "request-7" {
+		t.Fatalf("jsonrpc.request.id = %q, want request-7", got)
+	}
+	if got := fields["network"].(map[string]interface{})["transport"]; got != "tcp" {
+		t.Fatalf("network.transport = %q, want tcp", got)
+	}
+	if got := fields["server"].(map[string]interface{})["port"]; got != 443 {
+		t.Fatalf("server.port = %#v, want 443", got)
+	}
+	if got := fields["rpc"].(map[string]interface{})["response"].(map[string]interface{})["status_code"]; got != "OK" {
+		t.Fatalf("rpc.response.status_code = %q, want OK", got)
+	}
+	mcp := fields["mcp"].(map[string]interface{})
+	if got := mcp["resource"].(map[string]interface{})["uri"]; got != "file:///tmp/report.md" {
+		t.Fatalf("mcp.resource.uri = %q, want resource URI", got)
+	}
+}
+
+func TestToolFieldsDoesNotTreatGenericNameAsMCP(t *testing.T) {
+	fields := toolFields("Write", map[string]interface{}{"name": "README.md"})
+	if _, ok := fields["mcp"]; ok {
+		t.Fatalf("non-MCP tool should not include mcp fields: %#v", fields)
+	}
+	if _, ok := fields["gen_ai"]; ok {
+		t.Fatalf("non-MCP tool should not include gen_ai fields: %#v", fields)
+	}
+}
+
 func TestMaybeEmitInventoryHeartbeatInvokesBeaconCLI(t *testing.T) {
 	oldPlatform := platformFlag
 	oldRunner := runInventoryHeartbeatCommand
