@@ -1,0 +1,111 @@
+id: container-or-iac-file-modified
+version: 1
+title: Container or IaC file modified (Dockerfile / compose / Terraform / K8s / Helm)
+description: >
+  The agent modified a container, orchestration, or infrastructure-as-code
+  file: a Dockerfile, a docker-compose YAML, a Terraform .tf / .tfstate,
+  a Kubernetes manifest (kubernetes*.yaml / k8s*.yaml / kustomization.yaml),
+  or a Helm values.yaml. A modified IaC file is a supply-chain /
+  lateral-movement primitive — an attacker can add a privileged
+  container, a host-path mount, an exec into a running pod, or a
+  wide-permission IAM role that gets applied on the next apply. The rule
+  matches the well-known file names (anchored on `Dockerfile` as a
+  whole word, anchored on `.tf` / `.tfstate` suffixes, anchored on
+  `values.yaml` as a leaf, and anchored on the k8s file-naming
+  convention), so random .yaml files in a repo are not flagged.
+severity: medium
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM03
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "file.modified" && (
+    e.file.path.matches("(?i)(^|/)dockerfile(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.prod|\\.pr[a-z0-9]+)?$") ||
+    e.file.path.matches("(?i)(^|/)containerfile(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?$") ||
+    e.file.path.matches("(?i)(^|/)docker-compose(-[^/]+)?\\.(yml|yaml)$") ||
+    e.file.path.matches("(?i)(^|/)[^/]+\\.tf$") ||
+    e.file.path.matches("(?i)(^|/)[^/]+\\.tfstate(\\.[0-9]+)?$") ||
+    e.file.path.matches("(?i)(^|/)kubernetes(-[^/]+)?\\.(yml|yaml)$") ||
+    e.file.path.matches("(?i)(^|/)k8s(-[^/]+)?\\.(yml|yaml)$") ||
+    e.file.path.matches("(?i)(^|/)kustomization\\.(yml|yaml)$") ||
+    e.file.path.matches("(?i)(^|/)values\\.(yml|yaml)$")
+  )
+
+emit:
+  reason: "Container or IaC file modified (Dockerfile / compose / Terraform / K8s manifest / Helm values)"
+
+tests:
+  - name: modify_dockerfile
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "app/Dockerfile" }
+        session: { id: s1 }
+  - name: modify_dockerfile_prod_variant
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "app/Dockerfile.prod" }
+        session: { id: s1 }
+  - name: modify_docker_compose
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "deploy/docker-compose.yaml" }
+        session: { id: s1 }
+  - name: modify_terraform_main
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "infra/prod/main.tf" }
+        session: { id: s1 }
+  - name: modify_terraform_state
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "infra/prod/terraform.tfstate" }
+        session: { id: s1 }
+  - name: modify_kubernetes_manifest
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "deploy/kubernetes-prod.yaml" }
+        session: { id: s1 }
+  - name: modify_helm_values
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "charts/api/values.yaml" }
+        session: { id: s1 }
+  - name: modify_kustomization
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "deploy/kustomization.yaml" }
+        session: { id: s1 }
+  - name: modify_ordinary_source
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "src/main.go" }
+        session: { id: s1 }
+  - name: modify_unrelated_yaml
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "config/api.yaml" }
+        session: { id: s1 }
+  - name: read_dockerfile
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "app/Dockerfile" }
+        session: { id: s1 }
+  - name: modify_dockerfile_backup
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "app/Dockerfile.bak" }
+        session: { id: s1 }
