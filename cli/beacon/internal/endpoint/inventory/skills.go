@@ -22,9 +22,10 @@ type Skill struct {
 	Readable         bool   `json:"readable"`
 	Reason           string `json:"reason,omitempty"`
 	ParserStatus     string `json:"parser_status"`
-	FileSHA256       string `json:"file_sha256,omitempty"`
-	ModifiedAt       string `json:"modified_at,omitempty"`
-	Redaction        string `json:"redaction"`
+	FileSHA256       string           `json:"file_sha256,omitempty"`
+	ModifiedAt       string           `json:"modified_at,omitempty"`
+	Redaction        string           `json:"redaction"`
+	Content          *CapturedContent `json:"content,omitempty"`
 }
 
 type skillRoot struct {
@@ -33,10 +34,10 @@ type skillRoot struct {
 	scope   string
 }
 
-func scanSkills(home, wd, redaction string, runtimes []string) []Skill {
+func scanSkills(home, wd, redaction string, runtimes []string, co contentOptions) []Skill {
 	var skills []Skill
 	for _, root := range filterSkillRoots(skillRoots(home, wd), runtimes) {
-		skills = append(skills, inspectSkillRoot(root, redaction)...)
+		skills = append(skills, inspectSkillRoot(root, redaction, co)...)
 	}
 	return dedupeSkills(skills)
 }
@@ -79,7 +80,7 @@ func skillRoots(home, wd string) []skillRoot {
 	return out
 }
 
-func inspectSkillRoot(root skillRoot, redaction string) []Skill {
+func inspectSkillRoot(root skillRoot, redaction string, co contentOptions) []Skill {
 	base := Skill{
 		Runtime:      root.runtime,
 		RootPath:     valueForPath(root.path, redaction),
@@ -123,7 +124,7 @@ func inspectSkillRoot(root skillRoot, redaction string) []Skill {
 		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 			continue
 		}
-		skills = append(skills, inspectSkillManifest(root, entry.Name(), manifestPath, redaction))
+		skills = append(skills, inspectSkillManifest(root, entry.Name(), manifestPath, redaction, co))
 	}
 	if len(skills) == 0 {
 		return nil
@@ -131,7 +132,7 @@ func inspectSkillRoot(root skillRoot, redaction string) []Skill {
 	return skills
 }
 
-func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string) Skill {
+func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string, co contentOptions) Skill {
 	skill := Skill{
 		Runtime:          root.runtime,
 		SkillName:        valueForName(name, redaction),
@@ -167,6 +168,9 @@ func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string) 
 	}
 	skill.Readable = true
 	skill.FileSHA256 = hashBytes(data)
+	if co.include {
+		skill.Content = captureContent(data, co.limit())
+	}
 	skill.ParserStatus = StatusOK
 	return skill
 }

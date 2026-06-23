@@ -32,6 +32,21 @@ func TestDefaultUserConfigUsesHomeScopedPaths(t *testing.T) {
 	if !inventory.Enabled || inventory.TTLSeconds != 86400 || len(inventory.Runtimes) != 2 || inventory.Runtimes[0] != "cursor" || inventory.Runtimes[1] != "claude_code" {
 		t.Fatalf("unexpected inventory defaults: %#v", inventory)
 	}
+	if inventory.IncludeContents || inventory.MaxContentBytes != 0 {
+		t.Fatalf("content capture should default off: %#v", inventory)
+	}
+}
+
+func TestInventoryContentCaptureOptIn(t *testing.T) {
+	include := true
+	cfg := Config{Inventory: &Inventory{IncludeContents: &include, MaxContentBytes: 4096}}
+	inventory := InventoryConfig(cfg)
+	if !inventory.IncludeContents {
+		t.Fatal("IncludeContents = false, want true when opted in")
+	}
+	if inventory.MaxContentBytes != 4096 {
+		t.Fatalf("MaxContentBytes = %d, want 4096", inventory.MaxContentBytes)
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {

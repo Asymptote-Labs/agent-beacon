@@ -23,7 +23,7 @@ Inventory can include:
 - Detected supported runtimes and telemetry status, including MDM-managed launch-environment state for GitHub Copilot CLI and Factory Droid
 - Hook integration status for Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, and OpenCode
 - Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally, including Claude Code `~/.claude.json` and Cursor `mcp.json`
-- Local agent skill manifests discovered under supported skill roots, including symlinked Claude Code skill directories, reported as metadata and hashes only
+- Local agent skill manifests discovered under supported skill roots, including symlinked Claude Code skill directories, reported as metadata and hashes by default (add `--contents` for redacted full bodies)
 - Recently observed Beacon runtime events when the runtime log exists
 - Admin-configured integration observations such as Claude Cowork and OpenClaw Gateway events
 
@@ -37,6 +37,27 @@ Use the section filters when you only need one inventory surface:
 
 The section filters can be combined. For example, `--mcp --skills --json` prints only MCP and skill inventory buckets in the JSON output.
 
+## Capturing Full Definitions
+
+By default inventory is metadata- and hash-only: it reports paths, hashes, MCP transport, command basenames, argument counts, and safe environment key names, but never the raw file bodies.
+
+Add `--contents` when you need to see the **full definitions** of config, hook, and skill files:
+
+- Each config and hook file gains a `content` block with the raw file body.
+- Each skill manifest gains a `content` block with the `SKILL.md` body.
+- Each MCP server gains a full `definition` block (complete command, arguments, URL, and environment) instead of only the summarized metadata.
+
+Captured contents are always passed through local redaction and a size limit:
+
+- Values held under secret-looking keys (matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL`) are replaced with `***REDACTED***`. The `content.redacted_count` field reports how many values were redacted.
+- Bodies are truncated to a per-file byte cap (64 KiB by default) and flagged with `content.truncated`. The `content.bytes` field always reports the original file size.
+
+```bash title="Show full, redacted MCP definitions"
+beacon endpoint inventory --mcp --contents
+```
+
+Content capture is opt-in and offline; `--contents` only reads files inventory already inspects locally.
+
 ## Inventory Heartbeats
 
 Cursor and Claude Code endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`:
@@ -44,16 +65,20 @@ Cursor and Claude Code endpoint hooks can periodically append inventory telemetr
 - `inventory.heartbeat` records that Beacon checked local agent configuration inventory, including counts and a snapshot digest.
 - `inventory.snapshot` records the current metadata-only inventory when the snapshot changed or when inventory is first initialized.
 
-Inventory snapshots include config file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
+By default, inventory snapshots include config file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
 
-The heartbeat TTL is configured in the existing endpoint config file:
+Set `include_contents` to opt the snapshot/heartbeat telemetry into capturing full definitions, matching the `--contents` CLI behavior. When enabled, `inventory.snapshot` events carry redacted, size-limited config/hook/skill `content` blocks and full MCP server `definition` blocks. Secret-looking values are redacted and bodies are truncated to `max_content_bytes` (64 KiB by default). This setting is off by default so the snapshot contract stays metadata-only unless an operator explicitly enables it.
+
+The heartbeat TTL and content capture are configured in the existing endpoint config file:
 
 ```json title="~/.beacon/endpoint/config.json"
 {
   "inventory_heartbeat": {
     "enabled": true,
     "ttl_seconds": 86400,
-    "runtimes": ["cursor", "claude_code"]
+    "runtimes": ["cursor", "claude_code"],
+    "include_contents": false,
+    "max_content_bytes": 65536
   }
 }
 ```
@@ -72,6 +97,7 @@ For a manual smoke test, temporarily lower `ttl_seconds`, start a Cursor or Clau
 | `--mcp` | Show only MCP server inventory and source configs |
 | `--skills` | Show only local agent skill inventory |
 | `--hooks` | Show only hook integration and hook config inventory |
+| `--contents` | Include redacted, size-limited config/hook/skill file contents and full MCP server definitions |
 
 ## Examples
 
