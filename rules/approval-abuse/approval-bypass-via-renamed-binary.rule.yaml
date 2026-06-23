@@ -1,0 +1,95 @@
+id: approval-bypass-via-renamed-binary
+version: 1
+title: Denied dangerous command re-invoked via a renamed copy of the binary
+description: >
+  An approval for a destructive or high-impact shell command was explicitly denied
+  (event.action approval.denied), and within the same session a command.executed event
+  invokes a renamed copy of the same dangerous binary class — a copy of rm as
+  /tmp/myrm or a wrapper script, a copy of curl, a copy of dd, a copy of mkfs, or
+  any other shim that uses the same dangerous command pattern. The deny+shim pair
+  indicates the operator blocked the canonical path and the agent re-issued the
+  action through a wrapper or copy to evade the gate. The rule is a
+  correlation between an approval.denied event in the same session and a
+  dangerous-class command that is not the literal denied path. Negative fixtures
+  cover denials with no follow-up, follow-ups in a different session, and
+  follow-ups that are unrelated benign commands.
+severity: critical
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0051
+
+correlation:
+  scope: session
+  window: 300s
+  steps:
+    - id: denied
+      match: >
+        e.event.action == "approval.denied" &&
+        e.command.command.matches("(?i)(\\brm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
+    - id: renamed_dangerous
+      match: >
+        e.event.action == "command.executed" &&
+        e.command.command.matches("(?i)(/tmp/|/var/tmp/|\\$\\(mktemp\\))") &&
+        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|\\s+-[a-z]*r[a-z]*f\\b|\\s+-[a-z]*f[a-z]*r\\b|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
+
+emit:
+  reason: "Denied dangerous command re-invoked via a renamed or shimmed binary in the same session"
+
+tests:
+  - name: denied_rm_then_renamed_rm
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp /bin/rm /tmp/myrm && /tmp/myrm -rf /var/data" }
+        session: { id: s1 }
+  - name: denied_dd_then_renamed_dd
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "dd if=/dev/zero of=/dev/sda" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp /bin/dd /var/tmp/.x && /var/tmp/.x if=/dev/zero of=/dev/sda" }
+        session: { id: s1 }
+  - name: denied_then_benign_command
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "ls -la /var/data" }
+        session: { id: s1 }
+  - name: denied_but_followup_in_other_session
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp /bin/rm /tmp/myrm && /tmp/myrm -rf /var/data" }
+        session: { id: s2 }
+  - name: renamed_dangerous_without_denial
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: command.executed }
+        command: { command: "cp /bin/rm /tmp/myrm && /tmp/myrm -rf /var/data" }
+        session: { id: s1 }

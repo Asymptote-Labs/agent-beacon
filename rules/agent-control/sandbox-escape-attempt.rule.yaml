@@ -1,0 +1,97 @@
+id: sandbox-escape-attempt
+version: 1
+title: Sandbox-escape primitives invoked in an agent session
+description: >
+  A command.executed event invokes a primitive commonly used to escape a container
+  or sandbox boundary: nsenter (enter an existing namespace), unshare (create or
+  attach to a namespace, including mount/PID/net), chroot (change the apparent root
+  directory), unshare -m with mount, or pivot_root. These primitives are the
+  standard tools for breaking out of a chroot, container, or restricted namespace
+  — when an agent is supposed to be sandboxed, using them is a control-bypass
+  signal. The rule is anchored to a command boundary (start of line, after a shell
+  separator, or after a launcher like sudo/env) and looks only for the dangerous
+  shapes (nsenter with a target, unshare with a non-user-namespace flag, chroot
+  with a non-`/` argument), so benign `unshare -U` for normal user-namespace apps
+  does not fire.
+severity: critical
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*nsenter\\b\\s+(?:--?(?:t|m|p|i|u|a|r|target|pid|mount|net|ipc|uts|all)\\b\\s*\\S*\\s*)+") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*unshare\\b\\s+--(mount|net|ipc|uts|pid|all|cgroup)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*chroot\\b\\s+/[^\\s;&|/][^;&|]*") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\benv\\s+)\\s*pivot_root\\b")
+  )
+
+emit:
+  reason: "Sandbox-escape primitive invoked (nsenter / unshare / chroot / pivot_root)"
+
+tests:
+  - name: nsenter_with_pid_target
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: command.executed }
+        command: { command: "nsenter -t 1 -m -p -n -- /bin/bash" }
+        session: { id: s1 }
+  - name: nsenter_mount_all
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:01:00Z"
+        event: { action: command.executed }
+        command: { command: "sudo nsenter --target 1234 --mount --pid --net /bin/sh" }
+        session: { id: s1 }
+  - name: unshare_mount_namespace
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:02:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare --mount --pid --fork /bin/sh" }
+        session: { id: s1 }
+  - name: chroot_to_directory
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:03:00Z"
+        event: { action: command.executed }
+        command: { command: "chroot /tmp/attacker-root /bin/bash" }
+        session: { id: s1 }
+  - name: pivot_root_invocation
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:04:00Z"
+        event: { action: command.executed }
+        command: { command: "pivot_root /new-root /old-root" }
+        session: { id: s1 }
+  - name: unshare_user_namespace_benign
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:05:00Z"
+        event: { action: command.executed }
+        command: { command: "unshare -U --map-root-user firefox" }
+        session: { id: s1 }
+  - name: nsenter_in_documentation
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:06:00Z"
+        event: { action: command.executed }
+        command: { command: "echo 'nsenter --target 1 --mount /bin/bash is dangerous'" }
+        session: { id: s1 }
+  - name: chroot_to_root
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:07:00Z"
+        event: { action: command.executed }
+        command: { command: "chroot / /bin/bash" }
+        session: { id: s1 }
+  - name: grep_for_pattern
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:08:00Z"
+        event: { action: command.executed }
+        command: { command: "grep -r 'unshare --mount' /usr/share/man" }
+        session: { id: s1 }

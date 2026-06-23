@@ -1,0 +1,77 @@
+id: permission-scope-expansion-via-env
+version: 1
+title: Agent runtime spawned with environment variables that elevate permissions
+description: >
+  A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
+  Cursor Agent, Aider, Goose, OpenCode, Gemini) with an environment-variable prefix
+  that grants an elevated or unscoped permission class — for example CLAUDE_CODE_ENTRYPOINT=cli
+  combined with a bypass, CODEX_HOME pointing at an attacker-writable directory, CURSOR_HOME
+  override, ANTHROPIC_API_KEY with a token-bearing value, or a generic *_TOKEN / *_API_KEY
+  / *_ADMIN_* prefix that grants admin scope. The agent binary must appear as a command
+  head (start of line, after a shell separator, or after a launcher like sudo/env/npx)
+  AND the command must carry a permission-elevating env var. This complements
+  agent-permission-bypass-spawn, which targets runtime CLI flags: this rule covers
+  out-of-band elevation via the environment the spawned agent inherits.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  owasp_llm: LLM06
+  mitre_atlas: AML.T0051
+
+# The agent binary must appear as a command head (start of line, after a shell
+# separator, after a launcher like sudo/env/npx, OR after a leading key=value
+# Bash-style env prefix). The env var must appear in the same command as a
+# leading key=value pair (Bash VAR=val agent form). Requiring both keeps the
+# rule off benign uses of *_TOKEN in unrelated commands.
+match: >
+  e.event.action == "command.executed" &&
+  e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+|([A-Z_][A-Z0-9_]*\\s*=\\S+\\s+)+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
+  e.command.command.matches("(?i)\\b((CLAUDE_CODE|CODEX|CURSOR|AIDER|GOOSE|OPENCODE|GEMINI)_[A-Z_][A-Z0-9_]*|(ADMIN|SUDO|ROOT|ELEVATED|PRIVILEGED|UNSANDBOXED)(_[A-Z_][A-Z0-9_]*)?|(GITHUB|AWS|AZURE|GCP|OPENAI|ANTHROPIC)_(ADMIN|TOKEN|API_KEY|ACCESS_KEY|SECRET_KEY)([A-Z_][A-Z0-9_]*)?)\\s*=")
+
+emit:
+  reason: "AI agent runtime spawned with environment variables that elevate permissions"
+
+tests:
+  - name: claude_with_admin_token_env
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: command.executed }
+        command: { command: "ADMIN_TOKEN=secret123 claude --dangerously-skip-permissions -p 'do it'" }
+        session: { id: s1 }
+  - name: codex_with_anthropic_admin_key
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:01:00Z"
+        event: { action: command.executed }
+        command: { command: "ANTHROPIC_ADMIN_KEY=sk-... codex exec 'patch the server'" }
+        session: { id: s1 }
+  - name: cursor_with_aws_admin_via_sudo
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:02:00Z"
+        event: { action: command.executed }
+        command: { command: "sudo AWS_ADMIN_TOKEN=hijack cursor-agent -m 'go'" }
+        session: { id: s1 }
+  - name: claude_normal_invocation_no_env
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:03:00Z"
+        event: { action: command.executed }
+        command: { command: "claude -p 'summarize the diff'" }
+        session: { id: s1 }
+  - name: non_permission_env_var_before_agent
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:04:00Z"
+        event: { action: command.executed }
+        command: { command: "PATH=/tmp/bin LANG=en_US claude -p 'work'" }
+        session: { id: s1 }
+  - name: env_var_but_no_agent_binary
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:05:00Z"
+        event: { action: command.executed }
+        command: { command: "ADMIN_TOKEN=secret123 curl https://example.com" }
+        session: { id: s1 }
