@@ -152,26 +152,23 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 		}
 	}
 
-	// Snapshot binaries for rollback, then install.
-	backup, _ := a.snapshotBinaries()
+	// Snapshot the whole install tree for rollback, then install. A snapshot
+	// failure on an existing install aborts before we touch anything: proceeding
+	// would leave us unable to roll back.
+	backup, err := a.snapshotInstall()
+	if err != nil {
+		a.emit(false, result, "rollback snapshot failed: "+err.Error())
+		return result, fmt.Errorf("snapshot current install for rollback: %w", err)
+	}
+
 	if err := a.install(ctx, pkgPath); err != nil {
-		// Install itself failed; attempt restore if we have a snapshot.
-		if backup != "" {
-			_ = a.restoreBinaries(backup)
-			result.RolledBack = true
-		}
+		a.rollback(backup, &result)
 		a.emit(false, result, err.Error())
 		return result, fmt.Errorf("install update: %w", err)
 	}
 
-	// Health-check; roll back binaries if the new install is unhealthy.
 	if err := a.healthCheck(ctx, manifest.Version); err != nil {
-		if backup != "" {
-			if rbErr := a.restoreBinaries(backup); rbErr == nil {
-				result.RolledBack = true
-				_ = a.restartCollector()
-			}
-		}
+		a.rollback(backup, &result)
 		a.emit(false, result, "post-install health check failed: "+err.Error())
 		return result, fmt.Errorf("post-install health check failed: %w", err)
 	}
@@ -287,26 +284,61 @@ func (a *Applier) install(ctx context.Context, pkgPath string) error {
 	return nil
 }
 
-// binDir is the install tree's binary directory under the active prefix.
-func (a *Applier) binDir() string {
-	return filepath.Join(a.prefix(), "opt", "beacon", "bin")
+// installDir is the root of the installed tree under the active prefix.
+func (a *Applier) installDir() string {
+	return filepath.Join(a.prefix(), "opt", "beacon")
 }
 
-func (a *Applier) snapshotBinaries() (string, error) {
-	src := a.binDir()
-	if _, err := os.Stat(src); err != nil {
-		return "", err // nothing to snapshot (fresh/test); rollback unavailable
+// binDir is the install tree's binary directory under the active prefix.
+func (a *Applier) binDir() string {
+	return filepath.Join(a.installDir(), "bin")
+}
+
+// snapshotInstall copies the whole /opt/beacon tree (binaries and scripts) to a
+// rollback location so a failed update can be reverted as a unit, not just its
+// binaries. It returns ("", nil) when there is nothing installed yet (a fresh
+// install — no rollback is possible or needed), and an error only on a real
+// copy failure, which the caller treats as fatal before touching the system.
+func (a *Applier) snapshotInstall() (string, error) {
+	src := a.installDir()
+	info, err := os.Stat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
 	}
-	dst := filepath.Join(a.stageDir(), "rollback")
-	_ = os.RemoveAll(dst)
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", src)
+	}
+	dst := filepath.Join(a.stageDir(), "rollback", "beacon")
+	if err := os.RemoveAll(dst); err != nil {
+		return "", err
+	}
 	if err := copyTree(src, dst); err != nil {
 		return "", err
 	}
 	return dst, nil
 }
 
-func (a *Applier) restoreBinaries(backup string) error {
-	return copyTree(backup, a.binDir())
+// rollback restores the pre-update install tree and restarts the collector. It
+// sets result.RolledBack only when a snapshot existed and was restored
+// successfully; with no snapshot (a first update) the failed new version stays
+// in place and RolledBack remains false, so telemetry never over-claims a
+// rollback that did not happen. Endpoint config/plists live outside the tree but
+// reference stable paths and a release-stable schema, so the restored older
+// binaries run against them consistently after the collector restarts.
+func (a *Applier) rollback(backup string, result *ApplyResult) {
+	if backup == "" {
+		return
+	}
+	if err := copyTree(backup, a.installDir()); err != nil {
+		return
+	}
+	result.RolledBack = true
+	if !a.AllowInsecureTest {
+		_ = a.restartCollector()
+	}
 }
 
 // healthCheck confirms the freshly installed beacon reports the expected

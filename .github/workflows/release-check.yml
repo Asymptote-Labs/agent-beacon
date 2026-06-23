@@ -11,6 +11,7 @@ on:
       - "cli/beacon/.goreleaser.yaml"
       - "collector-builder/**"
       - "packaging/macos/**"
+      - ".github/workflows/release.yml"
       - ".github/workflows/release-check.yml"
 
 permissions:
