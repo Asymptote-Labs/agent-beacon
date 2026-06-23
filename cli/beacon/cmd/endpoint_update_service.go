@@ -67,10 +67,8 @@ func init() {
 	endpointUpdateEnableCmd.Flags().BoolVar(&endpointUpdateServiceOpts.checkOnly, "check-only", false, "Check for updates and surface them, but do not apply automatically")
 	// The launchd job runs `update --scheduled`; it resolves the mode and
 	// either checks or applies. Hidden from the user-facing help.
-	for _, c := range []*cobra.Command{endpointUpdateCmd, topLevelUpdateCmd} {
-		c.Flags().BoolVar(&endpointUpdateServiceOpts.scheduled, "scheduled", false, "Internal: run as the scheduled updater job")
-		_ = c.Flags().MarkHidden("scheduled")
-	}
+	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateServiceOpts.scheduled, "scheduled", false, "Internal: run as the scheduled updater job")
+	_ = endpointUpdateCmd.Flags().MarkHidden("scheduled")
 }
 
 // setConfigAutoUpdateMode persists the auto-update mode in the system endpoint

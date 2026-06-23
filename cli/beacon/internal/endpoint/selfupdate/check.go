@@ -32,12 +32,21 @@ func resolveManifestURL() string {
 	return updatecheck.DefaultManifestURL
 }
 
-// Check fetches the manifest and compares it to the running build. It performs
-// no privileged actions and makes a single network request.
+// Check fetches the manifest and compares it to the running build with the
+// default mode resolution (no local config input). It performs no privileged
+// actions and makes a single network request.
 func Check(ctx context.Context, currentVersion string) (CheckResult, error) {
-	install := DetectInstall()
-	localMode := "" // the cmd layer passes the config value via CheckWithMode
-	res := CheckResult{Install: install, Mode: ResolveMode(localMode), ArchKey: updatecheck.RuntimeArchKey()}
+	return CheckWithMode(ctx, currentVersion, "")
+}
+
+// CheckWithMode is Check with the local config mode value as the
+// lowest-precedence input to mode resolution (env > managed > localMode).
+func CheckWithMode(ctx context.Context, currentVersion, localMode string) (CheckResult, error) {
+	res := CheckResult{
+		Install: DetectInstall(),
+		Mode:    ResolveMode(localMode),
+		ArchKey: updatecheck.RuntimeArchKey(),
+	}
 
 	src := updatecheck.ManifestSource{
 		Client:   &http.Client{Timeout: 10 * time.Second},
@@ -57,12 +66,4 @@ func Check(ctx context.Context, currentVersion string) (CheckResult, error) {
 		res.HasArtifact = true
 	}
 	return res, nil
-}
-
-// CheckWithMode is like Check but resolves the effective mode using the local
-// config mode value as the lowest-precedence input.
-func CheckWithMode(ctx context.Context, currentVersion, localMode string) (CheckResult, error) {
-	res, err := Check(ctx, currentVersion)
-	res.Mode = ResolveMode(localMode)
-	return res, err
 }

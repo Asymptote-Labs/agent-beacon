@@ -64,16 +64,18 @@ func TestParseMode(t *testing.T) {
 func TestResolveModePrecedence(t *testing.T) {
 	// Point the managed config at a temp dir so the test is hermetic.
 	dir := t.TempDir()
+	origManaged := ManagedConfigPath
 	ManagedConfigPath = filepath.Join(dir, "managed.json")
+	t.Cleanup(func() { ManagedConfigPath = origManaged })
 
-	// No env, no managed, no local => default auto.
-	if got := ResolveMode(""); got != ModeAuto {
+	// No env, no managed, no local => default off (auto-update is opt-in).
+	if got := ResolveMode(""); got != ModeOff {
 		t.Fatalf("default = %q", got)
 	}
 
 	// Local config wins over default.
-	if got := ResolveMode("off"); got != ModeOff {
-		t.Fatalf("local off = %q", got)
+	if got := ResolveMode("auto"); got != ModeAuto {
+		t.Fatalf("local auto = %q", got)
 	}
 
 	// Managed overrides local.
@@ -93,7 +95,9 @@ func TestResolveModePrecedence(t *testing.T) {
 
 func TestResolveManifestURLPrecedence(t *testing.T) {
 	dir := t.TempDir()
+	origManaged := ManagedConfigPath
 	ManagedConfigPath = filepath.Join(dir, "managed.json")
+	t.Cleanup(func() { ManagedConfigPath = origManaged })
 
 	if got := resolveManifestURL(); got != updatecheck.DefaultManifestURL {
 		t.Fatalf("default = %q", got)

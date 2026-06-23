@@ -166,14 +166,15 @@ through standard MDM workflows.
 | [Fleet](https://docs.asymptotelabs.ai/cli/fleet) | macOS package and user-context deployment helpers |
 | [Jamf Pro](https://docs.asymptotelabs.ai/cli/jamf) | macOS package, policy scripts, validation, and Extension Attributes |
 
-Once the macOS package is installed, Agent Beacon keeps itself current with a
-built-in self-updater that is on by default — no MDM-driven update process is
-required. A background `launchd` job checks for new releases and applies the
-signed, notarized, and stapled package automatically, with binary rollback if an
-update is unhealthy. Manage it with `beacon endpoint update status`,
-`beacon endpoint update --check`, or `beacon endpoint update disable`. MDM/managed
-profiles can force `check-only`/`off` or repoint the update source without
-changing the binary.
+Agent Beacon includes an optional built-in self-updater for the macOS package
+install, so machines can stay current without an MDM-driven update process. It is
+**off by default**; enable it with `beacon endpoint update enable` (or
+`--check-only` to be notified without auto-applying). Once enabled, a background
+`launchd` job checks for new releases and applies the signed, notarized, and
+stapled package automatically, with binary rollback if an update is unhealthy.
+Check on demand any time with `beacon endpoint update --check`, and inspect state
+with `beacon endpoint update status`. MDM/managed profiles can turn it on, force
+`check-only`/`off`, or repoint the update source without changing the binary.
 
 ## Dashboard and Local Detection
 

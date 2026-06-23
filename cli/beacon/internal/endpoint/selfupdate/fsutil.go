@@ -32,6 +32,21 @@ func acquireLock(path string) (func(), error) {
 	}, nil
 }
 
+// safeJoin resolves an archive entry name against dest and rejects anything that
+// would escape dest (path traversal / "zip slip"). It rejects absolute paths and
+// any entry whose cleaned, joined path is not contained within dest.
+func safeJoin(dest, name string) (string, error) {
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") {
+		return "", fmt.Errorf("absolute path in archive entry: %q", name)
+	}
+	cleanDest := filepath.Clean(dest)
+	target := filepath.Clean(filepath.Join(cleanDest, name))
+	if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
+		return "", fmt.Errorf("archive entry escapes destination: %q", name)
+	}
+	return target, nil
+}
+
 // extractTarballInto expands a gzipped tar into dest, guarding against path
 // traversal. It is used only by the insecure test seam; production installs go
 // through the macOS installer.
@@ -56,9 +71,9 @@ func extractTarballInto(tarball, dest string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(cleanDest, hdr.Name)
-		if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(filepath.Separator)) {
-			return fmt.Errorf("tar entry escapes destination: %q", hdr.Name)
+		target, err := safeJoin(cleanDest, hdr.Name)
+		if err != nil {
+			return err
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:

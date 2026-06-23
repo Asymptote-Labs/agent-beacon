@@ -11,7 +11,7 @@ import (
 type Mode string
 
 const (
-	// ModeAuto checks for and applies updates seamlessly. This is the default.
+	// ModeAuto checks for and applies updates seamlessly.
 	ModeAuto Mode = "auto"
 	// ModeCheckOnly surfaces an available update but never applies it.
 	ModeCheckOnly Mode = "check-only"
@@ -19,8 +19,10 @@ const (
 	ModeOff Mode = "off"
 )
 
-// DefaultMode is the built-in default when nothing overrides it.
-const DefaultMode = ModeAuto
+// DefaultMode is the built-in default when nothing overrides it. Auto-update is
+// off by default: the background updater is opt-in via `beacon endpoint update
+// enable`, an env override, or a managed profile.
+const DefaultMode = ModeOff
 
 // AutoUpdateEnv overrides the resolved mode for a single invocation.
 const AutoUpdateEnv = "BEACON_AUTO_UPDATE"

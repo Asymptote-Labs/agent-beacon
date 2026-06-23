@@ -169,7 +169,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 		if backup != "" {
 			if rbErr := a.restoreBinaries(backup); rbErr == nil {
 				result.RolledBack = true
-				_ = a.restartCollector(ctx)
+				_ = a.restartCollector()
 			}
 		}
 		a.emit(false, result, "post-install health check failed: "+err.Error())
@@ -337,7 +337,7 @@ func (a *Applier) healthCheck(ctx context.Context, wantVersion string) error {
 	}
 }
 
-func (a *Applier) restartCollector(ctx context.Context) error {
+func (a *Applier) restartCollector() error {
 	mgr := service.Manager{UserMode: false}
 	_ = mgr.Unload()
 	return mgr.Load()

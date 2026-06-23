@@ -37,31 +37,33 @@ anything.`,
 	RunE:         runEndpointUpdate,
 }
 
-var topLevelUpdateCmd = &cobra.Command{
-	Use:          "update",
-	Short:        "Alias for beacon endpoint update",
-	SilenceUsage: true,
-	RunE:         runEndpointUpdate,
-}
-
 func init() {
+	// `update` lives under `endpoint` only; a top-level `update` command is
+	// intentionally not exposed (the public command-tree smoke test forbids it).
 	endpointCmd.AddCommand(endpointUpdateCmd)
-	rootCmd.AddCommand(topLevelUpdateCmd)
-	for _, c := range []*cobra.Command{endpointUpdateCmd, topLevelUpdateCmd} {
-		c.Flags().BoolVar(&endpointUpdateOpts.check, "check", false, "Only report whether an update is available; do not apply")
-		// Test-only seam: apply into a temp prefix without root/Gatekeeper. Hidden
-		// from help; never used by the launchd job or normal operation.
-		c.Flags().BoolVar(&endpointUpdateOpts.allowInsecure, "allow-insecure-test", false, "Test only: apply into --install-prefix and honor "+insecureSkipGatekeeperEnv)
-		c.Flags().StringVar(&endpointUpdateOpts.installPrefix, "install-prefix", "", "Test only: install root instead of /")
-		_ = c.Flags().MarkHidden("allow-insecure-test")
-		_ = c.Flags().MarkHidden("install-prefix")
-	}
+	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateOpts.check, "check", false, "Only report whether an update is available; do not apply")
+	// Test-only seam: apply into a temp prefix without root/Gatekeeper. Hidden
+	// from help; never used by the launchd job or normal operation.
+	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateOpts.allowInsecure, "allow-insecure-test", false, "Test only: apply into --install-prefix and honor "+insecureSkipGatekeeperEnv)
+	endpointUpdateCmd.Flags().StringVar(&endpointUpdateOpts.installPrefix, "install-prefix", "", "Test only: install root instead of /")
+	_ = endpointUpdateCmd.Flags().MarkHidden("allow-insecure-test")
+	_ = endpointUpdateCmd.Flags().MarkHidden("install-prefix")
 }
 
-// configAutoUpdateMode returns the locally configured auto-update mode, if any.
+// configAutoUpdateMode returns the locally configured auto-update mode.
+//
+// The system config is authoritative for the system install the self-updater
+// governs: if it loads at all, its value wins (empty means "use the default"),
+// and we never fall through to a user-mode config an operator could set under
+// ~/.beacon — which, being visible under sudo, would otherwise override the
+// system/managed intent. The user config is consulted only when there is no
+// system config (i.e. a user-mode install).
 func configAutoUpdateMode() string {
-	if cfg, err := endpointconfig.Load(false); err == nil && cfg.AutoUpdate != nil {
-		return cfg.AutoUpdate.Mode
+	if cfg, err := endpointconfig.Load(false); err == nil {
+		if cfg.AutoUpdate != nil {
+			return cfg.AutoUpdate.Mode
+		}
+		return ""
 	}
 	if cfg, err := endpointconfig.Load(true); err == nil && cfg.AutoUpdate != nil {
 		return cfg.AutoUpdate.Mode
@@ -134,8 +136,16 @@ func applyUpdate(parent context.Context, current string) error {
 	// Real installs need root; the launchd job runs as root, an interactive
 	// user must use sudo. The test seam installs into a temp prefix and skips
 	// this requirement.
-	if !insecure && os.Geteuid() != 0 {
-		return fmt.Errorf("applying an update requires root; rerun with sudo or let the background updater apply it")
+	if !insecure {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("applying an update requires root; rerun with sudo or let the background updater apply it")
+		}
+		// `installer -pkg -target /` is only correct for the system package
+		// install. Refuse to apply over any other install kind even when run as
+		// root (e.g. a scheduled job on an unexpected layout).
+		if install := selfupdate.DetectInstall(); !install.SupportsSeamlessUpdate() {
+			return fmt.Errorf("automatic apply is only supported for the system package install (detected: %s)", install.Kind)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(parent, 15*time.Minute)
