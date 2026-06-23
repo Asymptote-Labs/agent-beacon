@@ -27,6 +27,11 @@ var secretAssignmentRE = regexp.MustCompile(
 		"(\"(?:[^\"\\\\]|\\\\.)*\"|'[^']*'|`[^`]*`|[^\\s,}\\]\\n#]+)",
 )
 
+var yamlSecretBlockScalarHeaderRE = regexp.MustCompile(
+	`(?i)^([ \t]*(?:-\s*)?"?[A-Za-z0-9_.\-]*(?:` + strings.ToLower(strings.Join(secretMarkers, "|")) + `)[A-Za-z0-9_.\-]*"?\s*:\s*)` +
+		`([|>](?:[+-]?[0-9]|[0-9][+-]?)?[ \t]*(?:#.*)?)(\r?\n?)$`,
+)
+
 // CapturedContent is the opt-in raw body of a config, hook, or skill file with
 // sensitive values redacted and the body truncated to a size cap. It is only
 // populated when content capture is explicitly requested.
@@ -71,16 +76,71 @@ func captureContent(data []byte, maxBytes int) *CapturedContent {
 // redactSecrets replaces the values of secret-looking assignments with a
 // placeholder and returns the redacted text plus the number of redactions.
 func redactSecrets(text string) (string, int) {
-	count := 0
-	out := secretAssignmentRE.ReplaceAllStringFunc(text, func(match string) string {
+	out, count := redactYAMLBlockScalarSecrets(text)
+	out = secretAssignmentRE.ReplaceAllStringFunc(out, func(match string) string {
 		sub := secretAssignmentRE.FindStringSubmatch(match)
 		if len(sub) != 4 {
+			return match
+		}
+		if isRedactedValueLiteral(sub[3]) {
 			return match
 		}
 		count++
 		return sub[1] + sub[2] + redactValueLiteral(sub[3])
 	})
 	return out, count
+}
+
+func redactYAMLBlockScalarSecrets(text string) (string, int) {
+	lines := splitLinesKeepEnd(text)
+	if len(lines) == 0 {
+		return text, 0
+	}
+	var out strings.Builder
+	count := 0
+	for i := 0; i < len(lines); i++ {
+		sub := yamlSecretBlockScalarHeaderRE.FindStringSubmatch(lines[i])
+		if len(sub) != 4 {
+			out.WriteString(lines[i])
+			continue
+		}
+
+		keyIndent := leadingIndentWidth(lines[i])
+		bodyStart := i + 1
+		bodyEnd := bodyStart
+		blockIndent := yamlBlockScalarIndent(sub[2], keyIndent)
+		if blockIndent == 0 {
+			for bodyEnd < len(lines) && isBlankLine(lines[bodyEnd]) {
+				bodyEnd++
+			}
+			if bodyEnd < len(lines) {
+				indent := leadingIndentWidth(lines[bodyEnd])
+				if indent > keyIndent {
+					blockIndent = indent
+				}
+			}
+		}
+		if blockIndent == 0 {
+			blockIndent = keyIndent + 2
+		}
+		for bodyEnd < len(lines) {
+			if isBlankLine(lines[bodyEnd]) {
+				bodyEnd++
+				continue
+			}
+			if leadingIndentWidth(lines[bodyEnd]) < blockIndent {
+				break
+			}
+			bodyEnd++
+		}
+
+		out.WriteString(sub[1])
+		out.WriteString(redactedPlaceholder)
+		out.WriteString(sub[3])
+		count++
+		i = bodyEnd - 1
+	}
+	return out.String(), count
 }
 
 // redactValueLiteral replaces a captured value with the placeholder while
@@ -95,6 +155,18 @@ func redactValueLiteral(value string) string {
 		return "`" + redactedPlaceholder + "`"
 	default:
 		return redactedPlaceholder
+	}
+}
+
+func isRedactedValueLiteral(value string) bool {
+	switch value {
+	case redactedPlaceholder,
+		`"` + redactedPlaceholder + `"`,
+		"'" + redactedPlaceholder + "'",
+		"`" + redactedPlaceholder + "`":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -139,6 +211,49 @@ func containsSecretMarker(key string) bool {
 		}
 	}
 	return false
+}
+
+func splitLinesKeepEnd(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var lines []string
+	for len(s) > 0 {
+		idx := strings.IndexByte(s, '\n')
+		if idx < 0 {
+			lines = append(lines, s)
+			break
+		}
+		lines = append(lines, s[:idx+1])
+		s = s[idx+1:]
+	}
+	return lines
+}
+
+func isBlankLine(line string) bool {
+	return strings.TrimSpace(line) == ""
+}
+
+func leadingIndentWidth(line string) int {
+	width := 0
+	for _, r := range line {
+		switch r {
+		case ' ', '\t':
+			width++
+		default:
+			return width
+		}
+	}
+	return width
+}
+
+func yamlBlockScalarIndent(header string, keyIndent int) int {
+	for _, r := range header[1:] {
+		if r >= '1' && r <= '9' {
+			return keyIndent + int(r-'0')
+		}
+	}
+	return 0
 }
 
 func truncateUTF8(s string, max int) string {
