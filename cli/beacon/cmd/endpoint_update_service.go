@@ -79,6 +79,9 @@ func runUpdateEnable(cmd *cobra.Command, args []string) error {
 	if err := requireRootForUpdater(); err != nil {
 		return err
 	}
+	if err := requireSystemPackageForUpdater(detectUpdateInstall()); err != nil {
+		return err
+	}
 	if !endpointUpdateServiceOpts.checkOnly {
 		return fmt.Errorf("phase 1 supports check-only monitoring only; rerun with --check-only")
 	}
@@ -95,6 +98,13 @@ func runUpdateEnable(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Update checks enabled (mode: %s).\n", mode)
 	return nil
+}
+
+func requireSystemPackageForUpdater(install selfupdate.Install) error {
+	if install.SupportsSeamlessUpdate() {
+		return nil
+	}
+	return fmt.Errorf("background update checks require the system package install (detected: %s)", install.Kind)
 }
 
 func runUpdateDisable(cmd *cobra.Command, args []string) error {
@@ -144,7 +154,19 @@ func runScheduledUpdate(parent context.Context) error {
 		return nil
 	}
 	if mode != selfupdate.ModeCheckOnly {
-		return fmt.Errorf("phase 1 scheduled updater supports check-only mode only (resolved: %s)", mode)
+		current := version.GetVersion()
+		res := selfupdate.CheckResult{Mode: mode}
+		if err := selfupdate.EmitCheckEvent(selfupdate.CheckEventOptions{
+			Result:       res,
+			Action:       selfupdate.EventUnsupported,
+			Reason:       "mode_not_supported_in_phase1",
+			LogPath:      endpointSystemLogPath(),
+			AgentVersion: current,
+		}); err != nil {
+			return fmt.Errorf("write update check event: %w", err)
+		}
+		fmt.Printf("Phase 1 scheduled updater supports check-only mode only (resolved: %s).\n", mode)
+		return nil
 	}
 
 	current := version.GetVersion()
@@ -179,6 +201,9 @@ func runScheduledUpdate(parent context.Context) error {
 
 func endpointSystemLogPath() string {
 	if endpointUpdateServiceOpts.scheduled {
+		return selfupdate.SystemLogPath(writer.DefaultPath(false), false)
+	}
+	if endpointOpts.logPath == "" && detectUpdateInstall().SupportsSeamlessUpdate() {
 		return selfupdate.SystemLogPath(writer.DefaultPath(false), false)
 	}
 	cfg := loadOrDefaultConfig()

@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 
 	"github.com/spf13/cobra"
@@ -1160,6 +1162,54 @@ func TestEndpointUpdateCommandsRegistered(t *testing.T) {
 	}
 	if cmd, _, err := rootCmd.Find([]string{"update"}); err == nil && cmd != nil && cmd.Name() == "update" {
 		t.Fatal("top-level update command should not be registered")
+	}
+}
+
+func TestConfigAutoUpdateModeDoesNotFallBackOnSystemLoadError(t *testing.T) {
+	systemErr := fmt.Errorf("invalid system config")
+	got := configAutoUpdateModeFrom(
+		func() (endpointconfig.Config, error) { return endpointconfig.Config{}, systemErr },
+		func() (endpointconfig.Config, error) {
+			return endpointconfig.Config{AutoUpdate: &endpointconfig.AutoUpdate{Mode: "check-only"}}, nil
+		},
+	)
+	if got != "" {
+		t.Fatalf("mode = %q, want empty when system config load fails", got)
+	}
+}
+
+func TestEndpointSystemLogPathUsesSystemPathForPackageInstall(t *testing.T) {
+	oldDetect := detectUpdateInstall
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	t.Cleanup(func() {
+		detectUpdateInstall = oldDetect
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+	detectUpdateInstall = func() selfupdate.Install {
+		return selfupdate.Install{Kind: selfupdate.InstallSystemPkg, BinaryPath: "/opt/beacon/bin/beacon"}
+	}
+	endpointOpts.logPath = ""
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+
+	if got, want := endpointSystemLogPath(), "/var/log/beacon-agent/system.jsonl"; got != want {
+		t.Fatalf("endpointSystemLogPath = %q, want %q", got, want)
+	}
+}
+
+func TestRequireSystemPackageForUpdater(t *testing.T) {
+	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallSystemPkg}); err != nil {
+		t.Fatalf("system package rejected: %v", err)
+	}
+	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallHomebrew}); err == nil {
+		t.Fatal("homebrew install should not be allowed to install system updater")
+	}
+	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallOther}); err == nil {
+		t.Fatal("other install should not be allowed to install system updater")
 	}
 }
 

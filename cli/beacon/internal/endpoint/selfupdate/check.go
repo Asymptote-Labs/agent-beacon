@@ -47,6 +47,17 @@ func CheckWithMode(ctx context.Context, currentVersion, localMode string) (Check
 		Mode:    ResolveMode(localMode),
 		ArchKey: updatecheck.RuntimeArchKey(),
 	}
+	current := strings.TrimSpace(currentVersion)
+	if current == "dev" {
+		res.ManifestResult.CurrentVersion = current
+		res.ManifestResult.CurrentIsDev = true
+		return res, nil
+	}
+	if !updatecheck.CanCheckVersion(current) {
+		res.ManifestResult.CurrentVersion = current
+		res.ManifestResult.UnsupportedCurrentVersion = true
+		return res, nil
+	}
 
 	src := updatecheck.ManifestSource{
 		Client:   &http.Client{Timeout: 10 * time.Second},

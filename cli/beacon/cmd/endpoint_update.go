@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,8 @@ import (
 var endpointUpdateOpts struct {
 	check bool
 }
+
+var detectUpdateInstall = selfupdate.DetectInstall
 
 var endpointUpdateCmd = &cobra.Command{
 	Use:   "update",
@@ -42,13 +45,22 @@ func init() {
 // system/managed intent. The user config is consulted only when there is no
 // system config (i.e. a user-mode install).
 func configAutoUpdateMode() string {
-	if cfg, err := endpointconfig.Load(false); err == nil {
+	return configAutoUpdateModeFrom(
+		func() (endpointconfig.Config, error) { return endpointconfig.Load(false) },
+		func() (endpointconfig.Config, error) { return endpointconfig.Load(true) },
+	)
+}
+
+func configAutoUpdateModeFrom(loadSystem, loadUser func() (endpointconfig.Config, error)) string {
+	if cfg, err := loadSystem(); err == nil {
 		if cfg.AutoUpdate != nil {
 			return cfg.AutoUpdate.Mode
 		}
 		return ""
+	} else if !os.IsNotExist(err) {
+		return ""
 	}
-	if cfg, err := endpointconfig.Load(true); err == nil && cfg.AutoUpdate != nil {
+	if cfg, err := loadUser(); err == nil && cfg.AutoUpdate != nil {
 		return cfg.AutoUpdate.Mode
 	}
 	return ""

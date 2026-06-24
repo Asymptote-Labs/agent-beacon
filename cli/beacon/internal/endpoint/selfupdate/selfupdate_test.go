@@ -137,6 +137,27 @@ func TestCheck(t *testing.T) {
 	}
 }
 
+func TestCheckSkipsManifestFetchForDevBuild(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	t.Setenv(updatecheck.ManifestURLEnv, srv.URL)
+
+	res, err := Check(context.Background(), "dev")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if called {
+		t.Fatal("manifest server was called for dev build")
+	}
+	if !res.CurrentIsDev {
+		t.Fatalf("expected CurrentIsDev: %+v", res)
+	}
+}
+
 func TestCheckMissingArtifactIsNotError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"schema":1,"version":"9.9.9","artifacts":{"darwin_arm64":{"url":"https://x/p.pkg","sha256":"deadbeef"}}}`))
