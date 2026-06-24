@@ -16,6 +16,7 @@ The package builder assembles this payload:
 ```text
 /opt/beacon/bin/beacon
 /opt/beacon/bin/beacon-otelcol
+/opt/beacon/bin/vector
 /opt/beacon/scripts/install-endpoint.sh
 /opt/beacon/scripts/uninstall-endpoint.sh
 /opt/beacon/jamf/extension-attributes/*.sh
@@ -68,6 +69,13 @@ BEACON_VECTOR_BIN="$(command -v vector)" \
 NOTARYTOOL_PROFILE="beacon-notary-profile" \
   sh packaging/macos/build-signed-notarized-pkg.sh
 ```
+
+The CI release workflow publishes the signed endpoint package from pushed `v*`
+tags. GoReleaser still publishes multi-arch CLI tarballs for Homebrew and manual
+archive installs, while the signed/notarized/stapled endpoint `.pkg` is currently
+Apple Silicon only (`BeaconEndpointAgent-<version>-arm64.pkg`) so the package can
+include the current Vector macOS distribution. The workflow also uploads the
+package `.sha256` and `update-manifest.json` assets to the GitHub release.
 
 ## Manual Install
 

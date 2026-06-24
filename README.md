@@ -161,6 +161,10 @@ management (SIEM), log aggregation, and object storage destinations.
 Agent Beacon is designed for Security and IT teams to deploy and validate
 through standard MDM workflows.
 
+Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
+`.pkg` to GitHub Releases for MDM/manual download. Homebrew and release archives
+remain available for CLI installs across supported macOS/Linux architectures.
+
 | MDM platform | Support path |
 | --- | --- |
 | [Fleet](https://docs.asymptotelabs.ai/cli/fleet) | macOS package and user-context deployment helpers |

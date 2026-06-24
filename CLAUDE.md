@@ -222,6 +222,23 @@ gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.conte
 gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
 ```
 
+The release should include the four GoReleaser CLI archives, `checksums.txt`,
+`threat-rules.tar.gz`, `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`,
+and `update-manifest.json`. Verify the package before announcing the release:
+
+```bash
+tmpdir="$(mktemp -d)"
+cd "$tmpdir"
+gh release download <tag> --repo Asymptote-Labs/agent-beacon --pattern 'BeaconEndpointAgent-*-arm64.pkg*' --pattern update-manifest.json
+expected="$(awk '{print $1}' BeaconEndpointAgent-*-arm64.pkg.sha256)"
+actual="$(shasum -a 256 BeaconEndpointAgent-*-arm64.pkg | awk '{print $1}')"
+test "$expected" = "$actual"
+pkgutil --check-signature BeaconEndpointAgent-*-arm64.pkg
+xcrun stapler validate BeaconEndpointAgent-*-arm64.pkg
+spctl --assess --type install -vv BeaconEndpointAgent-*-arm64.pkg
+jq . update-manifest.json
+```
+
 If the workflow fails after the tag is pushed, do not create a second tag until
 the failure is understood. Fix the release workflow or source issue, then rerun
 the failed workflow for the same tag when possible. Delete and recreate a pushed

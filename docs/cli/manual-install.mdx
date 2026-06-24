@@ -7,6 +7,12 @@ description: "Install the Beacon CLI from platform archives or build it from sou
 
 Beacon releases publish platform archives for macOS and Linux on `amd64` and `arm64`. Each archive includes the `beacon` CLI and the matching `beacon-otelcol` collector binary, with SHA-256 checksums published alongside the release.
 
+For managed endpoint rollouts on Apple Silicon Macs, GitHub Releases also attach
+a signed, notarized, and stapled `BeaconEndpointAgent-<version>-arm64.pkg`. The
+package installs Beacon under `/opt/beacon`, includes the collector and Vector
+binary, and is intended for MDM or root-managed system deployments rather than
+per-user CLI installs.
+
 ## Build from source
 
 To build the CLI directly from the Beacon repository:
