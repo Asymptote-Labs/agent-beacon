@@ -1143,6 +1143,26 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 	}
 }
 
+func TestEndpointUpdateCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"update"},
+		{"update", "enable"},
+		{"update", "disable"},
+		{"update", "status"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("endpoint command %v not registered: %v", path, err)
+		}
+		if cmd == nil {
+			t.Fatalf("endpoint command %v not registered", path)
+		}
+	}
+	if cmd, _, err := rootCmd.Find([]string{"update"}); err == nil && cmd != nil && cmd.Name() == "update" {
+		t.Fatal("top-level update command should not be registered")
+	}
+}
+
 func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
 	for _, name := range []string{"completion", "docs"} {
 		cmd, _, err := rootCmd.Find([]string{name})

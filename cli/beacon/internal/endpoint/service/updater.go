@@ -1,0 +1,110 @@
+package service
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+// UpdaterLabel is the launchd label for the periodic update-check job. Phase 1
+// is check-only and does not apply package updates.
+const UpdaterLabel = "com.beacon.endpoint.updater"
+
+// UpdaterManager manages the update-check launchd job. Unlike the collector
+// service it is system-only and runs on a schedule rather than KeepAlive.
+type UpdaterManager struct{}
+
+// PlistPath returns the LaunchDaemon plist path for the updater job.
+func (UpdaterManager) PlistPath() string {
+	return filepath.Join("/Library/LaunchDaemons", UpdaterLabel+".plist")
+}
+
+// WritePlist writes the updater LaunchDaemon plist invoking the given program.
+func (m UpdaterManager) WritePlist(program string) (string, error) {
+	if runtime.GOOS != "darwin" {
+		return "", fmt.Errorf("launchd service management is supported only on macOS")
+	}
+	path := m.PlistPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, []byte(updaterPlist(UpdaterLabel, program)), 0644)
+}
+
+// Load bootstraps the updater job into the system domain.
+func (m UpdaterManager) Load() error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	path := m.PlistPath()
+	out, err := runLaunchctlCommand("bootstrap", "system", path)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.TrimSpace(out), "already bootstrapped") {
+		target := "system/" + UpdaterLabel
+		if err := runLaunchctlWithContext("system", UpdaterLabel, "", "bootout", target); err != nil {
+			return err
+		}
+		return runLaunchctlWithContext("system", UpdaterLabel, path, "bootstrap", "system", path)
+	}
+	return launchctlError(strings.TrimSpace(out), err, "system", UpdaterLabel, path, "bootstrap", "system", path)
+}
+
+// Unload boots the updater job out of the system domain.
+func (m UpdaterManager) Unload() error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return runLaunchctlWithContext("system", UpdaterLabel, "", "bootout", "system/"+UpdaterLabel)
+}
+
+// Status reports whether the updater job is loaded.
+func (m UpdaterManager) Status() Status {
+	status := Status{Label: UpdaterLabel}
+	if runtime.GOOS != "darwin" {
+		status.Message = "service status is available only on macOS"
+		return status
+	}
+	out, err := runLaunchctlCommand("print", "system/"+UpdaterLabel)
+	if err != nil {
+		status.Message = strings.TrimSpace(out)
+		return status
+	}
+	status.Loaded = true
+	status.Running = strings.Contains(out, "state = running") || strings.Contains(out, "pid =")
+	return status
+}
+
+// updaterPlist renders the check-only LaunchDaemon. Phase 1 runs every ten
+// minutes so update detection can be dogfooded quickly without install risk.
+// It does not RunAtLoad and is not KeepAlive (one-shot scheduled job).
+func updaterPlist(label, program string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>%s</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>%s</string>
+    <string>endpoint</string>
+    <string>update</string>
+    <string>--check</string>
+    <string>--scheduled</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/tmp/%s.out</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/%s.err</string>
+</dict>
+</plist>
+`, label, program, label, label)
+}

@@ -30,6 +30,13 @@ type Config struct {
 	Inventory       *Inventory     `json:"inventory_heartbeat,omitempty"`
 	Destinations    *Destinations  `json:"destinations,omitempty"`
 	ManagedUpload   *ManagedUpload `json:"managed_upload,omitempty"`
+	AutoUpdate      *AutoUpdate    `json:"auto_update,omitempty"`
+}
+
+// AutoUpdate controls Beacon's endpoint update checker. Phase 1 supports
+// check-only/off behavior; an empty mode uses the built-in default of off.
+type AutoUpdate struct {
+	Mode string `json:"mode,omitempty"`
 }
 
 type Collector struct {

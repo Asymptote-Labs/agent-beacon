@@ -23,6 +23,24 @@ brew upgrade beacon
 beacon version
 ```
 
+## Check-only endpoint update monitoring
+
+For Apple Silicon systems installed from the signed endpoint package, Beacon can
+periodically check the GitHub Release manifest without downloading or applying
+updates. This writes local-only update status events to `system.jsonl` beside the
+runtime log.
+
+```bash title="Enable check-only endpoint update monitoring"
+sudo /opt/beacon/bin/beacon endpoint update enable --check-only
+sudo /opt/beacon/bin/beacon endpoint update status
+```
+
+Disable the background check job with:
+
+```bash title="Disable endpoint update monitoring"
+sudo /opt/beacon/bin/beacon endpoint update disable
+```
+
 ## Repair endpoint configuration
 
 If you run Beacon as a local endpoint service, reapply managed service files and telemetry configuration after upgrading:
