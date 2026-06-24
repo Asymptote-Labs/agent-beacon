@@ -114,6 +114,35 @@ func TestRunPostToolEmitsCursorAfterShellExecution(t *testing.T) {
 	}
 }
 
+func TestRunPostToolCorrectsCursorPayloadWithDefaultPlatform(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"hook_event_name": "afterShellExecution",
+		"session_id":      "conv-shell",
+		"command":         "go test ./...",
+		"output":          "ok",
+		"cwd":             "/repo",
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "cursor" {
+		t.Fatalf("harness = %q, want cursor", harness)
+	}
+	if action := event["event"].(map[string]interface{})["action"]; action != "command.executed" {
+		t.Fatalf("event.action = %q, want command.executed", action)
+	}
+	if sessionID := event["session"].(map[string]interface{})["id"]; sessionID != "conv-shell" {
+		t.Fatalf("session.id = %q, want conv-shell", sessionID)
+	}
+}
+
 func TestRunPostToolEmitsCursorMCPGenAIFields(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
@@ -273,7 +302,7 @@ func TestRunPostToolEmitsCursorMCPFailureResponseFields(t *testing.T) {
 			"jsonrpc_request_id": "req-1",
 		},
 		"tool_response": map[string]interface{}{
-			"error": true,
+			"error":      true,
 			"mcp_server": "linear",
 			"mcp_tool":   "get_organizations",
 		},

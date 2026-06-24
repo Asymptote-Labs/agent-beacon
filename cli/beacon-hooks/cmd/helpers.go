@@ -11,6 +11,9 @@ import (
 func readStdinJSON() (map[string]interface{}, error) {
 	var input map[string]interface{}
 	err := json.NewDecoder(os.Stdin).Decode(&input)
+	if err == nil {
+		applyPayloadPlatformOverride(input)
+	}
 	return input, err
 }
 
@@ -34,6 +37,28 @@ func isDevinLikePlatform(platform string) bool {
 
 func isCascadePlatform(platform string) bool {
 	return platform == "devin-desktop"
+}
+
+func applyPayloadPlatformOverride(input map[string]interface{}) {
+	if platformFlag != "claude" || !looksLikeCursorPayload(input) {
+		return
+	}
+	platformFlag = "cursor"
+}
+
+func looksLikeCursorPayload(input map[string]interface{}) bool {
+	if getFirstStr(input, "conversation_id", "parent_conversation_id", "cursor_version", "generation_id") != "" {
+		return true
+	}
+	if _, ok := input["workspace_roots"]; ok {
+		return true
+	}
+	switch getFirstStr(input, "hook_event_name", "hookEventName") {
+	case "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "beforeReadFile", "afterFileEdit", "postToolUse", "postToolUseFailure", "preCompact", "subagentStart", "subagentStop":
+		return true
+	default:
+		return false
+	}
 }
 
 // getFirstStr returns the first non-empty string value from input for the given keys.
@@ -60,7 +85,7 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		}
 		return getFirstStr(input, "sessionId", "session_id")
 	case "cursor":
-		return getFirstStr(input, "conversation_id", "parent_conversation_id")
+		return getFirstStr(input, "conversation_id", "parent_conversation_id", "session_id", "sessionId")
 	case "vscode":
 		return getFirstStr(input, "sessionId", "session_id", "conversation_id", "gen_ai.conversation.id")
 	case "devin", "devin-cli":
@@ -95,7 +120,7 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		}
 		return
 	case "cursor":
-		sessionID = getFirstStr(input, "conversation_id", "parent_conversation_id")
+		sessionID = getFirstStr(input, "conversation_id", "parent_conversation_id", "session_id", "sessionId")
 		transcriptPath = getFirstStr(input, "transcript_path")
 		return
 	case "vscode":
