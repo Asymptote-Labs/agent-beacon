@@ -457,6 +457,37 @@ check fails:
 sudo launchctl print system/com.beacon.endpoint.s3-forwarder >/dev/null 2>&1
 ```
 
+Then run this script on those devices, or on all Beacon devices if the original
+S3 env file should already exist everywhere:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+ENV_PATH="/Library/Application Support/Beacon/Forwarders/s3-vector.env"
+INSTALLER="/opt/beacon/jamf/claude/s3/install-forwarder.sh"
+LABEL="com.beacon.endpoint.s3-forwarder"
+
+if [ ! -x "$INSTALLER" ]; then
+  echo "Beacon S3 installer missing: $INSTALLER" >&2
+  exit 1
+fi
+
+if [ ! -f "$ENV_PATH" ]; then
+  echo "S3 env file missing: $ENV_PATH; rerun the original S3 configuration policy" >&2
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+. "$ENV_PATH"
+set +a
+
+"$INSTALLER"
+
+launchctl print "system/$LABEL" | egrep 'state =|pid =|last exit code' || true
+```
+
 Verify that the env file has non-secret settings without printing credentials:
 
 ```bash
