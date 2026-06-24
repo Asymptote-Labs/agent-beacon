@@ -94,6 +94,34 @@ func TestRunPreToolEmitsCursorBeforeShellExecution(t *testing.T) {
 	}
 }
 
+func TestRunPreToolCorrectsCursorPayloadWithDefaultPlatform(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"conversation_id": "conv-shell",
+		"hook_event_name": "beforeShellExecution",
+		"command":         "npm test",
+		"cwd":             "/repo",
+	})
+	if out["permission"] != "allow" {
+		t.Fatalf("beforeShellExecution response = %#v, want permission allow", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "cursor" {
+		t.Fatalf("harness = %q, want cursor", harness)
+	}
+	if action := event["event"].(map[string]interface{})["action"]; action != "approval.allowed" {
+		t.Fatalf("event.action = %q, want approval.allowed", action)
+	}
+	if sessionID := event["session"].(map[string]interface{})["id"]; sessionID != "conv-shell" {
+		t.Fatalf("session.id = %q, want conv-shell", sessionID)
+	}
+}
+
 func TestRunPreToolEmitsCursorBeforeReadFile(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
