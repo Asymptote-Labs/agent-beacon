@@ -11,6 +11,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### Unreleased
+
+- **Check-only endpoint update monitoring** · Apple Silicon package installs can opt into a local `launchd` job that checks the release manifest every 10 minutes and writes local-only update status events to `system.jsonl`. This phase does not download or apply packages.
+
 ### v0.0.76 · June 24, 2026
 
 - **Signed Apple Silicon endpoint package releases** · A pushed version tag now runs the release pipeline end-to-end: GoReleaser publishes CLI archives and updates Homebrew, then CI builds, signs, notarizes, staples, and uploads the Apple Silicon endpoint `.pkg`, `.sha256`, and `update-manifest.json` assets to GitHub Releases for direct MDM/manual download.

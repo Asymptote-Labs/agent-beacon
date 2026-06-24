@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 
 	"github.com/spf13/cobra"
@@ -1140,6 +1142,112 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 	}
 	if strings.Contains(text, "secret") {
 		t.Fatalf("manual inventory snapshot log leaked secret content: %s", text)
+	}
+}
+
+func TestEndpointUpdateCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"update"},
+		{"update", "enable"},
+		{"update", "disable"},
+		{"update", "status"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("endpoint command %v not registered: %v", path, err)
+		}
+		if cmd == nil {
+			t.Fatalf("endpoint command %v not registered", path)
+		}
+	}
+	if cmd, _, err := rootCmd.Find([]string{"update"}); err == nil && cmd != nil && cmd.Name() == "update" {
+		t.Fatal("top-level update command should not be registered")
+	}
+}
+
+func TestConfigAutoUpdateModeDoesNotFallBackOnSystemLoadError(t *testing.T) {
+	systemErr := fmt.Errorf("invalid system config")
+	got := configAutoUpdateModeFrom(
+		func() (string, error) { return "", systemErr },
+		func() (string, error) { return "check-only", nil },
+	)
+	if got != "" {
+		t.Fatalf("mode = %q, want empty when system config load fails", got)
+	}
+}
+
+func TestAutoUpdateModeIgnoresDestinationValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, path, `{
+  "user_mode": false,
+  "log_path": "/var/log/beacon-agent/runtime.jsonl",
+  "collector": {"grpc_port":4317,"http_port":4318},
+  "harnesses": ["claude"],
+  "destinations": {"splunk_hec": {"endpoint": "https://splunk.example"}},
+  "auto_update": {"mode": "check-only"}
+}`)
+	got, err := autoUpdateModeFromPath(path)
+	if err != nil {
+		t.Fatalf("autoUpdateModeFromPath: %v", err)
+	}
+	if got != "check-only" {
+		t.Fatalf("mode = %q, want check-only", got)
+	}
+	if err := setConfigAutoUpdateModeAt(path, "off"); err != nil {
+		t.Fatalf("setConfigAutoUpdateModeAt: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["destinations"]; !ok {
+		t.Fatalf("destinations were not preserved: %s", data)
+	}
+	mode, err := autoUpdateModeFromPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "off" {
+		t.Fatalf("mode after set = %q, want off", mode)
+	}
+}
+
+func TestEndpointSystemLogPathUsesSystemPathForPackageInstall(t *testing.T) {
+	oldDetect := detectUpdateInstall
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	t.Cleanup(func() {
+		detectUpdateInstall = oldDetect
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+	detectUpdateInstall = func() selfupdate.Install {
+		return selfupdate.Install{Kind: selfupdate.InstallSystemPkg, BinaryPath: "/opt/beacon/bin/beacon"}
+	}
+	endpointOpts.logPath = ""
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+
+	if got, want := endpointSystemLogPath(), "/var/log/beacon-agent/system.jsonl"; got != want {
+		t.Fatalf("endpointSystemLogPath = %q, want %q", got, want)
+	}
+}
+
+func TestRequireSystemPackageForUpdater(t *testing.T) {
+	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallSystemPkg}); err != nil {
+		t.Fatalf("system package rejected: %v", err)
+	}
+	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallHomebrew}); err == nil {
+		t.Fatal("homebrew install should not be allowed to install system updater")
+	}
+	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallOther}); err == nil {
+		t.Fatal("other install should not be allowed to install system updater")
 	}
 }
 
