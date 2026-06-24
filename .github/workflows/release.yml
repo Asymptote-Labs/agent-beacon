@@ -122,7 +122,17 @@ jobs:
             fi
             printf '%s\n' "$checksum_line" | shasum -a 256 -c -
             mkdir -p "dist/vector/${ARCH}"
-            tar -xzf "$archive" -C "dist/vector/${ARCH}" --strip-components=2 "./vector-${VECTOR_ARCH}-apple-darwin/bin/vector"
+            extract_dir="$(mktemp -d)"
+            tar -xzf "$archive" -C "$extract_dir"
+            vector_bin="$(find "$extract_dir" -path "*/bin/vector" -type f | head -n 1)"
+            if [ -z "$vector_bin" ]; then
+              echo "vector binary not found in $archive" >&2
+              find "$extract_dir" -maxdepth 4 -type f >&2
+              exit 1
+            fi
+            cp "$vector_bin" "dist/vector/${ARCH}/vector"
+            chmod 755 "dist/vector/${ARCH}/vector"
+            rm -rf "$extract_dir"
             "dist/vector/${ARCH}/vector" --version
           done
 
