@@ -446,13 +446,71 @@ sudo tail -n 100 /tmp/com.beacon.endpoint.s3-forwarder.err
 
 ### Forwarder Is Not Loaded
 
-Load it manually:
+If `launchctl` reports `Could not find service "com.beacon.endpoint.s3-forwarder"`,
+first confirm the managed files are still present:
+
+```bash
+ls -l /opt/beacon/bin/vector
+ls -l /opt/beacon/jamf/claude/s3/install-forwarder.sh
+ls -l "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
+ls -l "/Library/Application Support/Beacon/Forwarders/s3-vector.toml" \
+      "/Library/Application Support/Beacon/Forwarders/s3-vector.env"
+```
+
+If the plist exists, load it:
 
 ```bash
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder | egrep 'state =|pid =|last exit code'
 ```
 
-If launchd remains opaque, run Vector in the foreground:
+If the LaunchDaemon files exist but you want an idempotent repair, rerun the
+packaged S3 installer using the saved environment. This rewrites the Vector
+config, environment file, and plist, then starts the forwarder:
+
+```bash
+sudo sh -c '. "/Library/Application Support/Beacon/Forwarders/s3-vector.env"; /opt/beacon/jamf/claude/s3/install-forwarder.sh'
+```
+
+For Jamf remediation, scope a policy to devices where the S3 forwarder is not
+loaded:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder >/dev/null 2>&1
+```
+
+Then run this script on those devices, or on all Beacon devices if the original
+S3 env file should already exist everywhere:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+ENV_PATH="/Library/Application Support/Beacon/Forwarders/s3-vector.env"
+INSTALLER="/opt/beacon/jamf/claude/s3/install-forwarder.sh"
+LABEL="com.beacon.endpoint.s3-forwarder"
+
+if [ ! -x "$INSTALLER" ]; then
+  echo "Beacon S3 installer missing: $INSTALLER" >&2
+  exit 1
+fi
+
+if [ ! -f "$ENV_PATH" ]; then
+  echo "S3 env file missing: $ENV_PATH; rerun the original S3 configuration policy" >&2
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+. "$ENV_PATH"
+set +a
+
+"$INSTALLER"
+
+launchctl print "system/$LABEL" | egrep 'state =|pid =|last exit code' || true
+```
+
+If launchd remains opaque after the repair, run Vector in the foreground:
 
 ```bash
 sudo /opt/beacon/jamf/claude/s3/run-forwarder.sh
