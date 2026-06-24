@@ -14,6 +14,8 @@ const (
 	EventCurrent     = "update.current"
 	EventUnsupported = "update.unsupported"
 	EventCheckFailed = "update.check_failed"
+	EventApplied     = "update.applied"
+	EventFailed      = "update.failed"
 )
 
 // SystemLogPath returns the local-only Beacon system/debug log that sits beside

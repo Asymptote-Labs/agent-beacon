@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1248,6 +1249,28 @@ func TestRequireSystemPackageForUpdater(t *testing.T) {
 	}
 	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallOther}); err == nil {
 		t.Fatal("other install should not be allowed to install system updater")
+	}
+}
+
+func TestEndpointUpdateApplyFlagRegistered(t *testing.T) {
+	cmd, _, err := endpointCmd.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("find endpoint update: %v", err)
+	}
+	if cmd.Flags().Lookup("apply") == nil {
+		t.Fatal("endpoint update missing --apply")
+	}
+}
+
+func TestApplyUpdateRequiresRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can apply updates")
+	}
+	oldAllow := endpointUpdateOpts.allowInsecure
+	t.Cleanup(func() { endpointUpdateOpts.allowInsecure = oldAllow })
+	endpointUpdateOpts.allowInsecure = false
+	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires root") {
+		t.Fatalf("applyUpdate error = %v, want root requirement", err)
 	}
 }
 
