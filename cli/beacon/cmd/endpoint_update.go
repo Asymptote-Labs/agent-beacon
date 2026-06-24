@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -46,24 +47,38 @@ func init() {
 // system config (i.e. a user-mode install).
 func configAutoUpdateMode() string {
 	return configAutoUpdateModeFrom(
-		func() (endpointconfig.Config, error) { return endpointconfig.Load(false) },
-		func() (endpointconfig.Config, error) { return endpointconfig.Load(true) },
+		func() (string, error) { return autoUpdateModeFromPath(endpointconfig.ConfigPath(false)) },
+		func() (string, error) { return autoUpdateModeFromPath(endpointconfig.ConfigPath(true)) },
 	)
 }
 
-func configAutoUpdateModeFrom(loadSystem, loadUser func() (endpointconfig.Config, error)) string {
-	if cfg, err := loadSystem(); err == nil {
-		if cfg.AutoUpdate != nil {
-			return cfg.AutoUpdate.Mode
-		}
-		return ""
+func configAutoUpdateModeFrom(loadSystem, loadUser func() (string, error)) string {
+	if mode, err := loadSystem(); err == nil {
+		return mode
 	} else if !os.IsNotExist(err) {
 		return ""
 	}
-	if cfg, err := loadUser(); err == nil && cfg.AutoUpdate != nil {
-		return cfg.AutoUpdate.Mode
+	if mode, err := loadUser(); err == nil {
+		return mode
 	}
 	return ""
+}
+
+func autoUpdateModeFromPath(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var partial struct {
+		AutoUpdate *endpointconfig.AutoUpdate `json:"auto_update"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil {
+		return "", err
+	}
+	if partial.AutoUpdate == nil {
+		return "", nil
+	}
+	return partial.AutoUpdate.Mode, nil
 }
 
 func runEndpointUpdate(cmd *cobra.Command, args []string) error {

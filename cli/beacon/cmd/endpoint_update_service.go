@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -55,17 +57,40 @@ func init() {
 // setConfigAutoUpdateMode persists the auto-update mode in the system endpoint
 // config, creating a default config if none exists.
 func setConfigAutoUpdateMode(mode string) error {
-	cfg, err := endpointconfig.Load(false)
+	return setConfigAutoUpdateModeAt(endpointconfig.ConfigPath(false), mode)
+}
+
+func setConfigAutoUpdateModeAt(path, mode string) error {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
-		cfg = endpointconfig.Default(false, writer.DefaultPath(false))
+		cfg := endpointconfig.Default(false, writer.DefaultPath(false))
+		cfg.AutoUpdate = &endpointconfig.AutoUpdate{Mode: mode}
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, data, 0644)
 	}
-	cfg.UserMode = false
-	cfg.AutoUpdate = &endpointconfig.AutoUpdate{Mode: mode}
-	_, err = endpointconfig.Save(cfg)
-	return err
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	autoUpdate, err := json.Marshal(endpointconfig.AutoUpdate{Mode: mode})
+	if err != nil {
+		return err
+	}
+	raw["auto_update"] = autoUpdate
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
 }
 
 func requireRootForUpdater() error {

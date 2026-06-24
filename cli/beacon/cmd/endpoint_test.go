@@ -1168,13 +1168,51 @@ func TestEndpointUpdateCommandsRegistered(t *testing.T) {
 func TestConfigAutoUpdateModeDoesNotFallBackOnSystemLoadError(t *testing.T) {
 	systemErr := fmt.Errorf("invalid system config")
 	got := configAutoUpdateModeFrom(
-		func() (endpointconfig.Config, error) { return endpointconfig.Config{}, systemErr },
-		func() (endpointconfig.Config, error) {
-			return endpointconfig.Config{AutoUpdate: &endpointconfig.AutoUpdate{Mode: "check-only"}}, nil
-		},
+		func() (string, error) { return "", systemErr },
+		func() (string, error) { return "check-only", nil },
 	)
 	if got != "" {
 		t.Fatalf("mode = %q, want empty when system config load fails", got)
+	}
+}
+
+func TestAutoUpdateModeIgnoresDestinationValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, path, `{
+  "user_mode": false,
+  "log_path": "/var/log/beacon-agent/runtime.jsonl",
+  "collector": {"grpc_port":4317,"http_port":4318},
+  "harnesses": ["claude"],
+  "destinations": {"splunk_hec": {"endpoint": "https://splunk.example"}},
+  "auto_update": {"mode": "check-only"}
+}`)
+	got, err := autoUpdateModeFromPath(path)
+	if err != nil {
+		t.Fatalf("autoUpdateModeFromPath: %v", err)
+	}
+	if got != "check-only" {
+		t.Fatalf("mode = %q, want check-only", got)
+	}
+	if err := setConfigAutoUpdateModeAt(path, "off"); err != nil {
+		t.Fatalf("setConfigAutoUpdateModeAt: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["destinations"]; !ok {
+		t.Fatalf("destinations were not preserved: %s", data)
+	}
+	mode, err := autoUpdateModeFromPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "off" {
+		t.Fatalf("mode after set = %q, want off", mode)
 	}
 }
 
