@@ -82,6 +82,10 @@ jobs:
       BEACON_APP_SIGN_IDENTITY: ${{ vars.DEVELOPER_ID_APP_IDENTITY }}
       PKG_SIGN_IDENTITY: ${{ vars.DEVELOPER_ID_INSTALLER_IDENTITY }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      # Signed endpoint packages target Apple Silicon. Vector 0.51+ no longer
+      # publishes x86_64-apple-darwin tarballs, so keep the package path on the
+      # current arm64 distribution instead of pinning all Macs to old Vector.
+      BEACON_PKG_ARCHES: "arm64"
       VECTOR_VERSION: "0.56.0"
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +111,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist/vector
           curl -fsSLO "https://packages.timber.io/vector/${VECTOR_VERSION}/vector-${VECTOR_VERSION}-SHA256SUMS"
-          for ARCH in arm64 amd64; do
+          for ARCH in $BEACON_PKG_ARCHES; do
             case "$ARCH" in
               arm64) VECTOR_ARCH="arm64" ;;
               amd64) VECTOR_ARCH="x86_64" ;;
@@ -144,7 +148,7 @@ jobs:
           BEACON_LD="github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
           HOOKS_LD="github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version"
           mkdir -p dist/pkgbins
-          for ARCH in arm64 amd64; do
+          for ARCH in $BEACON_PKG_ARCHES; do
             # Embed the arch-matched hooks binary, then build beacon for that arch.
             (cd cli/beacon-hooks && GOOS=darwin GOARCH="$ARCH" \
               go build -ldflags "-s -w -X ${HOOKS_LD}.Version=${VERSION}" \
@@ -198,7 +202,7 @@ jobs:
         run: |
           set -euo pipefail
           security unlock-keychain -p "$BEACON_SIGNING_KEYCHAIN_PW" "$BEACON_SIGNING_KEYCHAIN"
-          for ARCH in arm64 amd64; do
+          for ARCH in $BEACON_PKG_ARCHES; do
             BEACON_VERSION="$VERSION" \
             BEACON_PKG_ARCH="$ARCH" \
             BEACON_BIN="$PWD/dist/pkgbins/beacon-${ARCH}" \
@@ -214,11 +218,9 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          ARM_PKG="$(ls dist/macos/*-${VERSION}-arm64.pkg)"
-          AMD_PKG="$(ls dist/macos/*-${VERSION}-amd64.pkg)"
           sh packaging/macos/gen-update-manifest.sh \
             "$VERSION" "$TAG" "$REPO" "$APPLE_TEAM_ID" \
-            "arm64=$ARM_PKG" "amd64=$AMD_PKG" > dist/macos/update-manifest.json
+            "arm64=$(ls dist/macos/*-${VERSION}-arm64.pkg)" > dist/macos/update-manifest.json
           cat dist/macos/update-manifest.json
 
       - name: Attach packages + manifest to the release

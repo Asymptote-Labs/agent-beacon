@@ -138,10 +138,12 @@ in the protected `release` GitHub Environment:
 
 1. `goreleaser` (ubuntu) builds the collector dists, publishes the GitHub release
    + changelog and tarballs, and updates the Homebrew tap.
-2. `package` (macOS, `needs: goreleaser`) builds `beacon`/`beacon-hooks` plus
-   arch-matched collector and Vector binaries for `darwin_arm64` and
-   `darwin_amd64`, then signs, notarizes, staples, and uploads the `.pkg`
-   artifacts, `.sha256`s, and `update-manifest.json`.
+2. `package` (macOS, `needs: goreleaser`) builds the Apple Silicon
+   `beacon`/`beacon-hooks` package payload plus arch-matched collector and
+   Vector binaries for `darwin_arm64`, then signs, notarizes, staples, and
+   uploads the `.pkg`, `.sha256`, and `update-manifest.json`. GoReleaser still
+   publishes multi-arch CLI tarballs; the signed endpoint `.pkg` is arm64-only
+   so it can carry a current Vector release.
 
 Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_APP_CERT_PASSWORD`,
