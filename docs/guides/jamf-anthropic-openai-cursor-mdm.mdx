@@ -440,6 +440,23 @@ sudo launchctl print system/com.beacon.endpoint.s3-forwarder
 sudo tail -n 100 /tmp/com.beacon.endpoint.s3-forwarder.err
 ```
 
+If `launchctl` reports `Could not find service "com.beacon.endpoint.s3-forwarder"`,
+the S3 files may still be present but the optional LaunchDaemon is not loaded.
+When the saved S3 environment exists, rerun the packaged installer to rewrite
+the Vector config and plist and start the service:
+
+```bash
+sudo sh -c '. "/Library/Application Support/Beacon/Forwarders/s3-vector.env"; /opt/beacon/jamf/claude/s3/install-forwarder.sh'
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder | egrep 'state =|pid =|last exit code'
+```
+
+Use the same command as a Jamf remediation policy for devices where this health
+check fails:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder >/dev/null 2>&1
+```
+
 Verify that the env file has non-secret settings without printing credentials:
 
 ```bash
