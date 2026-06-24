@@ -24,6 +24,11 @@ beacon version 0.0.66
 
 Beacon releases publish macOS and Linux archives for `amd64` and `arm64` alongside Homebrew builds. For archive-based installs or source builds, see [Manual CLI Installation](/cli/manual-install).
 
+Apple Silicon endpoint package releases are attached to GitHub Releases as
+signed, notarized, and stapled `.pkg` assets for MDM or manual system installs.
+Use those package assets when you want `/opt/beacon`, the local collector
+LaunchDaemon, and the bundled Vector forwarder helpers installed together.
+
 ## Next steps
 
 After installing Beacon, configure the workflow you need:

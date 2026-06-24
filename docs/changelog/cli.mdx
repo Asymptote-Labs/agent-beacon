@@ -11,6 +11,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.76 · June 24, 2026
+
+- **Signed Apple Silicon endpoint package releases** · A pushed version tag now runs the release pipeline end-to-end: GoReleaser publishes CLI archives and updates Homebrew, then CI builds, signs, notarizes, staples, and uploads the Apple Silicon endpoint `.pkg`, `.sha256`, and `update-manifest.json` assets to GitHub Releases for direct MDM/manual download.
+- **Current bundled Vector in the macOS package** · The signed endpoint package includes `/opt/beacon/bin/vector` for Jamf/Fleet forwarder helpers and now targets Apple Silicon so Beacon can ship the current Vector macOS distribution rather than pinning all packages to an older dual-arch Vector release.
+- **Cursor and Claude session attribution fix** · Fixed a hook attribution edge case where Cursor-shaped hook payloads invoked through the default hook platform could be stamped as Claude, making a single Cursor session UUID appear under both Cursor and Claude in runtime logs and managed dashboards.
+
 ### v0.0.73 · June 21, 2026
 
 - **S3 token and cost analytics fields** · The S3 Vector forwarding template now preserves canonical `gen_ai.usage` and also emits top-level `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `reasoning_output_tokens`, and `cost_usd` fields so downstream warehouses can persist usage attribution reliably.
