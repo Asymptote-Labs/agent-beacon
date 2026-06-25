@@ -12,7 +12,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Agent harness | Collection path | Commonly available telemetry |
 |---------------|-----------------|------------------------------|
 | Claude Code | Local OTLP export | Prompt, command, tool, and file telemetry when emitted through OTLP |
-| Codex CLI | Local OTLP logs | Session, prompt, approval, and tool-result activity from Codex semantic logs |
+| Codex CLI | Local OTLP logs plus optional inventory hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; inventory heartbeat triggers from hooks |
 | Gemini CLI | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | Grok Build | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | OpenCode | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
@@ -37,12 +37,12 @@ By default, inventory is metadata- and hash-only. Beacon hashes config, hook, an
 
 Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction — values under keys matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL` are replaced with `***REDACTED***` — and a per-file size cap (64 KiB by default, configurable via `max_content_bytes`).
 
-Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. For Cursor and Claude Code, normal hook execution can periodically write:
+Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. Normal hook execution can periodically write:
 
 - `inventory.heartbeat`, a small event showing that Beacon checked local agent configuration inventory and recording counts plus a snapshot digest.
 - `inventory.snapshot`, a snapshot written when the digest changes or inventory is first initialized. Metadata-only unless `include_contents` is enabled.
 
-By default, snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content. When `include_contents` is enabled, snapshots additionally carry redacted, size-limited `content` and `definition` blocks as described above.
+By default, snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata across supported local runtimes. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content. When `include_contents` is enabled, snapshots additionally carry redacted, size-limited `content` and `definition` blocks as described above.
 
 ## Required Fields
 

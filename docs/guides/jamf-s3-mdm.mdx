@@ -321,8 +321,7 @@ path = Path("/Library/Application Support/Beacon/Endpoint/config.json")
 data = json.loads(path.read_text())
 data["inventory_heartbeat"] = {
     "enabled": True,
-    "ttl_seconds": 5,
-    "runtimes": ["cursor", "claude_code"]
+    "ttl_seconds": 5
 }
 path.write_text(json.dumps(data, indent=2) + "\n")
 PY
@@ -414,8 +413,7 @@ path = Path("/Library/Application Support/Beacon/Endpoint/config.json")
 data = json.loads(path.read_text())
 data["inventory_heartbeat"] = {
     "enabled": True,
-    "ttl_seconds": 86400,
-    "runtimes": ["cursor", "claude_code"]
+    "ttl_seconds": 86400
 }
 path.write_text(json.dumps(data, indent=2) + "\n")
 PY

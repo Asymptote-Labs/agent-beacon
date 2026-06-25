@@ -5,7 +5,7 @@ description: "Asymptote support details for Codex CLI endpoint telemetry"
 
 ## Runtime Overview
 
-Asymptote supports Codex CLI through local OTLP logs and token usage metrics, with optional raw Codex spans for troubleshooting.
+Asymptote supports Codex CLI runtime telemetry through local OTLP logs and token usage metrics, with optional raw Codex spans for troubleshooting. Codex hooks can also trigger endpoint inventory heartbeats without replacing the OTLP runtime path.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ Before enabling Codex CLI telemetry, make sure:
 
 ## Collection path
 
-Codex CLI exports local OpenTelemetry logs and metrics to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events, and keeps the `codex.turn.token_usage` metric for token attribution. Other high-volume Codex metrics, and Codex spans, are suppressed by default.
+Codex CLI exports local OpenTelemetry logs and metrics to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events, and keeps the `codex.turn.token_usage` metric for token attribution. Other high-volume Codex metrics, and Codex spans, are suppressed by default. Optional Codex hooks are heartbeat-only and refresh `inventory_state.jsonl`; they do not write duplicate runtime prompt or session events.
 
 Use `--include-codex-spans` during install or repair only when you need raw Codex spans for troubleshooting.
 
@@ -66,7 +66,13 @@ Asymptote detects Codex CLI through the `codex` executable and `~/.codex/config.
 
 `beacon endpoint install` writes Codex OTLP exporter tables to `~/.codex/config.toml`.
 
-Codex CLI is not currently configured through Asymptote's hook adapter.
+To let Codex sessions trigger inventory heartbeats, install optional Codex hooks after the endpoint is installed:
+
+```bash
+beacon endpoint hooks install --harness codex
+```
+
+The hook installer writes heartbeat-only hooks to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`.
 
 ## Telemetry coverage
 

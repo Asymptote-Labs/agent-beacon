@@ -25,8 +25,8 @@ type endpointTarget struct {
 //   - hookAliases map a spelling to the harness in the hook-only namespace.
 //
 // The two alias sets differ on purpose: in the hook-only namespace some OTLP
-// spellings are reinterpreted as their hook variant (for example "claude" and
-// "vscode"), and OTLP-only harnesses are not hook-addressable at all.
+// spellings are reinterpreted as their hook variant (for example "claude",
+// "codex", and "vscode"), and OTLP-only harnesses are not hook-addressable at all.
 type harnessTarget struct {
 	name            string
 	endpointKind    endpointTargetKind
@@ -39,7 +39,7 @@ type harnessTarget struct {
 var harnessTargets = []harnessTarget{
 	{name: "claude", endpointKind: endpointTargetOTLP, endpointAliases: []string{"claude", "claude-code"}, hookAliases: []string{"claude", "claude-code"}},
 	{name: "claude", endpointKind: endpointTargetHook, endpointAliases: []string{"claude-hooks"}, hookAliases: []string{"claude-hooks"}},
-	{name: "codex", endpointKind: endpointTargetOTLP, endpointAliases: []string{"codex", "codex-cli"}},
+	{name: "codex", endpointKind: endpointTargetOTLP, endpointAliases: []string{"codex", "codex-cli"}, hookAliases: []string{"codex", "codex-cli"}},
 	{name: "gemini", endpointKind: endpointTargetOTLP, endpointAliases: []string{"gemini", "gemini-cli"}},
 	{name: "vscode", endpointKind: endpointTargetOTLP, endpointAliases: []string{"vscode", "vs-code", "vscode-copilot"}, hookAliases: []string{"vscode", "vs-code"}},
 	{name: "cursor", endpointKind: endpointTargetHook, endpointAliases: []string{"cursor"}, hookAliases: []string{"cursor"}},

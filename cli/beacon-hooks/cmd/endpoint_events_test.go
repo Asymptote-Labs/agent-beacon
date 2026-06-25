@@ -252,7 +252,7 @@ func TestMaybeEmitInventoryHeartbeatSkipsUnsupportedPlatform(t *testing.T) {
 		platformFlag = oldPlatform
 		runInventoryHeartbeatCommand = oldRunner
 	}()
-	platformFlag = "codex"
+	platformFlag = "gemini"
 	t.Setenv("BEACON_ENDPOINT_CLI", "/usr/local/bin/beacon")
 	called := false
 	runInventoryHeartbeatCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -262,7 +262,7 @@ func TestMaybeEmitInventoryHeartbeatSkipsUnsupportedPlatform(t *testing.T) {
 		return cmd
 	}
 
-	logger := logging.NewLoggerForPlatform("test", "codex")
+	logger := logging.NewLoggerForPlatform("test", "gemini")
 	maybeEmitInventoryHeartbeat(logger, map[string]interface{}{"cwd": "/repo"})
 
 	if called {

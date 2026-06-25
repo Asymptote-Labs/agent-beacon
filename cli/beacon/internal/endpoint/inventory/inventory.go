@@ -81,18 +81,18 @@ type UserScope struct {
 }
 
 type Config struct {
-	Runtime        string `json:"runtime"`
-	Path           string `json:"path,omitempty"`
-	PathHash       string `json:"path_hash,omitempty"`
-	Scope          string `json:"scope"`
-	ConfigKind     string `json:"config_kind"`
-	ParserMode     string `json:"parser_mode"`
-	Exists         bool   `json:"exists"`
-	Readable       bool   `json:"readable"`
-	Reason         string `json:"reason,omitempty"`
-	ParserStatus   string `json:"parser_status"`
-	FileSHA256     string `json:"file_sha256,omitempty"`
-	ModifiedAt     string `json:"modified_at,omitempty"`
+	Runtime        string           `json:"runtime"`
+	Path           string           `json:"path,omitempty"`
+	PathHash       string           `json:"path_hash,omitempty"`
+	Scope          string           `json:"scope"`
+	ConfigKind     string           `json:"config_kind"`
+	ParserMode     string           `json:"parser_mode"`
+	Exists         bool             `json:"exists"`
+	Readable       bool             `json:"readable"`
+	Reason         string           `json:"reason,omitempty"`
+	ParserStatus   string           `json:"parser_status"`
+	FileSHA256     string           `json:"file_sha256,omitempty"`
+	ModifiedAt     string           `json:"modified_at,omitempty"`
 	MCPServerCount int              `json:"mcp_server_count"`
 	BeaconManaged  bool             `json:"beacon_managed"`
 	Redaction      string           `json:"redaction"`
@@ -100,20 +100,20 @@ type Config struct {
 }
 
 type MCPServer struct {
-	Runtime         string   `json:"runtime"`
-	ServerName      string   `json:"server_name,omitempty"`
-	ServerNameHash  string   `json:"server_name_hash,omitempty"`
-	SourcePath      string   `json:"source_path,omitempty"`
-	SourcePathHash  string   `json:"source_path_hash,omitempty"`
-	SourceScope     string   `json:"source_scope"`
-	Transport       string   `json:"transport"`
-	CommandPresent  bool     `json:"command_present"`
-	CommandName     string   `json:"command_name,omitempty"`
-	CommandNameHash string   `json:"command_name_hash,omitempty"`
-	ArgsCount       int      `json:"args_count,omitempty"`
-	URLPresent      bool     `json:"url_present"`
-	EnvKeys         []string `json:"env_keys,omitempty"`
-	EnvKeyCount     int      `json:"env_key_count,omitempty"`
+	Runtime         string                 `json:"runtime"`
+	ServerName      string                 `json:"server_name,omitempty"`
+	ServerNameHash  string                 `json:"server_name_hash,omitempty"`
+	SourcePath      string                 `json:"source_path,omitempty"`
+	SourcePathHash  string                 `json:"source_path_hash,omitempty"`
+	SourceScope     string                 `json:"source_scope"`
+	Transport       string                 `json:"transport"`
+	CommandPresent  bool                   `json:"command_present"`
+	CommandName     string                 `json:"command_name,omitempty"`
+	CommandNameHash string                 `json:"command_name_hash,omitempty"`
+	ArgsCount       int                    `json:"args_count,omitempty"`
+	URLPresent      bool                   `json:"url_present"`
+	EnvKeys         []string               `json:"env_keys,omitempty"`
+	EnvKeyCount     int                    `json:"env_key_count,omitempty"`
 	DefinitionHash  string                 `json:"definition_hash"`
 	ParserStatus    string                 `json:"parser_status"`
 	Redaction       string                 `json:"redaction"`
@@ -193,7 +193,7 @@ func runtimeSet(runtimes []string) map[string]bool {
 func candidates(home, wd string) []candidate {
 	items := []candidate{}
 	items = append(items, claudeCandidates(home, wd)...)
-	items = append(items, codexCandidates(home)...)
+	items = append(items, codexCandidates(home, wd)...)
 	items = append(items, cursorCandidates(home, wd)...)
 	items = append(items, geminiCandidates(home)...)
 	items = append(items, antigravityCandidates(home, wd)...)
@@ -226,8 +226,13 @@ func claudeCandidates(home, wd string) []candidate {
 	}
 }
 
-func codexCandidates(home string) []candidate {
-	return []candidate{{runtime: "codex_cli", path: filepath.Join(home, ".codex", "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig}}
+func codexCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
+		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "config.toml"), scope: ScopeProject, format: formatTOML, kind: KindNativeConfig},
+		{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
 }
 
 func cursorCandidates(home, wd string) []candidate {

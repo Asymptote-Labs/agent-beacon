@@ -60,23 +60,22 @@ Content capture is opt-in and offline; `--contents` only reads files inventory a
 
 ## Inventory Heartbeats
 
-Cursor and Claude Code endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`:
+Endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`. The hook that fires is recorded as trigger provenance, but the default heartbeat scans all supported local inventory candidates:
 
 - `inventory.heartbeat` records that Beacon checked local agent configuration inventory, including counts and a snapshot digest.
 - `inventory.snapshot` records the current metadata-only inventory when the snapshot changed or when inventory is first initialized.
 
-By default, inventory snapshots include config file metadata, MCP server metadata, skill metadata, and hook config metadata. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
+By default, inventory snapshots include config file metadata, MCP server metadata, skill metadata, and hook config metadata across supported local runtimes. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
 
 Set `include_contents` to opt the snapshot/heartbeat telemetry into capturing full definitions, matching the `--contents` CLI behavior. When enabled, `inventory.snapshot` events carry redacted, size-limited config/hook/skill `content` blocks and full MCP server `definition` blocks. Secret-looking values are redacted and bodies are truncated to `max_content_bytes` (64 KiB by default). This setting is off by default so the snapshot contract stays metadata-only unless an operator explicitly enables it.
 
-The heartbeat TTL and content capture are configured in the existing endpoint config file:
+The heartbeat TTL and content capture are configured in the existing endpoint config file. Omit `runtimes` to scan all supported inventory runtimes, or set it when you intentionally want a narrower snapshot:
 
 ```json title="~/.beacon/endpoint/config.json"
 {
   "inventory_heartbeat": {
     "enabled": true,
     "ttl_seconds": 86400,
-    "runtimes": ["cursor", "claude_code"],
     "include_contents": false,
     "max_content_bytes": 65536
   }

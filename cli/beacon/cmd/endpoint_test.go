@@ -63,11 +63,11 @@ func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
 }
 
 func TestCanonicalHookTargetsNormalizesAliasesToSwitchNames(t *testing.T) {
-	got, err := canonicalHookTargets([]string{"claude_code", "vs_code", "droid", "devin", "devin_desktop", "antigravity_cli", "hermes-agent"})
+	got, err := canonicalHookTargets([]string{"claude_code", "codex_cli", "vs_code", "droid", "devin", "devin_desktop", "antigravity_cli", "hermes-agent"})
 	if err != nil {
 		t.Fatalf("canonicalHookTargets returned error: %v", err)
 	}
-	want := []string{"claude", "vscode", "factory", "devin-cli", "devin-desktop", "antigravity", "hermes"}
+	want := []string{"claude", "codex", "vscode", "factory", "devin-cli", "devin-desktop", "antigravity", "hermes"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("canonicalHookTargets = %#v, want %#v", got, want)
 	}
@@ -853,9 +853,12 @@ func TestInventoryHeartbeatTTLAndSnapshotDigest(t *testing.T) {
 	work := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"}}}`)
+	writeTestFile(t, filepath.Join(home, ".codex", "config.toml"), `[mcp_servers.github]
+command = "gh"
+`)
 	cfg := endpointconfig.Default(true, logPath)
 	enabled := true
-	cfg.Inventory = &endpointconfig.Inventory{Enabled: &enabled, TTLSeconds: 86400, Runtimes: []string{"cursor", "claude_code"}}
+	cfg.Inventory = &endpointconfig.Inventory{Enabled: &enabled, TTLSeconds: 86400}
 	settings := endpointconfig.InventoryConfig(cfg)
 
 	first, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
@@ -906,6 +909,9 @@ func TestInventoryHeartbeatTTLAndSnapshotDigest(t *testing.T) {
 	}
 	if !strings.Contains(text, `"server_name":"two"`) {
 		t.Fatalf("changed snapshot missing new MCP server: %s", text)
+	}
+	if !strings.Contains(text, `"server_name":"github"`) {
+		t.Fatalf("default heartbeat should include Codex inventory from cursor trigger: %s", text)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(logPath), "inventory-state.json")); err != nil {
 		t.Fatalf("inventory state should live beside inventory log: %v", err)
@@ -1110,6 +1116,7 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpointOpts.userMode = true
+	endpointOpts.logPath = logPath
 	endpointOpts.jsonOutput = true
 	endpointOpts.writeInventoryEvent = true
 	endpointOpts.inventoryContents = false

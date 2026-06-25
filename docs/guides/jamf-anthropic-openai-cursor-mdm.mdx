@@ -285,7 +285,7 @@ The helper switches to the console user and runs:
 
 ## Step 4: Configure Codex CLI
 
-Codex CLI is not hook-based. It reads OTLP settings from `~/.codex/config.toml`.
+Codex CLI runtime telemetry is OTLP-based. It reads OTLP settings from `~/.codex/config.toml`.
 
 Use your standard Jamf user-context mechanism or managed config approach to ensure each Codex user has this block:
 
@@ -301,7 +301,7 @@ endpoint = "http://127.0.0.1:4317"
 endpoint = "http://127.0.0.1:4317"
 ```
 
-Preserve existing non-OTel Codex settings and ensure the final file is owned by the user. This step is required for Codex telemetry; the S3 helper does not install Codex hooks.
+Preserve existing non-OTel Codex settings and ensure the final file is owned by the user. This step is required for Codex runtime telemetry. Optional Codex hooks can be installed separately when you want Codex sessions to trigger inventory heartbeats.
 
 ## Validate A Deployed Mac
 
@@ -519,7 +519,7 @@ command -v codex
 grep -n 'otel\|otlp-grpc\|127.0.0.1:4317' ~/.codex/config.toml
 ```
 
-Codex CLI is not hook-based. Re-run the Codex config policy for the logged-in user if the OTel block is missing.
+Codex runtime telemetry is OTLP-based. Re-run the Codex config policy for the logged-in user if the OTel block is missing.
 
 ### Inventory Is Empty
 
