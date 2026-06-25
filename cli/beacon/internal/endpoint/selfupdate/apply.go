@@ -376,11 +376,13 @@ func (a *Applier) rollback(backup string, result *ApplyResult) error {
 		}
 		return err
 	}
-	result.RolledBack = true
 	_ = os.RemoveAll(failed)
 	if !a.AllowInsecureTest {
-		_ = a.restartCollector()
+		if err := a.restartCollector(); err != nil {
+			return err
+		}
 	}
+	result.RolledBack = true
 	return nil
 }
 

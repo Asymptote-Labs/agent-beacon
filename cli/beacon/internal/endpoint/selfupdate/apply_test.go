@@ -257,6 +257,40 @@ func TestRollbackDoesNotRemoveLiveInstallWhenRestorePreparationFails(t *testing.
 	}
 }
 
+func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
+	a := NewApplier("0.0.1")
+	a.InstallPrefix = t.TempDir()
+	a.StageDir = t.TempDir()
+	liveBin := filepath.Join(a.InstallPrefix, "opt/beacon/bin/beacon")
+	if err := os.MkdirAll(filepath.Dir(liveBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(liveBin, []byte("failed-install"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(a.StageDir, "backup")
+	backupBin := filepath.Join(backup, "bin/beacon")
+	if err := os.MkdirAll(filepath.Dir(backupBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backupBin, []byte("backup"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		return "launchctl failed", fmt.Errorf("exit 1")
+	}
+	var result ApplyResult
+	if err := a.rollback(backup, &result); err == nil {
+		t.Fatal("expected restart failure")
+	}
+	if got := string(mustRead(t, liveBin)); got != "backup" {
+		t.Fatalf("filesystem rollback did not restore backup: %q", got)
+	}
+	if result.RolledBack {
+		t.Fatal("RolledBack should remain false when collector restart fails")
+	}
+}
+
 func TestVersionLineMatches(t *testing.T) {
 	out := "beacon version 0.0.69 (abc1234) built on 2026-01-01"
 	if !versionLineMatches(out, "0.0.69") {
