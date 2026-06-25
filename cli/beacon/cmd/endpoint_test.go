@@ -1198,6 +1198,11 @@ func TestAutoUpdateModeIgnoresDestinationValidation(t *testing.T) {
 	if err := setConfigAutoUpdateModeAt(path, "off"); err != nil {
 		t.Fatalf("setConfigAutoUpdateModeAt: %v", err)
 	}
+	if info, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("config permissions = %v, want 0600", got)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

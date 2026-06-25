@@ -8,11 +8,10 @@ import (
 	"strings"
 )
 
-// UpdaterLabel is the launchd label for the periodic update-check job. Phase 1
-// is check-only and does not apply package updates.
+// UpdaterLabel is the launchd label for the periodic endpoint updater job.
 const UpdaterLabel = "com.beacon.endpoint.updater"
 
-// UpdaterManager manages the update-check launchd job. Unlike the collector
+// UpdaterManager manages the endpoint updater launchd job. Unlike the collector
 // service it is system-only and runs on a schedule rather than KeepAlive.
 type UpdaterManager struct{}
 
@@ -78,9 +77,8 @@ func (m UpdaterManager) Status() Status {
 	return status
 }
 
-// updaterPlist renders the check-only LaunchDaemon. Phase 1 runs every ten
-// minutes so update detection can be dogfooded quickly without install risk.
-// It does not RunAtLoad and is not KeepAlive (one-shot scheduled job).
+// updaterPlist renders the updater LaunchDaemon. It runs daily and does not
+// RunAtLoad or KeepAlive; each invocation resolves the configured mode.
 func updaterPlist(label, program string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -93,11 +91,15 @@ func updaterPlist(label, program string) string {
     <string>%s</string>
     <string>endpoint</string>
     <string>update</string>
-    <string>--check</string>
     <string>--scheduled</string>
   </array>
-  <key>StartInterval</key>
-  <integer>600</integer>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
   <key>RunAtLoad</key>
   <false/>
   <key>StandardOutPath</key>

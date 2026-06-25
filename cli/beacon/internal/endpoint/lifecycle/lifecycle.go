@@ -246,6 +246,11 @@ func Uninstall(opts UninstallOptions) error {
 	cfg := loadOrDefault(opts.UserMode, opts.LogPath)
 	manager := service.Manager{UserMode: cfg.UserMode}
 	_ = manager.Unload()
+	if !cfg.UserMode {
+		updater := service.UpdaterManager{}
+		_ = updater.Unload()
+		_ = os.Remove(updater.PlistPath())
+	}
 	manifest, _ := ReadManifest(cfg.UserMode)
 	if !opts.KeepConfig {
 		restoreBackups(manifest.Backups)
