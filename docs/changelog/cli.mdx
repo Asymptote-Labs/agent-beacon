@@ -11,6 +11,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.79 · June 25, 2026
+
+- **Full endpoint inventory heartbeats** · Inventory heartbeats now scan all supported local inventory candidates by default instead of only Cursor and Claude Code, while `inventory_heartbeat.runtimes` remains available for intentionally scoped deployments.
+- **Codex inventory heartbeat hooks** · Codex CLI can install optional heartbeat-only hooks that refresh `inventory_state.jsonl` without duplicating Codex runtime telemetry, which continues to flow through local OTLP logs and metrics.
+- **Expanded Codex inventory coverage** · Beacon now inventories Codex user and project `config.toml` plus `hooks.json` files so MCP and hook drift appears in endpoint inventory snapshots.
+
 ### v0.0.78 · June 25, 2026
 
 - **Check-only endpoint update monitoring** · Apple Silicon package installs can opt into a local `launchd` job that checks the release manifest every 10 minutes and writes local-only update status events to `system.jsonl`. This phase does not download or apply packages.
