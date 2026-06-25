@@ -280,6 +280,12 @@ func Uninstall(opts UninstallOptions) error {
 func Repair(opts InstallOptions) (InstallResult, error) {
 	configPath := endpointconfig.ConfigPath(opts.UserMode)
 	configSnapshot := snapshotFile(configPath)
+	priorAutoUpdateMode := ""
+	if !opts.UserMode {
+		if mode, err := autoUpdateModeFromConfigFile(configPath); err == nil {
+			priorAutoUpdateMode = mode
+		}
+	}
 	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true, KeepUpdater: true})
 	result, err := Install(opts)
 	if err != nil {
@@ -287,6 +293,11 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 		return result, err
 	}
 	if !opts.UserMode {
+		if priorAutoUpdateMode != "" {
+			if err := setAutoUpdateModeInConfigFile(configPath, priorAutoUpdateMode); err != nil {
+				return result, err
+			}
+		}
 		if err := reconcileUpdaterFromConfig(opts.LogPath); err != nil {
 			return result, err
 		}
@@ -327,6 +338,31 @@ func autoUpdateModeFromConfigFile(path string) (string, error) {
 		return "", nil
 	}
 	return partial.AutoUpdate.Mode, nil
+}
+
+func setAutoUpdateModeInConfigFile(path, mode string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	autoUpdate, err := json.Marshal(endpointconfig.AutoUpdate{Mode: mode})
+	if err != nil {
+		return err
+	}
+	raw["auto_update"] = autoUpdate
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	perm := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return os.WriteFile(path, out, perm)
 }
 
 func GetStatus(userMode bool, logPath string) Status {

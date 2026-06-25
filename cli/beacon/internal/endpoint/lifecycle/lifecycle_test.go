@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -317,6 +318,32 @@ func TestAutoUpdateModeFromConfigFileIgnoresDestinationValidation(t *testing.T) 
 	}
 	if mode != "auto" {
 		t.Fatalf("mode = %q, want auto", mode)
+	}
+	if err := setAutoUpdateModeInConfigFile(path, "check-only"); err != nil {
+		t.Fatalf("setAutoUpdateModeInConfigFile: %v", err)
+	}
+	if info, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("permissions = %v, want 0600", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["destinations"]; !ok {
+		t.Fatalf("destinations were not preserved: %s", data)
+	}
+	mode, err = autoUpdateModeFromConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "check-only" {
+		t.Fatalf("mode after set = %q, want check-only", mode)
 	}
 }
 
