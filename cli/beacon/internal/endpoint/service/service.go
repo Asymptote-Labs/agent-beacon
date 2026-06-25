@@ -72,20 +72,7 @@ func (m Manager) Load() error {
 	if err != nil {
 		return err
 	}
-	domain := serviceDomain(m.UserMode)
-	out, err := runLaunchctlCommand("bootstrap", domain, path)
-	if err == nil {
-		return nil
-	}
-	text := strings.TrimSpace(out)
-	if strings.Contains(text, "already bootstrapped") {
-		target := domain + "/" + m.Label()
-		if err := runLaunchctlWithContext(domain, m.Label(), "", "bootout", target); err != nil {
-			return err
-		}
-		return runLaunchctlWithContext(domain, m.Label(), path, "bootstrap", domain, path)
-	}
-	return launchctlError(text, err, domain, m.Label(), path, "bootstrap", domain, path)
+	return loadLaunchdJob(serviceDomain(m.UserMode), m.Label(), path)
 }
 
 func (m Manager) Unload() error {
@@ -94,6 +81,24 @@ func (m Manager) Unload() error {
 	}
 	target := serviceDomain(m.UserMode) + "/" + m.Label()
 	return runLaunchctlWithContext(serviceDomain(m.UserMode), m.Label(), "", "bootout", target)
+}
+
+func (m Manager) Restart() error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	domain := serviceDomain(m.UserMode)
+	label := m.Label()
+	target := domain + "/" + label
+	out, err := runLaunchctlCommand("kickstart", "-k", target)
+	if err == nil {
+		return nil
+	}
+	text := strings.TrimSpace(out)
+	if launchctlNoSuchProcess(text) {
+		return m.Load()
+	}
+	return launchctlError(text, err, domain, label, "", "kickstart", "-k", target)
 }
 
 func (m Manager) Status() Status {
@@ -123,10 +128,49 @@ func runLaunchctlWithContext(domain, label, plistPath string, args ...string) er
 		return nil
 	}
 	text := strings.TrimSpace(out)
-	if strings.Contains(text, "No such process") {
+	if launchctlNoSuchProcess(text) {
 		return nil
 	}
 	return launchctlError(text, err, domain, label, plistPath, args...)
+}
+
+func launchctlNoSuchProcess(text string) bool {
+	return strings.Contains(text, "No such process") || strings.Contains(text, "Could not find service")
+}
+
+func loadLaunchdJob(domain, label, plistPath string) error {
+	out, err := runLaunchctlCommand("bootstrap", domain, plistPath)
+	if err == nil {
+		return nil
+	}
+	text := strings.TrimSpace(out)
+	if !launchdJobAppearsLoaded(text, domain, label) {
+		return launchctlError(text, err, domain, label, plistPath, "bootstrap", domain, plistPath)
+	}
+	target := domain + "/" + label
+	if err := runLaunchctlWithContext(domain, label, "", "bootout", target); err != nil {
+		return err
+	}
+	if out, err := runLaunchctlCommand("bootstrap", domain, plistPath); err != nil {
+		text := strings.TrimSpace(out)
+		if launchdJobAppearsLoaded(text, domain, label) {
+			return nil
+		}
+		return launchctlError(text, err, domain, label, plistPath, "bootstrap", domain, plistPath)
+	}
+	return nil
+}
+
+func launchdJobAppearsLoaded(bootstrapOutput, domain, label string) bool {
+	text := strings.TrimSpace(bootstrapOutput)
+	if strings.Contains(text, "already bootstrapped") {
+		return true
+	}
+	if !strings.Contains(text, "Bootstrap failed: 5") && !strings.Contains(text, "Input/output error") {
+		return false
+	}
+	out, err := runLaunchctlCommand("print", domain+"/"+label)
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 func launchctlError(text string, err error, domain, label, plistPath string, args ...string) error {
