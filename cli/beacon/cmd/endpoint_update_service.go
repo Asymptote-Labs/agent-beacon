@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -22,9 +24,14 @@ var endpointUpdateServiceOpts struct {
 	scheduled bool
 }
 
+// jitterEnv overrides the maximum scheduled-run jitter (seconds). Default 1800;
+// 0 disables jitter for tests/manual diagnostics.
+const jitterEnv = "BEACON_UPDATE_JITTER_SECONDS"
+const defaultJitterSeconds = 1800
+
 var endpointUpdateEnableCmd = &cobra.Command{
 	Use:          "enable",
-	Short:        "Enable check-only update monitoring",
+	Short:        "Enable endpoint update monitoring",
 	SilenceUsage: true,
 	RunE:         runUpdateEnable,
 }
@@ -43,13 +50,25 @@ var endpointUpdateStatusCmd = &cobra.Command{
 	RunE:         runUpdateStatus,
 }
 
+// endpointUpdateInstallDaemonCmd is invoked by package postinstall. It
+// reconciles the launchd job with the resolved mode without changing stored
+// config, so explicit off/check-only/auto choices survive package upgrades.
+var endpointUpdateInstallDaemonCmd = &cobra.Command{
+	Use:          "install-daemon",
+	Short:        "Internal: reconcile the updater launchd job with configured mode",
+	Hidden:       true,
+	SilenceUsage: true,
+	RunE:         runUpdateInstallDaemon,
+}
+
 func init() {
 	endpointUpdateCmd.AddCommand(endpointUpdateEnableCmd)
 	endpointUpdateCmd.AddCommand(endpointUpdateDisableCmd)
 	endpointUpdateCmd.AddCommand(endpointUpdateStatusCmd)
+	endpointUpdateCmd.AddCommand(endpointUpdateInstallDaemonCmd)
 	endpointUpdateEnableCmd.Flags().BoolVar(&endpointUpdateServiceOpts.checkOnly, "check-only", false, "Enable periodic checks without applying updates")
-	// The launchd job runs `update --scheduled`; Phase 1 is check-only. Hidden
-	// from the user-facing help.
+	// The launchd job runs `update --scheduled`; it resolves the mode and either
+	// checks only or applies. Hidden from user-facing help.
 	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateServiceOpts.scheduled, "scheduled", false, "Internal: run as the scheduled updater job")
 	_ = endpointUpdateCmd.Flags().MarkHidden("scheduled")
 }
@@ -81,6 +100,10 @@ func setConfigAutoUpdateModeAt(path, mode string) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	perm := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
 	autoUpdate, err := json.Marshal(endpointconfig.AutoUpdate{Mode: mode})
 	if err != nil {
 		return err
@@ -90,7 +113,7 @@ func setConfigAutoUpdateModeAt(path, mode string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0644)
+	return os.WriteFile(path, out, perm)
 }
 
 func requireRootForUpdater() error {
@@ -107,10 +130,10 @@ func runUpdateEnable(cmd *cobra.Command, args []string) error {
 	if err := requireSystemPackageForUpdater(detectUpdateInstall()); err != nil {
 		return err
 	}
-	if !endpointUpdateServiceOpts.checkOnly {
-		return fmt.Errorf("phase 1 supports check-only monitoring only; rerun with --check-only")
+	mode := selfupdate.ModeAuto
+	if endpointUpdateServiceOpts.checkOnly {
+		mode = selfupdate.ModeCheckOnly
 	}
-	mode := selfupdate.ModeCheckOnly
 	if err := setConfigAutoUpdateMode(string(mode)); err != nil {
 		return fmt.Errorf("write auto-update config: %w", err)
 	}
@@ -121,7 +144,7 @@ func runUpdateEnable(cmd *cobra.Command, args []string) error {
 	if err := mgr.Load(); err != nil {
 		return fmt.Errorf("load updater job: %w", err)
 	}
-	fmt.Printf("Update checks enabled (mode: %s).\n", mode)
+	fmt.Printf("Endpoint updater enabled (mode: %s).\n", mode)
 	return nil
 }
 
@@ -161,8 +184,34 @@ func runUpdateStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runScheduledUpdate is the entrypoint the launchd job calls. Phase 1 only
-// performs check-only monitoring and writes a local system-log event.
+func runUpdateInstallDaemon(cmd *cobra.Command, args []string) error {
+	if err := requireRootForUpdater(); err != nil {
+		return err
+	}
+	if err := requireSystemPackageForUpdater(detectUpdateInstall()); err != nil {
+		return err
+	}
+	mode := selfupdate.ResolveMode(configAutoUpdateMode())
+	mgr := service.UpdaterManager{}
+	if mode == selfupdate.ModeOff {
+		_ = mgr.Unload()
+		_ = os.Remove(mgr.PlistPath())
+		fmt.Println("Auto-update is off; updater daemon not installed.")
+		return nil
+	}
+	if _, err := mgr.WritePlist(selfupdate.SystemBeaconPath()); err != nil {
+		return fmt.Errorf("write updater plist: %w", err)
+	}
+	if err := mgr.Load(); err != nil {
+		return fmt.Errorf("load updater job: %w", err)
+	}
+	fmt.Printf("Background updater installed (mode: %s).\n", mode)
+	return nil
+}
+
+// runScheduledUpdate is the entrypoint the launchd job calls. It resolves the
+// effective mode and either checks only or applies, after a randomized delay to
+// spread fleet-wide release-manifest/package fetches.
 func runScheduledUpdate(parent context.Context) error {
 	mode := selfupdate.ResolveMode(configAutoUpdateMode())
 	if mode == selfupdate.ModeOff {
@@ -178,23 +227,29 @@ func runScheduledUpdate(parent context.Context) error {
 		fmt.Println("Update checks are off; nothing to do.")
 		return nil
 	}
-	if mode != selfupdate.ModeCheckOnly {
+	sleepJitter()
+	mode = selfupdate.ResolveMode(configAutoUpdateMode())
+	if mode == selfupdate.ModeOff {
 		current := version.GetVersion()
 		res := selfupdate.CheckResult{Mode: mode}
-		if err := selfupdate.EmitCheckEvent(selfupdate.CheckEventOptions{
+		_ = selfupdate.EmitCheckEvent(selfupdate.CheckEventOptions{
 			Result:       res,
 			Action:       selfupdate.EventUnsupported,
-			Reason:       "mode_not_supported_in_phase1",
+			Reason:       "mode_off_after_jitter",
 			LogPath:      endpointSystemLogPath(),
 			AgentVersion: current,
-		}); err != nil {
-			return fmt.Errorf("write update check event: %w", err)
-		}
-		fmt.Printf("Phase 1 scheduled updater supports check-only mode only (resolved: %s).\n", mode)
+		})
+		fmt.Println("Update checks were disabled during jitter; nothing to do.")
 		return nil
 	}
 
 	current := version.GetVersion()
+	if mode == selfupdate.ModeAuto {
+		return applyUpdate(parent, current)
+	}
+	if mode != selfupdate.ModeCheckOnly {
+		return fmt.Errorf("unsupported update mode %q", mode)
+	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	res, err := selfupdate.CheckWithMode(ctx, current, configAutoUpdateMode())
@@ -222,6 +277,19 @@ func runScheduledUpdate(parent context.Context) error {
 		fmt.Printf("Update available: %s (current %s). check-only mode; not applying.\n", res.LatestVersion, res.CurrentVersion)
 	}
 	return nil
+}
+
+func sleepJitter() {
+	max := defaultJitterSeconds
+	if v := os.Getenv(jitterEnv); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			max = n
+		}
+	}
+	if max <= 0 {
+		return
+	}
+	time.Sleep(time.Duration(rand.Intn(max)) * time.Second)
 }
 
 func endpointSystemLogPath() string {

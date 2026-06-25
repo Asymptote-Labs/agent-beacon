@@ -14,6 +14,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/ingest"
@@ -25,6 +26,12 @@ var (
 	writeCollectorConfig = endpointcollector.WriteConfig
 	saveEndpointConfig   = endpointconfig.Save
 	appendInstallEvent   = writer.AppendEvent
+	detectUpdaterInstall = selfupdate.DetectInstall
+	removeUpdaterJob     = func() {
+		updater := service.UpdaterManager{}
+		_ = updater.Unload()
+		_ = os.Remove(updater.PlistPath())
+	}
 )
 
 type InstallOptions struct {
@@ -42,10 +49,11 @@ type InstallOptions struct {
 }
 
 type UninstallOptions struct {
-	UserMode   bool
-	LogPath    string
-	KeepLogs   bool
-	KeepConfig bool
+	UserMode    bool
+	LogPath     string
+	KeepLogs    bool
+	KeepConfig  bool
+	KeepUpdater bool
 }
 
 type InstallResult struct {
@@ -246,6 +254,9 @@ func Uninstall(opts UninstallOptions) error {
 	cfg := loadOrDefault(opts.UserMode, opts.LogPath)
 	manager := service.Manager{UserMode: cfg.UserMode}
 	_ = manager.Unload()
+	if !cfg.UserMode && !opts.KeepUpdater {
+		removeUpdaterJob()
+	}
 	manifest, _ := ReadManifest(cfg.UserMode)
 	if !opts.KeepConfig {
 		restoreBackups(manifest.Backups)
@@ -270,12 +281,92 @@ func Uninstall(opts UninstallOptions) error {
 func Repair(opts InstallOptions) (InstallResult, error) {
 	configPath := endpointconfig.ConfigPath(opts.UserMode)
 	configSnapshot := snapshotFile(configPath)
-	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true})
+	priorAutoUpdateMode := ""
+	if !opts.UserMode {
+		if mode, err := autoUpdateModeFromConfigFile(configPath); err == nil {
+			priorAutoUpdateMode = mode
+		}
+	}
+	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true, KeepUpdater: true})
 	result, err := Install(opts)
 	if err != nil {
 		restoreFile(configPath, configSnapshot)
+		return result, err
 	}
-	return result, err
+	if !opts.UserMode {
+		if priorAutoUpdateMode != "" {
+			if err := setAutoUpdateModeInConfigFile(configPath, priorAutoUpdateMode); err != nil {
+				return result, err
+			}
+		}
+		if err := reconcileUpdaterFromConfig(opts.LogPath); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func reconcileUpdaterFromConfig(logPath string) error {
+	if !detectUpdaterInstall().SupportsSeamlessUpdate() {
+		return nil
+	}
+	localMode := ""
+	if mode, err := autoUpdateModeFromConfigFile(endpointconfig.ConfigPath(false)); err == nil {
+		localMode = mode
+	}
+	mode := selfupdate.ResolveMode(localMode)
+	mgr := service.UpdaterManager{}
+	if mode == selfupdate.ModeOff {
+		_ = mgr.Unload()
+		_ = os.Remove(mgr.PlistPath())
+		return nil
+	}
+	if _, err := mgr.WritePlist(selfupdate.SystemBeaconPath()); err != nil {
+		return err
+	}
+	return mgr.Load()
+}
+
+func autoUpdateModeFromConfigFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var partial struct {
+		AutoUpdate *endpointconfig.AutoUpdate `json:"auto_update"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil {
+		return "", err
+	}
+	if partial.AutoUpdate == nil {
+		return "", nil
+	}
+	return partial.AutoUpdate.Mode, nil
+}
+
+func setAutoUpdateModeInConfigFile(path, mode string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	autoUpdate, err := json.Marshal(endpointconfig.AutoUpdate{Mode: mode})
+	if err != nil {
+		return err
+	}
+	raw["auto_update"] = autoUpdate
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	perm := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return os.WriteFile(path, out, perm)
 }
 
 func GetStatus(userMode bool, logPath string) Status {
@@ -361,6 +452,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		logPath = writer.DefaultPath(opts.UserMode)
 	}
 	cfg := endpointconfig.Default(opts.UserMode, logPath)
+	if mode, err := autoUpdateModeFromConfigFile(endpointconfig.ConfigPath(opts.UserMode)); err == nil && mode != "" {
+		cfg.AutoUpdate = &endpointconfig.AutoUpdate{Mode: mode}
+	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
 	}

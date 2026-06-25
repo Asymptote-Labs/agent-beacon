@@ -11,10 +11,12 @@ func TestUpdaterPlistContent(t *testing.T) {
 	for _, want := range []string{
 		"<string>com.beacon.endpoint.updater</string>",
 		"<string>/opt/beacon/bin/beacon</string>",
-		"<string>--check</string>",
 		"<string>--scheduled</string>",
-		"<key>StartInterval</key>",
-		"<integer>600</integer>",
+		"<key>StartCalendarInterval</key>",
+		"<key>Hour</key>",
+		"<integer>3</integer>",
+		"<key>Minute</key>",
+		"<integer>0</integer>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plist missing %q", want)
@@ -23,6 +25,9 @@ func TestUpdaterPlistContent(t *testing.T) {
 	// One-shot scheduled job: must not RunAtLoad or KeepAlive.
 	if strings.Contains(out, "<key>KeepAlive</key>") {
 		t.Errorf("updater plist should not set KeepAlive")
+	}
+	if strings.Contains(out, "<string>--check</string>") {
+		t.Errorf("updater plist should let scheduled mode resolve check/apply behavior")
 	}
 	if !strings.Contains(out, "<key>RunAtLoad</key>\n  <false/>") {
 		t.Errorf("updater plist should set RunAtLoad false")

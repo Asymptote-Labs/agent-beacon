@@ -40,6 +40,10 @@ if command -v launchctl >/dev/null 2>&1; then
   }
   restart_optional_forwarder "com.beacon.endpoint.falcon-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist"
   restart_optional_forwarder "com.beacon.endpoint.s3-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
+  "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint update install-daemon || {
+    echo "Error: could not reconcile Beacon endpoint updater daemon" >&2
+    exit 1
+  }
 fi
 
 exit 0

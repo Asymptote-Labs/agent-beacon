@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
@@ -83,6 +85,22 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 	if got := cfg.Destinations.FalconHEC.Sourcetype; got != endpointconfig.DefaultFalconSourcetype {
 		t.Fatalf("Falcon sourcetype = %q, want default", got)
+	}
+}
+
+func TestBuildConfigPreservesAutoUpdateMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := endpointconfig.ConfigPath(true)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"auto_update":{"mode":"check-only"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := buildConfig(InstallOptions{UserMode: true})
+	if cfg.AutoUpdate == nil || cfg.AutoUpdate.Mode != "check-only" {
+		t.Fatalf("AutoUpdate = %#v, want check-only", cfg.AutoUpdate)
 	}
 }
 
@@ -296,6 +314,64 @@ func TestWriteReadManifestRoundTrip(t *testing.T) {
 	}
 	if loaded.ServiceLabel != manifest.ServiceLabel || loaded.Files[0] != manifest.Files[0] || loaded.Backups[0] != manifest.Backups[0] {
 		t.Fatalf("manifest did not round-trip: %#v", loaded)
+	}
+}
+
+func TestAutoUpdateModeFromConfigFileIgnoresDestinationValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{
+  "user_mode": false,
+  "log_path": "/var/log/beacon-agent/runtime.jsonl",
+  "collector": {"grpc_port":4317,"http_port":4318},
+  "harnesses": ["claude"],
+  "destinations": {"splunk_hec": {"endpoint": "https://splunk.example"}},
+  "auto_update": {"mode": "auto"}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mode, err := autoUpdateModeFromConfigFile(path)
+	if err != nil {
+		t.Fatalf("autoUpdateModeFromConfigFile: %v", err)
+	}
+	if mode != "auto" {
+		t.Fatalf("mode = %q, want auto", mode)
+	}
+	if err := setAutoUpdateModeInConfigFile(path, "check-only"); err != nil {
+		t.Fatalf("setAutoUpdateModeInConfigFile: %v", err)
+	}
+	if info, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("permissions = %v, want 0600", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["destinations"]; !ok {
+		t.Fatalf("destinations were not preserved: %s", data)
+	}
+	mode, err = autoUpdateModeFromConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "check-only" {
+		t.Fatalf("mode after set = %q, want check-only", mode)
+	}
+}
+
+func TestReconcileUpdaterSkipsNonPackageInstalls(t *testing.T) {
+	oldDetect := detectUpdaterInstall
+	t.Cleanup(func() { detectUpdaterInstall = oldDetect })
+	detectUpdaterInstall = func() selfupdate.Install {
+		return selfupdate.Install{Kind: selfupdate.InstallHomebrew, BinaryPath: "/opt/homebrew/bin/beacon"}
+	}
+	if err := reconcileUpdaterFromConfig(filepath.Join(t.TempDir(), "runtime.jsonl")); err != nil {
+		t.Fatalf("reconcileUpdaterFromConfig should ignore non-package install, got %v", err)
 	}
 }
 
