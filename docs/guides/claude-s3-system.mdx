@@ -157,26 +157,6 @@ s3://example-security-logs/beacon-prod/runtime/date=YYYY-MM-DD/<timestamp>-<uuid
 s3://example-security-logs/beacon-prod/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
 ```
 
-## Reset And Start Over
-
-Use this when you want to wipe Beacon endpoint state from the Mac before following the guide again. It removes Beacon services, logs, package files, forwarder state, and the current user's Beacon hook cache.
-
-```bash
-/opt/beacon/bin/beacon endpoint hooks uninstall --harness claude 2>/dev/null || true
-sudo /opt/beacon/bin/beacon endpoint uninstall --system 2>/dev/null || true
-sudo launchctl bootout system/com.beacon.endpoint.s3-forwarder 2>/dev/null || true
-sudo rm -rf \
-  "/Library/Application Support/Beacon" \
-  /Library/LaunchDaemons/com.beacon.endpoint.collector.plist \
-  /Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist \
-  /var/log/beacon-agent \
-  /opt/beacon
-rm -rf "$HOME/.beacon"
-sudo pkgutil --forget ai.asymptote.beacon.endpoint 2>/dev/null || true
-```
-
-If Claude Code was open during reset or install, quit it fully and reopen it.
-
 ## Troubleshooting
 
 ### Vector Is Not Starting
