@@ -239,6 +239,17 @@ spctl --assess --type install -vv BeaconEndpointAgent-*-arm64.pkg
 jq . update-manifest.json
 ```
 
+For releases that include endpoint self-update changes, validate the manual apply
+path from the prior installed package on an Apple Silicon Mac:
+
+```bash
+/opt/beacon/bin/beacon version
+sudo /opt/beacon/bin/beacon endpoint update --apply
+/opt/beacon/bin/beacon version
+/opt/beacon/bin/beacon endpoint status --system
+sudo tail -n 20 /var/log/beacon-agent/system.jsonl
+```
+
 If the workflow fails after the tag is pushed, do not create a second tag until
 the failure is understood. Fix the release workflow or source issue, then rerun
 the failed workflow for the same tag when possible. Delete and recreate a pushed
