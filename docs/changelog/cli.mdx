@@ -11,6 +11,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.80 · June 25, 2026
+
+- **Self-update verification on managed Macs** · Manual endpoint package apply no longer requires full Xcode just to run `stapler validate`. Beacon still requires the manifest checksum, Developer ID Installer signature, and Gatekeeper install assessment to pass, while treating unavailable `stapler` on Command Line Tools-only endpoints as a best-effort check so MDM-installed Macs can self-update.
+
 ### v0.0.79 · June 25, 2026
 
 - **Full endpoint inventory heartbeats** · Inventory heartbeats now scan all supported local inventory candidates by default instead of only Cursor and Claude Code, while `inventory_heartbeat.runtimes` remains available for intentionally scoped deployments.
