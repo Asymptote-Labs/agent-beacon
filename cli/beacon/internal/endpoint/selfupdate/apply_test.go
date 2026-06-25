@@ -217,6 +217,50 @@ func TestApplyGatekeeperAbortsBeforeInstall(t *testing.T) {
 	}
 }
 
+func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
+	artifact, sha := makeBeaconTarball(t, "9.9.9")
+	srv := manifestServer(t, "9.9.9", sha, artifact)
+	defer srv.Close()
+
+	a := NewApplier("0.0.1")
+	a.ManifestURL = srv.URL + "/manifest.json"
+	a.StageDir = t.TempDir()
+	a.InstallPrefix = t.TempDir()
+	a.LogPath = filepath.Join(t.TempDir(), "system.jsonl")
+	oldBin := filepath.Join(a.InstallPrefix, "opt/beacon/bin/beacon")
+	if err := os.MkdirAll(filepath.Dir(oldBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldBin, []byte("#!/bin/sh\necho \"beacon version 0.0.1 (old) built on test\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		switch filepath.Base(name) {
+		case "pkgutil":
+			return "Developer ID Installer: Example (TEAMID)", nil
+		case "stapler", "spctl", "installer":
+			return "", nil
+		case "beacon":
+			return "beacon version 9.9.9 (new) built on test", nil
+		default:
+			return "", nil
+		}
+	}
+	restartErr := fmt.Errorf("launchctl failed")
+	a.restart = func() error { return restartErr }
+
+	res, err := a.Apply(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "collector restart failed") {
+		t.Fatalf("Apply error = %v, want collector restart failure", err)
+	}
+	if !res.RolledBack {
+		t.Fatalf("filesystem rollback should be recorded after restart failure: %+v", res)
+	}
+	if !strings.Contains(string(mustRead(t, a.LogPath)), "rollback failed") {
+		t.Fatalf("expected rollback restart failure telemetry, got %s", mustRead(t, a.LogPath))
+	}
+}
+
 func TestSkipGatekeeperRequiresInsecureFlag(t *testing.T) {
 	a := NewApplier("0.0.1")
 	a.SkipGatekeeper = true // without AllowInsecureTest

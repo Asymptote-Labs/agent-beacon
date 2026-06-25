@@ -59,6 +59,7 @@ type Applier struct {
 
 	HTTPClient *http.Client
 	run        runnerFunc
+	restart    func() error
 	now        func() time.Time
 }
 
@@ -188,6 +189,18 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 		}
 		a.emit(false, result, message)
 		return result, fmt.Errorf("install update: %w", err)
+	}
+
+	if !a.AllowInsecureTest {
+		if err := a.restartCollector(); err != nil {
+			rollbackErr := a.rollback(backup, &result)
+			message := "post-install collector restart failed: " + err.Error()
+			if rollbackErr != nil {
+				message += "; rollback failed: " + rollbackErr.Error()
+			}
+			a.emit(false, result, message)
+			return result, fmt.Errorf("post-install collector restart failed: %w", err)
+		}
 	}
 
 	if err := a.healthCheck(ctx, manifest.Version); err != nil {
@@ -417,6 +430,9 @@ func (a *Applier) healthCheck(ctx context.Context, wantVersion string) error {
 }
 
 func (a *Applier) restartCollector() error {
+	if a.restart != nil {
+		return a.restart()
+	}
 	mgr := service.Manager{UserMode: false}
 	_ = mgr.Unload()
 	return mgr.Load()
