@@ -217,6 +217,50 @@ func TestApplyGatekeeperAbortsBeforeInstall(t *testing.T) {
 	}
 }
 
+func TestVerifyGatekeeperSkipsUnavailableStapler(t *testing.T) {
+	a := NewApplier("0.0.1")
+	var calls []string
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, name)
+		switch name {
+		case "pkgutil":
+			return "Developer ID Installer: Example (TEAMID)", nil
+		case "stapler":
+			return "xcode-select: error: tool 'stapler' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance", fmt.Errorf("exit status 1")
+		case "spctl":
+			return "accepted", nil
+		default:
+			return "", nil
+		}
+	}
+
+	if err := a.verifyGatekeeper(context.Background(), filepath.Join(t.TempDir(), "Beacon.pkg"), "TEAMID"); err != nil {
+		t.Fatalf("verifyGatekeeper should skip unavailable stapler, got %v", err)
+	}
+	if strings.Join(calls, ",") != "pkgutil,stapler,spctl" {
+		t.Fatalf("calls = %v, want pkgutil, stapler, spctl", calls)
+	}
+}
+
+func TestVerifyGatekeeperFailsStaplerValidationFailure(t *testing.T) {
+	a := NewApplier("0.0.1")
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		switch name {
+		case "pkgutil":
+			return "Developer ID Installer: Example (TEAMID)", nil
+		case "stapler":
+			return "The validate action worked! The staple and validate action failed!", fmt.Errorf("exit status 65")
+		default:
+			return "", nil
+		}
+	}
+
+	err := a.verifyGatekeeper(context.Background(), filepath.Join(t.TempDir(), "Beacon.pkg"), "TEAMID")
+	if err == nil || !strings.Contains(err.Error(), "stapler validate") {
+		t.Fatalf("verifyGatekeeper error = %v, want stapler validation failure", err)
+	}
+}
+
 func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", sha, artifact)
