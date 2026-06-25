@@ -141,6 +141,19 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Printf("This build is below the minimum supported version; updating is strongly recommended.\n")
 	}
 
+	if err := maybeReturnAfterUpdateReport(res); err != nil || !endpointUpdateOpts.apply || endpointUpdateOpts.check {
+		return err
+	}
+
+	return applyUpdate(cmd.Context(), current)
+}
+
+func maybeReturnAfterUpdateReport(res selfupdate.CheckResult) error {
+	if endpointUpdateOpts.check && endpointUpdateOpts.apply {
+		fmt.Println("--check was set; no package was downloaded or applied.")
+		return nil
+	}
+
 	if !endpointUpdateOpts.apply {
 		switch res.Install.Kind {
 		case selfupdate.InstallHomebrew:
@@ -164,7 +177,7 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 		case selfupdate.InstallHomebrew:
 			fmt.Println("Installed via Homebrew. Update with:")
 			fmt.Println("  brew upgrade beacon")
-			return nil
+			return fmt.Errorf("manual apply is not supported for Homebrew installs")
 		case selfupdate.InstallOther:
 			return fmt.Errorf("manual apply is supported only for the system package install (detected: %s)", res.Install.Kind)
 		}
@@ -172,8 +185,7 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("no signed endpoint package artifact is available for %s", res.ArchKey)
 		}
 	}
-
-	return applyUpdate(cmd.Context(), current)
+	return nil
 }
 
 func emitManualCheckEvent(opts selfupdate.CheckEventOptions) error {

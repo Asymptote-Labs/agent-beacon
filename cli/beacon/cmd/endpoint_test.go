@@ -20,6 +20,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 
 	"github.com/spf13/cobra"
 )
@@ -1285,6 +1286,47 @@ func TestApplyUpdateInsecureRequiresInstallPrefix(t *testing.T) {
 	endpointUpdateOpts.installPrefix = ""
 	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires --install-prefix") {
 		t.Fatalf("applyUpdate error = %v, want install-prefix requirement", err)
+	}
+}
+
+func TestEndpointUpdateCheckWinsOverApply(t *testing.T) {
+	oldCheck := endpointUpdateOpts.check
+	oldApply := endpointUpdateOpts.apply
+	t.Cleanup(func() {
+		endpointUpdateOpts.check = oldCheck
+		endpointUpdateOpts.apply = oldApply
+	})
+	endpointUpdateOpts.check = true
+	endpointUpdateOpts.apply = true
+	res := selfupdate.CheckResult{
+		ManifestResult: updatecheck.ManifestResult{UpdateAvailable: true},
+		Install:        selfupdate.Install{Kind: selfupdate.InstallSystemPkg},
+		HasArtifact:    true,
+	}
+	if err := maybeReturnAfterUpdateReport(res); err != nil {
+		t.Fatalf("maybeReturnAfterUpdateReport = %v, want nil check-only return", err)
+	}
+}
+
+func TestEndpointUpdateApplyRejectsHomebrew(t *testing.T) {
+	oldCheck := endpointUpdateOpts.check
+	oldApply := endpointUpdateOpts.apply
+	oldInsecure := endpointUpdateOpts.allowInsecure
+	t.Cleanup(func() {
+		endpointUpdateOpts.check = oldCheck
+		endpointUpdateOpts.apply = oldApply
+		endpointUpdateOpts.allowInsecure = oldInsecure
+	})
+	endpointUpdateOpts.check = false
+	endpointUpdateOpts.apply = true
+	endpointUpdateOpts.allowInsecure = false
+	res := selfupdate.CheckResult{
+		ManifestResult: updatecheck.ManifestResult{UpdateAvailable: true},
+		Install:        selfupdate.Install{Kind: selfupdate.InstallHomebrew},
+		HasArtifact:    true,
+	}
+	if err := maybeReturnAfterUpdateReport(res); err == nil || !strings.Contains(err.Error(), "Homebrew") {
+		t.Fatalf("maybeReturnAfterUpdateReport = %v, want Homebrew apply rejection", err)
 	}
 }
 
