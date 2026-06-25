@@ -295,10 +295,9 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 }
 
 func reconcileUpdaterFromConfig(logPath string) error {
-	cfg := loadOrDefault(false, logPath)
 	localMode := ""
-	if cfg.AutoUpdate != nil {
-		localMode = cfg.AutoUpdate.Mode
+	if mode, err := autoUpdateModeFromConfigFile(endpointconfig.ConfigPath(false)); err == nil {
+		localMode = mode
 	}
 	mode := selfupdate.ResolveMode(localMode)
 	mgr := service.UpdaterManager{}
@@ -311,6 +310,23 @@ func reconcileUpdaterFromConfig(logPath string) error {
 		return err
 	}
 	return mgr.Load()
+}
+
+func autoUpdateModeFromConfigFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var partial struct {
+		AutoUpdate *endpointconfig.AutoUpdate `json:"auto_update"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil {
+		return "", err
+	}
+	if partial.AutoUpdate == nil {
+		return "", nil
+	}
+	return partial.AutoUpdate.Mode, nil
 }
 
 func GetStatus(userMode bool, logPath string) Status {

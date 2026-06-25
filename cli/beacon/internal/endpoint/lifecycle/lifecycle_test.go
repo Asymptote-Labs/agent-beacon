@@ -299,6 +299,27 @@ func TestWriteReadManifestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAutoUpdateModeFromConfigFileIgnoresDestinationValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{
+  "user_mode": false,
+  "log_path": "/var/log/beacon-agent/runtime.jsonl",
+  "collector": {"grpc_port":4317,"http_port":4318},
+  "harnesses": ["claude"],
+  "destinations": {"splunk_hec": {"endpoint": "https://splunk.example"}},
+  "auto_update": {"mode": "auto"}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mode, err := autoUpdateModeFromConfigFile(path)
+	if err != nil {
+		t.Fatalf("autoUpdateModeFromConfigFile: %v", err)
+	}
+	if mode != "auto" {
+		t.Fatalf("mode = %q, want auto", mode)
+	}
+}
+
 func TestDiscoverAndRestoreBackups(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "settings.json")

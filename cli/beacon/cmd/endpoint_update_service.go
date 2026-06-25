@@ -228,6 +228,20 @@ func runScheduledUpdate(parent context.Context) error {
 		return nil
 	}
 	sleepJitter()
+	mode = selfupdate.ResolveMode(configAutoUpdateMode())
+	if mode == selfupdate.ModeOff {
+		current := version.GetVersion()
+		res := selfupdate.CheckResult{Mode: mode}
+		_ = selfupdate.EmitCheckEvent(selfupdate.CheckEventOptions{
+			Result:       res,
+			Action:       selfupdate.EventUnsupported,
+			Reason:       "mode_off_after_jitter",
+			LogPath:      endpointSystemLogPath(),
+			AgentVersion: current,
+		})
+		fmt.Println("Update checks were disabled during jitter; nothing to do.")
+		return nil
+	}
 
 	current := version.GetVersion()
 	if mode == selfupdate.ModeAuto {
