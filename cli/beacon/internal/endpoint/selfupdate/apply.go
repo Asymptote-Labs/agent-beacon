@@ -291,8 +291,10 @@ func verifySHA256(path, want string) error {
 	return nil
 }
 
-// verifyGatekeeper confirms the .pkg is a Developer ID Installer-signed,
-// notarized, and stapled package before it is run.
+// verifyGatekeeper confirms the .pkg is Developer ID Installer-signed and
+// accepted by Gatekeeper before it is run. stapler validation is best-effort:
+// endpoint machines commonly have only Command Line Tools installed, where the
+// stapler shim exists but refuses to run without full Xcode.
 func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath, teamID string) error {
 	run := a.runner()
 	out, err := run(ctx, "pkgutil", "--check-signature", pkgPath)
@@ -303,12 +305,22 @@ func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath, teamID string) 
 		return fmt.Errorf("package signature does not match expected team id %s", teamID)
 	}
 	if out, err := run(ctx, "stapler", "validate", pkgPath); err != nil {
-		return fmt.Errorf("stapler validate: %s: %w", strings.TrimSpace(out), err)
+		if !staplerUnavailable(out, err) {
+			return fmt.Errorf("stapler validate: %s: %w", strings.TrimSpace(out), err)
+		}
 	}
 	if out, err := run(ctx, "spctl", "--assess", "--type", "install", "-vv", pkgPath); err != nil {
 		return fmt.Errorf("spctl assessment failed: %s: %w", strings.TrimSpace(out), err)
 	}
 	return nil
+}
+
+func staplerUnavailable(out string, err error) bool {
+	msg := strings.ToLower(strings.TrimSpace(out + " " + err.Error()))
+	return strings.Contains(msg, "requires xcode") ||
+		strings.Contains(msg, "command line tools instance") ||
+		strings.Contains(msg, "executable file not found") ||
+		strings.Contains(msg, "no such file or directory")
 }
 
 // install applies the package. Production runs the macOS installer into "/";
