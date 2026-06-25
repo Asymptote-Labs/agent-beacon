@@ -14,6 +14,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 ### Unreleased
 
 - **Check-only endpoint update monitoring** · Apple Silicon package installs can opt into a local `launchd` job that checks the release manifest every 10 minutes and writes local-only update status events to `system.jsonl`. This phase does not download or apply packages.
+- **Manual endpoint package apply** · Apple Silicon package installs can explicitly run `sudo /opt/beacon/bin/beacon endpoint update --apply` to download the signed package from the release manifest, verify its checksum/signature/notarization/staple, install it with Apple's `installer`, health-check it, and roll back the `/opt/beacon` tree if the new install is unhealthy.
 
 ### v0.0.76 · June 24, 2026
 

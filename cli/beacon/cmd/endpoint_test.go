@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 
 	"github.com/spf13/cobra"
 )
@@ -1248,6 +1250,83 @@ func TestRequireSystemPackageForUpdater(t *testing.T) {
 	}
 	if err := requireSystemPackageForUpdater(selfupdate.Install{Kind: selfupdate.InstallOther}); err == nil {
 		t.Fatal("other install should not be allowed to install system updater")
+	}
+}
+
+func TestEndpointUpdateApplyFlagRegistered(t *testing.T) {
+	cmd, _, err := endpointCmd.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("find endpoint update: %v", err)
+	}
+	if cmd.Flags().Lookup("apply") == nil {
+		t.Fatal("endpoint update missing --apply")
+	}
+}
+
+func TestApplyUpdateRequiresRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can apply updates")
+	}
+	oldAllow := endpointUpdateOpts.allowInsecure
+	t.Cleanup(func() { endpointUpdateOpts.allowInsecure = oldAllow })
+	endpointUpdateOpts.allowInsecure = false
+	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires root") {
+		t.Fatalf("applyUpdate error = %v, want root requirement", err)
+	}
+}
+
+func TestApplyUpdateInsecureRequiresInstallPrefix(t *testing.T) {
+	oldAllow := endpointUpdateOpts.allowInsecure
+	oldPrefix := endpointUpdateOpts.installPrefix
+	t.Cleanup(func() {
+		endpointUpdateOpts.allowInsecure = oldAllow
+		endpointUpdateOpts.installPrefix = oldPrefix
+	})
+	endpointUpdateOpts.allowInsecure = true
+	endpointUpdateOpts.installPrefix = ""
+	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires --install-prefix") {
+		t.Fatalf("applyUpdate error = %v, want install-prefix requirement", err)
+	}
+}
+
+func TestEndpointUpdateCheckWinsOverApply(t *testing.T) {
+	oldCheck := endpointUpdateOpts.check
+	oldApply := endpointUpdateOpts.apply
+	t.Cleanup(func() {
+		endpointUpdateOpts.check = oldCheck
+		endpointUpdateOpts.apply = oldApply
+	})
+	endpointUpdateOpts.check = true
+	endpointUpdateOpts.apply = true
+	res := selfupdate.CheckResult{
+		ManifestResult: updatecheck.ManifestResult{UpdateAvailable: true},
+		Install:        selfupdate.Install{Kind: selfupdate.InstallSystemPkg},
+		HasArtifact:    true,
+	}
+	if err := maybeReturnAfterUpdateReport(res); err != nil {
+		t.Fatalf("maybeReturnAfterUpdateReport = %v, want nil check-only return", err)
+	}
+}
+
+func TestEndpointUpdateApplyRejectsHomebrew(t *testing.T) {
+	oldCheck := endpointUpdateOpts.check
+	oldApply := endpointUpdateOpts.apply
+	oldInsecure := endpointUpdateOpts.allowInsecure
+	t.Cleanup(func() {
+		endpointUpdateOpts.check = oldCheck
+		endpointUpdateOpts.apply = oldApply
+		endpointUpdateOpts.allowInsecure = oldInsecure
+	})
+	endpointUpdateOpts.check = false
+	endpointUpdateOpts.apply = true
+	endpointUpdateOpts.allowInsecure = false
+	res := selfupdate.CheckResult{
+		ManifestResult: updatecheck.ManifestResult{UpdateAvailable: true},
+		Install:        selfupdate.Install{Kind: selfupdate.InstallHomebrew},
+		HasArtifact:    true,
+	}
+	if err := maybeReturnAfterUpdateReport(res); err == nil || !strings.Contains(err.Error(), "Homebrew") {
+		t.Fatalf("maybeReturnAfterUpdateReport = %v, want Homebrew apply rejection", err)
 	}
 }
 

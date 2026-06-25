@@ -3,8 +3,10 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,7 +17,10 @@ import (
 )
 
 var endpointUpdateOpts struct {
-	check bool
+	check         bool
+	apply         bool
+	allowInsecure bool
+	installPrefix string
 }
 
 var detectUpdateInstall = selfupdate.DetectInstall
@@ -24,8 +29,8 @@ var endpointUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Check for Beacon endpoint agent updates",
 	Long: `Check for a newer signed and notarized Beacon endpoint package without
-downloading or applying it. Phase 1 is check-only: it can surface update status
-and write local system-log events, but it never mutates the install.`,
+downloading or applying it by default. Use --apply explicitly to download,
+verify, install, health-check, and roll back if needed.`,
 	SilenceUsage: true,
 	RunE:         runEndpointUpdate,
 }
@@ -35,6 +40,11 @@ func init() {
 	// intentionally not exposed (the public command-tree smoke test forbids it).
 	endpointCmd.AddCommand(endpointUpdateCmd)
 	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateOpts.check, "check", false, "Only report whether an update is available; do not apply")
+	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateOpts.apply, "apply", false, "Download, verify, and apply an available endpoint package update")
+	endpointUpdateCmd.Flags().BoolVar(&endpointUpdateOpts.allowInsecure, "allow-insecure-test", false, "Test only: apply into --install-prefix and skip package notarization checks")
+	endpointUpdateCmd.Flags().StringVar(&endpointUpdateOpts.installPrefix, "install-prefix", "", "Test only: install root instead of /")
+	_ = endpointUpdateCmd.Flags().MarkHidden("allow-insecure-test")
+	_ = endpointUpdateCmd.Flags().MarkHidden("install-prefix")
 }
 
 // configAutoUpdateMode returns the locally configured auto-update mode.
@@ -92,7 +102,7 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 	current := version.GetVersion()
 	res, err := selfupdate.CheckWithMode(ctx, current, configAutoUpdateMode())
 	if err != nil {
-		_ = selfupdate.EmitCheckEvent(selfupdate.CheckEventOptions{
+		_ = emitManualCheckEvent(selfupdate.CheckEventOptions{
 			Result:       res,
 			Action:       selfupdate.EventCheckFailed,
 			Reason:       err.Error(),
@@ -102,7 +112,7 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update check failed: %w", err)
 	}
 	action, reason := selfupdate.CheckOutcome(res)
-	if err := selfupdate.EmitCheckEvent(selfupdate.CheckEventOptions{
+	if err := emitManualCheckEvent(selfupdate.CheckEventOptions{
 		Result:       res,
 		Action:       action,
 		Reason:       reason,
@@ -131,21 +141,104 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Printf("This build is below the minimum supported version; updating is strongly recommended.\n")
 	}
 
-	switch res.Install.Kind {
-	case selfupdate.InstallHomebrew:
-		fmt.Println("Installed via Homebrew. Update with:")
-		fmt.Println("  brew upgrade beacon")
-		return nil
-	case selfupdate.InstallOther:
-		fmt.Printf("Endpoint package checks apply only to the system package install.\n")
+	if err := maybeReturnAfterUpdateReport(res); err != nil || !endpointUpdateOpts.apply || endpointUpdateOpts.check {
+		return err
+	}
+
+	return applyUpdate(cmd.Context(), current)
+}
+
+func maybeReturnAfterUpdateReport(res selfupdate.CheckResult) error {
+	if endpointUpdateOpts.check && endpointUpdateOpts.apply {
+		fmt.Println("--check was set; no package was downloaded or applied.")
 		return nil
 	}
 
-	if !res.HasArtifact {
-		fmt.Printf("No signed endpoint package artifact is available for %s.\n", res.ArchKey)
+	if !endpointUpdateOpts.apply {
+		switch res.Install.Kind {
+		case selfupdate.InstallHomebrew:
+			fmt.Println("Installed via Homebrew. Update with:")
+			fmt.Println("  brew upgrade beacon")
+			return nil
+		case selfupdate.InstallOther:
+			fmt.Printf("Endpoint package checks apply only to the system package install.\n")
+			return nil
+		}
+		if !res.HasArtifact {
+			fmt.Printf("No signed endpoint package artifact is available for %s.\n", res.ArchKey)
+			return nil
+		}
+		fmt.Println("Check-only mode: no package was downloaded or applied.")
 		return nil
 	}
 
-	fmt.Println("Check-only mode: no package was downloaded or applied.")
+	if !endpointUpdateOpts.allowInsecure {
+		switch res.Install.Kind {
+		case selfupdate.InstallHomebrew:
+			fmt.Println("Installed via Homebrew. Update with:")
+			fmt.Println("  brew upgrade beacon")
+			return fmt.Errorf("manual apply is not supported for Homebrew installs")
+		case selfupdate.InstallOther:
+			return fmt.Errorf("manual apply is supported only for the system package install (detected: %s)", res.Install.Kind)
+		}
+		if !res.HasArtifact {
+			return fmt.Errorf("no signed endpoint package artifact is available for %s", res.ArchKey)
+		}
+	}
+	return nil
+}
+
+func emitManualCheckEvent(opts selfupdate.CheckEventOptions) error {
+	err := selfupdate.EmitCheckEvent(opts)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, os.ErrPermission) || os.IsPermission(err) {
+		fmt.Fprintf(os.Stderr, "warning: could not write update check event to system log: %v\n", err)
+		return nil
+	}
+	return err
+}
+
+func applyUpdate(parent context.Context, current string) error {
+	insecure := endpointUpdateOpts.allowInsecure
+	if !insecure {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("applying an update requires root; rerun with sudo")
+		}
+		if install := detectUpdateInstall(); !install.SupportsSeamlessUpdate() {
+			return fmt.Errorf("automatic apply is only supported for the system package install (detected: %s)", install.Kind)
+		}
+	} else if endpointUpdateOpts.installPrefix == "" {
+		return fmt.Errorf("--allow-insecure-test requires --install-prefix")
+	}
+
+	ctx, cancel := context.WithTimeout(parent, 15*time.Minute)
+	defer cancel()
+
+	applier := selfupdate.NewApplier(current)
+	applier.LogPath = endpointSystemLogPath()
+	if insecure {
+		applier.AllowInsecureTest = true
+		applier.SkipGatekeeper = true
+		if endpointUpdateOpts.installPrefix != "" {
+			applier.InstallPrefix = endpointUpdateOpts.installPrefix
+			applier.StageDir = filepath.Join(endpointUpdateOpts.installPrefix, "stage")
+			applier.LogPath = filepath.Join(endpointUpdateOpts.installPrefix, "system.jsonl")
+		}
+	}
+
+	res, err := applier.Apply(ctx)
+	if err != nil {
+		if res.RolledBack {
+			fmt.Println("Update failed; rolled back to the previous version.")
+		}
+		return err
+	}
+	if !res.Applied {
+		fmt.Printf("No update applied: %s\n", res.Message)
+		return nil
+	}
+	fmt.Printf("Updated Beacon to %s.\n", res.ToVersion)
 	return nil
 }

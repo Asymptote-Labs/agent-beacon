@@ -41,6 +41,17 @@ Disable the background check job with:
 sudo /opt/beacon/bin/beacon endpoint update disable
 ```
 
+When a newer signed endpoint package is available, apply it manually with:
+
+```bash title="Manually apply an endpoint package update"
+sudo /opt/beacon/bin/beacon endpoint update --apply
+```
+
+Manual apply downloads the package from the release manifest, verifies the
+checksum, Developer ID signature, stapled notarization ticket, and Gatekeeper
+assessment, then installs it with Apple's `installer`. If the updated install is
+unhealthy, Beacon restores the previous `/opt/beacon` tree.
+
 ## Repair endpoint configuration
 
 If you run Beacon as a local endpoint service, reapply managed service files and telemetry configuration after upgrading:
