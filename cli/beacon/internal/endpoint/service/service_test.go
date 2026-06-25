@@ -129,12 +129,7 @@ func TestRunLaunchctlWithContextExplainsBootstrapIOError(t *testing.T) {
 	}
 }
 
-func TestManagerLoadReloadsAlreadyBootstrappedJob(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd reload is macOS-only")
-	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+func TestLoadLaunchdJobReloadsAlreadyBootstrappedJob(t *testing.T) {
 	var calls []string
 	oldRun := runLaunchctlCommand
 	runLaunchctlCommand = func(args ...string) (string, error) {
@@ -152,8 +147,8 @@ func TestManagerLoadReloadsAlreadyBootstrappedJob(t *testing.T) {
 		runLaunchctlCommand = oldRun
 	})
 
-	if err := (Manager{UserMode: true}).Load(); err != nil {
-		t.Fatalf("Load returned error: %v", err)
+	if err := loadLaunchdJob("gui/501", UserLabel, "/Users/test/Library/LaunchAgents/"+UserLabel+".plist"); err != nil {
+		t.Fatalf("loadLaunchdJob returned error: %v", err)
 	}
 	if len(calls) != 3 {
 		t.Fatalf("launchctl calls = %#v, want bootstrap/bootout/bootstrap", calls)
@@ -163,26 +158,138 @@ func TestManagerLoadReloadsAlreadyBootstrappedJob(t *testing.T) {
 	}
 }
 
-func TestManagerLoadReturnsBootoutFailureWhenReloadFails(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd reload is macOS-only")
-	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+func TestLoadLaunchdJobReloadsBootstrapIOErrorWhenJobPrints(t *testing.T) {
+	var calls []string
 	oldRun := runLaunchctlCommand
 	runLaunchctlCommand = func(args ...string) (string, error) {
-		if len(args) > 0 && args[0] == "bootstrap" {
-			return "Bootstrap failed: 5: already bootstrapped", errors.New("exit status 5")
+		calls = append(calls, strings.Join(args, " "))
+		switch strings.Join(args, " ") {
+		case "bootstrap system /Library/LaunchDaemons/" + SystemLabel + ".plist":
+			if len(calls) == 1 {
+				return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+			}
+			return "", nil
+		case "print system/" + SystemLabel:
+			return "state = running\npid = 123\n", nil
+		case "bootout system/" + SystemLabel:
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected launchctl call: %s", strings.Join(args, " "))
 		}
-		return "Boot-out failed", errors.New("exit status 5")
 	}
 	t.Cleanup(func() {
 		runLaunchctlCommand = oldRun
 	})
 
-	err := (Manager{UserMode: true}).Load()
+	if err := loadLaunchdJob("system", SystemLabel, "/Library/LaunchDaemons/"+SystemLabel+".plist"); err != nil {
+		t.Fatalf("loadLaunchdJob returned error: %v", err)
+	}
+	if len(calls) != 4 {
+		t.Fatalf("launchctl calls = %#v, want bootstrap/print/bootout/bootstrap", calls)
+	}
+}
+
+func TestLoadLaunchdJobTreatsPostBootstrapLoadedStateAsSuccess(t *testing.T) {
+	var calls []string
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		switch strings.Join(args, " ") {
+		case "bootstrap system /Library/LaunchDaemons/" + SystemLabel + ".plist":
+			return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+		case "print system/" + SystemLabel:
+			return "state = running\npid = 123\n", nil
+		case "bootout system/" + SystemLabel:
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected launchctl call: %s", strings.Join(args, " "))
+		}
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	if err := loadLaunchdJob("system", SystemLabel, "/Library/LaunchDaemons/"+SystemLabel+".plist"); err != nil {
+		t.Fatalf("loadLaunchdJob returned error: %v", err)
+	}
+	if len(calls) != 5 {
+		t.Fatalf("launchctl calls = %#v, want bootstrap/print/bootout/bootstrap/print", calls)
+	}
+}
+
+func TestLoadLaunchdJobReturnsBootoutFailureWhenReloadFails(t *testing.T) {
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		switch args[0] {
+		case "bootstrap":
+			return "Bootstrap failed: 5: already bootstrapped", errors.New("exit status 5")
+		case "bootout":
+			return "Boot-out failed", errors.New("exit status 5")
+		default:
+			return "", fmt.Errorf("unexpected launchctl call: %s", strings.Join(args, " "))
+		}
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	err := loadLaunchdJob("gui/501", UserLabel, "/Users/test/Library/LaunchAgents/"+UserLabel+".plist")
 	if err == nil || !strings.Contains(err.Error(), "Boot-out failed") {
-		t.Fatalf("Load error = %v, want bootout failure", err)
+		t.Fatalf("loadLaunchdJob error = %v, want bootout failure", err)
+	}
+}
+
+func TestManagerRestartKickstartsLoadedJob(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd restart is macOS-only")
+	}
+	var calls []string
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", nil
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	if err := (Manager{UserMode: false}).Restart(); err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	want := "kickstart -k system/" + SystemLabel
+	if len(calls) != 1 || calls[0] != want {
+		t.Fatalf("launchctl calls = %#v, want %q", calls, want)
+	}
+}
+
+func TestManagerRestartLoadsMissingJob(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd restart is macOS-only")
+	}
+	var calls []string
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		switch args[0] {
+		case "kickstart":
+			return "Could not find service \"system/" + SystemLabel + "\" in domain for system", errors.New("exit status 113")
+		case "bootstrap":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected launchctl call: %s", strings.Join(args, " "))
+		}
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	if err := (Manager{UserMode: false}).Restart(); err != nil {
+		t.Fatalf("Restart returned error: %v", err)
+	}
+	if len(calls) != 2 ||
+		calls[0] != "kickstart -k system/"+SystemLabel ||
+		calls[1] != "bootstrap system /Library/LaunchDaemons/"+SystemLabel+".plist" {
+		t.Fatalf("launchctl calls = %#v, want kickstart/bootstrap", calls)
 	}
 }
 

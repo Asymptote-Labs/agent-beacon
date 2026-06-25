@@ -38,18 +38,7 @@ func (m UpdaterManager) Load() error {
 		return nil
 	}
 	path := m.PlistPath()
-	out, err := runLaunchctlCommand("bootstrap", "system", path)
-	if err == nil {
-		return nil
-	}
-	if strings.Contains(strings.TrimSpace(out), "already bootstrapped") {
-		target := "system/" + UpdaterLabel
-		if err := runLaunchctlWithContext("system", UpdaterLabel, "", "bootout", target); err != nil {
-			return err
-		}
-		return runLaunchctlWithContext("system", UpdaterLabel, path, "bootstrap", "system", path)
-	}
-	return launchctlError(strings.TrimSpace(out), err, "system", UpdaterLabel, path, "bootstrap", "system", path)
+	return loadLaunchdJob("system", UpdaterLabel, path)
 }
 
 // Unload boots the updater job out of the system domain.

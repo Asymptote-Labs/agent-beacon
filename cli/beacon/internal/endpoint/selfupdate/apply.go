@@ -445,9 +445,7 @@ func (a *Applier) restartCollector() error {
 	if a.restart != nil {
 		return a.restart()
 	}
-	mgr := service.Manager{UserMode: false}
-	_ = mgr.Unload()
-	return mgr.Load()
+	return service.Manager{UserMode: false}.Restart()
 }
 
 // versionLineMatches reports whether `beacon version` output
