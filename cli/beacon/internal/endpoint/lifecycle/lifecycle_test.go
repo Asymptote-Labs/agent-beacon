@@ -16,6 +16,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
@@ -344,6 +345,17 @@ func TestAutoUpdateModeFromConfigFileIgnoresDestinationValidation(t *testing.T) 
 	}
 	if mode != "check-only" {
 		t.Fatalf("mode after set = %q, want check-only", mode)
+	}
+}
+
+func TestReconcileUpdaterSkipsNonPackageInstalls(t *testing.T) {
+	oldDetect := detectUpdaterInstall
+	t.Cleanup(func() { detectUpdaterInstall = oldDetect })
+	detectUpdaterInstall = func() selfupdate.Install {
+		return selfupdate.Install{Kind: selfupdate.InstallHomebrew, BinaryPath: "/opt/homebrew/bin/beacon"}
+	}
+	if err := reconcileUpdaterFromConfig(filepath.Join(t.TempDir(), "runtime.jsonl")); err != nil {
+		t.Fatalf("reconcileUpdaterFromConfig should ignore non-package install, got %v", err)
 	}
 }
 

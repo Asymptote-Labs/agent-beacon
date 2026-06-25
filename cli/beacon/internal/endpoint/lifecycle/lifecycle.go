@@ -26,6 +26,7 @@ var (
 	writeCollectorConfig = endpointcollector.WriteConfig
 	saveEndpointConfig   = endpointconfig.Save
 	appendInstallEvent   = writer.AppendEvent
+	detectUpdaterInstall = selfupdate.DetectInstall
 	removeUpdaterJob     = func() {
 		updater := service.UpdaterManager{}
 		_ = updater.Unload()
@@ -306,6 +307,9 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 }
 
 func reconcileUpdaterFromConfig(logPath string) error {
+	if !detectUpdaterInstall().SupportsSeamlessUpdate() {
+		return nil
+	}
 	localMode := ""
 	if mode, err := autoUpdateModeFromConfigFile(endpointconfig.ConfigPath(false)); err == nil {
 		localMode = mode
