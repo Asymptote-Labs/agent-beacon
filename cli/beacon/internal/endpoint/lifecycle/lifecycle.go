@@ -25,6 +25,11 @@ var (
 	writeCollectorConfig = endpointcollector.WriteConfig
 	saveEndpointConfig   = endpointconfig.Save
 	appendInstallEvent   = writer.AppendEvent
+	removeUpdaterJob     = func() {
+		updater := service.UpdaterManager{}
+		_ = updater.Unload()
+		_ = os.Remove(updater.PlistPath())
+	}
 )
 
 type InstallOptions struct {
@@ -42,10 +47,11 @@ type InstallOptions struct {
 }
 
 type UninstallOptions struct {
-	UserMode   bool
-	LogPath    string
-	KeepLogs   bool
-	KeepConfig bool
+	UserMode    bool
+	LogPath     string
+	KeepLogs    bool
+	KeepConfig  bool
+	KeepUpdater bool
 }
 
 type InstallResult struct {
@@ -246,10 +252,8 @@ func Uninstall(opts UninstallOptions) error {
 	cfg := loadOrDefault(opts.UserMode, opts.LogPath)
 	manager := service.Manager{UserMode: cfg.UserMode}
 	_ = manager.Unload()
-	if !cfg.UserMode {
-		updater := service.UpdaterManager{}
-		_ = updater.Unload()
-		_ = os.Remove(updater.PlistPath())
+	if !cfg.UserMode && !opts.KeepUpdater {
+		removeUpdaterJob()
 	}
 	manifest, _ := ReadManifest(cfg.UserMode)
 	if !opts.KeepConfig {
@@ -275,7 +279,7 @@ func Uninstall(opts UninstallOptions) error {
 func Repair(opts InstallOptions) (InstallResult, error) {
 	configPath := endpointconfig.ConfigPath(opts.UserMode)
 	configSnapshot := snapshotFile(configPath)
-	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true})
+	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true, KeepUpdater: true})
 	result, err := Install(opts)
 	if err != nil {
 		restoreFile(configPath, configSnapshot)
