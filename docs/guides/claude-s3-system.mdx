@@ -1,0 +1,256 @@
+---
+title: "Claude System Mode with S3"
+description: "Install Beacon directly from GitHub Releases, configure Claude Code in system mode, and forward local JSONL logs to AWS S3 with bundled Vector."
+---
+
+## Overview
+
+Use this guide for a single Mac where you want Beacon running in system mode, Claude Code telemetry enabled, and local Beacon JSONL logs forwarded to an S3 bucket. There is no MDM setup here.
+
+The end state is:
+
+- Beacon is installed under `/opt/beacon` from the signed and notarized GitHub Release package.
+- The system collector runs as `com.beacon.endpoint.collector`.
+- Claude Code hooks are installed for the logged-in user.
+- Runtime logs are written to `/var/log/beacon-agent/runtime.jsonl`.
+- Inventory logs are written to `/var/log/beacon-agent/inventory_state.jsonl`.
+- Bundled Vector forwards both streams to S3 under `runtime/` and `inventory/`.
+
+## 1. Prepare AWS
+
+Create or choose an S3 bucket and a root prefix such as `beacon-prod`. Do not include `runtime` or `inventory` in the prefix; Beacon adds those folders.
+
+Give the credentials used by Vector permission to write under that prefix:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::example-security-logs/beacon-prod/*"
+    }
+  ]
+}
+```
+
+If your bucket requires KMS or object tags, add the required `kms:*` or `s3:PutObjectTagging` permissions in AWS.
+
+For a quick local setup, have these values ready:
+
+```bash
+export BEACON_S3_BUCKET="example-security-logs"
+export BEACON_S3_PREFIX="beacon-prod"
+export AWS_REGION="us-west-2"
+
+# Use temporary or managed credentials when possible.
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_SESSION_TOKEN="" # optional
+```
+
+Beacon does not store these secrets in endpoint configuration. The helper writes the AWS provider-chain values you pass to Vector's root-owned env file at `/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600`.
+
+You can also use normal AWS provider-chain settings such as `AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_WEB_IDENTITY_TOKEN_FILE`, or `AWS_ROLE_ARN` instead of raw access keys.
+
+## 2. Install The Package
+
+Download and install the latest Apple Silicon endpoint package from [GitHub Releases](https://github.com/Asymptote-Labs/agent-beacon/releases):
+
+```bash
+tmpdir="$(mktemp -d)"
+gh release download \
+  --repo Asymptote-Labs/agent-beacon \
+  --pattern 'BeaconEndpointAgent-*-arm64.pkg' \
+  --dir "$tmpdir"
+
+sudo installer -pkg "$tmpdir"/BeaconEndpointAgent-*-arm64.pkg -target /
+/opt/beacon/bin/beacon version
+```
+
+If you do not use the GitHub CLI, download the latest `BeaconEndpointAgent-*-arm64.pkg` asset from the release page and run the same `sudo installer` command against that file.
+
+The package installs `/opt/beacon/bin/beacon`, `/opt/beacon/bin/beacon-otelcol`, `/opt/beacon/bin/vector`, and the S3 helper scripts.
+
+## 3. Configure Beacon And S3
+
+Run the packaged helper once from an interactive login session. Keep Claude Code closed while this runs.
+
+```bash
+sudo env \
+  BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
+  BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
+  BEACON_S3_STORAGE_CLASS="STANDARD" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}" \
+  /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
+```
+
+This starts the Beacon collector, installs Claude hooks for the current console user, writes the Vector S3 config, and starts `com.beacon.endpoint.s3-forwarder`.
+
+Restart Claude Code before testing a real Claude session.
+
+## 4. Verify Locally
+
+Check the two services:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.collector
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder
+```
+
+Check Beacon status and local logs:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint status --system
+ls -l /var/log/beacon-agent/runtime.jsonl /var/log/beacon-agent/inventory_state.jsonl
+```
+
+Write a validation event:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint s3 validate --system
+sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
+  --system \
+  --force \
+  --trigger manual \
+  --trigger-harness claude \
+  --working-dir /Users/Shared \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+Confirm events landed locally:
+
+```bash
+tail -n 5 /var/log/beacon-agent/runtime.jsonl
+tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
+```
+
+## 5. Verify S3
+
+Vector batches uploads, so allow up to five minutes.
+
+```bash
+aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/" \
+  --recursive \
+  --region "$AWS_REGION"
+
+aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/inventory/" \
+  --recursive \
+  --region "$AWS_REGION"
+```
+
+Inspect a recent object:
+
+```bash
+aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" - \
+  --region "$AWS_REGION" | gzip -dc | grep "Beacon endpoint S3 validation event"
+```
+
+Expected layout:
+
+```text
+s3://example-security-logs/beacon-prod/runtime/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+s3://example-security-logs/beacon-prod/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+```
+
+## Troubleshooting
+
+### Vector Is Not Starting
+
+Check launchd and Vector stderr:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder
+sudo tail -n 100 /tmp/com.beacon.endpoint.s3-forwarder.err
+```
+
+Run Vector in the foreground to see the real error:
+
+```bash
+sudo /opt/beacon/jamf/claude/s3/run-forwarder.sh
+```
+
+Common causes are a missing `/opt/beacon/bin/vector`, a malformed env file, missing AWS credentials, or an S3 bucket/prefix/IAM mismatch. Re-run the helper after fixing the environment.
+
+### Port 4137 Or 4317 Is Already In Use
+
+Beacon's default OTLP ports are `4317` for gRPC and `4318` for HTTP. If setup reports a port conflict, first retry the same command once. A transient launchd or collector startup race can briefly surface as "address already in use" and then succeed on the next run.
+
+If the retry fails, identify the process:
+
+```bash
+sudo lsof -nP -iTCP:4317 -sTCP:LISTEN
+sudo lsof -nP -iTCP:4318 -sTCP:LISTEN
+sudo lsof -nP -iTCP:4137 -sTCP:LISTEN # only if the error names 4137
+```
+
+Either stop the conflicting process or choose alternate Beacon ports and re-run setup:
+
+```bash
+sudo env \
+  BEACON_OTLP_GRPC_PORT="44317" \
+  BEACON_OTLP_HTTP_PORT="44318" \
+  BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
+  BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}" \
+  /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
+```
+
+Restart Claude Code after changing ports.
+
+### No S3 Objects Appear
+
+First wait five minutes. Then check that Vector has the expected non-secret settings:
+
+```bash
+sudo sh -c 'sed -E "s/(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)=.*/\1=<redacted>/" "/Library/Application Support/Beacon/Forwarders/s3-vector.env"'
+sudo grep -E 'runtime.jsonl|inventory_state.jsonl|key_prefix|read_from' \
+  "/Library/Application Support/Beacon/Forwarders/s3-vector.toml"
+```
+
+Then confirm IAM allows `s3:PutObject` for `s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/*`, the AWS region matches the bucket, and the validation event was written after Vector started. Runtime forwarding starts at the end of the file to avoid backfilling old runtime events.
+
+### Claude Hooks Are Missing
+
+Run the helper while an interactive user is logged in, then restart Claude Code. Check the user's Claude settings:
+
+```bash
+grep -n 'BEACON_ENDPOINT_CLI\|beacon-hooks' ~/.claude/settings.json
+```
+
+If nothing appears, re-run:
+
+```bash
+sudo env \
+  BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
+  BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}" \
+  /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
+```
+
+### Launchd Says Bootstrap Failed: 5
+
+Verify the files exist and are executable/readable:
+
+```bash
+ls -l /opt/beacon/bin/beacon /opt/beacon/bin/beacon-otelcol /opt/beacon/bin/vector
+ls -l /Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+ls -l /Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist
+```
+
+Clear stale launchd state and run the helper again:
+
+```bash
+sudo launchctl bootout system/com.beacon.endpoint.collector 2>/dev/null || true
+sudo launchctl bootout system/com.beacon.endpoint.s3-forwarder 2>/dev/null || true
+```

@@ -245,6 +245,7 @@
                   {
                     "group": "Object Storage",
                     "pages": [
+                      "guides/claude-s3-system",
                       "log-forwarding/s3",
                       "log-forwarding/gcs"
                     ]
