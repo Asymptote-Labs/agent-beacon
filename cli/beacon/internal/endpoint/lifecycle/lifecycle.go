@@ -452,6 +452,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		logPath = writer.DefaultPath(opts.UserMode)
 	}
 	cfg := endpointconfig.Default(opts.UserMode, logPath)
+	if mode, err := autoUpdateModeFromConfigFile(endpointconfig.ConfigPath(opts.UserMode)); err == nil && mode != "" {
+		cfg.AutoUpdate = &endpointconfig.AutoUpdate{Mode: mode}
+	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
 	}

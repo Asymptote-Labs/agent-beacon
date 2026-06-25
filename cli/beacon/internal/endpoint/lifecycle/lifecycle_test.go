@@ -88,6 +88,22 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 }
 
+func TestBuildConfigPreservesAutoUpdateMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := endpointconfig.ConfigPath(true)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"auto_update":{"mode":"check-only"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := buildConfig(InstallOptions{UserMode: true})
+	if cfg.AutoUpdate == nil || cfg.AutoUpdate.Mode != "check-only" {
+		t.Fatalf("AutoUpdate = %#v, want check-only", cfg.AutoUpdate)
+	}
+}
+
 func TestBuildConfigPreservesExplicitEmptyHarnesses(t *testing.T) {
 	cfg := buildConfig(InstallOptions{UserMode: true, Harnesses: []string{}})
 	if cfg.Harnesses == nil || len(cfg.Harnesses) != 0 {
