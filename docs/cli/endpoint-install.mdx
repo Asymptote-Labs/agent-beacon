@@ -11,7 +11,7 @@ description: "Install or update the local Beacon endpoint collector and runtime 
 beacon endpoint install
 ```
 
-By default, Beacon configures Claude Code and Codex CLI telemetry for local or customer-controlled runtime JSONL logs. Gemini CLI and VS Code Copilot telemetry are opt-in with the `gemini` and `vscode` harnesses. Claude Code can also use optional hook telemetry for richer lifecycle, subagent, permission, and tool detail; install the endpoint agent first, then add Claude hooks with `beacon endpoint hooks install --harness claude`. Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields. GitHub Copilot CLI and Factory Droid OTLP are managed through their launch environments, so Beacon validates their telemetry state but does not mutate shell profiles during install.
+By default, Beacon configures Claude Code and Codex CLI telemetry for local or customer-controlled runtime JSONL logs. Gemini CLI and VS Code Copilot telemetry are opt-in with the `gemini` and `vscode` harnesses. Claude Code can also use optional hook telemetry for richer lifecycle, subagent, permission, and tool detail; install the endpoint agent first, then add Claude hooks with `beacon endpoint hooks install --harness claude`. Codex runtime telemetry stays OTLP-based, but optional Codex hooks can trigger inventory heartbeats with `beacon endpoint hooks install --harness codex`. Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields. GitHub Copilot CLI and Factory Droid OTLP are managed through their launch environments, so Beacon validates their telemetry state but does not mutate shell profiles during install.
 
 ## Flags
 

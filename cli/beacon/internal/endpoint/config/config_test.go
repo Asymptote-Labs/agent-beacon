@@ -29,7 +29,7 @@ func TestDefaultUserConfigUsesHomeScopedPaths(t *testing.T) {
 		t.Fatalf("unexpected default harnesses: %#v", cfg.Harnesses)
 	}
 	inventory := InventoryConfig(cfg)
-	if !inventory.Enabled || inventory.TTLSeconds != 86400 || len(inventory.Runtimes) != 2 || inventory.Runtimes[0] != "cursor" || inventory.Runtimes[1] != "claude_code" {
+	if !inventory.Enabled || inventory.TTLSeconds != 86400 || len(inventory.Runtimes) != 0 {
 		t.Fatalf("unexpected inventory defaults: %#v", inventory)
 	}
 	if inventory.IncludeContents || inventory.MaxContentBytes != 0 {

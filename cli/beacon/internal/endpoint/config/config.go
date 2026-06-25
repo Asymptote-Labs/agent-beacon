@@ -119,7 +119,7 @@ func InventoryDefaults() InventorySettings {
 	return InventorySettings{
 		Enabled:    true,
 		TTLSeconds: 24 * 60 * 60,
-		Runtimes:   []string{"cursor", "claude_code"},
+		Runtimes:   []string{},
 	}
 }
 

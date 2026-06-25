@@ -90,6 +90,16 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Claude Code hooks installed: %s\n", status.SettingsPath)
+	case "codex":
+		status, err := endpointhooks.InstallCodex(endpointhooks.CodexOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Codex CLI inventory hooks installed: %s\n", status.HooksPath)
 	case "vscode":
 		status, err := endpointhooks.InstallVSCode(endpointhooks.VSCodeOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -225,6 +235,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "codex":
+		status, err := endpointhooks.UninstallCodex(endpointhooks.CodexOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "vscode":
 		status, err := endpointhooks.UninstallVSCode(endpointhooks.VSCodeOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -325,6 +345,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			})
 		case "claude":
 			statuses["claude"] = endpointhooks.ClaudeHookStatus(endpointhooks.ClaudeOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
+		case "codex":
+			statuses["codex"] = endpointhooks.CodexHookStatus(endpointhooks.CodexOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,

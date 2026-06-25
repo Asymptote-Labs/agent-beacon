@@ -73,6 +73,9 @@ func TestNormalizeHookTargetCharacterization(t *testing.T) {
 		"claude-code":   {"claude", true},
 		"claude_code":   {"claude", true},
 		"claude-hooks":  {"claude", true},
+		"codex":         {"codex", true},
+		"codex-cli":     {"codex", true},
+		"codex_cli":     {"codex", true},
 		"vscode":        {"vscode", true},
 		"vs-code":       {"vscode", true},
 		"vs_code":       {"vscode", true},
@@ -87,8 +90,6 @@ func TestNormalizeHookTargetCharacterization(t *testing.T) {
 		"devin-desktop": {"devin-desktop", true},
 		"DEVIN_DESKTOP": {"devin-desktop", true},
 		// OTLP-only harnesses are not hook-addressable
-		"codex":          {"", false},
-		"codex-cli":      {"", false},
 		"gemini":         {"", false},
 		"vscode-copilot": {"", false},
 		// Unsupported

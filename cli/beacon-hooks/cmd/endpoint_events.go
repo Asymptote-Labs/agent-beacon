@@ -83,9 +83,6 @@ func maybeUploadCursorCloudTelemetry(logger *logging.Logger) {
 }
 
 func maybeEmitInventoryHeartbeat(logger *logging.Logger, input map[string]interface{}) {
-	if platformFlag != "cursor" && platformFlag != "claude" {
-		return
-	}
 	cliPath := strings.TrimSpace(os.Getenv("BEACON_ENDPOINT_CLI"))
 	if cliPath == "" {
 		return
