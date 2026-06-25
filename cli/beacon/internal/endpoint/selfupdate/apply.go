@@ -21,6 +21,8 @@ import (
 // MB; this is a generous ceiling that still bounds a hostile response.
 const maxPackageBytes = 512 << 20
 
+const collectorHealthTimeout = 60 * time.Second
+
 // runnerFunc executes an external command and returns combined output. It is
 // injectable so tests can avoid real installer/pkgutil/launchctl calls.
 type runnerFunc func(ctx context.Context, name string, args ...string) (string, error)
@@ -377,12 +379,12 @@ func (a *Applier) rollback(backup string, result *ApplyResult) error {
 		return err
 	}
 	_ = os.RemoveAll(failed)
+	result.RolledBack = true
 	if !a.AllowInsecureTest {
 		if err := a.restartCollector(); err != nil {
 			return err
 		}
 	}
-	result.RolledBack = true
 	return nil
 }
 
@@ -402,7 +404,7 @@ func (a *Applier) healthCheck(ctx context.Context, wantVersion string) error {
 	}
 	// Give launchd a moment to relaunch the collector via the pkg postinstall.
 	mgr := service.Manager{UserMode: false}
-	deadline := a.clock()().Add(15 * time.Second)
+	deadline := a.clock()().Add(collectorHealthTimeout)
 	for {
 		if mgr.Status().Running {
 			return nil

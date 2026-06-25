@@ -286,8 +286,8 @@ func TestRollbackReportsCollectorRestartFailure(t *testing.T) {
 	if got := string(mustRead(t, liveBin)); got != "backup" {
 		t.Fatalf("filesystem rollback did not restore backup: %q", got)
 	}
-	if result.RolledBack {
-		t.Fatal("RolledBack should remain false when collector restart fails")
+	if !result.RolledBack {
+		t.Fatal("RolledBack should be true when filesystem rollback completed")
 	}
 }
 
