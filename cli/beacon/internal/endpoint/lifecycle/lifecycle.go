@@ -14,6 +14,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/ingest"
@@ -283,8 +284,33 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 	result, err := Install(opts)
 	if err != nil {
 		restoreFile(configPath, configSnapshot)
+		return result, err
 	}
-	return result, err
+	if !opts.UserMode {
+		if err := reconcileUpdaterFromConfig(opts.LogPath); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func reconcileUpdaterFromConfig(logPath string) error {
+	cfg := loadOrDefault(false, logPath)
+	localMode := ""
+	if cfg.AutoUpdate != nil {
+		localMode = cfg.AutoUpdate.Mode
+	}
+	mode := selfupdate.ResolveMode(localMode)
+	mgr := service.UpdaterManager{}
+	if mode == selfupdate.ModeOff {
+		_ = mgr.Unload()
+		_ = os.Remove(mgr.PlistPath())
+		return nil
+	}
+	if _, err := mgr.WritePlist(selfupdate.SystemBeaconPath()); err != nil {
+		return err
+	}
+	return mgr.Load()
 }
 
 func GetStatus(userMode bool, logPath string) Status {
