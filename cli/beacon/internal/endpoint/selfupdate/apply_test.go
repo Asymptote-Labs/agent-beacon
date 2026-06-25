@@ -225,6 +225,38 @@ func TestSkipGatekeeperRequiresInsecureFlag(t *testing.T) {
 	}
 }
 
+func TestInsecureApplyRequiresNonRootPrefix(t *testing.T) {
+	a := NewApplier("0.0.1")
+	a.AllowInsecureTest = true
+	if _, err := a.Apply(context.Background()); err == nil || !strings.Contains(err.Error(), "non-root install prefix") {
+		t.Fatalf("expected non-root prefix guard, got %v", err)
+	}
+}
+
+func TestRollbackDoesNotRemoveLiveInstallWhenRestorePreparationFails(t *testing.T) {
+	a := NewApplier("0.0.1")
+	a.AllowInsecureTest = true
+	a.InstallPrefix = t.TempDir()
+	a.StageDir = t.TempDir()
+	liveBin := filepath.Join(a.InstallPrefix, "opt/beacon/bin/beacon")
+	if err := os.MkdirAll(filepath.Dir(liveBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(liveBin, []byte("live"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var result ApplyResult
+	if err := a.rollback(filepath.Join(t.TempDir(), "missing-backup"), &result); err == nil {
+		t.Fatal("expected rollback error for missing backup")
+	}
+	if got := string(mustRead(t, liveBin)); got != "live" {
+		t.Fatalf("live install changed after failed rollback prep: %q", got)
+	}
+	if result.RolledBack {
+		t.Fatal("RolledBack should remain false when restore was not completed")
+	}
+}
+
 func TestVersionLineMatches(t *testing.T) {
 	out := "beacon version 0.0.69 (abc1234) built on 2026-01-01"
 	if !versionLineMatches(out, "0.0.69") {

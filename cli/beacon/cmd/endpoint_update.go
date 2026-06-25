@@ -159,6 +159,20 @@ func runEndpointUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if !endpointUpdateOpts.allowInsecure {
+		switch res.Install.Kind {
+		case selfupdate.InstallHomebrew:
+			fmt.Println("Installed via Homebrew. Update with:")
+			fmt.Println("  brew upgrade beacon")
+			return nil
+		case selfupdate.InstallOther:
+			return fmt.Errorf("manual apply is supported only for the system package install (detected: %s)", res.Install.Kind)
+		}
+		if !res.HasArtifact {
+			return fmt.Errorf("no signed endpoint package artifact is available for %s", res.ArchKey)
+		}
+	}
+
 	return applyUpdate(cmd.Context(), current)
 }
 
@@ -183,6 +197,8 @@ func applyUpdate(parent context.Context, current string) error {
 		if install := detectUpdateInstall(); !install.SupportsSeamlessUpdate() {
 			return fmt.Errorf("automatic apply is only supported for the system package install (detected: %s)", install.Kind)
 		}
+	} else if endpointUpdateOpts.installPrefix == "" {
+		return fmt.Errorf("--allow-insecure-test requires --install-prefix")
 	}
 
 	ctx, cancel := context.WithTimeout(parent, 15*time.Minute)

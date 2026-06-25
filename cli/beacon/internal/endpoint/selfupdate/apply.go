@@ -93,6 +93,9 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 	if a.SkipGatekeeper && !a.AllowInsecureTest {
 		return ApplyResult{}, fmt.Errorf("SkipGatekeeper requires AllowInsecureTest")
 	}
+	if a.AllowInsecureTest && filepath.Clean(a.prefix()) == string(filepath.Separator) {
+		return ApplyResult{}, fmt.Errorf("AllowInsecureTest requires a non-root install prefix")
+	}
 	result := ApplyResult{FromVersion: a.CurrentVersion}
 	current := strings.TrimSpace(a.CurrentVersion)
 	if current == "dev" {
@@ -176,14 +179,22 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 	}
 
 	if err := a.install(ctx, pkgPath); err != nil {
-		a.rollback(backup, &result)
-		a.emit(false, result, err.Error())
+		rollbackErr := a.rollback(backup, &result)
+		message := err.Error()
+		if rollbackErr != nil {
+			message += "; rollback failed: " + rollbackErr.Error()
+		}
+		a.emit(false, result, message)
 		return result, fmt.Errorf("install update: %w", err)
 	}
 
 	if err := a.healthCheck(ctx, manifest.Version); err != nil {
-		a.rollback(backup, &result)
-		a.emit(false, result, "post-install health check failed: "+err.Error())
+		rollbackErr := a.rollback(backup, &result)
+		message := "post-install health check failed: " + err.Error()
+		if rollbackErr != nil {
+			message += "; rollback failed: " + rollbackErr.Error()
+		}
+		a.emit(false, result, message)
 		return result, fmt.Errorf("post-install health check failed: %w", err)
 	}
 
@@ -342,20 +353,35 @@ func (a *Applier) snapshotInstall() (string, error) {
 // rollback that did not happen. Endpoint config/plists live outside the tree but
 // reference stable paths and a release-stable schema, so the restored older
 // binaries run against them consistently after the collector restarts.
-func (a *Applier) rollback(backup string, result *ApplyResult) {
+func (a *Applier) rollback(backup string, result *ApplyResult) error {
 	if backup == "" {
-		return
+		return nil
 	}
-	if err := os.RemoveAll(a.installDir()); err != nil {
-		return
+	live := a.installDir()
+	restore := filepath.Join(a.stageDir(), "rollback", "restore")
+	failed := filepath.Join(a.stageDir(), "rollback", "failed-install")
+	if err := os.RemoveAll(restore); err != nil {
+		return err
 	}
-	if err := copyTree(backup, a.installDir()); err != nil {
-		return
+	if err := copyTree(backup, restore); err != nil {
+		return err
+	}
+	_ = os.RemoveAll(failed)
+	if err := os.Rename(live, failed); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(restore, live); err != nil {
+		if _, statErr := os.Stat(failed); statErr == nil {
+			_ = os.Rename(failed, live)
+		}
+		return err
 	}
 	result.RolledBack = true
+	_ = os.RemoveAll(failed)
 	if !a.AllowInsecureTest {
 		_ = a.restartCollector()
 	}
+	return nil
 }
 
 // healthCheck confirms the freshly installed beacon reports the expected

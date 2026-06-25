@@ -1274,6 +1274,20 @@ func TestApplyUpdateRequiresRoot(t *testing.T) {
 	}
 }
 
+func TestApplyUpdateInsecureRequiresInstallPrefix(t *testing.T) {
+	oldAllow := endpointUpdateOpts.allowInsecure
+	oldPrefix := endpointUpdateOpts.installPrefix
+	t.Cleanup(func() {
+		endpointUpdateOpts.allowInsecure = oldAllow
+		endpointUpdateOpts.installPrefix = oldPrefix
+	})
+	endpointUpdateOpts.allowInsecure = true
+	endpointUpdateOpts.installPrefix = ""
+	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires --install-prefix") {
+		t.Fatalf("applyUpdate error = %v, want install-prefix requirement", err)
+	}
+}
+
 func TestCompletionAndDocsCommandsRegistered(t *testing.T) {
 	for _, name := range []string{"completion", "docs"} {
 		cmd, _, err := rootCmd.Find([]string{name})
