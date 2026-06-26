@@ -50,12 +50,13 @@ func TestUpdaterWritePlistNonDarwinContract(t *testing.T) {
 	}
 }
 
-func TestUpdaterLoadDoesNotUnloadRunningUpdater(t *testing.T) {
+func TestUpdaterLoadDefersReloadForRunningUpdater(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("launchd updater load is macOS-only")
 	}
 	var calls []string
 	oldRun := runLaunchctlCommand
+	oldDeferred := startDeferredUpdaterReload
 	runLaunchctlCommand = func(args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
 		if strings.Join(args, " ") == "print system/"+UpdaterLabel {
@@ -63,8 +64,14 @@ func TestUpdaterLoadDoesNotUnloadRunningUpdater(t *testing.T) {
 		}
 		return "", errors.New("unexpected launchctl call")
 	}
+	var deferredPath string
+	startDeferredUpdaterReload = func(path string) error {
+		deferredPath = path
+		return nil
+	}
 	t.Cleanup(func() {
 		runLaunchctlCommand = oldRun
+		startDeferredUpdaterReload = oldDeferred
 	})
 
 	if err := (UpdaterManager{}).Load(); err != nil {
@@ -72,5 +79,8 @@ func TestUpdaterLoadDoesNotUnloadRunningUpdater(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0] != "print system/"+UpdaterLabel {
 		t.Fatalf("launchctl calls = %#v, want only status print", calls)
+	}
+	if deferredPath != (UpdaterManager{}).PlistPath() {
+		t.Fatalf("deferred reload path = %q, want updater plist", deferredPath)
 	}
 }
