@@ -17,16 +17,16 @@ const UpdaterLabel = "com.beacon.endpoint.updater"
 type UpdaterManager struct{}
 
 var startDeferredUpdaterReload = func(path string) error {
-	cmd := exec.Command("/bin/sh", "-c", deferredUpdaterReloadScript(os.Getpid(), path))
+	cmd := exec.Command("/bin/sh", "-c", deferredUpdaterReloadScript(path))
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Start()
 }
 
-func deferredUpdaterReloadScript(pid int, path string) string {
+func deferredUpdaterReloadScript(path string) string {
 	return fmt.Sprintf(
-		"deadline=$((SECONDS+600)); while /bin/kill -0 %d >/dev/null 2>&1 && [ \"$SECONDS\" -lt \"$deadline\" ]; do sleep 2; done; /bin/launchctl bootout system/%s >/dev/null 2>&1 || true; /bin/launchctl bootstrap system %s >/dev/null 2>&1",
-		pid,
+		"deadline=$((SECONDS+600)); while [ \"$SECONDS\" -lt \"$deadline\" ] && /bin/launchctl print system/%s 2>/dev/null | /usr/bin/grep -Eq 'state = running|pid ='; do sleep 2; done; /bin/launchctl bootout system/%s >/dev/null 2>&1 || true; /bin/launchctl bootstrap system %s >/dev/null 2>&1",
+		UpdaterLabel,
 		UpdaterLabel,
 		shellQuote(path),
 	)

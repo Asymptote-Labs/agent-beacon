@@ -86,9 +86,10 @@ func TestUpdaterLoadDefersReloadForRunningUpdater(t *testing.T) {
 }
 
 func TestDeferredUpdaterReloadScriptWaitsForParentExit(t *testing.T) {
-	script := deferredUpdaterReloadScript(12345, "/Library/LaunchDaemons/com.beacon.endpoint.updater.plist")
+	script := deferredUpdaterReloadScript("/Library/LaunchDaemons/com.beacon.endpoint.updater.plist")
 	for _, want := range []string{
-		"/bin/kill -0 12345",
+		"/bin/launchctl print system/" + UpdaterLabel,
+		"/usr/bin/grep -Eq 'state = running|pid ='",
 		"SECONDS+600",
 		"do sleep 2; done",
 		"/bin/launchctl bootout system/" + UpdaterLabel,
