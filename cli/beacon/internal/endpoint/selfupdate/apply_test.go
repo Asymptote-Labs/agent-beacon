@@ -119,6 +119,10 @@ func TestApplyCleansSuccessfulUpdateStaging(t *testing.T) {
 	if err := os.WriteFile(staleRollback, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	staleFailure := filepath.Join(a.StageDir, "last_failure.json")
+	if err := os.WriteFile(staleFailure, []byte(`{"reason":"old failure"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := a.Apply(context.Background())
 	if err != nil {
@@ -135,6 +139,9 @@ func TestApplyCleansSuccessfulUpdateStaging(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists or unexpected error: %v", path, err)
 		}
+	}
+	if _, err := os.Stat(staleFailure); !os.IsNotExist(err) {
+		t.Fatalf("stale failure diagnostic still exists or unexpected error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(a.StageDir, ".update.lock")); err != nil {
 		t.Fatalf("lock file should remain reusable: %v", err)
@@ -230,6 +237,20 @@ func TestApplyHealthFailRollsBack(t *testing.T) {
 	got := mustRead(t, oldBin)
 	if !strings.Contains(string(got), "OLD-BINARY") {
 		t.Fatalf("rollback did not restore old binary, got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(a.StageDir, "rollback")); !os.IsNotExist(err) {
+		t.Fatalf("successful rollback should clean rollback snapshot, stat err=%v", err)
+	}
+	diag := string(mustRead(t, filepath.Join(a.StageDir, "last_failure.json")))
+	for _, want := range []string{
+		`"from_version": "0.0.1"`,
+		`"to_version": "9.9.9"`,
+		`"rolled_back": true`,
+		"post-install health check failed",
+	} {
+		if !strings.Contains(diag, want) {
+			t.Fatalf("failure diagnostic missing %q:\n%s", want, diag)
+		}
 	}
 }
 
@@ -348,6 +369,13 @@ func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
 	}
 	if !strings.Contains(string(mustRead(t, a.LogPath)), "rollback failed") {
 		t.Fatalf("expected rollback restart failure telemetry, got %s", mustRead(t, a.LogPath))
+	}
+	if _, err := os.Stat(filepath.Join(a.StageDir, "rollback")); err != nil {
+		t.Fatalf("failed rollback should preserve rollback materials: %v", err)
+	}
+	diag := string(mustRead(t, filepath.Join(a.StageDir, "last_failure.json")))
+	if !strings.Contains(diag, "rollback_error") || !strings.Contains(diag, "launchctl failed") {
+		t.Fatalf("failure diagnostic should preserve rollback error, got %s", diag)
 	}
 }
 
