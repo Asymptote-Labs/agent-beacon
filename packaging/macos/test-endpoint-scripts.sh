@@ -29,6 +29,22 @@ if ! grep -q 'INVENTORY_STATE' "$ROOT_DIR/packaging/macos/jamf/claude/common/rep
   echo "repair-hooks should prepare inventory heartbeat state files" >&2
   exit 1
 fi
+if ! grep -q 'restore_existing_forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should restore existing optional forwarders" >&2
+  exit 1
+fi
+if ! grep -q 'launchctl kickstart -k' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should kickstart already-loaded forwarders" >&2
+  exit 1
+fi
+if ! grep -q 'could not restore existing forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should fail loudly when an existing forwarder cannot be restored" >&2
+  exit 1
+fi
+if ! grep -q 'launchctl bootstrap failed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should preserve launchctl bootstrap diagnostics" >&2
+  exit 1
+fi
 
 PKG_TEST_BIN="$TMP_DIR/pkg-bin"
 PKG_TEST_ROOT="$TMP_DIR/pkg-root"

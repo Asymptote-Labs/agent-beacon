@@ -17,20 +17,51 @@ BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}" \
 BEACON_NO_START=1 \
   /opt/beacon/scripts/install-endpoint.sh
 
-restart_optional_forwarder() {
+forwarder_running() {
+  label="$1"
+
+  launchctl print "system/$label" 2>/dev/null | grep -Eq 'state = running|pid ='
+}
+
+restore_existing_forwarder() {
   label="$1"
   plist_path="$2"
+  target="system/$label"
 
+  # No plist means the customer has not installed this optional forwarder.
   if [ ! -f "$plist_path" ]; then
     return 0
   fi
 
-  launchctl bootout "system/$label" >/dev/null 2>&1 || true
-  launchctl bootstrap system "$plist_path" >/dev/null 2>&1 || {
-    if ! launchctl print "system/$label" >/dev/null 2>&1; then
-      echo "Warning: could not restart optional forwarder $label" >&2
+  if forwarder_running "$label"; then
+    out="$(launchctl kickstart -k "$target" 2>&1)" || {
+      echo "Warning: launchctl kickstart failed for $label: $out" >&2
+    }
+    if forwarder_running "$label"; then
+      return 0
     fi
-  }
+  fi
+
+  for delay in 1 2 4 8 16; do
+    out="$(launchctl bootstrap system "$plist_path" 2>&1)" || {
+      echo "Warning: launchctl bootstrap failed for $label: $out" >&2
+    }
+    if forwarder_running "$label"; then
+      return 0
+    fi
+
+    out="$(launchctl kickstart -k "$target" 2>&1)" || {
+      echo "Warning: launchctl kickstart retry failed for $label: $out" >&2
+    }
+    if forwarder_running "$label"; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+
+  out="$(launchctl print "$target" 2>&1)" || true
+  echo "Error: could not restore existing forwarder $label after package install. launchctl print: $out" >&2
+  return 1
 }
 
 if command -v launchctl >/dev/null 2>&1; then
@@ -38,8 +69,8 @@ if command -v launchctl >/dev/null 2>&1; then
   launchctl bootstrap system /Library/LaunchDaemons/com.beacon.endpoint.collector.plist >/dev/null 2>&1 || {
     launchctl print system/com.beacon.endpoint.collector >/dev/null 2>&1 || exit 1
   }
-  restart_optional_forwarder "com.beacon.endpoint.falcon-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist"
-  restart_optional_forwarder "com.beacon.endpoint.s3-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
+  restore_existing_forwarder "com.beacon.endpoint.falcon-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist"
+  restore_existing_forwarder "com.beacon.endpoint.s3-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
   "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint update install-daemon || {
     echo "Error: could not reconcile Beacon endpoint updater daemon" >&2
     exit 1
