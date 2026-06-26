@@ -95,6 +95,52 @@ func TestApplyHappyPath(t *testing.T) {
 	}
 }
 
+func TestApplyCleansSuccessfulUpdateStaging(t *testing.T) {
+	artifact, sha := makeBeaconTarball(t, "9.9.9")
+	srv := manifestServer(t, "9.9.9", sha, artifact)
+	defer srv.Close()
+
+	a := testApplier(t, "0.0.1", srv)
+	oldBin := filepath.Join(a.InstallPrefix, "opt/beacon/bin/beacon")
+	if err := os.MkdirAll(filepath.Dir(oldBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldBin, []byte("#!/bin/sh\necho \"beacon version 0.0.1 (old) built on test\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleDownload := filepath.Join(a.StageDir, "download.pkg")
+	if err := os.WriteFile(staleDownload, []byte("stale package"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleRollback := filepath.Join(a.StageDir, "rollback", "beacon", "bin", "old")
+	if err := os.MkdirAll(filepath.Dir(staleRollback), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staleRollback, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := a.Apply(context.Background())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !res.Applied {
+		t.Fatalf("expected update applied: %+v", res)
+	}
+	for _, path := range []string{
+		staleDownload,
+		filepath.Join(a.StageDir, "download.tar.gz"),
+		filepath.Join(a.StageDir, "rollback"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists or unexpected error: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(a.StageDir, ".update.lock")); err != nil {
+		t.Fatalf("lock file should remain reusable: %v", err)
+	}
+}
+
 func TestApplySHA256Mismatch(t *testing.T) {
 	artifact, _ := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", "deadbeefbad", artifact)
