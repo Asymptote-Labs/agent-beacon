@@ -71,11 +71,35 @@ Build or obtain a signed and notarized Beacon macOS package, upload it to Jamf P
     | 14 | Splunk TLS skip-verify flag, accepts `1`, `true`, or `yes`; use only for testing. |
     | 15 | Optional Splunk HEC CA certificate path. |
   </Step>
+  <Step title="Optionally enable endpoint self-updates">
+    Beacon package self-updates are off by default. To opt in during rollout,
+    add a Jamf Files and Processes payload, or a post-install policy command,
+    that runs one of the following after the package install completes:
+
+    ```bash title="Enable automatic package self-updates"
+    /opt/beacon/bin/beacon endpoint update enable
+    ```
+
+    For visibility without automatic package installation, enable check-only
+    mode instead:
+
+    ```bash title="Enable check-only update monitoring"
+    /opt/beacon/bin/beacon endpoint update enable --check-only
+    ```
+
+    Both commands require root and are intended for the system package install.
+    `auto` mode installs newer compatible signed packages from the release
+    manifest after verifying checksum, Developer ID signature, and Gatekeeper
+    assessment. `check-only` mode writes local update status events to
+    `/var/log/beacon-agent/system.jsonl` but does not download or apply
+    packages.
+  </Step>
   <Step title="Validate the deployment">
     After the package deploys, validate the endpoint state on a managed Mac:
 
     ```bash
     sudo /opt/beacon/bin/beacon endpoint status --json
+    sudo /opt/beacon/bin/beacon endpoint update status
     sudo /opt/beacon/bin/beacon endpoint wazuh validate
     sudo launchctl print system/com.beacon.endpoint.collector
     ```
@@ -168,6 +192,30 @@ Use `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-contex
 
     ```bash
     sudo /opt/beacon/bin/beacon endpoint status --system --json
+    ```
+  </Accordion>
+  <Accordion title="Endpoint self-update is not running">
+    Check the configured update mode and updater LaunchDaemon state:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint update status
+    sudo launchctl print system/com.beacon.endpoint.updater
+    sudo tail -n 30 /var/log/beacon-agent/system.jsonl
+    ```
+
+    `auto` mode applies newer compatible signed packages. `check-only` mode
+    reports update availability without installing. If the updater is disabled
+    or missing, re-run the Jamf policy command that enables the desired mode:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint update enable
+    ```
+
+    For urgent remediation, a Jamf policy can trigger the scheduled updater path
+    immediately:
+
+    ```bash
+    sudo BEACON_UPDATE_JITTER_SECONDS=0 /opt/beacon/bin/beacon endpoint update --scheduled
     ```
   </Accordion>
 </AccordionGroup>
