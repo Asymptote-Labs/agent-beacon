@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -188,6 +189,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 			message += "; rollback failed: " + rollbackErr.Error()
 		}
 		a.emit(false, result, message)
+		a.cleanupFailedUpdate(result, message, rollbackErr)
 		return result, fmt.Errorf("install update: %w", err)
 	}
 
@@ -199,6 +201,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 				message += "; rollback failed: " + rollbackErr.Error()
 			}
 			a.emit(false, result, message)
+			a.cleanupFailedUpdate(result, message, rollbackErr)
 			return result, fmt.Errorf("post-install collector restart failed: %w", err)
 		}
 	}
@@ -210,6 +213,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 			message += "; rollback failed: " + rollbackErr.Error()
 		}
 		a.emit(false, result, message)
+		a.cleanupFailedUpdate(result, message, rollbackErr)
 		return result, fmt.Errorf("post-install health check failed: %w", err)
 	}
 
@@ -235,6 +239,11 @@ func (a *Applier) stageDir() string {
 }
 
 func (a *Applier) cleanupSuccessfulUpdate() {
+	a.cleanupLargeUpdateArtifacts()
+	_ = os.Remove(filepath.Join(a.stageDir(), "last_failure.json"))
+}
+
+func (a *Applier) cleanupLargeUpdateArtifacts() {
 	stage := a.stageDir()
 	for _, pattern := range []string{
 		filepath.Join(stage, "download*"),
@@ -248,6 +257,41 @@ func (a *Applier) cleanupSuccessfulUpdate() {
 			_ = os.RemoveAll(match)
 		}
 	}
+}
+
+type failureDiagnostic struct {
+	Timestamp     string `json:"timestamp"`
+	FromVersion   string `json:"from_version,omitempty"`
+	ToVersion     string `json:"to_version,omitempty"`
+	Reason        string `json:"reason"`
+	RolledBack    bool   `json:"rolled_back"`
+	RollbackError string `json:"rollback_error,omitempty"`
+}
+
+func (a *Applier) cleanupFailedUpdate(result ApplyResult, reason string, rollbackErr error) {
+	a.writeFailureDiagnostic(result, reason, rollbackErr)
+	if rollbackErr != nil || !result.RolledBack {
+		return
+	}
+	a.cleanupLargeUpdateArtifacts()
+}
+
+func (a *Applier) writeFailureDiagnostic(result ApplyResult, reason string, rollbackErr error) {
+	diag := failureDiagnostic{
+		Timestamp:   a.clock()().UTC().Format(time.RFC3339),
+		FromVersion: result.FromVersion,
+		ToVersion:   result.ToVersion,
+		Reason:      reason,
+		RolledBack:  result.RolledBack,
+	}
+	if rollbackErr != nil {
+		diag.RollbackError = rollbackErr.Error()
+	}
+	data, err := json.MarshalIndent(diag, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(a.stageDir(), "last_failure.json"), append(data, '\n'), 0o644)
 }
 
 func (a *Applier) prefix() string {
