@@ -17,14 +17,19 @@ const UpdaterLabel = "com.beacon.endpoint.updater"
 type UpdaterManager struct{}
 
 var startDeferredUpdaterReload = func(path string) error {
-	cmd := exec.Command("/bin/sh", "-c", fmt.Sprintf(
-		"sleep 75; /bin/launchctl bootout system/%s >/dev/null 2>&1 || true; /bin/launchctl bootstrap system %s >/dev/null 2>&1",
-		UpdaterLabel,
-		shellQuote(path),
-	))
+	cmd := exec.Command("/bin/sh", "-c", deferredUpdaterReloadScript(os.Getpid(), path))
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Start()
+}
+
+func deferredUpdaterReloadScript(pid int, path string) string {
+	return fmt.Sprintf(
+		"deadline=$((SECONDS+600)); while /bin/kill -0 %d >/dev/null 2>&1 && [ \"$SECONDS\" -lt \"$deadline\" ]; do sleep 2; done; /bin/launchctl bootout system/%s >/dev/null 2>&1 || true; /bin/launchctl bootstrap system %s >/dev/null 2>&1",
+		pid,
+		UpdaterLabel,
+		shellQuote(path),
+	)
 }
 
 // PlistPath returns the LaunchDaemon plist path for the updater job.

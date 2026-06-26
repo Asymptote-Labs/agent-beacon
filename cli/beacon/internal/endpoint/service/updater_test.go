@@ -84,3 +84,18 @@ func TestUpdaterLoadDefersReloadForRunningUpdater(t *testing.T) {
 		t.Fatalf("deferred reload path = %q, want updater plist", deferredPath)
 	}
 }
+
+func TestDeferredUpdaterReloadScriptWaitsForParentExit(t *testing.T) {
+	script := deferredUpdaterReloadScript(12345, "/Library/LaunchDaemons/com.beacon.endpoint.updater.plist")
+	for _, want := range []string{
+		"/bin/kill -0 12345",
+		"SECONDS+600",
+		"do sleep 2; done",
+		"/bin/launchctl bootout system/" + UpdaterLabel,
+		"/bin/launchctl bootstrap system '/Library/LaunchDaemons/com.beacon.endpoint.updater.plist'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("deferred reload script missing %q:\n%s", want, script)
+		}
+	}
+}
