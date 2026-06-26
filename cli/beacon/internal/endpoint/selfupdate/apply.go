@@ -215,6 +215,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 
 	result.Applied = true
 	result.Message = fmt.Sprintf("updated %s -> %s", a.CurrentVersion, manifest.Version)
+	a.cleanupSuccessfulUpdate()
 	a.emit(true, result, result.Message)
 	return result, nil
 }
@@ -231,6 +232,22 @@ func (a *Applier) stageDir() string {
 		return a.StageDir
 	}
 	return StateDir()
+}
+
+func (a *Applier) cleanupSuccessfulUpdate() {
+	stage := a.stageDir()
+	for _, pattern := range []string{
+		filepath.Join(stage, "download*"),
+		filepath.Join(stage, "rollback"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			_ = os.RemoveAll(match)
+		}
+	}
 }
 
 func (a *Applier) prefix() string {
