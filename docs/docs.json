@@ -100,7 +100,8 @@
                 "tag": "Enterprise",
                 "pages": [
                   "manage/configure-s3-data-connector",
-                  "manage/connect-okta"
+                  "manage/connect-okta",
+                  "manage/connect-slack"
                 ]
               },
               {
