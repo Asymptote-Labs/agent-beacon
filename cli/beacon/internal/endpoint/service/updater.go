@@ -69,7 +69,8 @@ func (m UpdaterManager) Status() Status {
 	return status
 }
 
-// updaterPlist renders the updater LaunchDaemon. It runs daily and does not
+// updaterPlist renders the updater LaunchDaemon. It runs daily at 2 PM local
+// time and does not
 // RunAtLoad or KeepAlive; each invocation resolves the configured mode.
 func updaterPlist(label, program string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -88,7 +89,7 @@ func updaterPlist(label, program string) string {
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
-    <integer>3</integer>
+    <integer>14</integer>
     <key>Minute</key>
     <integer>0</integer>
   </dict>

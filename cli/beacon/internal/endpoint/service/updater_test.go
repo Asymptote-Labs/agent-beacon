@@ -15,7 +15,7 @@ func TestUpdaterPlistContent(t *testing.T) {
 		"<string>--scheduled</string>",
 		"<key>StartCalendarInterval</key>",
 		"<key>Hour</key>",
-		"<integer>3</integer>",
+		"<integer>14</integer>",
 		"<key>Minute</key>",
 		"<integer>0</integer>",
 	} {
