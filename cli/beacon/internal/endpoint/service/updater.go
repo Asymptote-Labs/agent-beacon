@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +15,22 @@ const UpdaterLabel = "com.beacon.endpoint.updater"
 // UpdaterManager manages the endpoint updater launchd job. Unlike the collector
 // service it is system-only and runs on a schedule rather than KeepAlive.
 type UpdaterManager struct{}
+
+var startDeferredUpdaterReload = func(path string) error {
+	cmd := exec.Command("/bin/sh", "-c", deferredUpdaterReloadScript(os.Getpid(), path))
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Start()
+}
+
+func deferredUpdaterReloadScript(pid int, path string) string {
+	return fmt.Sprintf(
+		"deadline=$((SECONDS+600)); while /bin/kill -0 %d >/dev/null 2>&1 && [ \"$SECONDS\" -lt \"$deadline\" ]; do sleep 2; done; /bin/launchctl bootout system/%s >/dev/null 2>&1 || true; /bin/launchctl bootstrap system %s >/dev/null 2>&1",
+		pid,
+		UpdaterLabel,
+		shellQuote(path),
+	)
+}
 
 // PlistPath returns the LaunchDaemon plist path for the updater job.
 func (UpdaterManager) PlistPath() string {
@@ -37,10 +54,10 @@ func (m UpdaterManager) Load() error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	if status := m.Status(); status.Loaded && status.Running {
-		return nil
-	}
 	path := m.PlistPath()
+	if status := m.Status(); status.Loaded && status.Running {
+		return startDeferredUpdaterReload(path)
+	}
 	return loadLaunchdJob("system", UpdaterLabel, path)
 }
 
@@ -102,4 +119,8 @@ func updaterPlist(label, program string) string {
 </dict>
 </plist>
 `, label, program, label, label)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
