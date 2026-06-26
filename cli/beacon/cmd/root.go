@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -18,15 +19,62 @@ local telemetry, and writes Wazuh-compatible JSON logs without requiring an
 Beacon-hosted backend.`,
 	Version: version.GetVersion(),
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Beacon Endpoint Agent")
-		fmt.Println()
-		fmt.Println("Start with:")
-		fmt.Println("  beacon endpoint install")
-		fmt.Println("  beacon endpoint status")
-		fmt.Println("  beacon endpoint wazuh print-config")
-		fmt.Println()
-		cmd.Usage()
+		printRootSplash(cmd)
 	},
+}
+
+const (
+	beaconPurple = "\x1b[38;5;141m"
+	resetColor   = "\x1b[0m"
+)
+
+var beaconBanner = []string{
+	"██████╗ ███████╗ █████╗  ██████╗ ██████╗ ███╗   ██╗",
+	"██╔══██╗██╔════╝██╔══██╗██╔════╝██╔═══██╗████╗  ██║",
+	"██████╔╝█████╗  ███████║██║     ██║   ██║██╔██╗ ██║",
+	"██╔══██╗██╔══╝  ██╔══██║██║     ██║   ██║██║╚██╗██║",
+	"██████╔╝███████╗██║  ██║╚██████╗╚██████╔╝██║ ╚████║",
+	"╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝",
+}
+
+func printRootSplash(cmd *cobra.Command) {
+	out := cmd.OutOrStdout()
+	printBeaconBanner(out, shouldUseColor(out))
+	fmt.Fprintln(out, "Open-source telemetry layer for AI agents.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Start with:")
+	fmt.Fprintln(out, "  beacon endpoint install")
+	fmt.Fprintln(out, "  beacon endpoint status")
+	fmt.Fprintln(out, "  beacon endpoint wazuh print-config")
+	fmt.Fprintln(out)
+	_ = cmd.Usage()
+}
+
+func printBeaconBanner(out io.Writer, color bool) {
+	if color {
+		fmt.Fprint(out, beaconPurple)
+	}
+	for _, line := range beaconBanner {
+		fmt.Fprintln(out, line)
+	}
+	if color {
+		fmt.Fprint(out, resetColor)
+	}
+}
+
+func shouldUseColor(out io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	file, ok := out.(*os.File)
+	if !ok {
+		return false
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return stat.Mode()&os.ModeCharDevice != 0
 }
 
 var completionCmd = &cobra.Command{
