@@ -14,13 +14,17 @@ func TestUpdaterPlistContent(t *testing.T) {
 		"<string>/opt/beacon/bin/beacon</string>",
 		"<string>--scheduled</string>",
 		"<key>StartCalendarInterval</key>",
-		"<key>Hour</key>",
-		"<integer>14</integer>",
+		"<array>",
 		"<key>Minute</key>",
 		"<integer>0</integer>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plist missing %q", want)
+		}
+	}
+	for _, hour := range []string{"9", "12", "15", "18", "21"} {
+		if !strings.Contains(out, "<integer>"+hour+"</integer>") {
+			t.Errorf("plist missing hour %s", hour)
 		}
 	}
 	// One-shot scheduled job: must not RunAtLoad or KeepAlive.
