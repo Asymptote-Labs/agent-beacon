@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -46,5 +47,30 @@ func TestUpdaterWritePlistNonDarwinContract(t *testing.T) {
 	}
 	if _, err := (UpdaterManager{}).WritePlist("/opt/beacon/bin/beacon"); err == nil {
 		t.Error("expected error writing updater plist on non-darwin")
+	}
+}
+
+func TestUpdaterLoadDoesNotUnloadRunningUpdater(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd updater load is macOS-only")
+	}
+	var calls []string
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if strings.Join(args, " ") == "print system/"+UpdaterLabel {
+			return "state = running\npid = 123\n", nil
+		}
+		return "", errors.New("unexpected launchctl call")
+	}
+	t.Cleanup(func() {
+		runLaunchctlCommand = oldRun
+	})
+
+	if err := (UpdaterManager{}).Load(); err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(calls) != 1 || calls[0] != "print system/"+UpdaterLabel {
+		t.Fatalf("launchctl calls = %#v, want only status print", calls)
 	}
 }

@@ -37,6 +37,9 @@ func (m UpdaterManager) Load() error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
+	if status := m.Status(); status.Loaded && status.Running {
+		return nil
+	}
 	path := m.PlistPath()
 	return loadLaunchdJob("system", UpdaterLabel, path)
 }
