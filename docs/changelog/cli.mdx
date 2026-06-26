@@ -11,6 +11,23 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.84 · June 26, 2026
+
+- **Updater daemon persistence after self-update** · Auto-update reconciliation now leaves the running updater LaunchDaemon in place when package postinstall is invoked by the updater itself, so `auto` mode remains loaded after a successful daemon-driven update.
+
+### v0.0.83 · June 26, 2026
+
+- **CLI launch banner** · Added the new Beacon CLI banner and routed root command output through the shared splash path for a more consistent command-line entrypoint.
+
+### v0.0.82 · June 25, 2026
+
+- **Launchd restart hardening for self-update** · Self-update now restarts the collector with `launchctl kickstart -k` and handles already-loaded launchd jobs idempotently, preventing valid package updates from rolling back when package postinstall has already restarted the collector.
+
+### v0.0.81 · June 25, 2026
+
+- **Apply-capable updater daemon lifecycle** · Apple Silicon system package installs can explicitly enable `auto` mode so the updater LaunchDaemon applies compatible signed package releases on its scheduled run, while `--check-only` remains available and updates stay off by default.
+- **Package lifecycle reconciliation** · macOS package installs preserve existing `auto_update` mode, reconcile the updater LaunchDaemon during postinstall, avoid killing the updater from preinstall, and remove the updater job during endpoint uninstall.
+
 ### v0.0.80 · June 25, 2026
 
 - **Self-update verification on managed Macs** · Manual endpoint package apply no longer requires full Xcode just to run `stapler validate`. Beacon still requires the manifest checksum, Developer ID Installer signature, and Gatekeeper install assessment to pass, while treating unavailable `stapler` on Command Line Tools-only endpoints as a best-effort check so MDM-installed Macs can self-update.
