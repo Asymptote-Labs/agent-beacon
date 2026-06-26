@@ -77,9 +77,15 @@ Optional network behavior is customer configured:
 | Sumo Logic | Customer-managed Sumo forwarding reads local JSONL and sends to a Hosted Collector HTTP Source |
 | Splunk HEC | Optional collector exporter sends events to the configured Splunk HEC endpoint |
 | Falcon LogScale HEC | Optional collector exporter sends events to the configured Falcon LogScale HEC endpoint |
+| Endpoint self-update | Optional updater mode fetches the release manifest and signed package assets when manually invoked or explicitly enabled |
 | Customer-managed forwarding | Customer shipper, agent, or SIEM pipeline reads local JSONL |
 
 Beacon itself does not store Elastic cluster URLs or credentials, Datadog API keys or site configuration, Sumo Source URLs, tokens, collector configuration, or Rapid7 webhook URLs. Splunk HEC and Falcon LogScale HEC tokens are stored only in local collector configuration when those optional destinations are enabled.
+
+Endpoint package self-updates are off by default. When an admin enables
+`check-only` or `auto`, the updater's network access is limited to the configured
+release manifest and package asset URLs; normal runtime hook execution remains
+local-only.
 
 ## Uninstall Guarantees
 

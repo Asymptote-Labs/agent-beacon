@@ -7,7 +7,7 @@ description: "Plan managed macOS deployment of Beacon with Jamf Pro, Fleet, or a
 
 Beacon's macOS package is designed for security and IT rollout through MDM. A signed and notarized `.pkg` installs Beacon under `/opt/beacon`, creates system endpoint configuration, loads the local collector LaunchDaemon, and writes endpoint events to `/var/log/beacon-agent/runtime.jsonl`. Optional Splunk HEC or Falcon LogScale HEC settings add collector destinations while preserving the local runtime log.
 
-The package installs and inventories a local-only endpoint agent. Beacon does not require a hosted account, remote policy fetch, or MDM API credentials for normal collection. During package postinstall, Beacon tolerates a transient `launchctl bootstrap` failure when the LaunchDaemon is already registered and continues validation against the existing service registration.
+The package installs and inventories a local-only endpoint agent. Beacon does not require a hosted account, remote policy fetch, or MDM API credentials for normal collection. During package postinstall, Beacon tolerates a transient `launchctl bootstrap` failure when the LaunchDaemon is already registered and continues validation against the existing service registration. Endpoint package self-updates are available for Apple Silicon system package installs, but remain off by default; IT admins can opt into `check-only` monitoring or `auto` package updates during Jamf or Fleet rollout.
 
 ## Package layout
 
@@ -30,7 +30,9 @@ The endpoint install creates system configuration and runtime state:
 /Library/Application Support/Beacon/Endpoint/config.json
 /Library/Application Support/Beacon/Endpoint/otelcol.yaml
 /Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/Library/LaunchDaemons/com.beacon.endpoint.updater.plist
 /var/log/beacon-agent/runtime.jsonl
+/var/log/beacon-agent/system.jsonl
 ```
 
 ## Deployment model

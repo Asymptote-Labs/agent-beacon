@@ -57,6 +57,19 @@ description: "Solutions for common issues when setting up and using Asymptote."
 
     After uninstalling hooks, restart the affected agent or IDE so new sessions pick up the updated hook configuration. See the [hook command docs](/cli/hooks#beacon-endpoint-hooks-uninstall) for supported harness names and flags.
   </Accordion>
+  <Accordion title="Endpoint package self-update is not running">
+    For signed macOS package installs, self-update is off by default. Check the
+    configured mode, updater LaunchDaemon state, and local update events:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint update status
+    sudo launchctl print system/com.beacon.endpoint.updater
+    sudo tail -n 30 /var/log/beacon-agent/system.jsonl
+    ```
+
+    See [Troubleshooting self-update](/cli/upgrade#troubleshooting-self-update)
+    for mode explanations, manual apply, and scheduled updater checks.
+  </Accordion>
 </AccordionGroup>
 
 <Info icon="circle-question" title="Still stuck?">
