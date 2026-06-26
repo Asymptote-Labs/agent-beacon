@@ -50,6 +50,16 @@ restore_existing_forwarder() {
       return 0
     fi
 
+    out="$(launchctl bootout "$target" 2>&1)" || {
+      echo "Warning: launchctl bootout retry failed for $label: $out" >&2
+    }
+    out="$(launchctl bootstrap system "$plist_path" 2>&1)" || {
+      echo "Warning: launchctl bootstrap after bootout failed for $label: $out" >&2
+    }
+    if forwarder_running "$label"; then
+      return 0
+    fi
+
     out="$(launchctl kickstart -k "$target" 2>&1)" || {
       echo "Warning: launchctl kickstart retry failed for $label: $out" >&2
     }

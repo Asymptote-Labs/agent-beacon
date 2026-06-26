@@ -37,6 +37,10 @@ if ! grep -q 'launchctl kickstart -k' "$ROOT_DIR/packaging/macos/scripts/postins
   echo "postinstall should kickstart already-loaded forwarders" >&2
   exit 1
 fi
+if ! grep -q 'launchctl bootout "$target"' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should recover loaded-but-stuck forwarders with bootout" >&2
+  exit 1
+fi
 if ! grep -q 'could not restore existing forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
   echo "postinstall should fail loudly when an existing forwarder cannot be restored" >&2
   exit 1
