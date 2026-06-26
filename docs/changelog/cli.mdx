@@ -11,6 +11,31 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.90 · June 26, 2026
+
+- **Multiple daily updater windows** · The endpoint updater LaunchDaemon now checks during five local business-hour windows, at 9 AM, noon, 3 PM, 6 PM, and 9 PM, while still honoring update mode and jitter for fleet-friendly rollout.
+
+### v0.0.89 · June 26, 2026
+
+- **Rollback staging cleanup** · Successful update rollback now removes large staged package and rollback snapshots, leaving a small `last_failure.json` diagnostic instead of retaining a full old `/opt/beacon` tree. If rollback itself fails, recovery materials remain in place for manual repair.
+
+### v0.0.88 · June 26, 2026
+
+- **Vector forwarder preservation during self-update** · Package postinstall now restores pre-existing S3 and Falcon Vector forwarders with retry, running-state verification, and preserved `launchctl` diagnostics. A package update now fails loudly if a previously configured forwarder cannot be restored, avoiding silent log-forwarding outages.
+
+### v0.0.87 · June 26, 2026
+
+- **Updater reload waits for the running job** · Deferred updater LaunchDaemon reload now waits for the actual scheduled updater job to exit before reloading launchd, avoiding races with slow self-update health checks.
+
+### v0.0.86 · June 26, 2026
+
+- **Deferred updater reload after self-update** · Package postinstall schedules a safe updater LaunchDaemon reload after the active self-update exits, so new updater plist changes take effect without killing the in-flight update.
+
+### v0.0.85 · June 26, 2026
+
+- **Business-hours updater schedule** · The endpoint updater schedule moved from overnight to 2 PM local time so managed laptops are more likely to be awake for update checks.
+- **Successful update staging cleanup** · Healthy self-updates now clean staged download and rollback directories, leaving only the reusable update lock in the updater state directory.
+
 ### v0.0.84 · June 26, 2026
 
 - **Updater daemon persistence after self-update** · Auto-update reconciliation now leaves the running updater LaunchDaemon in place when package postinstall is invoked by the updater itself, so `auto` mode remains loaded after a successful daemon-driven update.
