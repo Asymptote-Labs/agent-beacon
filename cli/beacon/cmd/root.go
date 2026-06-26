@@ -39,6 +39,7 @@ var beaconBanner = []string{
 
 func printRootSplash(cmd *cobra.Command) {
 	out := cmd.OutOrStdout()
+	cmd.SetOut(out)
 	printBeaconBanner(out, shouldUseColor(out))
 	fmt.Fprintln(out, "Open-source telemetry layer for AI agents.")
 	fmt.Fprintln(out)
