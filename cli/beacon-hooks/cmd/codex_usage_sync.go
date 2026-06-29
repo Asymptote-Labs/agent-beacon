@@ -9,8 +9,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/codexusage"
 )
 
-const codexHookReconcileWindow = 24 * time.Hour
-
 var codexUsageSyncCmd = &cobra.Command{
 	Use:    "codex-usage-sync",
 	Short:  "Reconcile Codex session token usage into endpoint telemetry",
@@ -44,7 +42,7 @@ func maybeReconcileCodexUsage(logger *logging.Logger) {
 }
 
 func reconcileCodexUsage(logger *logging.Logger) error {
-	result, err := codexusage.Reconcile(codexusage.ReconcileOptions{ModifiedSince: time.Now().Add(-codexHookReconcileWindow)})
+	result, err := codexusage.Reconcile(codexusage.ReconcileOptions{})
 	if err != nil {
 		return err
 	}
