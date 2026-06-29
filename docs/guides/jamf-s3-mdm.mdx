@@ -171,6 +171,22 @@ AWS_SECRET_ACCESS_KEY="..."
 /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
 ```
 
+### 4. Optionally Enable Endpoint Self-Updates
+
+Beacon package self-updates are off by default. To let Beacon apply future signed package updates after the Jamf install, add a Jamf Files and Processes payload or post-install policy command:
+
+```bash title="Enable automatic package self-updates"
+sudo /opt/beacon/bin/beacon endpoint update enable
+```
+
+For visibility without automatic package installation, enable check-only mode instead:
+
+```bash title="Enable check-only update monitoring"
+sudo /opt/beacon/bin/beacon endpoint update enable --check-only
+```
+
+Both commands require root. `auto` mode downloads newer compatible signed packages from the release manifest after checksum, Developer ID signature, and Gatekeeper verification. `check-only` mode writes update status events to `/var/log/beacon-agent/system.jsonl` without downloading or applying packages.
+
 ## What The Helper Does
 
 The combined helper performs all endpoint and forwarding setup:
