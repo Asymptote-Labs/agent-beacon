@@ -48,6 +48,8 @@ type ReconcileResult struct {
 	Scanned int
 }
 
+type WriteFunc func(UsageEvent) error
+
 type rawLine struct {
 	Type      string          `json:"type"`
 	Timestamp string          `json:"timestamp"`
@@ -142,8 +144,16 @@ func ParseFile(path string, opts ParseOptions) ([]UsageEvent, error) {
 		model        string
 		turnID       string
 		lastUsageRaw string
+		pending      *UsageEvent
 		gate         forkGate
 	)
+	flushPending := func() {
+		if pending == nil {
+			return
+		}
+		events = append(events, *pending)
+		pending = nil
+	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -156,6 +166,7 @@ func ParseFile(path string, opts ParseOptions) ([]UsageEvent, error) {
 		ts := parseTimestamp(raw.Timestamp)
 		switch raw.Type {
 		case "session_meta":
+			flushPending()
 			if gate.active {
 				continue
 			}
@@ -171,6 +182,7 @@ func ParseFile(path string, opts ParseOptions) ([]UsageEvent, error) {
 			}
 			gate.arm(meta, ts)
 		case "turn_context":
+			flushPending()
 			var payload turnContextPayload
 			if err := json.Unmarshal(raw.Payload, &payload); err != nil {
 				continue
@@ -228,12 +240,13 @@ func ParseFile(path string, opts ParseOptions) ([]UsageEvent, error) {
 				SourcePath:      path,
 			}
 			event.DedupKey = DedupKey(event, usageRaw)
-			events = append(events, event)
+			pending = &event
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	flushPending()
 	return events, nil
 }
 
@@ -263,6 +276,54 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 				continue
 			}
 			seen[event.DedupKey] = true
+			result.Events = append(result.Events, event)
+		}
+	}
+	return result, nil
+}
+
+func ReconcileAndWrite(opts ReconcileOptions, write WriteFunc) (ReconcileResult, error) {
+	if write == nil {
+		return ReconcileResult{}, fmt.Errorf("nil Codex usage writer")
+	}
+	statePath := resolveStatePath(opts.StatePath)
+	unlock, err := lockState(statePath)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	defer unlock()
+
+	files, err := DiscoverFiles(opts.Roots)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	seen, err := loadStateFile(statePath)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	result := ReconcileResult{Scanned: len(files)}
+	for _, path := range files {
+		if !opts.ModifiedSince.IsZero() {
+			info, err := os.Stat(path)
+			if err != nil || info.ModTime().Before(opts.ModifiedSince) {
+				continue
+			}
+		}
+		events, err := ParseFile(path, ParseOptions{})
+		if err != nil {
+			continue
+		}
+		for _, event := range events {
+			if event.DedupKey == "" || seen[event.DedupKey] {
+				continue
+			}
+			if err := write(event); err != nil {
+				return result, err
+			}
+			seen[event.DedupKey] = true
+			if err := saveStateFile(statePath, seen); err != nil {
+				return result, err
+			}
 			result.Events = append(result.Events, event)
 		}
 	}
@@ -353,9 +414,10 @@ func DefaultStatePath() string {
 }
 
 func LoadState(path string) (map[string]bool, error) {
-	if path == "" {
-		path = DefaultStatePath()
-	}
+	return loadStateFile(resolveStatePath(path))
+}
+
+func loadStateFile(path string) (map[string]bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -374,9 +436,10 @@ func LoadState(path string) (map[string]bool, error) {
 }
 
 func SaveState(path string, seen map[string]bool) error {
-	if path == "" {
-		path = DefaultStatePath()
-	}
+	return saveStateFile(resolveStatePath(path), seen)
+}
+
+func saveStateFile(path string, seen map[string]bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -385,6 +448,13 @@ func SaveState(path string, seen map[string]bool) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+func resolveStatePath(path string) string {
+	if strings.TrimSpace(path) != "" {
+		return path
+	}
+	return DefaultStatePath()
 }
 
 func SourcePathHash(path string) string {

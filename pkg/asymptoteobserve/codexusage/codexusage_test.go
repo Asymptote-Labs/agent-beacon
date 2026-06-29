@@ -39,6 +39,30 @@ func TestParseFileNormalizesAndDedupesTokenCount(t *testing.T) {
 	}
 }
 
+func TestParseFileKeepsLatestTokenSnapshotPerTurn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	lines := []string{
+		`{"type":"session_meta","timestamp":"2026-06-29T10:00:00Z","payload":{"id":"codex-session-1"}}`,
+		`{"type":"turn_context","timestamp":"2026-06-29T10:00:01Z","payload":{"model":"gpt-5","turn_id":"turn-1"}}`,
+		`{"type":"event_msg","timestamp":"2026-06-29T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":5,"cached_input_tokens":40}}}}`,
+		`{"type":"event_msg","timestamp":"2026-06-29T10:00:03Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"output_tokens":9,"cached_input_tokens":80}}}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ParseFile(path, ParseOptions{})
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want latest snapshot only", events)
+	}
+	if got := events[0]; got.InputTokens != 120 || got.CacheReadTokens != 80 || got.OutputTokens != 9 {
+		t.Fatalf("latest snapshot tokens = %#v", got)
+	}
+}
+
 func TestReconcileUsesStateForIdempotence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -66,6 +90,40 @@ func TestReconcileUsesStateForIdempotence(t *testing.T) {
 	}
 	if len(second.Events) != 0 {
 		t.Fatalf("second events = %#v, want idempotent empty", second.Events)
+	}
+}
+
+func TestReconcileAndWriteMarksAfterSuccessfulWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	statePath := filepath.Join(dir, "state.json")
+	line := `{"type":"session_meta","timestamp":"2026-06-29T10:00:00Z","payload":{"id":"codex-session-1"}}` + "\n" +
+		`{"type":"turn_context","timestamp":"2026-06-29T10:00:01Z","payload":{"model":"gpt-5","turn_id":"turn-1"}}` + "\n" +
+		`{"type":"event_msg","timestamp":"2026-06-29T10:00:03Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":4}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var writes int
+	first, err := ReconcileAndWrite(ReconcileOptions{Roots: []string{dir}, StatePath: statePath}, func(event UsageEvent) error {
+		writes++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("first reconcile write: %v", err)
+	}
+	if len(first.Events) != 1 || writes != 1 {
+		t.Fatalf("first result events=%#v writes=%d, want one write", first.Events, writes)
+	}
+	second, err := ReconcileAndWrite(ReconcileOptions{Roots: []string{dir}, StatePath: statePath}, func(event UsageEvent) error {
+		writes++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("second reconcile write: %v", err)
+	}
+	if len(second.Events) != 0 || writes != 1 {
+		t.Fatalf("second result events=%#v writes=%d, want no duplicate write", second.Events, writes)
 	}
 }
 

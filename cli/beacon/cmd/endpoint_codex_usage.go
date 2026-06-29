@@ -50,20 +50,13 @@ func runEndpointCodexUsageSync(cmd *cobra.Command, args []string) error {
 }
 
 func syncCodexUsageToLog(logPath string, userMode bool) (codexusage.ReconcileResult, error) {
-	result, err := codexusage.Reconcile(codexusage.ReconcileOptions{})
-	if err != nil {
-		return codexusage.ReconcileResult{}, err
-	}
-	for _, usage := range result.Events {
+	return codexusage.ReconcileAndWrite(codexusage.ReconcileOptions{}, func(usage codexusage.UsageEvent) error {
 		event := codexUsageSchemaEvent(usage)
 		if _, err := writer.AppendEvent(event, writer.Options{Path: logPath, UserMode: userMode}); err != nil {
-			return codexusage.ReconcileResult{}, err
+			return err
 		}
-		if err := codexusage.MarkEventSeen(usage, ""); err != nil {
-			return codexusage.ReconcileResult{}, err
-		}
-	}
-	return result, nil
+		return nil
+	})
 }
 
 func codexUsageSchemaEvent(usage codexusage.UsageEvent) schema.Event {

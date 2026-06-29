@@ -42,18 +42,15 @@ func maybeReconcileCodexUsage(logger *logging.Logger) {
 }
 
 func reconcileCodexUsage(logger *logging.Logger) error {
-	result, err := codexusage.Reconcile(codexusage.ReconcileOptions{})
-	if err != nil {
-		return err
-	}
-	for _, event := range result.Events {
+	result, err := codexusage.ReconcileAndWrite(codexusage.ReconcileOptions{}, func(event codexusage.UsageEvent) error {
 		fields := codexUsageFields(event)
 		if err := logger.EndpointEvent("token.usage", "metric", "info", "Codex token usage observed", fields); err != nil {
 			return err
 		}
-		if err := codexusage.MarkEventSeen(event, ""); err != nil {
-			return err
-		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	logger.Debug("Codex usage reconciliation completed", "events", len(result.Events), "scanned", result.Scanned)
 	return nil
