@@ -168,6 +168,23 @@ func TestAggregatePrefersCodexSessionUsageOverOTLP(t *testing.T) {
 	}
 }
 
+func TestAggregateDedupesCodexSessionUsageByRawDedupKey(t *testing.T) {
+	event := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "codex:s1", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.Raw = map[string]interface{}{"source": "codex_session_jsonl", "dedup_key": "same-turn"}
+	})
+	duplicate := event
+
+	report := Aggregate([]schema.Event{event, duplicate}, Options{})
+	if report.Totals.InputTokens != 40 || report.Totals.OutputTokens != 10 || report.Totals.Events != 1 {
+		t.Fatalf("duplicate session totals = %#v, want one contribution", report.Totals)
+	}
+	if report.TotalEvents != 2 || report.EventsWithUsage != 1 {
+		t.Fatalf("event counts = %d/%d, want 1 usage event from 2 log events", report.EventsWithUsage, report.TotalEvents)
+	}
+}
+
 func TestAggregateDedupesCumulativeSeries(t *testing.T) {
 	cumulative := func(ts string, value int64) schema.Event {
 		return usageEventFixture(ts, "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {

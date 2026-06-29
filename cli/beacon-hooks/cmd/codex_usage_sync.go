@@ -53,9 +53,9 @@ func reconcileCodexUsage(logger *logging.Logger) error {
 		if err := logger.EndpointEvent("token.usage", "metric", "info", "Codex token usage observed", fields); err != nil {
 			return err
 		}
-	}
-	if err := codexusage.MarkEventsSeen(result.Events, ""); err != nil {
-		return err
+		if err := codexusage.MarkEventSeen(event, ""); err != nil {
+			return err
+		}
 	}
 	logger.Debug("Codex usage reconciliation completed", "events", len(result.Events), "scanned", result.Scanned)
 	return nil

@@ -59,9 +59,9 @@ func syncCodexUsageToLog(logPath string, userMode bool) (codexusage.ReconcileRes
 		if _, err := writer.AppendEvent(event, writer.Options{Path: logPath, UserMode: userMode}); err != nil {
 			return codexusage.ReconcileResult{}, err
 		}
-	}
-	if err := codexusage.MarkEventsSeen(result.Events, ""); err != nil {
-		return codexusage.ReconcileResult{}, err
+		if err := codexusage.MarkEventSeen(usage, ""); err != nil {
+			return codexusage.ReconcileResult{}, err
+		}
 	}
 	return result, nil
 }

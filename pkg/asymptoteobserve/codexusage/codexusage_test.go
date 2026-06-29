@@ -68,3 +68,13 @@ func TestReconcileUsesStateForIdempotence(t *testing.T) {
 		t.Fatalf("second events = %#v, want idempotent empty", second.Events)
 	}
 }
+
+func TestLoadStateRejectsCorruptJSON(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(statePath, []byte("{not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadState(statePath); err == nil {
+		t.Fatal("LoadState returned nil error for corrupt JSON")
+	}
+}

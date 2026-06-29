@@ -285,6 +285,13 @@ func MarkEventsSeen(events []UsageEvent, statePath string) error {
 	return SaveState(statePath, seen)
 }
 
+func MarkEventSeen(event UsageEvent, statePath string) error {
+	if event.DedupKey == "" {
+		return nil
+	}
+	return MarkEventsSeen([]UsageEvent{event}, statePath)
+}
+
 func DiscoverFiles(roots []string) ([]string, error) {
 	if len(roots) == 0 {
 		defaults, err := DefaultRoots()
@@ -358,7 +365,7 @@ func LoadState(path string) (map[string]bool, error) {
 	}
 	var seen map[string]bool
 	if err := json.Unmarshal(data, &seen); err != nil {
-		return map[string]bool{}, nil
+		return nil, err
 	}
 	if seen == nil {
 		seen = map[string]bool{}

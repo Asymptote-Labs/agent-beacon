@@ -151,6 +151,7 @@ type usageEvent struct {
 	seriesField  string
 	seriesValue  float64
 	rawSource    string
+	rawDedupKey  string
 }
 
 // Aggregate builds a token usage report from endpoint events. Events from
@@ -170,6 +171,7 @@ func Aggregate(events []schema.Event, opts Options) Report {
 	}
 	report := Report{TotalEvents: len(events)}
 	usageEvents := collectUsageEvents(events)
+	usageEvents = dedupeCodexSessionUsage(usageEvents)
 	usageEvents, report.Source = selectCodexUsageSource(usageEvents, opts.CodexSource)
 	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
@@ -297,8 +299,24 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
 			ue.rawSource, _ = event.Raw["source"].(string)
+			ue.rawDedupKey, _ = event.Raw["dedup_key"].(string)
 		}
 		out = append(out, ue)
+	}
+	return out
+}
+
+func dedupeCodexSessionUsage(events []*usageEvent) []*usageEvent {
+	seen := map[string]bool{}
+	out := events[:0]
+	for _, event := range events {
+		if isCodexSessionUsage(event) && event.rawDedupKey != "" {
+			if seen[event.rawDedupKey] {
+				continue
+			}
+			seen[event.rawDedupKey] = true
+		}
+		out = append(out, event)
 	}
 	return out
 }
