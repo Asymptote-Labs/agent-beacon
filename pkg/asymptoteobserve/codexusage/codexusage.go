@@ -317,11 +317,13 @@ func ReconcileAndWrite(opts ReconcileOptions, write WriteFunc) (ReconcileResult,
 			if event.DedupKey == "" || seen[event.DedupKey] {
 				continue
 			}
-			if err := write(event); err != nil {
-				return result, err
-			}
 			seen[event.DedupKey] = true
 			if err := saveStateFile(statePath, seen); err != nil {
+				return result, err
+			}
+			if err := write(event); err != nil {
+				delete(seen, event.DedupKey)
+				_ = saveStateFile(statePath, seen)
 				return result, err
 			}
 			result.Events = append(result.Events, event)

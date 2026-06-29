@@ -5,6 +5,7 @@
 package tokens
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -344,10 +345,24 @@ func selectCodexUsageSource(events []*usageEvent, source string) ([]*usageEvent,
 	if summary.CodexSessionEvents == 0 && summary.CodexOTLPEvents == 0 {
 		return events, nil
 	}
-	if source == CodexSourceAuto && hasSession {
-		source = CodexSourceRuntime
-	}
 	if source == CodexSourceAuto {
+		if hasSession {
+			out := events[:0]
+			sessionKeys := codexSessionOverlapKeys(events)
+			for _, event := range events {
+				if isCodexOTLPUsage(event) && sessionKeys[codexOverlapKey(event)] {
+					summary.CodexOTLPSuppressed++
+					continue
+				}
+				out = append(out, event)
+			}
+			if summary.CodexOTLPSuppressed > 0 {
+				summary.Codex = "session files with OTLP fallback (overlaps suppressed)"
+			} else {
+				summary.Codex = "session files with OTLP fallback"
+			}
+			return out, summary
+		}
 		summary.Codex = "otlp metrics"
 		return events, summary
 	}
@@ -381,6 +396,28 @@ func selectCodexUsageSource(events []*usageEvent, source string) ([]*usageEvent,
 		summary.Codex = "session files and OTLP metrics (diagnostic)"
 	}
 	return out, summary
+}
+
+func codexSessionOverlapKeys(events []*usageEvent) map[string]bool {
+	keys := map[string]bool{}
+	for _, event := range events {
+		if isCodexSessionUsage(event) {
+			keys[codexOverlapKey(event)] = true
+		}
+	}
+	return keys
+}
+
+func codexOverlapKey(event *usageEvent) string {
+	return strings.Join([]string{
+		event.ts.UTC().Format(time.RFC3339),
+		event.model,
+		fmt.Sprint(event.usage.InputTokens),
+		fmt.Sprint(event.usage.OutputTokens),
+		fmt.Sprint(event.usage.CacheReadInputTokens),
+		fmt.Sprint(event.usage.CacheCreationInputTokens),
+		fmt.Sprint(event.usage.ReasoningOutputTokens),
+	}, "\x00")
 }
 
 func isCodexSessionUsage(event *usageEvent) bool {

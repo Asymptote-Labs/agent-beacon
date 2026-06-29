@@ -127,7 +127,7 @@ func TestTokenUsageCodexSourceSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := runTokenUsageCommand(t, "--log-path", logPath)
-	if !strings.Contains(output, "Codex source: session files (OTLP suppressed)") {
+	if !strings.Contains(output, "Codex source: session files with OTLP fallback (overlaps suppressed)") {
 		t.Fatalf("text report missing Codex source summary:\n%s", output)
 	}
 	if !strings.Contains(output, "codex:s1") {
