@@ -5,7 +5,6 @@
 package tokens
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -348,18 +347,17 @@ func selectCodexUsageSource(events []*usageEvent, source string) ([]*usageEvent,
 	if source == CodexSourceAuto {
 		if hasSession {
 			out := events[:0]
-			suppressedOTLPKeys := codexOverlappingOTLPGroups(events)
 			for _, event := range events {
-				if isCodexOTLPUsage(event) && suppressedOTLPKeys[codexOTLPGroupKey(event)] {
+				if isCodexOTLPUsage(event) {
 					summary.CodexOTLPSuppressed++
 					continue
 				}
 				out = append(out, event)
 			}
 			if summary.CodexOTLPSuppressed > 0 {
-				summary.Codex = "session files with OTLP fallback (overlaps suppressed)"
+				summary.Codex = "session files (OTLP suppressed)"
 			} else {
-				summary.Codex = "session files with OTLP fallback"
+				summary.Codex = "session files"
 			}
 			return out, summary
 		}
@@ -396,66 +394,6 @@ func selectCodexUsageSource(events []*usageEvent, source string) ([]*usageEvent,
 		summary.Codex = "session files and OTLP metrics (diagnostic)"
 	}
 	return out, summary
-}
-
-func codexOverlappingOTLPGroups(events []*usageEvent) map[string]bool {
-	type otlpGroup struct {
-		model string
-		usage Usage
-	}
-	sessionUsage := map[string]Usage{}
-	otlpGroups := map[string]*otlpGroup{}
-	for _, event := range events {
-		if isCodexSessionUsage(event) {
-			sessionUsage[codexFullUsageKey(event)] = event.usage
-			continue
-		}
-		if isCodexOTLPUsage(event) {
-			key := codexOTLPGroupKey(event)
-			group := otlpGroups[key]
-			if group == nil {
-				group = &otlpGroup{model: event.model}
-				otlpGroups[key] = group
-			}
-			group.usage.add(event.usage)
-		}
-	}
-	out := map[string]bool{}
-	for groupKey, group := range otlpGroups {
-		probe := &usageEvent{ts: parseCodexGroupTime(groupKey), model: group.model, usage: group.usage}
-		if _, ok := sessionUsage[codexFullUsageKey(probe)]; ok {
-			out[groupKey] = true
-		}
-	}
-	return out
-}
-
-func codexOTLPGroupKey(event *usageEvent) string {
-	return strings.Join([]string{
-		event.ts.UTC().Format(time.RFC3339),
-		event.model,
-	}, "\x00")
-}
-
-func codexFullUsageKey(event *usageEvent) string {
-	return strings.Join([]string{
-		event.ts.UTC().Format(time.RFC3339),
-		event.model,
-		fmt.Sprint(event.usage.InputTokens),
-		fmt.Sprint(event.usage.OutputTokens),
-		fmt.Sprint(event.usage.CacheReadInputTokens),
-		fmt.Sprint(event.usage.CacheCreationInputTokens),
-		fmt.Sprint(event.usage.ReasoningOutputTokens),
-	}, "\x00")
-}
-
-func parseCodexGroupTime(groupKey string) time.Time {
-	parts := strings.SplitN(groupKey, "\x00", 2)
-	if len(parts) == 0 {
-		return time.Time{}
-	}
-	ts, _ := time.Parse(time.RFC3339, parts[0])
-	return ts
 }
 
 func isCodexSessionUsage(event *usageEvent) bool {
