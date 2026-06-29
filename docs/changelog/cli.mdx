@@ -11,6 +11,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## June 2026
 
+### v0.0.91 · June 29, 2026
+
+- **Nested MCP inventory detection** · Agent inventory now discovers MCP server definitions nested inside Claude Code project records such as `~/.claude.json` `projects.*.mcpServers`, plus nested MCP blocks using the `mcpServers`, `mcp_servers`, or `mcp` naming patterns in supported harness config files.
+- **Hook refresh after package updates** · macOS package postinstall now refreshes Beacon-managed user hook payloads for the active console user on a best-effort basis, so self-updates replace stale copied `beacon-hooks` binaries without overwriting non-Beacon hook commands.
+- **Jamf inventory remediation guidance** · Jamf deployment docs now include optional endpoint self-update enablement commands and MDM-owned inventory log/state permission remediation steps for environments where user-level runtime hooks cannot write system-mode inventory files.
+
 ### v0.0.90 · June 26, 2026
 
 - **Multiple daily updater windows** · The endpoint updater LaunchDaemon now checks during five local business-hour windows, at 9 AM, noon, 3 PM, 6 PM, and 9 PM, while still honoring update mode and jitter for fleet-friendly rollout.
