@@ -36,7 +36,6 @@ func runSessionEnd(cmd *cobra.Command, args []string) {
 		logger := logging.NewSessionLogger("session-end", platformFlag, sessionID)
 		logger.Info("Session ended", "session_id", sessionID, "platform", platformFlag)
 		emitHookEvent(logger, "session.ended", "session", "info", "Agent session ended", input, sessionFields(sessionID, input))
-		maybeReconcileCodexUsage(logger)
 		uploadCloudTelemetry(logger, true)
 
 		logFile := config.GetSessionLogFile(platformFlag, sessionID)
@@ -49,7 +48,6 @@ func runSessionEnd(cmd *cobra.Command, args []string) {
 		uploadCloudTelemetry(platformLogger, true)
 	} else {
 		platformLogger.Info("Session ended", "platform", platformFlag)
-		maybeReconcileCodexUsage(platformLogger)
 		uploadCloudTelemetry(platformLogger, true)
 	}
 

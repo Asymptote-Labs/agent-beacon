@@ -65,8 +65,6 @@ func installCodexHooks(path, binaryPath, logPath, configPath string) error {
 	endpointHooks := map[string]settingsHookGroup{
 		"SessionStart":     {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10}}},
 		"UserPromptSubmit": {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10}}},
-		"Stop":             {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " codex-usage-sync", Timeout: 10}}},
-		"SessionEnd":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " codex-usage-sync", Timeout: 10}}},
 	}
 	return installSettingsEndpointHooks(path, "codex", endpointHooks)
 }

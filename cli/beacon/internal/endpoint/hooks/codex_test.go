@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestInstallCodexHooksUsesInventoryAndUsageSync(t *testing.T) {
+func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
@@ -27,11 +27,8 @@ func TestInstallCodexHooksUsesInventoryAndUsageSync(t *testing.T) {
 		"echo keep",
 		"SessionStart",
 		"UserPromptSubmit",
-		"Stop",
-		"SessionEnd",
 		"--platform codex",
 		"inventory-heartbeat",
-		"codex-usage-sync",
 		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
 		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
 	} {
@@ -39,9 +36,9 @@ func TestInstallCodexHooksUsesInventoryAndUsageSync(t *testing.T) {
 			t.Fatalf("Codex hooks missing %q:\n%s", want, text)
 		}
 	}
-	for _, forbidden := range []string{"session-start", "prompt-submit", " stop", " session-end"} {
+	for _, forbidden := range []string{"session-start", "prompt-submit"} {
 		if strings.Contains(text, forbidden) {
-			t.Fatalf("Codex hooks should not emit runtime lifecycle events %q:\n%s", forbidden, text)
+			t.Fatalf("Codex inventory hooks should not emit runtime hook events %q:\n%s", forbidden, text)
 		}
 	}
 }

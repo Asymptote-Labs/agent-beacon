@@ -10,9 +10,6 @@ import (
 // RenderText writes a human-readable token usage report.
 func RenderText(w io.Writer, report Report) {
 	fmt.Fprintf(w, "Token usage report (%d of %d events carry usage)\n\n", report.EventsWithUsage, report.TotalEvents)
-	if report.Source != nil && report.Source.Codex != "" {
-		fmt.Fprintf(w, "Codex source: %s\n\n", report.Source.Codex)
-	}
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "TOTALS\tINPUT\tOUTPUT\tCACHE READ\tCACHE CREATE\tREASONING\tCOST USD\tEVENTS")
 	writeUsageRow(tw, "", report.Totals)
