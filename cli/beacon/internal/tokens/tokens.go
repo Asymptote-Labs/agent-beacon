@@ -14,13 +14,6 @@ import (
 
 const defaultNearLimitRatio = 0.8
 
-const (
-	CodexSourceAuto      = "auto"
-	CodexSourceRuntime   = "runtime"
-	CodexSourceOTLP      = "otlp"
-	CodexSourceBothDebug = "both-debug"
-)
-
 // Usage sums the canonical gen_ai.usage fields across events. Field names
 // match the event schema so report consumers see one vocabulary.
 type Usage struct {
@@ -102,17 +95,6 @@ type Options struct {
 	SessionID string
 	// TopLimit caps each group list (0 keeps all groups).
 	TopLimit int
-	// CodexSource selects which Codex usage source contributes to totals:
-	// auto (default), runtime, otlp, or both-debug.
-	CodexSource string
-}
-
-type SourceSummary struct {
-	Codex               string `json:"codex,omitempty"`
-	CodexSessionEvents  int    `json:"codex_session_events,omitempty"`
-	CodexOTLPEvents     int    `json:"codex_otlp_events,omitempty"`
-	CodexOTLPSuppressed int    `json:"codex_otlp_suppressed,omitempty"`
-	Diagnostic          bool   `json:"diagnostic,omitempty"`
 }
 
 type Report struct {
@@ -127,7 +109,6 @@ type Report struct {
 	SessionDetail   *SessionDetail     `json:"session_detail,omitempty"`
 	EventsWithUsage int                `json:"events_with_usage"`
 	TotalEvents     int                `json:"total_events"`
-	Source          *SourceSummary     `json:"source,omitempty"`
 }
 
 // usageEvent is one usage-bearing event with its usage normalized to a delta
@@ -150,8 +131,6 @@ type usageEvent struct {
 	metricName   string
 	seriesField  string
 	seriesValue  float64
-	rawSource    string
-	rawDedupKey  string
 }
 
 // Aggregate builds a token usage report from endpoint events. Events from
@@ -171,8 +150,6 @@ func Aggregate(events []schema.Event, opts Options) Report {
 	}
 	report := Report{TotalEvents: len(events)}
 	usageEvents := collectUsageEvents(events)
-	usageEvents = dedupeCodexSessionUsage(usageEvents)
-	usageEvents, report.Source = selectCodexUsageSource(usageEvents, opts.CodexSource)
 	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
 
@@ -298,114 +275,10 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 				ue.cumulative = true
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
-			ue.rawSource, _ = event.Raw["source"].(string)
-			ue.rawDedupKey, _ = event.Raw["dedup_key"].(string)
 		}
 		out = append(out, ue)
 	}
 	return out
-}
-
-func dedupeCodexSessionUsage(events []*usageEvent) []*usageEvent {
-	seen := map[string]bool{}
-	out := events[:0]
-	for _, event := range events {
-		if isCodexSessionUsage(event) && event.rawDedupKey != "" {
-			if seen[event.rawDedupKey] {
-				continue
-			}
-			seen[event.rawDedupKey] = true
-		}
-		out = append(out, event)
-	}
-	return out
-}
-
-func selectCodexUsageSource(events []*usageEvent, source string) ([]*usageEvent, *SourceSummary) {
-	source = strings.ToLower(strings.TrimSpace(source))
-	if source == "" {
-		source = CodexSourceAuto
-	}
-	switch source {
-	case CodexSourceAuto, CodexSourceRuntime, CodexSourceOTLP, CodexSourceBothDebug:
-	default:
-		source = CodexSourceAuto
-	}
-	summary := &SourceSummary{}
-	var hasSession bool
-	for _, event := range events {
-		if isCodexSessionUsage(event) {
-			hasSession = true
-			summary.CodexSessionEvents++
-		} else if isCodexOTLPUsage(event) {
-			summary.CodexOTLPEvents++
-		}
-	}
-	if summary.CodexSessionEvents == 0 && summary.CodexOTLPEvents == 0 {
-		return events, nil
-	}
-	if source == CodexSourceAuto {
-		if hasSession {
-			out := events[:0]
-			for _, event := range events {
-				if isCodexOTLPUsage(event) {
-					summary.CodexOTLPSuppressed++
-					continue
-				}
-				out = append(out, event)
-			}
-			if summary.CodexOTLPSuppressed > 0 {
-				summary.Codex = "session files (OTLP suppressed)"
-			} else {
-				summary.Codex = "session files"
-			}
-			return out, summary
-		}
-		summary.Codex = "otlp metrics"
-		return events, summary
-	}
-	out := events[:0]
-	for _, event := range events {
-		switch source {
-		case CodexSourceRuntime:
-			if isCodexOTLPUsage(event) {
-				summary.CodexOTLPSuppressed++
-				continue
-			}
-		case CodexSourceOTLP:
-			if isCodexSessionUsage(event) {
-				continue
-			}
-		case CodexSourceBothDebug:
-			summary.Diagnostic = true
-		}
-		out = append(out, event)
-	}
-	switch source {
-	case CodexSourceRuntime:
-		if summary.CodexOTLPSuppressed > 0 {
-			summary.Codex = "session files (OTLP suppressed)"
-		} else {
-			summary.Codex = "session files"
-		}
-	case CodexSourceOTLP:
-		summary.Codex = "otlp metrics"
-	case CodexSourceBothDebug:
-		summary.Codex = "session files and OTLP metrics (diagnostic)"
-	}
-	return out, summary
-}
-
-func isCodexSessionUsage(event *usageEvent) bool {
-	return isCodexHarness(event.harness) && strings.EqualFold(event.rawSource, "codex_session_jsonl")
-}
-
-func isCodexOTLPUsage(event *usageEvent) bool {
-	return isCodexHarness(event.harness) && strings.EqualFold(event.metricName, "codex.turn.token_usage")
-}
-
-func isCodexHarness(harness string) bool {
-	return strings.EqualFold(harness, "codex_cli") || strings.EqualFold(harness, "codex")
 }
 
 // dedupeOverlappingChannels removes double-counted usage when a runtime reports

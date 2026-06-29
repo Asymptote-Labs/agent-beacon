@@ -18,24 +18,18 @@ Before enabling Codex CLI telemetry, make sure:
 
 ## Collection path
 
-Codex CLI exports local OpenTelemetry logs and metrics to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events, and keeps the `codex.turn.token_usage` metric as a fallback and diagnostics signal. Other high-volume Codex metrics, and Codex spans, are suppressed by default. Codex hooks refresh `inventory_state.jsonl` and reconcile local session JSONL into session-attributed token usage events in the runtime log.
+Codex CLI exports local OpenTelemetry logs and metrics to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events, and keeps the `codex.turn.token_usage` metric for token attribution. Other high-volume Codex metrics, and Codex spans, are suppressed by default. Optional Codex hooks are heartbeat-only and refresh `inventory_state.jsonl`; they do not write duplicate runtime prompt or session events.
 
 Use `--include-codex-spans` during install or repair only when you need raw Codex spans for troubleshooting.
 
-### Token usage
+### Token usage and cost
 
-`beacon endpoint install` configures both the Codex log exporter and the Codex metrics exporter in `~/.codex/config.toml`, so Codex's per-turn `codex.turn.token_usage` metric reaches the collector. Beacon also installs Codex usage reconciliation hooks. On Codex stop/session-end, Beacon parses local Codex session JSONL, derives session-attributed token events, and writes them to the normal endpoint runtime log.
+`beacon endpoint install` configures both the Codex log exporter and the Codex metrics exporter in `~/.codex/config.toml`, so Codex's per-turn `codex.turn.token_usage` metric reaches the collector. Beacon normalizes it into the canonical `gen_ai.usage` fields (`input_tokens`, `output_tokens`, `cache_read.input_tokens`, `reasoning.output_tokens`). Codex reports prompt tokens inclusive of the cached portion, so Beacon subtracts cached input to keep `input_tokens` and `cache_read` disjoint and avoid double-counting in totals.
 
-The derived events use Beacon's canonical `gen_ai.usage` schema and flow through the same local JSONL and S3 forwarding path as other endpoint events. Codex reports prompt tokens inclusive of the cached portion, so Beacon subtracts cached input to keep `input_tokens` and `cache_read.input_tokens` disjoint:
+Two attribution limits are specific to Codex and follow from what Codex emits, not from Beacon:
 
-- Codex `input_tokens - cached_input_tokens` becomes `gen_ai.usage.input_tokens`.
-- Codex `cached_input_tokens` becomes `gen_ai.usage.cache_read.input_tokens`.
-- Codex `output_tokens` becomes `gen_ai.usage.output_tokens`.
-- Codex `reasoning_output_tokens` becomes `gen_ai.usage.reasoning.output_tokens` when present.
-
-Codex does not emit a cost signal, so `gen_ai.usage.cost_usd` is empty for Codex turns. Beacon does not derive Codex cost locally in the endpoint agent.
-
-When both local session-derived events and OTLP Codex token metrics are present, `beacon token-usage` defaults to `--codex-source auto`: it prefers session-derived events and suppresses OTLP duplicates. Use `--codex-source otlp` for OTLP-only diagnostics, or `--codex-source both-debug` to compare both non-authoritatively.
+- **No cost.** Codex does not emit a cost signal, so `gen_ai.usage.cost_usd` is empty for Codex turns. Beacon never derives cost from local pricing tables.
+- **No per-session attribution.** Codex's usage metric carries no conversation id, so Codex turns do not roll up by session. Model, harness, repository, and run attribution work normally.
 
 See [How token attribution works](/cli/token-usage#how-token-attribution-works) for the cross-runtime model.
 
@@ -72,13 +66,13 @@ Asymptote detects Codex CLI through the `codex` executable and `~/.codex/config.
 
 `beacon endpoint install` writes Codex OTLP exporter tables to `~/.codex/config.toml`.
 
-To let Codex sessions trigger inventory heartbeats and usage reconciliation, install optional Codex hooks after the endpoint is installed:
+To let Codex sessions trigger inventory heartbeats, install optional Codex hooks after the endpoint is installed:
 
 ```bash
 beacon endpoint hooks install --harness codex
 ```
 
-The hook installer writes heartbeat and token-usage reconciliation hooks to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`.
+The hook installer writes heartbeat-only hooks to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`.
 
 ## Telemetry coverage
 
@@ -86,9 +80,9 @@ The hook installer writes heartbeat and token-usage reconciliation hooks to `~/.
 |------|---------|
 | Prompt telemetry | Supported when emitted through Codex semantic logs |
 | Command, tool, and file telemetry | Supported when emitted through Codex semantic logs |
-| Token usage | Supported through local session-derived runtime events (input, output, cache read, reasoning), with OTLP metrics retained as fallback/diagnostics |
+| Token usage | Supported through the `codex.turn.token_usage` metric (input, output, cache read, reasoning) |
 | Cost attribution | Not available; Codex emits no cost signal |
-| Per-session attribution | Supported when local Codex session JSONL is available |
+| Per-session attribution | Not available; Codex usage metric carries no conversation id |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported through the system-mode package or MDM-managed config |
 

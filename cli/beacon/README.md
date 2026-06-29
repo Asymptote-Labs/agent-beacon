@@ -16,16 +16,12 @@ make build
 ./beacon endpoint discover --json
 ./beacon endpoint repair
 ./beacon endpoint dashboard
-./beacon token-usage
-./beacon endpoint codex-usage sync
 ./beacon endpoint uninstall --keep-logs
 ```
 
 Endpoint commands use per-user paths by default so hook and OTLP telemetry share
 `~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` for root-managed
-deployment paths. `beacon endpoint codex-usage sync` reconciles local Codex
-session JSONL into token-only runtime events when operators need a manual
-backfill outside the normal Codex hook-triggered flow.
+deployment paths.
 
 Add optional Splunk HEC forwarding during install or repair:
 
