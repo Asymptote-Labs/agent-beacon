@@ -189,6 +189,35 @@ func TestAggregateAutoKeepsNonOverlappingCodexOTLPUsage(t *testing.T) {
 	}
 }
 
+func TestAggregateAutoSuppressesSplitCodexOTLPDatapoints(t *testing.T) {
+	sessionEvent := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "codex:s1", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(60)}
+		e.Raw = map[string]interface{}{"source": "codex_session_jsonl", "dedup_key": "session-turn-1"}
+	})
+	otlpInput := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+	})
+	otlpOutput := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+	})
+	otlpCache := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(60)}
+		e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+	})
+
+	report := Aggregate([]schema.Event{sessionEvent, otlpInput, otlpOutput, otlpCache}, Options{})
+	if report.Totals.InputTokens != 40 || report.Totals.OutputTokens != 10 || report.Totals.CacheReadInputTokens != 60 || report.Totals.Events != 1 {
+		t.Fatalf("auto totals = %#v, want session event only", report.Totals)
+	}
+	if report.Source == nil || report.Source.CodexOTLPSuppressed != 3 {
+		t.Fatalf("source summary = %#v, want three suppressed OTLP datapoints", report.Source)
+	}
+}
+
 func TestAggregateDedupesCodexSessionUsageByRawDedupKey(t *testing.T) {
 	event := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "codex:s1", "gpt-5", func(e *schema.Event) {
 		e.GenAI.Usage.InputTokens = int64Ptr(40)
