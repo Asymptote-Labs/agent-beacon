@@ -225,6 +225,22 @@ This policy:
 - Installs Claude Code hooks for the console user.
 - Starts `com.beacon.endpoint.s3-forwarder`.
 
+## Optional: Enable Endpoint Self-Updates
+
+Beacon package self-updates are off by default. To let Beacon apply future signed package updates after the Jamf install, add a Jamf Files and Processes payload or post-install policy command:
+
+```bash title="Enable automatic package self-updates"
+sudo /opt/beacon/bin/beacon endpoint update enable
+```
+
+For visibility without automatic package installation, enable check-only mode instead:
+
+```bash title="Enable check-only update monitoring"
+sudo /opt/beacon/bin/beacon endpoint update enable --check-only
+```
+
+Both commands require root. `auto` mode verifies release manifest checksums, Developer ID signature, and Gatekeeper install assessment before applying a signed package. `check-only` mode writes update status events to `/var/log/beacon-agent/system.jsonl` without downloading or applying packages.
+
 ## Step 3: Configure Cursor Hooks
 
 Create a Jamf script named `Beacon - Configure Cursor Hooks`.
@@ -246,11 +262,16 @@ if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" =
 fi
 
 RUNTIME_DIR="$(dirname "$BEACON_HOOK_LOG_PATH")"
+INVENTORY_LOG="$RUNTIME_DIR/inventory_state.jsonl"
+INVENTORY_STATE="$RUNTIME_DIR/inventory-state.json"
 mkdir -p "$RUNTIME_DIR"
 touch "$BEACON_HOOK_LOG_PATH" "$BEACON_HOOK_LOG_PATH.lock"
+touch "$INVENTORY_LOG" "$INVENTORY_LOG.lock" "$INVENTORY_STATE" "$INVENTORY_STATE.lock"
 chown root:wheel "$RUNTIME_DIR" "$BEACON_HOOK_LOG_PATH" "$BEACON_HOOK_LOG_PATH.lock"
+chown "$CONSOLE_USER":wheel "$INVENTORY_LOG" "$INVENTORY_LOG.lock" "$INVENTORY_STATE" "$INVENTORY_STATE.lock"
 chmod 755 "$RUNTIME_DIR"
 chmod 644 "$BEACON_HOOK_LOG_PATH" "$BEACON_HOOK_LOG_PATH.lock"
+chmod 664 "$INVENTORY_LOG" "$INVENTORY_LOG.lock" "$INVENTORY_STATE" "$INVENTORY_STATE.lock"
 chmod +a "$CONSOLE_USER allow list,search,add_file,readattr,writeattr" "$RUNTIME_DIR" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$BEACON_HOOK_LOG_PATH" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$BEACON_HOOK_LOG_PATH.lock" || true

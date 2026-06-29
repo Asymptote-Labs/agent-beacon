@@ -153,6 +153,22 @@ The combined helper performs all endpoint and forwarding setup:
 
 End users do not need to run any Beacon command or edit any local config.
 
+## Optional: Enable Endpoint Self-Updates
+
+Beacon package self-updates are off by default. To let Beacon apply future signed package updates after the Jamf install, add a Jamf Files and Processes payload or post-install policy command:
+
+```bash title="Enable automatic package self-updates"
+sudo /opt/beacon/bin/beacon endpoint update enable
+```
+
+For visibility without automatic package installation, enable check-only mode instead:
+
+```bash title="Enable check-only update monitoring"
+sudo /opt/beacon/bin/beacon endpoint update enable --check-only
+```
+
+Both commands require root. `auto` mode verifies release manifest checksums, Developer ID signature, and Gatekeeper install assessment before applying a signed package. `check-only` mode writes update status events to `/var/log/beacon-agent/system.jsonl` without downloading or applying packages.
+
 ## Manual Smoke Test
 
 To simulate the Jamf policy on one Mac, install the Beacon package, then run the packaged helper manually.

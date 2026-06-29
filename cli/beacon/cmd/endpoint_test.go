@@ -1098,6 +1098,95 @@ func TestEndpointInventoryHooksJSONIncludesDefaultHookStatuses(t *testing.T) {
 	}
 }
 
+func TestRepairInstalledEndpointHooksUsesExplicitHarnesses(t *testing.T) {
+	oldOpts := endpointOpts
+	oldConsoleUser := activeConsoleUser
+	oldRunAsUser := runHookRepairAsUser
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		activeConsoleUser = oldConsoleUser
+		runHookRepairAsUser = oldRunAsUser
+	})
+
+	home := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: "shad", HomeDir: home}, true, nil
+	}
+	var gotUser consoleUserInfo
+	var gotArgs []string
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		gotUser = info
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+	endpointOpts.logPath = logPath
+	endpointOpts.hookHarnesses = "claude,codex,cursor"
+	endpointOpts.hookLevel = "user"
+
+	result, err := repairInstalledEndpointHooks()
+	if err != nil {
+		t.Fatalf("repairInstalledEndpointHooks returned error: %v", err)
+	}
+	if result.User != "shad" || result.HomeDir != home {
+		t.Fatalf("result user/home = %#v", result)
+	}
+	wantArgs := []string{"endpoint", "hooks", "install", "--harness", "claude,codex,cursor", "--level", "user", "--log-path", logPath}
+	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("repair args = %#v, want %#v", gotArgs, wantArgs)
+	}
+	if gotUser.Username != "shad" || gotUser.HomeDir != home {
+		t.Fatalf("run user = %#v, want shad/%s", gotUser, home)
+	}
+}
+
+func TestRepairInstalledEndpointHooksDetectsAlreadyInstalledBeaconHooks(t *testing.T) {
+	oldOpts := endpointOpts
+	oldConsoleUser := activeConsoleUser
+	oldRunAsUser := runHookRepairAsUser
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		activeConsoleUser = oldConsoleUser
+		runHookRepairAsUser = oldRunAsUser
+	})
+
+	home := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform claude session-start"}]}]}}`)
+	writeTestFile(t, filepath.Join(home, ".codex", "hooks.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`)
+	writeTestFile(t, filepath.Join(home, ".factory", "settings.json"), `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform factory post-tool"}]}]}}`)
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: "shad", HomeDir: home}, true, nil
+	}
+	var gotArgs []string
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+	endpointOpts.logPath = logPath
+	endpointOpts.hookHarnesses = ""
+	endpointOpts.hookLevel = "user"
+
+	result, err := repairInstalledEndpointHooks()
+	if err != nil {
+		t.Fatalf("repairInstalledEndpointHooks returned error: %v", err)
+	}
+	if strings.Join(result.Targets, ",") != "claude,factory" {
+		t.Fatalf("targets = %#v, want claude,factory", result.Targets)
+	}
+	wantArgs := []string{"endpoint", "hooks", "install", "--harness", "claude,factory", "--level", "user", "--log-path", logPath}
+	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("repair args = %#v, want %#v", gotArgs, wantArgs)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "echo keep") {
+		t.Fatalf("detection should not modify hook file or drop non-Beacon hook: %s", string(data))
+	}
+}
+
 func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })

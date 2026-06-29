@@ -180,6 +180,55 @@ Use `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-contex
 
     If validation succeeds but events remain stale, confirm the configured harnesses match the agent harnesses installed or configured for the device and that the local collector ports are not in use by another process. If GitHub Copilot CLI events are missing, confirm Copilot's launch environment includes `COPILOT_OTEL_ENABLED=true` and a localhost OTLP HTTP endpoint. If Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, or OpenCode hook events are missing, confirm the separate user-context hook policy has run for the logged-in user. For OpenClaw Gateway, confirm the `diagnostics-otel` plugin is enabled and pointed at Beacon's OTLP HTTP receiver.
   </Accordion>
+  <Accordion title="Agent inventory heartbeats are stale">
+    System-mode inventory heartbeats are triggered by user-level runtime hooks,
+    then written to `/var/log/beacon-agent/inventory_state.jsonl` and
+    `/var/log/beacon-agent/inventory-state.json`. In managed environments where
+    normal users cannot write system log files, grant the active console user
+    write access through Jamf or your MDM policy.
+
+    A Jamf remediation can prepare the Beacon inventory files before refreshing
+    hooks:
+
+    ```bash
+    CONSOLE_USER="$(stat -f '%Su' /dev/console)"
+    [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$CONSOLE_USER" != "loginwindow" ] || exit 0
+
+    mkdir -p /var/log/beacon-agent
+    touch /var/log/beacon-agent/inventory_state.jsonl \
+      /var/log/beacon-agent/inventory_state.jsonl.lock \
+      /var/log/beacon-agent/inventory-state.json \
+      /var/log/beacon-agent/inventory-state.json.lock
+
+    chown "$CONSOLE_USER":wheel /var/log/beacon-agent/inventory_state.jsonl \
+      /var/log/beacon-agent/inventory_state.jsonl.lock \
+      /var/log/beacon-agent/inventory-state.json \
+      /var/log/beacon-agent/inventory-state.json.lock
+
+    chmod 664 /var/log/beacon-agent/inventory_state.jsonl \
+      /var/log/beacon-agent/inventory_state.jsonl.lock \
+      /var/log/beacon-agent/inventory-state.json \
+      /var/log/beacon-agent/inventory-state.json.lock
+    ```
+
+    After applying the remediation, refresh the user's Beacon hooks:
+
+    ```bash
+    HOME_DIR="$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | awk '{print $2}')"
+    sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" USER="$CONSOLE_USER" LOGNAME="$CONSOLE_USER" \
+      /opt/beacon/bin/beacon endpoint hooks install \
+        --harness claude,codex,cursor \
+        --level user \
+        --log-path /var/log/beacon-agent/runtime.jsonl
+    ```
+
+    Trigger a small Claude Code, Codex CLI, or Cursor action and confirm the
+    inventory log receives a hook-triggered heartbeat:
+
+    ```bash
+    sudo tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
+    ```
+  </Accordion>
   <Accordion title="Configured harnesses are wrong">
     Check Jamf parameter 4 on the install policy. The default is `claude,codex`; set the parameter explicitly when you want a narrower or broader harness list. Include `gemini` when Gemini CLI telemetry should be managed. Do not include GitHub Copilot CLI in this list; manage Copilot's OTel environment separately.
 
