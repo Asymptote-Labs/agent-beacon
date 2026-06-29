@@ -40,7 +40,7 @@ After rollout:
 - The S3 forwarder runs as `com.beacon.endpoint.s3-forwarder`.
 - Claude Code hooks write local runtime telemetry.
 - Cursor hooks write local runtime telemetry.
-- Codex CLI sends OTLP logs and token metrics to Beacon's local collector.
+- Codex CLI sends OTLP logs and fallback token metrics to Beacon's local collector; optional hooks reconcile local Codex session JSONL into session-level token usage events.
 - Runtime telemetry is written locally to `/var/log/beacon-agent/runtime.jsonl`.
 - Inventory telemetry is written locally to `/var/log/beacon-agent/inventory_state.jsonl`.
 - Vector uploads both JSONL streams to your S3 bucket.
@@ -60,7 +60,7 @@ Runtime objects contain agent activity. Inventory objects contain agent configur
 | --- | --- | --- |
 | Claude Code | S3 helper installs Claude Code hooks for the console user | Prompt, lifecycle, tool, permission, command, file, and inventory telemetry where Claude Code exposes it |
 | Cursor | Separate user hook policy installs Cursor hooks | Prompt, tool, shell command, MCP-like, approval, file edit, and inventory telemetry where Cursor exposes it |
-| Codex CLI | Separate user config policy writes `~/.codex/config.toml` | Codex semantic logs and token usage metrics emitted through local OTLP |
+| Codex CLI | Separate user config policy writes `~/.codex/config.toml`; optional hook policy writes `~/.codex/hooks.json` | Codex semantic logs through local OTLP plus session-level token usage from local Codex session JSONL |
 | Claude Cowork, cloud agents, CI, SDK apps | Out of scope for this Mac MDM runbook | Configure those from their runtime-specific pages |
 
 ## Prerequisites
@@ -322,7 +322,7 @@ endpoint = "http://127.0.0.1:4317"
 endpoint = "http://127.0.0.1:4317"
 ```
 
-Preserve existing non-OTel Codex settings and ensure the final file is owned by the user. This step is required for Codex runtime telemetry. Optional Codex hooks can be installed separately when you want Codex sessions to trigger inventory heartbeats.
+Preserve existing non-OTel Codex settings and ensure the final file is owned by the user. This step is required for Codex runtime telemetry. Optional Codex hooks can be installed separately when you want Codex sessions to trigger inventory heartbeats and session-level token usage reconciliation.
 
 ## Validate A Deployed Mac
 
@@ -540,7 +540,7 @@ command -v codex
 grep -n 'otel\|otlp-grpc\|127.0.0.1:4317' ~/.codex/config.toml
 ```
 
-Codex runtime telemetry is OTLP-based. Re-run the Codex config policy for the logged-in user if the OTel block is missing.
+Codex semantic runtime telemetry is OTLP-based. Re-run the Codex config policy for the logged-in user if the OTel block is missing. If session-level token usage is missing, also confirm the optional Codex hook policy installed Beacon-managed stop/session-end usage reconciliation hooks.
 
 ### Inventory Is Empty
 

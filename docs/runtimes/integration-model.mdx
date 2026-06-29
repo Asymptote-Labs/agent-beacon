@@ -34,7 +34,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | Runtime or surface | Install-time behavior |
 |--------------------|-----------------------|
 | [Claude Code](/runtimes/claude-code) | Beacon points Claude Code at the local OTLP collector. Hook installation is separate through [`beacon endpoint hooks`](/cli/hooks). |
-| [Codex CLI](/runtimes/codex-cli) | Beacon points Codex CLI at the local OTLP collector, writes structured OTLP exporter tables to `~/.codex/config.toml`, sets `log_user_prompt = false`, and sends logs, traces, and metrics to the local collector. |
+| [Codex CLI](/runtimes/codex-cli) | Beacon points Codex CLI at the local OTLP collector, writes structured OTLP exporter tables to `~/.codex/config.toml`, sets `log_user_prompt = false`, and can install hooks that reconcile local Codex session JSONL into session-level token usage events. |
 | [Gemini CLI](/runtimes/gemini-cli) | Optional with `--harness gemini`. Beacon writes local OTLP settings to `~/.gemini/settings.json`, sets `target` to `local`, uses OTLP gRPC, enables the collector, and removes `outfile` so telemetry flows to Beacon. |
 | [VS Code](/runtimes/vscode) | Optional with `--harness vscode`. Beacon writes Copilot Chat OTel settings to VS Code user settings and points OTLP/HTTP to the local collector. |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | Copilot's OTLP HTTP endpoint remains under MDM or customer-owned launch-environment policy. Beacon validates `COPILOT_OTEL_ENABLED=true` and a localhost OTLP endpoint but does not write Copilot configuration. |
@@ -47,7 +47,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | Runtime | Collection path | Notes |
 |---------|-----------------|-------|
 | [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Uses Claude settings to enable telemetry and point OTLP to localhost; optional hooks add lifecycle, subagent, permission, and tool event detail. |
-| [Codex CLI](/runtimes/codex-cli) | Local OTLP logs, traces, and metrics | Beacon writes structured Codex OTLP config and filters noisy internal transport spans. |
+| [Codex CLI](/runtimes/codex-cli) | Local OTLP logs, traces, metrics, and usage reconciliation hooks | Beacon writes structured Codex OTLP config, filters noisy internal transport spans, and can derive session-level token events from local Codex session JSONL. |
 | [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP logs, traces, and metrics | Beacon writes Gemini telemetry settings and maps Gemini prompts, tool calls, MCP activity, file operations, and approval events into endpoint events. |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP export | Beacon validates Copilot's effective launch environment and maps Copilot spans into prompt, session, tool, and approval-like endpoint events. |
 | [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Beacon writes VS Code Copilot OTel settings and maps Copilot prompts, sessions, model metadata, and tool activity into endpoint events. Hooks are optional for extra lifecycle and cross-agent detail. |

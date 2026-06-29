@@ -293,7 +293,7 @@ func parseQuery(r *http.Request, fallbackLimit int) EventQuery {
 
 func tokenOptions(r *http.Request) tokens.Options {
 	q := r.URL.Query()
-	opts := tokens.Options{SessionID: q.Get("session")}
+	opts := tokens.Options{SessionID: q.Get("session"), CodexSource: q.Get("codex_source")}
 	if bucket := q.Get("bucket"); bucket != "" {
 		if parsed, err := time.ParseDuration(bucket); err == nil && parsed > 0 {
 			opts.BucketSize = parsed

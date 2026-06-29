@@ -13,19 +13,21 @@ import (
 )
 
 type tokenUsageOptions struct {
-	userMode   bool
-	systemMode bool
-	logPath    string
-	jsonOutput bool
-	since      string
-	until      string
-	session    string
-	model      string
-	harness    string
-	repository string
-	runID      string
-	bucket     string
-	top        int
+	userMode    bool
+	systemMode  bool
+	logPath     string
+	jsonOutput  bool
+	since       string
+	until       string
+	session     string
+	model       string
+	harness     string
+	repository  string
+	runID       string
+	bucket      string
+	top         int
+	codexSource string
+	codexSync   bool
 }
 
 var tokenUsageOpts tokenUsageOptions
@@ -67,9 +69,19 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if tokenUsageOpts.codexSync {
+		if _, err := syncCodexUsageToLog(runtimeLog.EffectiveLogPath, runtimeLog.EffectiveUserMode); err != nil {
+			return err
+		}
+		events, err = dashboard.ReadEventsAppendOrder(runtimeLog.EffectiveLogPath, query)
+		if err != nil {
+			return err
+		}
+	}
 	opts := tokens.Options{
-		SessionID: tokenUsageOpts.session,
-		TopLimit:  tokenUsageOpts.top,
+		SessionID:   tokenUsageOpts.session,
+		TopLimit:    tokenUsageOpts.top,
+		CodexSource: tokenUsageOpts.codexSource,
 	}
 	if bucket := strings.TrimSpace(tokenUsageOpts.bucket); bucket != "" {
 		parsed, err := time.ParseDuration(bucket)
@@ -104,4 +116,6 @@ func init() {
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.runID, "run-id", "", "Filter by CI run id")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.bucket, "bucket", "", "Time-series bucket size (for example 1h or 15m)")
 	tokenUsageCmd.Flags().IntVar(&tokenUsageOpts.top, "top", 0, "Limit each grouping to the top N entries (0 keeps all)")
+	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.codexSource, "codex-source", tokens.CodexSourceAuto, "Codex usage source: auto, runtime, otlp, or both-debug")
+	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.codexSync, "codex-sync", false, "Reconcile local Codex session token usage before reading the runtime log")
 }
