@@ -408,16 +408,38 @@ func parseMCPServers(item candidate, data []byte, redaction string, co contentOp
 }
 
 func serversFromMap(item candidate, root map[string]interface{}, redaction string, co contentOptions) []MCPServer {
-	var servers []MCPServer
-	for _, key := range []string{"mcpServers", "mcp_servers", "servers"} {
-		if raw, ok := root[key]; ok {
-			servers = append(servers, serversFromBlock(item, raw, redaction, co)...)
-		}
-	}
-	if raw, ok := root["mcp"]; ok {
+	servers := serversFromNestedMCPBlocks(item, root, redaction, co)
+	if raw, ok := root["servers"]; ok {
 		servers = append(servers, serversFromBlock(item, raw, redaction, co)...)
 	}
 	return dedupeServers(servers)
+}
+
+func serversFromNestedMCPBlocks(item candidate, value interface{}, redaction string, co contentOptions) []MCPServer {
+	var servers []MCPServer
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		for key, nested := range typed {
+			if isMCPServerBlockKey(key) {
+				servers = append(servers, serversFromBlock(item, nested, redaction, co)...)
+			}
+			servers = append(servers, serversFromNestedMCPBlocks(item, nested, redaction, co)...)
+		}
+	case []interface{}:
+		for _, nested := range typed {
+			servers = append(servers, serversFromNestedMCPBlocks(item, nested, redaction, co)...)
+		}
+	}
+	return servers
+}
+
+func isMCPServerBlockKey(key string) bool {
+	switch key {
+	case "mcpServers", "mcp_servers", "mcp":
+		return true
+	default:
+		return false
+	}
 }
 
 func serversFromBlock(item candidate, raw interface{}, redaction string, co contentOptions) []MCPServer {

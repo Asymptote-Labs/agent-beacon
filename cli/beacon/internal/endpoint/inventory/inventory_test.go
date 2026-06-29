@@ -131,6 +131,88 @@ func TestScanClaudeJSONMCPInventory(t *testing.T) {
 	}
 }
 
+func TestScanClaudeJSONNestedProjectMCPInventory(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{
+  "projects": {
+    "/repo/one": {
+      "mcpServers": {
+        "beacon-dummy-test": {
+          "command": "/bin/echo",
+          "args": ["beacon-dummy-test"]
+        }
+      }
+    },
+    "/repo/two": {
+      "mcpServers": {
+        "remote": {
+          "url": "https://example.test/mcp",
+          "transport": "http"
+        }
+      }
+    }
+  }
+}`)
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Runtimes:   []string{"claude_code"},
+		Now:        fixedNow,
+	})
+
+	if got, want := len(result.MCPServers), 2; got != want {
+		t.Fatalf("MCPServers len = %d, want %d: %#v", got, want, result.MCPServers)
+	}
+	assertServer(t, result.MCPServers, "claude_code", "beacon-dummy-test", TransportStdio, true, 1, 0, 0)
+	assertServer(t, result.MCPServers, "claude_code", "remote", TransportHTTP, false, 0, 0, 0)
+	config := findConfig(result.Configs, "claude_code", filepath.Join(home, ".claude.json"))
+	if config == nil {
+		t.Fatalf("Claude ~/.claude.json config not found in %#v", result.Configs)
+	}
+	if config.MCPServerCount != 2 || config.ParserStatus != StatusOK {
+		t.Fatalf("Claude ~/.claude.json status = %#v, want nested MCP servers", config)
+	}
+}
+
+func TestScanNestedMCPBlocksAcrossConfigFormats(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{
+  "profiles": {
+    "default": {
+      "mcp_servers": {
+        "cursor-nested": {"command": "node"}
+      }
+    }
+  }
+}`)
+	writeFile(t, filepath.Join(home, ".codex", "config.toml"), `
+[profiles.default.mcp_servers.codex_nested]
+command = "python3"
+args = ["server.py"]
+`)
+
+	result := Scan(Options{
+		HomeDir:    home,
+		WorkingDir: work,
+		Runtimes:   []string{"cursor", "codex_cli"},
+		Now:        fixedNow,
+	})
+
+	assertServer(t, result.MCPServers, "cursor", "cursor-nested", TransportStdio, true, 0, 0, 0)
+	assertServer(t, result.MCPServers, "codex_cli", "codex_nested", TransportStdio, true, 1, 0, 0)
+	cursorConfig := findConfig(result.Configs, "cursor", filepath.Join(home, ".cursor", "mcp.json"))
+	if cursorConfig == nil || cursorConfig.MCPServerCount != 1 {
+		t.Fatalf("Cursor nested MCP count = %#v, want one server", cursorConfig)
+	}
+	codexConfig := findConfig(result.Configs, "codex_cli", filepath.Join(home, ".codex", "config.toml"))
+	if codexConfig == nil || codexConfig.MCPServerCount != 1 {
+		t.Fatalf("Codex nested MCP count = %#v, want one server", codexConfig)
+	}
+}
+
 func TestScanFiltersRuntimes(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
