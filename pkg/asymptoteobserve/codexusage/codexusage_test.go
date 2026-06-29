@@ -63,6 +63,29 @@ func TestParseFileKeepsLatestTokenSnapshotPerTurn(t *testing.T) {
 	}
 }
 
+func TestParseFileForkGateDoesNotStickOnEmptyTurnID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fork.jsonl")
+	lines := []string{
+		`{"type":"session_meta","timestamp":"2026-06-29T10:00:00Z","payload":{"id":"forked-session","forked_from_id":"parent-session","timestamp":"2026-06-29T10:00:00Z"}}`,
+		`{"type":"turn_context","timestamp":"2026-06-29T10:00:01Z","payload":{"model":"gpt-5","turn_id":""}}`,
+		`{"type":"event_msg","timestamp":"2026-06-29T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":4}}}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ParseFile(path, ParseOptions{})
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want token usage after empty turn id clears fork gate", events)
+	}
+	if events[0].InputTokens != 6 || events[0].CacheReadTokens != 4 || events[0].OutputTokens != 2 {
+		t.Fatalf("tokens = %#v", events[0])
+	}
+}
+
 func TestReconcileUsesStateForIdempotence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")

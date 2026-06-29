@@ -115,6 +115,7 @@ func (g *forkGate) suppresses(lineType string, turnID string) bool {
 		return true
 	}
 	if turnID == "" {
+		g.active = false
 		return true
 	}
 	if ms := uuidV7Millis(turnID); ms != 0 && ms < g.createdMs {

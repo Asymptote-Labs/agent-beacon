@@ -69,3 +69,40 @@ func TestRunCodexUsageSyncWritesTokenUsageEvent(t *testing.T) {
 		t.Fatalf("idempotent run wrote %d events, want 1", got)
 	}
 }
+
+func TestRunCodexUsageSyncWithoutEndpointLogDoesNotMarkSeen(t *testing.T) {
+	tmp := t.TempDir()
+	statePath := filepath.Join(tmp, "state.json")
+	sessionDir := filepath.Join(tmp, "codex", "sessions")
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(sessionDir, "session.jsonl")
+	lines := []string{
+		`{"type":"session_meta","timestamp":"2026-06-29T10:00:00Z","payload":{"id":"codex-session-1"}}`,
+		`{"type":"turn_context","timestamp":"2026-06-29T10:00:01Z","payload":{"model":"gpt-5","turn_id":"turn-1"}}`,
+		`{"type":"event_msg","timestamp":"2026-06-29T10:00:03Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":4}}}}`,
+	}
+	if err := os.WriteFile(sessionPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEACON_ENDPOINT_LOG", "")
+	t.Setenv("BEACON_ENDPOINT_MODE", "")
+	t.Setenv("BEACON_CODEX_USAGE_STATE", statePath)
+	t.Setenv("BEACON_CODEX_SESSIONS_DIR", sessionDir)
+	origPlatform := platformFlag
+	platformFlag = "codex"
+	t.Cleanup(func() { platformFlag = origPlatform })
+
+	runHookWithInput(t, runCodexUsageSync, map[string]interface{}{"hook_event_name": "Stop"})
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("state path exists or stat failed after skipped reconciliation: %v", err)
+	}
+
+	logPath := filepath.Join(tmp, "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	runHookWithInput(t, runCodexUsageSync, map[string]interface{}{"hook_event_name": "Stop"})
+	if got := len(endpointEvents(t, logPath)); got != 1 {
+		t.Fatalf("events after configuring endpoint log = %d, want 1", got)
+	}
+}

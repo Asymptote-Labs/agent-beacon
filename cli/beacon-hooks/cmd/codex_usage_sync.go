@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -42,6 +44,10 @@ func maybeReconcileCodexUsage(logger *logging.Logger) {
 }
 
 func reconcileCodexUsage(logger *logging.Logger) error {
+	if !endpointLoggingConfigured() {
+		logger.Debug("Skipping Codex usage reconciliation because endpoint logging is not configured")
+		return nil
+	}
 	result, err := codexusage.ReconcileAndWrite(codexusage.ReconcileOptions{}, func(event codexusage.UsageEvent) error {
 		fields := codexUsageFields(event)
 		if err := logger.EndpointEvent("token.usage", "metric", "info", "Codex token usage observed", fields); err != nil {
@@ -54,6 +60,15 @@ func reconcileCodexUsage(logger *logging.Logger) error {
 	}
 	logger.Debug("Codex usage reconciliation completed", "events", len(result.Events), "scanned", result.Scanned)
 	return nil
+}
+
+func endpointLoggingConfigured() bool {
+	for _, key := range []string{"BEACON_ENDPOINT_LOG", "BEACON_CLOUD_LOG_PATH", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
+	}
+	return strings.TrimSpace(os.Getenv("BEACON_ENDPOINT_MODE")) != ""
 }
 
 func codexUsageFields(event codexusage.UsageEvent) map[string]interface{} {
