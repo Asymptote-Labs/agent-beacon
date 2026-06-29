@@ -19,7 +19,7 @@ func TestTokenUsageCommandRegistered(t *testing.T) {
 	if cmd == nil || cmd.Use != "token-usage" {
 		t.Fatalf("token-usage command not registered: %#v", cmd)
 	}
-	for _, flag := range []string{"log-path", "json", "since", "until", "session", "model", "harness", "repository", "run-id", "bucket", "top"} {
+	for _, flag := range []string{"log-path", "json", "since", "until", "session", "model", "harness", "repository", "run-id", "bucket", "top", "codex-source", "codex-sync"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("token-usage command missing --%s flag", flag)
 		}
@@ -114,5 +114,23 @@ func TestTokenUsageEmptyLogSucceeds(t *testing.T) {
 	output := runTokenUsageCommand(t, "--log-path", logPath)
 	if !strings.Contains(output, "0 of 0 events carry usage") {
 		t.Fatalf("empty report = %q", output)
+	}
+}
+
+func TestTokenUsageCodexSourceSummary(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"codex_cli"},"session":{"id":"codex:s1"},"model":"gpt-5","gen_ai":{"usage":{"input_tokens":40,"output_tokens":10,"cache_read":{"input_tokens":60}}},"message":"Codex token usage observed","raw":{"source":"codex_session_jsonl","dedup_key":"turn-1"}}`,
+		`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"codex_cli"},"model":"gpt-5","gen_ai":{"usage":{"input_tokens":40,"output_tokens":10,"cache_read":{"input_tokens":60}}},"message":"codex.turn.token_usage","raw":{"metric_name":"codex.turn.token_usage","metric_temporality":"Delta"}}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	output := runTokenUsageCommand(t, "--log-path", logPath)
+	if !strings.Contains(output, "Codex source: session files (OTLP suppressed)") {
+		t.Fatalf("text report missing Codex source summary:\n%s", output)
+	}
+	if !strings.Contains(output, "codex:s1") {
+		t.Fatalf("text report missing session attribution:\n%s", output)
 	}
 }

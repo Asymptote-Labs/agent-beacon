@@ -25,7 +25,7 @@ A few rules shape how the numbers read:
 
 - **Counts are kept disjoint.** `input_tokens`, `output_tokens`, `cache_read`, and `cache_creation` do not overlap, so a total is `input + output + cache_read + cache_creation` without double-counting. When a runtime reports prompt tokens inclusive of cache (Codex), Beacon subtracts the cached portion so the disjoint model holds.
 - **Cost is runtime-reported only.** `cost_usd` reflects what the runtime emits. Beacon never derives cost from local pricing tables, so cost appears only for runtimes that report it.
-- **Attribution depends on the metadata a runtime attaches.** Model, harness, repository, and run grouping work whenever those fields are present. Per-session grouping (`--session`, the session step tree) requires a session or conversation id on the usage signal.
+- **Attribution depends on the metadata a runtime attaches.** Model, harness, repository, and run grouping work whenever those fields are present. For Codex, Beacon derives session-level token events from local Codex session JSONL when hook reconciliation is enabled, because Codex's OTLP token metric does not carry a conversation id.
 - **Duplicate channels are de-duplicated.** When a runtime emits the same usage on more than one signal (Claude Code reports it on both logs and metrics), Beacon counts it once.
 
 ### Per-runtime coverage
@@ -33,9 +33,9 @@ A few rules shape how the numbers read:
 | Runtime | Tokens | Cost | Per-session |
 |---------|--------|------|-------------|
 | Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes |
-| Codex CLI | input, output, cache read, reasoning | Not emitted by Codex | No (metric carries no conversation id) |
+| Codex CLI | input, output, cache read, reasoning | Not emitted by Codex | Yes, when local Codex session JSONL is available |
 
-`cost_usd` and `--session` detail are empty for Codex because Codex does not emit a cost signal or a conversation id on its usage metric — not a Beacon limitation. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
+`cost_usd` remains empty for Codex because Codex does not emit a cost signal and Beacon does not derive cost locally. See the [Codex CLI](/runtimes/codex-cli#token-usage) and [Claude Code](/runtimes/claude-code) runtime pages for details.
 
 ## Examples
 
@@ -84,6 +84,8 @@ Filters can be combined to narrow the report to a time range, model, agent harne
 | `--run-id <id>` | Filter by CI run ID. Bare run IDs and composite provider/run keys are accepted |
 | `--bucket <duration>` | Time-series bucket size, such as `1h` or `15m` |
 | `--top <count>` | Limit each grouping to the top N entries. `0` keeps all entries |
+| `--codex-source <auto\|runtime\|otlp\|both-debug>` | Select the Codex token source. `auto` prefers session-derived runtime events and suppresses OTLP duplicates. `both-debug` is diagnostic only |
+| `--codex-sync` | Reconcile local Codex session files into the runtime log before reporting |
 
 ## Runtime Log Selection
 

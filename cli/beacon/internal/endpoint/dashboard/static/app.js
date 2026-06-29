@@ -1031,7 +1031,11 @@ async function loadTokens() {
 
 function renderTokensPage(report, session) {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
-  setText("#token-meta", `${report.events_with_usage} of ${report.total_events} events carry usage`);
+  const meta = [`${report.events_with_usage} of ${report.total_events} events carry usage`];
+  if (report.source?.codex) {
+    meta.push(`Codex source: ${report.source.codex}`);
+  }
+  setText("#token-meta", meta.join(" · "));
   renderTokenCards(report.totals || {});
   renderUtilizationRows(report.utilization || []);
   renderUsageGroupRows("#token-models", report.by_model || [], "model");

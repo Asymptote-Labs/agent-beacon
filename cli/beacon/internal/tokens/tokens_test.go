@@ -132,6 +132,80 @@ func TestAggregateDedupesDualChannelUsage(t *testing.T) {
 	}
 }
 
+func TestAggregatePrefersCodexSessionUsageOverOTLP(t *testing.T) {
+	sessionEvent := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "codex:s1", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(60)}
+		e.Raw = map[string]interface{}{"source": "codex_session_jsonl", "dedup_key": "session-turn-1"}
+	})
+	otlpEvent := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(60)}
+		e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+	})
+
+	report := Aggregate([]schema.Event{sessionEvent, otlpEvent}, Options{})
+	if report.Totals.InputTokens != 40 || report.Totals.OutputTokens != 10 || report.Totals.CacheReadInputTokens != 60 {
+		t.Fatalf("auto totals = %#v, want session event only", report.Totals)
+	}
+	if report.Source == nil || report.Source.Codex != "session files (OTLP suppressed)" || report.Source.CodexOTLPSuppressed != 1 {
+		t.Fatalf("source summary = %#v", report.Source)
+	}
+	if len(report.BySession) != 1 || report.BySession[0].Key != "codex:s1" {
+		t.Fatalf("by_session = %#v, want session-derived attribution", report.BySession)
+	}
+
+	otlpOnly := Aggregate([]schema.Event{sessionEvent, otlpEvent}, Options{CodexSource: CodexSourceOTLP})
+	if otlpOnly.Totals.InputTokens != 40 || len(otlpOnly.BySession) != 0 {
+		t.Fatalf("otlp-only report = totals %#v sessions %#v", otlpOnly.Totals, otlpOnly.BySession)
+	}
+
+	debug := Aggregate([]schema.Event{sessionEvent, otlpEvent}, Options{CodexSource: CodexSourceBothDebug})
+	if debug.Totals.InputTokens != 80 || debug.Source == nil || !debug.Source.Diagnostic {
+		t.Fatalf("both-debug report = totals %#v source %#v", debug.Totals, debug.Source)
+	}
+}
+
+func TestAggregateAutoSuppressesCodexOTLPWhenSessionUsageExists(t *testing.T) {
+	sessionEvent := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "codex:s1", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.Raw = map[string]interface{}{"source": "codex_session_jsonl", "dedup_key": "session-turn-1"}
+	})
+	otlpOnlyEvent := usageEventFixture("2026-06-11T10:01:00Z", "codex_cli", "", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(9)
+		e.GenAI.Usage.OutputTokens = int64Ptr(3)
+		e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+	})
+
+	report := Aggregate([]schema.Event{sessionEvent, otlpOnlyEvent}, Options{})
+	if report.Totals.InputTokens != 40 || report.Totals.OutputTokens != 10 || report.Totals.Events != 1 {
+		t.Fatalf("auto totals = %#v, want session event only", report.Totals)
+	}
+	if report.Source == nil || report.Source.Codex != "session files (OTLP suppressed)" || report.Source.CodexOTLPSuppressed != 1 {
+		t.Fatalf("source summary = %#v", report.Source)
+	}
+}
+
+func TestAggregateDedupesCodexSessionUsageByRawDedupKey(t *testing.T) {
+	event := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "codex:s1", "gpt-5", func(e *schema.Event) {
+		e.GenAI.Usage.InputTokens = int64Ptr(40)
+		e.GenAI.Usage.OutputTokens = int64Ptr(10)
+		e.Raw = map[string]interface{}{"source": "codex_session_jsonl", "dedup_key": "same-turn"}
+	})
+	duplicate := event
+
+	report := Aggregate([]schema.Event{event, duplicate}, Options{})
+	if report.Totals.InputTokens != 40 || report.Totals.OutputTokens != 10 || report.Totals.Events != 1 {
+		t.Fatalf("duplicate session totals = %#v, want one contribution", report.Totals)
+	}
+	if report.TotalEvents != 2 || report.EventsWithUsage != 1 {
+		t.Fatalf("event counts = %d/%d, want 1 usage event from 2 log events", report.EventsWithUsage, report.TotalEvents)
+	}
+}
+
 func TestAggregateDedupesCumulativeSeries(t *testing.T) {
 	cumulative := func(ts string, value int64) schema.Event {
 		return usageEventFixture(ts, "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {

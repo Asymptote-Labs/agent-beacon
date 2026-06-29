@@ -21,7 +21,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 |----------------|-----------------|--------------------|
 | [Antigravity CLI](/runtimes/antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
 | [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, lifecycle, subagent, and permission telemetry where emitted through OTLP or hooks |
-| [Codex CLI](/runtimes/codex-cli) | Local OTLP logs plus optional inventory hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; inventory heartbeat triggers from hooks |
+| [Codex CLI](/runtimes/codex-cli) | Local OTLP logs plus usage reconciliation hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; session-level token usage from local Codex session JSONL |
 | [Cursor](/runtimes/cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
 | [Devin CLI](/runtimes/devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
 | [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |

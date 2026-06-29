@@ -12,7 +12,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Agent harness | Collection path | Commonly available telemetry |
 |---------------|-----------------|------------------------------|
 | Claude Code | Local OTLP export | Prompt, command, tool, and file telemetry when emitted through OTLP |
-| Codex CLI | Local OTLP logs plus optional inventory hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; inventory heartbeat triggers from hooks |
+| Codex CLI | Local OTLP logs plus usage reconciliation hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; session-level token usage from local Codex session JSONL |
 | Gemini CLI | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | Grok Build | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | OpenCode | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |

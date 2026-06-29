@@ -76,6 +76,7 @@ func runStop(cmd *cobra.Command, args []string) {
 	elapsed := time.Since(start)
 	logger.Info("stop completed", "duration_ms", elapsed.Milliseconds())
 	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+	maybeReconcileCodexUsage(logger)
 	uploadCloudTelemetry(logger, true)
 	outputJSONAndExit(emptyResponse)
 }
