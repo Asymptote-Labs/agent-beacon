@@ -31,6 +31,7 @@ beacon endpoint hooks [command]
 |---------|-------------------|----------------------|-------------|-------------|
 | Antigravity CLI | `~/.gemini/config/hooks.json` | `./.agents/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Claude Code | `~/.claude/settings.json` | `./.claude/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Codex CLI | `~/.codex/hooks.json` | `./.codex/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Cursor | `~/.cursor/hooks.json` | `./.cursor/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Devin CLI | `~/.config/devin/config.json` | `./.devin/hooks.v1.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Devin Desktop | `~/.codeium/windsurf/hooks.json` | `./.windsurf/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
@@ -45,7 +46,7 @@ In system mode, the hook binary is written under `/Library/Application Support/B
 
 | Flag | Description |
 |------|-------------|
-| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, or `antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`. Defaults to `cursor` |
+| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `codex`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, or `antigravity,claude,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`. Defaults to `cursor` |
 | `--level <level>` | Hook install level: `user` or `project` |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
@@ -55,7 +56,7 @@ In system mode, the hook binary is written under `/Library/Application Support/B
 | `--dry-run` | Print planned install or uninstall actions without changing hook files. Install and uninstall only |
 
 <Note>
-  Restart Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, or OpenCode after installing or removing hooks so the updated hook configuration is picked up by new sessions.
+  Restart Antigravity CLI, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, or OpenCode after installing or removing hooks so the updated hook configuration is picked up by new sessions.
 </Note>
 
 Beacon validates the embedded `beacon-hooks` binary before writing hook configuration. If install fails with an architecture validation error, upgrade Beacon or reinstall the platform-specific release archive for the host, then run the hook install command again.
@@ -68,7 +69,7 @@ Beacon validates the embedded `beacon-hooks` binary before writing hook configur
 beacon endpoint hooks install --harness cursor
 ```
 
- The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events.
+The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Codex CLI hooks cover `SessionStart` and `UserPromptSubmit` for inventory heartbeats; Codex prompt, tool, and token telemetry still comes from its local OpenTelemetry export path. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events.
 
 ### Examples
 
@@ -89,6 +90,14 @@ Install Claude Code hooks at the user level:
 ```bash title="Install Claude Code hooks at the user level"
 beacon endpoint hooks install --harness claude
 ```
+
+Install Codex CLI inventory hooks at the user level:
+
+```bash title="Install Codex CLI inventory hooks at the user level"
+beacon endpoint hooks install --harness codex
+```
+
+A successful user-level install prints `Codex CLI inventory hooks installed: /Users/you/.codex/hooks.json`.
 
 Install Antigravity hooks at the project level:
 
@@ -168,10 +177,10 @@ beacon endpoint hooks install --all
 
 When `--all` is used with `--level project`, Beacon skips Hermes Agent because Hermes shell hooks are user-level only.
 
-Install Antigravity, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log:
+Install Antigravity, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log:
 
-```bash title="Install Antigravity, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log"
-beacon endpoint hooks install --harness antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode
+```bash title="Install Antigravity, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log"
+beacon endpoint hooks install --harness antigravity,claude,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode
 ```
 
 Use a custom runtime log:
@@ -208,6 +217,12 @@ Check Claude Code hook status:
 
 ```bash title="Check Claude Code hook status"
 beacon endpoint hooks status --harness claude
+```
+
+Check Codex CLI inventory hook status:
+
+```bash title="Check Codex CLI inventory hook status"
+beacon endpoint hooks status --harness codex
 ```
 
 Check Factory hook status:
@@ -290,6 +305,12 @@ Remove user-level Claude Code hooks:
 
 ```bash title="Remove user-level Claude Code hooks"
 beacon endpoint hooks uninstall --harness claude
+```
+
+Remove user-level Codex CLI inventory hooks:
+
+```bash title="Remove user-level Codex CLI inventory hooks"
+beacon endpoint hooks uninstall --harness codex
 ```
 
 Remove project-level Antigravity hooks:
@@ -375,6 +396,12 @@ If Grok telemetry is missing, check the selected level, confirm the hook file co
 Beacon merges Hermes Agent hooks into `~/.hermes/config.yaml`. Hermes hooks are user-level only; project-level install, status, or uninstall requests return a clear error. Beacon preserves existing Hermes settings and non-Beacon hooks, and replaces only Beacon-managed commands with `BEACON_ENDPOINT_MODE=1` and `--platform hermes`.
 
 If Hermes telemetry is missing, confirm `~/.hermes/config.yaml` contains commands with `--platform hermes`, restart Hermes, and verify hook consent. Hermes prompts for first-use consent for each `(event, command)` pair; for non-interactive gateway, cron, or CI runs, set `HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure `hooks_auto_accept: true`.
+
+## Codex CLI troubleshooting
+
+Beacon writes Codex CLI inventory hooks to `~/.codex/hooks.json` for user-level installs or `./.codex/hooks.json` for project-level installs. These hooks trigger inventory heartbeats on `SessionStart` and `UserPromptSubmit`; they do not replace the Codex OTLP runtime telemetry path for prompt, tool, or token events.
+
+If Codex inventory updates are missing, check the selected level, confirm the hook file contains commands with `--platform codex`, and restart Codex CLI so new sessions pick up the updated hook configuration.
 
 ## OpenCode troubleshooting
 
