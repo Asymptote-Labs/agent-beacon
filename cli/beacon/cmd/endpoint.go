@@ -365,6 +365,7 @@ func init() {
 	}
 	endpointCmd.AddCommand(endpointIntegrationsCmd)
 	endpointCmd.AddCommand(endpointHooksCmd)
+	endpointCmd.AddCommand(endpointUserConfigCmd)
 	endpointCmd.AddCommand(endpointConfigCmd)
 	endpointInventoryCmd.AddCommand(endpointInventoryHeartbeatCmd)
 	endpointConfigCmd.AddCommand(endpointConfigShowCmd)
@@ -377,6 +378,7 @@ func init() {
 	endpointHooksCmd.AddCommand(endpointHooksUninstallCmd)
 	endpointHooksCmd.AddCommand(endpointHooksStatusCmd)
 	endpointHooksCmd.AddCommand(endpointHooksRepairInstalledCmd)
+	endpointUserConfigCmd.AddCommand(endpointUserConfigRepairInstalledCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkPrintConfigCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkSetupCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkStatusCmd)
@@ -389,7 +391,7 @@ func init() {
 	endpointVSCodeCmd.AddCommand(endpointVSCodeStatusCmd)
 	endpointVSCodeCmd.AddCommand(endpointVSCodeValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -512,6 +514,9 @@ func init() {
 	endpointHooksRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "", "Comma-separated hook harnesses to refresh; empty refreshes already-installed Beacon hooks")
 	endpointHooksRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
 	endpointHooksRepairInstalledCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print repair result as JSON")
+	endpointUserConfigRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "claude,codex,cursor", "Comma-separated user runtime configs to repair")
+	endpointUserConfigRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
+	endpointUserConfigRepairInstalledCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print repair result as JSON")
 	endpointHooksInstallCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Target all supported hook harnesses")
 	endpointHooksInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned hook actions without changing files")
 	endpointHooksUninstallCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Target all supported hook harnesses")

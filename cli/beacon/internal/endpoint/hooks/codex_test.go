@@ -9,7 +9,7 @@ import (
 
 func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
-	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`
+	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex inventory-heartbeat"}]}],"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex codex-usage-sync"}]}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,10 +36,13 @@ func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
 			t.Fatalf("Codex hooks missing %q:\n%s", want, text)
 		}
 	}
-	for _, forbidden := range []string{"session-start", "prompt-submit"} {
+	for _, forbidden := range []string{"session-start", "prompt-submit", " stop", " session-end", "codex-usage-sync"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("Codex inventory hooks should not emit runtime hook events %q:\n%s", forbidden, text)
 		}
+	}
+	if !strings.Contains(text, "SessionStart") || strings.Contains(text, `"Stop"`) {
+		t.Fatalf("existing non-Beacon SessionStart should remain and old Beacon Stop should be removed:\n%s", text)
 	}
 }
 

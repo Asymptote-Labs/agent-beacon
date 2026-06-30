@@ -69,6 +69,7 @@ func installSettingsEndpointHooks(path, platform string, endpointHooks map[strin
 	if err != nil {
 		return err
 	}
+	removeSettingsEndpointHooksFromLoaded(&settings, platform)
 	for eventName, group := range endpointHooks {
 		settings.hooks[eventName] = mergeSettingsEndpointHook(settings.hooks[eventName], group, platform)
 	}
@@ -77,6 +78,32 @@ func installSettingsEndpointHooks(path, platform string, endpointHooks map[strin
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+func removeSettingsEndpointHooksFromLoaded(settings *settingsHooksFile, platform string) bool {
+	if settings == nil {
+		return false
+	}
+	changed := false
+	for eventName, groups := range settings.hooks {
+		filtered := groups[:0]
+		for _, group := range groups {
+			withoutEndpointHooks, groupChanged := filterSettingsEndpointHooks(group, platform)
+			if groupChanged {
+				changed = true
+			}
+			if len(withoutEndpointHooks.Hooks) == 0 {
+				continue
+			}
+			filtered = append(filtered, withoutEndpointHooks)
+		}
+		if len(filtered) == 0 {
+			delete(settings.hooks, eventName)
+		} else {
+			settings.hooks[eventName] = filtered
+		}
+	}
+	return changed
 }
 
 func mergeSettingsEndpointHook(existing []settingsHookGroup, group settingsHookGroup, platform string) []settingsHookGroup {

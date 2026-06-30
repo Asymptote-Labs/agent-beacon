@@ -34,6 +34,12 @@ The endpoint install creates system configuration and runtime state:
 /var/log/beacon-agent/runtime.jsonl
 ```
 
+The package postinstall also repairs endpoint user configuration for the active
+console user when one is logged in. This user-context step points Claude Code and
+Codex native OTLP settings at the system collector and refreshes supported user
+hooks. Already-running Claude Code sessions may need to be restarted before
+settings-based OTLP environment changes take effect.
+
 ## Build A Test Package
 
 Build Beacon, `beacon-otelcol`, and have the release Vector binary available,
@@ -247,6 +253,11 @@ Recommended rollout:
 4. Scope repair/remediation to unhealthy devices.
 5. Broaden deployment in stages after inventory and validation stay healthy.
 
+During install or repair, Beacon waits briefly for stale collector processes to
+release the configured OTLP ports before reporting a port conflict. Persistent
+`4317`/`4318` conflicts still fail because they may indicate another non-Beacon
+process owns the local receiver port.
+
 Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, and opencode hook
 installation is separate from the base system package because these integrations
 write per-user or per-project runtime settings. Run hook helpers only when an
@@ -321,8 +332,9 @@ environment that launches opencode to enable best-effort plugin debug logs.
 ## Jamf Pro
 
 Upload the generated `.pkg` to Jamf Pro and create a Policy scoped to a pilot
-Smart Group. The package postinstall performs the default system install, so no
-script is required for the common path.
+Smart Group. The package postinstall performs the default system install and
+repairs the active console user's Claude/Codex native OTLP settings plus user
+hooks, so no script is required for the common path.
 
 Use `/opt/beacon/jamf/scripts/install.sh` when a policy needs explicit
 parameters or a reinstall action:
@@ -377,7 +389,9 @@ needs only to repair the system endpoint, prepare
 `/var/log/beacon-agent/runtime.jsonl`,
 `/var/log/beacon-agent/inventory_state.jsonl`, and the inventory heartbeat state
 file for user-run hooks, reinstall Claude Code hooks for the interactive console
-user, and run a manual Claude hook smoke test.
+user, and run a manual Claude hook smoke test. Newer packages perform the
+console-user native OTLP repair in postinstall; Jamf scripts should not need to
+hand-edit Claude settings JSON.
 
 `repair-hooks.sh` Jamf script parameters:
 

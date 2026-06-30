@@ -282,6 +282,28 @@ func WaitUntilReady(cfg endpointconfig.Config, timeout time.Duration) error {
 	}
 }
 
+func WaitForPortsAvailable(grpcPort, httpPort int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		grpcAvailable := PortAvailable(grpcPort)
+		httpAvailable := PortAvailable(httpPort)
+		if grpcAvailable && httpAvailable {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			switch {
+			case !grpcAvailable && !httpAvailable:
+				return fmt.Errorf("OTLP gRPC port %d and HTTP port %d are already in use", grpcPort, httpPort)
+			case !grpcAvailable:
+				return fmt.Errorf("OTLP gRPC port %d is already in use", grpcPort)
+			default:
+				return fmt.Errorf("OTLP HTTP port %d is already in use", httpPort)
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func PortAvailable(port int) bool {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {

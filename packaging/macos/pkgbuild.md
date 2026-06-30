@@ -81,6 +81,11 @@ runs Gatekeeper's install assessment, and rewrites the SHA-256 checksum.
 The package installs files under `/opt/beacon` and runs
 `/opt/beacon/scripts/install-endpoint.sh` in `postinstall` with explicit
 collector settings, matching the shared MDM install wrapper.
+After the system install step, postinstall runs Beacon's hidden
+`endpoint user-config repair-installed --system` helper. That helper resolves the
+active console user, configures that user's Claude/Codex native OTLP settings to
+use the system collector, and refreshes supported user hooks. This avoids writing
+per-user Claude/Codex settings as `root` during package or Jamf execution.
 
 opencode support is intentionally not part of the default package install. To
 enable opencode prompt/session/tool telemetry, run Beacon's hook installer in the
@@ -157,6 +162,10 @@ user-run hooks, reinstall Claude Code hooks for the console user, and run a
 manual hook smoke test. Destination-specific forwarding policies live under
 `/opt/beacon/jamf/claude/<destination>`, sourced from
 [`packaging/macos/jamf/claude/<destination>`](https://github.com/Asymptote-Labs/agent-beacon/tree/main/packaging/macos/jamf/claude).
+Beacon endpoint repair waits briefly for previously loaded collectors to release
+OTLP ports before failing with a port conflict. If a port remains occupied after
+that bounded wait, treat it as a real local receiver conflict rather than adding
+unbounded Jamf retries.
 
 Upload Extension Attributes from
 `packaging/macos/jamf/extension-attributes` and build Smart Groups for missing,

@@ -17,10 +17,10 @@ BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}" \
 BEACON_NO_START=1 \
   /opt/beacon/scripts/install-endpoint.sh
 
-"${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint hooks repair-installed \
+"${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint user-config repair-installed \
   --system \
   --harness "${BEACON_ENDPOINT_HARNESSES:-claude,codex}" || {
-  echo "Warning: could not refresh installed user hooks after package install" >&2
+  echo "Warning: could not refresh installed user endpoint configuration after package install" >&2
 }
 
 forwarder_running() {
