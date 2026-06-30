@@ -74,7 +74,7 @@ For MDM deployments, use the signed and notarized macOS `.pkg`.
 | Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
 | OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
 
-Install Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks separately in the logged-in user's context when you need richer hook telemetry.
+Install Antigravity CLI, Claude Code, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers.
 
 If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
 

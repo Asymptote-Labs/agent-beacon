@@ -72,7 +72,11 @@ To let Codex sessions trigger inventory heartbeats, install optional Codex hooks
 beacon endpoint hooks install --harness codex
 ```
 
-The hook installer writes heartbeat-only hooks to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`.
+The hook installer writes heartbeat-only hooks to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
+
+```text
+Codex CLI inventory hooks installed: /Users/you/.codex/hooks.json
+```
 
 ## Telemetry coverage
 
