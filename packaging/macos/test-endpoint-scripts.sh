@@ -33,8 +33,8 @@ if ! grep -q 'restore_existing_forwarder' "$ROOT_DIR/packaging/macos/scripts/pos
   echo "postinstall should restore existing optional forwarders" >&2
   exit 1
 fi
-if ! grep -q 'endpoint hooks repair-installed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should refresh installed user hooks after package install" >&2
+if ! grep -q 'endpoint user-config repair-installed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should refresh installed user endpoint configuration after package install" >&2
   exit 1
 fi
 if ! grep -q 'launchctl kickstart -k' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then

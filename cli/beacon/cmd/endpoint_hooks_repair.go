@@ -67,7 +67,7 @@ func repairInstalledEndpointHooks() (endpointHookRepairResult, error) {
 		logPath = writer.DefaultPath(false)
 	}
 
-	targets, err := repairHookTargetsForUser(info, logPath)
+	targets, err := repairHookTargetsForUser(info, logPath, nil)
 	if err != nil {
 		return endpointHookRepairResult{}, err
 	}
@@ -79,9 +79,13 @@ func repairInstalledEndpointHooks() (endpointHookRepairResult, error) {
 	}, nil
 }
 
-func repairHookTargetsForUser(info consoleUserInfo, logPath string) ([]string, error) {
+func repairHookTargetsForUser(info consoleUserInfo, logPath string, requestedTargets []string) ([]string, error) {
 	targetSet := map[string]bool{}
-	if strings.TrimSpace(endpointOpts.hookHarnesses) != "" {
+	if requestedTargets != nil {
+		for _, target := range requestedTargets {
+			targetSet[target] = true
+		}
+	} else if strings.TrimSpace(endpointOpts.hookHarnesses) != "" {
 		targets, err := canonicalHookTargets(splitCSV(endpointOpts.hookHarnesses))
 		if err != nil {
 			return nil, err

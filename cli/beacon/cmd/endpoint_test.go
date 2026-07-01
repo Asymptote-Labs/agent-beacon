@@ -96,6 +96,191 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	}
 }
 
+func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T) {
+	oldOpts := endpointOpts
+	oldActiveConsoleUser := activeConsoleUser
+	oldRunHookRepairAsUser := runHookRepairAsUser
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		activeConsoleUser = oldActiveConsoleUser
+		runHookRepairAsUser = oldRunHookRepairAsUser
+	})
+
+	home := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	claudeSettingsPath := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(claudeSettingsPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeSettingsPath, []byte(`{"env":{"KEEP_ME":"yes"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	endpointOpts.logPath = logPath
+	endpointOpts.hookHarnesses = "claude,codex,cursor,gemini"
+	endpointOpts.hookLevel = "user"
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
+	}
+	var repairArgs []string
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		if info.Username != "alice" || info.HomeDir != home {
+			t.Fatalf("repair user = %#v, want alice/%s", info, home)
+		}
+		repairArgs = append([]string(nil), args...)
+		return nil
+	}
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err != nil {
+		t.Fatalf("repairInstalledEndpointUserConfig returned error: %v", err)
+	}
+	if got, want := strings.Join(result.NativeConfigTargets, ","), "claude,codex,gemini"; got != want {
+		t.Fatalf("native targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(result.HookTargets, ","), "claude,codex,cursor"; got != want {
+		t.Fatalf("hook targets = %q, want %q", got, want)
+	}
+	if got := strings.Join(repairArgs, " "); !strings.Contains(got, "endpoint hooks install") ||
+		!strings.Contains(got, "--harness claude,codex,cursor") ||
+		!strings.Contains(got, "--log-path "+logPath) {
+		t.Fatalf("hook repair args = %q, want endpoint hooks install for requested targets", got)
+	}
+	claudeSettings, err := os.ReadFile(claudeSettingsPath)
+	if err != nil {
+		t.Fatalf("read Claude settings: %v", err)
+	}
+	for _, want := range []string{
+		`"CLAUDE_CODE_ENABLE_TELEMETRY": "1"`,
+		`"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4317"`,
+	} {
+		if !strings.Contains(string(claudeSettings), want) {
+			t.Fatalf("Claude settings missing %q:\n%s", want, claudeSettings)
+		}
+	}
+	if !strings.Contains(string(claudeSettings), `"KEEP_ME": "yes"`) {
+		t.Fatalf("Claude settings did not preserve existing env:\n%s", claudeSettings)
+	}
+	claudeBackup, err := os.ReadFile(claudeSettingsPath + ".beacon.bak")
+	if err != nil {
+		t.Fatalf("read rolling Claude backup: %v", err)
+	}
+	if !strings.Contains(string(claudeBackup), `"KEEP_ME":"yes"`) {
+		t.Fatalf("rolling Claude backup did not preserve original config: %s", claudeBackup)
+	}
+	timestampedBackups, err := filepath.Glob(claudeSettingsPath + ".beacon.*.bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(timestampedBackups) != 0 {
+		t.Fatalf("timestamped Claude backups = %v, want collapsed rolling backup only", timestampedBackups)
+	}
+	codexConfig, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatalf("read Codex config: %v", err)
+	}
+	for _, want := range []string{
+		"[otel]",
+		`endpoint = "http://127.0.0.1:4317"`,
+		"[otel.metrics_exporter.\"otlp-grpc\"]",
+	} {
+		if !strings.Contains(string(codexConfig), want) {
+			t.Fatalf("Codex config missing %q:\n%s", want, codexConfig)
+		}
+	}
+	geminiSettings, err := os.ReadFile(filepath.Join(home, ".gemini", "settings.json"))
+	if err != nil {
+		t.Fatalf("read Gemini settings: %v", err)
+	}
+	for _, want := range []string{
+		`"enabled": true`,
+		`"otlpEndpoint": "http://127.0.0.1:4317"`,
+	} {
+		if !strings.Contains(string(geminiSettings), want) {
+			t.Fatalf("Gemini settings missing %q:\n%s", want, geminiSettings)
+		}
+	}
+}
+
+func TestRepairInstalledEndpointUserConfigAllowsNativeOnlyHarness(t *testing.T) {
+	oldOpts := endpointOpts
+	oldActiveConsoleUser := activeConsoleUser
+	oldRunHookRepairAsUser := runHookRepairAsUser
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		activeConsoleUser = oldActiveConsoleUser
+		runHookRepairAsUser = oldRunHookRepairAsUser
+	})
+
+	home := t.TempDir()
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	endpointOpts.hookHarnesses = "gemini"
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
+	}
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		t.Fatalf("native-only Gemini repair should not invoke hook repair, args=%v", args)
+		return nil
+	}
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err != nil {
+		t.Fatalf("repairInstalledEndpointUserConfig returned error: %v", err)
+	}
+	if got, want := strings.Join(result.NativeConfigTargets, ","), "gemini"; got != want {
+		t.Fatalf("native targets = %q, want %q", got, want)
+	}
+	if len(result.HookTargets) != 0 {
+		t.Fatalf("hook targets = %#v, want none", result.HookTargets)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".gemini", "settings.json")); err != nil {
+		t.Fatalf("Gemini settings not written: %v", err)
+	}
+}
+
+func TestRepairInstalledEndpointUserConfigHonorsHookOnlyAliases(t *testing.T) {
+	oldOpts := endpointOpts
+	oldActiveConsoleUser := activeConsoleUser
+	oldRunHookRepairAsUser := runHookRepairAsUser
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		activeConsoleUser = oldActiveConsoleUser
+		runHookRepairAsUser = oldRunHookRepairAsUser
+	})
+
+	home := t.TempDir()
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	endpointOpts.hookHarnesses = "claude-hooks"
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
+	}
+	var repairArgs []string
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		repairArgs = append([]string(nil), args...)
+		return nil
+	}
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err != nil {
+		t.Fatalf("repairInstalledEndpointUserConfig returned error: %v", err)
+	}
+	if len(result.NativeConfigTargets) != 0 || len(result.NativeConfigPaths) != 0 {
+		t.Fatalf("native config = %v %v, want none for hook-only alias", result.NativeConfigTargets, result.NativeConfigPaths)
+	}
+	if got, want := strings.Join(result.HookTargets, ","), "claude"; got != want {
+		t.Fatalf("hook targets = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("Claude native settings should not be written for hook-only alias, err=%v", err)
+	}
+	if got := strings.Join(repairArgs, " "); !strings.Contains(got, "--harness claude") {
+		t.Fatalf("hook repair args = %q, want claude hook install", got)
+	}
+}
+
 func TestEndpointDashboardCommandRegistered(t *testing.T) {
 	cmd, _, err := endpointCmd.Find([]string{"dashboard"})
 	if err != nil {

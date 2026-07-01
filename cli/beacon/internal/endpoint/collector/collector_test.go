@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
@@ -214,6 +215,48 @@ func TestWriteConfigUsesPrivatePermissionsWithFalconToken(t *testing.T) {
 	}
 	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
 		t.Fatalf("collector config permissions = %o, want %o", got, want)
+	}
+}
+
+func TestWaitForPortsAvailableWaitsForTransientListeners(t *testing.T) {
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = grpcListener.Close()
+		t.Fatal(err)
+	}
+	grpcPort := grpcListener.Addr().(*net.TCPAddr).Port
+	httpPort := httpListener.Addr().(*net.TCPAddr).Port
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = grpcListener.Close()
+		_ = httpListener.Close()
+	}()
+
+	if err := WaitForPortsAvailable(grpcPort, httpPort, 2*time.Second); err != nil {
+		t.Fatalf("WaitForPortsAvailable returned error: %v", err)
+	}
+}
+
+func TestWaitForPortsAvailableReportsPersistentConflict(t *testing.T) {
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer grpcListener.Close()
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpPort := httpListener.Addr().(*net.TCPAddr).Port
+	_ = httpListener.Close()
+
+	err = WaitForPortsAvailable(grpcListener.Addr().(*net.TCPAddr).Port, httpPort, 50*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "OTLP gRPC port") {
+		t.Fatalf("WaitForPortsAvailable error = %v, want gRPC port conflict", err)
 	}
 }
 

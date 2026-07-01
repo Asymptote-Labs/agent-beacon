@@ -576,15 +576,16 @@ func preflight(cfg endpointconfig.Config, startService bool) error {
 	if !startService {
 		return nil
 	}
-	if !endpointcollector.PortAvailable(cfg.Collector.GRPCPort) {
-		if !existingCollectorReady(cfg) {
-			return fmt.Errorf("OTLP gRPC port %d is already in use", cfg.Collector.GRPCPort)
-		}
+	grpcAvailable := endpointcollector.PortAvailable(cfg.Collector.GRPCPort)
+	httpAvailable := endpointcollector.PortAvailable(cfg.Collector.HTTPPort)
+	if grpcAvailable && httpAvailable {
+		return nil
 	}
-	if !endpointcollector.PortAvailable(cfg.Collector.HTTPPort) {
-		if !existingCollectorReady(cfg) {
-			return fmt.Errorf("OTLP HTTP port %d is already in use", cfg.Collector.HTTPPort)
-		}
+	if existingCollectorReady(cfg) {
+		return nil
+	}
+	if err := endpointcollector.WaitForPortsAvailable(cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, 10*time.Second); err != nil {
+		return fmt.Errorf("%w; if this persists, another process may be using Beacon's OTLP receiver ports", err)
 	}
 	return nil
 }
