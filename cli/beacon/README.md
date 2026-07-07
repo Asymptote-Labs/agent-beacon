@@ -369,7 +369,9 @@ credentials at the job level and set `upload`:
 
 See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-actions/claude-code-telemetry.yml),
 [`examples/github-actions/claude-security-review-session.yml`](../../examples/github-actions/claude-security-review-session.yml),
-and [`examples/github-actions/codex-action-session.yml`](../../examples/github-actions/codex-action-session.yml)
+[`examples/github-actions/codex-action-session.yml`](../../examples/github-actions/codex-action-session.yml),
+[`examples/github-actions/s3-upload-telemetry.yml`](../../examples/github-actions/s3-upload-telemetry.yml),
+and [`examples/github-actions/gcs-upload-telemetry.yml`](../../examples/github-actions/gcs-upload-telemetry.yml)
 for complete reference workflows.
 
 ## Wazuh

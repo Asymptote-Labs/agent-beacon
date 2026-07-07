@@ -1,0 +1,43 @@
+# Reference workflow for testing Agent Beacon CI telemetry with direct S3
+# upload. Copy this file to .github/workflows/ in a test repository and update
+# the bucket, AWS role, region, and action ref.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a reference
+# only and does not run in this repository.
+# Replace <tag> with the Beacon release tag you want to run (v0.0.44 or newer).
+
+name: Test Agent Beacon S3 upload
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  beacon-s3-upload:
+    runs-on: ubuntu-latest
+    env:
+      BEACON_CI_S3_BUCKET: ${{ vars.BEACON_CI_S3_BUCKET }}
+      BEACON_CI_S3_PREFIX: github-actions/test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Agent Beacon with S3 upload
+        uses: asymptote-labs/agent-beacon@<tag>
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          command: claude --print "Say hello from Agent Beacon CI telemetry"
+          upload: s3
+          upload-artifact: "true"
