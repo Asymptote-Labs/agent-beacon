@@ -20,7 +20,22 @@ The end state is:
 
 Create or choose an S3 bucket and a root prefix such as `beacon-prod`. Do not include `runtime` or `inventory` in the prefix; Beacon adds those folders.
 
-Give the credentials used by Vector permission to write under that prefix:
+### Create an S3 bucket
+
+Create the bucket that will receive Beacon endpoint logs. Replace the example bucket name and region with your values:
+
+```bash
+aws s3api create-bucket \
+  --bucket example-security-logs \
+  --region us-west-2 \
+  --create-bucket-configuration LocationConstraint=us-west-2
+```
+
+If you already have a bucket, choose the root prefix Beacon should write under, for example `beacon-prod`.
+
+### Create an S3 policy
+
+Name the IAM policy `BeaconEndpointWriteOnly` and give the credentials used by Vector permission to write under the selected prefix. Save this JSON as `beacon-s3-write-only-policy.json`:
 
 ```json
 {
@@ -33,6 +48,14 @@ Give the credentials used by Vector permission to write under that prefix:
     }
   ]
 }
+```
+
+Create the IAM policy:
+
+```bash
+aws iam create-policy \
+  --policy-name BeaconEndpointWriteOnly \
+  --policy-document file://beacon-s3-write-only-policy.json
 ```
 
 If your bucket requires KMS or object tags, add the required `kms:*` or `s3:PutObjectTagging` permissions in AWS.
