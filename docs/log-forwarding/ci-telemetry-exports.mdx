@@ -72,6 +72,36 @@ beacon ci exec --upload s3 --upload gcs -- claude --print "Review this repositor
 
 S3 upload uses `aws s3 cp` and the standard AWS credential provider chain. GCS upload uses `gcloud storage cp` when available, falling back to `gsutil cp`.
 
+### GitHub Actions SIEM Forwarding
+
+Set the Splunk or Falcon ingest token at the job or workflow level from a secret, then pass `forward` and `forward-endpoint` to the Agent Beacon action:
+
+```yaml
+jobs:
+  claude-telemetry:
+    runs-on: ubuntu-latest
+    env:
+      BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Claude with Beacon telemetry
+        uses: asymptote-labs/agent-beacon@v0.0.66
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          command: claude --print "Review this pull request"
+          forward: splunk
+          forward-endpoint: https://splunk.example:8088/services/collector
+          upload-artifact: "true"
+```
+
+See the sample workflow:
+
+- [Splunk forward telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/splunk-forward-telemetry.yml)
+
+For Falcon LogScale HEC, set `BEACON_CI_FALCON_HEC_TOKEN` and use `forward: falcon`.
+
 ### GitHub Actions Object Storage
 
 Configure cloud credentials at the job level, then pass the upload destination to the Agent Beacon action:
