@@ -121,7 +121,12 @@ func Handler(opts Options) (http.Handler, error) {
 			methodNotAllowed(w)
 			return
 		}
-		events, err := ReadEvents(opts.LogPath, parseQuery(r, maxEventLimit))
+		// Summary cards must describe the same dataset as total_events, so
+		// aggregate over every matched event rather than the page-limited
+		// slice a small ?limit= would leave behind.
+		query := parseQuery(r, maxEventLimit)
+		query.NoLimit = true
+		events, err := ReadEvents(opts.LogPath, query)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
