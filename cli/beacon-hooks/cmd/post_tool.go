@@ -210,7 +210,7 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 	if params.sessionID != "" {
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
-	applyBranchField(fields, input, filepath.Dir(params.filePath))
+	applyWorkspaceFields(fields, input, filepath.Dir(params.filePath))
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 

@@ -166,6 +166,46 @@ func TestRunPostToolFileEditEmitsLocalGitBranch(t *testing.T) {
 	if got := event["branch"]; got != "feature/edit" {
 		t.Fatalf("branch = %q, want feature/edit", got)
 	}
+	// The file-dir fallback must not masquerade as the workspace path.
+	if repository, ok := event["repository"]; ok {
+		t.Fatalf("repository = %q, want no repository without a payload cwd", repository)
+	}
+}
+
+func TestRunPostToolFileEditEmitsWorkspaceFields(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/edit\n")
+	editedFile := filepath.Join(repo, "pkg", "main.go")
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-edit-ws",
+		"hook_event_name": "afterFileEdit",
+		"workspace_roots": []interface{}{repo},
+		"file_path":       editedFile,
+		"edits": []interface{}{
+			map[string]interface{}{"old_string": "old line", "new_string": "new line"},
+		},
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["repository"]; got != repo {
+		t.Fatalf("repository = %q, want %q", got, repo)
+	}
+	session := event["session"].(map[string]interface{})
+	if got := session["working_directory"]; got != repo {
+		t.Fatalf("session.working_directory = %q, want %q", got, repo)
+	}
+	if got := session["id"]; got != "conv-edit-ws" {
+		t.Fatalf("session.id = %q, want conv-edit-ws", got)
+	}
+	if got := event["branch"]; got != "feature/edit" {
+		t.Fatalf("branch = %q, want feature/edit", got)
+	}
 }
 
 func TestToolFieldsMapsMCPGenAIStandardFields(t *testing.T) {

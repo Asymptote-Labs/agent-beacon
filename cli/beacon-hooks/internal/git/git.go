@@ -54,10 +54,14 @@ func findHeadFile(cwd string) string {
 				return filepath.Join(gitPath, "HEAD")
 			}
 			if gitdir := parseGitDirPointer(gitPath); gitdir != "" {
+				// A parsed pointer marks this directory as its own
+				// checkout. A missing HEAD means the checkout is broken;
+				// walking on would misattribute an enclosing repo's branch.
 				head := filepath.Join(gitdir, "HEAD")
 				if _, err := os.Stat(head); err == nil {
 					return head
 				}
+				return ""
 			}
 		}
 

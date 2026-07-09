@@ -65,19 +65,28 @@ func resolveBranch(input map[string]interface{}, cwd string) string {
 	return git.CurrentBranch(cwd)
 }
 
-// applyBranchField fills fields["branch"] for emitters that write endpoint
-// events without going through emitHookEvent. fallbackDir seeds branch
-// resolution when the payload carries no working directory, such as a file
-// edit identified only by its path.
-func applyBranchField(fields map[string]interface{}, input map[string]interface{}, fallbackDir string) {
+// applyWorkspaceFields fills workspace context (session.working_directory,
+// repository, branch) for emitters that write endpoint events without going
+// through emitHookEvent, mirroring emitHookEvent's enrichment. fallbackDir
+// seeds branch resolution when the payload carries no working directory,
+// such as a file edit identified only by its path; it is never used for
+// repository, which must reflect the actual workspace path.
+func applyWorkspaceFields(fields map[string]interface{}, input map[string]interface{}, fallbackDir string) {
+	cwd := resolveCwd(input, platformFlag)
+	if cwd != "" {
+		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"working_directory": cwd})
+		if existing, ok := fields["repository"]; !ok || existing == "" {
+			fields["repository"] = cwd
+		}
+	}
 	if existing, ok := fields["branch"]; ok && existing != "" {
 		return
 	}
-	cwd := resolveCwd(input, platformFlag)
-	if cwd == "" {
-		cwd = fallbackDir
+	branchDir := cwd
+	if branchDir == "" {
+		branchDir = fallbackDir
 	}
-	if branch := resolveBranch(input, cwd); branch != "" {
+	if branch := resolveBranch(input, branchDir); branch != "" {
 		fields["branch"] = branch
 	}
 }

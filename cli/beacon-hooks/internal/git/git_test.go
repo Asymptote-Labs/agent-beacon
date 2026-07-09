@@ -103,6 +103,20 @@ func TestCurrentBranchWorktreeRelativeGitDirPointer(t *testing.T) {
 	}
 }
 
+func TestCurrentBranchBrokenWorktreeDoesNotReportParentBranch(t *testing.T) {
+	parent := t.TempDir()
+	writeTestFile(t, filepath.Join(parent, ".git", "HEAD"), "ref: refs/heads/parent-branch\n")
+
+	// The pointer parses but the referenced gitdir has no HEAD: the checkout
+	// is broken, so no branch should be reported — least of all the parent's.
+	broken := filepath.Join(parent, "broken-worktree")
+	writeTestFile(t, filepath.Join(broken, ".git"), "gitdir: "+filepath.Join(parent, ".git", "worktrees", "missing")+"\n")
+
+	if got := CurrentBranch(broken); got != "" {
+		t.Fatalf("CurrentBranch = %q, want empty for a broken worktree", got)
+	}
+}
+
 func TestCurrentBranchRejectsMalformedHead(t *testing.T) {
 	tests := []struct {
 		name string
