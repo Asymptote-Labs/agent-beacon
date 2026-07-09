@@ -49,6 +49,7 @@ beacon endpoint hooks install --harness cursor --level project
 |------|---------|
 | Prompt telemetry | Supported for local Cursor through `beforeSubmitPrompt` hooks; not available in Cursor Cloud Agents because Cursor submits the prompt before the cloud VM exists. See [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support). |
 | Command, tool, and file telemetry | Supported for tool, shell command, MCP-like, approval, and file edit payloads where Cursor exposes them; Cursor Cloud support is limited to Cursor's [cloud-supported command hooks](https://cursor.com/docs/hooks#cloud-agent-support). |
+| Repository and branch context | Events include the workspace path as `repository`, and `branch` is resolved from the workspace's local git checkout (`.git/HEAD`) when Cursor does not supply one; disable local git resolution with `BEACON_DISABLE_GIT_METADATA=1` |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent; Cursor hooks are installed separately in the logged-in user's context |
 

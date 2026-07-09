@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/git"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
@@ -38,16 +39,65 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}
-	if cwd := resolveCwd(input, platformFlag); cwd != "" {
+	cwd := resolveCwd(input, platformFlag)
+	if cwd != "" {
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"working_directory": cwd})
 		fields["repository"] = cwd
 	}
-	if branch := getFirstStr(input, "branch", "git_branch"); branch != "" {
+	if branch := resolveBranch(input, cwd); branch != "" {
 		fields["branch"] = branch
 	}
 	if err := logger.EndpointEvent(action, category, severity, message, fields); err != nil {
 		logger.Error("Failed to write endpoint event", "error", err.Error(), "action", action)
 	}
+}
+
+// resolveBranch prefers a runtime-provided branch and otherwise derives the
+// checked-out branch from the event's working directory. Runtime-provided
+// values pass through even when local git metadata enrichment is disabled.
+func resolveBranch(input map[string]interface{}, cwd string) string {
+	if branch := getFirstStr(input, "branch", "git_branch"); branch != "" {
+		return branch
+	}
+	if cwd == "" || gitMetadataDisabled() {
+		return ""
+	}
+	return git.CurrentBranch(cwd)
+}
+
+// applyWorkspaceFields fills workspace context (session.working_directory,
+// repository, branch) for emitters that write endpoint events without going
+// through emitHookEvent, mirroring emitHookEvent's enrichment. fallbackDir
+// seeds branch resolution when the payload carries no working directory,
+// such as a file edit identified only by its path; it is never used for
+// repository, which must reflect the actual workspace path.
+func applyWorkspaceFields(fields map[string]interface{}, input map[string]interface{}, fallbackDir string) {
+	cwd := resolveCwd(input, platformFlag)
+	if cwd != "" {
+		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"working_directory": cwd})
+		if existing, ok := fields["repository"]; !ok || existing == "" {
+			fields["repository"] = cwd
+		}
+	}
+	if existing, ok := fields["branch"]; ok && existing != "" {
+		return
+	}
+	branchDir := cwd
+	if branchDir == "" {
+		branchDir = fallbackDir
+	}
+	if branch := resolveBranch(input, branchDir); branch != "" {
+		fields["branch"] = branch
+	}
+}
+
+// gitMetadataDisabled accepts 1/true/yes, matching other Beacon disable flags.
+func gitMetadataDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEACON_DISABLE_GIT_METADATA"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 func uploadCloudTelemetry(logger *logging.Logger, force bool) {

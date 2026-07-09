@@ -4,11 +4,209 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
+
+func writeGitHead(t *testing.T, repo, head string) {
+	t.Helper()
+	gitDir := filepath.Join(repo, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", gitDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte(head), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+}
+
+func TestResolveBranchPrefersRuntimeProvidedBranch(t *testing.T) {
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/local-branch\n")
+
+	got := resolveBranch(map[string]interface{}{"git_branch": "cloud-branch"}, repo)
+	if got != "cloud-branch" {
+		t.Fatalf("resolveBranch = %q, want runtime-provided cloud-branch", got)
+	}
+}
+
+func TestResolveBranchReadsLocalCheckout(t *testing.T) {
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
+
+	got := resolveBranch(map[string]interface{}{}, repo)
+	if got != "feature/local" {
+		t.Fatalf("resolveBranch = %q, want feature/local", got)
+	}
+}
+
+func TestResolveBranchOutsideRepo(t *testing.T) {
+	if got := resolveBranch(map[string]interface{}{}, t.TempDir()); got != "" {
+		t.Fatalf("resolveBranch = %q, want empty outside a repo", got)
+	}
+	if got := resolveBranch(map[string]interface{}{}, ""); got != "" {
+		t.Fatalf("resolveBranch = %q, want empty without cwd", got)
+	}
+}
+
+func TestResolveBranchDisabledByEnv(t *testing.T) {
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
+
+	for _, value := range []string{"1", "true", "YES"} {
+		t.Setenv("BEACON_DISABLE_GIT_METADATA", value)
+		if got := resolveBranch(map[string]interface{}{}, repo); got != "" {
+			t.Fatalf("resolveBranch = %q, want empty with BEACON_DISABLE_GIT_METADATA=%s", got, value)
+		}
+		// Runtime-provided branch still passes through when disabled.
+		if got := resolveBranch(map[string]interface{}{"git_branch": "cloud-branch"}, repo); got != "cloud-branch" {
+			t.Fatalf("resolveBranch = %q, want runtime-provided branch to pass through", got)
+		}
+	}
+
+	t.Setenv("BEACON_DISABLE_GIT_METADATA", "0")
+	if got := resolveBranch(map[string]interface{}{}, repo); got != "feature/local" {
+		t.Fatalf("resolveBranch = %q, want feature/local with disable flag off", got)
+	}
+}
+
+func TestRunPromptSubmitEmitsLocalGitBranch(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
+
+	runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversation_id": "conv-branch",
+		"hook_event_name": "beforeSubmitPrompt",
+		"workspace_roots": []interface{}{repo},
+		"prompt":          "hello",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["branch"]; got != "feature/local" {
+		t.Fatalf("branch = %q, want feature/local", got)
+	}
+	if got := event["repository"]; got != repo {
+		t.Fatalf("repository = %q, want %q", got, repo)
+	}
+}
+
+func TestRunPromptSubmitOmitsBranchOutsideRepo(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"conversation_id": "conv-no-repo",
+		"hook_event_name": "beforeSubmitPrompt",
+		"workspace_roots": []interface{}{t.TempDir()},
+		"prompt":          "hello",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if branch, ok := event["branch"]; ok {
+		t.Fatalf("branch = %q, want no branch field outside a repo", branch)
+	}
+}
+
+func TestRunOpenCodeEventEmitsLocalGitBranch(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "opencode"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/opencode\n")
+
+	runHookWithInput(t, runOpenCodeEvent, map[string]interface{}{
+		"type":       "command.executed",
+		"session_id": "oc-branch",
+		"cwd":        repo,
+		"command":    "ls",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["branch"]; got != "feature/opencode" {
+		t.Fatalf("branch = %q, want feature/opencode", got)
+	}
+}
+
+func TestRunPostToolFileEditEmitsLocalGitBranch(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/edit\n")
+	editedFile := filepath.Join(repo, "pkg", "main.go")
+
+	// No workspace_roots or cwd in the payload: branch must resolve from the
+	// edited file's own directory.
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-edit",
+		"hook_event_name": "afterFileEdit",
+		"file_path":       editedFile,
+		"edits": []interface{}{
+			map[string]interface{}{"old_string": "old line", "new_string": "new line"},
+		},
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	if got := event["branch"]; got != "feature/edit" {
+		t.Fatalf("branch = %q, want feature/edit", got)
+	}
+	// The file-dir fallback must not masquerade as the workspace path.
+	if repository, ok := event["repository"]; ok {
+		t.Fatalf("repository = %q, want no repository without a payload cwd", repository)
+	}
+}
+
+func TestRunPostToolFileEditEmitsWorkspaceFields(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/edit\n")
+	editedFile := filepath.Join(repo, "pkg", "main.go")
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-edit-ws",
+		"hook_event_name": "afterFileEdit",
+		"workspace_roots": []interface{}{repo},
+		"file_path":       editedFile,
+		"edits": []interface{}{
+			map[string]interface{}{"old_string": "old line", "new_string": "new line"},
+		},
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["repository"]; got != repo {
+		t.Fatalf("repository = %q, want %q", got, repo)
+	}
+	session := event["session"].(map[string]interface{})
+	if got := session["working_directory"]; got != repo {
+		t.Fatalf("session.working_directory = %q, want %q", got, repo)
+	}
+	if got := session["id"]; got != "conv-edit-ws" {
+		t.Fatalf("session.id = %q, want conv-edit-ws", got)
+	}
+	if got := event["branch"]; got != "feature/edit" {
+		t.Fatalf("branch = %q, want feature/edit", got)
+	}
+}
 
 func TestToolFieldsMapsMCPGenAIStandardFields(t *testing.T) {
 	tests := []struct {

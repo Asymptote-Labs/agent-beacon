@@ -80,6 +80,8 @@ By default, snapshots include config-file metadata, MCP server metadata, skill m
 
 Top-level `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields can add shared context across entities. Content-bearing fields follow the configured retention mode.
 
+For hook-based runtimes, `branch` is derived locally from the workspace's `.git/HEAD` file when the runtime payload does not provide one. This is a local file read only — no git command runs and nothing leaves the machine — and it can be disabled with `BEACON_DISABLE_GIT_METADATA=1`.
+
 ## Related
 
 <Columns cols={2}>
