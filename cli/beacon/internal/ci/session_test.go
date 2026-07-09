@@ -93,8 +93,18 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	if err := session.Start(context.Background(), nil, nil); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
+	stopped := false
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = session.Stop(ctx)
+	})
 	var data []byte
-	for i := 0; i < 20; i++ {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
 		var err error
 		data, err = os.ReadFile(session.ConfigPath + ".env")
 		if err == nil && len(data) > 0 {
@@ -113,6 +123,7 @@ func TestStartStopCollectorProcess(t *testing.T) {
 	if err := session.Stop(ctx); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
 	}
+	stopped = true
 }
 
 func TestStartDetachedWritesStateAndExports(t *testing.T) {

@@ -100,10 +100,12 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	oldOpts := endpointOpts
 	oldActiveConsoleUser := activeConsoleUser
 	oldRunHookRepairAsUser := runHookRepairAsUser
+	oldLoadConfigForUserRepair := loadConfigForUserRepair
 	t.Cleanup(func() {
 		endpointOpts = oldOpts
 		activeConsoleUser = oldActiveConsoleUser
 		runHookRepairAsUser = oldRunHookRepairAsUser
+		loadConfigForUserRepair = oldLoadConfigForUserRepair
 	})
 
 	home := t.TempDir()
@@ -120,6 +122,9 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	endpointOpts.logPath = logPath
 	endpointOpts.hookHarnesses = "claude,codex,cursor,gemini"
 	endpointOpts.hookLevel = "user"
+	loadConfigForUserRepair = func(userMode bool, logPath string) endpointconfig.Config {
+		return endpointconfig.Default(userMode, logPath)
+	}
 	activeConsoleUser = func() (consoleUserInfo, bool, error) {
 		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
 	}

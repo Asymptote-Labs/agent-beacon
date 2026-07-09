@@ -46,6 +46,8 @@ type userConfigTargets struct {
 	hooks  []string
 }
 
+var loadConfigForUserRepair = loadConfigForMode
+
 func runEndpointUserConfigRepairInstalled(cmd *cobra.Command, args []string) error {
 	result, err := repairInstalledEndpointUserConfig()
 	if endpointOpts.jsonOutput {
@@ -66,7 +68,7 @@ func repairInstalledEndpointUserConfig() (endpointUserConfigRepairResult, error)
 		return endpointUserConfigRepairResult{SkippedReason: "no_active_console_user"}, nil
 	}
 
-	cfg := loadConfigForMode(false, endpointOpts.logPath)
+	cfg := loadConfigForUserRepair(false, endpointOpts.logPath)
 	if cfg.LogPath == "" {
 		cfg.LogPath = writer.DefaultPath(false)
 	}
