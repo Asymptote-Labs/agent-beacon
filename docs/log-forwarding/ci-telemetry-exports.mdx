@@ -92,6 +92,10 @@ Configure cloud credentials at the job level, then pass the upload destination t
     upload: s3
 ```
 
+See the sample workflow:
+
+- [S3 upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-upload-telemetry.yml)
+
 For GCS, authenticate with your normal Google Cloud CI mechanism and set `BEACON_CI_GCS_BUCKET` plus optional `BEACON_CI_GCS_PREFIX`:
 
 ```yaml
@@ -109,6 +113,10 @@ For GCS, authenticate with your normal Google Cloud CI mechanism and set `BEACON
     command: claude --print "Review this pull request"
     upload: gcs
 ```
+
+See the sample workflow:
+
+- [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
 
 ## Object Layout
 

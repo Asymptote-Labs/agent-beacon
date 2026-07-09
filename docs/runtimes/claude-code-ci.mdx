@@ -104,6 +104,24 @@ See the sample workflow:
 
 Use `--upload` when the completed `runtime.jsonl` should be handed off through object storage after validation.
 
+Upload to Amazon S3:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
+    aws-region: us-east-1
+
+- name: Run an agent with Asymptote telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.66
+  env:
+    BEACON_CI_S3_BUCKET: my-beacon-telemetry
+    BEACON_CI_S3_PREFIX: github-actions
+  with:
+    command: claude --print "Review this pull request"
+    upload: s3
+```
+
 Upload to Google Cloud Storage:
 
 ```yaml
@@ -122,8 +140,9 @@ Upload to Google Cloud Storage:
     upload: gcs
 ```
 
-See the sample workflow:
+See the sample workflows:
 
+- [S3 upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-upload-telemetry.yml)
 - [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
 
 ## Validation Behavior
