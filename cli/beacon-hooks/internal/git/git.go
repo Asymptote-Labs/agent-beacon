@@ -2,11 +2,125 @@ package git
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// maxGitMetadataBytes caps reads of repository metadata files so hostile or
+// corrupt .git contents cannot balloon hook memory or telemetry.
+const maxGitMetadataBytes = 4096
+
+// CurrentBranch returns the branch checked out in the repository containing
+// cwd, reading HEAD directly so no git binary is required. It returns "" when
+// cwd is not inside a git repository, HEAD is detached, or HEAD does not
+// parse as a local branch ref.
+func CurrentBranch(cwd string) string {
+	headPath := findHeadFile(cwd)
+	if headPath == "" {
+		return ""
+	}
+	ref, ok := strings.CutPrefix(firstNonEmptyLine(readCapped(headPath)), "ref:")
+	if !ok {
+		return ""
+	}
+	branch, ok := strings.CutPrefix(strings.TrimSpace(ref), "refs/heads/")
+	if !ok || !isValidBranchName(branch) {
+		return ""
+	}
+	return branch
+}
+
+// findHeadFile walks up from cwd to the HEAD file of the innermost checkout.
+// Unlike findGitDir, a worktree ".git" pointer file resolves to the
+// per-worktree gitdir, which holds this checkout's HEAD; the shared commondir
+// HEAD would report another worktree's branch.
+func findHeadFile(cwd string) string {
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			return ""
+		}
+	}
+
+	dir := cwd
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if info, err := os.Stat(gitPath); err == nil {
+			if info.IsDir() {
+				return filepath.Join(gitPath, "HEAD")
+			}
+			if gitdir := parseGitDirPointer(gitPath); gitdir != "" {
+				head := filepath.Join(gitdir, "HEAD")
+				if _, err := os.Stat(head); err == nil {
+					return head
+				}
+			}
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// parseGitDirPointer reads a ".git" pointer file ("gitdir: <path>") and
+// returns the referenced gitdir as an absolute cleaned path, or "".
+func parseGitDirPointer(dotGitFile string) string {
+	gitdir, ok := strings.CutPrefix(firstNonEmptyLine(readCapped(dotGitFile)), "gitdir:")
+	if !ok {
+		return ""
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if gitdir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(filepath.Dir(dotGitFile), gitdir)
+	}
+	return filepath.Clean(gitdir)
+}
+
+func readCapped(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxGitMetadataBytes))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func firstNonEmptyLine(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// isValidBranchName rejects ref names git itself would refuse, so malformed
+// or hostile HEAD content never reaches telemetry.
+func isValidBranchName(branch string) bool {
+	if branch == "" || len(branch) > 255 {
+		return false
+	}
+	for _, r := range branch {
+		if r < 0x20 || r == 0x7f || r == ' ' {
+			return false
+		}
+	}
+	return true
+}
 
 // GetRemoteInfo returns the owner and repository name from the git remote origin.
 // Returns empty strings if not in a git repo or no origin remote is configured.
@@ -71,26 +185,10 @@ func findGitDir(cwd string) string {
 // extracts the gitdir path, and resolves the common git directory
 // that contains the config with remote URLs.
 func resolveWorktreeGitDir(dotGitFile string) string {
-	data, err := os.ReadFile(dotGitFile)
-	if err != nil {
-		return ""
-	}
-
-	// Parse "gitdir: <path>" from the .git file
-	line := strings.TrimSpace(string(data))
-	if !strings.HasPrefix(line, "gitdir:") {
-		return ""
-	}
-	gitdir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+	gitdir := parseGitDirPointer(dotGitFile)
 	if gitdir == "" {
 		return ""
 	}
-
-	// Resolve relative paths against the .git file's parent directory
-	if !filepath.IsAbs(gitdir) {
-		gitdir = filepath.Join(filepath.Dir(dotGitFile), gitdir)
-	}
-	gitdir = filepath.Clean(gitdir)
 
 	// In a worktree, gitdir points to e.g. /repo/.git/worktrees/foo
 	// which contains a "commondir" file with a relative path to the shared .git dir

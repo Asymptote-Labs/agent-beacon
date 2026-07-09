@@ -36,6 +36,8 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 
 Top-level `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields add shared context that can apply across multiple entities. For example, a command event can include both `tool` and `command`; a file edit can include `file`, `session`, `repository`, and `branch`; a CI event can include `origin` and `run`; and a GenAI tool call can include both `tool` and nested `gen_ai.tool` metadata.
 
+For hook-based runtimes, when the runtime payload does not supply a branch, Beacon fills `branch` from the working directory's git checkout by reading `.git/HEAD` directly — no git binary is required, and the field is omitted when the directory is not a git repository or HEAD is detached. Set `BEACON_DISABLE_GIT_METADATA=1` (accepts `1`, `true`, or `yes`) in the runtime's environment to turn off local git metadata enrichment; runtime-provided branch values still pass through.
+
 ## GenAI context
 
 When a runtime emits OpenTelemetry GenAI semantic convention attributes, Beacon preserves them under `gen_ai` while also projecting commonly queried values into top-level fields such as `model`, `tool.name`, or `prompt.text`.

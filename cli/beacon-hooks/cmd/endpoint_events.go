@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/git"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
@@ -38,16 +39,39 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}
-	if cwd := resolveCwd(input, platformFlag); cwd != "" {
+	cwd := resolveCwd(input, platformFlag)
+	if cwd != "" {
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"working_directory": cwd})
 		fields["repository"] = cwd
 	}
-	if branch := getFirstStr(input, "branch", "git_branch"); branch != "" {
+	if branch := resolveBranch(input, cwd); branch != "" {
 		fields["branch"] = branch
 	}
 	if err := logger.EndpointEvent(action, category, severity, message, fields); err != nil {
 		logger.Error("Failed to write endpoint event", "error", err.Error(), "action", action)
 	}
+}
+
+// resolveBranch prefers a runtime-provided branch and otherwise derives the
+// checked-out branch from the event's working directory. Runtime-provided
+// values pass through even when local git metadata enrichment is disabled.
+func resolveBranch(input map[string]interface{}, cwd string) string {
+	if branch := getFirstStr(input, "branch", "git_branch"); branch != "" {
+		return branch
+	}
+	if cwd == "" || gitMetadataDisabled() {
+		return ""
+	}
+	return git.CurrentBranch(cwd)
+}
+
+// gitMetadataDisabled accepts 1/true/yes, matching other Beacon disable flags.
+func gitMetadataDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEACON_DISABLE_GIT_METADATA"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 func uploadCloudTelemetry(logger *logging.Logger, force bool) {
