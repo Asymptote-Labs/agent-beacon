@@ -60,6 +60,24 @@ aws iam create-policy \
 
 If your bucket requires KMS or object tags, add the required `kms:*` or `s3:PutObjectTagging` permissions in AWS.
 
+### Create or choose IAM credentials
+
+You get the access key and secret key from AWS IAM, but ideally use temporary credentials instead of long-lived access keys.
+
+For a quick setup:
+
+1. Open the AWS Console.
+2. Go to IAM.
+3. Go to Users.
+4. Select the IAM user you want Vector to use, or create one named `beacon-endpoint-writer`.
+5. Attach the `BeaconEndpointWriteOnly` policy to that IAM user.
+6. Open the Security credentials tab.
+7. Under Access keys, click Create access key.
+8. Choose the use case, such as Command Line Interface (CLI).
+9. AWS will show `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+
+AWS only shows the secret access key once. Copy it immediately or download the `.csv`.
+
 For a quick local setup, have these values ready:
 
 ```bash
