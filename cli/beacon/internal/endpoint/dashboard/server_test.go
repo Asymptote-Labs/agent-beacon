@@ -118,6 +118,58 @@ func TestStatusUsesRequestedRuntimeLogSource(t *testing.T) {
 	}
 }
 
+// TestSummaryEndpointAggregatesAllMatchedEvents guards /api/summary against
+// truncated aggregation: total_events comes from the full match count, so the
+// breakdown counts must be computed over the same full set even when the
+// request carries a small ?limit= from the Log Search view.
+func TestSummaryEndpointAggregatesAllMatchedEvents(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	mk := func(minute int) string {
+		return `{"timestamp":"2026-06-11T10:` + itoa2(minute) + `:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"cursor"},"session":{"id":"s1"},"command":{"command":"ls"},"message":"command.executed"}`
+	}
+	var lines []string
+	for i := 0; i < 12; i++ {
+		lines = append(lines, mk(i))
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/summary?limit=5", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var summary Summary
+	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("unmarshal summary: %v", err)
+	}
+	if summary.TotalEvents != 12 {
+		t.Fatalf("total_events = %d, want 12", summary.TotalEvents)
+	}
+	if summary.CountsByHarness["cursor"] != 12 {
+		t.Fatalf("counts_by_harness[cursor] = %d, want 12 (must not be capped by ?limit=5)", summary.CountsByHarness["cursor"])
+	}
+	if summary.CommandEvents != 12 {
+		t.Fatalf("command_events = %d, want 12", summary.CommandEvents)
+	}
+	if len(summary.TopHarnesses) != 1 || summary.TopHarnesses[0].Count != 12 {
+		t.Fatalf("top_harnesses = %#v, want cursor with 12 events", summary.TopHarnesses)
+	}
+}
+
+func itoa2(v int) string {
+	if v < 10 {
+		return "0" + strconv.Itoa(v)
+	}
+	return strconv.Itoa(v)
+}
+
 func TestTokensEndpointAggregatesUsage(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	lines := []string{
@@ -517,6 +569,7 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		{path: "/detections.html", want: "Beacon Endpoint Detections"},
 		{path: "/findings.html", want: "Beacon Endpoint Findings"},
 		{path: "/inventory.html", want: "Beacon Endpoint Agent Inventory"},
+		{path: "/inventory-hooks.html", want: "Beacon Endpoint Hook Inventory"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {

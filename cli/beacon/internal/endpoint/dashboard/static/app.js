@@ -21,7 +21,9 @@ const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
 const isDetectionsPage = document.body.dataset.page === "detections";
 const isFindingsPage = document.body.dataset.page === "findings";
-const isInventoryPage = document.body.dataset.page === "inventory";
+// Both inventory pages share loadInventory(); each renderer targets its own
+// page's elements and no-ops when they are absent.
+const isInventoryPage = document.body.dataset.page === "inventory" || document.body.dataset.page === "inventory-hooks";
 const formFields = [
   "q",
   "harness",
@@ -86,8 +88,25 @@ function hydrateFiltersFromURL() {
   for (const field of formFields) {
     const input = $(`[name="${field}"]`);
     if (!input) continue;
-    if (params.has(field)) input.value = params.get(field);
+    if (!params.has(field)) continue;
+    const value = params.get(field);
+    if (field === "limit") ensureLimitOption(input, value);
+    input.value = value;
   }
+}
+
+// The limit control is a fixed <select>; a URL like ?limit=5 would otherwise
+// silently deselect it and the query would fall back to the server default,
+// so add the requested limit as a selectable option.
+function ensureLimitOption(select, value) {
+  if (!(select instanceof HTMLSelectElement)) return;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return;
+  if (Array.from(select.options).some((option) => option.value === value)) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = `${value} events`;
+  select.append(option);
 }
 
 function updateURL(query) {
@@ -283,6 +302,9 @@ function renderInventory(resp) {
   renderInventoryMCP(servers, configs);
   renderInventorySkills(existingSkills);
   renderInventoryHooks(hooks, hookConfigs);
+  renderHookInventoryCards(hooks, hookConfigs);
+  renderHookTargets(hooks, configs);
+  renderHookManifests(hookConfigs);
   renderInventoryScope(resp?.user_scope || {});
 }
 
@@ -447,6 +469,78 @@ function renderInventoryHooks(hooks, configs = []) {
         </tr>
       `;
     })
+    .join("");
+}
+
+// Renderers for the dedicated Hook Inventory page (inventory-hooks.html).
+
+function renderHookInventoryCards(hooks, hookConfigs) {
+  const el = $("#hook-inventory-cards");
+  if (!el) return;
+  const installed = hooks.filter((hook) => hook.installed).length;
+  const managed = hookConfigs.filter((config) => config.beacon_managed).length;
+  const cards = [
+    { label: "Hook Targets", value: hooks.length, hint: "runtimes probed" },
+    { label: "Hooks Installed", value: installed, hint: "reporting to Beacon" },
+    { label: "Hook Manifests", value: hookConfigs.length, hint: "discovered files" },
+    { label: "Beacon Managed", value: managed, hint: "managed manifests" },
+  ];
+  el.innerHTML = cards
+    .map((card) => `
+      <div class="card">
+        <span class="muted">${escapeHTML(card.label)}</span>
+        <span class="value">${escapeHTML(card.value)}</span>
+        ${card.hint ? `<span class="muted">${escapeHTML(card.hint)}</span>` : ""}
+      </div>
+    `)
+    .join("");
+}
+
+function renderHookTargets(hooks, configs = []) {
+  const tbody = $("#hook-targets");
+  if (!tbody) return;
+  if (!hooks.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No hook targets probed.</td></tr>`;
+    return;
+  }
+  const configByPath = configsByPath(configs);
+  tbody.innerHTML = hooks
+    .map((hook) => {
+      const config = configByPath.get(hook.path) || {};
+      return `
+        <tr class="${hook.installed ? "" : "row-absent"}">
+          <td>${escapeHTML(runtimeLabel(hook.target))}</td>
+          <td>${badge(hook.status || (hook.installed ? "configured" : "not_installed"), hook.installed ? "badge-ok" : "badge-muted")}</td>
+          <td>${config.scope ? badge(config.scope, "badge-muted") : `<span class="muted">-</span>`}</td>
+          <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
+          <td class="mono path-cell">${hook.binary_path ? escapeHTML(hook.binary_path) : `<span class="muted">-</span>`}</td>
+          <td class="mono path-cell">${hook.path ? escapeHTML(hook.path) : `<span class="muted">-</span>`}</td>
+          <td>${hook.message ? `<span class="muted">${escapeHTML(hook.message)}</span>` : `<span class="muted">-</span>`}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderHookManifests(hookConfigs) {
+  const tbody = $("#hook-manifests");
+  if (!tbody) return;
+  if (!hookConfigs.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No hook configuration manifests discovered.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = hookConfigs
+    .map((config) => `
+      <tr>
+        <td>${escapeHTML(runtimeLabel(config.runtime))}</td>
+        <td>${badge(config.scope || "unknown", "badge-muted")}</td>
+        <td>${parserBadge(config)}</td>
+        <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
+        <td class="nowrap">${config.modified_at ? escapeHTML(formatTime(config.modified_at)) : `<span class="muted">-</span>`}</td>
+        <td class="mono sha-cell">${hashCell(config.file_sha256)}</td>
+        <td class="mono path-cell">${escapeHTML(config.path || config.path_hash || "")}</td>
+      </tr>
+    `)
     .join("");
 }
 
@@ -618,8 +712,19 @@ function patchEvents(previousEvents, nextEvents) {
     if (existing.has(record.id)) break;
     newest.push(record);
   }
-  if (!newest.length) return;
-  prependEventRows(newest);
+  if (newest.length) prependEventRows(newest);
+  trimEventRows(nextEvents.length);
+}
+
+// trimEventRows drops trailing rows so the poll path's prepends never grow the
+// table past the active limit; nextEvents is the server's limited slice, so its
+// length is the row budget for the current view.
+function trimEventRows(maxRows) {
+  const tbody = $("#events");
+  if (!tbody || !(maxRows > 0)) return;
+  while (tbody.children.length > maxRows) {
+    tbody.removeChild(tbody.lastElementChild);
+  }
 }
 
 function prependEventRows(records) {
