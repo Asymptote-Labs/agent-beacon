@@ -1,0 +1,38 @@
+# Reference workflow for testing Agent Beacon CI telemetry with direct Splunk
+# HEC forwarding. Copy this file to .github/workflows/ in a test repository
+# and update the Splunk endpoint, secret names, and action ref.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a reference
+# only and does not run in this repository.
+# Replace <tag> with the Beacon release tag you want to run (v0.0.39 or newer).
+
+name: Test Agent Beacon Splunk forward
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beacon-splunk-forward:
+    runs-on: ubuntu-latest
+    # Keep the Splunk token at the job level so Beacon can forward events
+    # without exposing the secret to the Claude child process.
+    env:
+      BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Agent Beacon with Splunk forwarding
+        uses: asymptote-labs/agent-beacon@<tag>
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          command: claude --print "Say hello from Agent Beacon CI telemetry"
+          forward: splunk
+          forward-endpoint: https://splunk.example:8088/services/collector
+          upload-artifact: "true"

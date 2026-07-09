@@ -19,7 +19,6 @@ jobs:
     # exposing secrets to the Claude child process. Omit this block if you only
     # upload the default GitHub artifact.
     env:
-      BEACON_CI_SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
       BEACON_CI_S3_BUCKET: ${{ vars.BEACON_CI_S3_BUCKET }}
       BEACON_CI_S3_PREFIX: github-actions
     steps:
@@ -44,8 +43,9 @@ jobs:
           command: claude --print "Summarize the changes in this pull request"
           # Optional: forward to a customer-managed SIEM before teardown.
           # Requires a Beacon release that includes ci exec --forward.
-          forward: splunk
-          forward-endpoint: https://splunk.example:8088/services/collector
+          # See examples/github-actions/splunk-forward-telemetry.yml.
+          # forward: splunk
+          # forward-endpoint: https://splunk.example:8088/services/collector
           # Optional: upload the completed runtime JSONL to object storage.
           # Supported values: s3, gcs, or s3,gcs.
           # upload: s3
