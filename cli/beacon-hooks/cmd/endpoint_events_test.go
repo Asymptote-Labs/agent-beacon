@@ -116,6 +116,58 @@ func TestRunPromptSubmitOmitsBranchOutsideRepo(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeEventEmitsLocalGitBranch(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "opencode"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/opencode\n")
+
+	runHookWithInput(t, runOpenCodeEvent, map[string]interface{}{
+		"type":       "command.executed",
+		"session_id": "oc-branch",
+		"cwd":        repo,
+		"command":    "ls",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["branch"]; got != "feature/opencode" {
+		t.Fatalf("branch = %q, want feature/opencode", got)
+	}
+}
+
+func TestRunPostToolFileEditEmitsLocalGitBranch(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/edit\n")
+	editedFile := filepath.Join(repo, "pkg", "main.go")
+
+	// No workspace_roots or cwd in the payload: branch must resolve from the
+	// edited file's own directory.
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-edit",
+		"hook_event_name": "afterFileEdit",
+		"file_path":       editedFile,
+		"edits": []interface{}{
+			map[string]interface{}{"old_string": "old line", "new_string": "new line"},
+		},
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	if got := event["branch"]; got != "feature/edit" {
+		t.Fatalf("branch = %q, want feature/edit", got)
+	}
+}
+
 func TestToolFieldsMapsMCPGenAIStandardFields(t *testing.T) {
 	tests := []struct {
 		name       string

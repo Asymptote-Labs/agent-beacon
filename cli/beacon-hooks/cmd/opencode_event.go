@@ -44,6 +44,7 @@ func runOpenCodeEvent(cmd *cobra.Command, args []string) {
 func opencodeEndpointEvent(input map[string]interface{}, sessionID string) (string, string, string, string, map[string]interface{}) {
 	eventType := getFirstStr(input, "type", "event_type", "hook")
 	fields := sessionFields(sessionID, input)
+	applyBranchField(fields, input, "")
 	fields["raw"] = map[string]interface{}{
 		"opencode": input,
 	}

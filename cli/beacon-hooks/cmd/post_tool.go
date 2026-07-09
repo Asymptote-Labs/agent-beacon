@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -85,7 +86,7 @@ func runPostTool(cmd *cobra.Command, args []string) {
 	}
 
 	seedCursorCloudRunID(input)
-	recordLocalEdit(params, logger)
+	recordLocalEdit(params, input, logger)
 	maybeUploadCursorCloudTelemetry(logger)
 	outputJSON(emptyResponse)
 }
@@ -196,7 +197,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 }
 
 // recordLocalEdit logs file-edit metadata without sending code or diffs to a hosted service.
-func recordLocalEdit(params *evaluationParams, logger *logging.Logger) {
+func recordLocalEdit(params *evaluationParams, input map[string]interface{}, logger *logging.Logger) {
 	logger.Info("File edit observed", "file_path", params.filePath, "tool_name", params.toolName)
 	fields := map[string]interface{}{}
 	for key, value := range params.extraFields {
@@ -209,6 +210,7 @@ func recordLocalEdit(params *evaluationParams, logger *logging.Logger) {
 	if params.sessionID != "" {
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
+	applyBranchField(fields, input, filepath.Dir(params.filePath))
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 

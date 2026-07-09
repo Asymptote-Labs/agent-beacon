@@ -65,6 +65,23 @@ func resolveBranch(input map[string]interface{}, cwd string) string {
 	return git.CurrentBranch(cwd)
 }
 
+// applyBranchField fills fields["branch"] for emitters that write endpoint
+// events without going through emitHookEvent. fallbackDir seeds branch
+// resolution when the payload carries no working directory, such as a file
+// edit identified only by its path.
+func applyBranchField(fields map[string]interface{}, input map[string]interface{}, fallbackDir string) {
+	if existing, ok := fields["branch"]; ok && existing != "" {
+		return
+	}
+	cwd := resolveCwd(input, platformFlag)
+	if cwd == "" {
+		cwd = fallbackDir
+	}
+	if branch := resolveBranch(input, cwd); branch != "" {
+		fields["branch"] = branch
+	}
+}
+
 // gitMetadataDisabled accepts 1/true/yes, matching other Beacon disable flags.
 func gitMetadataDisabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEACON_DISABLE_GIT_METADATA"))) {
