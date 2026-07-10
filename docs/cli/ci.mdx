@@ -39,7 +39,7 @@ Some workflows call a third-party action that launches the agent internally. In 
 
 ```yaml title="Wrap a CI action that launches an agent"
 - name: Start Beacon telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: start
     harnesses: claude
@@ -54,7 +54,7 @@ Some workflows call a third-party action that launches the agent internally. In 
 
 - name: Finish Beacon telemetry
   if: always()
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: finish
     min-events: "1"

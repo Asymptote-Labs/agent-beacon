@@ -67,7 +67,7 @@ Use the Asymptote GitHub Action when you want the workflow to install the CI col
 
 ```yaml
 - name: Run an agent with Asymptote telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     command: claude --print "Review this pull request"
     upload-artifact: "true"
@@ -78,7 +78,7 @@ To wrap a third-party action that launches an agent internally, start and finish
 
 ```yaml
 - name: Start Asymptote telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: start
     harnesses: claude
@@ -89,7 +89,7 @@ To wrap a third-party action that launches an agent internally, start and finish
 
 - name: Finish Asymptote telemetry
   if: always()
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: finish
     min-events: "1"
@@ -113,7 +113,7 @@ Upload to Amazon S3:
     aws-region: us-east-1
 
 - name: Run an agent with Asymptote telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   env:
     BEACON_CI_S3_BUCKET: my-beacon-telemetry
     BEACON_CI_S3_PREFIX: github-actions
@@ -131,7 +131,7 @@ Upload to Google Cloud Storage:
     service_account: ${{ secrets.BEACON_GCP_SERVICE_ACCOUNT }}
 
 - name: Run an agent with Asymptote telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   env:
     BEACON_CI_GCS_BUCKET: my-beacon-telemetry
     BEACON_CI_GCS_PREFIX: github-actions
