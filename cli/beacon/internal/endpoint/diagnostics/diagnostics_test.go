@@ -51,7 +51,7 @@ func TestCheckLogPermissions(t *testing.T) {
 	if err := os.Chmod(logPath, 0666); err != nil {
 		t.Fatalf("chmod writable log: %v", err)
 	}
-	if check := checkLogPermissions(logPath); check.Status != "fail" || check.Severity != "high" {
+	if check := checkLogPermissions(logPath); check.Status != "ok" {
 		t.Fatalf("0666 log permissions check = %#v", check)
 	}
 
@@ -60,6 +60,13 @@ func TestCheckLogPermissions(t *testing.T) {
 	}
 	if check := checkLogPermissions(logPath); check.Status != "warn" || check.Severity != "low" {
 		t.Fatalf("0200 log permissions check = %#v", check)
+	}
+
+	if err := os.Chmod(logPath, 0444); err != nil {
+		t.Fatalf("chmod non-writable log: %v", err)
+	}
+	if check := checkLogPermissions(logPath); check.Status != "fail" || check.Severity != "high" || check.Evidence != "not_writable" {
+		t.Fatalf("0444 log permissions check = %#v", check)
 	}
 }
 

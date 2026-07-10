@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/elastic"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 func runEndpointElasticUp(ctx context.Context) error {
@@ -85,14 +86,7 @@ func ensureLogFile(path string) error {
 	if path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	return file.Close()
+	return writer.EnsureRuntimeFile(path)
 }
 
 func runDockerCompose(ctx context.Context, dir string, env []string, args ...string) error {

@@ -18,6 +18,7 @@ import (
 const (
 	defaultEndpointRotateBytes    = 10 * 1024 * 1024
 	defaultEndpointRotateArchives = 5
+	endpointRuntimeFileMode       = 0666
 )
 
 // Logger provides structured JSON logging for hook events
@@ -273,7 +274,7 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	lock, err := openEndpointRuntimeFile(path+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return err
 	}
@@ -289,13 +290,32 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if err := rotateEndpointLogIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := openEndpointRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	_, err = f.Write(line)
 	return err
+}
+
+func openEndpointRuntimeFile(path string, flag int) (*os.File, error) {
+	existed := true
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		existed = false
+	}
+	f, err := os.OpenFile(path, flag, endpointRuntimeFileMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, endpointRuntimeFileMode); err != nil && !existed {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 func rotateEndpointLogIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {

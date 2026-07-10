@@ -21,6 +21,7 @@ const (
 	DefaultRotateBytes    = 10 * 1024 * 1024
 	DefaultRotateArchives = 5
 	RotateBytes           = DefaultRotateBytes
+	runtimeFileMode       = 0666
 )
 
 type Options struct {
@@ -81,6 +82,20 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	return opts.Path, nil
 }
 
+// EnsureRuntimeFile creates the shared runtime log with the shared writable
+// mode without appending an event, for doctor --fix and setup flows that
+// pre-create the log so user-run hooks can append to it later.
+func EnsureRuntimeFile(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	f, err := openRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 func LastLine(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -107,7 +122,7 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	lock, err := openRuntimeFile(path+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return err
 	}
@@ -123,13 +138,32 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := openRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	_, err = f.Write(line)
 	return err
+}
+
+func openRuntimeFile(path string, flag int) (*os.File, error) {
+	existed := true
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		existed = false
+	}
+	f, err := os.OpenFile(path, flag, runtimeFileMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, runtimeFileMode); err != nil && !existed {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {

@@ -87,8 +87,8 @@ func checkLogPermissions(path string) Check {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: "runtime log not created yet", Evidence: "runtime_log_missing"}
 	}
 	mode := info.Mode().Perm()
-	if mode&0022 != 0 {
-		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh, Message: fmt.Sprintf("runtime log is group/world writable: %o", mode), Evidence: "group_or_world_writable"}
+	if mode&0222 == 0 {
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh, Message: fmt.Sprintf("runtime log is not writable: %o", mode), Evidence: "not_writable"}
 	}
 	if mode&0044 == 0 {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
