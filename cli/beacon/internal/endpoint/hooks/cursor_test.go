@@ -35,6 +35,9 @@ func TestInstallCursorHooksJSONPreservesNonBeaconHooks(t *testing.T) {
 	if !strings.Contains(text, "BEACON_ENDPOINT_CONFIG='/tmp/config.json'") {
 		t.Fatalf("endpoint config env was not added: %s", text)
 	}
+	if !strings.Contains(text, `"afterAgentThought"`) || !strings.Contains(text, "agent-thought") {
+		t.Fatalf("afterAgentThought reasoning hook was not installed: %s", text)
+	}
 }
 
 func TestRemoveEndpointHooksPreservesOtherHooks(t *testing.T) {

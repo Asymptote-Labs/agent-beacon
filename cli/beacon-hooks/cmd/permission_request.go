@@ -32,12 +32,7 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 	}
 
 	sessionID := resolveSessionID(input, platformFlag)
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("permission-request", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("permission-request", platformFlag)
-	}
+	logger := newHookLogger("permission-request", platformFlag, sessionID)
 
 	if deny, denied := enforcePolicy(logger, input, sessionID, policycontract.PhasePermissionRequest); denied {
 		outputJSON(deny)

@@ -37,12 +37,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	}
 
 	sessionID := resolveSessionID(input, platformFlag)
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("pre-tool", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("pre-tool", platformFlag)
-	}
+	logger := newHookLogger("pre-tool", platformFlag, sessionID)
 
 	logger.Debug("Pre-tool observed")
 	if deny, denied := enforcePolicy(logger, input, sessionID, policycontract.PhasePreTool); denied {

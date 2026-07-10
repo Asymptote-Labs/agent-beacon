@@ -95,6 +95,7 @@ func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error 
 		"sessionStart":       {Command: commandPrefix + " session-start"},
 		"beforeSubmitPrompt": {Command: commandPrefix + " prompt-submit", Timeout: 30},
 		"preToolUse":         {Command: commandPrefix + " pre-tool", Matcher: "Write|Edit|MultiEdit|Shell|MCP"},
+		"afterAgentThought":  {Command: commandPrefix + " agent-thought"},
 		"afterFileEdit":      {Command: commandPrefix + " post-tool"},
 		"postToolUse":        {Command: commandPrefix + " post-tool"},
 		"postToolUseFailure": {Command: commandPrefix + " post-tool"},

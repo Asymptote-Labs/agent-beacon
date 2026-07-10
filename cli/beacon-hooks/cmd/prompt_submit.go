@@ -3,7 +3,6 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
 )
 
@@ -20,24 +19,14 @@ func init() {
 }
 
 func runPromptSubmit(cmd *cobra.Command, args []string) {
-	noopResponse := emptyResponse
-	if platformFlag == "cursor" {
-		noopResponse = map[string]interface{}{"continue": true}
-	}
-
 	input, err := readStdinJSON()
 	if err != nil {
-		outputJSON(noopResponse)
+		outputJSON(hookNoopResponse())
 		return
 	}
 
 	sessionID := resolveSessionID(input, platformFlag)
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("prompt-submit", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("prompt-submit", platformFlag)
-	}
+	logger := newHookLogger("prompt-submit", platformFlag, sessionID)
 
 	logger.Debug("Prompt submit observed")
 	maybeEmitInventoryHeartbeat(logger, input)
@@ -65,5 +54,5 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	outputJSON(noopResponse)
+	outputJSON(hookNoopResponse())
 }

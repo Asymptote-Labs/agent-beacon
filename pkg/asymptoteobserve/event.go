@@ -200,11 +200,16 @@ type PromptInfo struct {
 	Text string `json:"text,omitempty"`
 }
 
+// ContentInfo marks how an event's retained raw content was handled. Hash and
+// Bytes describe the original content before redaction/truncation, so events
+// keep a stable identifier and size even when the stored text was cut down.
 type ContentInfo struct {
 	Retention string `json:"retention"`
 	Included  bool   `json:"included"`
 	Redacted  bool   `json:"redacted,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
+	Hash      string `json:"hash,omitempty"`
+	Bytes     int    `json:"bytes,omitempty"`
 }
 
 const (

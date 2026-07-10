@@ -111,6 +111,9 @@ func TestEndpointEventDoesNotInventCloudRunID(t *testing.T) {
 	t.Setenv("BEACON_RUN_PROVIDER", "claude_code_web")
 	t.Setenv("BEACON_CLOUD_GCS_BUCKET", "bucket")
 	t.Setenv("BEACON_CLOUD_GCS_CREDENTIALS_B64", "credentials")
+	// cloudRunFields falls back to this env var; clear it so the test stays
+	// hermetic when it runs inside a Claude Code remote session.
+	t.Setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "")
 
 	logger := NewLoggerForPlatform("session-start", "claude")
 	if err := logger.EndpointEvent("session.started", "session", "info", "Session started", nil); err != nil {

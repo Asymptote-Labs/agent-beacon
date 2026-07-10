@@ -4,8 +4,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
 var opencodeEventCmd = &cobra.Command{
@@ -26,12 +24,7 @@ func runOpenCodeEvent(cmd *cobra.Command, args []string) {
 		return
 	}
 	sessionID := resolveSessionID(input, "opencode")
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("opencode-event", "opencode", sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("opencode-event", "opencode")
-	}
+	logger := newHookLogger("opencode-event", "opencode", sessionID)
 	action, category, severity, message, fields := opencodeEndpointEvent(input, sessionID)
 	if action == "" {
 		outputJSON(emptyResponse)

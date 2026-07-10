@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
 // readStdinJSON decodes JSON from stdin into a map.
@@ -31,6 +33,24 @@ func outputJSONAndExit(data map[string]interface{}) {
 // emptyResponse is a reusable empty JSON response.
 var emptyResponse = map[string]interface{}{}
 
+// hookNoopResponse returns the platform's expected no-op hook reply. Call it
+// after readStdinJSON so payload-based platform overrides have been applied.
+func hookNoopResponse() map[string]interface{} {
+	if platformFlag == "cursor" {
+		return map[string]interface{}{"continue": true}
+	}
+	return emptyResponse
+}
+
+// newHookLogger returns a per-session logger when a session ID is known and a
+// per-platform logger otherwise.
+func newHookLogger(hookName, platform, sessionID string) *logging.Logger {
+	if sessionID != "" {
+		return logging.NewSessionLogger(hookName, platform, sessionID)
+	}
+	return logging.NewLoggerForPlatform(hookName, platform)
+}
+
 func isDevinLikePlatform(platform string) bool {
 	return platform == "devin" || platform == "devin-cli"
 }
@@ -54,7 +74,7 @@ func looksLikeCursorPayload(input map[string]interface{}) bool {
 		return true
 	}
 	switch getFirstStr(input, "hook_event_name", "hookEventName") {
-	case "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "beforeReadFile", "afterFileEdit", "postToolUse", "postToolUseFailure", "preCompact", "subagentStart", "subagentStop":
+	case "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "beforeReadFile", "afterFileEdit", "afterAgentThought", "postToolUse", "postToolUseFailure", "preCompact", "subagentStart", "subagentStop":
 		return true
 	default:
 		return false
