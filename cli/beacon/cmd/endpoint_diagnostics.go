@@ -974,7 +974,7 @@ func actionForCheck(check diagnostics.Check, runtimeLog lifecycle.RuntimeLogSour
 		if check.Evidence == "runtime_log_missing" || check.Evidence == "missing_optional_file" {
 			return "beacon endpoint doctor --fix"
 		}
-		return "chmod 644 " + check.Target
+		return "chmod 666 " + check.Target
 	case "runtime_log_source":
 		if runtimeLog.RequestedUserMode && !runtimeLog.EffectiveUserMode {
 			return "stop the system collector or run beacon endpoint install --user"

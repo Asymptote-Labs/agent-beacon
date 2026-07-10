@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -38,6 +39,31 @@ func TestEndpointEventStillWritesStructuredTelemetry(t *testing.T) {
 
 	if data, err := os.ReadFile(logPath); err != nil || len(data) == 0 {
 		t.Fatalf("expected structured endpoint event, len=%d err=%v", len(data), err)
+	}
+}
+
+func TestEndpointEventCreatesSharedRuntimeFilesDespiteUmask(t *testing.T) {
+	oldUmask := syscall.Umask(0022)
+	t.Cleanup(func() {
+		syscall.Umask(oldUmask)
+	})
+
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("agent-thought", "cursor")
+	if err := logger.EndpointEvent("agent.reasoning", "session", "info", "Agent reasoning captured", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	for _, target := range []string{logPath, logPath + ".lock"} {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("stat %s: %v", target, err)
+		}
+		if got := info.Mode().Perm(); got != endpointRuntimeFileMode {
+			t.Fatalf("%s mode = %o, want %o", target, got, endpointRuntimeFileMode)
+		}
 	}
 }
 
