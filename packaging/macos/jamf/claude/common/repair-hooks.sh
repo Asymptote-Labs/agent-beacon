@@ -43,7 +43,11 @@ mkdir -p "$RUNTIME_DIR"
 touch "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
 chown root:wheel "$RUNTIME_DIR" "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
 chmod 755 "$RUNTIME_DIR"
-chmod 644 "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
+# Runtime log and lock stay 666 so user-run hooks can append even when a
+# root-owned rotation or collector recreates them; Beacon's writers use the
+# same shared mode.
+chmod 666 "$RUNTIME_LOG" "$RUNTIME_LOCK"
+chmod 644 "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
 
 CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
 

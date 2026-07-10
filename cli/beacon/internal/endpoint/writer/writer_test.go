@@ -71,6 +71,26 @@ func TestAppendEventCreatesSharedRuntimeFilesDespiteUmask(t *testing.T) {
 	}
 }
 
+func TestEnsureRuntimeFileCreatesSharedRuntimeLogDespiteUmask(t *testing.T) {
+	oldUmask := syscall.Umask(0022)
+	t.Cleanup(func() {
+		syscall.Umask(oldUmask)
+	})
+
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := EnsureRuntimeFile(path); err != nil {
+		t.Fatalf("EnsureRuntimeFile returned error: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != runtimeFileMode {
+		t.Fatalf("%s mode = %o, want %o", path, got, runtimeFileMode)
+	}
+}
+
 func TestAppendEventRedactsSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	event := schema.NewEvent(schema.NewEventOptions{

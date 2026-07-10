@@ -82,6 +82,20 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	return opts.Path, nil
 }
 
+// EnsureRuntimeFile creates the shared runtime log with the shared writable
+// mode without appending an event, for doctor --fix and setup flows that
+// pre-create the log so user-run hooks can append to it later.
+func EnsureRuntimeFile(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	f, err := openRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 func LastLine(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
