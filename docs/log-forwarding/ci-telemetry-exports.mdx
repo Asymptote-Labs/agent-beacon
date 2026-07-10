@@ -31,7 +31,7 @@ The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a 
 
 ```yaml
 - name: Run Claude with Beacon telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     command: claude --print "Review this pull request"
     upload-artifact: "true"
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Claude with Beacon telemetry
-        uses: asymptote-labs/agent-beacon@v0.0.66
+        uses: asymptote-labs/agent-beacon@v0.0.95
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
@@ -113,7 +113,7 @@ Configure cloud credentials at the job level, then pass the upload destination t
     aws-region: us-east-1
 
 - name: Run Claude with Beacon telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   env:
     BEACON_CI_S3_BUCKET: my-beacon-telemetry
     BEACON_CI_S3_PREFIX: github-actions
@@ -135,7 +135,7 @@ For GCS, authenticate with your normal Google Cloud CI mechanism and set `BEACON
     service_account: ${{ secrets.BEACON_GCP_SERVICE_ACCOUNT }}
 
 - name: Run Claude with Beacon telemetry
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   env:
     BEACON_CI_GCS_BUCKET: my-beacon-telemetry
     BEACON_CI_GCS_PREFIX: github-actions

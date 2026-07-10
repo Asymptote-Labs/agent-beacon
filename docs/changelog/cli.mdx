@@ -9,6 +9,28 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
+## July 2026
+
+### v0.0.95 · July 10, 2026
+
+- **Cursor telemetry docs polish** · Fixed punctuation and grammar in the Cursor telemetry support table so local and cloud hook coverage is easier to scan.
+
+### v0.0.94 · July 10, 2026
+
+- **Cursor agent reasoning telemetry** · Local Cursor hooks now capture completed `afterAgentThought` thinking blocks as `agent.reasoning` events, preserving the text in the OpenTelemetry GenAI `gen_ai.output.messages` reasoning-part shape when Cursor exposes visible thinking text.
+- **Hook inventory dashboard fixes** · Added a dedicated Hook Inventory dashboard page and fixed summary aggregation and poll-path row limits so inventory coverage is easier to inspect locally.
+
+### v0.0.93 · July 9, 2026
+
+- **Branch attribution without git execution** · Hook events can now fill `branch` from the local checkout by reading `.git/HEAD` directly when the runtime payload does not provide one, avoiding broken-worktree walks and keeping branch context paired with workspace fields.
+- **CI export reference workflows** · Added GitHub Actions examples for forwarding CI telemetry to Splunk HEC and uploading completed runtime JSONL to S3.
+- **S3 setup doc updates** · Clarified IAM user configuration and AWS S3 setup steps for customer-managed telemetry upload paths.
+
+### v0.0.92 · July 1, 2026
+
+- **Package install repair for active users** · macOS package installs now repair the active user's runtime configuration after package updates, helping user-context hooks keep pointing at the current packaged binaries.
+- **Codex hook docs alignment** · Updated Codex hook guidance after reverting the in-progress Codex session token attribution changes, preserving the current contract where Codex token usage has model, harness, repository, and run attribution but no per-session rollup.
+
 ## June 2026
 
 ### v0.0.91 · June 29, 2026

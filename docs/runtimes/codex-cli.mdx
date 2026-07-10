@@ -40,7 +40,7 @@ Asymptote can also capture Codex telemetry in CI with `beacon ci start` and `bea
 ```yaml
 - name: Start Asymptote telemetry
   id: beacon
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: start
     harnesses: codex
@@ -53,7 +53,7 @@ Asymptote can also capture Codex telemetry in CI with `beacon ci start` and `bea
 
 - name: Finish Asymptote telemetry
   if: always()
-  uses: asymptote-labs/agent-beacon@v0.0.66
+  uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: finish
 ```
