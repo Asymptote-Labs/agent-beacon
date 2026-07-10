@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
 var subagentStartCmd = &cobra.Command{
@@ -34,12 +32,7 @@ func runSubagentLifecycle(action, message string) {
 		return
 	}
 	sessionID := resolveSessionID(input, platformFlag)
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("subagent", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("subagent", platformFlag)
-	}
+	logger := newHookLogger("subagent", platformFlag, sessionID)
 	fields := sessionFields(sessionID, input)
 	subagent := map[string]interface{}{
 		"id":   getFirstStr(input, "subagent_id", "agent_id", "agentId"),

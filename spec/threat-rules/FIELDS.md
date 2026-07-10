@@ -15,6 +15,8 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.command.command` | string |
 | `e.command.duration_ms` | int |
 | `e.command.exit_code` | int |
+| `e.content.bytes` | int |
+| `e.content.hash` | string |
 | `e.content.included` | bool |
 | `e.content.redacted` | bool |
 | `e.content.retention` | string |

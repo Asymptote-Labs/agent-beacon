@@ -42,12 +42,7 @@ func runPostTool(cmd *cobra.Command, args []string) {
 
 	// Resolve session ID early so we can use per-session logger
 	sessionID := resolveSessionID(input, platformFlag)
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("post-tool-async-scan", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("post-tool-async-scan", platformFlag)
-	}
+	logger := newHookLogger("post-tool-async-scan", platformFlag, sessionID)
 
 	var params *evaluationParams
 

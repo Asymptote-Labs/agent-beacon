@@ -29,7 +29,7 @@ Do not recreate or depend on removed `asymptote` mirror trees. Keep new work foc
 Supported runtime surfaces today:
 
 - Claude Code and Codex CLI telemetry configuration through local OpenTelemetry settings.
-- Cursor hook telemetry for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, and file edits where hook payloads expose those fields.
+- Cursor hook telemetry for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, file edits, and agent reasoning (`afterAgentThought` thinking text recorded as `agent.reasoning` events in the OTel GenAI `gen_ai.output.messages` reasoning-part shape) where hook payloads expose those fields.
 - Claude Cowork admin-configured OpenTelemetry setup guidance and local validation.
 - `beaconjson` OpenTelemetry Collector exporter that converts OTLP logs, traces, metrics, and resource attributes into Beacon endpoint JSONL.
 - Asymptote Observe TypeScript SDK instrumentation for cloud applications, starting from OpenTelemetry/OpenLLMetry patterns and `observe()` wrappers.

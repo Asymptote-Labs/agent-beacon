@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
 )
 
@@ -38,12 +37,7 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	sessionID, transcriptPath := resolveSessionIDWithTranscript(input, platformFlag)
 
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("stop", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("stop", platformFlag)
-	}
+	logger := newHookLogger("stop", platformFlag, sessionID)
 
 	logger.Debug("Stop hook called", "session_id", sessionID, "has_transcript", transcriptPath != "", "platform", platformFlag)
 	if sessionID == "" {

@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
 var cursorEventCmd = &cobra.Command{
@@ -23,12 +21,7 @@ func runCursorEvent(cmd *cobra.Command, args []string) {
 		return
 	}
 	sessionID := resolveSessionID(input, platformFlag)
-	var logger *logging.Logger
-	if sessionID != "" {
-		logger = logging.NewSessionLogger("cursor-event", platformFlag, sessionID)
-	} else {
-		logger = logging.NewLoggerForPlatform("cursor-event", platformFlag)
-	}
+	logger := newHookLogger("cursor-event", platformFlag, sessionID)
 	switch getFirstStr(input, "hook_event_name", "hookEventName") {
 	case "preCompact":
 		emitHookEvent(logger, "session.compacting", "session", "info", "Context compaction observed", input, sessionFields(sessionID, input))
