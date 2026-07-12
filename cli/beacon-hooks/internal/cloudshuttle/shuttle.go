@@ -503,7 +503,7 @@ func signS3Request(req *http.Request, cfg Config, payloadHash string) {
 	signedHeaders := strings.Join(keys, ";")
 	canonicalRequest := strings.Join([]string{
 		req.Method,
-		req.URL.EscapedPath(),
+		awsCanonicalURI(req.URL.Path),
 		req.URL.RawQuery,
 		canonicalHeaders.String(),
 		signedHeaders,
@@ -678,6 +678,30 @@ func escapeObjectName(objectName string) string {
 
 func escapePath(value string) string {
 	return (&url.URL{Path: value}).EscapedPath()
+}
+
+func awsCanonicalURI(pathValue string) string {
+	if pathValue == "" {
+		return "/"
+	}
+	var out strings.Builder
+	for i := 0; i < len(pathValue); i++ {
+		b := pathValue[i]
+		switch {
+		case b == '/':
+			out.WriteByte('/')
+		case (b >= 'A' && b <= 'Z') ||
+			(b >= 'a' && b <= 'z') ||
+			(b >= '0' && b <= '9') ||
+			b == '-' || b == '_' || b == '.' || b == '~':
+			out.WriteByte(b)
+		default:
+			out.WriteByte('%')
+			out.WriteByte("0123456789ABCDEF"[b>>4])
+			out.WriteByte("0123456789ABCDEF"[b&0x0f])
+		}
+	}
+	return out.String()
 }
 
 func defaultString(value, fallback string) string {

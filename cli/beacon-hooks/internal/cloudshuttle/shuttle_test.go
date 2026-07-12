@@ -270,6 +270,14 @@ func TestUploadSendsJSONLToS3(t *testing.T) {
 	}
 }
 
+func TestAWSCanonicalURIEncodesHivePartitionEquals(t *testing.T) {
+	got := awsCanonicalURI("/bucket/prefix/runtime/date=2026-07-12/1783891419-claude_code_web-cse_123.jsonl.gz")
+	want := "/bucket/prefix/runtime/date%3D2026-07-12/1783891419-claude_code_web-cse_123.jsonl.gz"
+	if got != want {
+		t.Fatalf("awsCanonicalURI = %q, want %q", got, want)
+	}
+}
+
 func TestUploadReusesLastObjectForSameRun(t *testing.T) {
 	current := time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC)
 	restore := stubNowFunc(t, func() time.Time { return current })
