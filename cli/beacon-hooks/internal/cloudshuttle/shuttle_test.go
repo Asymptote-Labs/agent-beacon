@@ -166,6 +166,22 @@ func TestConfigFromEnvSelectsS3(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvDefaultsToGCSWhenS3BucketIsAlsoSet(t *testing.T) {
+	t.Setenv("BEACON_CLOUD_UPLOAD", "")
+	t.Setenv("BEACON_CLOUD_GCS_BUCKET", "gcs-bucket")
+	t.Setenv("BEACON_CLOUD_GCS_PREFIX", "gcs-prefix")
+	t.Setenv("BEACON_CLOUD_GCS_CREDENTIALS_B64", "gcs-credentials")
+	t.Setenv("BEACON_CLOUD_S3_BUCKET", "s3-bucket")
+
+	cfg := ConfigFromEnv()
+	if cfg.Upload != uploadGCS {
+		t.Fatalf("Upload = %q, want %q", cfg.Upload, uploadGCS)
+	}
+	if cfg.Bucket != "gcs-bucket" || cfg.Prefix != "gcs-prefix" || cfg.CredentialsB64 != "gcs-credentials" {
+		t.Fatalf("unexpected GCS config: %#v", cfg)
+	}
+}
+
 func TestUploadSendsJSONLToS3(t *testing.T) {
 	var uploadedPath, uploadedAuth, uploadedDate, uploadedHash, uploadedToken, uploadedType, uploadedBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

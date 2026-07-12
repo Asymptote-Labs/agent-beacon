@@ -516,9 +516,6 @@ func cloudUploadFromEnv() string {
 	case uploadGCS:
 		return uploadGCS
 	}
-	if strings.TrimSpace(os.Getenv("BEACON_CLOUD_S3_BUCKET")) != "" {
-		return uploadS3
-	}
 	return uploadGCS
 }
 
