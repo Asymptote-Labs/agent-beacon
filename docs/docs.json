@@ -374,6 +374,7 @@
                 ]
               },
               "cli/scan",
+              "cli/token-usage-sync-cursor",
               "cli/token-usage",
               "cli/version"
             ]

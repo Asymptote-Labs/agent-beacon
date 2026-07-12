@@ -282,9 +282,13 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 }
 
 // dedupeOverlappingChannels removes double-counted usage when a runtime reports
-// the same tokens through two OTel channels. Claude Code emits each request's
+// the same tokens through two channels. Claude Code emits each request's
 // usage on both a claude_code.api_request log record and the
 // claude_code.token.usage metric, so ingesting both doubles every token field.
+// The Cursor state-store sync (beacon token-usage sync-cursor) relies on the same
+// contract from the other side: it stamps its events with
+// raw.metric_name=cursor.db.token.usage so that hook-payload usage (a log/span
+// channel), if Cursor ever ships it, takes precedence over synced counts.
 //
 // The log/span channel (events without a metric_name) is the token source of
 // truth: it carries full per-request usage under the base model name. For each

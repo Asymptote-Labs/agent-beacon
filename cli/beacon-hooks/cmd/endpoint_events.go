@@ -36,9 +36,10 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if isCascadePlatform(platformFlag) {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"cascade": input})
 	}
-	if model := getFirstStr(input, "model"); model != "" {
+	if model := getFirstStr(input, "model", "model_id"); model != "" {
 		fields["model"] = model
 	}
+	applyGenAIUsageFields(fields, input)
 	cwd := resolveCwd(input, platformFlag)
 	if cwd != "" {
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"working_directory": cwd})
