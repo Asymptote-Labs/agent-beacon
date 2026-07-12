@@ -2,6 +2,7 @@ package cloudshuttle
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto"
 	"crypto/hmac"
@@ -33,12 +34,14 @@ const (
 	defaultTokenURI    = "https://oauth2.googleapis.com/token"
 	defaultGCSEndpoint = "https://storage.googleapis.com"
 	defaultS3Region    = "us-east-1"
-	contentTypeJSONL   = "text/plain; charset=utf-8"
+	contentTypeJSONL   = "application/x-ndjson"
+	contentEncoding    = "gzip"
 	uploadGCS          = "gcs"
 	uploadS3           = "s3"
 )
 
 var httpClient = http.DefaultClient
+var nowUTC = func() time.Time { return time.Now().UTC() }
 
 type Config struct {
 	Upload         string
@@ -69,6 +72,8 @@ type state struct {
 	LastUpload string `json:"last_upload,omitempty"`
 	LastSize   int64  `json:"last_size,omitempty"`
 	LastObject string `json:"last_object,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
 }
 
 type tokenResponse struct {
@@ -155,7 +160,7 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		return err
 	}
 	defer cleanup()
-	objectName := ObjectName(cfg)
+	objectName := uploadObjectName(cfg)
 	if err := uploadSnapshot(ctx, cfg, objectName, snapshot); err != nil {
 		return err
 	}
@@ -163,20 +168,42 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		LastUpload: time.Now().UTC().Format(time.RFC3339),
 		LastSize:   info.Size(),
 		LastObject: objectName,
+		Provider:   cfg.Provider,
+		RunID:      cfg.RunID,
 	})
 }
 
+func uploadObjectName(cfg Config) string {
+	st, err := readState(cfg.StatePath)
+	if err == nil && stateObjectMatchesConfig(st, cfg) {
+		return strings.TrimSpace(st.LastObject)
+	}
+	return ObjectName(cfg)
+}
+
+func stateObjectMatchesConfig(st state, cfg Config) bool {
+	objectName := strings.TrimSpace(st.LastObject)
+	if objectName == "" {
+		return false
+	}
+	if st.Provider != "" || st.RunID != "" {
+		return st.Provider == cfg.Provider && st.RunID == cfg.RunID
+	}
+	provider := cleanKeyPart(defaultString(cfg.Provider, "unknown"))
+	runID := cleanKeyPart(defaultString(cfg.RunID, "unknown"))
+	return strings.HasSuffix(path.Base(objectName), "-"+provider+"-"+runID+".jsonl.gz")
+}
+
 func ObjectName(cfg Config) string {
+	now := nowUTC()
 	parts := cleanKeyParts(cfg.Prefix)
-	parts = append(parts, "provider="+cleanKeyPart(defaultString(cfg.Provider, "unknown")))
-	if cfg.UserID != "" {
-		parts = append(parts, "user_id="+cleanKeyPart(cfg.UserID))
-	}
-	if cfg.Repository != "" {
-		parts = append(parts, cleanKeyParts("repo="+cfg.Repository)...)
-	}
-	parts = append(parts, "run_id="+cleanKeyPart(defaultString(cfg.RunID, "unknown")))
-	parts = append(parts, "runtime.jsonl")
+	parts = append(parts, "runtime", "date="+now.Format("2006-01-02"))
+	filename := strings.Join([]string{
+		fmt.Sprintf("%d", now.Unix()),
+		cleanKeyPart(defaultString(cfg.Provider, "unknown")),
+		cleanKeyPart(defaultString(cfg.RunID, "unknown")),
+	}, "-") + ".jsonl.gz"
+	parts = append(parts, filename)
 	return path.Join(parts...)
 }
 
@@ -325,16 +352,52 @@ func parseRSAPrivateKey(raw string) (*rsa.PrivateKey, error) {
 }
 
 func uploadSnapshot(ctx context.Context, cfg Config, objectName, filePath string) error {
+	compressedPath, cleanup, err := gzipSnapshot(filePath)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	switch cfg.Upload {
 	case uploadS3:
-		return uploadS3Object(ctx, cfg, objectName, filePath)
+		return uploadS3Object(ctx, cfg, objectName, compressedPath)
 	default:
 		token, err := accessToken(ctx, cfg.CredentialsB64)
 		if err != nil {
 			return err
 		}
-		return uploadGCSObject(ctx, cfg.GCSEndpoint, cfg.Bucket, objectName, filePath, token)
+		return uploadGCSObject(ctx, cfg.GCSEndpoint, cfg.Bucket, objectName, compressedPath, token)
 	}
+}
+
+func gzipSnapshot(filePath string) (string, func(), error) {
+	source, err := os.Open(filePath)
+	if err != nil {
+		return "", func() {}, err
+	}
+	defer source.Close()
+	temp, err := os.CreateTemp(filepath.Dir(filePath), "beacon-cloud-*.jsonl.gz")
+	if err != nil {
+		return "", func() {}, err
+	}
+	tempPath := temp.Name()
+	cleanup := func() { _ = os.Remove(tempPath) }
+	gz := gzip.NewWriter(temp)
+	if _, err := io.Copy(gz, source); err != nil {
+		_ = gz.Close()
+		_ = temp.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := gz.Close(); err != nil {
+		_ = temp.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := temp.Close(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return tempPath, cleanup, nil
 }
 
 func uploadGCSObject(ctx context.Context, endpoint, bucket, objectName, filePath, token string) error {
@@ -353,6 +416,7 @@ func uploadGCSObject(ctx context.Context, endpoint, bucket, objectName, filePath
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", contentTypeJSONL)
+	req.Header.Set("Content-Encoding", contentEncoding)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
@@ -391,6 +455,7 @@ func uploadS3Object(ctx context.Context, cfg Config, objectName, filePath string
 		req.ContentLength = info.Size()
 	}
 	req.Header.Set("Content-Type", contentTypeJSONL)
+	req.Header.Set("Content-Encoding", contentEncoding)
 	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 	req.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
 	if cfg.S3SessionToken != "" {
@@ -414,6 +479,7 @@ func signS3Request(req *http.Request, cfg Config, payloadHash string) {
 	dateStamp := amzDate[:8]
 	credentialScope := dateStamp + "/" + cfg.S3Region + "/s3/aws4_request"
 	headers := map[string]string{
+		"content-encoding":     req.Header.Get("Content-Encoding"),
 		"content-type":         req.Header.Get("Content-Type"),
 		"host":                 req.URL.Host,
 		"x-amz-content-sha256": payloadHash,

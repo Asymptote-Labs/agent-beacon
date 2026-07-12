@@ -39,7 +39,7 @@ configured.
 
 Use `beacon cloud` helpers to configure provider-managed cloud agent sandboxes.
 Claude Code on the web and Cursor cloud agents can forward Beacon JSONL to
-customer-managed GCS:
+customer-managed GCS or S3:
 
 ```bash
 ./beacon cloud gcs setup \
@@ -53,7 +53,12 @@ customer-managed GCS:
 
 Copy the printed `BEACON_CLOUD_GCS_BUCKET`,
 `BEACON_CLOUD_GCS_PREFIX`, and `BEACON_CLOUD_GCS_CREDENTIALS_B64`
-values into the cloud agent environment. Also set:
+values into the cloud agent environment.
+
+For S3, use `beacon cloud s3 setup --apply --print-env` and copy the printed
+`BEACON_CLOUD_S3_*` and AWS credential values instead.
+
+For both destinations, also set:
 
 ```bash
 BEACON_ORIGIN=cloud
@@ -84,14 +89,14 @@ paste it into the provider's cloud setup field:
 ```
 
 The setup script installs `beacon-hooks` into the cloud sandbox and uploads a
-browser-viewable `/tmp/beacon/runtime.jsonl` snapshot to GCS. Claude web writes
+gzip-compressed `/tmp/beacon/runtime.jsonl` snapshot to object storage. Claude web writes
 `.claude/settings.local.json` inside the sandbox clone. Cursor cloud uses
 `.cursor/environment.json` to install Beacon and generate project-level
 `.cursor/hooks.json` because Cursor cloud only runs repository project hooks.
 
 ```text
-<prefix>/provider=claude_code_web/user_id=<id>/run_id=<claude-session-id>/runtime.jsonl
-<prefix>/provider=cursor_cloud/user_id=<id>/run_id=<generated-or-explicit-run-id>/runtime.jsonl
+<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<claude-session-id>.jsonl.gz
+<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<generated-or-explicit-run-id>.jsonl.gz
 ```
 
 Cloud network access must allow `oauth2.googleapis.com` and

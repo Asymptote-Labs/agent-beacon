@@ -47,7 +47,7 @@ The setup has four parts:
 Each Cursor cloud agent conversation writes one readable JSONL object:
 
 ```text
-gs://<bucket>/<prefix>/provider=cursor_cloud/user_id=<user_id>/run_id=<cursor_conversation_id>/runtime.jsonl
+gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<cursor_conversation_id>.jsonl.gz
 ```
 
 Beacon uses Cursor's `conversation_id` hook field as the default `run_id` for
@@ -242,7 +242,7 @@ gcloud storage ls --recursive "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PRE
 You should see a path like:
 
 ```text
-provider=cursor_cloud/user_id=<user_id>/run_id=<run_id>/runtime.jsonl
+runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<run_id>.jsonl.gz
 ```
 
 <Frame caption="Beacon uploads one readable runtime.jsonl object per Cursor cloud agent session.">
@@ -252,7 +252,7 @@ provider=cursor_cloud/user_id=<user_id>/run_id=<run_id>/runtime.jsonl
 Inspect the log:
 
 ```bash
-gcloud storage cat "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=cursor_cloud/user_id=<user_id>/run_id=<run_id>/runtime.jsonl" | head
+gcloud storage cat "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | head
 ```
 
 Expected fields include:
