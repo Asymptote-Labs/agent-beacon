@@ -1,6 +1,8 @@
 package cloudshuttle
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -17,9 +19,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestObjectNamePartitionsByProviderUserRepoAndRun(t *testing.T) {
+func TestObjectNameUsesDatePartitionedGzipLayout(t *testing.T) {
+	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
+	defer restore()
 	got := ObjectName(Config{
 		Prefix:     "agent-traces/customer=test",
 		Provider:   "claude_code_web",
@@ -27,20 +32,22 @@ func TestObjectNamePartitionsByProviderUserRepoAndRun(t *testing.T) {
 		Repository: "asymptote-labs/agent-beacon",
 		RunID:      "cse_123",
 	})
-	want := "agent-traces/customer=test/provider=claude_code_web/user_id=user-1/repo=asymptote-labs/agent-beacon/run_id=cse_123/runtime.jsonl"
+	want := "agent-traces/customer=test/runtime/date=2026-07-12/1783887423-claude_code_web-cse_123.jsonl.gz"
 	if got != want {
 		t.Fatalf("ObjectName = %q, want %q", got, want)
 	}
 }
 
 func TestObjectNameUsesCursorCloudProvider(t *testing.T) {
+	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
+	defer restore()
 	got := ObjectName(Config{
 		Prefix:   "agent-traces",
 		Provider: "cursor_cloud",
 		UserID:   "user-1",
 		RunID:    "manual-123",
 	})
-	want := "agent-traces/provider=cursor_cloud/user_id=user-1/run_id=manual-123/runtime.jsonl"
+	want := "agent-traces/runtime/date=2026-07-12/1783887423-cursor_cloud-manual-123.jsonl.gz"
 	if got != want {
 		t.Fatalf("ObjectName = %q, want %q", got, want)
 	}
@@ -80,8 +87,11 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 }
 
 func TestUploadSendsJSONLToGCS(t *testing.T) {
+	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
+	defer restore()
 	key := mustRSAKey(t)
-	var uploadedPath, uploadedAuth, uploadedType, uploadedBody string
+	var uploadedPath, uploadedAuth, uploadedType, uploadedEncoding string
+	var uploadedBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
@@ -96,8 +106,9 @@ func TestUploadSendsJSONLToGCS(t *testing.T) {
 			uploadedPath = r.URL.EscapedPath()
 			uploadedAuth = r.Header.Get("Authorization")
 			uploadedType = r.Header.Get("Content-Type")
+			uploadedEncoding = r.Header.Get("Content-Encoding")
 			data, _ := io.ReadAll(r.Body)
-			uploadedBody = string(data)
+			uploadedBody = data
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -136,11 +147,14 @@ func TestUploadSendsJSONLToGCS(t *testing.T) {
 	if uploadedType != contentTypeJSONL {
 		t.Fatalf("Content-Type = %q, want %q", uploadedType, contentTypeJSONL)
 	}
-	if !strings.Contains(uploadedPath, "/bucket/prefix/provider=claude_code_web/user_id=user/run_id=run/runtime.jsonl") {
+	if uploadedEncoding != contentEncoding {
+		t.Fatalf("Content-Encoding = %q, want %q", uploadedEncoding, contentEncoding)
+	}
+	if !strings.Contains(uploadedPath, "/bucket/prefix/runtime/date=2026-07-12/1783887423-claude_code_web-run.jsonl.gz") {
 		t.Fatalf("upload path = %q", uploadedPath)
 	}
-	if uploadedBody != "{\"event\":\"ok\"}\n" {
-		t.Fatalf("uploaded body = %q", uploadedBody)
+	if got := gunzipString(t, uploadedBody); got != "{\"event\":\"ok\"}\n" {
+		t.Fatalf("uploaded body = %q", got)
 	}
 }
 
@@ -183,7 +197,10 @@ func TestConfigFromEnvDefaultsToGCSWhenS3BucketIsAlsoSet(t *testing.T) {
 }
 
 func TestUploadSendsJSONLToS3(t *testing.T) {
-	var uploadedPath, uploadedAuth, uploadedDate, uploadedHash, uploadedToken, uploadedType, uploadedBody string
+	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
+	defer restore()
+	var uploadedPath, uploadedAuth, uploadedDate, uploadedHash, uploadedToken, uploadedType, uploadedEncoding string
+	var uploadedBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		uploadedPath = r.URL.EscapedPath()
 		uploadedAuth = r.Header.Get("Authorization")
@@ -191,8 +208,9 @@ func TestUploadSendsJSONLToS3(t *testing.T) {
 		uploadedHash = r.Header.Get("X-Amz-Content-Sha256")
 		uploadedToken = r.Header.Get("X-Amz-Security-Token")
 		uploadedType = r.Header.Get("Content-Type")
+		uploadedEncoding = r.Header.Get("Content-Encoding")
 		data, _ := io.ReadAll(r.Body)
-		uploadedBody = string(data)
+		uploadedBody = data
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -220,13 +238,13 @@ func TestUploadSendsJSONLToS3(t *testing.T) {
 	if err := Upload(context.Background(), cfg, true); err != nil {
 		t.Fatalf("Upload returned error: %v", err)
 	}
-	if !strings.Contains(uploadedPath, "/bucket/prefix/provider=claude_code_web/user_id=user/run_id=run/runtime.jsonl") {
+	if !strings.Contains(uploadedPath, "/bucket/prefix/runtime/date=2026-07-12/1783887423-claude_code_web-run.jsonl.gz") {
 		t.Fatalf("upload path = %q", uploadedPath)
 	}
 	if !strings.HasPrefix(uploadedAuth, "AWS4-HMAC-SHA256 Credential=AKIATEST/") {
 		t.Fatalf("Authorization = %q", uploadedAuth)
 	}
-	for _, want := range []string{"us-west-2/s3/aws4_request", "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token"} {
+	for _, want := range []string{"us-west-2/s3/aws4_request", "SignedHeaders=content-encoding;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token"} {
 		if !strings.Contains(uploadedAuth, want) {
 			t.Fatalf("Authorization missing %q: %q", want, uploadedAuth)
 		}
@@ -234,7 +252,7 @@ func TestUploadSendsJSONLToS3(t *testing.T) {
 	if uploadedDate == "" {
 		t.Fatal("X-Amz-Date is empty")
 	}
-	sum := sha256.Sum256([]byte(body))
+	sum := sha256.Sum256(uploadedBody)
 	if uploadedHash != hex.EncodeToString(sum[:]) {
 		t.Fatalf("X-Amz-Content-Sha256 = %q", uploadedHash)
 	}
@@ -244,8 +262,11 @@ func TestUploadSendsJSONLToS3(t *testing.T) {
 	if uploadedType != contentTypeJSONL {
 		t.Fatalf("Content-Type = %q, want %q", uploadedType, contentTypeJSONL)
 	}
-	if uploadedBody != body {
-		t.Fatalf("uploaded body = %q", uploadedBody)
+	if uploadedEncoding != contentEncoding {
+		t.Fatalf("Content-Encoding = %q, want %q", uploadedEncoding, contentEncoding)
+	}
+	if got := gunzipString(t, uploadedBody); got != body {
+		t.Fatalf("uploaded body = %q", got)
 	}
 }
 
@@ -278,6 +299,27 @@ func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 		t.Fatalf("generate key: %v", err)
 	}
 	return key
+}
+
+func stubNow(t *testing.T, value time.Time) func() {
+	t.Helper()
+	old := nowUTC
+	nowUTC = func() time.Time { return value.UTC() }
+	return func() { nowUTC = old }
+}
+
+func gunzipString(t *testing.T, data []byte) string {
+	t.Helper()
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer reader.Close()
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("gzip read: %v", err)
+	}
+	return string(out)
 }
 
 func pemKey(t *testing.T, key *rsa.PrivateKey) string {

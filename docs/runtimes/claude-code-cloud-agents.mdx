@@ -53,13 +53,13 @@ The setup has three parts:
 Each Claude Code cloud agent session writes one readable JSONL object:
 
 ```text
-gs://<bucket>/<prefix>/provider=claude_code_web/user_id=<user_id>/run_id=<claude_session_id>/runtime.jsonl
+gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<claude_session_id>.jsonl.gz
 ```
 
 or:
 
 ```text
-s3://<bucket>/<prefix>/provider=claude_code_web/user_id=<user_id>/run_id=<claude_session_id>/runtime.jsonl
+s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<claude_session_id>.jsonl.gz
 ```
 
 ## Prerequisites
@@ -295,7 +295,7 @@ aws s3 ls --recursive "s3://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_S3_PREFIX}/"
 You should see a path like:
 
 ```text
-provider=claude_code_web/user_id=<user_id>/run_id=cse_.../runtime.jsonl
+runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-cse_....jsonl.gz
 ```
 
 <Frame caption="Beacon uploads one readable runtime.jsonl object per Claude Code cloud agent session.">
@@ -305,13 +305,13 @@ provider=claude_code_web/user_id=<user_id>/run_id=cse_.../runtime.jsonl
 Inspect the log:
 
 ```bash
-gcloud storage cat "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=claude_code_web/user_id=<user_id>/run_id=<run_id>/runtime.jsonl" | head
+gcloud storage cat "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | head
 ```
 
 For S3:
 
 ```bash
-aws s3 cp "s3://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_S3_PREFIX}/provider=claude_code_web/user_id=<user_id>/run_id=<run_id>/runtime.jsonl" - | head
+aws s3 cp "s3://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_S3_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" - | gzip -dc | head
 ```
 
 Expected fields include:
