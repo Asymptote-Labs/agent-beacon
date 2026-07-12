@@ -12,9 +12,14 @@ import (
 func TestSafeJoinRejectsTraversal(t *testing.T) {
 	dest := "/tmp/dest"
 	bad := []string{
+		"..",
 		"../escape",
 		"../../etc/passwd",
 		"a/../../escape",
+		"a/../b",
+		"a/..",
+		"a\\..\\..\\escape",
+		"..\\escape",
 		"/etc/passwd",
 		"\\windows\\system32",
 	}
