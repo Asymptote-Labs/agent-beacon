@@ -33,11 +33,18 @@ func acquireLock(path string) (func(), error) {
 }
 
 // safeJoin resolves an archive entry name against dest and rejects anything that
-// would escape dest (path traversal / "zip slip"). It rejects absolute paths and
-// any entry whose cleaned, joined path is not contained within dest.
+// would escape dest (path traversal / "zip slip"). It rejects absolute paths,
+// any ".." path segment (including backslash-separated ones), and any entry
+// whose cleaned, joined path is not contained within dest.
 func safeJoin(dest, name string) (string, error) {
 	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") {
 		return "", fmt.Errorf("absolute path in archive entry: %q", name)
+	}
+	normalized := strings.ReplaceAll(name, "\\", "/")
+	for _, seg := range strings.Split(normalized, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("path traversal in archive entry: %q", name)
+		}
 	}
 	cleanDest := filepath.Clean(dest)
 	target := filepath.Clean(filepath.Join(cleanDest, name))
