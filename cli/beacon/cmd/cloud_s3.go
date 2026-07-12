@@ -46,7 +46,7 @@ func runCloudS3Setup(cmd *cobra.Command, args []string) error {
 	if err := ensureS3Bucket(cloudOpts.bucket, cloudOpts.region); err != nil {
 		return err
 	}
-	if err := runAWS("aws", "s3api", "put-public-access-block", "--bucket", cloudOpts.bucket, "--public-access-block-configuration", "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"); err != nil {
+	if err := runAWS(s3PutPublicAccessBlockCommand(cloudOpts.bucket, cloudOpts.region)...); err != nil {
 		return err
 	}
 	if err := ensureIAMUser(cloudOpts.iamUser); err != nil {
@@ -82,7 +82,7 @@ func s3SetupCommands(bucket, region, prefix, iamUser string) ([][]string, error)
 	commands := [][]string{
 		{"aws", "s3api", "head-bucket", "--bucket", bucket},
 		s3CreateBucketCommand(bucket, region),
-		{"aws", "s3api", "put-public-access-block", "--bucket", bucket, "--public-access-block-configuration", "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"},
+		s3PutPublicAccessBlockCommand(bucket, region),
 		{"aws", "iam", "get-user", "--user-name", iamUser},
 		{"aws", "iam", "create-user", "--user-name", iamUser},
 		{"aws", "iam", "put-user-policy", "--user-name", iamUser, "--policy-name", s3InlinePolicyName, "--policy-document", policy},
@@ -97,6 +97,10 @@ func s3CreateBucketCommand(bucket, region string) []string {
 		args = append(args, "--create-bucket-configuration", "LocationConstraint="+region)
 	}
 	return args
+}
+
+func s3PutPublicAccessBlockCommand(bucket, region string) []string {
+	return []string{"aws", "s3api", "put-public-access-block", "--bucket", bucket, "--region", region, "--public-access-block-configuration", "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"}
 }
 
 func s3UploadPolicy(bucket, prefix string) (string, error) {

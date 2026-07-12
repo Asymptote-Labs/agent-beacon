@@ -189,7 +189,7 @@ func TestS3SetupCommandsUseLeastPrivilegePolicy(t *testing.T) {
 	for _, want := range []string{
 		"aws s3api head-bucket --bucket bucket",
 		"aws s3api create-bucket --bucket bucket --region us-west-2 --create-bucket-configuration LocationConstraint=us-west-2",
-		"aws s3api put-public-access-block --bucket bucket",
+		"aws s3api put-public-access-block --bucket bucket --region us-west-2",
 		"aws iam create-user --user-name beacon-uploader",
 		"aws iam put-user-policy --user-name beacon-uploader --policy-name BeaconCloudTraceUpload",
 		"aws iam create-access-key --user-name beacon-uploader --output json",
