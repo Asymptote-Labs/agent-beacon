@@ -270,6 +270,59 @@ func TestUploadSendsJSONLToS3(t *testing.T) {
 	}
 }
 
+func TestUploadReusesLastObjectForSameRun(t *testing.T) {
+	current := time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC)
+	restore := stubNowFunc(t, func() time.Time { return current })
+	defer restore()
+	var uploadedPaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uploadedPaths = append(uploadedPaths, r.URL.EscapedPath())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"first\"}\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	cfg := Config{
+		Upload:        uploadS3,
+		LogPath:       logPath,
+		StatePath:     filepath.Join(dir, "state.json"),
+		Bucket:        "bucket",
+		Prefix:        "prefix",
+		Provider:      "cursor_cloud",
+		RunID:         "run",
+		S3Region:      "us-west-2",
+		S3AccessKeyID: "AKIATEST",
+		S3SecretKey:   "secret",
+		S3Endpoint:    server.URL,
+	}
+	if err := Upload(context.Background(), cfg, true); err != nil {
+		t.Fatalf("first Upload returned error: %v", err)
+	}
+
+	current = current.Add(2 * time.Minute)
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"second\"}\n"), 0644); err != nil {
+		t.Fatalf("rewrite log: %v", err)
+	}
+	if err := Upload(context.Background(), cfg, true); err != nil {
+		t.Fatalf("second Upload returned error: %v", err)
+	}
+
+	if len(uploadedPaths) != 2 {
+		t.Fatalf("uploaded paths = %v, want 2 uploads", uploadedPaths)
+	}
+	if uploadedPaths[0] != uploadedPaths[1] {
+		t.Fatalf("Upload used different object keys: first=%q second=%q", uploadedPaths[0], uploadedPaths[1])
+	}
+	want := "/bucket/prefix/runtime/date=2026-07-12/1783887423-cursor_cloud-run.jsonl.gz"
+	if uploadedPaths[0] != want {
+		t.Fatalf("upload path = %q, want %q", uploadedPaths[0], want)
+	}
+}
+
 func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "cse_env")
 	if got := resolveRunID(); got != "cse_env" {
@@ -303,8 +356,13 @@ func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 
 func stubNow(t *testing.T, value time.Time) func() {
 	t.Helper()
+	return stubNowFunc(t, func() time.Time { return value.UTC() })
+}
+
+func stubNowFunc(t *testing.T, fn func() time.Time) func() {
+	t.Helper()
 	old := nowUTC
-	nowUTC = func() time.Time { return value.UTC() }
+	nowUTC = func() time.Time { return fn().UTC() }
 	return func() { nowUTC = old }
 }
 

@@ -72,6 +72,8 @@ type state struct {
 	LastUpload string `json:"last_upload,omitempty"`
 	LastSize   int64  `json:"last_size,omitempty"`
 	LastObject string `json:"last_object,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
 }
 
 type tokenResponse struct {
@@ -158,7 +160,7 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		return err
 	}
 	defer cleanup()
-	objectName := ObjectName(cfg)
+	objectName := uploadObjectName(cfg)
 	if err := uploadSnapshot(ctx, cfg, objectName, snapshot); err != nil {
 		return err
 	}
@@ -166,7 +168,30 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		LastUpload: time.Now().UTC().Format(time.RFC3339),
 		LastSize:   info.Size(),
 		LastObject: objectName,
+		Provider:   cfg.Provider,
+		RunID:      cfg.RunID,
 	})
+}
+
+func uploadObjectName(cfg Config) string {
+	st, err := readState(cfg.StatePath)
+	if err == nil && stateObjectMatchesConfig(st, cfg) {
+		return strings.TrimSpace(st.LastObject)
+	}
+	return ObjectName(cfg)
+}
+
+func stateObjectMatchesConfig(st state, cfg Config) bool {
+	objectName := strings.TrimSpace(st.LastObject)
+	if objectName == "" {
+		return false
+	}
+	if st.Provider != "" || st.RunID != "" {
+		return st.Provider == cfg.Provider && st.RunID == cfg.RunID
+	}
+	provider := cleanKeyPart(defaultString(cfg.Provider, "unknown"))
+	runID := cleanKeyPart(defaultString(cfg.RunID, "unknown"))
+	return strings.HasSuffix(path.Base(objectName), "-"+provider+"-"+runID+".jsonl.gz")
 }
 
 func ObjectName(cfg Config) string {
