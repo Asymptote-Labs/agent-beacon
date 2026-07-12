@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ func TestCloudCommandsRegistered(t *testing.T) {
 		{"cloud", "cursor", "print-setup"},
 		{"cloud", "devin", "pull"},
 		{"cloud", "gcs", "setup"},
+		{"cloud", "s3", "setup"},
 	} {
 		cmd, _, err := rootCmd.Find(path)
 		if err != nil {
@@ -171,5 +173,63 @@ func TestGCSSetupClassifiesNotFoundOutput(t *testing.T) {
 	}
 	if isNotFoundOutput("ERROR: permission denied") {
 		t.Fatal("permission denied should not be treated as not found")
+	}
+}
+
+func TestS3SetupCommandsUseLeastPrivilegePolicy(t *testing.T) {
+	commands, err := s3SetupCommands("bucket", "us-west-2", "agent-traces/customer=my-team", "beacon-uploader")
+	if err != nil {
+		t.Fatalf("s3SetupCommands returned error: %v", err)
+	}
+	joined := make([]string, 0, len(commands))
+	for _, command := range commands {
+		joined = append(joined, shellCommand(command...))
+	}
+	got := strings.Join(joined, "\n")
+	for _, want := range []string{
+		"aws s3api head-bucket --bucket bucket",
+		"aws s3api create-bucket --bucket bucket --region us-west-2 --create-bucket-configuration LocationConstraint=us-west-2",
+		"aws s3api put-public-access-block --bucket bucket --region us-west-2",
+		"aws iam create-user --user-name beacon-uploader",
+		"aws iam put-user-policy --user-name beacon-uploader --policy-name BeaconCloudTraceUpload",
+		"aws iam create-access-key --user-name beacon-uploader --output json",
+		`arn:aws:s3:::bucket/agent-traces/customer=my-team/*`,
+		`"s3:PutObject"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("setup commands missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestS3CreateBucketCommandOmitsLocationConstraintForUSEast1(t *testing.T) {
+	got := shellCommand(s3CreateBucketCommand("bucket", "us-east-1")...)
+	if strings.Contains(got, "LocationConstraint") {
+		t.Fatalf("us-east-1 create-bucket should omit LocationConstraint: %s", got)
+	}
+}
+
+func TestS3UploadPolicyScopesToPrefix(t *testing.T) {
+	policyJSON, err := s3UploadPolicy("bucket", "/prefix/")
+	if err != nil {
+		t.Fatalf("s3UploadPolicy returned error: %v", err)
+	}
+	var policy struct {
+		Statement []struct {
+			Action   []string `json:"Action"`
+			Resource string   `json:"Resource"`
+		} `json:"Statement"`
+	}
+	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+		t.Fatalf("policy is not JSON: %v", err)
+	}
+	if len(policy.Statement) != 1 {
+		t.Fatalf("Statement length = %d, want 1", len(policy.Statement))
+	}
+	if got := strings.Join(policy.Statement[0].Action, ","); got != "s3:PutObject" {
+		t.Fatalf("Action = %q, want s3:PutObject", got)
+	}
+	if policy.Statement[0].Resource != "arn:aws:s3:::bucket/prefix/*" {
+		t.Fatalf("Resource = %q", policy.Statement[0].Resource)
 	}
 }

@@ -306,7 +306,8 @@
                   "cli/cloud-claude-web-print-hooks",
                   "cli/cloud-cursor-print-setup",
                   "cli/cloud-cursor-print-hooks",
-                  "cli/cloud-gcs-setup"
+                  "cli/cloud-gcs-setup",
+                  "cli/cloud-s3-setup"
                 ]
               },
               {
@@ -905,6 +906,10 @@
     {
       "source": "/cli/cloud#beacon-cloud-gcs-setup",
       "destination": "/cli/cloud-gcs-setup"
+    },
+    {
+      "source": "/cli/cloud#beacon-cloud-s3-setup",
+      "destination": "/cli/cloud-s3-setup"
     },
     {
       "source": "/cli/endpoint-dashboard",

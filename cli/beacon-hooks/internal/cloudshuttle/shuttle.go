@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -19,6 +21,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -29,12 +32,16 @@ const (
 	defaultStatePath   = "/tmp/beacon/shuttle-state.json"
 	defaultTokenURI    = "https://oauth2.googleapis.com/token"
 	defaultGCSEndpoint = "https://storage.googleapis.com"
+	defaultS3Region    = "us-east-1"
 	contentTypeJSONL   = "text/plain; charset=utf-8"
+	uploadGCS          = "gcs"
+	uploadS3           = "s3"
 )
 
 var httpClient = http.DefaultClient
 
 type Config struct {
+	Upload         string
 	LogPath        string
 	StatePath      string
 	Bucket         string
@@ -45,6 +52,11 @@ type Config struct {
 	UserID         string
 	Repository     string
 	GCSEndpoint    string
+	S3Region       string
+	S3AccessKeyID  string
+	S3SecretKey    string
+	S3SessionToken string
+	S3Endpoint     string
 }
 
 type serviceAccount struct {
@@ -67,17 +79,30 @@ type tokenResponse struct {
 
 func ConfigFromEnv() Config {
 	statePath := firstEnvDefault(defaultStatePath, "BEACON_CLOUD_SHUTTLE_STATE")
+	upload := cloudUploadFromEnv()
+	bucket := strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_BUCKET"))
+	prefix := strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/")
+	if upload == uploadS3 {
+		bucket = strings.TrimSpace(os.Getenv("BEACON_CLOUD_S3_BUCKET"))
+		prefix = strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_S3_PREFIX")), "/")
+	}
 	return Config{
+		Upload:         upload,
 		LogPath:        firstEnvDefault(defaultLogPath, "BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"),
 		StatePath:      statePath,
-		Bucket:         strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_BUCKET")),
-		Prefix:         strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/"),
+		Bucket:         bucket,
+		Prefix:         prefix,
 		CredentialsB64: strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_CREDENTIALS_B64")),
 		Provider:       firstEnvDefault("claude_code_web", "BEACON_RUN_PROVIDER"),
 		RunID:          resolveRunID(),
 		UserID:         firstEnvDefault("unknown", "BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"),
 		Repository:     firstEnv("BEACON_RUN_REPOSITORY"),
 		GCSEndpoint:    firstEnvDefault(defaultGCSEndpoint, "BEACON_CLOUD_GCS_ENDPOINT"),
+		S3Region:       firstEnvDefault(defaultS3Region, "BEACON_CLOUD_S3_REGION", "AWS_REGION", "AWS_DEFAULT_REGION"),
+		S3AccessKeyID:  firstEnv("AWS_ACCESS_KEY_ID"),
+		S3SecretKey:    firstEnv("AWS_SECRET_ACCESS_KEY"),
+		S3SessionToken: firstEnv("AWS_SESSION_TOKEN"),
+		S3Endpoint:     firstEnv("BEACON_CLOUD_S3_ENDPOINT"),
 	}
 }
 
@@ -105,20 +130,12 @@ func ResetFromEnv() error {
 }
 
 func Upload(ctx context.Context, cfg Config, force bool) error {
-	if strings.TrimSpace(cfg.Bucket) == "" || strings.TrimSpace(cfg.CredentialsB64) == "" {
+	cfg = normalizeConfig(cfg)
+	if !uploadConfigured(cfg) {
 		return nil
 	}
 	if strings.TrimSpace(cfg.RunID) == "" {
 		return nil
-	}
-	if cfg.LogPath == "" {
-		cfg.LogPath = defaultLogPath
-	}
-	if cfg.StatePath == "" {
-		cfg.StatePath = defaultStatePath
-	}
-	if cfg.GCSEndpoint == "" {
-		cfg.GCSEndpoint = defaultGCSEndpoint
 	}
 	info, err := os.Stat(cfg.LogPath)
 	if err != nil {
@@ -138,12 +155,8 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		return err
 	}
 	defer cleanup()
-	token, err := accessToken(ctx, cfg.CredentialsB64)
-	if err != nil {
-		return err
-	}
 	objectName := ObjectName(cfg)
-	if err := uploadObject(ctx, cfg.GCSEndpoint, cfg.Bucket, objectName, snapshot, token); err != nil {
+	if err := uploadSnapshot(ctx, cfg, objectName, snapshot); err != nil {
 		return err
 	}
 	return writeState(cfg.StatePath, state{
@@ -311,7 +324,20 @@ func parseRSAPrivateKey(raw string) (*rsa.PrivateKey, error) {
 	return nil, errors.New("parse GCS private key")
 }
 
-func uploadObject(ctx context.Context, endpoint, bucket, objectName, filePath, token string) error {
+func uploadSnapshot(ctx context.Context, cfg Config, objectName, filePath string) error {
+	switch cfg.Upload {
+	case uploadS3:
+		return uploadS3Object(ctx, cfg, objectName, filePath)
+	default:
+		token, err := accessToken(ctx, cfg.CredentialsB64)
+		if err != nil {
+			return err
+		}
+		return uploadGCSObject(ctx, cfg.GCSEndpoint, cfg.Bucket, objectName, filePath, token)
+	}
+}
+
+func uploadGCSObject(ctx context.Context, endpoint, bucket, objectName, filePath, token string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
@@ -339,6 +365,94 @@ func uploadObject(ctx context.Context, endpoint, bucket, objectName, filePath, t
 	return nil
 }
 
+func uploadS3Object(ctx context.Context, cfg Config, objectName, filePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	payloadHash, err := hashOpenFile(file)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	endpoint := strings.TrimRight(cfg.S3Endpoint, "/")
+	if endpoint == "" {
+		endpoint = "https://s3." + cfg.S3Region + ".amazonaws.com"
+	}
+	uploadURL := endpoint + "/" + escapePath(cfg.Bucket) + "/" + escapeObjectName(objectName)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, file)
+	if err != nil {
+		return err
+	}
+	if info, err := file.Stat(); err == nil {
+		req.ContentLength = info.Size()
+	}
+	req.Header.Set("Content-Type", contentTypeJSONL)
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	req.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
+	if cfg.S3SessionToken != "" {
+		req.Header.Set("X-Amz-Security-Token", cfg.S3SessionToken)
+	}
+	signS3Request(req, cfg, payloadHash)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("S3 upload failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func signS3Request(req *http.Request, cfg Config, payloadHash string) {
+	amzDate := req.Header.Get("X-Amz-Date")
+	dateStamp := amzDate[:8]
+	credentialScope := dateStamp + "/" + cfg.S3Region + "/s3/aws4_request"
+	headers := map[string]string{
+		"content-type":         req.Header.Get("Content-Type"),
+		"host":                 req.URL.Host,
+		"x-amz-content-sha256": payloadHash,
+		"x-amz-date":           amzDate,
+	}
+	if token := req.Header.Get("X-Amz-Security-Token"); token != "" {
+		headers["x-amz-security-token"] = token
+	}
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var canonicalHeaders strings.Builder
+	for _, key := range keys {
+		canonicalHeaders.WriteString(key)
+		canonicalHeaders.WriteString(":")
+		canonicalHeaders.WriteString(strings.TrimSpace(headers[key]))
+		canonicalHeaders.WriteString("\n")
+	}
+	signedHeaders := strings.Join(keys, ";")
+	canonicalRequest := strings.Join([]string{
+		req.Method,
+		req.URL.EscapedPath(),
+		req.URL.RawQuery,
+		canonicalHeaders.String(),
+		signedHeaders,
+		payloadHash,
+	}, "\n")
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		credentialScope,
+		sha256Hex([]byte(canonicalRequest)),
+	}, "\n")
+	signature := hex.EncodeToString(hmacSHA256(s3SigningKey(cfg.S3SecretKey, dateStamp, cfg.S3Region), stringToSign))
+	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+cfg.S3AccessKeyID+"/"+credentialScope+", SignedHeaders="+signedHeaders+", Signature="+signature)
+}
+
 func readState(path string) (state, error) {
 	var st state
 	data, err := os.ReadFile(path)
@@ -361,6 +475,7 @@ func writeState(path string, st state) error {
 }
 
 func preserveExistingLog(cfg Config) error {
+	cfg = normalizeConfig(cfg)
 	info, err := os.Stat(cfg.LogPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -371,16 +486,14 @@ func preserveExistingLog(cfg Config) error {
 	if info.Size() == 0 {
 		return os.Remove(cfg.LogPath)
 	}
-	if st, err := readState(cfg.StatePath); err == nil && st.LastObject != "" && cfg.Bucket != "" && cfg.CredentialsB64 != "" {
+	if st, err := readState(cfg.StatePath); err == nil && st.LastObject != "" && uploadConfigured(cfg) {
 		snapshot, cleanup, err := snapshotLog(cfg.LogPath)
 		if err == nil {
 			defer cleanup()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			if token, tokenErr := accessToken(ctx, cfg.CredentialsB64); tokenErr == nil {
-				if uploadErr := uploadObject(ctx, cfg.GCSEndpoint, cfg.Bucket, st.LastObject, snapshot, token); uploadErr == nil {
-					return os.Remove(cfg.LogPath)
-				}
+			if uploadErr := uploadSnapshot(ctx, cfg, st.LastObject, snapshot); uploadErr == nil {
+				return os.Remove(cfg.LogPath)
 			}
 		}
 	}
@@ -393,6 +506,80 @@ func preserveExistingLog(cfg Config) error {
 
 func resolveRunID() string {
 	return firstEnv("BEACON_RUN_ID", "CLAUDE_CODE_REMOTE_SESSION_ID")
+}
+
+func cloudUploadFromEnv() string {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("BEACON_CLOUD_UPLOAD")))
+	switch value {
+	case uploadS3:
+		return uploadS3
+	case uploadGCS:
+		return uploadGCS
+	}
+	return uploadGCS
+}
+
+func normalizeConfig(cfg Config) Config {
+	cfg.Upload = strings.ToLower(strings.TrimSpace(cfg.Upload))
+	if cfg.Upload == "" {
+		if cfg.S3AccessKeyID != "" || cfg.S3SecretKey != "" || cfg.S3Region != "" || strings.Contains(cfg.S3Endpoint, "s3") {
+			cfg.Upload = uploadS3
+		} else {
+			cfg.Upload = uploadGCS
+		}
+	}
+	if cfg.LogPath == "" {
+		cfg.LogPath = defaultLogPath
+	}
+	if cfg.StatePath == "" {
+		cfg.StatePath = defaultStatePath
+	}
+	if cfg.GCSEndpoint == "" {
+		cfg.GCSEndpoint = defaultGCSEndpoint
+	}
+	if cfg.S3Region == "" {
+		cfg.S3Region = defaultS3Region
+	}
+	cfg.Prefix = strings.Trim(cfg.Prefix, "/")
+	return cfg
+}
+
+func uploadConfigured(cfg Config) bool {
+	if strings.TrimSpace(cfg.Bucket) == "" {
+		return false
+	}
+	switch cfg.Upload {
+	case uploadS3:
+		return strings.TrimSpace(cfg.S3AccessKeyID) != "" && strings.TrimSpace(cfg.S3SecretKey) != ""
+	default:
+		return strings.TrimSpace(cfg.CredentialsB64) != ""
+	}
+}
+
+func hashOpenFile(file *os.File) (string, error) {
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func s3SigningKey(secret, dateStamp, region string) []byte {
+	dateKey := hmacSHA256([]byte("AWS4"+secret), dateStamp)
+	regionKey := hmacSHA256(dateKey, region)
+	serviceKey := hmacSHA256(regionKey, "s3")
+	return hmacSHA256(serviceKey, "aws4_request")
+}
+
+func hmacSHA256(key []byte, value string) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(value))
+	return mac.Sum(nil)
 }
 
 func cleanKeyParts(value string) []string {

@@ -21,8 +21,10 @@ var cloudOpts struct {
 	project        string
 	bucket         string
 	location       string
+	region         string
 	prefix         string
 	serviceAccount string
+	iamUser        string
 	printOnly      bool
 	apply          bool
 	printEnv       bool
@@ -112,6 +114,11 @@ var cloudGCSCmd = &cobra.Command{
 	Short: "Configure GCS forwarding for cloud agent telemetry",
 }
 
+var cloudS3Cmd = &cobra.Command{
+	Use:   "s3",
+	Short: "Configure S3 forwarding for cloud agent telemetry",
+}
+
 var cloudGCSSetupCmd = &cobra.Command{
 	Use:          "setup",
 	Short:        "Create or print self-serve GCS setup for cloud agent telemetry",
@@ -119,16 +126,25 @@ var cloudGCSSetupCmd = &cobra.Command{
 	RunE:         runCloudGCSSetup,
 }
 
+var cloudS3SetupCmd = &cobra.Command{
+	Use:          "setup",
+	Short:        "Create or print self-serve S3 setup for cloud agent telemetry",
+	SilenceUsage: true,
+	RunE:         runCloudS3Setup,
+}
+
 func init() {
 	rootCmd.AddCommand(cloudCmd)
 	cloudCmd.AddCommand(cloudClaudeWebCmd)
 	cloudCmd.AddCommand(cloudCursorCmd)
 	cloudCmd.AddCommand(cloudGCSCmd)
+	cloudCmd.AddCommand(cloudS3Cmd)
 	cloudClaudeWebCmd.AddCommand(cloudClaudeWebPrintHooksCmd)
 	cloudClaudeWebCmd.AddCommand(cloudClaudeWebPrintSetupCmd)
 	cloudCursorCmd.AddCommand(cloudCursorPrintHooksCmd)
 	cloudCursorCmd.AddCommand(cloudCursorPrintSetupCmd)
 	cloudGCSCmd.AddCommand(cloudGCSSetupCmd)
+	cloudS3Cmd.AddCommand(cloudS3SetupCmd)
 
 	cloudClaudeWebPrintHooksCmd.Flags().StringVar(&cloudOpts.binaryPath, "binary-path", "", "Path to beacon-hooks inside the cloud sandbox")
 	cloudClaudeWebPrintHooksCmd.Flags().StringVar(&cloudOpts.logPath, "log-path", "/tmp/beacon/runtime.jsonl", "Cloud sandbox runtime JSONL path")
@@ -146,6 +162,14 @@ func init() {
 	cloudGCSSetupCmd.Flags().BoolVar(&cloudOpts.printOnly, "print", false, "Print the gcloud commands without running them")
 	cloudGCSSetupCmd.Flags().BoolVar(&cloudOpts.apply, "apply", false, "Run the gcloud setup commands")
 	cloudGCSSetupCmd.Flags().BoolVar(&cloudOpts.printEnv, "print-env", false, "Print Claude web environment variables after setup")
+
+	cloudS3SetupCmd.Flags().StringVar(&cloudOpts.bucket, "bucket", "", "S3 bucket for cloud agent telemetry")
+	cloudS3SetupCmd.Flags().StringVar(&cloudOpts.region, "region", "us-east-1", "AWS region for the S3 bucket")
+	cloudS3SetupCmd.Flags().StringVar(&cloudOpts.prefix, "prefix", "agent-traces", "S3 object prefix for cloud telemetry")
+	cloudS3SetupCmd.Flags().StringVar(&cloudOpts.iamUser, "iam-user", "beacon-cloud-trace-uploader", "IAM user name for cloud telemetry uploads")
+	cloudS3SetupCmd.Flags().BoolVar(&cloudOpts.printOnly, "print", false, "Print the AWS CLI commands without running them")
+	cloudS3SetupCmd.Flags().BoolVar(&cloudOpts.apply, "apply", false, "Run the AWS setup commands")
+	cloudS3SetupCmd.Flags().BoolVar(&cloudOpts.printEnv, "print-env", false, "Print Claude web environment variables after setup")
 }
 
 func defaultCloudLogPath(path string) string {
@@ -390,7 +414,11 @@ func isNotFoundOutput(text string) bool {
 	return strings.Contains(lower, "not found") ||
 		strings.Contains(lower, "does not exist") ||
 		strings.Contains(lower, "matched no") ||
-		strings.Contains(lower, "no urls matched")
+		strings.Contains(lower, "no urls matched") ||
+		strings.Contains(lower, "nosuchbucket") ||
+		strings.Contains(lower, "nosuchentity") ||
+		strings.Contains(lower, "status code: 404") ||
+		strings.Contains(lower, "404")
 }
 
 func isGCSBucketIAMBinding(args []string) bool {
