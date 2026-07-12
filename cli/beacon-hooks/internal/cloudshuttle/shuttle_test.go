@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -138,6 +140,95 @@ func TestUploadSendsJSONLToGCS(t *testing.T) {
 		t.Fatalf("upload path = %q", uploadedPath)
 	}
 	if uploadedBody != "{\"event\":\"ok\"}\n" {
+		t.Fatalf("uploaded body = %q", uploadedBody)
+	}
+}
+
+func TestConfigFromEnvSelectsS3(t *testing.T) {
+	t.Setenv("BEACON_CLOUD_UPLOAD", "s3")
+	t.Setenv("BEACON_CLOUD_S3_BUCKET", "bucket")
+	t.Setenv("BEACON_CLOUD_S3_PREFIX", "prefix")
+	t.Setenv("BEACON_CLOUD_S3_REGION", "us-west-2")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("AWS_SESSION_TOKEN", "token")
+	t.Setenv("BEACON_RUN_ID", "run")
+
+	cfg := ConfigFromEnv()
+	if cfg.Upload != uploadS3 {
+		t.Fatalf("Upload = %q, want %q", cfg.Upload, uploadS3)
+	}
+	if cfg.Bucket != "bucket" || cfg.Prefix != "prefix" || cfg.S3Region != "us-west-2" {
+		t.Fatalf("unexpected S3 config: %#v", cfg)
+	}
+	if cfg.S3AccessKeyID != "AKIATEST" || cfg.S3SecretKey != "secret" || cfg.S3SessionToken != "token" {
+		t.Fatalf("unexpected S3 credentials in config: %#v", cfg)
+	}
+}
+
+func TestUploadSendsJSONLToS3(t *testing.T) {
+	var uploadedPath, uploadedAuth, uploadedDate, uploadedHash, uploadedToken, uploadedType, uploadedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uploadedPath = r.URL.EscapedPath()
+		uploadedAuth = r.Header.Get("Authorization")
+		uploadedDate = r.Header.Get("X-Amz-Date")
+		uploadedHash = r.Header.Get("X-Amz-Content-Sha256")
+		uploadedToken = r.Header.Get("X-Amz-Security-Token")
+		uploadedType = r.Header.Get("Content-Type")
+		data, _ := io.ReadAll(r.Body)
+		uploadedBody = string(data)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	body := "{\"event\":\"ok\"}\n"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte(body), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	cfg := Config{
+		Upload:         uploadS3,
+		LogPath:        logPath,
+		StatePath:      filepath.Join(t.TempDir(), "state.json"),
+		Bucket:         "bucket",
+		Prefix:         "prefix",
+		Provider:       "claude_code_web",
+		UserID:         "user",
+		RunID:          "run",
+		S3Region:       "us-west-2",
+		S3AccessKeyID:  "AKIATEST",
+		S3SecretKey:    "secret",
+		S3SessionToken: "session-token",
+		S3Endpoint:     server.URL,
+	}
+	if err := Upload(context.Background(), cfg, true); err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if !strings.Contains(uploadedPath, "/bucket/prefix/provider=claude_code_web/user_id=user/run_id=run/runtime.jsonl") {
+		t.Fatalf("upload path = %q", uploadedPath)
+	}
+	if !strings.HasPrefix(uploadedAuth, "AWS4-HMAC-SHA256 Credential=AKIATEST/") {
+		t.Fatalf("Authorization = %q", uploadedAuth)
+	}
+	for _, want := range []string{"us-west-2/s3/aws4_request", "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token"} {
+		if !strings.Contains(uploadedAuth, want) {
+			t.Fatalf("Authorization missing %q: %q", want, uploadedAuth)
+		}
+	}
+	if uploadedDate == "" {
+		t.Fatal("X-Amz-Date is empty")
+	}
+	sum := sha256.Sum256([]byte(body))
+	if uploadedHash != hex.EncodeToString(sum[:]) {
+		t.Fatalf("X-Amz-Content-Sha256 = %q", uploadedHash)
+	}
+	if uploadedToken != "session-token" {
+		t.Fatalf("X-Amz-Security-Token = %q", uploadedToken)
+	}
+	if uploadedType != contentTypeJSONL {
+		t.Fatalf("Content-Type = %q, want %q", uploadedType, contentTypeJSONL)
+	}
+	if uploadedBody != body {
 		t.Fatalf("uploaded body = %q", uploadedBody)
 	}
 }

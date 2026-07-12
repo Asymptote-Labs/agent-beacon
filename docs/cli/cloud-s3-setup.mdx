@@ -1,0 +1,73 @@
+---
+title: "beacon cloud s3 setup"
+description: "Create or print S3 setup commands for cloud-agent telemetry"
+---
+
+## Command Overview
+
+`beacon cloud s3 setup` creates or prints self-serve Amazon S3 setup commands
+for cloud-agent telemetry.
+
+```bash title="Command syntax"
+beacon cloud s3 setup
+```
+
+The helper creates or validates a bucket, blocks public access, creates a
+dedicated IAM user, grants prefix-scoped `s3:PutObject`, creates one access key,
+and prints the `BEACON_CLOUD_S3_*` plus AWS credential environment variables for
+cloud agents.
+
+<Warning>
+  This self-serve flow passes scoped AWS access keys into the provider-managed
+  cloud agent environment. Use it for proof-of-concept testing and prototyping.
+  For production enterprise deployments, use [Asymptote Managed](/deployment/managed)
+  or contact Asymptote about secure forwarding in customer-managed infrastructure.
+</Warning>
+
+## Examples
+
+Create S3 resources and print cloud-agent environment variables:
+
+```bash title="Create S3 resources and print environment variables"
+beacon cloud s3 setup \
+  --bucket "$BEACON_CLOUD_S3_BUCKET" \
+  --region us-east-1 \
+  --prefix "$BEACON_CLOUD_S3_PREFIX" \
+  --iam-user beacon-cloud-trace-uploader \
+  --apply \
+  --print-env
+```
+
+Print the setup commands without applying them:
+
+```bash title="Print S3 setup commands"
+beacon cloud s3 setup \
+  --bucket "$BEACON_CLOUD_S3_BUCKET" \
+  --region us-east-1 \
+  --prefix "$BEACON_CLOUD_S3_PREFIX" \
+  --iam-user beacon-cloud-trace-uploader \
+  --print
+```
+
+The printed policy grants only:
+
+```text
+s3:PutObject on arn:aws:s3:::<bucket>/<prefix>/*
+```
+
+Delete or rotate the generated IAM access key after the cloud-agent test is
+complete.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon cloud" icon="cloud" href="/cli/cloud">
+    Review cloud command group behavior.
+  </Card>
+  <Card title="Claude Code Cloud Agents" icon="cloud" href="/runtimes/claude-code-cloud-agents">
+    Configure Claude Code cloud agent telemetry and S3 upload end to end.
+  </Card>
+  <Card title="S3 forwarding" icon="database" href="/log-forwarding/s3">
+    Review local endpoint S3 forwarding for persistent endpoint deployments.
+  </Card>
+</Columns>
