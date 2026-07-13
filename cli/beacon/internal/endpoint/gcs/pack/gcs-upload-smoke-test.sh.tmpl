@@ -2,7 +2,8 @@
 set -eu
 
 BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
-BEACON_GCS_PREFIX="${BEACON_GCS_PREFIX:-beacon/runtime}"
+BEACON_INVENTORY_LOG="${BEACON_INVENTORY_LOG:-{{INVENTORY_LOG_PATH}}}"
+BEACON_GCS_PREFIX="${BEACON_GCS_PREFIX:-beacon}"
 
 if [ -z "${BEACON_GCS_BUCKET:-}" ]; then
   echo "BEACON_GCS_BUCKET is required." >&2
@@ -15,18 +16,40 @@ if [ ! -r "$BEACON_LOG" ]; then
 fi
 
 prefix="${BEACON_GCS_PREFIX%/}"
+case "$prefix" in
+  */runtime)
+    prefix="${prefix%/runtime}"
+    ;;
+  */inventory)
+    prefix="${prefix%/inventory}"
+    ;;
+esac
+[ -n "$prefix" ] || prefix="beacon"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-uri="gs://${BEACON_GCS_BUCKET}/${prefix}/smoke-tests/beacon-runtime-${timestamp}.jsonl"
+runtime_uri="gs://${BEACON_GCS_BUCKET}/${prefix}/runtime/smoke-tests/beacon-runtime-${timestamp}.jsonl"
 
 if command -v gcloud >/dev/null 2>&1; then
-  gcloud storage cp "$BEACON_LOG" "$uri" --content-type="application/x-ndjson"
+  gcloud storage cp "$BEACON_LOG" "$runtime_uri" --content-type="application/x-ndjson"
+  if [ -r "$BEACON_INVENTORY_LOG" ]; then
+    inventory_uri="gs://${BEACON_GCS_BUCKET}/${prefix}/inventory/smoke-tests/beacon-inventory-${timestamp}.jsonl"
+    gcloud storage cp "$BEACON_INVENTORY_LOG" "$inventory_uri" --content-type="application/x-ndjson"
+  fi
 elif command -v gsutil >/dev/null 2>&1; then
-  gsutil -h "Content-Type:application/x-ndjson" cp "$BEACON_LOG" "$uri"
+  gsutil -h "Content-Type:application/x-ndjson" cp "$BEACON_LOG" "$runtime_uri"
+  if [ -r "$BEACON_INVENTORY_LOG" ]; then
+    inventory_uri="gs://${BEACON_GCS_BUCKET}/${prefix}/inventory/smoke-tests/beacon-inventory-${timestamp}.jsonl"
+    gsutil -h "Content-Type:application/x-ndjson" cp "$BEACON_INVENTORY_LOG" "$inventory_uri"
+  fi
 else
   echo "gcloud or gsutil is required for this smoke test." >&2
   exit 2
 fi
 
-echo "Uploaded one-shot Beacon log copy to $uri"
+echo "Uploaded one-shot Beacon runtime log copy to $runtime_uri"
+if [ -n "${inventory_uri:-}" ]; then
+  echo "Uploaded one-shot Beacon inventory log copy to $inventory_uri"
+else
+  echo "Beacon inventory log is not readable yet, skipping optional upload: $BEACON_INVENTORY_LOG"
+fi
 echo "Google credentials were resolved by Application Default Credentials or gcloud/gsutil configuration."
 echo "This script is for validation only; use vector.toml for production forwarding."

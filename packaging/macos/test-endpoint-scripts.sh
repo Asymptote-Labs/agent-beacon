@@ -7,6 +7,7 @@ UNINSTALL_SCRIPT="$ROOT_DIR/packaging/macos/uninstall-endpoint.sh"
 PKG_BUILD_SCRIPT="$ROOT_DIR/packaging/macos/build-pkg.sh"
 PKG_SIGN_NOTARIZE_SCRIPT="$ROOT_DIR/packaging/macos/build-signed-notarized-pkg.sh"
 REPAIR_SCRIPT="$ROOT_DIR/packaging/macos/jamf/scripts/repair.sh"
+FULL_CLEANUP_SCRIPT="$ROOT_DIR/packaging/macos/jamf/scripts/full-cleanup.sh"
 FLEET_REPAIR_SCRIPT="$ROOT_DIR/packaging/macos/fleet/scripts/repair.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
@@ -51,6 +52,212 @@ if ! grep -q 'could not restore existing forwarder' "$ROOT_DIR/packaging/macos/s
 fi
 if ! grep -q 'launchctl bootstrap failed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
   echo "postinstall should preserve launchctl bootstrap diagnostics" >&2
+  exit 1
+fi
+if ! grep -q 'forwarder_stably_running' "$ROOT_DIR/packaging/macos/scripts/postinstall" ||
+   ! grep -q 'wait_for_forwarder_bootout' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should wait for bootout and verify stable forwarder startup" >&2
+  exit 1
+fi
+if ! grep -q 'com.beacon.endpoint.gcs-forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
+  echo "postinstall should restore the optional GCS forwarder" >&2
+  exit 1
+fi
+for installer in \
+  "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" \
+  "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh"
+do
+  if ! grep -q 'Timed out waiting for.*to stop' "$installer"; then
+    echo "forwarder installer should wait for launchd bootout: $installer" >&2
+    exit 1
+  fi
+  if ! grep -q 'did not remain running' "$installer"; then
+    echo "forwarder installer should verify sustained launchd startup: $installer" >&2
+    exit 1
+  fi
+done
+if ! grep -q 'BEACON_KEEP_LOGS' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should support preserving logs" >&2
+  exit 1
+fi
+if ! grep -q 'BEACON_CLEAN_ALL_USERS' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should support all-user cleanup opt-in" >&2
+  exit 1
+fi
+if ! grep -q 'endpoint uninstall --system' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should run Beacon uninstall before force removal" >&2
+  exit 1
+fi
+if ! grep -q 'endpoint uninstall --system --keep-logs' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should preserve logs during the Beacon uninstall step" >&2
+  exit 1
+fi
+if ! grep -q 'OTEL_EXPORTER_OTLP_ENDPOINT' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should remove Beacon-managed Claude OTLP env" >&2
+  exit 1
+fi
+if ! grep -q 'http://127.0.0.1:' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should preserve non-local OTLP settings" >&2
+  exit 1
+fi
+if grep -q 'or enabled == "1"' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup must not remove remote Claude OTLP settings solely because telemetry is enabled" >&2
+  exit 1
+fi
+if ! grep -q 'BEACON_LOCAL_OTLP_ENDPOINTS' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should match user OTLP settings to the installed Beacon ports" >&2
+  exit 1
+fi
+if ! grep -q 'ai.asymptote.beacon.endpoint' "$FULL_CLEANUP_SCRIPT" ||
+   grep -q 'pkgutil --pkgs' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should forget only the known Beacon package receipt" >&2
+  exit 1
+fi
+if ! grep -q 'GCS_FORWARDER_LABEL' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should remove the GCS forwarder" >&2
+  exit 1
+fi
+
+FULL_CLEANUP_BIN="$TMP_DIR/full-cleanup-bin"
+FULL_CLEANUP_BEACON="$TMP_DIR/full-cleanup-beacon"
+FULL_CLEANUP_ARGS="$TMP_DIR/full-cleanup-args"
+FULL_CLEANUP_RECEIPT="$TMP_DIR/full-cleanup-receipt"
+FULL_CLEANUP_RUNTIME="$TMP_DIR/full-cleanup-runtime"
+FULL_CLEANUP_CONFIG="$TMP_DIR/full-cleanup-config"
+FULL_CLEANUP_OPT="$TMP_DIR/full-cleanup-opt"
+mkdir -p "$FULL_CLEANUP_BIN" "$FULL_CLEANUP_RUNTIME" "$FULL_CLEANUP_CONFIG" "$FULL_CLEANUP_OPT"
+printf '%s\n' preserved >"$FULL_CLEANUP_RUNTIME/runtime.jsonl"
+cat >"$FULL_CLEANUP_BEACON" <<'STUB'
+#!/bin/sh
+case "$1" in
+  version) echo "beacon test" ;;
+  endpoint) printf '%s\n' "$*" >"$FULL_CLEANUP_ARGS" ;;
+  *) exit 1 ;;
+esac
+STUB
+cat >"$FULL_CLEANUP_BIN/launchctl" <<'STUB'
+#!/bin/sh
+exit 1
+STUB
+cat >"$FULL_CLEANUP_BIN/stat" <<'STUB'
+#!/bin/sh
+case "$*" in
+  *"/dev/console"*) echo loginwindow ;;
+  *) /usr/bin/stat "$@" ;;
+esac
+STUB
+cat >"$FULL_CLEANUP_BIN/pkgutil" <<'STUB'
+#!/bin/sh
+case "$1" in
+  --pkg-info) [ "$2" = "ai.asymptote.beacon.endpoint" ] ;;
+  --forget) printf '%s\n' "$2" >"$FULL_CLEANUP_RECEIPT" ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$FULL_CLEANUP_BEACON" "$FULL_CLEANUP_BIN/launchctl" "$FULL_CLEANUP_BIN/stat" "$FULL_CLEANUP_BIN/pkgutil"
+
+PATH="$FULL_CLEANUP_BIN:$PATH" \
+FULL_CLEANUP_ARGS="$FULL_CLEANUP_ARGS" \
+FULL_CLEANUP_RECEIPT="$FULL_CLEANUP_RECEIPT" \
+BEACON_BIN="$FULL_CLEANUP_BEACON" \
+BEACON_KEEP_LOGS=1 \
+COLLECTOR_LABEL=com.test.beacon.collector \
+UPDATER_LABEL=com.test.beacon.updater \
+S3_FORWARDER_LABEL=com.test.beacon.s3 \
+GCS_FORWARDER_LABEL=com.test.beacon.gcs \
+FALCON_FORWARDER_LABEL=com.test.beacon.falcon \
+RUNTIME_DIR="$FULL_CLEANUP_RUNTIME" \
+SYSTEM_CONFIG_DIR="$FULL_CLEANUP_CONFIG" \
+OPT_BEACON_DIR="$FULL_CLEANUP_OPT" \
+"$FULL_CLEANUP_SCRIPT" >/dev/null 2>&1
+if ! grep -q -- '--keep-logs' "$FULL_CLEANUP_ARGS"; then
+  echo "full cleanup should pass --keep-logs to endpoint uninstall" >&2
+  exit 1
+fi
+if [ ! -f "$FULL_CLEANUP_RUNTIME/runtime.jsonl" ]; then
+  echo "full cleanup should preserve the runtime directory when requested" >&2
+  exit 1
+fi
+if [ "$(cat "$FULL_CLEANUP_RECEIPT")" != "ai.asymptote.beacon.endpoint" ]; then
+  echo "full cleanup should forget only the known Beacon package receipt" >&2
+  exit 1
+fi
+
+if ! grep -q 'O_NOFOLLOW' "$FULL_CLEANUP_SCRIPT" || grep -q 'chown -R' "$FULL_CLEANUP_SCRIPT"; then
+  echo "full cleanup should reject symlinks and avoid recursive ownership changes" >&2
+  exit 1
+fi
+
+FULL_CLEANUP_USER_BIN="$TMP_DIR/full-cleanup-user-bin"
+FULL_CLEANUP_HOME="$TMP_DIR/full-cleanup-home"
+FULL_CLEANUP_USER_CONFIG="$TMP_DIR/full-cleanup-user-config"
+FULL_CLEANUP_USER_OPT="$TMP_DIR/full-cleanup-user-opt"
+FULL_CLEANUP_SENTINEL="$TMP_DIR/full-cleanup-symlink-target"
+mkdir -p \
+  "$FULL_CLEANUP_USER_BIN" \
+  "$FULL_CLEANUP_HOME/.claude" \
+  "$FULL_CLEANUP_HOME/.codex" \
+  "$FULL_CLEANUP_HOME/.cursor" \
+  "$FULL_CLEANUP_USER_CONFIG/Endpoint" \
+  "$FULL_CLEANUP_USER_OPT"
+printf '%s\n' '{"collector":{"grpc_port":54317,"http_port":54318}}' \
+  >"$FULL_CLEANUP_USER_CONFIG/Endpoint/config.json"
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://otel.example.com"}}' \
+  >"$FULL_CLEANUP_HOME/.claude/settings.json"
+cat >"$FULL_CLEANUP_HOME/.codex/config.toml" <<'EOF'
+[otel]
+endpoint = "http://127.0.0.1:54317"
+
+[otel.other]
+endpoint = "http://127.0.0.1:59999"
+EOF
+printf '%s\n' do-not-touch >"$FULL_CLEANUP_SENTINEL"
+ln -s "$FULL_CLEANUP_SENTINEL" "$FULL_CLEANUP_HOME/.cursor/hooks.json"
+cat >"$FULL_CLEANUP_USER_BIN/stat" <<'STUB'
+#!/bin/sh
+case "$*" in
+  *"/dev/console"*) echo cleanupuser ;;
+  *) /usr/bin/stat "$@" ;;
+esac
+STUB
+cat >"$FULL_CLEANUP_USER_BIN/dscl" <<'STUB'
+#!/bin/sh
+printf 'NFSHomeDirectory: %s\n' "$FULL_CLEANUP_HOME"
+STUB
+cat >"$FULL_CLEANUP_USER_BIN/id" <<'STUB'
+#!/bin/sh
+case "$1" in
+  -gn) echo staff ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$FULL_CLEANUP_USER_BIN/stat" "$FULL_CLEANUP_USER_BIN/dscl" "$FULL_CLEANUP_USER_BIN/id"
+
+PATH="$FULL_CLEANUP_USER_BIN:$FULL_CLEANUP_BIN:$PATH" \
+FULL_CLEANUP_HOME="$FULL_CLEANUP_HOME" \
+FULL_CLEANUP_ARGS="$FULL_CLEANUP_ARGS" \
+FULL_CLEANUP_RECEIPT="$FULL_CLEANUP_RECEIPT" \
+BEACON_BIN="$FULL_CLEANUP_BEACON" \
+COLLECTOR_LABEL=com.test.user.beacon.collector \
+UPDATER_LABEL=com.test.user.beacon.updater \
+S3_FORWARDER_LABEL=com.test.user.beacon.s3 \
+GCS_FORWARDER_LABEL=com.test.user.beacon.gcs \
+FALCON_FORWARDER_LABEL=com.test.user.beacon.falcon \
+RUNTIME_DIR="$TMP_DIR/full-cleanup-user-runtime" \
+SYSTEM_CONFIG_DIR="$FULL_CLEANUP_USER_CONFIG" \
+OPT_BEACON_DIR="$FULL_CLEANUP_USER_OPT" \
+"$FULL_CLEANUP_SCRIPT" >/dev/null 2>&1
+if ! grep -q 'https://otel.example.com' "$FULL_CLEANUP_HOME/.claude/settings.json"; then
+  echo "full cleanup should preserve non-Beacon Claude OTLP settings" >&2
+  exit 1
+fi
+if [ "$(cat "$FULL_CLEANUP_SENTINEL")" != "do-not-touch" ]; then
+  echo "full cleanup should never follow user-controlled config symlinks" >&2
+  exit 1
+fi
+if grep -q '54317' "$FULL_CLEANUP_HOME/.codex/config.toml" ||
+   ! grep -q '59999' "$FULL_CLEANUP_HOME/.codex/config.toml"; then
+  echo "full cleanup should remove only Codex OTLP blocks matching installed Beacon ports" >&2
   exit 1
 fi
 
@@ -388,6 +595,9 @@ case "$1" in
   --version)
     echo "vector 0.56.0"
     ;;
+  validate)
+    exit 0
+    ;;
   *)
     echo "unexpected vector args: $*" >&2
     exit 1
@@ -488,7 +698,7 @@ AWS_SHARED_CREDENTIALS_FILE="/tmp/test-aws-credentials" \
 AWS_CONFIG_FILE="/tmp/test-aws-config" \
 AWS_WEB_IDENTITY_TOKEN_FILE="/tmp/test-web-identity-token" \
 AWS_ROLE_ARN="arn:aws:iam::123456789012:role/beacon-demo" \
-"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime" "STANDARD_IA" "end" >/dev/null
+"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime/" "STANDARD_IA" "end" >/dev/null
 
 if [ ! -f "$S3_FORWARDER_BASE/s3-vector.toml" ]; then
   echo "S3 Vector config was not written" >&2
@@ -609,5 +819,263 @@ S3_FORWARDER_MARKER="$S3_FORWARDER_MARKER" \
 }
 if [ ! -f "$S3_FORWARDER_MARKER" ]; then
   echo "combined S3 Vector repair should run forwarder before failing repair" >&2
+  exit 1
+fi
+
+GCS_FORWARDER_BASE="$TMP_DIR/gcs-forwarders"
+GCS_LAUNCHDAEMONS_DIR="$TMP_DIR/gcs-launchdaemons"
+GCS_CREDENTIALS="$TMP_DIR/gcs-service-account.json"
+mkdir -p "$GCS_LAUNCHDAEMONS_DIR"
+printf '%s\n' '{"type":"service_account","project_id":"beacon-test"}' >"$GCS_CREDENTIALS"
+chmod 0600 "$GCS_CREDENTIALS"
+
+BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
+BEACON_FORWARDER_BASE_DIR="$GCS_FORWARDER_BASE" \
+BEACON_LAUNCHDAEMONS_DIR="$GCS_LAUNCHDAEMONS_DIR" \
+BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/gcs-runtime.jsonl" \
+BEACON_NO_START="1" \
+GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS" \
+GOOGLE_CLOUD_PROJECT="beacon-test" \
+"$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh" _ _ _ "beacon-gcs-test-bucket" "beacon/claude/runtime/" "NEARLINE" "end" >/dev/null
+
+for path in \
+  "$GCS_FORWARDER_BASE/gcs-vector.toml" \
+  "$GCS_FORWARDER_BASE/gcs-vector.env" \
+  "$GCS_LAUNCHDAEMONS_DIR/com.beacon.endpoint.gcs-forwarder.plist"
+do
+  if [ ! -f "$path" ]; then
+    echo "GCS forwarder output missing: $path" >&2
+    exit 1
+  fi
+done
+
+for expected in \
+  'sinks.beacon_runtime_gcs' \
+  'sinks.beacon_inventory_gcs' \
+  "$TMP_DIR/gcs-runtime.jsonl" \
+  "$TMP_DIR/inventory_state.jsonl" \
+  'key_prefix = "${BEACON_GCS_PREFIX:-beacon}/runtime/date=%F/"' \
+  'key_prefix = "${BEACON_GCS_PREFIX:-beacon}/inventory/date=%F/"' \
+  'read_from = "beginning"' \
+  'compression = "gzip"' \
+  'filename_append_uuid = true' \
+  '[sinks.beacon_runtime_gcs.healthcheck]' \
+  '[sinks.beacon_inventory_gcs.healthcheck]' \
+  'enabled = false'
+do
+  if ! grep -Fq "$expected" "$GCS_FORWARDER_BASE/gcs-vector.toml"; then
+    echo "GCS Vector config missing: $expected" >&2
+    exit 1
+  fi
+done
+
+if grep -q 'beacon-gcs-test-bucket\|service_account\|private_key\|\.input_tokens =\|\.output_tokens =\|\.cost_usd =' "$GCS_FORWARDER_BASE/gcs-vector.toml"; then
+  echo "GCS Vector config should not contain destination values, credentials, or parallel usage fields" >&2
+  exit 1
+fi
+for expected in \
+  "BEACON_GCS_BUCKET='beacon-gcs-test-bucket'" \
+  "BEACON_GCS_PREFIX='beacon/claude'" \
+  "BEACON_GCS_STORAGE_CLASS='NEARLINE'" \
+  "GOOGLE_APPLICATION_CREDENTIALS='$GCS_CREDENTIALS'" \
+  "GOOGLE_CLOUD_PROJECT='beacon-test'"
+do
+  if ! grep -Fq "$expected" "$GCS_FORWARDER_BASE/gcs-vector.env"; then
+    echo "GCS Vector env missing: $expected" >&2
+    exit 1
+  fi
+done
+case "$(ls -l "$GCS_FORWARDER_BASE/gcs-vector.env" | awk '{print $1}')" in
+  -rw-------*) ;;
+  *)
+    echo "GCS Vector env should be 0600" >&2
+    exit 1
+    ;;
+esac
+if ! grep -q 'RunAtLoad' "$GCS_LAUNCHDAEMONS_DIR/com.beacon.endpoint.gcs-forwarder.plist"; then
+  echo "GCS Vector plist missing RunAtLoad" >&2
+  exit 1
+fi
+
+RELATIVE_CREDENTIALS_OUTPUT="$TMP_DIR/gcs-relative-credentials.out"
+if BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+  BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
+  BEACON_FORWARDER_BASE_DIR="$TMP_DIR/gcs-relative-forwarders" \
+  BEACON_LAUNCHDAEMONS_DIR="$TMP_DIR/gcs-relative-launchdaemons" \
+  BEACON_NO_START="1" \
+  GOOGLE_APPLICATION_CREDENTIALS="relative-service-account.json" \
+  "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh" _ _ _ "beacon-gcs-test-bucket" >"$RELATIVE_CREDENTIALS_OUTPUT" 2>&1
+then
+  echo "GCS installer should reject a relative credential path" >&2
+  exit 1
+fi
+if ! grep -q 'must be an absolute path' "$RELATIVE_CREDENTIALS_OUTPUT"; then
+  echo "GCS installer should explain launchd credential path requirements" >&2
+  exit 1
+fi
+
+GCS_ATOMIC_BASE="$TMP_DIR/gcs-atomic-forwarders"
+GCS_ATOMIC_PLISTS="$TMP_DIR/gcs-atomic-launchdaemons"
+GCS_FAIL_VECTOR="$TMP_DIR/gcs-vector-validation-fails"
+mkdir -p "$GCS_ATOMIC_BASE" "$GCS_ATOMIC_PLISTS"
+printf '%s\n' original-config >"$GCS_ATOMIC_BASE/gcs-vector.toml"
+printf '%s\n' original-env >"$GCS_ATOMIC_BASE/gcs-vector.env"
+printf '%s\n' original-plist >"$GCS_ATOMIC_PLISTS/com.beacon.endpoint.gcs-forwarder.plist"
+cat >"$GCS_FAIL_VECTOR" <<'STUB'
+#!/bin/sh
+case "$1" in
+  --version) exit 0 ;;
+  validate) exit 12 ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$GCS_FAIL_VECTOR"
+if BEACON_VECTOR_BIN="$GCS_FAIL_VECTOR" \
+  BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
+  BEACON_FORWARDER_BASE_DIR="$GCS_ATOMIC_BASE" \
+  BEACON_LAUNCHDAEMONS_DIR="$GCS_ATOMIC_PLISTS" \
+  BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/gcs-atomic-runtime.jsonl" \
+  BEACON_NO_START="1" \
+  GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS" \
+  "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh" _ _ _ "beacon-gcs-test-bucket" >/dev/null 2>&1
+then
+  echo "GCS installer should fail when Vector rejects generated config" >&2
+  exit 1
+fi
+if [ "$(cat "$GCS_ATOMIC_BASE/gcs-vector.toml")" != "original-config" ] ||
+   [ "$(cat "$GCS_ATOMIC_BASE/gcs-vector.env")" != "original-env" ] ||
+   [ "$(cat "$GCS_ATOMIC_PLISTS/com.beacon.endpoint.gcs-forwarder.plist")" != "original-plist" ]; then
+  echo "GCS validation failure should preserve the last installed configuration" >&2
+  exit 1
+fi
+for path in "$GCS_ATOMIC_BASE"/*.tmp.* "$GCS_ATOMIC_PLISTS"/*.tmp.*; do
+  if [ -e "$path" ]; then
+    echo "GCS validation failure should remove temporary file: $path" >&2
+    exit 1
+  fi
+done
+
+GCS_RUNNER="$TMP_DIR/gcs-vector-runner"
+GCS_RUN_MARKER="$TMP_DIR/gcs-vector-run-args"
+cat >"$GCS_RUNNER" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$GCS_RUN_MARKER"
+STUB
+chmod +x "$GCS_RUNNER"
+BEACON_VECTOR_BIN="$GCS_RUNNER" \
+BEACON_GCS_VECTOR_CONFIG="$GCS_FORWARDER_BASE/gcs-vector.toml" \
+BEACON_GCS_VECTOR_ENV="$GCS_FORWARDER_BASE/gcs-vector.env" \
+GCS_RUN_MARKER="$GCS_RUN_MARKER" \
+"$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh"
+if ! grep -Fq -- "--config $GCS_FORWARDER_BASE/gcs-vector.toml" "$GCS_RUN_MARKER"; then
+  echo "GCS wrapper should exec Vector with the generated config" >&2
+  exit 1
+fi
+
+FAKE_LAUNCHCTL_BIN="$TMP_DIR/fake-launchctl-bin"
+FAKE_LAUNCHCTL_STATE="$TMP_DIR/fake-launchctl-state"
+GCS_LIFECYCLE_BASE="$TMP_DIR/gcs-lifecycle-forwarders"
+GCS_LIFECYCLE_PLISTS="$TMP_DIR/gcs-lifecycle-launchdaemons"
+mkdir -p "$FAKE_LAUNCHCTL_BIN" "$GCS_LIFECYCLE_PLISTS"
+printf '%s\n' old >"$FAKE_LAUNCHCTL_STATE"
+cat >"$FAKE_LAUNCHCTL_BIN/launchctl" <<'STUB'
+#!/bin/sh
+case "$1" in
+  bootout)
+    printf '%s\n' stopping >"$FAKE_LAUNCHCTL_STATE"
+    ;;
+  bootstrap)
+    printf '%s\n' running >"$FAKE_LAUNCHCTL_STATE"
+    ;;
+  print)
+    [ -f "$FAKE_LAUNCHCTL_STATE" ] || exit 113
+    state="$(cat "$FAKE_LAUNCHCTL_STATE")"
+    if [ "$state" = "stopping" ]; then
+      echo "state = stopping"
+      rm -f "$FAKE_LAUNCHCTL_STATE"
+      exit 0
+    fi
+    if [ "${FAKE_LAUNCHCTL_CRASH_LOOP:-0}" = "1" ]; then
+      count_file="$FAKE_LAUNCHCTL_STATE.count"
+      count=0
+      [ ! -f "$count_file" ] || count="$(cat "$count_file")"
+      count=$((count + 1))
+      printf '%s\n' "$count" >"$count_file"
+      if [ $((count % 2)) -eq 0 ]; then
+        echo "state = exited"
+        exit 0
+      fi
+    fi
+    echo "state = running"
+    echo "pid = 1234"
+    ;;
+  *)
+    echo "unexpected launchctl args: $*" >&2
+    exit 1
+    ;;
+esac
+STUB
+chmod +x "$FAKE_LAUNCHCTL_BIN/launchctl"
+
+PATH="$FAKE_LAUNCHCTL_BIN:$PATH" \
+FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
+BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
+BEACON_FORWARDER_BASE_DIR="$GCS_LIFECYCLE_BASE" \
+BEACON_LAUNCHDAEMONS_DIR="$GCS_LIFECYCLE_PLISTS" \
+BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/gcs-lifecycle-runtime.jsonl" \
+GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS" \
+"$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh" _ _ _ "beacon-gcs-test-bucket" "beacon" "STANDARD" "end" >/dev/null
+if [ "$(cat "$FAKE_LAUNCHCTL_STATE")" != "running" ]; then
+  echo "GCS installer should wait for bootout and bootstrap a running service" >&2
+  exit 1
+fi
+
+GCS_CRASH_BASE="$TMP_DIR/gcs-crash-forwarders"
+GCS_CRASH_PLISTS="$TMP_DIR/gcs-crash-launchdaemons"
+mkdir -p "$GCS_CRASH_PLISTS"
+printf '%s\n' old >"$FAKE_LAUNCHCTL_STATE"
+rm -f "$FAKE_LAUNCHCTL_STATE.count"
+if PATH="$FAKE_LAUNCHCTL_BIN:$PATH" \
+  FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
+  FAKE_LAUNCHCTL_CRASH_LOOP=1 \
+  BEACON_FORWARDER_START_ATTEMPTS=4 \
+  BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+  BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
+  BEACON_FORWARDER_BASE_DIR="$GCS_CRASH_BASE" \
+  BEACON_LAUNCHDAEMONS_DIR="$GCS_CRASH_PLISTS" \
+  BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/gcs-crash-runtime.jsonl" \
+  GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS" \
+  "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh" _ _ _ "beacon-gcs-test-bucket" "beacon" "STANDARD" "end" >/dev/null 2>&1
+then
+  echo "GCS installer should reject a crash-looping launchd job" >&2
+  exit 1
+fi
+
+GCS_FAKE_REPAIR="$TMP_DIR/fake-gcs-repair-fails.sh"
+GCS_FAKE_FORWARDER="$TMP_DIR/fake-gcs-forwarder-runs.sh"
+GCS_FORWARDER_MARKER="$TMP_DIR/gcs-forwarder-ran"
+cat >"$GCS_FAKE_REPAIR" <<'STUB'
+#!/bin/sh
+exit 11
+STUB
+cat >"$GCS_FAKE_FORWARDER" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$GCS_FORWARDER_MARKER"
+STUB
+chmod +x "$GCS_FAKE_REPAIR" "$GCS_FAKE_FORWARDER"
+
+BEACON_REPAIR_HOOKS_SCRIPT="$GCS_FAKE_REPAIR" \
+BEACON_GCS_VECTOR_SCRIPT="$GCS_FAKE_FORWARDER" \
+BEACON_GCS_BUCKET="beacon-gcs-test-bucket" \
+GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS" \
+GCS_FORWARDER_MARKER="$GCS_FORWARDER_MARKER" \
+"$ROOT_DIR/packaging/macos/jamf/claude/gcs/repair-hooks-and-forwarder.sh" >/dev/null 2>&1 && {
+  echo "combined GCS Vector repair should return the failing repair status" >&2
+  exit 1
+}
+if [ ! -f "$GCS_FORWARDER_MARKER" ]; then
+  echo "combined GCS Vector repair should run forwarder before failing repair" >&2
   exit 1
 fi

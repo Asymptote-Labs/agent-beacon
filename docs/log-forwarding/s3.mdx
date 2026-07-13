@@ -5,7 +5,7 @@ description: "Forward Beacon endpoint events into AWS S3 with customer-managed V
 
 ## Forwarding Overview
 
-Beacon `v0.0.37` added the [AWS S3 content pack](/concepts/core-concepts#aws-s3-content-pack) for teams that want Beacon endpoint events stored in an S3 bucket for data lake, SIEM, archive, or downstream detection workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Your customer-managed [Vector forwarding](/concepts/core-concepts#vector-forwarding) agent tails that file and uploads gzip-compressed NDJSON objects to S3.
+Beacon `v0.0.37` added the [AWS S3 content pack](/concepts/core-concepts#aws-s3-content-pack) for teams that want Beacon endpoint events stored in an S3 bucket for data lake, SIEM, archive, or downstream detection workflows. Beacon remains the local JSONL producer. Your customer-managed [Vector forwarding](/concepts/core-concepts#vector-forwarding) agent tails runtime activity and the sibling inventory stream and uploads gzip-compressed NDJSON objects to S3.
 
 Use this path when you want Beacon events forwarded to S3 without storing AWS credentials, bucket policy, lifecycle, retention, or encryption settings in Beacon endpoint configuration.
 
@@ -21,7 +21,7 @@ Use system mode for MDM deployments so Vector can tail `/var/log/beacon-agent/ru
 ## Prerequisites
 
 - Beacon endpoint installed and writing local JSONL.
-- An AWS S3 bucket for Beacon runtime logs.
+- An AWS S3 bucket for Beacon runtime and inventory logs.
 - Vector installed or deployable through your endpoint-management tooling.
 - An IAM role or credentials available through the standard AWS credential provider chain for the process running Vector or the AWS CLI smoke test.
 
@@ -29,6 +29,7 @@ Recommended object layout:
 
 ```text
 s3://example-security-logs/beacon/runtime/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+s3://example-security-logs/beacon/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
 ```
 
 Example least-privilege IAM policy for a dedicated Beacon prefix:
@@ -40,7 +41,7 @@ Example least-privilege IAM policy for a dedicated Beacon prefix:
     {
       "Effect": "Allow",
       "Action": ["s3:PutObject"],
-      "Resource": "arn:aws:s3:::example-security-logs/beacon/runtime/*"
+      "Resource": "arn:aws:s3:::example-security-logs/beacon/*"
     }
   ]
 }
@@ -73,7 +74,7 @@ Use the generated smoke-test script to upload the current runtime log once. This
 
 ```bash title="Command example"
 export BEACON_S3_BUCKET="example-security-logs"
-export BEACON_S3_PREFIX="beacon/runtime"
+export BEACON_S3_PREFIX="beacon"
 export AWS_REGION="us-east-1"
 ./beacon-s3-pack/s3-upload-smoke-test.sh
 ```
@@ -83,31 +84,33 @@ The script uses `aws s3 cp` and the standard AWS credential provider chain. You 
 Confirm the uploaded object:
 
 ```bash title="Confirm the uploaded object"
-aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/smoke-tests/" --region "$AWS_REGION"
-aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/smoke-tests/<object>.jsonl" - --region "$AWS_REGION" | grep "Beacon endpoint S3 validation event"
+aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/smoke-tests/" --region "$AWS_REGION"
+aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/smoke-tests/<object>.jsonl" - --region "$AWS_REGION" | grep "Beacon endpoint S3 validation event"
 ```
 
 ## Production forwarding
 
-For production, use the generated Vector config as a customer-managed host-agent forwarding template. Beacon remains the local JSONL producer; Vector tails `runtime.jsonl`, checkpoints file offsets in its `data_dir`, batches Beacon events, and writes gzip-compressed newline-delimited JSON objects into AWS S3.
+For production, use the generated Vector config as a customer-managed host-agent forwarding template. Beacon remains the local JSONL producer; Vector tails `runtime.jsonl` and `inventory_state.jsonl`, checkpoints file offsets in its `data_dir`, batches Beacon events, and writes gzip-compressed newline-delimited JSON objects into AWS S3.
 
 ```mermaid
 flowchart LR
   agentHarnesses["Agent harnesses"] -->|"OTLP or hooks"| beaconEndpoint["Beacon endpoint agent"]
-  beaconEndpoint -->|"writes normalized events"| runtimeLog["runtime.jsonl"]
+  beaconEndpoint -->|"writes activity"| runtimeLog["runtime.jsonl"]
+  beaconEndpoint -->|"writes inventory"| inventoryLog["inventory_state.jsonl"]
   runtimeLog -->|"file source tails active path"| vectorAgent["Vector host agent"]
+  inventoryLog -->|"file source tails active path"| vectorAgent
   vectorAgent -->|"parse_json, gzip NDJSON"| s3Bucket["AWS S3 bucket"]
   s3Bucket -->|"partitioned objects"| downstreamSiem["SIEM, lake, or archive workflow"]
   endpointMgmt["MDM or secret tooling"] -->|"bucket, prefix, region, AWS credentials"| vectorAgent
 ```
 
-Install Vector using your normal endpoint management tooling, then copy the generated config into Vector's config directory. On a macOS system-mode Beacon deployment, the generated config tails `/var/log/beacon-agent/runtime.jsonl`:
+Install Vector using your normal endpoint management tooling, then copy the generated config into Vector's config directory. On a macOS system-mode Beacon deployment, the generated config tails `/var/log/beacon-agent/runtime.jsonl` and `/var/log/beacon-agent/inventory_state.jsonl`:
 
 ```bash title="Install Vector using your normal endpoint management tooling, then copy the generated config into Vector's config directory. On a macOS system-mode Beacon deployment, the generated config tails /var/log/beacon-agent/runtime.jsonl"
 sudo mkdir -p /etc/vector
 sudo cp ./beacon-s3-pack/vector.toml /etc/vector/beacon-s3.toml
 export BEACON_S3_BUCKET="example-security-logs"
-export BEACON_S3_PREFIX="beacon/runtime"
+export BEACON_S3_PREFIX="beacon"
 export AWS_REGION="us-east-1"
 vector validate /etc/vector/beacon-s3.toml
 vector --config /etc/vector/beacon-s3.toml
@@ -150,7 +153,7 @@ Run the one-shot smoke test or wait for your production forwarder to ship the ne
 
 ```bash title="Run the one-shot smoke test or wait for your production forwarder to ship the new line. Beacon can write the local validation event, but remote delivery must be confirmed with AWS tooling"
 aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/" --recursive --region "$AWS_REGION"
-aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/date=<date>/<object>.jsonl.gz" - --region "$AWS_REGION" | gzip -dc | grep "Beacon endpoint S3 validation event"
+aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" - --region "$AWS_REGION" | gzip -dc | grep "Beacon endpoint S3 validation event"
 ```
 
 Expected validation fields:
@@ -163,11 +166,17 @@ If events do not appear, verify that Vector is reading the same runtime log path
 
 ## Content Handling
 
-Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to `runtime.jsonl` and forwarded to S3. Review bucket access, lifecycle, retention, and downstream consumers so retained telemetry matches your approved collection policy.
+Beacon applies redaction, sanitization, truncation, and event-size limits before
+events are written to local runtime or inventory JSONL and forwarded to S3.
+Review bucket access, lifecycle, retention, and downstream consumers so retained
+telemetry matches your approved collection policy.
 
 ## Related
 
 <Columns cols={2}>
+  <Card title="macOS system-mode object storage" icon="desktop" href="/guides/macos-object-storage-system">
+    Install harness-neutral S3 or GCS forwarding on one Mac.
+  </Card>
   <Card title="beacon endpoint s3" icon="terminal" href="/cli/s3">
     Review AWS S3 command syntax, flags, and examples.
   </Card>

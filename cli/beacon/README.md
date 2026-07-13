@@ -452,11 +452,19 @@ deployment tooling, not in Beacon endpoint configuration.
 ```
 
 The GCS pack keeps Beacon as a local JSONL producer and documents forwarding
-`runtime.jsonl` into a Google Cloud Storage bucket with a customer-managed
-Vector host agent. Store Google credentials, service accounts, workload
-identity, bucket IAM, lifecycle rules, retention policies, and encryption
-settings in Google Cloud, Vector, or deployment tooling, not in Beacon endpoint
-configuration.
+`runtime.jsonl` and the sibling `inventory_state.jsonl` into separate
+`runtime/` and `inventory/` folders below one root GCS prefix.
+
+The macOS package includes
+`/opt/beacon/jamf/claude/gcs/{install-forwarder.sh,run-forwarder.sh,repair-hooks-and-forwarder.sh}`
+and runs bundled Vector as `com.beacon.endpoint.gcs-forwarder`. Vector `0.56`
+supports service-account JSON and GCE metadata credentials; on a normal Mac,
+deliver the JSON through MDM or secret tooling to a root-owned path outside
+Beacon-managed directories and reference it with
+`GOOGLE_APPLICATION_CREDENTIALS`. Do not rely on interactive `gcloud` ADC or
+Workload Identity Federation for the launchd service. An endpoint writer with
+`roles/storage.objectCreator` cannot list or read objects, so use a separate
+reader identity for validation.
 
 ## Microsoft Sentinel
 

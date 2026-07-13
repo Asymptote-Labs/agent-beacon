@@ -148,7 +148,7 @@ management (SIEM), log aggregation, and object storage destinations.
 | Destination | Support path |
 | --- | --- |
 | [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector content pack over local runtime and inventory JSONL using customer-managed AWS credentials |
-| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector content pack over local JSONL using customer-managed Google credentials |
+| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector content pack and packaged macOS helpers over runtime and inventory JSONL using customer-managed Google credentials |
 
 #### Local
 
@@ -169,6 +169,12 @@ remain available for CLI installs across supported macOS/Linux architectures.
 | --- | --- |
 | [Fleet](https://docs.asymptotelabs.ai/cli/fleet) | macOS package and user-context deployment helpers |
 | [Jamf Pro](https://docs.asymptotelabs.ai/cli/jamf) | macOS package, policy scripts, validation, and Extension Attributes |
+
+The macOS package includes GCS forwarder helpers at
+`/opt/beacon/jamf/claude/gcs/{install-forwarder.sh,run-forwarder.sh,repair-hooks-and-forwarder.sh}`.
+They run bundled Vector as `com.beacon.endpoint.gcs-forwarder`, write runtime
+and inventory objects below one root prefix, and reference an externally
+delivered service-account JSON through `GOOGLE_APPLICATION_CREDENTIALS`.
 
 ## Dashboard and Local Detection
 

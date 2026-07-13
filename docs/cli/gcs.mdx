@@ -5,7 +5,7 @@ description: "Generate Google Cloud Storage forwarding content and validation ev
 
 ## Forwarding Command
 
-Use `beacon endpoint gcs` to generate Google Cloud Storage forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload `runtime.jsonl` to a GCS bucket as gzip-compressed NDJSON.
+Use `beacon endpoint gcs` to generate Google Cloud Storage forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload runtime and inventory JSONL to a GCS bucket as gzip-compressed NDJSON.
 
 Beacon does not store Google Cloud credentials, service accounts, workload identity settings, bucket IAM, lifecycle rules, retention policies, or encryption settings. Keep those values in Google Cloud, Vector, endpoint-management policy, or deployment tooling.
 
@@ -80,7 +80,10 @@ beacon endpoint gcs print-config --log-path /path/to/runtime.jsonl
 beacon endpoint gcs install-pack --output ./beacon-gcs-pack
 ```
 
-The pack includes setup instructions, a one-shot GCS upload smoke-test script, a Vector `gcp_cloud_storage` forwarding template, and sample Beacon endpoint events.
+The pack includes setup instructions, a one-shot GCS upload smoke-test script,
+a Vector `gcp_cloud_storage` forwarding template, and sample Beacon endpoint
+events. Current templates keep a root prefix and write runtime activity and
+inventory snapshots below separate `runtime/` and `inventory/` folders.
 
 ### Examples
 
@@ -147,7 +150,7 @@ The validation command writes the local event only. Confirm remote delivery with
 
 ```text
 gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/**"
-gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"
+gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"
 ```
 
 Expected validation fields:
@@ -163,6 +166,37 @@ vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=googl
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
+
+## Packaged macOS forwarding
+
+The signed macOS endpoint package includes:
+
+```text
+/opt/beacon/jamf/claude/gcs/install-forwarder.sh
+/opt/beacon/jamf/claude/gcs/run-forwarder.sh
+/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh
+```
+
+The helper requires:
+
+- `BEACON_GCS_BUCKET`
+- optional root `BEACON_GCS_PREFIX`, default `beacon`
+- optional `BEACON_GCS_STORAGE_CLASS`, default `STANDARD`
+- `GOOGLE_APPLICATION_CREDENTIALS`, pointing to an externally delivered
+  service-account JSON file outside Beacon-managed directories
+
+It writes `gcs-vector.toml` and a root-owned `gcs-vector.env` below
+`/Library/Application Support/Beacon/Forwarders`, then starts
+`com.beacon.endpoint.gcs-forwarder`. The env file stores the credential path,
+not the credential JSON.
+
+Vector `0.56` supports service-account JSON and GCE metadata credentials. On
+managed Macs, do not depend on interactive `gcloud` Application Default
+Credentials or Workload Identity Federation for the launchd service.
+
+Use a write-only service account with `roles/storage.objectCreator` for the
+endpoint and a separate reader identity for validation. An object creator cannot
+list or read the objects it successfully uploads.
 
 ## Related
 

@@ -29,6 +29,34 @@ forwarder_running() {
   launchctl print "system/$label" 2>/dev/null | grep -Eq 'state = running|pid ='
 }
 
+forwarder_stably_running() {
+  label="$1"
+  observations=0
+
+  while [ "$observations" -lt 3 ]; do
+    if ! forwarder_running "$label"; then
+      return 1
+    fi
+    observations=$((observations + 1))
+    if [ "$observations" -lt 3 ]; then
+      sleep 1
+    fi
+  done
+}
+
+wait_for_forwarder_bootout() {
+  target="$1"
+  attempts=0
+
+  while launchctl print "$target" >/dev/null 2>&1; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 65 ]; then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 restore_existing_forwarder() {
   label="$1"
   plist_path="$2"
@@ -43,7 +71,7 @@ restore_existing_forwarder() {
     out="$(launchctl kickstart -k "$target" 2>&1)" || {
       echo "Warning: launchctl kickstart failed for $label: $out" >&2
     }
-    if forwarder_running "$label"; then
+    if forwarder_stably_running "$label"; then
       return 0
     fi
   fi
@@ -52,24 +80,28 @@ restore_existing_forwarder() {
     out="$(launchctl bootstrap system "$plist_path" 2>&1)" || {
       echo "Warning: launchctl bootstrap failed for $label: $out" >&2
     }
-    if forwarder_running "$label"; then
+    if forwarder_stably_running "$label"; then
       return 0
     fi
 
     out="$(launchctl bootout "$target" 2>&1)" || {
       echo "Warning: launchctl bootout retry failed for $label: $out" >&2
     }
+    if ! wait_for_forwarder_bootout "$target"; then
+      echo "Warning: timed out waiting for launchctl bootout for $label" >&2
+      continue
+    fi
     out="$(launchctl bootstrap system "$plist_path" 2>&1)" || {
       echo "Warning: launchctl bootstrap after bootout failed for $label: $out" >&2
     }
-    if forwarder_running "$label"; then
+    if forwarder_stably_running "$label"; then
       return 0
     fi
 
     out="$(launchctl kickstart -k "$target" 2>&1)" || {
       echo "Warning: launchctl kickstart retry failed for $label: $out" >&2
     }
-    if forwarder_running "$label"; then
+    if forwarder_stably_running "$label"; then
       return 0
     fi
     sleep "$delay"
@@ -87,6 +119,7 @@ if command -v launchctl >/dev/null 2>&1; then
   }
   restore_existing_forwarder "com.beacon.endpoint.falcon-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist"
   restore_existing_forwarder "com.beacon.endpoint.s3-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist"
+  restore_existing_forwarder "com.beacon.endpoint.gcs-forwarder" "/Library/LaunchDaemons/com.beacon.endpoint.gcs-forwarder.plist"
   "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint update install-daemon || {
     echo "Error: could not reconcile Beacon endpoint updater daemon" >&2
     exit 1
