@@ -161,7 +161,28 @@ sudo env \
 
 The services have separate labels, configs, credentials, and checkpoint
 directories. Install both helpers to forward the same local events to S3 and
-GCS:
+GCS. After exporting the provider variables from the two sections above, run:
+
+```bash
+sudo env \
+  BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
+  BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
+  BEACON_S3_STORAGE_CLASS="$BEACON_S3_STORAGE_CLASS" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}" \
+  /opt/beacon/jamf/claude/s3/install-forwarder.sh
+
+sudo env \
+  BEACON_GCS_BUCKET="$BEACON_GCS_BUCKET" \
+  BEACON_GCS_PREFIX="$BEACON_GCS_PREFIX" \
+  BEACON_GCS_STORAGE_CLASS="$BEACON_GCS_STORAGE_CLASS" \
+  GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_APPLICATION_CREDENTIALS" \
+  /opt/beacon/jamf/claude/gcs/install-forwarder.sh
+```
+
+This creates two independent services:
 
 ```text
 com.beacon.endpoint.s3-forwarder
