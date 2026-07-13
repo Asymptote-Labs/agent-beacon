@@ -97,24 +97,81 @@ Use a root prefix such as `beacon-prod`. Do not include `runtime` or
 
 ### AWS S3
 
-Prepare the bucket, region, prefix, and a credential provider with
-`s3:PutObject` permission for the selected prefix. Review
-[AWS S3 Forwarding](/log-forwarding/s3) for the IAM policy, provider-chain
-options, storage classes, object layout, validation, and retention guidance.
+You need an AWS account where your current AWS CLI identity can create an S3
+bucket, IAM user, and inline policy. Confirm the identity before making changes:
+
+```bash
+aws sts get-caller-identity
+```
+
+Choose globally unique bucket and writer names:
+
+```bash
+export AWS_REGION="us-west-2"
+export BEACON_S3_BUCKET="<globally-unique-bucket>"
+export BEACON_S3_PREFIX="beacon-prod"
+export BEACON_S3_STORAGE_CLASS="STANDARD"
+export BEACON_S3_WRITER="beacon-endpoint-writer"
+```
+
+Create the bucket. AWS requires a different command shape for `us-east-1`:
+
+```bash
+if [ "$AWS_REGION" = "us-east-1" ]; then
+  aws s3api create-bucket \
+    --bucket "$BEACON_S3_BUCKET" \
+    --region "$AWS_REGION"
+else
+  aws s3api create-bucket \
+    --bucket "$BEACON_S3_BUCKET" \
+    --region "$AWS_REGION" \
+    --create-bucket-configuration "LocationConstraint=$AWS_REGION"
+fi
+```
+
+Create a dedicated writer and grant only `s3:PutObject` below the Beacon root
+prefix:
+
+```bash
+aws iam create-user --user-name "$BEACON_S3_WRITER"
+
+aws iam put-user-policy \
+  --user-name "$BEACON_S3_WRITER" \
+  --policy-name BeaconEndpointWriteOnly \
+  --policy-document "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["s3:PutObject"],
+    "Resource": "arn:aws:s3:::${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/*"
+  }]
+}
+EOF
+)"
+```
+
+Create an access key:
+
+```bash
+aws iam create-access-key \
+  --user-name "$BEACON_S3_WRITER" \
+  --output json
+```
+
+AWS displays the secret only once. Store both values in your password manager
+or endpoint secret tooling, then export them without committing them or placing
+them in shell startup files:
+
+```bash
+export AWS_ACCESS_KEY_ID="<AccessKeyId from the previous command>"
+export AWS_SECRET_ACCESS_KEY="<SecretAccessKey from the previous command>"
+export AWS_SESSION_TOKEN="" # only set for temporary credentials
+```
 
 Then install only the S3 forwarder:
 
 ```bash
-export BEACON_S3_BUCKET="<bucket>"
-export BEACON_S3_PREFIX="beacon-prod"
-export BEACON_S3_STORAGE_CLASS="STANDARD"
-export AWS_REGION="<region>"
-
-# Supply one supported AWS provider-chain pattern. These are examples only.
-export AWS_ACCESS_KEY_ID="<managed-or-temporary-access-key>"
-export AWS_SECRET_ACCESS_KEY="<managed-or-temporary-secret-key>"
-export AWS_SESSION_TOKEN="<optional-session-token>"
-
 sudo env \
   BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
   BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
@@ -126,29 +183,97 @@ sudo env \
   /opt/beacon/jamf/claude/s3/install-forwarder.sh
 ```
 
-For profiles or web identity, provide the corresponding variables documented in
-[AWS S3 Forwarding](/log-forwarding/s3) instead of raw access keys.
+The helper stores the provider values in a root-owned `0600` file for the
+launchd service. For production, prefer temporary credentials, a managed
+profile, or web identity where your environment can refresh them. Configure
+bucket encryption, lifecycle, retention, and access logging in AWS rather than
+in Beacon.
 
 ### Google Cloud Storage
 
-Prepare a bucket and a dedicated writer with bucket-level
-`roles/storage.objectCreator`. The packaged Vector 0.56 path on macOS requires
-a service-account JSON file through `GOOGLE_APPLICATION_CREDENTIALS`; it does
-not support external-account Workload Identity Federation. Keep the JSON in an
-externally managed root-only location.
+You need a Google Cloud project where your current `gcloud` identity can enable
+APIs, create a bucket, create a service account, and manage bucket IAM. Confirm
+the active identity and project:
 
-Review [Google Cloud Storage Forwarding](/log-forwarding/gcs) for exact `gcloud`
-commands, the separate reader identity, key-delivery constraints, disabled
-write-only healthchecks, object layout, and rotation guidance.
+```bash
+gcloud auth list --filter=status:ACTIVE
+gcloud config get-value project
+```
+
+Choose the project, bucket, location, prefix, and writer name:
+
+```bash
+export GCP_PROJECT="<project-id>"
+export GCP_LOCATION="us-west1"
+export BEACON_GCS_BUCKET="<globally-unique-bucket>"
+export BEACON_GCS_PREFIX="beacon-prod"
+export BEACON_GCS_STORAGE_CLASS="STANDARD"
+export BEACON_GCS_WRITER="beacon-endpoint-writer"
+export BEACON_GCS_WRITER_EMAIL="${BEACON_GCS_WRITER}@${GCP_PROJECT}.iam.gserviceaccount.com"
+```
+
+Enable the APIs and create a uniform-access bucket:
+
+```bash
+gcloud services enable storage.googleapis.com iam.googleapis.com \
+  --project "$GCP_PROJECT"
+
+gcloud storage buckets create "gs://${BEACON_GCS_BUCKET}" \
+  --project "$GCP_PROJECT" \
+  --location "$GCP_LOCATION" \
+  --default-storage-class "$BEACON_GCS_STORAGE_CLASS" \
+  --uniform-bucket-level-access
+```
+
+Create the writer service account:
+
+```bash
+gcloud iam service-accounts create "$BEACON_GCS_WRITER" \
+  --project "$GCP_PROJECT" \
+  --display-name "Beacon endpoint GCS writer"
+```
+
+Grant it write-only access to the bucket:
+
+```bash
+gcloud storage buckets add-iam-policy-binding \
+  "gs://${BEACON_GCS_BUCKET}" \
+  --member "serviceAccount:${BEACON_GCS_WRITER_EMAIL}" \
+  --role roles/storage.objectCreator
+```
+
+The packaged Vector 0.56 service on macOS needs a service-account JSON file. If
+your organization allows service-account keys, create one in a temporary
+directory:
+
+```bash
+credential_dir="$(mktemp -d)"
+credential_file="${credential_dir}/beacon-gcs-writer.json"
+umask 077
+
+gcloud iam service-accounts keys create "$credential_file" \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+```
+
+Install the JSON outside Beacon-managed directories so upgrades and cleanup do
+not remove it:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
+
+sudo install -d -m 0700 -o root -g wheel \
+  "$(dirname "$GOOGLE_APPLICATION_CREDENTIALS")"
+sudo install -m 0600 -o root -g wheel \
+  "$credential_file" \
+  "$GOOGLE_APPLICATION_CREDENTIALS"
+
+rm -rf "$credential_dir"
+```
 
 Then install only the GCS forwarder:
 
 ```bash
-export BEACON_GCS_BUCKET="<bucket>"
-export BEACON_GCS_PREFIX="beacon-prod"
-export BEACON_GCS_STORAGE_CLASS="STANDARD"
-export GOOGLE_APPLICATION_CREDENTIALS="/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
-
 sudo env \
   BEACON_GCS_BUCKET="$BEACON_GCS_BUCKET" \
   BEACON_GCS_PREFIX="$BEACON_GCS_PREFIX" \
@@ -156,6 +281,14 @@ sudo env \
   GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_APPLICATION_CREDENTIALS" \
   /opt/beacon/jamf/claude/gcs/install-forwarder.sh
 ```
+
+The endpoint writer intentionally cannot list or read objects. Validate with
+your current administrator identity or a separate identity with
+`roles/storage.objectViewer`. If service-account key creation is blocked by
+organization policy, stop here: packaged Vector 0.56 does not support
+external-account Workload Identity Federation on macOS. Configure lifecycle,
+retention, audit logging, and CMEK controls in Google Cloud rather than in
+Beacon.
 
 ### Forward To Both
 
@@ -217,10 +350,40 @@ sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
 Vector batches for up to five minutes by default. Use an authorized reader to
 inspect the destination:
 
-- Follow [S3 validation](/log-forwarding/s3#validate-forwarding) for AWS CLI
-  commands and writer-versus-reader permissions.
-- Follow [GCS validation](/log-forwarding/gcs#validate-forwarding) for Google
-  Cloud CLI commands and the separate reader identity.
+```bash
+# AWS S3
+aws s3 ls \
+  "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/" \
+  --recursive \
+  --region "$AWS_REGION"
+aws s3 ls \
+  "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/inventory/" \
+  --recursive \
+  --region "$AWS_REGION"
+
+# Google Cloud Storage
+gcloud storage ls \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**"
+gcloud storage ls \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/inventory/**"
+```
+
+Inspect a runtime object and look for the destination validation event:
+
+```bash
+aws s3 cp \
+  "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" \
+  - \
+  --region "$AWS_REGION" |
+  gzip -dc | grep "Beacon endpoint S3 validation event"
+
+gcloud storage cat \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" |
+  gzip -dc | grep "Beacon endpoint GCS validation event"
+```
+
+The endpoint writer identities are intentionally write-only. Run these
+inspection commands with your administrator identity or a separate reader.
 
 Generate a real event from every configured harness and confirm its
 `harness.name` appears in a remote runtime object.
@@ -239,11 +402,75 @@ sudo tail -n 100 /tmp/com.beacon.endpoint.s3-forwarder.err
 sudo tail -n 100 /tmp/com.beacon.endpoint.gcs-forwarder.err
 ```
 
-Use the destination reference pages for provider-specific `403`, IAM, region,
-credential, encryption, retention, and reader-access troubleshooting:
+Common causes of missing objects are:
 
-- [AWS S3 Forwarding](/log-forwarding/s3)
-- [Google Cloud Storage Forwarding](/log-forwarding/gcs)
+- The validation event was written before Vector started. Write another event.
+- The configured bucket, region, or root prefix does not match the IAM policy.
+- The service credential cannot create objects.
+- The GCS credential path is not absolute, root-owned, and mode `0400` or
+  `0600`.
+- The write-only endpoint identity is being used for a list/read validation
+  command.
+
+### Rotate AWS credentials
+
+Create a replacement key, rerun the S3 helper with the new values, confirm a new
+object, and only then delete the retired key:
+
+```bash
+aws iam create-access-key \
+  --user-name "$BEACON_S3_WRITER" \
+  --output json
+
+export AWS_ACCESS_KEY_ID="<new AccessKeyId>"
+export AWS_SECRET_ACCESS_KEY="<new SecretAccessKey>"
+
+sudo env \
+  BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
+  BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
+  BEACON_S3_STORAGE_CLASS="$BEACON_S3_STORAGE_CLASS" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  /opt/beacon/jamf/claude/s3/install-forwarder.sh
+
+aws iam delete-access-key \
+  --user-name "$BEACON_S3_WRITER" \
+  --access-key-id "<retired-access-key-id>"
+```
+
+### Rotate Google credentials
+
+Create a replacement key in a temporary directory, atomically replace the
+externally managed file, restart Vector, confirm a new object, and then delete
+the retired service-account key:
+
+```bash
+next_dir="$(mktemp -d)"
+next_key="${next_dir}/beacon-gcs-writer.json"
+umask 077
+
+gcloud iam service-accounts keys create "$next_key" \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+
+sudo install -m 0600 -o root -g wheel \
+  "$next_key" \
+  "${GOOGLE_APPLICATION_CREDENTIALS}.new"
+sudo mv -f \
+  "${GOOGLE_APPLICATION_CREDENTIALS}.new" \
+  "$GOOGLE_APPLICATION_CREDENTIALS"
+rm -rf "$next_dir"
+
+sudo launchctl kickstart -k system/com.beacon.endpoint.gcs-forwarder
+
+gcloud iam service-accounts keys list \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+gcloud iam service-accounts keys delete "<retired-key-id>" \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+```
 
 For managed fleets, use the dedicated [Jamf S3 guide](/guides/jamf-s3-mdm) or
 [Jamf GCS guide](/guides/jamf-gcs-mdm). Those guides show the optional

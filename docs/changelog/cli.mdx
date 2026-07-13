@@ -15,7 +15,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 - **Packaged GCS forwarding for managed Macs** · Added GCS Jamf helpers under `/opt/beacon/jamf/claude/gcs/` that run bundled Vector as `com.beacon.endpoint.gcs-forwarder` and forward runtime plus inventory JSONL below one root prefix.
 - **Explicit macOS GCS credential contract** · Documented externally delivered service-account JSON referenced by `GOOGLE_APPLICATION_CREDENTIALS`, Vector `0.56` authentication limits, write-only `roles/storage.objectCreator`, and separate reader identities for validation.
-- **Harness-neutral object storage guide** · Consolidated the Claude-specific single-Mac S3 and GCS walkthroughs into one system-mode guide for any configured harness, while keeping provider IAM, credential, and validation details in the dedicated destination references.
+- **Harness-neutral object storage guide** · Consolidated the Claude-specific single-Mac S3 and GCS walkthroughs and their provider IAM, credential, rotation, and validation steps into one system-mode guide for any configured harness.
 
 ### v0.0.95 · July 10, 2026
 
@@ -136,7 +136,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### v0.0.69 · June 17, 2026
 
-- **Persistent S3 forwarder credentials on macOS** · Fixed an issue where MDM-injected AWS provider-chain settings for the [S3 log forwarder](/log-forwarding/s3) were lost across `launchd` restarts. Provider env vars now persist in a root-owned env file so the managed `com.beacon.endpoint.s3-forwarder` job keeps shipping events after reboots and policy refreshes.
+- **Persistent S3 forwarder credentials on macOS** · Fixed an issue where MDM-injected AWS provider-chain settings for the [S3 log forwarder](/guides/macos-object-storage-system#aws-s3) were lost across `launchd` restarts. Provider env vars now persist in a root-owned env file so the managed `com.beacon.endpoint.s3-forwarder` job keeps shipping events after reboots and policy refreshes.
 - **Credentials kept out of Vector config** · AWS provider settings stay in the root-owned env file rather than `s3-vector.toml`, so packaged Vector configs remain free of customer credentials. See the [Jamf Claude S3 deployment guide](/mdm/jamf/claude) for the supported MDM injection flow.
 - **Reorganized Jamf Claude deployment scripts** · Jamf-managed [Claude](/mdm/jamf/claude) deployments now use a structured `jamf/claude/{common,falcon,s3}/` script layout. Existing Jamf policies that reference the old flat `jamf/scripts/*` paths must be updated to point at the new locations.
 - **S3 forwarder for Claude on Jamf** · Added a Vector-based [S3 forwarding path](/mdm/jamf/claude) that tails `runtime.jsonl` and ships endpoint events to a customer-managed AWS S3 bucket as gzipped NDJSON, alongside the existing Falcon forwarder option.

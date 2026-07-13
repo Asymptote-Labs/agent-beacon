@@ -231,7 +231,7 @@ only that path.
 
 Use `roles/storage.objectCreator` for the endpoint writer. Because that role
 cannot list or read objects, validate with a distinct reader identity. See
-[Google Cloud Storage forwarding](/log-forwarding/gcs) for full setup and
+[macOS System-Mode Object Storage Forwarding](/guides/macos-object-storage-system) for full setup and
 rotation steps.
 
 ## Validation
@@ -261,8 +261,8 @@ If events do not appear, check the same ownership boundary in order: Beacon shou
 
 The same Vector pattern powers several Beacon content packs:
 
-- [AWS S3](/log-forwarding/s3) uses Vector's `aws_s3` sink to write gzip NDJSON objects.
-- [Google Cloud Storage](/log-forwarding/gcs) uses Vector's [`gcp_cloud_storage` sink](https://vector.dev/docs/reference/configuration/sinks/gcp_cloud_storage/) to write gzip NDJSON objects.
+- [AWS S3](/guides/macos-object-storage-system#aws-s3) uses Vector's `aws_s3` sink to write gzip NDJSON objects.
+- [Google Cloud Storage](/guides/macos-object-storage-system#google-cloud-storage) uses Vector's [`gcp_cloud_storage` sink](https://vector.dev/docs/reference/configuration/sinks/gcp_cloud_storage/) to write gzip NDJSON objects.
 - [AWS CloudWatch Logs](/log-forwarding/cloudwatch) uses Vector's `aws_cloudwatch_logs` sink to write parsed Beacon events into a log group.
 - [Sumo Logic](/log-forwarding/sumo), [Rapid7 InsightIDR](/log-forwarding/rapid7), and [Falcon LogScale](/log-forwarding/falcon) use HTTP-based Vector sinks with destination-specific headers, endpoints, and batching.
 
@@ -287,7 +287,7 @@ Use the official Vector docs when adapting generated templates:
 ## Related
 
 <Columns cols={2}>
-  <Card title="AWS S3 forwarding" icon="box-archive" href="/log-forwarding/s3">
+  <Card title="Object storage forwarding" icon="box-archive" href="/guides/macos-object-storage-system">
     Configure Vector forwarding from Beacon JSONL into AWS S3.
   </Card>
   <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">

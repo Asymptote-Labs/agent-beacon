@@ -80,12 +80,6 @@ Use these paths when Beacon JSONL should land in a customer-managed bucket for a
   <Card title="macOS system-mode setup" icon="desktop" href="/guides/macos-object-storage-system">
     Configure harness-neutral S3, GCS, or dual forwarding on one Mac.
   </Card>
-  <Card title="AWS S3" icon="box-archive" href="/log-forwarding/s3">
-    Vector content pack over local JSONL using customer-managed AWS credentials.
-  </Card>
-  <Card title="Google Cloud Storage" icon="box-archive" href="/log-forwarding/gcs">
-    Vector content pack over runtime and inventory JSONL using customer-managed Google credentials.
-  </Card>
 </Columns>
 
 ### Local
@@ -226,7 +220,8 @@ beacon endpoint s3 install-pack --system --output ./beacon-s3-pack
 
 The generated pack includes setup guidance, a Vector `aws_s3` sink template, a one-shot AWS CLI smoke-test script, and sample events. AWS credentials, bucket policy, lifecycle, retention, encryption, and object ownership stay in AWS, Vector, endpoint-management tooling, or your secret store rather than Beacon endpoint configuration.
 
-See [AWS S3 forwarding](/log-forwarding/s3) for IAM, object layout, Vector setup, smoke testing, and validation steps.
+See [macOS System-Mode Object Storage Forwarding](/guides/macos-object-storage-system)
+for bucket creation, IAM, credentials, Vector setup, and validation.
 
 ### Google Cloud Storage
 
@@ -244,9 +239,9 @@ separate folders below one root prefix and run as
 store it outside Beacon-managed directories, and reference it with
 `GOOGLE_APPLICATION_CREDENTIALS`.
 
-See [Google Cloud Storage forwarding](/log-forwarding/gcs) for IAM, object
-layout, Vector `0.56` authentication limits, safe credential delivery and
-rotation, smoke testing, and validation with a separate reader identity.
+See [macOS System-Mode Object Storage Forwarding](/guides/macos-object-storage-system)
+for bucket creation, IAM, Vector `0.56` authentication limits, safe credential
+delivery and rotation, and validation.
 
 ### Vector log forwarding
 

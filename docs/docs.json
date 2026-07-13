@@ -247,9 +247,7 @@
                   {
                     "group": "Object Storage",
                     "pages": [
-                      "guides/macos-object-storage-system",
-                      "log-forwarding/s3",
-                      "log-forwarding/gcs"
+                      "guides/macos-object-storage-system"
                     ]
                   },
                   {
@@ -534,6 +532,14 @@
   },
   "redirects": [
     {
+      "source": "/log-forwarding/s3",
+      "destination": "/guides/macos-object-storage-system"
+    },
+    {
+      "source": "/log-forwarding/gcs",
+      "destination": "/guides/macos-object-storage-system"
+    },
+    {
       "source": "/guides/claude-gcs-system",
       "destination": "/guides/macos-object-storage-system"
     },
@@ -763,7 +769,7 @@
     },
     {
       "source": "/cli/siem-forwarding-gcs",
-      "destination": "/log-forwarding/gcs"
+      "destination": "/guides/macos-object-storage-system"
     },
     {
       "source": "/cli/siem-forwarding-local-jsonl",
@@ -779,7 +785,7 @@
     },
     {
       "source": "/cli/siem-forwarding-s3",
-      "destination": "/log-forwarding/s3"
+      "destination": "/guides/macos-object-storage-system"
     },
     {
       "source": "/cli/siem-forwarding-splunk",
@@ -1179,7 +1185,7 @@
     },
     {
       "source": "/siem-forwarding-gcs",
-      "destination": "/log-forwarding/gcs"
+      "destination": "/guides/macos-object-storage-system"
     },
     {
       "source": "/siem-forwarding-local-jsonl",
@@ -1195,7 +1201,7 @@
     },
     {
       "source": "/siem-forwarding-s3",
-      "destination": "/log-forwarding/s3"
+      "destination": "/guides/macos-object-storage-system"
     },
     {
       "source": "/siem-forwarding-splunk",
