@@ -11,11 +11,34 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## July 2026
 
-### Unreleased
+### v1.0.1 · July 13, 2026
 
 - **Packaged GCS forwarding for managed Macs** · Added GCS Jamf helpers under `/opt/beacon/jamf/claude/gcs/` that run bundled Vector as `com.beacon.endpoint.gcs-forwarder` and forward runtime plus inventory JSONL below one root prefix.
 - **Explicit macOS GCS credential contract** · Documented externally delivered service-account JSON referenced by `GOOGLE_APPLICATION_CREDENTIALS`, Vector `0.56` authentication limits, write-only `roles/storage.objectCreator`, and separate reader identities for validation.
 - **Harness-neutral object storage guide** · Consolidated the Claude-specific single-Mac S3 and GCS walkthroughs and their provider IAM, credential, rotation, and validation steps into one system-mode guide for any configured harness.
+- **Self-update extraction hardening** · Archive extraction now rejects explicit `..` path segments with either slash style before applying its existing containment checks, strengthening protection against path traversal during endpoint updates.
+
+### v1.0.0 · July 12, 2026
+
+- **S3 partition-path signing fix** · Fixed AWS SigV4 canonical URI encoding for cloud-agent S3 object keys containing date partitions such as `date=2026-07-12`, preventing authentication failures when uploading partitioned runtime snapshots.
+
+### v0.0.99 · July 12, 2026
+
+- **Compressed cloud telemetry snapshots** · Claude Code and Cursor cloud uploads to GCS or S3 now write gzip-compressed NDJSON under `<prefix>/runtime/date=YYYY-MM-DD/<unix>-<provider>-<run_id>.jsonl.gz`.
+- **Stable per-run object paths** · Repeated snapshots from the same cloud-agent run reuse one object key, while provider, run, user, and repository attribution remain in the event data rather than the storage path.
+
+### v0.0.98 · July 12, 2026
+
+- **S3 export for Claude Code cloud agents** · Added S3 as an alternative to GCS for uploading cloud sandbox `runtime.jsonl`, selected explicitly with `BEACON_CLOUD_UPLOAD=s3` and configured through environment-based bucket, prefix, region, and AWS credentials.
+- **Cloud S3 setup command** · Added `beacon cloud s3 setup` with print, apply, and environment-output modes for creating a bucket, blocking public access, provisioning a dedicated IAM user, and granting prefix-scoped `s3:PutObject`.
+
+### v0.0.97 · July 10, 2026
+
+- **Collector dependency maintenance** · Updated the collector exporter's `golang.org/x/net` dependency from `0.48.0` to `0.55.0`.
+
+### v0.0.96 · July 10, 2026
+
+- **Shared runtime log permissions** · Runtime log and lock creation now consistently preserves the shared `0666` mode across hooks, CLI writers, the collector exporter, `doctor --fix`, Elastic setup, and Jamf repair, so root-side creation or rotation does not prevent user hooks from appending telemetry.
 
 ### v0.0.95 · July 10, 2026
 
