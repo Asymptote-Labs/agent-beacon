@@ -23,10 +23,12 @@ The macOS package includes Beacon binaries, endpoint helper scripts, and Jamf as
 ```text
 /opt/beacon/bin/beacon
 /opt/beacon/bin/beacon-otelcol
+/opt/beacon/bin/vector
 /opt/beacon/scripts/install-endpoint.sh
 /opt/beacon/scripts/uninstall-endpoint.sh
 /opt/beacon/jamf/extension-attributes/*.sh
 /opt/beacon/jamf/scripts/*.sh
+/opt/beacon/jamf/claude/gcs/*.sh
 ```
 
 The package postinstall performs the default system install. That install creates system configuration and runtime state:
@@ -144,6 +146,15 @@ Suggested Smart Groups:
 - Splunk HEC forwarding is `not_configured` when HEC export is required.
 
 Use `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-context policy for hook telemetry. Set `BEACON_HOOK_HARNESSES=antigravity,claude,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode` when you want Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hook integrations. Hook configuration is per user and should run only when an interactive console user is present. Gemini CLI is configured through the endpoint harness list instead; add `gemini` to Jamf parameter 4, for example `claude,codex,gemini`. GitHub Copilot CLI is MDM-managed outside the Beacon harness list; configure `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in Copilot's launch environment. OpenClaw Gateway is configured in OpenClaw, not through Jamf hook helpers.
+
+For Google Cloud Storage, the package includes
+`/opt/beacon/jamf/claude/gcs/{install-forwarder.sh,run-forwarder.sh,repair-hooks-and-forwarder.sh}`.
+The combined helper configures runtime and inventory forwarding under one root
+prefix and starts `com.beacon.endpoint.gcs-forwarder`. Deliver the required
+service-account JSON with Jamf secret/file tooling to a root-owned path outside
+Beacon-managed directories, then pass only its path through
+`GOOGLE_APPLICATION_CREDENTIALS`. Follow the
+[Jamf GCS guide](/guides/jamf-gcs-mdm) for exact Google Cloud and policy steps.
 
 ## Troubleshooting
 
@@ -278,6 +289,9 @@ Use `/opt/beacon/jamf/scripts/uninstall.sh` to remove endpoint service files. Se
 ## Related
 
 <Columns cols={2}>
+  <Card title="Claude with Jamf and GCS" icon="bucket" href="/guides/jamf-gcs-mdm">
+    Deploy Beacon and forward runtime plus inventory telemetry to GCS.
+  </Card>
   <Card title="Anthropic, OpenAI, and Cursor with Jamf and S3" icon="bucket" href="/guides/jamf-anthropic-openai-cursor-mdm">
     Deploy Beacon with Jamf and forward Claude Code, Codex CLI, and Cursor telemetry to S3.
   </Card>

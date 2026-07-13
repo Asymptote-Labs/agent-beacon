@@ -1,0 +1,230 @@
+---
+title: "macOS System-Mode Object Storage Forwarding"
+description: "Install Beacon on one Mac and forward system runtime and inventory telemetry to AWS S3, Google Cloud Storage, or both."
+---
+
+## Overview
+
+Use this guide for a single Apple Silicon Mac without MDM. Beacon's object
+storage forwarders are harness-neutral: they tail the system endpoint logs, so
+Claude Code, Codex CLI, Cursor, VS Code, opencode, and other configured
+integrations can share the same S3 or GCS pipeline.
+
+The end state is:
+
+- Beacon and bundled Vector are installed under `/opt/beacon`.
+- `com.beacon.endpoint.collector` receives local OTLP telemetry.
+- Supported hooks and plugins write to the same system runtime log.
+- Runtime activity is stored in `/var/log/beacon-agent/runtime.jsonl`.
+- Inventory telemetry is stored in
+  `/var/log/beacon-agent/inventory_state.jsonl`.
+- Vector forwards both streams to S3, GCS, or both:
+
+```text
+<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+```
+
+The scripts below use the destination-only `install-forwarder.sh` helpers.
+The `repair-hooks-and-forwarder.sh` scripts under the `claude/` package path are
+Claude convenience wrappers: they install the same forwarder and then repair
+Claude hooks. The forwarding services themselves do not inspect or depend on
+the producing harness.
+
+## 1. Install Beacon
+
+Download and install the latest signed Apple Silicon endpoint package from
+[GitHub Releases](https://github.com/Asymptote-Labs/agent-beacon/releases):
+
+```bash
+tmpdir="$(mktemp -d)"
+gh release download \
+  --repo Asymptote-Labs/agent-beacon \
+  --pattern 'BeaconEndpointAgent-*-arm64.pkg' \
+  --dir "$tmpdir"
+
+sudo installer -pkg "$tmpdir"/BeaconEndpointAgent-*-arm64.pkg -target /
+/opt/beacon/bin/beacon version
+```
+
+The package installs Beacon, the collector, bundled Vector, and the S3 and GCS
+forwarder helpers. Confirm the system endpoint is healthy:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint status --system
+sudo launchctl print system/com.beacon.endpoint.collector
+```
+
+## 2. Configure Runtime Harnesses
+
+Object storage forwarding begins after events reach Beacon's system logs.
+Configure the runtimes you use before troubleshooting the destination.
+
+The package configures the default native OTLP path for Claude Code and Codex
+CLI for the active console user. Other hook- or plugin-backed integrations use
+their normal endpoint installation commands. For example:
+
+```bash
+/opt/beacon/bin/beacon endpoint hooks install \
+  --harness cursor \
+  --level user \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+
+/opt/beacon/bin/beacon endpoint hooks install \
+  --harness opencode \
+  --level user \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+Run hook installers as the interactive user, not root. Review
+[Agent Harness Integrations](/runtimes) and
+[Endpoint Hooks](/cli/hooks) for the supported setup method for each runtime.
+Restart the runtime after changing hooks or OTLP settings.
+
+Confirm recent local events before configuring a cloud destination:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint status --system --json
+ls -l \
+  /var/log/beacon-agent/runtime.jsonl \
+  /var/log/beacon-agent/inventory_state.jsonl
+```
+
+## 3. Choose A Destination
+
+Use a root prefix such as `beacon-prod`. Do not include `runtime` or
+`inventory`; Beacon appends those folders.
+
+### AWS S3
+
+Prepare the bucket, region, prefix, and a credential provider with
+`s3:PutObject` permission for the selected prefix. Review
+[AWS S3 Forwarding](/log-forwarding/s3) for the IAM policy, provider-chain
+options, storage classes, object layout, validation, and retention guidance.
+
+Then install only the S3 forwarder:
+
+```bash
+export BEACON_S3_BUCKET="<bucket>"
+export BEACON_S3_PREFIX="beacon-prod"
+export BEACON_S3_STORAGE_CLASS="STANDARD"
+export AWS_REGION="<region>"
+
+# Supply one supported AWS provider-chain pattern. These are examples only.
+export AWS_ACCESS_KEY_ID="<managed-or-temporary-access-key>"
+export AWS_SECRET_ACCESS_KEY="<managed-or-temporary-secret-key>"
+export AWS_SESSION_TOKEN="<optional-session-token>"
+
+sudo env \
+  BEACON_S3_BUCKET="$BEACON_S3_BUCKET" \
+  BEACON_S3_PREFIX="$BEACON_S3_PREFIX" \
+  BEACON_S3_STORAGE_CLASS="$BEACON_S3_STORAGE_CLASS" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}" \
+  /opt/beacon/jamf/claude/s3/install-forwarder.sh
+```
+
+For profiles or web identity, provide the corresponding variables documented in
+[AWS S3 Forwarding](/log-forwarding/s3) instead of raw access keys.
+
+### Google Cloud Storage
+
+Prepare a bucket and a dedicated writer with bucket-level
+`roles/storage.objectCreator`. The packaged Vector 0.56 path on macOS requires
+a service-account JSON file through `GOOGLE_APPLICATION_CREDENTIALS`; it does
+not support external-account Workload Identity Federation. Keep the JSON in an
+externally managed root-only location.
+
+Review [Google Cloud Storage Forwarding](/log-forwarding/gcs) for exact `gcloud`
+commands, the separate reader identity, key-delivery constraints, disabled
+write-only healthchecks, object layout, and rotation guidance.
+
+Then install only the GCS forwarder:
+
+```bash
+export BEACON_GCS_BUCKET="<bucket>"
+export BEACON_GCS_PREFIX="beacon-prod"
+export BEACON_GCS_STORAGE_CLASS="STANDARD"
+export GOOGLE_APPLICATION_CREDENTIALS="/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
+
+sudo env \
+  BEACON_GCS_BUCKET="$BEACON_GCS_BUCKET" \
+  BEACON_GCS_PREFIX="$BEACON_GCS_PREFIX" \
+  BEACON_GCS_STORAGE_CLASS="$BEACON_GCS_STORAGE_CLASS" \
+  GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_APPLICATION_CREDENTIALS" \
+  /opt/beacon/jamf/claude/gcs/install-forwarder.sh
+```
+
+### Forward To Both
+
+The services have separate labels, configs, credentials, and checkpoint
+directories. Install both helpers to forward the same local events to S3 and
+GCS:
+
+```text
+com.beacon.endpoint.s3-forwarder
+com.beacon.endpoint.gcs-forwarder
+```
+
+## 4. Validate
+
+Check the configured services:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.collector
+sudo launchctl print system/com.beacon.endpoint.s3-forwarder  # when configured
+sudo launchctl print system/com.beacon.endpoint.gcs-forwarder # when configured
+```
+
+Write destination and inventory validation events:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint s3 validate --system  # when configured
+sudo /opt/beacon/bin/beacon endpoint gcs validate --system # when configured
+
+sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
+  --system \
+  --force \
+  --trigger manual \
+  --trigger-harness manual \
+  --working-dir /Users/Shared \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+Vector batches for up to five minutes by default. Use an authorized reader to
+inspect the destination:
+
+- Follow [S3 validation](/log-forwarding/s3#validate-forwarding) for AWS CLI
+  commands and writer-versus-reader permissions.
+- Follow [GCS validation](/log-forwarding/gcs#validate-forwarding) for Google
+  Cloud CLI commands and the separate reader identity.
+
+Generate a real event from every configured harness and confirm its
+`harness.name` appears in a remote runtime object.
+
+## 5. Operate And Troubleshoot
+
+The forwarders persist checkpoints, so restarts and package upgrades resume from
+the last observed offsets. Runtime starts at the end on first install to avoid
+unexpected historical backfill; inventory starts at the beginning so the first
+snapshot is not missed.
+
+Check Vector errors:
+
+```bash
+sudo tail -n 100 /tmp/com.beacon.endpoint.s3-forwarder.err
+sudo tail -n 100 /tmp/com.beacon.endpoint.gcs-forwarder.err
+```
+
+Use the destination reference pages for provider-specific `403`, IAM, region,
+credential, encryption, retention, and reader-access troubleshooting:
+
+- [AWS S3 Forwarding](/log-forwarding/s3)
+- [Google Cloud Storage Forwarding](/log-forwarding/gcs)
+
+For managed fleets, use the dedicated [Jamf S3 guide](/guides/jamf-s3-mdm) or
+[Jamf GCS guide](/guides/jamf-gcs-mdm). Those guides show the optional
+Claude-oriented combined repair wrappers as well as policy parameters and
+managed credential delivery.

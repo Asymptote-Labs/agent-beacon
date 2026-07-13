@@ -304,8 +304,8 @@ var siemDestinations = []siemDestination{
 			message: "Beacon endpoint GCS validation event",
 			print: func(cfg endpointconfig.Config) {
 				fmt.Println("Expected GCS fields: vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl")
-				fmt.Println(`Confirm delivery with Google Cloud CLI: gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/**"`)
-				fmt.Println(`Inspect an object with Google Cloud CLI: gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"`)
+				fmt.Println(`Confirm delivery with Google Cloud CLI: gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**"`)
+				fmt.Println(`Inspect an object with Google Cloud CLI: gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"`)
 			},
 		},
 	},

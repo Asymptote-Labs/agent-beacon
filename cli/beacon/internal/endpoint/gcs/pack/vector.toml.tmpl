@@ -1,9 +1,10 @@
 # Beacon Endpoint Agent -> Google Cloud Storage
 #
 # Run Vector as a customer-managed host agent. Keep Google credentials,
-# service-account bindings, workload identity, bucket IAM, lifecycle, retention,
-# and encryption in Google Cloud or deployment tooling, not in Beacon config.
-# This template relies on Google Application Default Credentials.
+# service-account bindings, bucket IAM, lifecycle, retention, and encryption in
+# Google Cloud or deployment tooling, not in Beacon config. Packaged Vector
+# 0.56 on macOS expects service-account JSON through
+# GOOGLE_APPLICATION_CREDENTIALS; it does not support external-account WIF.
 
 data_dir = "/var/lib/vector/beacon-gcs"
 
@@ -12,18 +13,30 @@ type = "file"
 include = ["{{LOG_PATH}}"]
 read_from = "end"
 
-[transforms.beacon_json]
+[sources.beacon_inventory]
+type = "file"
+include = ["{{INVENTORY_LOG_PATH}}"]
+read_from = "beginning"
+
+[transforms.beacon_runtime_json]
 type = "remap"
 inputs = ["beacon_runtime"]
 source = '''
 . = parse_json!(.message)
 '''
 
-[sinks.beacon_gcs]
+[transforms.beacon_inventory_json]
+type = "remap"
+inputs = ["beacon_inventory"]
+source = '''
+. = parse_json!(.message)
+'''
+
+[sinks.beacon_runtime_gcs]
 type = "gcp_cloud_storage"
-inputs = ["beacon_json"]
+inputs = ["beacon_runtime_json"]
 bucket = "${BEACON_GCS_BUCKET}"
-key_prefix = "${BEACON_GCS_PREFIX:-beacon/runtime}/date=%F/"
+key_prefix = "${BEACON_GCS_PREFIX:-beacon}/runtime/date=%F/"
 filename_time_format = "%s"
 filename_append_uuid = true
 filename_extension = "jsonl.gz"
@@ -32,17 +45,51 @@ content_encoding = "gzip"
 content_type = "application/x-ndjson"
 storage_class = "${BEACON_GCS_STORAGE_CLASS:-STANDARD}"
 
-[sinks.beacon_gcs.encoding]
+[sinks.beacon_runtime_gcs.encoding]
 codec = "json"
 
-[sinks.beacon_gcs.framing]
+[sinks.beacon_runtime_gcs.framing]
 method = "newline_delimited"
 
-[sinks.beacon_gcs.batch]
+[sinks.beacon_runtime_gcs.batch]
 max_bytes = 10000000
 timeout_secs = 300
 
-[sinks.beacon_gcs.request]
+[sinks.beacon_runtime_gcs.request]
 retry_attempts = 10
 retry_initial_backoff_secs = 1
 retry_max_duration_secs = 300
+
+[sinks.beacon_runtime_gcs.healthcheck]
+enabled = false
+
+[sinks.beacon_inventory_gcs]
+type = "gcp_cloud_storage"
+inputs = ["beacon_inventory_json"]
+bucket = "${BEACON_GCS_BUCKET}"
+key_prefix = "${BEACON_GCS_PREFIX:-beacon}/inventory/date=%F/"
+filename_time_format = "%s"
+filename_append_uuid = true
+filename_extension = "jsonl.gz"
+compression = "gzip"
+content_encoding = "gzip"
+content_type = "application/x-ndjson"
+storage_class = "${BEACON_GCS_STORAGE_CLASS:-STANDARD}"
+
+[sinks.beacon_inventory_gcs.encoding]
+codec = "json"
+
+[sinks.beacon_inventory_gcs.framing]
+method = "newline_delimited"
+
+[sinks.beacon_inventory_gcs.batch]
+max_bytes = 10000000
+timeout_secs = 300
+
+[sinks.beacon_inventory_gcs.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300
+
+[sinks.beacon_inventory_gcs.healthcheck]
+enabled = false

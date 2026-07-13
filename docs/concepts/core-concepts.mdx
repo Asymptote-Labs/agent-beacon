@@ -117,15 +117,15 @@ The **Rapid7 content pack** is Beacon's generated setup guidance, NDJSON upload 
 
 ## AWS S3 Content Pack
 
-The **AWS S3 content pack** is Beacon's generated setup guidance, AWS CLI smoke-test script, Vector `aws_s3` forwarding template, and sample events for shipping local Beacon JSONL into an S3 bucket. The pack reads the runtime log; Beacon itself does not store AWS credentials, bucket policies, lifecycle rules, or encryption settings.
+The **AWS S3 content pack** is Beacon's generated setup guidance, AWS CLI smoke-test script, Vector `aws_s3` forwarding template, and sample events for shipping local Beacon JSONL into an S3 bucket. The current Vector path reads runtime and inventory JSONL and writes them below separate folders under one root prefix; Beacon itself does not store AWS credentials, bucket policies, lifecycle rules, or encryption settings.
 
 ## Google Cloud Storage Content Pack
 
-The **Google Cloud Storage content pack** is Beacon's generated setup guidance, GCS upload smoke-test script, Vector `gcp_cloud_storage` forwarding template, and sample events for shipping local Beacon JSONL into a GCS bucket. The pack reads the runtime log; Beacon itself does not store Google Cloud credentials, service accounts, workload identity settings, bucket IAM, lifecycle rules, retention policies, or encryption settings.
+The **Google Cloud Storage content pack** is Beacon's generated setup guidance, GCS upload smoke-test script, Vector `gcp_cloud_storage` forwarding template, and sample events for shipping local Beacon JSONL into a GCS bucket. The current Vector path reads runtime and inventory JSONL and writes them below separate folders under one root prefix; Beacon itself does not store Google Cloud credentials, service accounts, bucket IAM, lifecycle rules, retention policies, or encryption settings.
 
 ## Vector Forwarding
 
-**Vector forwarding** means a customer-managed Vector host agent tails Beacon's local `runtime.jsonl`, parses each JSON line, and delivers events to a downstream destination such as Sumo Logic, Rapid7 InsightIDR, Falcon LogScale, AWS CloudWatch Logs, AWS S3, or Google Cloud Storage. Vector owns checkpointing, batching, retries, credentials, and destination-specific settings.
+**Vector forwarding** means a customer-managed Vector host agent tails Beacon's local JSONL streams, parses each JSON line, and delivers events to a downstream destination such as Sumo Logic, Rapid7 InsightIDR, Falcon LogScale, AWS CloudWatch Logs, AWS S3, or Google Cloud Storage. Vector owns checkpointing, batching, retries, credentials, and destination-specific settings.
 
 ## Customer-Managed Forwarding
 

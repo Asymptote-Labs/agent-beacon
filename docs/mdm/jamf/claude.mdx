@@ -6,6 +6,9 @@ description: "Deploy Claude Code endpoint telemetry with Jamf Pro and route Beac
 Use this page as the Claude-specific Jamf entry point. For complete managed forwarding setup, follow the destination-specific self-serve guide:
 
 <Columns cols={2}>
+  <Card title="Deploy Beacon With Jamf And GCS" icon="bucket" href="/guides/jamf-gcs-mdm">
+    Install Beacon with Jamf Pro, deliver a Google service-account JSON through managed secret tooling, and forward runtime plus inventory JSONL to GCS.
+  </Card>
   <Card title="Deploy Beacon With Jamf And S3" icon="bucket" href="/guides/jamf-s3-mdm">
     Install Beacon with Jamf Pro, inject AWS provider settings through MDM, configure Claude Code hooks, and forward runtime plus inventory JSONL to S3.
   </Card>
@@ -32,6 +35,9 @@ The macOS package includes these Claude-specific helpers:
 
 ```text
 /opt/beacon/jamf/claude/common/repair-hooks.sh
+/opt/beacon/jamf/claude/gcs/install-forwarder.sh
+/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh
+/opt/beacon/jamf/claude/gcs/run-forwarder.sh
 /opt/beacon/jamf/claude/s3/install-forwarder.sh
 /opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh
 /opt/beacon/jamf/claude/s3/run-forwarder.sh
@@ -41,6 +47,10 @@ The macOS package includes these Claude-specific helpers:
 ```
 
 Use `repair-hooks.sh` when you only need to repair the system endpoint and reinstall Claude hooks.
+
+Use `gcs/repair-hooks-and-forwarder.sh` when one Jamf policy should repair the
+endpoint, reinstall Claude hooks, and configure GCS runtime and inventory
+forwarding through `com.beacon.endpoint.gcs-forwarder`.
 
 Use `s3/repair-hooks-and-forwarder.sh` when one Jamf policy should repair the endpoint, reinstall Claude hooks, and configure S3 forwarding.
 
@@ -54,6 +64,9 @@ Use `falcon/repair-hooks-and-forwarder.sh` when one Jamf policy should repair th
   </Card>
   <Card title="S3 Log Forwarding" icon="bucket" href="/log-forwarding/s3">
     Review the generated S3 content pack and Vector forwarding behavior.
+  </Card>
+  <Card title="GCS Log Forwarding" icon="bucket" href="/log-forwarding/gcs">
+    Review GCS IAM, root-prefix layout, service-account delivery, and validation.
   </Card>
   <Card title="CrowdStrike Falcon LogScale" icon="shield-halved" href="/log-forwarding/falcon">
     Review Falcon parser setup, HEC settings, and validation steps.

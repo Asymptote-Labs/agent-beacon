@@ -11,6 +11,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## July 2026
 
+### Unreleased
+
+- **Packaged GCS forwarding for managed Macs** · Added GCS Jamf helpers under `/opt/beacon/jamf/claude/gcs/` that run bundled Vector as `com.beacon.endpoint.gcs-forwarder` and forward runtime plus inventory JSONL below one root prefix.
+- **Explicit macOS GCS credential contract** · Documented externally delivered service-account JSON referenced by `GOOGLE_APPLICATION_CREDENTIALS`, Vector `0.56` authentication limits, write-only `roles/storage.objectCreator`, and separate reader identities for validation.
+- **Harness-neutral object storage guide** · Consolidated the Claude-specific single-Mac S3 and GCS walkthroughs into one system-mode guide for any configured harness, while keeping provider IAM, credential, and validation details in the dedicated destination references.
+
 ### v0.0.95 · July 10, 2026
 
 - **Cursor telemetry docs polish** · Fixed punctuation and grammar in the Cursor telemetry support table so local and cloud hook coverage is easier to scan.

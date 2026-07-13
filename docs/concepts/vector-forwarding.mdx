@@ -24,11 +24,15 @@ flowchart LR
 
 Vector is a lightweight observability pipeline agent. A Vector configuration connects **sources** that collect events, **transforms** that parse or reshape them, and **sinks** that deliver them to downstream systems. In Beacon forwarding, Vector is the customer-managed shipper that tails Beacon's local JSONL audit log, parses each line into the original Beacon event, batches records, retries delivery, and writes them to destinations such as AWS S3, Google Cloud Storage, AWS CloudWatch Logs, Sumo Logic, Rapid7 InsightIDR, or CrowdStrike Falcon LogScale.
 
-Beacon uses Vector as a handoff pattern, not as a hosted dependency. Beacon continues to write one local source of truth at `runtime.jsonl`. Vector runs beside Beacon only when you choose to forward that file into your own storage, SIEM, data lake, or log platform.
+Beacon uses Vector as a handoff pattern, not as a hosted dependency. Beacon writes
+runtime activity to `runtime.jsonl` and metadata-only inventory snapshots to the
+sibling `inventory_state.jsonl`. Vector runs beside Beacon only when you choose
+to forward those local streams into your own storage, SIEM, data lake, or log
+platform.
 
 ## Open Source And Managed
 
-In **Asymptote Open Source**, Agent Beacon is local-first. It configures supported agent harnesses, receives OTLP or hook telemetry, normalizes events, writes the local [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log), and can generate forwarding content packs. Destination credentials, bucket policies, IAM roles, lifecycle rules, retention, encryption, and remote ingestion settings stay outside Beacon endpoint configuration.
+In **Asymptote Open Source**, Agent Beacon is local-first. It configures supported agent harnesses, receives OTLP or hook telemetry, normalizes events, writes local runtime and inventory JSONL, and can generate forwarding content packs. Destination credentials, bucket policies, IAM roles, lifecycle rules, retention, encryption, and remote ingestion settings stay outside Beacon endpoint configuration.
 
 That is where Vector fits. For open-source deployments, Vector is an optional customer-managed forwarder. You install and operate Vector through MDM, endpoint management, launchd, systemd, Kubernetes, or your normal host-agent tooling. Beacon can generate a destination-specific `vector.toml`, but Vector owns:
 
@@ -44,7 +48,10 @@ In **Asymptote Managed**, the main path is different. Managed deployments use As
 
 ## Why The Handoff Is Local
 
-Beacon's local JSONL handoff keeps the endpoint posture simple and inspectable. The endpoint agent does not need S3 credentials to keep collecting telemetry. The local dashboard can read the same file that a forwarder tails. If your destination changes, Beacon can keep writing the same normalized event stream while you replace the downstream shipper or sink.
+Beacon's local JSONL handoff keeps the endpoint posture simple and inspectable.
+The endpoint agent does not need object-storage credentials to keep collecting
+telemetry. If your destination changes, Beacon can keep writing the same
+normalized streams while you replace the downstream shipper or sink.
 
 This also creates a clear ownership boundary:
 
@@ -89,15 +96,19 @@ The source reads Beacon's local file. The transform replaces Vector's wrapper ev
 
 ## S3 In Depth
 
-AWS S3 forwarding is the clearest example of the pattern because it shows how Beacon's local event stream becomes durable object storage without Beacon storing AWS credentials.
+AWS S3 forwarding is one example of how Beacon's local runtime and inventory
+streams become durable object storage without Beacon storing AWS credentials.
 
-First, Beacon writes endpoint events locally. A managed system-mode deployment writes to:
+First, Beacon writes endpoint activity and inventory locally. A managed
+system-mode deployment writes to:
 
 ```text
 /var/log/beacon-agent/runtime.jsonl
+/var/log/beacon-agent/inventory_state.jsonl
 ```
 
-Each line is one complete Beacon endpoint event. Beacon keeps the active path stable for dashboards and shippers, and rotates local archives when needed.
+Each line is one complete Beacon endpoint event. Beacon keeps the active paths
+stable for shippers and rotates local archives when needed.
 
 Next, you generate the S3 content pack:
 
@@ -202,6 +213,26 @@ For a dedicated Beacon prefix, least privilege usually starts with `s3:PutObject
 ```
 
 Add `s3:PutObjectTagging`, KMS permissions, bucket-owner controls, or condition keys only when your AWS environment requires them. Bucket lifecycle, retention, server-side encryption, replication, access logs, and object lock should be configured in AWS, not in Beacon.
+
+## GCS Authentication On macOS
+
+The packaged GCS flow mirrors the S3 runtime/inventory layout with
+`gcp_cloud_storage` sinks and a root `BEACON_GCS_PREFIX`. The signed package
+installs GCS helpers under `/opt/beacon/jamf/claude/gcs/` and runs Vector as
+`com.beacon.endpoint.gcs-forwarder`.
+
+The bundled Vector `0.56` supports service-account JSON and GCE metadata
+authentication. Normal Macs do not have GCE metadata, and interactive `gcloud`
+ADC or Workload Identity Federation is not a reliable launchd service contract
+for this version. Deliver a service-account JSON through MDM or secret tooling,
+store it outside Beacon-managed directories, and reference it with
+`GOOGLE_APPLICATION_CREDENTIALS`. Beacon's root-owned `gcs-vector.env` stores
+only that path.
+
+Use `roles/storage.objectCreator` for the endpoint writer. Because that role
+cannot list or read objects, validate with a distinct reader identity. See
+[Google Cloud Storage forwarding](/log-forwarding/gcs) for full setup and
+rotation steps.
 
 ## Validation
 

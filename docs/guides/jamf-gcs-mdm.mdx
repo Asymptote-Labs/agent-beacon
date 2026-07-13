@@ -1,0 +1,309 @@
+---
+title: "Claude with Jamf and GCS"
+description: "Self-serve Jamf Pro setup for Beacon endpoint telemetry, Claude Code hooks, inventory snapshots, and Google Cloud Storage forwarding"
+---
+
+## Overview
+
+Use this guide to install Beacon on managed Macs and forward Claude Code runtime
+and inventory telemetry to Google Cloud Storage without asking users to configure
+the endpoint.
+
+The deployed state is:
+
+- Beacon and Vector are installed under `/opt/beacon`.
+- `com.beacon.endpoint.collector` runs the system endpoint.
+- Claude Code hooks are installed for the logged-in console user.
+- Runtime and inventory events are written to
+  `/var/log/beacon-agent/runtime.jsonl` and
+  `/var/log/beacon-agent/inventory_state.jsonl`.
+- `com.beacon.endpoint.gcs-forwarder` uploads both streams under one root prefix:
+
+```text
+gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+gs://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+```
+
+Use a root prefix such as `beacon-prod`, not `beacon-prod/runtime` or
+`beacon-prod/inventory`. The installer normalizes those older suffixes, but new
+deployments should use the root layout.
+
+## 1. Prepare Google Cloud
+
+Set placeholders in an administrator shell:
+
+```bash
+export GCP_PROJECT="<project-id>"
+export GCP_REGION="<region>"                 # for example us-central1
+export BEACON_GCS_BUCKET="<globally-unique-bucket>"
+export BEACON_GCS_PREFIX="beacon-prod"
+export BEACON_GCS_WRITER="beacon-endpoint-writer"
+export BEACON_GCS_READER="beacon-endpoint-reader"
+```
+
+Create the bucket and writer service account:
+
+```bash
+gcloud services enable storage.googleapis.com iam.googleapis.com \
+  --project "$GCP_PROJECT"
+
+gcloud storage buckets create "gs://${BEACON_GCS_BUCKET}" \
+  --project "$GCP_PROJECT" \
+  --location "$GCP_REGION" \
+  --uniform-bucket-level-access
+
+gcloud iam service-accounts create "$BEACON_GCS_WRITER" \
+  --project "$GCP_PROJECT" \
+  --display-name "Beacon endpoint GCS writer"
+
+export BEACON_GCS_WRITER_EMAIL="${BEACON_GCS_WRITER}@${GCP_PROJECT}.iam.gserviceaccount.com"
+
+gcloud storage buckets add-iam-policy-binding "gs://${BEACON_GCS_BUCKET}" \
+  --member "serviceAccount:${BEACON_GCS_WRITER_EMAIL}" \
+  --role roles/storage.objectCreator
+```
+
+`roles/storage.objectCreator` can create objects but cannot list, read, overwrite,
+or delete them. A successful writer therefore cannot validate delivery by
+running `gcloud storage ls` or `cat`.
+
+Create a separate read-only identity for validation and downstream consumers:
+
+```bash
+gcloud iam service-accounts create "$BEACON_GCS_READER" \
+  --project "$GCP_PROJECT" \
+  --display-name "Beacon endpoint GCS reader"
+
+export BEACON_GCS_READER_EMAIL="${BEACON_GCS_READER}@${GCP_PROJECT}.iam.gserviceaccount.com"
+
+gcloud storage buckets add-iam-policy-binding "gs://${BEACON_GCS_BUCKET}" \
+  --member "serviceAccount:${BEACON_GCS_READER_EMAIL}" \
+  --role roles/storage.objectViewer
+```
+
+Apply lifecycle, retention, logging, and CMEK controls in Google Cloud according
+to your organization's policy.
+
+## 2. Deliver The Writer Credential
+
+Vector `0.56` supports a service-account JSON file through
+`GOOGLE_APPLICATION_CREDENTIALS` and GCE metadata credentials. Managed Macs do
+not normally have GCE metadata, and interactive `gcloud auth
+application-default login` credentials or Workload Identity Federation are not
+a reliable launchd authentication contract for this Vector version.
+
+Create a key only when your organization permits service-account keys:
+
+```bash
+umask 077
+gcloud iam service-accounts keys create "./${BEACON_GCS_WRITER}.json" \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+```
+
+Deliver that file with Jamf's managed-file or secret-delivery mechanism to a
+root-owned location outside Beacon's managed tree, for example:
+
+```text
+/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json
+```
+
+Do not upload the JSON as an ordinary Jamf script parameter, print it in policy
+logs, commit it, or place it below `/opt/beacon` or
+`/Library/Application Support/Beacon`. Beacon upgrades, repair, and cleanup own
+those trees. On the Mac, enforce restrictive permissions:
+
+```bash
+sudo chown root:wheel \
+  "/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
+sudo chmod 0600 \
+  "/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
+```
+
+The packaged helper stores only the credential path in
+`/Library/Application Support/Beacon/Forwarders/gcs-vector.env`; the JSON stays
+in the externally managed location.
+
+## 3. Configure The Jamf Policy
+
+Upload the signed Beacon endpoint package, which includes:
+
+```text
+/opt/beacon/bin/vector
+/opt/beacon/jamf/claude/gcs/install-forwarder.sh
+/opt/beacon/jamf/claude/gcs/run-forwarder.sh
+/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh
+```
+
+Use one policy to install the package and a second policy to deliver the
+credential and configure forwarding. Add this Jamf script to the second policy:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+export BEACON_GCS_BUCKET="${4:-}"
+export BEACON_GCS_PREFIX="${5:-beacon}"
+export BEACON_GCS_STORAGE_CLASS="${6:-STANDARD}"
+export BEACON_VECTOR_READ_FROM="${7:-end}"
+export GOOGLE_APPLICATION_CREDENTIALS="${8:-}"
+
+test -r "$GOOGLE_APPLICATION_CREDENTIALS"
+/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh
+```
+
+Configure the Jamf parameter labels:
+
+| Parameter | Label | Example |
+| --- | --- | --- |
+| 4 | GCS bucket | `example-security-logs` |
+| 5 | GCS prefix root | `beacon-prod` |
+| 6 | GCS storage class | `STANDARD` |
+| 7 | Vector runtime read position | `end` |
+| 8 | Managed credential file path | `/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json` |
+
+The helper writes:
+
+```text
+/Library/Application Support/Beacon/Forwarders/gcs-vector.toml
+/Library/Application Support/Beacon/Forwarders/gcs-vector.env
+/Library/Application Support/Beacon/Forwarders/vector-data/gcs/
+/Library/LaunchDaemons/com.beacon.endpoint.gcs-forwarder.plist
+```
+
+Runtime starts at `end` to avoid an unexpected historical upload. Inventory
+starts at `beginning` so an initial snapshot created before Vector starts is not
+missed.
+
+## 4. Validate A Managed Mac
+
+Check services, files, and the non-secret configuration:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.collector
+sudo launchctl print system/com.beacon.endpoint.gcs-forwarder
+
+ls -l /var/log/beacon-agent/runtime.jsonl \
+  /var/log/beacon-agent/inventory_state.jsonl
+
+sudo grep -E 'runtime.jsonl|inventory_state.jsonl|runtime/date|inventory/date|read_from' \
+  "/Library/Application Support/Beacon/Forwarders/gcs-vector.toml"
+
+sudo sh -c '. "/Library/Application Support/Beacon/Forwarders/gcs-vector.env"; test -r "$GOOGLE_APPLICATION_CREDENTIALS"'
+```
+
+Generate runtime and inventory events:
+
+```bash
+sudo /opt/beacon/bin/beacon endpoint gcs validate --system
+sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
+  --system \
+  --force \
+  --trigger manual \
+  --trigger-harness claude \
+  --working-dir /Users/Shared \
+  --log-path /var/log/beacon-agent/runtime.jsonl
+```
+
+Allow up to five minutes for the default Vector batch timeout. Validate with the
+separate reader identity, not the write-only endpoint credential:
+
+```bash
+gcloud storage ls \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**" \
+  --impersonate-service-account "$BEACON_GCS_READER_EMAIL"
+
+gcloud storage ls \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/inventory/**" \
+  --impersonate-service-account "$BEACON_GCS_READER_EMAIL"
+
+gcloud storage cat \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" \
+  --impersonate-service-account "$BEACON_GCS_READER_EMAIL" |
+  gzip -dc | grep "Beacon endpoint GCS validation event"
+```
+
+The administrator running impersonation also needs
+`roles/iam.serviceAccountTokenCreator` on the reader account. Alternatively,
+validate with your existing security operations reader identity.
+
+Grant that role to a designated validator:
+
+```bash
+export BEACON_GCS_VALIDATOR="<validator-user@example.com>"
+gcloud iam service-accounts add-iam-policy-binding \
+  "$BEACON_GCS_READER_EMAIL" \
+  --project "$GCP_PROJECT" \
+  --member "user:${BEACON_GCS_VALIDATOR}" \
+  --role roles/iam.serviceAccountTokenCreator
+```
+
+## Credential Rotation
+
+Create and deliver a new key before deleting the old one:
+
+```bash
+umask 077
+gcloud iam service-accounts keys create "./${BEACON_GCS_WRITER}-next.json" \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+```
+
+After securely transferring the new file to the Mac, replace the externally
+managed JSON atomically, preserve `root:wheel` and mode `0600`, then restart the
+forwarder:
+
+```bash
+export BEACON_GCS_CREDENTIAL_PATH="/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
+sudo install -m 0600 -o root -g wheel \
+  "./${BEACON_GCS_WRITER}-next.json" \
+  "${BEACON_GCS_CREDENTIAL_PATH}.new"
+sudo mv -f "${BEACON_GCS_CREDENTIAL_PATH}.new" \
+  "$BEACON_GCS_CREDENTIAL_PATH"
+rm -f "./${BEACON_GCS_WRITER}-next.json"
+
+sudo launchctl kickstart -k system/com.beacon.endpoint.gcs-forwarder
+sudo launchctl print system/com.beacon.endpoint.gcs-forwarder
+```
+
+After new objects arrive, list keys and delete the retired key:
+
+```bash
+gcloud iam service-accounts keys list \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+
+gcloud iam service-accounts keys delete "<old-key-id>" \
+  --project "$GCP_PROJECT" \
+  --iam-account "$BEACON_GCS_WRITER_EMAIL"
+```
+
+## Troubleshooting
+
+Check launchd and Vector stderr:
+
+```bash
+sudo launchctl print system/com.beacon.endpoint.gcs-forwarder
+sudo tail -n 100 /tmp/com.beacon.endpoint.gcs-forwarder.err
+sudo /opt/beacon/jamf/claude/gcs/run-forwarder.sh
+```
+
+Common failures:
+
+- `GOOGLE_APPLICATION_CREDENTIALS is missing or unreadable`: confirm the path in
+  `gcs-vector.env`, the external file, and root read permission.
+- `403 Forbidden`: confirm the credential belongs to the expected service
+  account and that account has `roles/storage.objectCreator` on the target
+  bucket. Confirm any CMEK key also permits encryption.
+- Uploads succeed but `gcloud storage ls` fails under the writer: expected;
+  `objectCreator` cannot inspect objects. Use the reader identity.
+- No recent runtime objects: runtime starts at `end`; write a validation event
+  after the forwarder is running.
+- No inventory objects: force an inventory heartbeat and inspect
+  `/var/log/beacon-agent/inventory_state.jsonl`.
+
+For idempotent repair using the saved settings:
+
+```bash
+sudo sh -c '. "/Library/Application Support/Beacon/Forwarders/gcs-vector.env"; /opt/beacon/jamf/claude/gcs/install-forwarder.sh'
+```

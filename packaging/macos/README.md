@@ -21,6 +21,9 @@ The package builder assembles this payload:
 /opt/beacon/scripts/uninstall-endpoint.sh
 /opt/beacon/jamf/extension-attributes/*.sh
 /opt/beacon/jamf/scripts/*.sh
+/opt/beacon/jamf/claude/gcs/install-forwarder.sh
+/opt/beacon/jamf/claude/gcs/run-forwarder.sh
+/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh
 /opt/beacon/fleet/queries/*.sql
 /opt/beacon/fleet/scripts/*.sh
 ```
@@ -187,6 +190,31 @@ helper persists set AWS provider-chain variables such as `AWS_ACCESS_KEY_ID`,
 `/Library/Application Support/Beacon/Forwarders/s3-vector.env` with mode `0600`
 for the launchd-managed Vector process. Keep bucket policy, IAM, lifecycle, and
 encryption in AWS.
+
+For Google Cloud Storage, the package includes a managed Vector path equivalent
+to S3. It tails `/var/log/beacon-agent/runtime.jsonl` and the sibling
+`inventory_state.jsonl`, then writes both below one root prefix:
+
+```text
+gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+gs://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
+```
+
+Run `/opt/beacon/jamf/claude/gcs/install-forwarder.sh` for forwarding only, or
+`/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh` to repair the
+endpoint and Claude hooks too. The service label is
+`com.beacon.endpoint.gcs-forwarder`; its config, environment, and checkpoint
+state live below `/Library/Application Support/Beacon/Forwarders`.
+
+Provide `BEACON_GCS_BUCKET`, a root `BEACON_GCS_PREFIX`, optional
+`BEACON_GCS_STORAGE_CLASS`, and `GOOGLE_APPLICATION_CREDENTIALS`. The latter
+must reference a readable service-account JSON file delivered and rotated by
+MDM or secret tooling outside `/opt/beacon` and
+`/Library/Application Support/Beacon`. Vector `0.56` supports service-account
+JSON and GCE metadata credentials, but interactive `gcloud` ADC and Workload
+Identity Federation are not reliable launchd authentication contracts on
+macOS. Use `roles/storage.objectCreator` for the endpoint writer and a separate
+reader identity because the writer cannot list or inspect uploaded objects.
 
 For CrowdStrike Falcon, use Beacon as the local JSONL producer and deploy Vector
 to tail hook-written or OTLP-written `runtime.jsonl` events into the Falcon HEC
@@ -384,6 +412,15 @@ policy for hook telemetry. Set
 integrations; the helper writes hook events to
 `/var/log/beacon-agent/runtime.jsonl` by default.
 
+Use `/opt/beacon/jamf/scripts/full-cleanup.sh` only for destructive rollback or
+complete uninstall. It removes Beacon launch daemons, package files, system
+configuration, optional forwarder configuration, package receipts, and
+Beacon-managed active-user hook/OTLP settings. It backs up touched user config
+files before editing them and only removes Claude/Codex OTLP settings that point
+to local Beacon endpoints. Set `BEACON_KEEP_LOGS=1` to preserve
+`/var/log/beacon-agent`, or `BEACON_CLEAN_ALL_USERS=1` to scan all local user
+homes instead of only the active console user.
+
 Use `/opt/beacon/jamf/claude/common/repair-hooks.sh` when a Jamf policy
 needs only to repair the system endpoint, prepare
 `/var/log/beacon-agent/runtime.jsonl`,
@@ -437,12 +474,28 @@ Set `BEACON_RUNTIME_LOG_PATHS` to override the tailed runtime logs. The S3
 forwarder derives an `inventory_state.jsonl` path beside each runtime path and
 ships those inventory files under the `inventory/` S3 folder.
 
+`gcs/install-forwarder.sh` Jamf script parameters:
+
+```text
+Parameter 4: GCS bucket
+Parameter 5: GCS prefix root, default beacon
+Parameter 6: GCS storage class, default STANDARD
+Parameter 7: Vector read_from, default end
+```
+
+Set `GOOGLE_APPLICATION_CREDENTIALS` in the root policy environment. The GCS
+forwarder derives an `inventory_state.jsonl` path beside each runtime path and
+ships those inventory files under the `inventory/` GCS folder.
+
 The Jamf Claude helper source paths map into the package as:
 
 - [`packaging/macos/jamf/claude/common/repair-hooks.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/common/repair-hooks.sh) -> `/opt/beacon/jamf/claude/common/repair-hooks.sh`
 - [`packaging/macos/jamf/claude/falcon/install-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/install-forwarder.sh) -> `/opt/beacon/jamf/claude/falcon/install-forwarder.sh`
 - [`packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh) -> `/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh`
 - [`packaging/macos/jamf/claude/falcon/run-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/run-forwarder.sh) -> `/opt/beacon/jamf/claude/falcon/run-forwarder.sh`
+- [`packaging/macos/jamf/claude/gcs/install-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/gcs/install-forwarder.sh) -> `/opt/beacon/jamf/claude/gcs/install-forwarder.sh`
+- [`packaging/macos/jamf/claude/gcs/repair-hooks-and-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/gcs/repair-hooks-and-forwarder.sh) -> `/opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh`
+- [`packaging/macos/jamf/claude/gcs/run-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/gcs/run-forwarder.sh) -> `/opt/beacon/jamf/claude/gcs/run-forwarder.sh`
 - [`packaging/macos/jamf/claude/s3/install-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/s3/install-forwarder.sh) -> `/opt/beacon/jamf/claude/s3/install-forwarder.sh`
 - [`packaging/macos/jamf/claude/s3/repair-hooks-and-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/s3/repair-hooks-and-forwarder.sh) -> `/opt/beacon/jamf/claude/s3/repair-hooks-and-forwarder.sh`
 - [`packaging/macos/jamf/claude/s3/run-forwarder.sh`](https://github.com/Asymptote-Labs/agent-beacon/blob/main/packaging/macos/jamf/claude/s3/run-forwarder.sh) -> `/opt/beacon/jamf/claude/s3/run-forwarder.sh`
@@ -454,6 +507,10 @@ The managed forwarder writes:
 /Library/Application Support/Beacon/Forwarders/falcon-vector.env
 /Library/Application Support/Beacon/Forwarders/vector-data/falcon
 /Library/LaunchDaemons/com.beacon.endpoint.falcon-forwarder.plist
+/Library/Application Support/Beacon/Forwarders/gcs-vector.toml
+/Library/Application Support/Beacon/Forwarders/gcs-vector.env
+/Library/Application Support/Beacon/Forwarders/vector-data/gcs
+/Library/LaunchDaemons/com.beacon.endpoint.gcs-forwarder.plist
 ```
 
 Validate hook-only forwarding by generating a unique Claude prompt and searching

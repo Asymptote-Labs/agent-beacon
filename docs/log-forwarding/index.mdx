@@ -77,11 +77,14 @@ Use these paths when Beacon JSONL feeds an observability store or customer-manag
 Use these paths when Beacon JSONL should land in a customer-managed bucket for archive, lake, or downstream detection workflows.
 
 <Columns cols={2}>
+  <Card title="macOS system-mode setup" icon="desktop" href="/guides/macos-object-storage-system">
+    Configure harness-neutral S3, GCS, or dual forwarding on one Mac.
+  </Card>
   <Card title="AWS S3" icon="box-archive" href="/log-forwarding/s3">
     Vector content pack over local JSONL using customer-managed AWS credentials.
   </Card>
   <Card title="Google Cloud Storage" icon="box-archive" href="/log-forwarding/gcs">
-    Vector content pack over local JSONL using customer-managed Google credentials.
+    Vector content pack over runtime and inventory JSONL using customer-managed Google credentials.
   </Card>
 </Columns>
 
@@ -233,13 +236,21 @@ For Google Cloud Storage, generate Beacon's GCS content pack and configure a cus
 beacon endpoint gcs install-pack --system --output ./beacon-gcs-pack
 ```
 
-The generated pack includes setup guidance, a Vector `gcp_cloud_storage` sink template, a one-shot `gcloud storage` or `gsutil` smoke-test script, and sample events. Google Cloud credentials, service accounts, workload identity, bucket IAM, lifecycle, retention, and encryption stay in Google Cloud, Vector, endpoint-management tooling, or your secret store rather than Beacon endpoint configuration.
+The generated pack includes setup guidance, a Vector `gcp_cloud_storage` sink
+template, a one-shot `gcloud storage` or `gsutil` smoke-test script, and sample
+events. Packaged macOS helpers forward runtime and inventory JSONL under
+separate folders below one root prefix and run as
+`com.beacon.endpoint.gcs-forwarder`. Deliver a service-account JSON externally,
+store it outside Beacon-managed directories, and reference it with
+`GOOGLE_APPLICATION_CREDENTIALS`.
 
-See [Google Cloud Storage forwarding](/log-forwarding/gcs) for IAM, object layout, Vector setup, smoke testing, and validation steps.
+See [Google Cloud Storage forwarding](/log-forwarding/gcs) for IAM, object
+layout, Vector `0.56` authentication limits, safe credential delivery and
+rotation, smoke testing, and validation with a separate reader identity.
 
 ### Vector log forwarding
 
-Beacon `v0.0.26` added generated Vector configs to the Sumo Logic and Rapid7 content packs, Beacon `v0.0.37` added a Vector [AWS S3 content pack](/concepts/core-concepts#aws-s3-content-pack), Beacon `v0.0.38` added a Vector [Google Cloud Storage content pack](/concepts/core-concepts#google-cloud-storage-content-pack), Beacon `v0.0.42` added a Vector [AWS CloudWatch Logs content pack](/concepts/core-concepts#aws-cloudwatch-logs-content-pack), and Beacon `v0.0.49` added a CrowdStrike Falcon Vector path. Use these templates when you want [Vector forwarding](/concepts/core-concepts#vector-forwarding) to tail Beacon's local `runtime.jsonl` and forward events without storing destination secrets in Beacon endpoint configuration.
+Beacon `v0.0.26` added generated Vector configs to the Sumo Logic and Rapid7 content packs, Beacon `v0.0.37` added a Vector [AWS S3 content pack](/concepts/core-concepts#aws-s3-content-pack), Beacon `v0.0.38` added a Vector [Google Cloud Storage content pack](/concepts/core-concepts#google-cloud-storage-content-pack), Beacon `v0.0.42` added a Vector [AWS CloudWatch Logs content pack](/concepts/core-concepts#aws-cloudwatch-logs-content-pack), and Beacon `v0.0.49` added a CrowdStrike Falcon Vector path. Use these templates when you want [Vector forwarding](/concepts/core-concepts#vector-forwarding) to tail Beacon's local JSONL streams and forward events without storing destination secrets in Beacon endpoint configuration.
 
 ```bash title="Generate the integration pack"
 beacon endpoint sumo install-pack --system --output ./beacon-sumo-pack

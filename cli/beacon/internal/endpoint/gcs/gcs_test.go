@@ -18,6 +18,9 @@ func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
 	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("script did not include configured path: %s", got)
 	}
+	if !strings.Contains(got, "/tmp/beacon/inventory_state.jsonl") {
+		t.Fatalf("script did not include derived inventory path: %s", got)
+	}
 	if strings.Contains(got, "{{LOG_PATH}}") {
 		t.Fatalf("script still contains template token: %s", got)
 	}
@@ -27,6 +30,10 @@ func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
 		"gcloud storage cp",
 		"gsutil",
 		"--content-type=\"application/x-ndjson\"",
+		`prefix="${prefix%/runtime}"`,
+		`prefix="${prefix%/inventory}"`,
+		`/runtime/smoke-tests/beacon-runtime-`,
+		`/inventory/smoke-tests/beacon-inventory-`,
 		"Application Default Credentials",
 		"validation only",
 	} {
@@ -69,6 +76,9 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if !strings.Contains(string(vectorConfig), "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("generated vector config missing configured log path: %s", vectorConfig)
 	}
+	if !strings.Contains(string(vectorConfig), "/tmp/beacon/inventory_state.jsonl") {
+		t.Fatalf("generated vector config missing derived inventory log path: %s", vectorConfig)
+	}
 	info, err = os.Stat(vectorPath)
 	if err != nil {
 		t.Fatal(err)
@@ -82,11 +92,14 @@ func TestVectorConfigUsesGCSCloudStorageSinkAndPreservesJSONShape(t *testing.T) 
 	got := mustRead("pack/vector.toml.tmpl")
 	for _, want := range []string{
 		`include = ["{{LOG_PATH}}"]`,
+		`include = ["{{INVENTORY_LOG_PATH}}"]`,
 		`read_from = "end"`,
+		`read_from = "beginning"`,
 		`. = parse_json!(.message)`,
 		`type = "gcp_cloud_storage"`,
 		`bucket = "${BEACON_GCS_BUCKET}"`,
-		`key_prefix = "${BEACON_GCS_PREFIX:-beacon/runtime}/date=%F/"`,
+		`key_prefix = "${BEACON_GCS_PREFIX:-beacon}/runtime/date=%F/"`,
+		`key_prefix = "${BEACON_GCS_PREFIX:-beacon}/inventory/date=%F/"`,
 		`filename_time_format = "%s"`,
 		`filename_append_uuid = true`,
 		`filename_extension = "jsonl.gz"`,
@@ -98,9 +111,24 @@ func TestVectorConfigUsesGCSCloudStorageSinkAndPreservesJSONShape(t *testing.T) 
 		`method = "newline_delimited"`,
 		`max_bytes = 10000000`,
 		`retry_attempts = 10`,
+		`[sinks.beacon_runtime_gcs.healthcheck]`,
+		`[sinks.beacon_inventory_gcs.healthcheck]`,
+		`enabled = false`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("vector config missing %q: %s", want, got)
+		}
+	}
+	for _, forbidden := range []string{
+		`.input_tokens =`,
+		`.output_tokens =`,
+		`.cache_read_input_tokens =`,
+		`.cache_creation_input_tokens =`,
+		`.reasoning_output_tokens =`,
+		`.cost_usd =`,
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("vector config must preserve canonical gen_ai.usage without parallel field %q", forbidden)
 		}
 	}
 }
@@ -142,6 +170,7 @@ func TestPackREADMEMentionsGCSSetupAndProductionForwarding(t *testing.T) {
 		"BEACON_GCS_PREFIX",
 		"gcloud storage ls",
 		"gcloud storage cat",
+		"inventory_state.jsonl",
 		"Beacon endpoint GCS validation event",
 		"vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl",
 		"vector.toml",
@@ -149,6 +178,7 @@ func TestPackREADMEMentionsGCSSetupAndProductionForwarding(t *testing.T) {
 		"without a Vector wrapper",
 		"Content Handling",
 		"/var/log/beacon-agent/runtime.jsonl",
+		"/var/log/beacon-agent/inventory_state.jsonl",
 		"Beacon does not store Google Cloud credentials",
 		"encryption",
 	} {

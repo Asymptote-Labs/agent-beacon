@@ -153,7 +153,7 @@ The validation command writes the local event only. Confirm remote delivery with
 
 ```text
 aws s3 ls "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/" --recursive --region "$AWS_REGION"
-aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/date=<date>/<object>.jsonl.gz" - --region "$AWS_REGION" | gzip -dc | grep "Beacon endpoint S3 validation event"
+aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" - --region "$AWS_REGION" | gzip -dc | grep "Beacon endpoint S3 validation event"
 ```
 
 Expected validation fields:

@@ -107,6 +107,7 @@ func destinationCharCases() []destinationCharCase {
 				"Expected GCS fields: vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl",
 				"gcloud storage ls",
 				"gcloud storage cat",
+				"${BEACON_GCS_PREFIX}/runtime/",
 				"Beacon endpoint GCS validation event",
 			},
 		},

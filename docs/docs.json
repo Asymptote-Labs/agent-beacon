@@ -211,6 +211,7 @@
                     "pages": [
                       "mdm/jamf/claude",
                       "guides/jamf-anthropic-openai-cursor-mdm",
+                      "guides/jamf-gcs-mdm",
                       "guides/jamf-s3-mdm",
                       "guides/jamf-falcon-mdm"
                     ]
@@ -246,7 +247,7 @@
                   {
                     "group": "Object Storage",
                     "pages": [
-                      "guides/claude-s3-system",
+                      "guides/macos-object-storage-system",
                       "log-forwarding/s3",
                       "log-forwarding/gcs"
                     ]
@@ -457,6 +458,7 @@
                 "pages": [
                   "mdm/jamf/claude",
                   "guides/jamf-anthropic-openai-cursor-mdm",
+                  "guides/jamf-gcs-mdm",
                   "guides/jamf-s3-mdm",
                   "guides/jamf-falcon-mdm"
                 ]
@@ -531,6 +533,14 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/guides/claude-gcs-system",
+      "destination": "/guides/macos-object-storage-system"
+    },
+    {
+      "source": "/guides/claude-s3-system",
+      "destination": "/guides/macos-object-storage-system"
+    },
     {
       "source": "/product-changelog",
       "destination": "/changelog/cli"
