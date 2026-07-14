@@ -102,9 +102,7 @@ func TestVectorConfigUsesGCSCloudStorageSinkAndPreservesJSONShape(t *testing.T) 
 		`key_prefix = "${BEACON_GCS_PREFIX:-beacon}/inventory/date=%F/"`,
 		`filename_time_format = "%s"`,
 		`filename_append_uuid = true`,
-		`filename_extension = "jsonl.gz"`,
-		`compression = "gzip"`,
-		`content_encoding = "gzip"`,
+		`filename_extension = "jsonl"`,
 		`content_type = "application/x-ndjson"`,
 		`storage_class = "${BEACON_GCS_STORAGE_CLASS:-STANDARD}"`,
 		`codec = "json"`,
@@ -120,6 +118,8 @@ func TestVectorConfigUsesGCSCloudStorageSinkAndPreservesJSONShape(t *testing.T) 
 		}
 	}
 	for _, forbidden := range []string{
+		`compression = "gzip"`,
+		`content_encoding`,
 		`.input_tokens =`,
 		`.output_tokens =`,
 		`.cache_read_input_tokens =`,

@@ -262,7 +262,7 @@ If events do not appear, check the same ownership boundary in order: Beacon shou
 The same Vector pattern powers several Beacon content packs:
 
 - [AWS S3](/guides/macos-object-storage-system#aws-s3) uses Vector's `aws_s3` sink to write gzip NDJSON objects.
-- [Google Cloud Storage](/guides/macos-object-storage-system#google-cloud-storage) uses Vector's [`gcp_cloud_storage` sink](https://vector.dev/docs/reference/configuration/sinks/gcp_cloud_storage/) to write gzip NDJSON objects.
+- [Google Cloud Storage](/guides/macos-object-storage-system#google-cloud-storage) uses Vector's [`gcp_cloud_storage` sink](https://vector.dev/docs/reference/configuration/sinks/gcp_cloud_storage/) to write NDJSON objects.
 - [AWS CloudWatch Logs](/log-forwarding/cloudwatch) uses Vector's `aws_cloudwatch_logs` sink to write parsed Beacon events into a log group.
 - [Sumo Logic](/log-forwarding/sumo), [Rapid7 InsightIDR](/log-forwarding/rapid7), and [Falcon LogScale](/log-forwarding/falcon) use HTTP-based Vector sinks with destination-specific headers, endpoints, and batching.
 
