@@ -1,0 +1,38 @@
+# Reference workflow for testing Agent Beacon CI telemetry with direct Falcon
+# LogScale HEC forwarding. Copy this file to .github/workflows/ in a test
+# repository and update the Falcon endpoint, secret names, and action ref.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a reference
+# only and does not run in this repository.
+# Replace <tag> with the Beacon release tag you want to run (v0.0.39 or newer).
+
+name: Test Agent Beacon Falcon forward
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beacon-falcon-forward:
+    runs-on: ubuntu-latest
+    # Keep the Falcon token at the job level so Beacon can forward events
+    # without exposing the secret to the Claude child process.
+    env:
+      BEACON_CI_FALCON_HEC_TOKEN: ${{ secrets.FALCON_HEC_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Agent Beacon with Falcon forwarding
+        uses: asymptote-labs/agent-beacon@<tag>
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          command: claude --print "Say hello from Agent Beacon CI telemetry"
+          forward: falcon
+          forward-endpoint: https://cloud.us-1.humio.com/api/v1/ingest/hec
+          upload-artifact: "true"
