@@ -148,6 +148,25 @@ See the sample workflow:
 
 - [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
 
+`--upload` is repeatable, so a job can upload to both destinations when required. Pass `upload: s3,gcs` (or the equivalent `--upload s3 --upload gcs` CLI flags) after configuring credentials for each provider:
+
+```yaml
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.95
+  env:
+    BEACON_CI_S3_BUCKET: my-beacon-telemetry
+    BEACON_CI_S3_PREFIX: github-actions
+    BEACON_CI_GCS_BUCKET: my-beacon-telemetry
+    BEACON_CI_GCS_PREFIX: github-actions
+  with:
+    command: claude --print "Review this pull request"
+    upload: s3,gcs
+```
+
+See the sample workflow:
+
+- [S3 and GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
+
 ## Object Layout
 
 In GitHub Actions, object keys use this shape:
