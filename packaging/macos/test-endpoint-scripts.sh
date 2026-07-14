@@ -858,7 +858,7 @@ for expected in \
   'key_prefix = "${BEACON_GCS_PREFIX:-beacon}/runtime/date=%F/"' \
   'key_prefix = "${BEACON_GCS_PREFIX:-beacon}/inventory/date=%F/"' \
   'read_from = "beginning"' \
-  'compression = "gzip"' \
+  'filename_extension = "jsonl"' \
   'filename_append_uuid = true' \
   '[sinks.beacon_runtime_gcs.healthcheck]' \
   '[sinks.beacon_inventory_gcs.healthcheck]' \
@@ -870,8 +870,8 @@ do
   fi
 done
 
-if grep -q 'beacon-gcs-test-bucket\|service_account\|private_key\|\.input_tokens =\|\.output_tokens =\|\.cost_usd =' "$GCS_FORWARDER_BASE/gcs-vector.toml"; then
-  echo "GCS Vector config should not contain destination values, credentials, or parallel usage fields" >&2
+if grep -q 'beacon-gcs-test-bucket\|service_account\|private_key\|content_encoding\|compression = "gzip"\|\.input_tokens =\|\.output_tokens =\|\.cost_usd =' "$GCS_FORWARDER_BASE/gcs-vector.toml"; then
+  echo "GCS Vector config should not contain destination values, credentials, gzip metadata, or parallel usage fields" >&2
   exit 1
 fi
 for expected in \

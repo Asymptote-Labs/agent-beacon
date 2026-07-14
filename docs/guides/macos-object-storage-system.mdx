@@ -378,8 +378,8 @@ aws s3 cp \
   gzip -dc | grep "Beacon endpoint S3 validation event"
 
 gcloud storage cat \
-  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" |
-  gzip -dc | grep "Beacon endpoint GCS validation event"
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl" |
+  grep "Beacon endpoint GCS validation event"
 ```
 
 The endpoint writer identities are intentionally write-only. Run these

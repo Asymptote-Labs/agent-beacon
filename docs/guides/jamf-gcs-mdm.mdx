@@ -218,9 +218,9 @@ gcloud storage ls \
   --impersonate-service-account "$BEACON_GCS_READER_EMAIL"
 
 gcloud storage cat \
-  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl.gz" \
+  "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<YYYY-MM-DD>/<object>.jsonl" \
   --impersonate-service-account "$BEACON_GCS_READER_EMAIL" |
-  gzip -dc | grep "Beacon endpoint GCS validation event"
+  grep "Beacon endpoint GCS validation event"
 ```
 
 The administrator running impersonation also needs
