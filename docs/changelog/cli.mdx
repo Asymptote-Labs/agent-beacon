@@ -11,6 +11,15 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## July 2026
 
+### v1.0.3 · July 14, 2026
+
+- **Detailed Claude Code tool telemetry** · Endpoint-managed and CI Claude Code sessions now enable `OTEL_LOG_TOOL_DETAILS=1`, preserving Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments in exported OpenTelemetry events.
+- **Upgrade-safe configuration refresh** · Signed macOS package updates repair the active user's Claude configuration with detailed tool logging enabled, while Jamf cleanup removes the managed setting with the rest of Beacon's Claude telemetry environment.
+
+### v1.0.2 · July 14, 2026
+
+- **GCS object encoding fix** · Managed endpoint GCS forwarding now writes uncompressed `.jsonl` objects without conflicting gzip content metadata, preventing HTTP readers such as ClickHouse from attempting to decompress the payload twice.
+
 ### v1.0.1 · July 13, 2026
 
 - **Packaged GCS forwarding for managed Macs** · Added GCS Jamf helpers under `/opt/beacon/jamf/claude/gcs/` that run bundled Vector as `com.beacon.endpoint.gcs-forwarder` and forward runtime plus inventory JSONL below one root prefix.
@@ -125,11 +134,26 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Check-only endpoint update monitoring** · Apple Silicon package installs can opt into a local `launchd` job that checks the release manifest every 10 minutes and writes local-only update status events to `system.jsonl`. This phase does not download or apply packages.
 - **Manual endpoint package apply** · Apple Silicon package installs can explicitly run `sudo /opt/beacon/bin/beacon endpoint update --apply` to download the signed package from the release manifest, verify its checksum/signature/notarization/staple, install it with Apple's `installer`, health-check it, and roll back the `/opt/beacon` tree if the new install is unhealthy.
 
+### v0.0.77 · June 24, 2026
+
+- **Check-only self-update mode** · Added the first endpoint updater monitor for checking signed package releases without applying them, including local status telemetry and edge-case handling around update mode and configuration validation.
+
 ### v0.0.76 · June 24, 2026
 
 - **Signed Apple Silicon endpoint package releases** · A pushed version tag now runs the release pipeline end-to-end: GoReleaser publishes CLI archives and updates Homebrew, then CI builds, signs, notarizes, staples, and uploads the Apple Silicon endpoint `.pkg`, `.sha256`, and `update-manifest.json` assets to GitHub Releases for direct MDM/manual download.
 - **Current bundled Vector in the macOS package** · The signed endpoint package includes `/opt/beacon/bin/vector` for Jamf/Fleet forwarder helpers and now targets Apple Silicon so Beacon can ship the current Vector macOS distribution rather than pinning all packages to an older dual-arch Vector release.
 - **Cursor and Claude session attribution fix** · Fixed a hook attribution edge case where Cursor-shaped hook payloads invoked through the default hook platform could be stamped as Claude, making a single Cursor session UUID appear under both Cursor and Claude in runtime logs and managed dashboards.
+
+### v0.0.75 · June 23, 2026
+
+- **Expanded threat detection pack** · Added 18 threat rules across agent control, approval abuse, credential access, context exfiltration, resource consumption, risky commands, sensitive edits, and source-control activity, with tighter matching and conformance fixtures.
+- **Richer MCP and inventory context** · Extended MCP event normalization and added opt-in, redacted full-content capture for endpoint inventory.
+
+### v0.0.74 · June 22, 2026
+
+- **External policy provider seam** · Added the optional, off-by-default hook policy-provider contract for customer-supplied allow/deny decisions while preserving Beacon's local visibility-first default.
+- **Permission-bypass detection** · Added the open `agent-permission-bypass-spawn` detection rule and aligned permission-request denials with pre-tool enforcement behavior.
+- **Shared rule loading** · Extracted local threat-rule store loading into the reusable `pkg/asymptoteobserve/rulestore` package.
 
 ### v0.0.73 · June 21, 2026
 
