@@ -69,6 +69,7 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 		"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "delta",
 		"OTEL_EXPORTER_OTLP_PROTOCOL":                       "grpc",
 		"OTEL_EXPORTER_OTLP_ENDPOINT":                       "http://127.0.0.1:4317",
+		"OTEL_LOG_TOOL_DETAILS":                             "1",
 		"OTEL_LOG_USER_PROMPTS":                             "1",
 	} {
 		if got := env[key]; got != want {

@@ -38,6 +38,7 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	delete(env, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
 	delete(env, "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
 	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
 	return flattenEnv(env)
 }
