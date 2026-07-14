@@ -57,7 +57,7 @@ Asymptote detects Claude Code through the `claude` executable and Claude setting
 
 ## Install or configuration support
 
-`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector.
+`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values; tool output content is not enabled by this setting.
 
 `beacon endpoint hooks install --harness claude` adds Asymptote-managed Claude Code hooks while preserving existing Claude settings and non-Asymptote hooks. `beacon endpoint hooks uninstall --harness claude` removes only Asymptote-managed Claude hook entries.
 
@@ -66,7 +66,7 @@ Asymptote detects Claude Code through the `claude` executable and Claude setting
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported when emitted through Claude Code OTLP or hooks |
-| Command, tool, and file telemetry | Supported when emitted through Claude Code OTLP |
+| Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled |
 | Token usage and cost | Supported through OTLP token and cost metrics, with per-model and per-session attribution |
 | Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
 | Claude Code cloud agent sessions | Supported through cloud sandbox hooks with GCS upload |
@@ -74,6 +74,8 @@ Asymptote detects Claude Code through the `claude` executable and Claude setting
 | MDM deployment | Supported through the system-mode package or MDM-managed settings |
 
 Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Pre-tool matching includes common Claude tools such as `Bash`, `Edit`, `Write`, `MultiEdit`, `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, and `mcp__.*`.
+
+Detailed tool inputs can contain sensitive command arguments, paths, URLs, search terms, and MCP request data. Beacon sends this telemetry only to the configured local collector during normal endpoint execution; apply the same access, retention, and redaction controls used for other retained prompt and tool data.
 
 ## Deployment notes
 

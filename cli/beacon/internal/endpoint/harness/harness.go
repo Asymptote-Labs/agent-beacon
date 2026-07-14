@@ -311,6 +311,9 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "delta"
 	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
 	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = opts.Endpoint
+	// Tool details expose the command, file path, URL, search pattern, and MCP
+	// identity/arguments needed to reconstruct agent activity from OTel events.
+	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
 	settings["env"] = env
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

@@ -159,6 +159,7 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	for _, want := range []string{
 		`"CLAUDE_CODE_ENABLE_TELEMETRY": "1"`,
 		`"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4317"`,
+		`"OTEL_LOG_TOOL_DETAILS": "1"`,
 	} {
 		if !strings.Contains(string(claudeSettings), want) {
 			t.Fatalf("Claude settings missing %q:\n%s", want, claudeSettings)
