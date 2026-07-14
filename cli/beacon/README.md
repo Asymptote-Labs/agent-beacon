@@ -293,7 +293,11 @@ A composite action wraps binary resolution, `ci exec`, session
 The action downloads a pinned Beacon release and verifies it against the
 release `checksums.txt` before running. When the action is invoked from a
 version tag, that tag is used as the default Beacon CLI release; set `version`
-explicitly or use `binary-path` when testing from a branch or local checkout.
+explicitly or use `binary-path` when testing from a branch or local checkout,
+or on air-gapped and self-hosted runners that already provide `beacon` and
+`beacon-otelcol`. See
+[`examples/github-actions/binary-path-telemetry.yml`](../../examples/github-actions/binary-path-telemetry.yml)
+for a complete reference workflow.
 It uploads the runtime JSONL log as an artifact by default.
 
 To wrap a third-party agent action, split the action into `start` and `finish`
@@ -377,7 +381,8 @@ See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-
 [`examples/github-actions/codex-action-session.yml`](../../examples/github-actions/codex-action-session.yml),
 [`examples/github-actions/s3-upload-telemetry.yml`](../../examples/github-actions/s3-upload-telemetry.yml),
 [`examples/github-actions/gcs-upload-telemetry.yml`](../../examples/github-actions/gcs-upload-telemetry.yml),
-and [`examples/github-actions/splunk-forward-telemetry.yml`](../../examples/github-actions/splunk-forward-telemetry.yml)
+[`examples/github-actions/splunk-forward-telemetry.yml`](../../examples/github-actions/splunk-forward-telemetry.yml),
+and [`examples/github-actions/binary-path-telemetry.yml`](../../examples/github-actions/binary-path-telemetry.yml)
 for complete reference workflows.
 
 ## Wazuh
