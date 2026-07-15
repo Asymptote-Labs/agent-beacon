@@ -48,6 +48,10 @@ jobs:
           # forward-endpoint: https://splunk.example:8088/services/collector
           # Optional: upload the completed runtime JSONL to object storage.
           # Supported values: s3, gcs, or s3,gcs.
+          # See examples/github-actions/s3-upload-telemetry.yml,
+          # examples/github-actions/gcs-upload-telemetry.yml, or
+          # examples/github-actions/s3-gcs-upload-telemetry.yml.
           # upload: s3
+          # upload: s3,gcs
           # The runtime log is uploaded as an artifact by default.
           upload-artifact: "true"
