@@ -196,6 +196,23 @@ By default, `beacon ci exec` fails the step when telemetry validation fails. Set
 
 Object storage upload runs after telemetry validation. Upload failures fail the CI step so broken export paths are visible. If the child command exits non-zero, that child exit code still takes precedence.
 
+### Air-gapped and self-hosted binary-path
+
+When runners should not download a Beacon release during the action step, provision `beacon` and `beacon-otelcol` side by side (from an internal mirror or pre-baked image), then pass `binary-path` to the action:
+
+```yaml
+- name: Run Claude with Beacon telemetry
+  uses: asymptote-labs/agent-beacon@v0.0.95
+  with:
+    binary-path: /opt/beacon/bin/beacon
+    command: claude --print "Review this pull request"
+    upload-artifact: "true"
+```
+
+See the sample workflow:
+
+- [binary-path telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/binary-path-telemetry.yml)
+
 ## Related
 
 <Columns cols={2}>
