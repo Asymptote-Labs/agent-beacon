@@ -6,7 +6,9 @@ BEACON_LOG_PATH="${BEACON_CLOUD_LOG_PATH:-$BEACON_HOME/runtime.jsonl}"
 
 mkdir -p "$(dirname "$BEACON_LOG_PATH")"
 
-case "${BEACON_CLOUD_UPLOAD:-gcs}" in
+BEACON_CLOUD_UPLOAD_NORMALIZED="$(printf '%s' "${BEACON_CLOUD_UPLOAD:-gcs}" | tr '[:upper:]' '[:lower:]')"
+
+case "$BEACON_CLOUD_UPLOAD_NORMALIZED" in
   s3)
     if [ -n "${BEACON_CLOUD_S3_BUCKET:-}" ] &&
       [ -n "${AWS_ACCESS_KEY_ID:-}" ] &&
@@ -16,15 +18,15 @@ case "${BEACON_CLOUD_UPLOAD:-gcs}" in
       echo "Beacon Cloud S3 forwarding is not active; set the S3 bucket, region, and AWS credentials to enable uploads."
     fi
     ;;
-  gcs)
+  *)
+    if [ "$BEACON_CLOUD_UPLOAD_NORMALIZED" != "gcs" ]; then
+      echo "Beacon Cloud upload destination '$BEACON_CLOUD_UPLOAD' is unknown; using the GCS fallback."
+    fi
     if [ -n "${BEACON_CLOUD_GCS_BUCKET:-}" ] && [ -n "${BEACON_CLOUD_GCS_CREDENTIALS_B64:-}" ]; then
       echo "Beacon Cloud GCS forwarding is configured for bucket: $BEACON_CLOUD_GCS_BUCKET"
     else
       echo "Beacon Cloud GCS forwarding is not active; set the GCS bucket and credentials to enable uploads."
     fi
-    ;;
-  *)
-    echo "Beacon Cloud forwarding has unsupported BEACON_CLOUD_UPLOAD=${BEACON_CLOUD_UPLOAD}."
     ;;
 esac
 
