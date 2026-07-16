@@ -50,8 +50,8 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 
 | Cloud surface | Collection path | Telemetry coverage |
 |---------------|-----------------|--------------------|
-| [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
-| [Cursor Cloud Agents](/runtimes/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
+| [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| [Cursor Cloud Agents](/runtimes/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction telemetry after project hooks become active |
 | [Anthropic](/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
 | [OpenAI](/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |

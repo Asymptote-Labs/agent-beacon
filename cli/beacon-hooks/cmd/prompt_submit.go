@@ -54,5 +54,6 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	maybeUploadCursorCloudTelemetry(logger)
 	outputJSON(hookNoopResponse())
 }

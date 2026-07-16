@@ -111,8 +111,8 @@ CI, and cloud surfaces.
 | --- | --- | --- |
 | [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
-| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
-| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
+| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction telemetry after project hooks become active |
 | [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | Org-wide API poll via `beacon cloud devin pull`, with GCS upload | Session, prompt, agent message, status, pull request, and ACU usage telemetry the Devin sessions API exposes (message-level; the autonomous agent runs no in-sandbox hooks) |
 | [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
 | [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
@@ -147,8 +147,8 @@ management (SIEM), log aggregation, and object storage destinations.
 
 | Destination | Support path |
 | --- | --- |
-| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector content pack over local runtime and inventory JSONL using customer-managed AWS credentials |
-| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector content pack and packaged macOS helpers over runtime and inventory JSONL using customer-managed Google credentials |
+| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector over endpoint JSONL, CI upload, or direct compressed snapshots from supported cloud agents |
+| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector and packaged macOS helpers over endpoint JSONL, CI upload, or direct compressed snapshots from supported cloud agents |
 
 #### Local
 

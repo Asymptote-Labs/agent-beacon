@@ -11,6 +11,20 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## July 2026
 
+### Unreleased
+
+- **Cursor Cloud prompt telemetry** · Committed `beforeSubmitPrompt` project
+  hooks now retain observed follow-up prompts and immediately refresh the
+  per-run object-storage snapshot, including prompt-only turns after hooks
+  become active.
+- **Cursor Cloud S3 walkthrough** · Expanded the self-serve Cursor Cloud flow
+  with direct, SigV4-signed uploads to customer-managed S3, static Runtime
+  Secret credentials, regional egress requirements, and end-to-end prompt
+  verification.
+- **Repository environment reliability** · Updated the committed Cursor
+  environment to use the current schema, build and embed `beacon-hooks` before
+  the CLI, select a compatible Go toolchain, and report GCS or S3 startup state.
+
 ### v1.0.3 · July 14, 2026
 
 - **Detailed Claude Code tool telemetry** · Endpoint-managed and CI Claude Code sessions now enable `OTEL_LOG_TOOL_DETAILS=1`, preserving Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments in exported OpenTelemetry events.
