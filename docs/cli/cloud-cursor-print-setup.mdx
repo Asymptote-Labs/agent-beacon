@@ -20,9 +20,11 @@ project hooks with [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-h
 commit `.cursor/hooks.json` to the repository, then start Cursor Cloud Agents
 from a commit that contains that file.
 
-Cursor cloud agents do not run prompt or session lifecycle hooks such as
-`beforeSubmitPrompt`, `sessionStart`, `sessionEnd`, and `stop`. Beacon refreshes
-the uploaded `runtime.jsonl` object as supported hook events run. See
+Cursor Cloud Agents run the committed `beforeSubmitPrompt` project hook after
+the cloud environment is available, so Beacon can capture and immediately
+upload prompt events. `sessionStart` and `sessionEnd` remain unavailable in
+Cursor Cloud. Beacon refreshes the uploaded `runtime.jsonl` object as supported
+hook events run. See
 [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
 for the current platform support list.
 

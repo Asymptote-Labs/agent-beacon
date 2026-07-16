@@ -50,8 +50,10 @@ install_go() {
 
 build_from_source() {
   install_go
-  (cd "$REPO_ROOT/cli/beacon" && go build -o "$BEACON_BIN_DIR/beacon" .)
+  export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
   (cd "$REPO_ROOT/cli/beacon-hooks" && go build -o "$BEACON_BIN_DIR/beacon-hooks" .)
+  cp "$BEACON_BIN_DIR/beacon-hooks" "$REPO_ROOT/cli/beacon/internal/embedded/hooks.bin"
+  (cd "$REPO_ROOT/cli/beacon" && go build -o "$BEACON_BIN_DIR/beacon" .)
 }
 
 if [ -n "${BEACON_VERSION:-}" ]; then

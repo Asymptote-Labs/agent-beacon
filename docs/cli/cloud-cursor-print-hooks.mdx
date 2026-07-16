@@ -17,16 +17,17 @@ The rendered hooks set `BEACON_ORIGIN=cloud`, `BEACON_RUN_PROVIDER=cursor_cloud`
 
 Cursor Cloud only runs command-based project hooks after the cloud VM starts.
 The generated hook set uses supported Cursor Cloud hooks such as
-`beforeReadFile`, `beforeShellExecution`, `afterShellExecution`,
+`beforeSubmitPrompt`, `beforeReadFile`, `beforeShellExecution`, `afterShellExecution`,
 `afterFileEdit`, `postToolUse`, `postToolUseFailure`, `subagentStart`,
-`subagentStop`, and `preCompact`. It does not include broad `preToolUse`,
-`beforeSubmitPrompt`, `sessionStart`, `sessionEnd`, or `stop` because Cursor
-does not run those hooks in cloud agents. See
+`subagentStop`, and `preCompact`. It currently omits broad `preToolUse`,
+`sessionStart`, `sessionEnd`, and `stop`. See
 [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
 for the current platform support list.
 
 Beacon uses Cursor's `conversation_id` hook payload as the default
 `run.run_id` for Cursor Cloud telemetry unless `BEACON_RUN_ID` is already set.
+Prompt events are written and uploaded as soon as `beforeSubmitPrompt` runs,
+including prompt-only follow-up turns.
 
 ## Examples
 
