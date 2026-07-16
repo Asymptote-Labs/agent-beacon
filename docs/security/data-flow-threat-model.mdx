@@ -37,12 +37,18 @@ flowchart LR
 | Network exposure of collectors | Default OTLP receivers bind to `127.0.0.1` rather than an externally reachable interface |
 | Over-collection of prompt or diff content | Scope supported runtimes and hook deployment deliberately before rollout, and review destination access for retained local telemetry |
 | Secret leakage in retained content | Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields |
-| SIEM credential exposure in endpoint config | File-based destinations tail local JSONL; Beacon does not store Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, AWS, or Google Cloud credentials. Splunk HEC and Falcon LogScale HEC tokens are stored in local collector configuration only when those optional destinations are enabled |
+| Destination credential exposure | Persistent endpoint file-based destinations tail local JSONL, so Beacon endpoint configuration does not store Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, AWS, or Google Cloud credentials. Optional Splunk and Falcon tokens live in collector configuration. Self-serve cloud-agent uploads are a separate proof-of-concept path: scoped GCS or AWS credentials are injected into the provider-managed sandbox as runtime secrets and must be rotated and access-reviewed. |
 | Removal uncertainty | Endpoint uninstall removes managed service and configuration state, with explicit `--keep-logs` and `--keep-config` exceptions |
 
 ## Current Boundaries
 
 Beacon focuses on supported agent harness telemetry and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, browser or SaaS telemetry, credential-use attribution, Datadog API export from Beacon, Sumo Logic API export from Beacon, Rapid7 API export from Beacon, or automatic mutation of Factory Droid shell profiles.
+
+Provider-managed cloud agents use a separate ephemeral boundary from the local
+endpoint. Their hook adapter writes sandbox-local JSONL and can send compressed
+snapshots directly to customer-managed object storage. Upload failures are
+fail-open so telemetry delivery cannot block the agent task; verify the remote
+object rather than treating a successful agent run as proof of delivery.
 
 ## Related
 

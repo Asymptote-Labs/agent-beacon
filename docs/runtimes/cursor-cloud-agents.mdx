@@ -6,13 +6,13 @@ description: "Capture Cursor cloud agent telemetry and forward cloud-agent runti
 ## Integration Overview
 
 Use this integration to capture Cursor cloud-agent activity and upload each
-session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant for testing
-cloud-agent telemetry without running a hosted Asymptote backend.
+session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant
+for testing cloud-agent telemetry without running a hosted Asymptote backend.
 
 This flow depends on the Beacon CLI. You run `beacon cloud` commands from your
-workstation to create the GCS upload path, generate project hooks to commit to
-your repository, and generate the setup script that installs Beacon binaries in
-the Cursor cloud sandbox.
+workstation to create the object-storage upload path, generate project hooks to
+commit to your repository, and generate the setup script that installs Beacon
+binaries in the Cursor cloud sandbox.
 
 <Info>
   If you're interested in leveraging this telemetry ingest across your
@@ -27,7 +27,7 @@ long-running endpoint agent that local installs use. Instead, commit
 project-level Cursor hooks to `.cursor/hooks.json` and use the setup script to
 install Beacon binaries in the sandbox. During a cloud-agent session, those
 hooks write `/tmp/beacon/runtime.jsonl`; Beacon refreshes the corresponding GCS
-object as supported Cursor hook events run.
+or S3 object as supported Cursor hook events run.
 
 ```mermaid
 flowchart LR
@@ -62,11 +62,13 @@ that value instead.
 
 ## Prerequisites
 
-- Beacon CLI `v0.0.56` or later.
+- Beacon CLI `v1.0.3` or later for direct S3 upload. Cursor Cloud prompt capture
+  requires the branch containing this change until a release includes it.
 - For GCS: `gcloud` installed and authenticated to a project where you can
   create buckets, service accounts, IAM bindings, and service account keys.
 - For S3: AWS CLI installed and authenticated to an account where you can
   create buckets, IAM users, inline policies, and access keys.
+- `jq` on the verification workstation.
 - Cursor Cloud Agent access for the repository you want to test.
 - A Cursor cloud environment with outbound access to:
   - `oauth2.googleapis.com`
@@ -180,6 +182,9 @@ beacon cloud s3 setup \
 The helper creates a dedicated IAM user and grants it `s3:PutObject` only under
 the selected bucket prefix.
 
+Copy the printed values. Treat `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` as sensitive and redact them from screenshots and logs.
+
 ## 2. Configure Cursor Cloud Agents
 
 Open your Cursor Cloud Agent environment for the repository.
@@ -213,7 +218,7 @@ AWS_SECRET_ACCESS_KEY=<secret-access-key-from-setup>
 ```
 
 <Frame caption="Configure network access and Beacon runtime secrets for Cursor Cloud Agents.">
-  <img src="/images/cursor-cloud-agents/cursor-cloud-agent-config.png" alt="Cursor Cloud Agents settings showing network allowlist entries and Beacon runtime secrets for GCS upload." />
+  <img src="/images/cursor-cloud-agents/cursor-cloud-agent-config.png" alt="Cursor Cloud Agents settings showing network allowlist entries and Beacon runtime secrets for object-storage upload." />
 </Frame>
 
 If your Cursor cloud environment restricts outbound network access, allow:
@@ -254,8 +259,12 @@ git push
 Generate the setup script for your Beacon release:
 
 ```bash
-beacon cloud cursor print-setup --version v0.0.95
+beacon cloud cursor print-setup --version vX.Y.Z
 ```
+
+Replace `vX.Y.Z` with a release tag that contains Cursor Cloud prompt capture.
+Until that release exists, use the source-build path below; `v1.0.3` supports
+direct S3 upload but predates the prompt hook.
 
 Paste the generated script into the Cursor cloud environment setup step. The
 script:
@@ -276,21 +285,34 @@ script:
 
 ## 5. Run a Cloud Agent Task
 
-Start a Cursor cloud agent task that uses tools. For example:
+Start a Cursor cloud agent task that uses tools so the environment becomes
+writable and project hooks become active. For example:
 
 ```text
-Read the README, run pwd && ls, create a tiny temporary markdown note under /tmp or in the repo, then summarize what you did.
+Read the README, run pwd && ls, create a tiny temporary markdown note under
+/tmp or in the repo, then summarize what you did.
 ```
 
-Beacon captures Cursor cloud hook activity such as tool use, shell execution,
-file reads and edits, subagent lifecycle events, and compaction events where
-Cursor exposes hook payloads.
+Beacon captures observed prompt submissions, tool use, shell execution, file
+reads and edits, subagent lifecycle events, and compaction events where Cursor
+exposes hook payloads.
+
+Then submit a prompt-only follow-up with a unique marker:
+
+```text
+BEACON_PROMPT_SMOKE_<unique-id>
+
+Do not inspect files or run tools. Reply exactly: PROMPT CAPTURE TEST COMPLETE
+```
 
 <Note>
   Beacon captures prompt text through Cursor Cloud's `beforeSubmitPrompt`
   project hook and uploads that event immediately. Commit `.cursor/hooks.json`
   before starting the run so the prompt hook is available when the cloud
-  environment starts. `sessionStart` and `sessionEnd` remain unavailable. See
+  environment starts. Cursor can perform early read-only or bootstrap work
+  before project hooks become active, so the initial launch prompt may be
+  absent; follow-up prompts are captured once hooks are running.
+  `sessionStart` and `sessionEnd` remain unavailable. See
   [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support)
   for the current platform support list.
 </Note>
@@ -331,6 +353,25 @@ For S3:
 aws s3 cp "s3://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_S3_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" - | gzip -dc | head
 ```
 
+For GCS, verify prompt capture with the unique marker from the follow-up:
+
+```bash
+gcloud storage cat "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" \
+  | gzip -dc \
+  | jq -c 'select(.event.action == "prompt.submitted") | {prompt: .prompt.text, run: .run}'
+```
+
+For S3:
+
+```bash
+aws s3 cp "s3://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_S3_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" - \
+  | gzip -dc \
+  | jq -c 'select(.event.action == "prompt.submitted") | {prompt: .prompt.text, run: .run}'
+```
+
+The last prompt can be the final record in the object. That proves Beacon
+uploaded the prompt immediately rather than waiting for a later tool event.
+
 Expected fields include:
 
 ```text
@@ -349,8 +390,9 @@ scoped to object uploads, then store its credentials in the Cursor cloud
 environment. This is useful for proof-of-concept testing, but treat those
 environment variables as sensitive credentials.
 
-Avoid broad credentials and review access before using this flow with sensitive
-telemetry.
+Store credential values as Cursor Runtime Secrets, avoid broad credentials,
+rotate test keys after use, and review access before using this flow with
+sensitive telemetry.
 
 ## Troubleshooting
 
@@ -400,7 +442,7 @@ git diff -- .cursor/hooks.json
     Review local Cursor telemetry through Beacon-managed hooks.
   </Card>
   <Card title="Log forwarding" icon="database" href="/log-forwarding">
-    Review local endpoint GCS forwarding for persistent endpoint deployments.
+    Compare direct cloud-agent uploads with local endpoint object-storage forwarding.
   </Card>
   <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
     Use managed secure ingest for production enterprise cloud-agent telemetry.

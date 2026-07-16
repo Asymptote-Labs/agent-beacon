@@ -71,15 +71,16 @@ For Cursor Cloud Agents, keep the repository-owned setup in `.cursor/`:
 
 ```text
 .cursor/environment.json
+.cursor/hooks.json
 .cursor/install.sh
 .cursor/start.sh
 ```
 
 The install script builds the current branch by default, or downloads a release
-when `BEACON_VERSION` is set, then merges Beacon commands into
-`.cursor/hooks.json` during environment setup. It defaults to safe hook coverage
-while testing forwarding and skips shell/edit-specific hooks; set
-`BEACON_CURSOR_CLOUD_FULL_HOOKS=1` to enable the full Cursor Cloud hook set.
+when `BEACON_VERSION` is set. Generate `.cursor/hooks.json` with
+`beacon cloud cursor print-hooks`, then commit it before starting a cloud agent;
+the environment update script must not create hooks after Cursor has already
+loaded the project configuration.
 
 For Claude Code on the web, generate the setup script for a Beacon release and
 paste it into the provider's cloud setup field:
@@ -91,7 +92,7 @@ paste it into the provider's cloud setup field:
 The setup script installs `beacon-hooks` into the cloud sandbox and uploads a
 gzip-compressed `/tmp/beacon/runtime.jsonl` snapshot to object storage. Claude web writes
 `.claude/settings.local.json` inside the sandbox clone. Cursor cloud uses
-`.cursor/environment.json` to install Beacon and generate project-level
+`.cursor/environment.json` to install Beacon and committed project-level
 `.cursor/hooks.json` because Cursor cloud only runs repository project hooks.
 
 ```text
@@ -99,12 +100,13 @@ gzip-compressed `/tmp/beacon/runtime.jsonl` snapshot to object storage. Claude w
 <prefix>/runtime/date=YYYY-MM-DD/<timestamp>-cursor_cloud-<generated-or-explicit-run-id>.jsonl.gz
 ```
 
-Cloud network access must allow `oauth2.googleapis.com` and
-`storage.googleapis.com`. Cursor cloud currently supports command hooks for tool
-activity, shell execution, file reads and edits, subagents, and compaction
-events; it does not currently run session start, session end, prompt submit, or
-stop hooks in cloud agents. If you are testing unreleased Beacon changes, clone
-and build the feature branch in the setup script instead of using
+Cloud network access must allow the selected destination: both
+`oauth2.googleapis.com` and `storage.googleapis.com` for GCS, or
+`s3.<region>.amazonaws.com` for S3. Cursor cloud project hooks capture follow-up
+prompts, tool activity, shell execution, file reads and edits, subagents, and
+compaction after the writable environment becomes available. Early bootstrap
+turns can precede project-hook activation. If you are testing unreleased Beacon
+changes, build the feature branch in the setup script instead of using
 `print-setup --version`.
 
 Add optional Falcon LogScale HEC forwarding during install or repair:

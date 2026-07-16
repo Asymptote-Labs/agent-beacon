@@ -33,8 +33,14 @@ for the current platform support list.
 Print setup for a specific Beacon release:
 
 ```bash title="Print setup for a specific Beacon release"
-beacon cloud cursor print-setup --version v0.0.95
+beacon cloud cursor print-setup --version vX.Y.Z
 ```
+
+Replace `vX.Y.Z` with the desired release tag. Cursor Cloud prompt capture
+requires a release containing the committed `beforeSubmitPrompt` hook and
+immediate upload behavior. Until that release exists, build the branch
+containing the change in the cloud environment instead of downloading an older
+release.
 
 ## Related
 
@@ -46,6 +52,6 @@ beacon cloud cursor print-setup --version v0.0.95
     Print project-level Cursor hook settings for a cloud sandbox.
   </Card>
   <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
-    Configure Cursor cloud agent telemetry and GCS upload end to end.
+    Configure Cursor cloud agent telemetry and GCS or S3 upload end to end.
   </Card>
 </Columns>

@@ -67,7 +67,15 @@ Command events can include normalized tool and command context, with truncation 
 
 ## Forwarding Implications
 
-Content handling is applied before events are written to `runtime.jsonl`. File-based destinations such as Wazuh, Elastic/Filebeat, Datadog Agent custom log collection, Sumo Logic forwarding, Rapid7 forwarding, Microsoft Sentinel forwarding, AWS S3 Vector forwarding, Google Cloud Storage Vector forwarding, and customer-managed shippers read the resulting local JSONL. Splunk HEC and Falcon LogScale HEC forwarding receive the same normalized collector output according to the configured endpoint pipeline.
+Content handling is applied before events are written to `runtime.jsonl`.
+File-based destinations such as Wazuh, Elastic/Filebeat, Datadog Agent custom
+log collection, Sumo Logic forwarding, Rapid7 forwarding, Microsoft Sentinel
+forwarding, AWS S3 Vector forwarding, Google Cloud Storage Vector forwarding,
+and customer-managed shippers read the resulting local JSONL. Supported cloud
+agents upload a compressed snapshot of their sandbox-local JSONL directly to
+customer-managed GCS or S3. Splunk HEC and Falcon LogScale HEC forwarding
+receive the same normalized collector output according to the configured
+endpoint pipeline.
 
 Review runtime scope, artifact access, destination permissions, and downstream retention before rollout so retained content matches your approved telemetry policy.
 
