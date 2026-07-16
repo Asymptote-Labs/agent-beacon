@@ -28,8 +28,18 @@ install_from_release() {
 }
 
 install_go() {
-  if command -v go >/dev/null 2>&1; then
+  local bundled_go="$BEACON_HOME/go-toolchain/go/bin/go"
+  if [ -x "$bundled_go" ]; then
+    export PATH="$(dirname "$bundled_go"):$PATH"
     return
+  fi
+
+  if command -v go >/dev/null 2>&1; then
+    local current_version
+    current_version="$(go version 2>/dev/null | awk '{print $3}')"
+    if [[ "$current_version" =~ ^go1\.([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 24 ]; then
+      return
+    fi
   fi
 
   local go_version="${BEACON_GO_VERSION:-1.24.4}"
