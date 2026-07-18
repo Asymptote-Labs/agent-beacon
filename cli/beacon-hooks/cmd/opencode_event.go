@@ -172,8 +172,10 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 		if tool := opencodeToolName(input); tool != "" {
 			fields["tool"] = map[string]interface{}{"name": tool}
 		}
+		mergeMap(fields, opencodePermissionCorrelation(properties))
 		return one("approval.requested", "approval", "info", "opencode permission requested", fields)
 	case "permission.replied", "permission.updated", "permission.v2.replied":
+		properties := opencodeProperties(input)
 		decision := opencodeDecision(input)
 		if decision == "" {
 			decision = "unknown"
@@ -182,6 +184,7 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 		if tool := opencodeToolName(input); tool != "" {
 			fields["tool"] = map[string]interface{}{"name": tool}
 		}
+		mergeMap(fields, opencodePermissionCorrelation(properties))
 		action := opencodeApprovalAction(decision)
 		return one(action, "approval", "info", "opencode permission "+decision, fields)
 	default:
@@ -196,6 +199,7 @@ func supportedOpenCodeEventTypes() []string {
 		"command.executed",
 		"file.edited",
 		"file.watcher.updated",
+		"message.part.delta",
 		"message.part.updated",
 		"message.updated",
 		"permission.asked",
@@ -611,6 +615,28 @@ func opencodeApprovalAction(decision string) string {
 	default:
 		return "approval.requested"
 	}
+}
+
+func opencodePermissionCorrelation(properties map[string]interface{}) map[string]interface{} {
+	toolRef := opencodeMap(properties, "tool")
+	callID := getFirstStr(toolRef, "callID", "call_id")
+	if callID == "" {
+		return nil
+	}
+	toolName := getFirstStr(properties, "permission")
+	fields := map[string]interface{}{
+		"gen_ai": map[string]interface{}{
+			"operation": map[string]interface{}{"name": "execute_tool"},
+			"tool": map[string]interface{}{
+				"name": toolName,
+				"call": map[string]interface{}{"id": callID},
+			},
+		},
+	}
+	if toolName != "" {
+		fields["tool"] = map[string]interface{}{"name": toolName}
+	}
+	return fields
 }
 
 func opencodeProperties(input map[string]interface{}) map[string]interface{} {

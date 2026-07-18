@@ -47,6 +47,11 @@ async function debugLog(client, message, extra) {
 }
 
 async function sendToBeacon(client, payload) {
+  const testSender = globalThis[Symbol.for("beacon.opencode.testSender")]
+  if (typeof testSender === "function") {
+    await testSender(payload)
+    return
+  }
   let proc
   try {
     proc = Bun.spawn(["/bin/sh", "-lc", beaconCommand], {
@@ -87,6 +92,7 @@ function sessionID(value) {
 }
 
 function modelName(value) {
+  if (value?.providerID && value?.modelID) return value.providerID + "/" + value.modelID
   const model = value?.model || value?.modelInfo
   if (!model || typeof model === "string") return model || ""
   if (model.providerID && model.modelID) return model.providerID + "/" + model.modelID
@@ -118,6 +124,9 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
   const pendingParts = new Map()
   const partDeltas = new Map()
   const messageModels = new Map()
+  const completedMessages = new Set()
+  const permissionRequests = new Map()
+  const sessionStates = new Map()
   const recentFilePaths = new Map()
   let eventQueue = Promise.resolve()
 
@@ -128,10 +137,10 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       .catch((err) => debugLog(client, "Beacon event queue failed", { error: String(err), type: value?.type }))
     return eventQueue
   }
-  const rememberFilePath = (tool, args) => {
+  const rememberFilePath = (tool, args, sid, callID) => {
     if (!isFileMutationTool(tool)) return
     const path = filePath(args)
-    if (path) recentFilePaths.set(path, Date.now())
+    if (path) recentFilePaths.set(path, { time: Date.now(), sessionID: sid, callID })
   }
   const partKey = (part) => `${part?.sessionID || ""}:${part?.messageID || ""}:${part?.id || ""}`
   const emitPart = (part, sid, model) => {
@@ -208,7 +217,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     "tool.execute.after": async (input, output) => {
       const active = activeCalls.get(input?.callID)
       const args = input?.args || active?.args || {}
-      rememberFilePath(input?.tool, args)
+      rememberFilePath(input?.tool, args, sessionID(input), input?.callID)
       await sendToBeacon(
         client,
         payload("tool.execute.after", {
@@ -235,6 +244,10 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         const model = modelName(info)
         if (info?.id && model) messageModels.set(info.id, model)
         if (!info?.time?.completed && !info?.error) return
+        if (info?.id) {
+          if (completedMessages.has(info.id)) return
+          completedMessages.add(info.id)
+        }
       }
       if (type === "message.part.delta") {
         const key = `${sid}:${properties?.messageID || ""}:${properties?.partID || ""}`
@@ -246,8 +259,27 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         emitPart(part, sid, messageModels.get(part?.messageID) || "")
         return
       }
-      if (type === "session.status" && properties?.status?.type === "idle") flushParts(sid)
-      if (type === "session.idle") flushParts(sid)
+      if (type === "session.status") {
+        const status = properties?.status?.type || ""
+        sessionStates.set(sid, status)
+        if (status === "idle") flushParts(sid)
+      }
+      if (type === "session.idle") {
+        flushParts(sid)
+        if (sessionStates.get(sid) === "idle") return
+        sessionStates.set(sid, "idle")
+      }
+      if (type === "permission.asked" || type === "permission.v2.asked") {
+        if (properties?.id) {
+          permissionRequests.set(properties.id, { tool: properties?.tool, permission: properties?.permission })
+        }
+      }
+      if (type === "permission.replied" || type === "permission.v2.replied") {
+        const request = permissionRequests.get(properties?.requestID)
+        if (request?.tool && !properties.tool) properties.tool = request.tool
+        if (request?.permission && !properties.permission) properties.permission = request.permission
+        permissionRequests.delete(properties?.requestID)
+      }
       if (type === "session.diff") {
         const diffs = Array.isArray(properties?.diff) ? properties.diff : []
         const now = Date.now()
@@ -255,18 +287,23 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
           const path = filePath(item)
           if (!path) return false
           const seen = recentFilePaths.get(path)
-          if (seen && now - seen < 5000) return false
+          if (seen && now - seen.time < 5000) return false
           return item?.before !== item?.after || item?.additions || item?.deletions
         })
         if (filtered.length === 0) return
         properties.diff = filtered
       }
       if (type === "file.edited" || type === "file.watcher.updated") {
-        if (!sid) return
+        if (!sid) {
+          const seen = recentFilePaths.get(filePath(properties))
+          if (!seen || Date.now() - seen.time >= 5000) return
+          properties.sessionID = seen.sessionID
+          properties.callID = seen.callID
+        }
       }
       void enqueue(
         payload(type, {
-          session_id: sid,
+          session_id: sessionID(properties) || sid,
           model: modelName(info || properties),
           properties,
           event,

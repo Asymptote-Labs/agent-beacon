@@ -132,6 +132,9 @@ func TestOpenCodeInstalledUsesManagedMarker(t *testing.T) {
 	if isOpenCodeInstalledAt(path) {
 		t.Fatal("unmarked plugin should not be detected as installed")
 	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove unmarked plugin: %v", err)
+	}
 	if err := installOpenCodePlugin(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installOpenCodePlugin returned error: %v", err)
 	}

@@ -1,28 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { BeaconEndpointPlugin } from "./beacon"
 
-const originalSpawn = Bun.spawn
 const payloads: any[] = []
+const senderKey = Symbol.for("beacon.opencode.testSender")
 
 beforeEach(() => {
   payloads.length = 0
-  Object.defineProperty(Bun, "spawn", {
-    configurable: true,
-    value: () => ({
-      stdin: {
-        write(value: string) {
-          payloads.push(JSON.parse(value))
-        },
-        end() {},
-      },
-      exited: Promise.resolve(0),
-      kill() {},
-    }),
-  })
+  ;(globalThis as any)[senderKey] = async (payload: any) => payloads.push(structuredClone(payload))
 })
 
 afterEach(() => {
-  Object.defineProperty(Bun, "spawn", { configurable: true, value: originalSpawn })
+  delete (globalThis as any)[senderKey]
 })
 
 async function plugin() {

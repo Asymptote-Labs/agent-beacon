@@ -332,7 +332,10 @@ func TestOpenCodePermissionRepliesMapAllowAndDeny(t *testing.T) {
 		action, _, _, _, _ := opencodeEndpointEvent(map[string]interface{}{
 			"type":       "permission.replied",
 			"session_id": "ses_test",
-			"properties": map[string]interface{}{"reply": tt.reply},
+			"properties": map[string]interface{}{
+				"reply": tt.reply, "permission": "bash",
+				"tool": map[string]interface{}{"messageID": "msg_1", "callID": "call_permission"},
+			},
 		}, "ses_test")
 		if action != tt.action {
 			t.Fatalf("reply %q action = %q, want %q", tt.reply, action, tt.action)
