@@ -317,9 +317,16 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 	}
 
 	if path := opencodeToolPath(toolInput); path != "" {
+		operation := fileOperation(toolName)
+		if operation == "" {
+			lower := strings.ToLower(toolName)
+			if strings.Contains(lower, "glob") || strings.Contains(lower, "grep") || strings.Contains(lower, "search") {
+				operation = "read"
+			}
+		}
 		fields["file"] = map[string]interface{}{
 			"path":      path,
-			"operation": fileOperation(toolName),
+			"operation": operation,
 			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
 		}
 		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "path": path})
@@ -398,12 +405,14 @@ func opencodeDecision(input map[string]interface{}) string {
 
 func opencodeToolAction(input map[string]interface{}) (string, string) {
 	name := strings.ToLower(opencodeToolName(input))
+	toolInput := opencodeMap(input, "tool_input", "toolInput")
 	switch {
 	case strings.Contains(name, "mcp") || strings.HasPrefix(name, "list_mcp_") || strings.HasPrefix(name, "read_mcp_"):
 		return "mcp.tool_invoked", "mcp"
 	case name == "bash" || strings.Contains(name, "shell") || strings.Contains(name, "terminal"):
 		return "command.executed", "command"
-	case strings.Contains(name, "read"):
+	case strings.Contains(name, "read") ||
+		((strings.Contains(name, "glob") || strings.Contains(name, "grep") || strings.Contains(name, "search")) && opencodeToolPath(toolInput) != ""):
 		return "file.read", "file"
 	case strings.Contains(name, "edit") || strings.Contains(name, "write") || strings.Contains(name, "patch"):
 		return "file.modified", "file"

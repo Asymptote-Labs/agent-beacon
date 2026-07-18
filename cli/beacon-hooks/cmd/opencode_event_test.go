@@ -377,7 +377,7 @@ func TestOpenCodeTidyPlanetTraceReplay(t *testing.T) {
 	want := []string{
 		"prompt.submitted", "prompt.submitted",
 		"tool.invoked", "file.read",
-		"tool.invoked", "tool.completed",
+		"tool.invoked", "file.read",
 		"prompt.submitted", "tool.invoked", "tool.completed",
 		"prompt.submitted", "tool.invoked", "file.modified",
 		"prompt.submitted", "tool.invoked", "command.executed",
