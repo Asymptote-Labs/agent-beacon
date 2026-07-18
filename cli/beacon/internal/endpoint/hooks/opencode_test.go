@@ -27,14 +27,31 @@ func TestInstallOpenCodePluginWritesManagedPlugin(t *testing.T) {
 		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
 		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
 		"forwardedEvents",
+		"tool.execute.before",
+		"tool.execute.after",
+		"message.updated",
+		"message.part.updated",
 		"session.created",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("plugin missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "message.updated") || strings.Contains(text, "message.part.updated") {
-		t.Fatalf("high-volume message update events should not be forwarded:\n%s", text)
+}
+
+func TestInstallOpenCodePluginRefusesToOverwriteUnmanagedPlugin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beacon.ts")
+	original := "export const UserPlugin = async () => ({})"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := installOpenCodePlugin(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json")
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite unmanaged") {
+		t.Fatalf("install error = %v", err)
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != original {
+		t.Fatalf("unmanaged plugin changed: err=%v body=%q", readErr, data)
 	}
 }
 

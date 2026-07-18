@@ -42,6 +42,48 @@ func TestEndpointEventStillWritesStructuredTelemetry(t *testing.T) {
 	}
 }
 
+func TestEndpointEventCompactsOversizedRetainedContent(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	large := make([]interface{}, 40)
+	for i := range large {
+		large[i] = strings.Repeat("x", 4096)
+	}
+	fields := map[string]interface{}{
+		"session": map[string]interface{}{"id": "ses_large"},
+		"gen_ai": map[string]interface{}{
+			"tool": map[string]interface{}{
+				"name": "read",
+				"call": map[string]interface{}{"id": "call_large", "result": large},
+			},
+		},
+		"content": map[string]interface{}{"retention": "full", "included": true, "bytes": 163840},
+	}
+
+	logger := NewLoggerForPlatform("opencode-event", "opencode")
+	if err := logger.EndpointEvent("tool.completed", "tool", "info", "opencode tool completed", fields); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > 64*1024 {
+		t.Fatalf("event size = %d", len(data))
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["field_truncated"] != true {
+		t.Fatalf("field_truncated = %#v", event["field_truncated"])
+	}
+	content := event["content"].(map[string]interface{})
+	if content["included"] != false || content["truncated"] != true {
+		t.Fatalf("content = %#v", content)
+	}
+}
+
 func TestEndpointEventCreatesSharedRuntimeFilesDespiteUmask(t *testing.T) {
 	oldUmask := syscall.Umask(0022)
 	t.Cleanup(func() {

@@ -1,0 +1,16 @@
+{
+  "type": "session.diff",
+  "session_id": "ses_fixture",
+  "properties": {
+    "sessionID": "ses_fixture",
+    "diff": [
+      {
+        "file": "/repo/README.md",
+        "before": "old",
+        "after": "new",
+        "additions": 1,
+        "deletions": 1
+      }
+    ]
+  }
+}

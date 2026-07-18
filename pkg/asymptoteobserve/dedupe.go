@@ -20,6 +20,7 @@ type endpointDedupeEvent struct {
 	action  string
 	harness string
 	key     string
+	callID  string
 	ts      time.Time
 }
 
@@ -41,7 +42,10 @@ func IsDuplicateEndpointEvent(path string, candidateLine []byte, window time.Dur
 		if !ok || existing.key != candidate.key {
 			continue
 		}
-		if existing.harness == candidate.harness {
+		// Same-harness events are normally preserved because two adjacent calls
+		// can legitimately target the same file or command. A stable tool call
+		// ID makes an exact duplicate safe to collapse.
+		if existing.harness == candidate.harness && (existing.callID == "" || candidate.callID == "") {
 			continue
 		}
 		diff := candidate.ts.Sub(existing.ts)
@@ -100,6 +104,7 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 		return endpointDedupeEvent{}, false
 	}
 	harness := strings.ToLower(nestedString(event, "harness", "name"))
+	callID := nestedString(event, "gen_ai", "tool", "call", "id")
 	target := dedupeTarget(action, event)
 	if target == "" {
 		return endpointDedupeEvent{}, false
@@ -113,8 +118,9 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 		sessionID,
 		strings.ToLower(workspace),
 		target,
+		callID,
 	}, "\x00")
-	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, key: key, ts: ts.UTC()}, true
+	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, key: key, callID: callID, ts: ts.UTC()}, true
 }
 
 func endpointDedupeWindow(action string, fallback time.Duration) time.Duration {

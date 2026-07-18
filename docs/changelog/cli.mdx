@@ -13,6 +13,17 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Full OpenCode agent traces** · Expanded the managed OpenCode plugin to
+  capture correlated prompt, assistant text/reasoning, model usage/cost, tool
+  invocation/result/failure, command, file, web/MCP, approval, and session
+  lifecycle telemetry.
+- **Accurate OpenCode file and approval events** · Empty or pathless
+  `session.diff` payloads no longer become file modifications, structured diffs
+  retain real agent paths, and rejected permission replies normalize to
+  `approval.denied`.
+- **Bounded fail-open plugin delivery** · OpenCode event delivery is ordered,
+  time-bounded, locally redacted/truncated, collision-safe during install, and
+  covered by Bun, Go, fixture, and macOS smoke tests.
 - **Cursor Cloud prompt telemetry** · Committed `beforeSubmitPrompt` project
   hooks now retain observed follow-up prompts and immediately refresh the
   per-run object-storage snapshot, including prompt-only turns after hooks

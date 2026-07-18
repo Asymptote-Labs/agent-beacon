@@ -230,7 +230,40 @@ func writeEndpointJSON(path string, event map[string]interface{}) error {
 			return err
 		}
 	}
+	if len(data) > 64*1024 {
+		compactEndpointContent(event)
+		data, err = json.Marshal(sanitizeEndpointMap(event))
+		if err != nil {
+			return err
+		}
+	}
+	if len(data) > 64*1024 {
+		return fmt.Errorf("endpoint event exceeds 64 KiB after content compaction")
+	}
 	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+}
+
+func compactEndpointContent(event map[string]interface{}) {
+	if file, ok := event["file"].(map[string]interface{}); ok {
+		delete(file, "diff")
+	}
+	if command, ok := event["command"].(map[string]interface{}); ok {
+		delete(command, "output")
+	}
+	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
+		delete(genAI, "input")
+		delete(genAI, "output")
+		if tool, ok := genAI["tool"].(map[string]interface{}); ok {
+			if call, ok := tool["call"].(map[string]interface{}); ok {
+				delete(call, "arguments")
+				delete(call, "result")
+			}
+		}
+	}
+	if content, ok := event["content"].(map[string]interface{}); ok {
+		content["included"] = false
+		content["truncated"] = true
+	}
 }
 
 func endpointLogPath() string {

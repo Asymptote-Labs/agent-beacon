@@ -15,7 +15,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Codex CLI | Local OTLP logs plus optional inventory hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; inventory heartbeat triggers from hooks |
 | Gemini CLI | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | Grok Build | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
-| OpenCode | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
+| OpenCode | Managed plugin hooks | Prompts, assistant text/reasoning, model and usage metadata, tool inputs/results/failures, commands and output, file activity/diffs, web/MCP calls, approvals, and session lifecycle/errors |
 | Devin CLI | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
 | Devin Desktop | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
 | Factory Droid | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
@@ -81,6 +81,13 @@ By default, snapshots include config-file metadata, MCP server metadata, skill m
 Top-level `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields can add shared context across entities. Content-bearing fields follow the configured retention mode.
 
 For hook-based runtimes, `branch` is derived locally from the workspace's `.git/HEAD` file when the runtime payload does not provide one. This is a local file read only — no git command runs and nothing leaves the machine — and it can be disabled with `BEACON_DISABLE_GIT_METADATA=1`.
+
+OpenCode's managed plugin retains full prompt, completed assistant/reasoning,
+tool argument/result, command output, and diff content in local or
+customer-controlled logs. All values pass through secret redaction and
+per-string truncation. Content events carry original hashes and byte counts;
+oversized events discard raw/content payloads, set `field_truncated`, and remain
+within the endpoint event-size limit.
 
 ## Related
 

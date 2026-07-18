@@ -45,6 +45,19 @@ func TestIsDuplicateEndpointEventKeepsSameHarnessCalls(t *testing.T) {
 	}
 }
 
+func TestIsDuplicateEndpointEventCollapsesSameHarnessCallID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"tool.completed"},"harness":{"name":"opencode"},"session":{"id":"s1"},"tool":{"name":"webfetch"},"gen_ai":{"tool":{"name":"webfetch","call":{"id":"call_1"}}},"message":"opencode tool completed"}`
+	candidate := []byte(`{"timestamp":"2026-06-18T21:11:25Z","event":{"action":"tool.completed"},"harness":{"name":"opencode"},"session":{"id":"s1"},"tool":{"name":"webfetch"},"gen_ai":{"tool":{"name":"webfetch","call":{"id":"call_1"}}},"message":"opencode tool completed"}`)
+	if err := os.WriteFile(path, []byte(existing+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if !IsDuplicateEndpointEvent(path, candidate, EndpointDuplicateWindow) {
+		t.Fatal("same OpenCode call ID should dedupe")
+	}
+}
+
 func TestIsDuplicateEndpointEventRequiresSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"cursor"},"mcp":{"tool":"list_tables"}}`

@@ -96,6 +96,46 @@ if ! grep -q 'BEACON_ENDPOINT_MODE=1' "$HOME_DIR/.cursor/hooks.json"; then
   exit 1
 fi
 
+echo "Installing and exercising OpenCode plugin in temporary HOME..."
+run_beacon endpoint hooks install --harness opencode --user --log-path "$LOG_PATH" >/dev/null
+run_beacon endpoint hooks status --harness opencode --user --log-path "$LOG_PATH" >/dev/null
+OPENCODE_PLUGIN="$HOME_DIR/.config/opencode/plugins/beacon.ts"
+OPENCODE_HOOK="$HOME_DIR/.beacon/endpoint/hooks/beacon-hooks"
+test -f "$OPENCODE_PLUGIN"
+test -x "$OPENCODE_HOOK"
+
+if grep -q '__BEACON_' "$OPENCODE_PLUGIN"; then
+  echo "OpenCode plugin contains unresolved Beacon placeholders" >&2
+  exit 1
+fi
+
+emit_opencode() {
+  printf '%s\n' "$1" | \
+    HOME="$HOME_DIR" BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG="$LOG_PATH" \
+    "$OPENCODE_HOOK" --platform opencode opencode-event >/dev/null
+}
+
+emit_opencode '{"type":"chat.message","session_id":"ses_smoke","directory":"/tmp/project","model":"test/model","output":{"parts":[{"type":"text","text":"summarize"}]}}'
+emit_opencode '{"type":"tool.execute.after","session_id":"ses_smoke","directory":"/tmp/project","tool_name":"bash","call_id":"call_bash","duration_ms":5,"tool_input":{"command":"git status --short"},"tool_response":{"output":"","metadata":{"exitCode":0}}}'
+emit_opencode '{"type":"tool.execute.after","session_id":"ses_smoke","directory":"/tmp/project","tool_name":"write","call_id":"call_write","tool_input":{"filePath":"/tmp/project/smoke.txt","content":"value"},"tool_response":{"output":"ok","metadata":{}}}'
+emit_opencode '{"type":"permission.replied","session_id":"ses_smoke","properties":{"sessionID":"ses_smoke","requestID":"per_smoke","reply":"reject"}}'
+emit_opencode '{"type":"session.diff","session_id":"ses_smoke","properties":{"sessionID":"ses_smoke","diff":[]}}'
+
+for action in prompt.submitted command.executed file.modified approval.denied; do
+  if ! grep -q "\"action\":\"$action\"" "$LOG_PATH"; then
+    echo "expected OpenCode $action event in runtime log" >&2
+    exit 1
+  fi
+done
+
+if grep '"session":{"id":"ses_smoke"' "$LOG_PATH" | grep -q 'opencode session diff observed'; then
+  echo "empty OpenCode session diff produced a file event" >&2
+  exit 1
+fi
+
+run_beacon endpoint hooks uninstall --harness opencode --user --log-path "$LOG_PATH" >/dev/null
+test ! -f "$OPENCODE_PLUGIN"
+
 echo "Uninstalling endpoint config..."
 run_beacon endpoint uninstall --user --log-path "$LOG_PATH" --keep-logs >/dev/null
 
