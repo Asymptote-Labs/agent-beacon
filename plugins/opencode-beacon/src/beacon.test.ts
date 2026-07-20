@@ -26,6 +26,9 @@ describe("BeaconEndpointPlugin", () => {
   test("forwards prompts and correlated tool lifecycle payloads", async () => {
     const hooks = await plugin()
 
+    await hooks.event!({
+      event: { type: "session.created", properties: { sessionID: "ses_1", info: { id: "ses_1" } } },
+    } as any)
     await hooks["chat.message"]!(
       { sessionID: "ses_1", model: { providerID: "moonshotai", modelID: "kimi-k3" } } as any,
       { parts: [{ type: "text", text: "summarize" }] } as any,
@@ -40,11 +43,12 @@ describe("BeaconEndpointPlugin", () => {
     )
 
     expect(payloads.map((item) => item.type)).toEqual([
+      "session.created",
       "chat.message",
       "tool.execute.before",
       "tool.execute.after",
     ])
-    expect(payloads[2]).toMatchObject({
+    expect(payloads[3]).toMatchObject({
       session_id: "ses_1",
       call_id: "call_1",
       tool_name: "bash",

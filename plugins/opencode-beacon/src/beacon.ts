@@ -208,7 +208,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
   return {
     "chat.message": async (input, output) => {
       if (output?.message?.id) messageRoles.set(output.message.id, "user")
-      await sendToBeacon(client, {
+      await enqueue({
         type: "chat.message",
         session_id: sessionID(input),
         model: modelName(input),
@@ -218,8 +218,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       })
     },
     "command.execute.before": async (input, output) => {
-      await sendToBeacon(
-        client,
+      await enqueue(
         payload("command.execute.before", {
           session_id: sessionID(input),
           command_name: input?.command,
@@ -237,8 +236,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         started_at: Date.now(),
       })
       rememberFilePath(input?.tool, output?.args || {}, sid, input?.callID)
-      await sendToBeacon(
-        client,
+      await enqueue(
         payload("tool.execute.before", {
           session_id: sessionID(input),
           tool_name: input?.tool,
@@ -251,8 +249,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const active = activeCalls.get(input?.callID)
       const args = input?.args || active?.args || {}
       rememberFilePath(input?.tool, args, sessionID(input), input?.callID)
-      await sendToBeacon(
-        client,
+      await enqueue(
         payload("tool.execute.after", {
           session_id: sessionID(input),
           tool_name: input?.tool,
