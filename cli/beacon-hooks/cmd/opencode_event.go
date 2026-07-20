@@ -625,7 +625,8 @@ func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{
 
 func opencodeFileMutationEvents(input map[string]interface{}, base map[string]interface{}) []opencodeNormalizedEvent {
 	command, _ := base["command"].(map[string]interface{})
-	if exitCode, ok := opencodeInt(command["exit_code"]); ok && exitCode != 0 {
+	exitCode, ok := opencodeInt(command["exit_code"])
+	if !ok || exitCode != 0 {
 		return nil
 	}
 	items, _ := input["file_mutations"].([]interface{})
@@ -748,6 +749,12 @@ func opencodeFloat(value interface{}) (float64, bool) {
 }
 
 func cloneOpenCodeFields(input map[string]interface{}) map[string]interface{} {
+	if data, err := json.Marshal(input); err == nil {
+		var out map[string]interface{}
+		if err := json.Unmarshal(data, &out); err == nil {
+			return out
+		}
+	}
 	out := make(map[string]interface{}, len(input))
 	for key, value := range input {
 		out[key] = value

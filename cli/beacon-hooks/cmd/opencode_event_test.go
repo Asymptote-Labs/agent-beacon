@@ -415,6 +415,43 @@ func TestOpenCodeSuccessfulRMEmitsCorrelatedFileDeletion(t *testing.T) {
 	if failed := opencodeEndpointEvents(input, "ses_test"); len(failed) != 1 {
 		t.Fatalf("failed rm emitted %d events, want command only", len(failed))
 	}
+	input["tool_response"] = map[string]interface{}{"output": "unknown", "metadata": map[string]interface{}{}}
+	if unknown := opencodeEndpointEvents(input, "ses_test"); len(unknown) != 1 {
+		t.Fatalf("rm without exit metadata emitted %d events, want command only", len(unknown))
+	}
+}
+
+func TestOpenCodeSiblingEventsDoNotShareNestedFields(t *testing.T) {
+	events := opencodeEndpointEvents(map[string]interface{}{
+		"type":       "tool.execute.after",
+		"session_id": "ses_test",
+		"tool_name":  "bash",
+		"call_id":    "call_rm",
+		"tool_input": map[string]interface{}{"command": `rm "/repo/.tmp/e2e.txt"`},
+		"tool_response": map[string]interface{}{
+			"output":   "",
+			"metadata": map[string]interface{}{"exit": 0},
+		},
+		"file_mutations": []interface{}{
+			map[string]interface{}{"path": "/repo/.tmp/e2e.txt", "operation": "delete"},
+		},
+	}, "ses_test")
+	if len(events) != 2 {
+		t.Fatalf("events = %d", len(events))
+	}
+	firstCall := events[0].fields["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})
+	delete(firstCall, "arguments")
+	firstContent := events[0].fields["content"].(map[string]interface{})
+	firstContent["included"] = false
+
+	secondCall := events[1].fields["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})
+	if secondCall["arguments"] == nil {
+		t.Fatal("mutating first event removed second event arguments")
+	}
+	secondContent := events[1].fields["content"].(map[string]interface{})
+	if secondContent["included"] != true {
+		t.Fatalf("mutating first event changed second content: %#v", secondContent)
+	}
 }
 
 func TestOpenCodePermissionRepliesMapAllowAndDeny(t *testing.T) {

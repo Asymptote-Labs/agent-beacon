@@ -313,4 +313,19 @@ describe("BeaconEndpointPlugin", () => {
     expect(payloads[1].file_mutations).toEqual([])
     expect(payloads[2].model).toBe("moonshotai/kimi-k3")
   })
+
+  test("requires a successful shell exit before emitting delete mutations", async () => {
+    const hooks = await plugin()
+    const path = "/tmp/maybe-not-deleted"
+    await hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_rm_unknown" },
+      { args: { command: `rm "${path}"` } },
+    )
+    await hooks["tool.execute.after"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_rm_unknown", args: { command: `rm "${path}"` } },
+      { title: "rm", output: "", metadata: {} },
+    )
+
+    expect(payloads[1].file_mutations).toEqual([])
+  })
 })

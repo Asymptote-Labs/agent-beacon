@@ -281,6 +281,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     "tool.execute.after": async (input, output) => {
       const active = activeCalls.get(input?.callID)
       const args = input?.args || active?.args || {}
+      const exitCode = output?.metadata?.exit ?? output?.metadata?.exitCode ?? output?.metadata?.exit_code
       rememberFilePath(input?.tool, args, sessionID(input), input?.callID)
       await enqueue(
         payload("tool.execute.after", {
@@ -290,7 +291,10 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
           duration_ms: active?.started_at ? Date.now() - active.started_at : undefined,
           tool_input: args,
           tool_response: output,
-          file_mutations: shellMutationPaths(input?.tool, args).map((path) => ({ path, operation: "delete" })),
+          file_mutations:
+            exitCode === 0
+              ? shellMutationPaths(input?.tool, args).map((path) => ({ path, operation: "delete" }))
+              : [],
         }),
       )
       activeCalls.delete(input?.callID)
