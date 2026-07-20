@@ -12,8 +12,6 @@ const directHookTypes = new Set([
   "tool.execute.after",
 ])
 const forwardedEvents = new Set([
-  "file.edited",
-  "file.watcher.updated",
   "message.part.updated",
   "message.part.delta",
   "message.updated",
@@ -376,14 +374,6 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         })
         if (filtered.length === 0) return
         properties.diff = filtered
-      }
-      if (type === "file.edited" || type === "file.watcher.updated") {
-        const seen = recentFilePaths.get(filePath(properties))
-        if (seen && Date.now() - seen.time < 5000) return
-        // OpenCode watcher events are filesystem-scoped and commonly omit a
-        // session. Never guess an active session: ambient IDE/user changes
-        // must not be attributed to an agent trace.
-        if (!sid) return
       }
       const queued = enqueue(
         payload(type, {

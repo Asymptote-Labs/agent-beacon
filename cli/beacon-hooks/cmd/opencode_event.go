@@ -138,31 +138,6 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 		return one("session.error", "session", "high", "opencode session error", fields)
 	case "session.diff":
 		return opencodeDiffEvents(input, fields)
-	case "file.edited", "file.watcher.updated":
-		properties := opencodeProperties(input)
-		path := getFirstStr(properties, "file", "path", "file_path", "filePath")
-		if path == "" || sessionID == "" {
-			return nil
-		}
-		operation := "modify"
-		if getFirstStr(properties, "event") == "unlink" {
-			operation = "delete"
-		}
-		fields["file"] = map[string]interface{}{
-			"path":      path,
-			"operation": operation,
-			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
-		}
-		if callID := getFirstStr(properties, "callID", "call_id"); callID != "" {
-			fields["gen_ai"] = map[string]interface{}{
-				"operation": map[string]interface{}{"name": "execute_tool"},
-				"tool": map[string]interface{}{
-					"name": "file_watcher",
-					"call": map[string]interface{}{"id": callID},
-				},
-			}
-		}
-		return one("file.modified", "file", "info", "opencode file change observed", fields)
 	case "command.execute.before":
 		if command := opencodeCommand(input); command != "" {
 			fields["command"] = map[string]interface{}{"command": command}
@@ -209,8 +184,6 @@ func supportedOpenCodeEventTypes() []string {
 		"chat.message",
 		"command.execute.before",
 		"command.executed",
-		"file.edited",
-		"file.watcher.updated",
 		"message.part.delta",
 		"message.part.updated",
 		"message.updated",

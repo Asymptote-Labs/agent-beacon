@@ -396,30 +396,6 @@ func TestOpenCodeBashCapturesExitMetadata(t *testing.T) {
 	}
 }
 
-func TestOpenCodeWatcherUnlinkNormalizesFileDeletion(t *testing.T) {
-	action, category, _, _, fields := opencodeEndpointEvent(map[string]interface{}{
-		"type":       "file.watcher.updated",
-		"session_id": "ses_test",
-		"properties": map[string]interface{}{
-			"sessionID": "ses_test",
-			"file":      "/repo/.tmp/e2e.txt",
-			"event":     "unlink",
-			"callID":    "call_rm",
-		},
-	}, "ses_test")
-	if action != "file.modified" || category != "file" {
-		t.Fatalf("event = %s/%s", action, category)
-	}
-	file := fields["file"].(map[string]interface{})
-	if file["operation"] != "delete" || file["path"] != "/repo/.tmp/e2e.txt" {
-		t.Fatalf("file = %#v", file)
-	}
-	call := fields["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})
-	if call["id"] != "call_rm" {
-		t.Fatalf("call = %#v", call)
-	}
-}
-
 func TestOpenCodeSuccessfulRMEmitsCorrelatedFileDeletion(t *testing.T) {
 	input := map[string]interface{}{
 		"type":       "tool.execute.after",
