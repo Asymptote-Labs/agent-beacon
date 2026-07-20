@@ -261,6 +261,31 @@ describe("BeaconEndpointPlugin", () => {
     expect(payloads[0].part.text).toBe("late role")
   })
 
+  test("idle flush does not loop when a pending part still has no role", async () => {
+    const hooks = await plugin()
+    await hooks.event!({
+      event: {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "ses_1",
+          part: {
+            id: "prt_unknown",
+            messageID: "msg_unknown",
+            sessionID: "ses_1",
+            type: "text",
+            text: "pending",
+          },
+        },
+      },
+    } as any)
+    await hooks.event!({
+      event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } },
+    } as any)
+    await Bun.sleep(20)
+
+    expect(payloads.map((item) => item.type)).toEqual(["session.status"])
+  })
+
   test("cleans session state after deletion", async () => {
     const hooks = await plugin()
     const completed = (sessionID: string) => ({

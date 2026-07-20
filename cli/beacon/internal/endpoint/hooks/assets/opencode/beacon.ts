@@ -200,7 +200,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     void enqueue(payload("message.part.updated", { session_id: sid, model, part: next }))
   }
   const flushParts = (sid) => {
-    for (const [key, item] of pendingParts) {
+    for (const [key, item] of [...pendingParts]) {
       if (item.session_id !== sid) continue
       const part = { ...item.part, time: { ...(item.part.time || {}), end: Date.now() } }
       pendingParts.delete(key)
@@ -208,7 +208,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     }
   }
   const flushMessageParts = (messageID, sid, model, completedAt) => {
-    for (const [key, item] of pendingParts) {
+    for (const [key, item] of [...pendingParts]) {
       if (item.part?.messageID !== messageID) continue
       const part = { ...item.part, time: { ...(item.part.time || {}), end: completedAt || Date.now() } }
       pendingParts.delete(key)
