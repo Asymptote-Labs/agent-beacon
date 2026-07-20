@@ -11,7 +11,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## July 2026
 
-### Unreleased
+### v1.0.4 · July 20, 2026
 
 - **Full OpenCode agent traces** · Expanded the managed OpenCode plugin to
   capture correlated prompt, assistant text/reasoning, model usage/cost, tool
@@ -35,6 +35,9 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Repository environment reliability** · Updated the committed Cursor
   environment to use the current schema, build and embed `beacon-hooks` before
   the CLI, select a compatible Go toolchain, and report GCS or S3 startup state.
+- **Falcon CI forwarding workflow** · Added a reference GitHub Actions workflow
+  for forwarding Beacon CI telemetry directly to CrowdStrike Falcon LogScale
+  HEC while retaining the completed runtime log as a workflow artifact.
 
 ### v1.0.3 · July 14, 2026
 
