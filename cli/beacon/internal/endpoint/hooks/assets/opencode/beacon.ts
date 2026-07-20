@@ -20,6 +20,7 @@ const forwardedEvents = new Set([
   "permission.v2.asked",
   "permission.v2.replied",
   "session.created",
+  "session.deleted",
   "session.idle",
   "session.status",
   "session.error",
@@ -116,6 +117,19 @@ function isFileMutationTool(tool) {
   return ["edit", "write", "patch", "apply_patch", "create"].some((part) => name.includes(part))
 }
 
+function shellMutationPaths(tool, args) {
+  const name = String(tool || "").toLowerCase()
+  if (name !== "bash" && !name.includes("shell")) return []
+  const command = String(args?.command || args?.cmd || "")
+  const paths = []
+  const pattern = /\b(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|(\S+))/g
+  for (const match of command.matchAll(pattern)) {
+    const path = match[1] || match[2] || match[3]
+    if (path) paths.push(path)
+  }
+  return paths
+}
+
 export const BeaconEndpointPlugin = async ({ project, directory, worktree, client }) => {
   const context = { project, directory, worktree }
   const activeCalls = new Map()
@@ -124,6 +138,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
   const pendingParts = new Map()
   const partDeltas = new Map()
   const messageModels = new Map()
+  const messageRoles = new Map()
   const completedMessages = new Set()
   const permissionRequests = new Map()
   const sessionStates = new Map()
@@ -138,9 +153,10 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     return eventQueue
   }
   const rememberFilePath = (tool, args, sid, callID) => {
-    if (!isFileMutationTool(tool)) return
-    const path = filePath(args)
-    if (path) recentFilePaths.set(path, { time: Date.now(), sessionID: sid, callID })
+    const paths = []
+    if (isFileMutationTool(tool) && filePath(args)) paths.push(filePath(args))
+    paths.push(...shellMutationPaths(tool, args))
+    for (const path of paths) recentFilePaths.set(path, { time: Date.now(), sessionID: sid, callID })
   }
   const partKey = (part) => `${part?.sessionID || ""}:${part?.messageID || ""}:${part?.id || ""}`
   const emitPart = (part, sid, model) => {
@@ -155,6 +171,19 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       if (status !== "completed" && status !== "error") return
       if (status === "completed" && completedCalls.has(next.callID)) return
     } else if (next.type === "text" || next.type === "reasoning") {
+      if (next.type === "text") {
+        const role = messageRoles.get(next.messageID)
+        if (role === "user") {
+          emittedParts.add(key)
+          pendingParts.delete(key)
+          partDeltas.delete(key)
+          return
+        }
+        if (role !== "assistant") {
+          pendingParts.set(key, { part: next, session_id: sid, model })
+          return
+        }
+      }
       if (!next.time?.end) {
         pendingParts.set(key, { part: next, session_id: sid, model })
         return
@@ -178,6 +207,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
 
   return {
     "chat.message": async (input, output) => {
+      if (output?.message?.id) messageRoles.set(output.message.id, "user")
       await sendToBeacon(client, {
         type: "chat.message",
         session_id: sessionID(input),
@@ -199,11 +229,14 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       )
     },
     "tool.execute.before": async (input, output) => {
+      const sid = sessionID(input)
       activeCalls.set(input?.callID, {
         tool: input?.tool,
         args: structuredClone(output?.args || {}),
+        session_id: sid,
         started_at: Date.now(),
       })
+      rememberFilePath(input?.tool, output?.args || {}, sid, input?.callID)
       await sendToBeacon(
         client,
         payload("tool.execute.before", {
@@ -240,6 +273,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const sid = sessionID(properties)
       const info = properties?.info || {}
       if (type === "message.updated") {
+        if (info?.id && info?.role) messageRoles.set(info.id, info.role)
         if (info?.role !== "assistant") return
         const model = modelName(info)
         if (info?.id && model) messageModels.set(info.id, model)
@@ -261,6 +295,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       }
       if (type === "session.status") {
         const status = properties?.status?.type || ""
+        if (sessionStates.get(sid) === status) return
         sessionStates.set(sid, status)
         if (status === "idle") flushParts(sid)
       }

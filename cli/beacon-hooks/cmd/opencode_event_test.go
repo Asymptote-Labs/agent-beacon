@@ -164,7 +164,7 @@ func TestOpenCodeEventIgnoresUnsupportedEvents(t *testing.T) {
 	assertNoEndpointLog(t, logPath)
 
 	runHookWithInput(t, runOpenCodeEvent, map[string]interface{}{
-		"type":       "session.deleted",
+		"type":       "session.compacted",
 		"session_id": "session-1",
 	})
 	assertNoEndpointLog(t, logPath)
@@ -318,6 +318,68 @@ func TestOpenCodeStructuredDiffSuppressesEmptyAndEmitsChangedFiles(t *testing.T)
 	}
 }
 
+func TestOpenCodeIdleIsStatusUntilSessionDeletion(t *testing.T) {
+	action, _, _, _, _ := opencodeEndpointEvent(map[string]interface{}{
+		"type":       "session.status",
+		"session_id": "ses_test",
+		"properties": map[string]interface{}{"status": map[string]interface{}{"type": "idle"}},
+	}, "ses_test")
+	if action != "session.status" {
+		t.Fatalf("idle action = %q, want session.status", action)
+	}
+	action, _, _, _, _ = opencodeEndpointEvent(map[string]interface{}{
+		"type":       "session.deleted",
+		"session_id": "ses_test",
+	}, "ses_test")
+	if action != "session.ended" {
+		t.Fatalf("deleted action = %q, want session.ended", action)
+	}
+}
+
+func TestOpenCodeBashCapturesExitMetadata(t *testing.T) {
+	_, _, _, _, fields := opencodeEndpointEvent(map[string]interface{}{
+		"type":       "tool.execute.after",
+		"session_id": "ses_test",
+		"tool_name":  "bash",
+		"call_id":    "bash_1",
+		"tool_input": map[string]interface{}{"command": "test -f missing"},
+		"tool_response": map[string]interface{}{
+			"output": "missing",
+			"metadata": map[string]interface{}{
+				"exit": 1,
+			},
+		},
+	}, "ses_test")
+	command := fields["command"].(map[string]interface{})
+	if command["exit_code"] != 1 {
+		t.Fatalf("exit_code = %#v, want 1", command["exit_code"])
+	}
+}
+
+func TestOpenCodeWatcherUnlinkNormalizesFileDeletion(t *testing.T) {
+	action, category, _, _, fields := opencodeEndpointEvent(map[string]interface{}{
+		"type":       "file.watcher.updated",
+		"session_id": "ses_test",
+		"properties": map[string]interface{}{
+			"sessionID": "ses_test",
+			"file":      "/repo/.tmp/e2e.txt",
+			"event":     "unlink",
+			"callID":    "call_rm",
+		},
+	}, "ses_test")
+	if action != "file.modified" || category != "file" {
+		t.Fatalf("event = %s/%s", action, category)
+	}
+	file := fields["file"].(map[string]interface{})
+	if file["operation"] != "delete" || file["path"] != "/repo/.tmp/e2e.txt" {
+		t.Fatalf("file = %#v", file)
+	}
+	call := fields["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})
+	if call["id"] != "call_rm" {
+		t.Fatalf("call = %#v", call)
+	}
+}
+
 func TestOpenCodePermissionRepliesMapAllowAndDeny(t *testing.T) {
 	for _, tt := range []struct {
 		reply  string
@@ -377,7 +439,7 @@ func TestOpenCodeTidyPlanetTraceReplay(t *testing.T) {
 	want := []string{
 		"prompt.submitted", "prompt.submitted",
 		"tool.invoked", "file.read",
-		"tool.invoked", "file.read",
+		"tool.invoked", "tool.completed",
 		"prompt.submitted", "tool.invoked", "tool.completed",
 		"prompt.submitted", "tool.invoked", "file.modified",
 		"prompt.submitted", "tool.invoked", "command.executed",

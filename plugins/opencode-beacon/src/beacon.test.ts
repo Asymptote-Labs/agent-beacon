@@ -161,4 +161,53 @@ describe("BeaconEndpointPlugin", () => {
 
     expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "tool.execute.after"])
   })
+
+  test("does not flush user text as assistant output and deduplicates session status", async () => {
+    const hooks = await plugin()
+    await hooks["chat.message"]!(
+      { sessionID: "ses_1", model: { providerID: "moonshotai", modelID: "kimi-k3" } } as any,
+      {
+        message: { id: "msg_user", role: "user" },
+        parts: [{ id: "prt_user", messageID: "msg_user", sessionID: "ses_1", type: "text", text: "hello" }],
+      } as any,
+    )
+    await hooks.event!({
+      event: {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "ses_1",
+          part: { id: "prt_user", messageID: "msg_user", sessionID: "ses_1", type: "text", text: "hello" },
+        },
+      },
+    } as any)
+    for (const status of ["busy", "busy", "idle"]) {
+      await hooks.event!({
+        event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: status } } },
+      } as any)
+    }
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "ses_1" } } } as any)
+    await Bun.sleep(20)
+
+    expect(payloads.map((item) => item.type)).toEqual(["chat.message", "session.status", "session.status"])
+    expect(payloads.some((item) => item.type === "message.part.updated")).toBe(false)
+  })
+
+  test("correlates file deletion watcher events with an active bash call", async () => {
+    const hooks = await plugin()
+    const path = "/repo/.tmp/beacon-opencode-e2e.txt"
+    await hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_rm" },
+      { args: { command: `rm "${path}"` } },
+    )
+    await hooks.event!({
+      event: { type: "file.watcher.updated", properties: { file: path, event: "unlink" } },
+    } as any)
+    await Bun.sleep(20)
+
+    expect(payloads[1]).toMatchObject({
+      type: "file.watcher.updated",
+      session_id: "ses_1",
+      properties: { sessionID: "ses_1", callID: "call_rm", file: path, event: "unlink" },
+    })
+  })
 })

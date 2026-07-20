@@ -113,12 +113,14 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 		return opencodePartEvents(fields, part)
 	case "session.created":
 		return one("session.started", "session", "info", "opencode session started", fields)
+	case "session.deleted":
+		return one("session.ended", "session", "info", "opencode session deleted", fields)
 	case "session.status":
 		status := opencodeMap(opencodeProperties(input), "status")
 		statusType := getFirstStr(status, "type")
 		switch statusType {
 		case "idle":
-			return one("session.ended", "session", "info", "opencode session idle", fields)
+			return one("session.status", "session", "info", "opencode session idle", fields)
 		case "retry":
 			fields["error"] = map[string]interface{}{"type": "retry"}
 			return one("model.retry", "session", "medium", "opencode model retry", fields)
@@ -126,7 +128,7 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 			return one("session.status", "session", "info", "opencode session "+firstNonEmpty(statusType, "status updated"), fields)
 		}
 	case "session.idle":
-		return one("session.ended", "session", "info", "opencode session ended", fields)
+		return one("session.status", "session", "info", "opencode session idle", fields)
 	case "session.error":
 		errorInfo := opencodeMap(opencodeProperties(input), "error")
 		if len(errorInfo) > 0 {
@@ -149,6 +151,15 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 			"path":      path,
 			"operation": operation,
 			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+		}
+		if callID := getFirstStr(properties, "callID", "call_id"); callID != "" {
+			fields["gen_ai"] = map[string]interface{}{
+				"operation": map[string]interface{}{"name": "execute_tool"},
+				"tool": map[string]interface{}{
+					"name": "file_watcher",
+					"call": map[string]interface{}{"id": callID},
+				},
+			}
 		}
 		return one("file.modified", "file", "info", "opencode file change observed", fields)
 	case "command.execute.before":
@@ -208,6 +219,7 @@ func supportedOpenCodeEventTypes() []string {
 		"permission.v2.asked",
 		"permission.v2.replied",
 		"session.created",
+		"session.deleted",
 		"session.diff",
 		"session.error",
 		"session.idle",
@@ -319,17 +331,18 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 	if path := opencodeToolPath(toolInput); path != "" {
 		operation := fileOperation(toolName)
 		if operation == "" {
-			lower := strings.ToLower(toolName)
-			if strings.Contains(lower, "glob") || strings.Contains(lower, "grep") || strings.Contains(lower, "search") {
-				operation = "read"
+			delete(fields, "file")
+			if tool, ok := fields["tool"].(map[string]interface{}); ok {
+				delete(tool, "path")
 			}
+		} else {
+			fields["file"] = map[string]interface{}{
+				"path":      path,
+				"operation": operation,
+				"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+			}
+			fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "path": path})
 		}
-		fields["file"] = map[string]interface{}{
-			"path":      path,
-			"operation": operation,
-			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
-		}
-		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "path": path})
 	}
 
 	if completed {
@@ -355,7 +368,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 				commandFields["duration_ms"] = duration
 			}
 			if metadata := opencodeMap(toolResponse, "metadata"); len(metadata) > 0 {
-				if exitCode, ok := firstToolIntAcross([]map[string]interface{}{metadata}, "exit_code", "exitCode", "status"); ok {
+				if exitCode, ok := firstToolIntAcross([]map[string]interface{}{metadata}, "exit", "exit_code", "exitCode", "status"); ok {
 					commandFields["exit_code"] = exitCode
 				}
 			}
@@ -405,14 +418,12 @@ func opencodeDecision(input map[string]interface{}) string {
 
 func opencodeToolAction(input map[string]interface{}) (string, string) {
 	name := strings.ToLower(opencodeToolName(input))
-	toolInput := opencodeMap(input, "tool_input", "toolInput")
 	switch {
 	case strings.Contains(name, "mcp") || strings.HasPrefix(name, "list_mcp_") || strings.HasPrefix(name, "read_mcp_"):
 		return "mcp.tool_invoked", "mcp"
 	case name == "bash" || strings.Contains(name, "shell") || strings.Contains(name, "terminal"):
 		return "command.executed", "command"
-	case strings.Contains(name, "read") ||
-		((strings.Contains(name, "glob") || strings.Contains(name, "grep") || strings.Contains(name, "search")) && opencodeToolPath(toolInput) != ""):
+	case strings.Contains(name, "read"):
 		return "file.read", "file"
 	case strings.Contains(name, "edit") || strings.Contains(name, "write") || strings.Contains(name, "patch"):
 		return "file.modified", "file"
@@ -437,11 +448,7 @@ func opencodeToolMessage(action string) string {
 }
 
 func opencodeToolPath(input map[string]interface{}) string {
-	path := firstToolString(input, "file_path", "filePath", "path", "target", "destination")
-	if path == "" {
-		path = firstToolString(input, "pattern")
-	}
-	return hookdiff.NormalizePath(path)
+	return hookdiff.NormalizePath(firstToolString(input, "file_path", "filePath", "path", "target", "destination"))
 }
 
 func opencodeAssistantFields(info map[string]interface{}) map[string]interface{} {
