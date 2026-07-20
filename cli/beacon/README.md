@@ -379,7 +379,8 @@ See [`examples/github-actions/claude-code-telemetry.yml`](../../examples/github-
 [`examples/github-actions/codex-action-session.yml`](../../examples/github-actions/codex-action-session.yml),
 [`examples/github-actions/s3-upload-telemetry.yml`](../../examples/github-actions/s3-upload-telemetry.yml),
 [`examples/github-actions/gcs-upload-telemetry.yml`](../../examples/github-actions/gcs-upload-telemetry.yml),
-and [`examples/github-actions/splunk-forward-telemetry.yml`](../../examples/github-actions/splunk-forward-telemetry.yml)
+[`examples/github-actions/splunk-forward-telemetry.yml`](../../examples/github-actions/splunk-forward-telemetry.yml),
+and [`examples/github-actions/falcon-forward-telemetry.yml`](../../examples/github-actions/falcon-forward-telemetry.yml)
 for complete reference workflows.
 
 ## Wazuh
