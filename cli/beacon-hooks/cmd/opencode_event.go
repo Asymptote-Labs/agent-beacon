@@ -89,7 +89,8 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 				action, category = "tool.completed", "tool"
 			}
 		}
-		return one(action, category, "info", opencodeToolMessage(action), fields)
+		events := one(action, category, "info", opencodeToolMessage(action), fields)
+		return append(events, opencodeFileMutationEvents(input, fields)...)
 	case "message.updated":
 		info := opencodeMap(input, "message_info", "info")
 		if len(info) == 0 {
@@ -617,6 +618,41 @@ func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{
 		events = append(events, opencodeNormalizedEvent{
 			action: "file.modified", category: "file", severity: "info",
 			message: "opencode session diff observed", fields: fields,
+		})
+	}
+	return events
+}
+
+func opencodeFileMutationEvents(input map[string]interface{}, base map[string]interface{}) []opencodeNormalizedEvent {
+	command, _ := base["command"].(map[string]interface{})
+	if exitCode, ok := opencodeInt(command["exit_code"]); ok && exitCode != 0 {
+		return nil
+	}
+	items, _ := input["file_mutations"].([]interface{})
+	if len(items) == 0 {
+		return nil
+	}
+	var events []opencodeNormalizedEvent
+	for _, item := range items {
+		mutation, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		path := getFirstStr(mutation, "path", "file", "filePath", "file_path")
+		operation := firstNonEmpty(getFirstStr(mutation, "operation"), "modify")
+		if path == "" {
+			continue
+		}
+		fields := cloneOpenCodeFields(base)
+		delete(fields, "command")
+		fields["file"] = map[string]interface{}{
+			"path":      path,
+			"operation": operation,
+			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+		}
+		events = append(events, opencodeNormalizedEvent{
+			action: "file.modified", category: "file", severity: "info",
+			message: "opencode file " + operation + " observed", fields: fields,
 		})
 	}
 	return events

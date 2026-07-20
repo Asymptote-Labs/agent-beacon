@@ -192,7 +192,7 @@ describe("BeaconEndpointPlugin", () => {
     expect(payloads.some((item) => item.type === "message.part.updated")).toBe(false)
   })
 
-  test("correlates file deletion watcher events with an active bash call", async () => {
+  test("records shell deletion side effects and suppresses watcher duplicates", async () => {
     const hooks = await plugin()
     const path = "/repo/.tmp/beacon-opencode-e2e.txt"
     await hooks["tool.execute.before"]!(
@@ -202,12 +202,18 @@ describe("BeaconEndpointPlugin", () => {
     await hooks.event!({
       event: { type: "file.watcher.updated", properties: { file: path, event: "unlink" } },
     } as any)
+    await hooks["tool.execute.after"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_rm", args: { command: `rm "${path}"` } },
+      { title: "rm", output: "", metadata: { exit: 0 } },
+    )
     await Bun.sleep(20)
 
+    expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "tool.execute.after"])
     expect(payloads[1]).toMatchObject({
-      type: "file.watcher.updated",
+      type: "tool.execute.after",
       session_id: "ses_1",
-      properties: { sessionID: "ses_1", callID: "call_rm", file: path, event: "unlink" },
+      call_id: "call_rm",
+      file_mutations: [{ path, operation: "delete" }],
     })
   })
 })

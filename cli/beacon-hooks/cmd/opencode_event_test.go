@@ -380,6 +380,43 @@ func TestOpenCodeWatcherUnlinkNormalizesFileDeletion(t *testing.T) {
 	}
 }
 
+func TestOpenCodeSuccessfulRMEmitsCorrelatedFileDeletion(t *testing.T) {
+	input := map[string]interface{}{
+		"type":       "tool.execute.after",
+		"session_id": "ses_test",
+		"tool_name":  "bash",
+		"call_id":    "call_rm",
+		"tool_input": map[string]interface{}{"command": `rm "/repo/.tmp/e2e.txt"`},
+		"tool_response": map[string]interface{}{
+			"output":   "",
+			"metadata": map[string]interface{}{"exit": 0},
+		},
+		"file_mutations": []interface{}{
+			map[string]interface{}{"path": "/repo/.tmp/e2e.txt", "operation": "delete"},
+		},
+	}
+	events := opencodeEndpointEvents(input, "ses_test")
+	if len(events) != 2 || events[0].action != "command.executed" || events[1].action != "file.modified" {
+		t.Fatalf("events = %#v", events)
+	}
+	file := events[1].fields["file"].(map[string]interface{})
+	if file["operation"] != "delete" {
+		t.Fatalf("file = %#v", file)
+	}
+	call := events[1].fields["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})
+	if call["id"] != "call_rm" {
+		t.Fatalf("call = %#v", call)
+	}
+
+	input["tool_response"] = map[string]interface{}{
+		"output":   "failed",
+		"metadata": map[string]interface{}{"exit": 1},
+	}
+	if failed := opencodeEndpointEvents(input, "ses_test"); len(failed) != 1 {
+		t.Fatalf("failed rm emitted %d events, want command only", len(failed))
+	}
+}
+
 func TestOpenCodePermissionRepliesMapAllowAndDeny(t *testing.T) {
 	for _, tt := range []struct {
 		reply  string

@@ -260,6 +260,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
           duration_ms: active?.started_at ? Date.now() - active.started_at : undefined,
           tool_input: args,
           tool_response: output,
+          file_mutations: shellMutationPaths(input?.tool, args).map((path) => ({ path, operation: "delete" })),
         }),
       )
       activeCalls.delete(input?.callID)
@@ -329,12 +330,9 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         properties.diff = filtered
       }
       if (type === "file.edited" || type === "file.watcher.updated") {
-        if (!sid) {
-          const seen = recentFilePaths.get(filePath(properties))
-          if (!seen || Date.now() - seen.time >= 5000) return
-          properties.sessionID = seen.sessionID
-          properties.callID = seen.callID
-        }
+        const seen = recentFilePaths.get(filePath(properties))
+        if (seen && Date.now() - seen.time < 5000) return
+        if (!sid) return
       }
       void enqueue(
         payload(type, {
