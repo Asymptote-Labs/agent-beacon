@@ -34,8 +34,14 @@ A few rules shape how the numbers read:
 |---------|--------|------|-------------|
 | Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes |
 | Codex CLI | input, output, cache read, reasoning | Not emitted by Codex | No (metric carries no conversation id) |
+| Cursor | input, output, cache (where Cursor records them) — via [`beacon token-usage sync-cursor`](/cli/token-usage-sync-cursor) | Not recorded by Cursor | Yes (conversation id) |
 
 `cost_usd` and `--session` detail are empty for Codex because Codex does not emit a cost signal or a conversation id on its usage metric — not a Beacon limitation. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
+
+Cursor hook payloads carry no token counts, so Cursor rows appear after an
+explicit [`beacon token-usage sync-cursor`](/cli/token-usage-sync-cursor) run, which
+extracts runtime-recorded counts from Cursor's local state store. See the
+[Cursor](/runtimes/cursor#token-usage) runtime page for details.
 
 ## Examples
 
