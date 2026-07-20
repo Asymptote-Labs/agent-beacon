@@ -68,6 +68,7 @@ async function sendToBeacon(client, payload) {
     ])
     if ("timeout" in outcome) {
       proc.kill()
+      await Promise.race([proc.exited.catch(() => undefined), Bun.sleep(250)])
       await debugLog(client, "Beacon hook command timed out", { type: payload?.type })
       return
     }
@@ -122,7 +123,8 @@ function shellMutationPaths(tool, args) {
   if (name !== "bash" && !name.includes("shell")) return []
   const command = String(args?.command || args?.cmd || "")
   const paths = []
-  const pattern = /\b(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|(\S+))/g
+  const pattern =
+    /(?:^|(?:&&|\|\||;|\n)\s*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
   for (const match of command.matchAll(pattern)) {
     const path = match[1] || match[2] || match[3]
     if (path) paths.push(path)
@@ -133,12 +135,13 @@ function shellMutationPaths(tool, args) {
 export const BeaconEndpointPlugin = async ({ project, directory, worktree, client }) => {
   const context = { project, directory, worktree }
   const activeCalls = new Map()
-  const completedCalls = new Set()
+  const completedCalls = new Map()
   const emittedParts = new Set()
   const pendingParts = new Map()
   const partDeltas = new Map()
   const messageModels = new Map()
   const messageRoles = new Map()
+  const messageSessions = new Map()
   const completedMessages = new Set()
   const permissionRequests = new Map()
   const sessionStates = new Map()
@@ -204,10 +207,40 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       emitPart(part, sid, item.model)
     }
   }
+  const flushMessageParts = (messageID, sid, model, completedAt) => {
+    for (const [key, item] of pendingParts) {
+      if (item.part?.messageID !== messageID) continue
+      const part = { ...item.part, time: { ...(item.part.time || {}), end: completedAt || Date.now() } }
+      pendingParts.delete(key)
+      emitPart(part, sid, model || item.model)
+    }
+  }
+  const cleanupSession = (sid) => {
+    for (const [callID, item] of activeCalls) if (item.session_id === sid) activeCalls.delete(callID)
+    for (const [callID, session] of completedCalls) if (session === sid) completedCalls.delete(callID)
+    for (const key of emittedParts) if (key.startsWith(`${sid}:`)) emittedParts.delete(key)
+    for (const [key, item] of pendingParts) if (item.session_id === sid) pendingParts.delete(key)
+    for (const key of partDeltas.keys()) if (key.startsWith(`${sid}:`)) partDeltas.delete(key)
+    for (const [messageID, session] of messageSessions) {
+      if (session !== sid) continue
+      messageSessions.delete(messageID)
+      messageModels.delete(messageID)
+      messageRoles.delete(messageID)
+      completedMessages.delete(messageID)
+    }
+    for (const [requestID, request] of permissionRequests) {
+      if (request.sessionID === sid) permissionRequests.delete(requestID)
+    }
+    sessionStates.delete(sid)
+    for (const [path, item] of recentFilePaths) if (item.sessionID === sid) recentFilePaths.delete(path)
+  }
 
   return {
     "chat.message": async (input, output) => {
-      if (output?.message?.id) messageRoles.set(output.message.id, "user")
+      if (output?.message?.id) {
+        messageRoles.set(output.message.id, "user")
+        messageSessions.set(output.message.id, sessionID(input))
+      }
       await enqueue({
         type: "chat.message",
         session_id: sessionID(input),
@@ -261,7 +294,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         }),
       )
       activeCalls.delete(input?.callID)
-      completedCalls.add(input?.callID)
+      completedCalls.set(input?.callID, sessionID(input))
     },
     event: async ({ event }) => {
       const type = event?.type || "event"
@@ -271,11 +304,15 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const sid = sessionID(properties)
       const info = properties?.info || {}
       if (type === "message.updated") {
-        if (info?.id && info?.role) messageRoles.set(info.id, info.role)
+        if (info?.id) {
+          if (info?.role) messageRoles.set(info.id, info.role)
+          messageSessions.set(info.id, sid)
+        }
         if (info?.role !== "assistant") return
         const model = modelName(info)
         if (info?.id && model) messageModels.set(info.id, model)
         if (!info?.time?.completed && !info?.error) return
+        flushMessageParts(info.id, sid, model, info?.time?.completed)
         if (info?.id) {
           if (completedMessages.has(info.id)) return
           completedMessages.add(info.id)
@@ -302,9 +339,14 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         if (sessionStates.get(sid) === "idle") return
         sessionStates.set(sid, "idle")
       }
+      if (type === "session.deleted") flushParts(sid)
       if (type === "permission.asked" || type === "permission.v2.asked") {
         if (properties?.id) {
-          permissionRequests.set(properties.id, { tool: properties?.tool, permission: properties?.permission })
+          permissionRequests.set(properties.id, {
+            tool: properties?.tool,
+            permission: properties?.permission,
+            sessionID: sid,
+          })
         }
       }
       if (type === "permission.replied" || type === "permission.v2.replied") {
@@ -331,14 +373,15 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         if (seen && Date.now() - seen.time < 5000) return
         if (!sid) return
       }
-      void enqueue(
+      const queued = enqueue(
         payload(type, {
           session_id: sessionID(properties) || sid,
-          model: modelName(info || properties),
+          model: modelName(Object.keys(info).length > 0 ? info : properties),
           properties,
           event,
         }),
       )
+      if (type === "session.deleted") void queued.finally(() => cleanupSession(sid))
     },
   }
 }

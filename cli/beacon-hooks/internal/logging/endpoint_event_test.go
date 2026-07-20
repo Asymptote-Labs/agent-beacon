@@ -50,6 +50,7 @@ func TestEndpointEventCompactsOversizedRetainedContent(t *testing.T) {
 		large[i] = strings.Repeat("x", 4096)
 	}
 	fields := map[string]interface{}{
+		"extra":   large,
 		"session": map[string]interface{}{"id": "ses_large"},
 		"gen_ai": map[string]interface{}{
 			"tool": map[string]interface{}{

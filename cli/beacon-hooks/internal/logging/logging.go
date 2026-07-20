@@ -238,7 +238,14 @@ func writeEndpointJSON(path string, event map[string]interface{}) error {
 		}
 	}
 	if len(data) > 64*1024 {
-		return fmt.Errorf("endpoint event exceeds 64 KiB after content compaction")
+		event = minimalEndpointEvent(event)
+		data, err = json.Marshal(sanitizeEndpointMap(event))
+		if err != nil {
+			return err
+		}
+	}
+	if len(data) > 64*1024 {
+		return fmt.Errorf("endpoint event exceeds 64 KiB after metadata fallback")
 	}
 	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
 }
@@ -264,6 +271,41 @@ func compactEndpointContent(event map[string]interface{}) {
 		content["included"] = false
 		content["truncated"] = true
 	}
+}
+
+func minimalEndpointEvent(event map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{"field_truncated": true}
+	for _, key := range []string{
+		"timestamp", "vendor", "product", "schema_version", "event", "severity",
+		"endpoint", "user", "harness", "origin", "run", "session", "trace",
+		"error", "tool", "file", "command", "mcp", "approval", "policy",
+		"content", "destination", "health", "model", "repository",
+		"branch", "message",
+	} {
+		if value, ok := event[key]; ok && value != nil {
+			out[key] = value
+		}
+	}
+	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
+		summary := map[string]interface{}{}
+		for _, key := range []string{"operation", "usage", "response", "provider"} {
+			if value := genAI[key]; value != nil {
+				summary[key] = value
+			}
+		}
+		if tool, ok := genAI["tool"].(map[string]interface{}); ok {
+			toolSummary := map[string]interface{}{"name": tool["name"], "type": tool["type"]}
+			if call, ok := tool["call"].(map[string]interface{}); ok {
+				toolSummary["call"] = map[string]interface{}{"id": call["id"]}
+			}
+			summary["tool"] = toolSummary
+		}
+		if len(summary) > 0 {
+			out["gen_ai"] = summary
+		}
+	}
+	out["message"] = truncateEndpoint(fmt.Sprint(out["message"]), 1024)
+	return out
 }
 
 func endpointLogPath() string {

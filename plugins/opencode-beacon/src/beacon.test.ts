@@ -220,4 +220,97 @@ describe("BeaconEndpointPlugin", () => {
       file_mutations: [{ path, operation: "delete" }],
     })
   })
+
+  test("drains completed assistant parts when the message role arrives later", async () => {
+    const hooks = await plugin()
+    await hooks.event!({
+      event: {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "ses_1",
+          part: {
+            id: "prt_late",
+            messageID: "msg_late",
+            sessionID: "ses_1",
+            type: "text",
+            text: "late role",
+            time: { start: 1, end: 2 },
+          },
+        },
+      },
+    } as any)
+    await hooks.event!({
+      event: {
+        type: "message.updated",
+        properties: {
+          sessionID: "ses_1",
+          info: {
+            id: "msg_late",
+            role: "assistant",
+            providerID: "moonshotai",
+            modelID: "kimi-k3",
+            time: { completed: 3 },
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    } as any)
+    await Bun.sleep(20)
+
+    expect(payloads.map((item) => item.type)).toEqual(["message.part.updated", "message.updated"])
+    expect(payloads[0].part.text).toBe("late role")
+  })
+
+  test("cleans session state after deletion", async () => {
+    const hooks = await plugin()
+    const completed = (sessionID: string) => ({
+      event: {
+        type: "message.updated",
+        properties: {
+          sessionID,
+          info: {
+            id: "msg_reused",
+            role: "assistant",
+            providerID: "moonshotai",
+            modelID: "kimi-k3",
+            time: { completed: 2 },
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    })
+    await hooks.event!(completed("ses_1") as any)
+    await hooks.event!({ event: { type: "session.deleted", properties: { sessionID: "ses_1" } } } as any)
+    await Bun.sleep(20)
+    await hooks.event!(completed("ses_2") as any)
+    await Bun.sleep(20)
+
+    expect(payloads.map((item) => item.type)).toEqual(["message.updated", "session.deleted", "message.updated"])
+  })
+
+  test("does not infer deletes from quoted rm text and preserves root model metadata", async () => {
+    const hooks = await plugin()
+    await hooks["tool.execute.before"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_echo" },
+      { args: { command: "echo rm /tmp/not-deleted" } },
+    )
+    await hooks["tool.execute.after"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_echo", args: { command: "echo rm /tmp/not-deleted" } },
+      { title: "echo", output: "rm /tmp/not-deleted", metadata: { exit: 0 } },
+    )
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "ses_1",
+          status: { type: "busy" },
+          model: { providerID: "moonshotai", modelID: "kimi-k3" },
+        },
+      },
+    } as any)
+    await Bun.sleep(20)
+
+    expect(payloads[1].file_mutations).toEqual([])
+    expect(payloads[2].model).toBe("moonshotai/kimi-k3")
+  })
 })
