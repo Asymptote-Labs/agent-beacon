@@ -58,6 +58,32 @@ func TestIsDuplicateEndpointEventCollapsesSameHarnessCallID(t *testing.T) {
 	}
 }
 
+func TestIsDuplicateEndpointEventKeepsDifferentSameHarnessCallIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"tool.completed"},"harness":{"name":"opencode"},"session":{"id":"s1"},"tool":{"name":"webfetch"},"gen_ai":{"tool":{"name":"webfetch","call":{"id":"call_1"}}},"message":"opencode tool completed"}`
+	candidate := []byte(`{"timestamp":"2026-06-18T21:11:25Z","event":{"action":"tool.completed"},"harness":{"name":"opencode"},"session":{"id":"s1"},"tool":{"name":"webfetch"},"gen_ai":{"tool":{"name":"webfetch","call":{"id":"call_2"}}},"message":"opencode tool completed"}`)
+	if err := os.WriteFile(path, []byte(existing+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if IsDuplicateEndpointEvent(path, candidate, EndpointDuplicateWindow) {
+		t.Fatal("different same-harness call IDs should not dedupe")
+	}
+}
+
+func TestIsDuplicateEndpointEventIgnoresCallIDDifferencesAcrossHarnesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"tool.invoked"},"harness":{"name":"opencode"},"session":{"id":"s1"},"tool":{"name":"read","path":"/repo/a.go"},"gen_ai":{"tool":{"name":"read","call":{"id":"opencode_1"}}},"message":"Tool execution observed"}`
+	candidate := []byte(`{"timestamp":"2026-06-18T21:11:25Z","event":{"action":"tool.invoked"},"harness":{"name":"otel"},"session":{"id":"s1"},"tool":{"name":"read","path":"/repo/a.go"},"gen_ai":{"tool":{"name":"read","call":{"id":"span_9"}}},"message":"Tool execution observed"}`)
+	if err := os.WriteFile(path, []byte(existing+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if !IsDuplicateEndpointEvent(path, candidate, EndpointDuplicateWindow) {
+		t.Fatal("cross-harness duplicates should ignore call ID differences")
+	}
+}
+
 func TestIsDuplicateEndpointEventRequiresSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	existing := `{"timestamp":"2026-06-18T21:11:24Z","event":{"action":"mcp.tool_invoked"},"harness":{"name":"cursor"},"mcp":{"tool":"list_tables"}}`

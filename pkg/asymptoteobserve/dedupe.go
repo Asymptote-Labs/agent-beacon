@@ -45,8 +45,10 @@ func IsDuplicateEndpointEvent(path string, candidateLine []byte, window time.Dur
 		// Same-harness events are normally preserved because two adjacent calls
 		// can legitimately target the same file or command. A stable tool call
 		// ID makes an exact duplicate safe to collapse.
-		if existing.harness == candidate.harness && (existing.callID == "" || candidate.callID == "") {
-			continue
+		if existing.harness == candidate.harness {
+			if existing.callID == "" || candidate.callID == "" || existing.callID != candidate.callID {
+				continue
+			}
 		}
 		diff := candidate.ts.Sub(existing.ts)
 		if diff < 0 {
@@ -118,7 +120,6 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 		sessionID,
 		strings.ToLower(workspace),
 		target,
-		callID,
 	}, "\x00")
 	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, key: key, callID: callID, ts: ts.UTC()}, true
 }
