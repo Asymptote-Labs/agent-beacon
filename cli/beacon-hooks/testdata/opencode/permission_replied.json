@@ -1,0 +1,9 @@
+{
+  "type": "permission.replied",
+  "session_id": "ses_fixture",
+  "properties": {
+    "sessionID": "ses_fixture",
+    "requestID": "per_fixture",
+    "reply": "reject"
+  }
+}

@@ -523,11 +523,12 @@ tooling, not in Beacon endpoint configuration.
 ```
 
 The opencode integration installs Beacon's owned local plugin at
-`~/.config/opencode/plugins/beacon.ts`. The plugin is a thin adapter that sends
-raw opencode hook payloads to Beacon's Go hook binary; Beacon handles
-normalization, retention, redaction, and JSONL output locally. For local
-troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches
-opencode to emit best-effort plugin debug logs.
+`~/.config/opencode/plugins/beacon.ts`. It captures prompts, completed assistant
+text/reasoning, model usage, correlated tool input/results, commands, file,
+web/MCP, approval, and lifecycle events through OpenCode's plugin hooks. Beacon
+handles normalization, retention, redaction, event-size controls, and JSONL
+output locally. For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the
+environment that launches opencode to emit best-effort plugin debug logs.
 
 Claude Code supports two Beacon setup paths. `beacon endpoint install --harness claude`
 configures Claude Code's local OpenTelemetry export to Beacon's collector.

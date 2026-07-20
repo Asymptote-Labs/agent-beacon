@@ -20,6 +20,9 @@ Before enabling OpenCode telemetry, make sure:
 
 Asymptote installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Asymptote's hook adapter.
 
+The integration is plugin-based. OpenCode native OTLP is not configured or
+required by Beacon.
+
 ## Discovery and status
 
 Asymptote detects OpenCode through the `opencode` executable or `~/.config/opencode`, then checks for Asymptote plugin configuration.
@@ -39,15 +42,44 @@ beacon endpoint hooks install --harness opencode
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported through `chat.message` hooks |
-| Command, tool, and file telemetry | Supported for chat messages, session events, command execution, permission activity, diffs, and errors where OpenCode exposes payloads |
+| Assistant output and reasoning | Completed text and reasoning parts, correlated by session/message/part IDs |
+| Tool lifecycle | Invocation, completion, result, duration, and failure using `tool.execute.before`, `tool.execute.after`, and terminal tool parts |
+| Command telemetry | Model-invoked Bash/shell tools plus successful OpenCode custom commands |
+| File telemetry | Read/search/glob and write/edit/patch activity with agent-derived paths; empty session diffs are ignored |
+| Web and MCP telemetry | Web tool arguments/results and normalized MCP server/tool/resource context |
+| Approval telemetry | Requests plus `once`, `always`, and `reject` replies normalized as requested/allowed/denied |
+| Model and usage | Provider/model, finish reason, token usage, cache usage, reasoning tokens, and runtime-reported cost |
+| Session telemetry | Create, busy/idle/end, retry, and error boundaries |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent; OpenCode plugins are installed separately in the logged-in user's context |
+
+## Data handling
+
+OpenCode prompts, completed assistant text and reasoning, tool arguments/results,
+commands, command output, paths, and diffs are retained in local or
+customer-controlled logs. Beacon applies local secret redaction and per-string
+limits before writing. Each content-bearing event includes a hash and byte count
+for the original value. Events that exceed the 64 KiB limit drop raw and
+retained content while preserving stable metadata and set `field_truncated`.
+
+The plugin uses OpenCode session, message, part, permission request, and tool
+call identifiers for correlation. It does not create file events without an
+agent-derived path, so object-storage ingestion paths are not treated as files
+the agent touched.
 
 ## Deployment notes
 
 Restart OpenCode after installing or removing hooks so new sessions pick up the updated plugin configuration.
 
-For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. Asymptote telemetry should not interrupt OpenCode execution if the hook command fails.
+For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. The adapter has a bounded local subprocess timeout and remains fail-open, so telemetry failures do not interrupt OpenCode execution.
+
+Validate a system-mode installation after restarting OpenCode:
+
+```bash
+/opt/beacon/bin/beacon endpoint hooks status --harness opencode --level user
+/opt/beacon/bin/beacon endpoint doctor --system
+/opt/beacon/bin/beacon endpoint dashboard --system --open
+```
 
 ## Related
 

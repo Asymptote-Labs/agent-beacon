@@ -46,9 +46,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - uses: actions/setup-go@v5
         with:
           go-version-file: cli/beacon/go.mod
+      - name: Check OpenCode plugin
+        working-directory: plugins/opencode-beacon
+        run: bun run check && bun test
       - name: Build embedded hooks binary
         working-directory: cli/beacon
         # hooks.bin is gitignored (build-time artifact). The CLI embeds it via
