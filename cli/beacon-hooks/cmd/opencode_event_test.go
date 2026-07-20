@@ -287,6 +287,27 @@ func TestOpenCodeCompletedAssistantNormalizesUsageOnce(t *testing.T) {
 	}
 }
 
+func TestOpenCodeAssistantPreservesCostWithoutTokens(t *testing.T) {
+	action, _, _, _, fields := opencodeEndpointEvent(map[string]interface{}{
+		"type":       "message.updated",
+		"session_id": "ses_test",
+		"properties": map[string]interface{}{
+			"info": map[string]interface{}{
+				"id": "msg_cost", "role": "assistant",
+				"providerID": "moonshotai", "modelID": "kimi-k3",
+				"finish": "stop", "cost": 0.25,
+			},
+		},
+	}, "ses_test")
+	if action != "agent.response.completed" {
+		t.Fatalf("action = %q", action)
+	}
+	usage := fields["gen_ai"].(map[string]interface{})["usage"].(map[string]interface{})
+	if usage["cost_usd"] != 0.25 {
+		t.Fatalf("usage = %#v", usage)
+	}
+}
+
 func TestOpenCodePartNormalization(t *testing.T) {
 	for _, tt := range []struct {
 		partType string

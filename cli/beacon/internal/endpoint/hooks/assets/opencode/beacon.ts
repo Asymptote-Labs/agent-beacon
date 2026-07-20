@@ -159,16 +159,17 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       .catch((err) => debugLog(client, "Beacon event queue failed", { error: String(err), type: value?.type }))
     return eventQueue
   }
-  const rememberFilePath = (tool, args, sid, callID) => {
+  const rememberFilePath = (tool, args, sid, callID, includeShell = false) => {
     const paths = []
     if (isFileMutationTool(tool) && filePath(args)) paths.push(filePath(args))
-    paths.push(...shellMutationPaths(tool, args))
+    if (includeShell) paths.push(...shellMutationPaths(tool, args))
     for (const path of paths) recentFilePaths.set(path, { time: Date.now(), sessionID: sid, callID })
   }
-  const partKey = (part) => `${part?.sessionID || ""}:${part?.messageID || ""}:${part?.id || ""}`
+  const partKey = (part, fallbackSessionID) =>
+    `${part?.sessionID || fallbackSessionID || ""}:${part?.messageID || ""}:${part?.id || ""}`
   const emitPart = (part, sid, model) => {
     if (!part) return
-    const key = partKey(part)
+    const key = partKey(part, sid)
     if (emittedParts.has(key)) return
     const next = structuredClone(part)
     const delta = partDeltas.get(key)
@@ -286,7 +287,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const active = activeCalls.get(input?.callID)
       const args = input?.args || active?.args || {}
       const exitCode = output?.metadata?.exit ?? output?.metadata?.exitCode ?? output?.metadata?.exit_code
-      rememberFilePath(input?.tool, args, sessionID(input), input?.callID)
+      rememberFilePath(input?.tool, args, sessionID(input), input?.callID, exitCode === 0)
       await enqueue(
         payload("tool.execute.after", {
           session_id: sessionID(input),

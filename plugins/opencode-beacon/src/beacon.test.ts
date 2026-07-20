@@ -261,6 +261,50 @@ describe("BeaconEndpointPlugin", () => {
     expect(payloads[0].part.text).toBe("late role")
   })
 
+  test("joins deltas when the completed part omits its session ID", async () => {
+    const hooks = await plugin()
+    await hooks.event!({
+      event: {
+        type: "message.updated",
+        properties: {
+          sessionID: "ses_1",
+          info: { id: "msg_delta", role: "assistant", providerID: "moonshotai", modelID: "kimi-k3", time: {} },
+        },
+      },
+    } as any)
+    await hooks.event!({
+      event: {
+        type: "message.part.delta",
+        properties: {
+          sessionID: "ses_1",
+          messageID: "msg_delta",
+          partID: "prt_delta",
+          field: "text",
+          delta: "streamed text",
+        },
+      },
+    } as any)
+    await hooks.event!({
+      event: {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "ses_1",
+          part: {
+            id: "prt_delta",
+            messageID: "msg_delta",
+            type: "text",
+            text: "",
+            time: { start: 1, end: 2 },
+          },
+        },
+      },
+    } as any)
+    await Bun.sleep(20)
+
+    expect(payloads).toHaveLength(1)
+    expect(payloads[0].part.text).toBe("streamed text")
+  })
+
   test("idle flush does not loop when a pending part still has no role", async () => {
     const hooks = await plugin()
     await hooks.event!({
@@ -350,8 +394,19 @@ describe("BeaconEndpointPlugin", () => {
       { tool: "bash", sessionID: "ses_1", callID: "call_rm_unknown", args: { command: `rm "${path}"` } },
       { title: "rm", output: "", metadata: {} },
     )
+    await hooks.event!({
+      event: {
+        type: "session.diff",
+        properties: {
+          sessionID: "ses_1",
+          diff: [{ file: path, before: "present", after: "", additions: 0, deletions: 1 }],
+        },
+      },
+    } as any)
+    await Bun.sleep(20)
 
     expect(payloads[1].file_mutations).toEqual([])
+    expect(payloads[2].type).toBe("session.diff")
   })
 
   test("does not treat substrings inside custom tool names as file mutations", async () => {

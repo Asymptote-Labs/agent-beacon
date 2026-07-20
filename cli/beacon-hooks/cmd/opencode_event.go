@@ -506,9 +506,6 @@ func opencodeAssistantFields(info map[string]interface{}) map[string]interface{}
 
 func opencodeUsage(input map[string]interface{}) map[string]interface{} {
 	tokens := opencodeMap(input, "tokens")
-	if len(tokens) == 0 {
-		return nil
-	}
 	usage := map[string]interface{}{}
 	if value, ok := opencodeInt(tokens["input"]); ok {
 		usage["input_tokens"] = value
