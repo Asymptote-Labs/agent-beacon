@@ -353,4 +353,25 @@ describe("BeaconEndpointPlugin", () => {
 
     expect(payloads[1].file_mutations).toEqual([])
   })
+
+  test("does not treat substrings inside custom tool names as file mutations", async () => {
+    const hooks = await plugin()
+    const path = "/repo/credit.txt"
+    await hooks["tool.execute.before"]!(
+      { tool: "credit_report", sessionID: "ses_1", callID: "call_credit" },
+      { args: { filePath: path } },
+    )
+    await hooks.event!({
+      event: {
+        type: "session.diff",
+        properties: {
+          sessionID: "ses_1",
+          diff: [{ file: path, before: "old", after: "new", additions: 1, deletions: 1 }],
+        },
+      },
+    } as any)
+    await Bun.sleep(20)
+
+    expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "session.diff"])
+  })
 })

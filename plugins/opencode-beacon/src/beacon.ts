@@ -115,7 +115,11 @@ function filePath(value) {
 
 function isFileMutationTool(tool) {
   const name = String(tool || "").toLowerCase()
-  return ["edit", "write", "patch", "apply_patch", "create"].some((part) => name.includes(part))
+  const tokens = name.split(/[^a-z0-9]+/).filter(Boolean)
+  return (
+    ["edit", "write", "patch", "create"].some((part) => tokens.includes(part)) ||
+    ["applypatch", "multiedit"].includes(name)
+  )
 }
 
 function shellMutationPaths(tool, args) {
@@ -375,6 +379,9 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       if (type === "file.edited" || type === "file.watcher.updated") {
         const seen = recentFilePaths.get(filePath(properties))
         if (seen && Date.now() - seen.time < 5000) return
+        // OpenCode watcher events are filesystem-scoped and commonly omit a
+        // session. Never guess an active session: ambient IDE/user changes
+        // must not be attributed to an agent trace.
         if (!sid) return
       }
       const queued = enqueue(

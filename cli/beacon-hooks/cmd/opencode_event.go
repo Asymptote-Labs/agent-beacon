@@ -330,7 +330,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 	}
 
 	if path := opencodeToolPath(toolInput); path != "" {
-		operation := fileOperation(toolName)
+		operation := opencodeFileOperation(toolName)
 		if operation == "" {
 			delete(fields, "file")
 			if tool, ok := fields["tool"].(map[string]interface{}); ok {
@@ -356,7 +356,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 			if path != "" {
 				mergeMap(fields, diffFields(path, diffText))
 				file := fields["file"].(map[string]interface{})
-				file["operation"] = fileOperation(toolName)
+				file["operation"] = opencodeFileOperation(toolName)
 			}
 		}
 		if action, _ := opencodeToolAction(input); action == "command.executed" {
@@ -420,16 +420,40 @@ func opencodeDecision(input map[string]interface{}) string {
 func opencodeToolAction(input map[string]interface{}) (string, string) {
 	name := strings.ToLower(opencodeToolName(input))
 	switch {
-	case strings.Contains(name, "mcp") || strings.HasPrefix(name, "list_mcp_") || strings.HasPrefix(name, "read_mcp_"):
+	case opencodeToolHasToken(name, "mcp"):
 		return "mcp.tool_invoked", "mcp"
-	case name == "bash" || strings.Contains(name, "shell") || strings.Contains(name, "terminal"):
+	case opencodeToolHasToken(name, "bash") || opencodeToolHasToken(name, "shell") || opencodeToolHasToken(name, "terminal") || name == "powershell":
 		return "command.executed", "command"
-	case strings.Contains(name, "read"):
+	case opencodeToolHasToken(name, "read"):
 		return "file.read", "file"
-	case strings.Contains(name, "edit") || strings.Contains(name, "write") || strings.Contains(name, "patch"):
+	case opencodeToolHasToken(name, "edit") || opencodeToolHasToken(name, "write") || opencodeToolHasToken(name, "patch") || opencodeToolHasToken(name, "create") || name == "applypatch" || name == "multiedit":
 		return "file.modified", "file"
 	default:
 		return "tool.completed", "tool"
+	}
+}
+
+func opencodeToolHasToken(name, token string) bool {
+	for _, part := range strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	}) {
+		if part == token {
+			return true
+		}
+	}
+	return false
+}
+
+func opencodeFileOperation(name string) string {
+	switch {
+	case opencodeToolHasToken(name, "read"), opencodeToolHasToken(name, "view"), opencodeToolHasToken(name, "list"):
+		return "read"
+	case opencodeToolHasToken(name, "write"), opencodeToolHasToken(name, "create"):
+		return "create"
+	case opencodeToolHasToken(name, "edit"), opencodeToolHasToken(name, "patch"), strings.EqualFold(name, "applypatch"), strings.EqualFold(name, "multiedit"):
+		return "modify"
+	default:
+		return ""
 	}
 }
 

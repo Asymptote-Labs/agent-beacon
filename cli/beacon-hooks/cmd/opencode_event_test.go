@@ -242,6 +242,25 @@ func TestOpenCodeToolLifecycleNormalization(t *testing.T) {
 	}
 }
 
+func TestOpenCodeToolClassificationUsesWholeNameTokens(t *testing.T) {
+	for _, name := range []string{"thread", "credit_report"} {
+		action, category, _, _, fields := opencodeEndpointEvent(map[string]interface{}{
+			"type":          "tool.execute.after",
+			"session_id":    "ses_test",
+			"tool_name":     name,
+			"call_id":       "call_" + name,
+			"tool_input":    map[string]interface{}{"filePath": "/repo/not-a-file-tool"},
+			"tool_response": map[string]interface{}{"output": "ok"},
+		}, "ses_test")
+		if action != "tool.completed" || category != "tool" {
+			t.Fatalf("%s classified as %s/%s", name, action, category)
+		}
+		if _, ok := fields["file"]; ok {
+			t.Fatalf("%s produced file fields: %#v", name, fields["file"])
+		}
+	}
+}
+
 func TestOpenCodeCompletedAssistantNormalizesUsageOnce(t *testing.T) {
 	input := map[string]interface{}{
 		"type":       "message.updated",
