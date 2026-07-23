@@ -1391,6 +1391,13 @@ func NormalizeHarnessName(name string) string {
 		return "claude_cowork"
 	case strings.Contains(lower, "claude_agent_sdk") || strings.Contains(lower, "claude-agent-sdk") || strings.Contains(lower, "claude agent sdk"):
 		return "claude_agent_sdk"
+	// Browser-based chat collectors (agent-beacon-browser-extension). These must
+	// precede the generic "claude" rule below, which would otherwise coerce
+	// claude_web → claude_code.
+	case strings.Contains(lower, "claude_web") || strings.Contains(lower, "claude-web") || lower == "claude.ai":
+		return "claude_web"
+	case strings.Contains(lower, "chatgpt") || lower == "chatgpt.com" || strings.Contains(lower, "openai_web"):
+		return "chatgpt_web"
 	case strings.Contains(lower, "claude_code") || strings.Contains(lower, "claude-code") || strings.Contains(lower, "claude code") || strings.HasPrefix(lower, "claude_code."):
 		return "claude_code"
 	case lower == "claude" || strings.Contains(lower, "claude"):

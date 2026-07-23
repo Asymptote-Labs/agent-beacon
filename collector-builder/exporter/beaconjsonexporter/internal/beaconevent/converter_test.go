@@ -732,3 +732,37 @@ func newObserveSDKTraceSpan(name string) (ptrace.Span, ptrace.Traces) {
 	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
 	return span, traces
 }
+
+// Browser-based collectors (agent-beacon-browser-extension) must keep their own
+// harness identity and not be coerced into claude_code by the generic "claude"
+// rule.
+func TestNormalizeHarnessNameBrowserSources(t *testing.T) {
+	cases := map[string]string{
+		"claude_web":  "claude_web",
+		"claude-web":  "claude_web",
+		"claude.ai":   "claude_web",
+		"chatgpt_web": "chatgpt_web",
+		"chatgpt.com": "chatgpt_web",
+		// Regression: existing harnesses must be unchanged.
+		"claude_code": "claude_code",
+		"claude":      "claude_code",
+		"codex":       "codex_cli",
+		"gemini":      "gemini_cli",
+	}
+	for in, want := range cases {
+		if got := NormalizeHarnessName(in); got != want {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHarnessNameHonorsBrowserExtensionAttr(t *testing.T) {
+	attrs := map[string]interface{}{
+		"beacon.harness.name": "claude_web",
+		"beacon.origin":       "browser-extension",
+		"service.name":        "agent-beacon-browser-collector",
+	}
+	if got := HarnessName(attrs); got != "claude_web" {
+		t.Errorf("HarnessName = %q, want claude_web", got)
+	}
+}
