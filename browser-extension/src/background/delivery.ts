@@ -27,6 +27,20 @@ async function writeQueue(items: QueueItem[]): Promise<void> {
   await chrome.storage.local.set({ [QUEUE_KEY]: items });
 }
 
+// Serialize every read-modify-write on the queue. The service worker is a single
+// JS context, but async interleaving of enqueue/flush would otherwise let two
+// read→write cycles clobber each other's writes (dropping queued telemetry).
+// Only this SW writes QUEUE_KEY, so an in-memory promise-chain mutex suffices.
+let queueLock: Promise<unknown> = Promise.resolve();
+function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = queueLock.then(fn, fn);
+  queueLock = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 /** Normalize a turn and enqueue it for delivery, then kick a flush. */
 export async function enqueueTurn(turn: ChatTurn, settings: Settings): Promise<void> {
   const envelope = turnToEnvelope(turn, settings.retention);
@@ -36,33 +50,37 @@ export async function enqueueTurn(turn: ChatTurn, settings: Settings): Promise<v
     envelope,
     attempts: 0,
   };
-  const queue = await readQueue();
-  queue.push(item);
-  await writeQueue(queue);
+  await withQueueLock(async () => {
+    const queue = await readQueue();
+    queue.push(item);
+    await writeQueue(queue);
+  });
   await flush();
 }
 
 /** Attempt to POST everything queued; requeue failures with backoff. */
 export async function flush(): Promise<void> {
-  const queue = await readQueue();
-  if (queue.length === 0) return;
+  await withQueueLock(async () => {
+    const queue = await readQueue();
+    if (queue.length === 0) return;
 
-  const remaining: QueueItem[] = [];
-  let anyFailed = false;
+    const remaining: QueueItem[] = [];
+    let anyFailed = false;
 
-  for (const item of queue) {
-    const ok = await post(item);
-    if (!ok) {
-      item.attempts += 1;
-      if (item.attempts < MAX_ATTEMPTS) {
-        remaining.push(item);
-        anyFailed = true;
-      } // else: give up, drop it (avoid an unbounded queue)
+    for (const item of queue) {
+      const ok = await post(item);
+      if (!ok) {
+        item.attempts += 1;
+        if (item.attempts < MAX_ATTEMPTS) {
+          remaining.push(item);
+          anyFailed = true;
+        } // else: give up, drop it (avoid an unbounded queue)
+      }
     }
-  }
 
-  await writeQueue(remaining);
-  if (anyFailed) scheduleRetry(remaining);
+    await writeQueue(remaining);
+    if (anyFailed) scheduleRetry(remaining);
+  });
 }
 
 async function post(item: QueueItem): Promise<boolean> {

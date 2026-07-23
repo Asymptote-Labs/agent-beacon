@@ -2,7 +2,7 @@
 // completed turns to the durable delivery queue.
 
 import '../adapters/claude.js'; // registers the Claude adapter (side effect)
-import type { RelayMessage, Settings } from '../shared/types.js';
+import type { ChatTurn, RelayMessage, Settings } from '../shared/types.js';
 import { getSettings, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
 import { enqueueTurn, flush, installFlushAlarm } from './delivery.js';
@@ -33,21 +33,23 @@ chrome.runtime.onMessage.addListener((msg: RelayMessage | ControlMessage, sender
     return true; // async response
   }
   if (msg?.type === 'BEACON_RAW') {
-    handleRaw(msg, sender.tab?.id);
+    // Feed the assembler SYNCHRONOUSLY, in message-arrival order. Stream events
+    // arrive ordered (request → chunk → … → done); an `await` before this call
+    // could let a chunk be processed before its `request` registered a parser,
+    // dropping early SSE (e.g. message_start). Async work (settings, delivery)
+    // happens only after a turn is finalized.
+    const turn = assembler.handle(msg.host, sender.tab?.id, msg.event);
+    updateKeepAlive();
+    if (turn) void finalizeTurn(turn);
     return false;
   }
   return false;
 });
 
-async function handleRaw(msg: RelayMessage, tabId: number | undefined): Promise<void> {
+async function finalizeTurn(turn: ChatTurn): Promise<void> {
   const settings = await getSettings();
-  if (!settings.enabled) return;
-
-  const turn = assembler.handle(msg.host, tabId, msg.event);
-  updateKeepAlive();
-  if (!turn) return;
+  // siteEnabled covers both the global toggle and the per-site toggle.
   if (!siteEnabled(settings, turn.site)) return;
-
   await enqueueTurn(turn, settings);
 }
 
