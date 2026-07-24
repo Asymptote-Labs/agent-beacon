@@ -37,13 +37,27 @@ declare global {
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
 
     const matched = looksLikeChatRequest(url);
+
+    // Capture the request body BEFORE fetch consumes it. Prefer a string
+    // init.body; otherwise read a clone of the Request (fetch(new Request(...))),
+    // whose body would otherwise never be seen and the prompt would be lost.
+    let body: string | null = null;
+    if (matched) {
+      if (typeof init?.body === 'string') {
+        body = init.body;
+      } else if (input instanceof Request) {
+        try {
+          body = await input.clone().text();
+        } catch {
+          body = null;
+        }
+      }
+    }
+
     const response = await originalFetch(input as RequestInfo, init);
 
     if (matched && response.body) {
       const reqId = ++reqSeq;
-      // Capture request body if it is a simple string (claude.ai/ChatGPT both
-      // send JSON string bodies for completions).
-      const body = typeof init?.body === 'string' ? init.body : null;
       post({ kind: 'request', reqId, url, method, body });
 
       // Tee the stream via a clone so the page's own reader is untouched.

@@ -26,7 +26,7 @@ export class Assembler {
     if (event.kind === 'request') {
       const adapter = adapterForHost(host);
       if (!adapter || !adapter.matchesRequest(event.url, event.method)) return null;
-      const parser = adapter.createParser();
+      const parser = adapter.createParser(event.reqId);
       parser.onRequest(event.url, event.method, event.body);
       this.entries.set(k, { adapter, parser });
       return null;

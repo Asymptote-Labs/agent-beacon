@@ -32,6 +32,8 @@ export interface ReplayCase {
   completionPath: string;
   /** optional CSP header to prove injection survives it */
   csp?: string;
+  /** how the page issues the completion fetch: 'init' (default) or a Request object */
+  requestStyle?: 'init' | 'request';
 }
 
 export interface ReplayServer {
@@ -135,13 +137,17 @@ function pageHtml(c: ReplayCase): string {
     </main>
     <script>
       (async () => {
-        const res = await fetch(${JSON.stringify(completionUrl)}, {
+        const url = ${JSON.stringify(completionUrl)};
+        const init = {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ prompt: ${JSON.stringify(c.prompt)}, conversation_id: ${JSON.stringify(
             c.conversationId,
           )} }),
-        });
+        };
+        const res = await ${
+          c.requestStyle === 'request' ? 'fetch(new Request(url, init))' : 'fetch(url, init)'
+        };
         // Consume the stream like the real site does.
         const reader = res.body.getReader();
         const dec = new TextDecoder();

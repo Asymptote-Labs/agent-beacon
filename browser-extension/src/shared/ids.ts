@@ -5,8 +5,8 @@
  * Derive a stable turn id from a conversation id and the request sequence.
  * Deterministic so retried/duplicate deliveries can be de-duped downstream.
  */
-export function turnId(sessionId: string, reqId: number): string {
-  return `${sessionId}:${reqId}`;
+export function turnId(sessionId: string, key: string | number): string {
+  return `${sessionId}:${key}`;
 }
 
 /** A per-record idempotency key for dedupe across delivery retries. */

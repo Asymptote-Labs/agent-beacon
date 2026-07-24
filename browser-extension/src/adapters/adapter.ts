@@ -20,7 +20,8 @@ export interface SiteAdapter {
   matchesHost(host: string): boolean;
   /** Whether this request is a chat completion worth capturing. */
   matchesRequest(url: string, method: string): boolean;
-  createParser(): TurnParser;
+  /** @param reqId the interceptor's per-page request id (from the InterceptEvent). */
+  createParser(reqId: number): TurnParser;
 }
 
 const registry: SiteAdapter[] = [];

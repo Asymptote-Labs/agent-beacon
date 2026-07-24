@@ -31,6 +31,9 @@ class ClaudeParser implements TurnParser {
   private startedAt = Date.now();
   private completedAt?: number;
   private reqId: number;
+  /** Stable per-turn id from message_start; used for turnId so ids don't collide
+   *  across service-worker restarts (which reset the reqId counter). */
+  private messageId = '';
   // tool_use blocks keyed by content-block index.
   private blocks = new Map<number, { type: string; tool?: ToolCall; argBuf: string }>();
 
@@ -83,6 +86,8 @@ class ClaudeParser implements TurnParser {
       case 'message_start': {
         const m = obj.message ?? {};
         if (typeof m.model === 'string') this.model = m.model;
+        if (typeof m.uuid === 'string') this.messageId = m.uuid;
+        else if (typeof m.id === 'string') this.messageId = m.id;
         if (typeof m.id === 'string' && !this.sessionId) this.sessionId = m.id;
         if (typeof m.usage?.input_tokens === 'number') this.inputTokens = m.usage.input_tokens;
         break;
@@ -135,11 +140,14 @@ class ClaudeParser implements TurnParser {
         toolCalls.push({ ...entry.tool, arguments: args });
       }
     }
-    const sessionId = this.sessionId || `claude-${this.reqId}`;
+    const sessionId = this.sessionId || `claude-${this.messageId || this.reqId}`;
+    // Prefer the stable assistant message id; fall back to the interceptor's
+    // per-page reqId only when message_start was never seen (degenerate case).
+    const turnKey = this.messageId || `r${this.reqId}`;
     return {
       site: 'claude_web',
       sessionId,
-      turnId: turnId(sessionId, this.reqId),
+      turnId: turnId(sessionId, turnKey),
       requestModel: this.model,
       responseModel: this.model,
       promptText: this.promptText,
@@ -197,12 +205,7 @@ export const claudeAdapter: SiteAdapter = {
   matchesRequest: (url, method) =>
     /chat_conversations\/.+\/(completion|retry_completion)/.test(url) &&
     method.toUpperCase() === 'POST',
-  createParser: () => new ClaudeParser(nextReqId()),
+  createParser: (reqId) => new ClaudeParser(reqId),
 };
-
-let reqCounter = 0;
-function nextReqId(): number {
-  return ++reqCounter;
-}
 
 registerAdapter(claudeAdapter);

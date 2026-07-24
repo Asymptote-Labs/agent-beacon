@@ -60,6 +60,41 @@ test('captures a simple Claude turn end-to-end into normalized OTLP', async ({
   expect(String(attrs['gen_ai.output.messages'])).toContain('Paris');
 });
 
+test('captures the prompt when the page uses fetch(new Request(...))', async ({
+  context,
+  serviceWorker,
+  replay,
+  mockCollector,
+}) => {
+  replay.setCase({
+    site: 'claude',
+    name: 'simple-turn',
+    conversationId: CONV,
+    prompt: 'What is the capital of France?',
+    completionPath: COMPLETION_PATH,
+    requestStyle: 'request', // body lives on the Request object, not init.body
+  });
+  await seedSettings(serviceWorker, {
+    enabled: true,
+    retention: 'full',
+    endpoint: mockCollector.url,
+    sites: { claude_web: true, chatgpt_web: true },
+  });
+
+  const page = await context.newPage();
+  await page.goto('https://claude.ai/chat');
+  await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute(
+    'data-complete',
+    '1',
+  );
+
+  await expect
+    .poll(() => recordByAction(mockCollector.received, 'prompt.submitted'), { timeout: 10_000 })
+    .toBeTruthy();
+  const p = flatAttrs(recordByAction(mockCollector.received, 'prompt.submitted')!.attributes);
+  expect(p['beacon.prompt.text']).toBe('What is the capital of France?');
+});
+
 test('captures a Claude tool call as a tool.invoked record', async ({
   context,
   serviceWorker,

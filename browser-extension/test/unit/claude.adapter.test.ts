@@ -14,7 +14,7 @@ const URL = `/api/organizations/org-x/chat_conversations/${CONV}/completion`;
 
 /** Feed a body through a fresh parser in tiny, boundary-crossing chunks. */
 function run(name: string, prompt: string, chunkSize = 7): TurnParser {
-  const parser = claudeAdapter.createParser();
+  const parser = claudeAdapter.createParser(1);
   parser.onRequest(URL, 'POST', JSON.stringify({ prompt, conversation_id: CONV }));
   const body = fixture(name);
   for (let i = 0; i < body.length; i += chunkSize) parser.onChunk(body.slice(i, i + chunkSize));
