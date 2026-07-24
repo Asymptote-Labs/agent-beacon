@@ -1,6 +1,6 @@
 ---
 title: "MDM Deployment"
-description: "Plan managed macOS deployment of Beacon with Jamf Pro, Fleet, or another MDM."
+description: "Plan managed macOS deployment of Beacon with Jamf Pro, Rippling, Fleet, or another MDM."
 ---
 
 ## Deployment Overview
@@ -30,10 +30,13 @@ The endpoint install creates system configuration and runtime state:
 /Library/Application Support/Beacon/Endpoint/config.json
 /Library/Application Support/Beacon/Endpoint/otelcol.yaml
 /Library/LaunchDaemons/com.beacon.endpoint.collector.plist
-/Library/LaunchDaemons/com.beacon.endpoint.updater.plist
 /var/log/beacon-agent/runtime.jsonl
-/var/log/beacon-agent/system.jsonl
 ```
+
+Enabling scheduled endpoint updates creates
+`/Library/LaunchDaemons/com.beacon.endpoint.updater.plist`. Scheduled or manual
+update activity writes `/var/log/beacon-agent/system.jsonl`. Self-updates are
+off by default.
 
 ## Deployment model
 
@@ -48,7 +51,7 @@ The endpoint install creates system configuration and runtime state:
     Track version, collector service health, log freshness, configured harnesses, and runtime log writability.
   </Step>
   <Step title="Scope repair workflows">
-    Use the packaged repair scripts for endpoints where inventory reports a stale or unhealthy install. Repair stops the existing collector before reinstalling it and restores the previous endpoint configuration if reinstall cannot complete.
+    Use a root MDM workflow that invokes `beacon endpoint repair --system` for endpoints where inventory reports a stale or unhealthy install. Repair stops the existing collector before reinstalling it and restores the previous endpoint configuration if reinstall cannot complete.
   </Step>
   <Step title="Roll out in stages">
     Broaden deployment after inventory and validation stay healthy for the pilot population.
@@ -103,6 +106,9 @@ The endpoint uninstall removes service and configuration state. Package payload 
   </Card>
   <Card title="Jamf" icon="laptop" href="/mdm/jamf">
     Deploy and inventory Beacon with Jamf Pro policies and extension attributes.
+  </Card>
+  <Card title="Rippling" icon="laptop" href="/mdm/rippling">
+    Deploy Beacon with custom installers, Supergroups, and recurring scripts in Rippling Device Management.
   </Card>
   <Card title="Fleet" icon="laptop-file" href="/mdm/fleet">
     Deploy Beacon with Fleet software, policies, queries, and scripts.

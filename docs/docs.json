@@ -216,6 +216,13 @@
                       "guides/jamf-falcon-mdm"
                     ]
                   },
+                  {
+                    "group": "Rippling",
+                    "root": "mdm/rippling",
+                    "pages": [
+                      "guides/rippling-gcs-mdm"
+                    ]
+                  },
                   "mdm/fleet"
                 ]
               },
@@ -459,6 +466,13 @@
                   "guides/jamf-gcs-mdm",
                   "guides/jamf-s3-mdm",
                   "guides/jamf-falcon-mdm"
+                ]
+              },
+              {
+                "group": "Rippling",
+                "root": "mdm/rippling",
+                "pages": [
+                  "guides/rippling-gcs-mdm"
                 ]
               }
             ]
