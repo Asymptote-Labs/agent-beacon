@@ -105,6 +105,12 @@ Beacon collector (prompt → response → tool calls → `runtime.jsonl` → S3 
   service worker for streaming would need additional interception (deferred).
 - **Single capture path.** No DOM-scraping fallback yet; if a site changes its SSE wire format, the
   adapter needs updating (the live-smoke drift alarm is designed to catch this).
+- **Telemetry integrity on the injected page.** The MAIN-world interceptor and any other page script
+  share the same JS world, so the ISOLATED content script cannot cryptographically distinguish the
+  extension's own `postMessage` events from forged ones. A malicious script already running on
+  claude.ai could therefore inject fabricated chat records into the local collector. Impact is
+  telemetry *integrity* only (no credential/code exposure). A proper fix is service-worker-driven
+  MAIN injection (`chrome.scripting`) with a per-tab nonce the page can't read; deferred for V0.
 
 > **Fixtures.** `fixtures/claude/simple-turn.sse` is a **real, sanitized** claude.ai capture
 > (via `npm run record:fixtures`); the adapter is verified against it. `with-tool-call.sse` is

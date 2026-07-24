@@ -86,9 +86,11 @@ class ClaudeParser implements TurnParser {
       case 'message_start': {
         const m = obj.message ?? {};
         if (typeof m.model === 'string') this.model = m.model;
+        // The completion/message id is a per-turn id — capture it for turnId,
+        // but never use it as the conversation/session id (that comes only from
+        // the URL/request body; using message.id would mis-correlate turns).
         if (typeof m.uuid === 'string') this.messageId = m.uuid;
         else if (typeof m.id === 'string') this.messageId = m.id;
-        if (typeof m.id === 'string' && !this.sessionId) this.sessionId = m.id;
         if (typeof m.usage?.input_tokens === 'number') this.inputTokens = m.usage.input_tokens;
         break;
       }
@@ -140,9 +142,11 @@ class ClaudeParser implements TurnParser {
         toolCalls.push({ ...entry.tool, arguments: args });
       }
     }
-    const sessionId = this.sessionId || `claude-${this.messageId || this.reqId}`;
-    // Prefer the stable assistant message id; fall back to the interceptor's
-    // per-page reqId only when message_start was never seen (degenerate case).
+    // Session id comes only from the conversation id (URL/body). If truly
+    // absent, use a clearly-synthetic per-stream id — never the message id.
+    const sessionId = this.sessionId || `claude-unknown-${this.reqId}`;
+    // Turn key prefers the stable assistant message id; falls back to the
+    // interceptor's per-page reqId only when message_start was never seen.
     const turnKey = this.messageId || `r${this.reqId}`;
     return {
       site: 'claude_web',
