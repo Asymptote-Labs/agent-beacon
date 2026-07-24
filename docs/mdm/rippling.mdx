@@ -1,0 +1,350 @@
+---
+title: "Rippling"
+description: "Deploy and operate the Beacon endpoint agent with Rippling Device Management."
+---
+
+## Overview
+
+Rippling IT with Device Management can deploy Beacon to managed Macs by
+uploading the signed endpoint package as a custom installer and assigning it to
+a Supergroup. Beacon's package postinstall creates the system endpoint,
+configures supported local runtimes, and writes telemetry to local JSONL without
+requiring a hosted Beacon account or Rippling API credentials.
+
+Rippling provides the deployment and targeting layer:
+
+| Rippling capability | Beacon use |
+| --- | --- |
+| Custom installers | Install the signed and notarized Beacon macOS package. |
+| Supergroups | Target pilot and production populations by role, department, location, OS, processor, or other attributes. |
+| Custom Bash scripts | Reconcile system configuration, user hooks, forwarding, updates, and health on a one-time or recurring schedule. |
+| Devices Overview and device details | Review software status, MDM and Rippling Agent health, pending actions, and activity logs. |
+
+Beacon remains local-first on the endpoint. The package does not call the
+Rippling API, and normal hook execution does not depend on Rippling being
+reachable.
+
+## Prerequisites
+
+Before deployment:
+
+- Enroll target Macs in Rippling MDM and connect the Rippling Agent.
+- Obtain the signed and notarized
+  `BeaconEndpointAgent-<version>-arm64.pkg`. The current endpoint package is for
+  Apple Silicon Macs.
+- Confirm that the package contains `/opt/beacon/bin/vector` when the deployment
+  will use GCS forwarding.
+- Create a pilot Supergroup that targets assigned Apple Silicon Macs and the
+  employees who should receive Beacon.
+- Verify in the pilot that Rippling custom Bash scripts run as `root`. Beacon's
+  system install, LaunchDaemons, system logs, and forwarding configuration
+  require root.
+
+<Warning>
+  Rippling's public documentation confirms custom installer and recurring Bash
+  script deployment, but it does not document script execution identity,
+  installer-to-script dependency ordering, or protected arbitrary-file
+  delivery. Treat those behaviors as pilot acceptance gates in your Rippling
+  tenant.
+</Warning>
+
+## Package layout
+
+The macOS package installs:
+
+```text
+/opt/beacon/bin/beacon
+/opt/beacon/bin/beacon-otelcol
+/opt/beacon/bin/vector
+/opt/beacon/scripts/install-endpoint.sh
+/opt/beacon/scripts/uninstall-endpoint.sh
+/opt/beacon/jamf/scripts/*.sh
+/opt/beacon/jamf/claude/gcs/*.sh
+```
+
+The `jamf` path is retained for compatibility with the packaged macOS MDM
+helpers. The endpoint and GCS scripts used in the Rippling flow do not call
+Jamf APIs.
+
+Package postinstall creates the default system endpoint:
+
+```text
+/Library/Application Support/Beacon/Endpoint/config.json
+/Library/Application Support/Beacon/Endpoint/otelcol.yaml
+/Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/var/log/beacon-agent/runtime.jsonl
+```
+
+The collector listens only on localhost by default:
+
+```text
+127.0.0.1:4317  OTLP/gRPC
+127.0.0.1:4318  OTLP/HTTP
+127.0.0.1:13133 collector health
+```
+
+## Deploy with Rippling
+
+<Steps>
+  <Step title="Upload Beacon as a custom installer">
+    In the Rippling Devices app, upload the signed Beacon `.pkg` as a custom
+    installer. Configure it as system-level software and assign it to the pilot
+    Supergroup.
+
+    The package postinstall performs the base system installation. A separate
+    script is not required to start the collector.
+  </Step>
+  <Step title="Confirm package installation">
+    Wait for the device to connect, then review software installation status,
+    pending actions, and the activity log in Rippling. Validate a pilot Mac:
+
+    ```bash
+    sudo test -x /opt/beacon/bin/beacon
+    sudo /opt/beacon/bin/beacon endpoint status --system
+    sudo launchctl print system/com.beacon.endpoint.collector
+    ```
+  </Step>
+  <Step title="Deploy a reconciliation script">
+    Use a recurring custom Bash script for configuration that depends on a
+    logged-in user or on files delivered separately. The script should fail
+    clearly until its prerequisites exist and be safe to rerun.
+
+    Start every system reconciliation script with:
+
+    ```bash
+    #!/bin/bash
+    set -euo pipefail
+
+    if [ "$(id -u)" -ne 0 ]; then
+      echo "Beacon system reconciliation must run as root" >&2
+      exit 1
+    fi
+
+    test -x /opt/beacon/bin/beacon
+    ```
+
+    Recurrence allows a device to converge after package installation, user
+    login, or credential delivery without depending on undocumented action
+    ordering.
+  </Step>
+  <Step title="Validate local telemetry">
+    Validate endpoint configuration and write a synthetic event:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint config validate --system
+    sudo /opt/beacon/bin/beacon endpoint wazuh validate --system
+    sudo tail -n 5 /var/log/beacon-agent/runtime.jsonl
+    ```
+  </Step>
+  <Step title="Expand the Supergroup">
+    Broaden the deployment only after package status, script output, collector
+    health, and local events remain healthy for the pilot population.
+  </Step>
+</Steps>
+
+## Claude Code and user hooks
+
+The package configures Claude Code's local OTLP settings during system
+installation when an interactive user is available. Claude Code hooks are
+per-user and should be reconciled while a non-root console user is logged in.
+
+For Claude-specific repair, deploy a recurring root script. Keep the helper's
+verbose output local because its smoke test prints recent runtime and inventory
+events:
+
+```bash
+RECONCILE_DIR="/var/root/Library/Logs/Beacon"
+RECONCILE_LOG="$RECONCILE_DIR/rippling-reconcile.log"
+install -d -m 0700 -o root -g wheel "$RECONCILE_DIR"
+rm -f "$RECONCILE_LOG"
+install -m 0600 -o root -g wheel /dev/null "$RECONCILE_LOG"
+
+if /opt/beacon/jamf/claude/common/repair-hooks.sh \
+  >>"$RECONCILE_LOG" 2>&1; then
+  echo "Beacon Claude reconciliation succeeded"
+else
+  echo "Beacon Claude reconciliation failed; inspect the local root-only log" >&2
+  exit 1
+fi
+```
+
+The helper:
+
+- repairs the Beacon system endpoint;
+- prepares runtime and inventory JSONL files;
+- grants the active console user append access;
+- installs Claude Code hooks for that user;
+- writes a synthetic hook event and validates the endpoint.
+
+It exits non-zero when no interactive console user is present. This is expected
+during login-window or pre-enrollment runs; let the recurring Rippling script
+retry after user login.
+
+## Inventory and remediation
+
+Rippling can report software install state, MDM status, Agent status, pending
+actions, and activity logs. Beacon-specific service and event freshness are
+best checked with a recurring Bash script whose metadata-only output Rippling
+can display or export:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+test "$(id -u)" -eq 0
+test -x /opt/beacon/bin/beacon
+
+/opt/beacon/bin/beacon version
+/opt/beacon/bin/beacon endpoint status --system
+/opt/beacon/bin/beacon endpoint config validate --system
+launchctl print system/com.beacon.endpoint.collector >/dev/null
+
+test -f /var/log/beacon-agent/runtime.jsonl
+last_event_epoch="$(stat -f %m /var/log/beacon-agent/runtime.jsonl)"
+now_epoch="$(date +%s)"
+echo "last_event_age_seconds=$((now_epoch - last_event_epoch))"
+```
+
+Do not export `beacon endpoint status --json` through Rippling script output.
+Its `last_event` field contains the complete most recent endpoint event.
+
+Use a separate recurring reconciliation script for unhealthy or newly assigned
+devices. Repair the base system endpoint explicitly:
+
+```bash
+/opt/beacon/bin/beacon endpoint repair \
+  --system \
+  --collector /opt/beacon/bin/beacon-otelcol \
+  --harness claude,codex
+```
+
+For Claude Code plus GCS forwarding, use the combined helper documented in
+[Claude with Rippling and GCS](/guides/rippling-gcs-mdm).
+
+## Updates
+
+Prefer deploying each new signed package through Rippling so software ownership
+stays with the MDM. Assign the new custom installer to the pilot Supergroup
+first, verify the collector and existing forwarder restart, and then broaden the
+assignment.
+
+Rippling's public documentation does not describe version comparison or
+supersedence behavior for uploaded custom installers. Test package upgrades in
+your tenant before production rollout.
+
+Beacon package self-updates remain off by default. If your organization chooses
+Beacon-managed updates, run one of these commands from a root reconciliation
+script:
+
+```bash title="Apply verified Beacon package updates"
+/opt/beacon/bin/beacon endpoint update enable
+```
+
+```bash title="Report updates without applying them"
+/opt/beacon/bin/beacon endpoint update enable --check-only
+```
+
+## Uninstall and offboarding
+
+Do not rely only on removing the custom installer from a Supergroup. Rippling
+can automatically remove managed software, but its public documentation does
+not establish that removal will run Beacon's cleanup helper.
+
+Use this sequence:
+
+1. Remove the device from recurring Beacon configuration scripts.
+2. Copy the cleanup helper to a temporary root-only path while `/opt/beacon`
+   still exists.
+3. Remove or unassign the Beacon custom installer so Rippling does not reinstall
+   it after cleanup.
+4. Run the copied helper from a one-time root script.
+5. Review warnings and verify that services, files, and the package receipt are
+   gone.
+6. Remove any separately managed forwarding credential.
+7. Revoke the corresponding cloud credential after endpoint cleanup is
+   confirmed.
+
+```bash
+sudo install -m 0700 -o root -g wheel \
+  /opt/beacon/jamf/scripts/full-cleanup.sh \
+  /var/tmp/beacon-full-cleanup.sh
+
+# Unassign the Beacon custom installer in Rippling, then run:
+sudo /var/tmp/beacon-full-cleanup.sh
+sudo rm -f /var/tmp/beacon-full-cleanup.sh
+sudo rm -rf "/var/root/Library/Logs/Beacon"
+```
+
+The full cleanup makes a best-effort removal of Beacon LaunchDaemons, endpoint
+and forwarder configuration, package files and receipts, and Beacon-managed
+active-user configuration. It reports some failures as warnings, so inspect its
+output and verify the result. Set `BEACON_KEEP_LOGS=1` to retain local logs or
+`BEACON_CLEAN_ALL_USERS=1` to clean Beacon-owned configuration for all local
+users.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="The custom installer remains pending">
+    Confirm the Mac is assigned to a user in the target Supergroup, is enrolled
+    in Rippling MDM, and has a connected Rippling Agent. Review pending actions
+    and the device activity log. Rippling waits to install assigned software on
+    an unassigned device until it is assigned to a qualifying user.
+  </Accordion>
+  <Accordion title="The script is not running as root">
+    Check the script output for the explicit `id -u` guard. Do not work around
+    this by installing Beacon in user mode: the managed endpoint requires
+    system LaunchDaemons and system-owned configuration. Confirm root execution
+    behavior with Rippling support for your tenant.
+  </Accordion>
+  <Accordion title="The collector is not running">
+    Check status and launchd state:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --system
+    sudo launchctl print system/com.beacon.endpoint.collector
+    ```
+
+    Then run an explicit system repair:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint repair \
+      --system \
+      --collector /opt/beacon/bin/beacon-otelcol \
+      --harness claude,codex
+    ```
+
+    Also confirm that ports `4317`, `4318`, and `13133` are not occupied by
+    another process.
+  </Accordion>
+  <Accordion title="Claude hooks are missing">
+    Confirm a non-root console user was logged in when the recurring hook repair
+    ran. Review the safe summary in Rippling and the root-only local
+    reconciliation log, rerun the wrapped helper, and fully restart Claude Code
+    before testing a new session.
+  </Accordion>
+</AccordionGroup>
+
+## Rippling references
+
+- [Rippling Device Management](https://www.rippling.com/products/it/device-management)
+- [Role-based software installation with Supergroups](https://www.rippling.com/use-cases/role-based-software-installation)
+- [Device health monitoring](https://www.rippling.com/use-cases/monitor-device-health-single-dashboard)
+- [Rippling Device Management whitepaper](https://go.rippling.com/rs/345-FHM-674/images/Rippling-Device-Management.pdf)
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Claude with Rippling and GCS" icon="bucket" href="/guides/rippling-gcs-mdm">
+    Deploy Beacon, configure Claude Code hooks, and forward runtime plus inventory telemetry to GCS.
+  </Card>
+  <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
+    Review the shared macOS MDM deployment model and package layout.
+  </Card>
+  <Card title="Claude Code" icon="code" href="/runtimes/claude-code">
+    Review the Claude Code telemetry surface and local configuration.
+  </Card>
+  <Card title="GCS command reference" icon="bucket" href="/cli/gcs">
+    Validate the system GCS forwarding path from the Beacon CLI.
+  </Card>
+</Columns>
