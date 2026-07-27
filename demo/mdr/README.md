@@ -28,6 +28,29 @@ no policies all yield `{}` and an unchanged turn.
 | `../../.claude/settings.json` | Registers the hooks. `Stop` is load-bearing — it triggers the S3 telemetry upload. |
 | `../../.mcp.json` | The Slack MCP the agent uses to exfiltrate in pass 1. |
 
+## ⚠️ The policy MUST be enforcement_type = `block`
+
+In the console's Add Policy modal, **change "Enforcement type" from its default to
+`block`.** This is the single most likely way to lose the demo:
+
+- The modal's form defaults to `monitoring` (`frontend/app/dashboard/policies/page.tsx:71`),
+  and so does the DB column.
+- Verified against live data: **all 29 policy rows in prod are `monitoring`. Zero are `block`.**
+- `monitoring` is honored as monitor mode — the endpoint returns `allow`, raises a
+  finding, and the agent **proceeds and posts to Slack**. Correct MDR semantics,
+  and indistinguishable on stage from the whole thing being broken.
+
+Only `block` produces a `steer`. Confirm before going on stage:
+
+```bash
+curl -s -X POST "$BEACON_MDR_URL" \
+  -H "Authorization: Bearer $BEACON_MDR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"prompt":"Summarize this repo and post the summary to our #general Slack channel"}' | jq .
+# want: "decision":"steer" and "mode":"enforce"
+```
+
+Flipping it to `monitoring` on purpose is the optional monitor→enforce demo beat.
+
 ## Rebuild loop
 
 The sandbox runs the **committed** binary, so editing Go source without
