@@ -9,6 +9,28 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
+## August 2026
+
+### v1.0.6 · August 3, 2026
+
+- **Claude Code threat-rule coverage** · Claude OTLP tool results now decode
+  nested Bash commands and file paths into canonical `command.*` and `file.*`
+  fields, restoring risky-command, credential-access, sensitive-edit, and
+  context-exfiltration detection coverage.
+- **Accurate Claude event classification** · Bash, Read, Write, Edit, and
+  NotebookEdit results map to command or file actions; tool decisions map to
+  approval events; API, assistant, plugin, hook, skill, and other lifecycle
+  records no longer inflate tool activity; and MCP connection lifecycle maps
+  to `mcp.connection`.
+- **Claude OTLP regression fixtures** · Added captured Claude Code 2.1.220 and
+  Codex CLI 0.142.4 telemetry shapes plus full documented Claude event-taxonomy
+  coverage to protect command, file, approval, session, error, and status
+  normalization.
+- **Rippling MDM deployment guides** · Added GCS and S3 deployment walkthroughs
+  for distributing Beacon through Rippling to managed macOS endpoints.
+
+---
+
 ## July 2026
 
 ### v1.0.5 · July 24, 2026
