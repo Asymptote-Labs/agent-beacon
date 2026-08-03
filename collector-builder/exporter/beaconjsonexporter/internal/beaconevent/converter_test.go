@@ -877,6 +877,18 @@ func TestClaudeUnknownFullBodyDefaultsToSessionActivity(t *testing.T) {
 	if got := ClaudeLogEventName(map[string]interface{}{"event.name": "future_lifecycle_event"}, "unstructured body"); got != "" {
 		t.Fatalf("unknown short event normalized to %q, want no match", got)
 	}
+	if got := ClaudeLogEventName(map[string]interface{}{"event.name": "claude_code.future_lifecycle_event"}, "unstructured body"); got != "claude_code.future_lifecycle_event" {
+		t.Fatalf("unknown namespaced event normalized to %q, want safe full-name match", got)
+	}
+
+	namespaced := plog.NewLogRecord()
+	namespaced.Body().SetStr("unstructured body")
+	namespaced.Attributes().PutStr("service.name", "claude-code")
+	namespaced.Attributes().PutStr("event.name", "claude_code.future_lifecycle_event")
+	namespacedEvent := NewConverter(Options{}).EventFromLog(nil, namespaced)
+	if namespacedEvent.Event.Action != "session.activity" || namespacedEvent.Event.Category != "session" {
+		t.Fatalf("namespaced event = %#v, want safe session.activity fallback", namespacedEvent.Event)
+	}
 }
 
 func TestClaudeNormalizationPreservesExplicitClassification(t *testing.T) {

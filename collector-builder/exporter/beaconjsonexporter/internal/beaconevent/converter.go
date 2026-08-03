@@ -473,10 +473,7 @@ func ClaudeLogEventName(attrs map[string]interface{}, body string) string {
 	}
 	normalized := strings.ToLower(strings.TrimSpace(FirstString(attrs, "event.name")))
 	if strings.HasPrefix(normalized, "claude_code.") {
-		if _, ok := claudeLogEventClassifications[normalized]; ok {
-			return normalized
-		}
-		return ""
+		return normalized
 	}
 	if normalized != "" {
 		candidate := "claude_code." + normalized
