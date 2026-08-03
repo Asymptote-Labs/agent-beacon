@@ -22,7 +22,42 @@ const (
 	CodexUserPrompt         = "codex.user_prompt"
 	CodexToolDecision       = "codex.tool_decision"
 	CodexToolResult         = "codex.tool_result"
+	ClaudeAPIRequest        = "claude_code.api_request"
+	ClaudeToolDecision      = "claude_code.tool_decision"
+	ClaudeToolResult        = "claude_code.tool_result"
 )
+
+type eventClassification struct {
+	action   string
+	category string
+}
+
+var claudeLogEventClassifications = map[string]eventClassification{
+	"claude_code.user_prompt":             {action: "prompt.submitted", category: "prompt"},
+	"claude_code.assistant_response":      {action: "session.activity", category: "session"},
+	ClaudeToolResult:                      {},
+	ClaudeAPIRequest:                      {action: "session.activity", category: "session"},
+	"claude_code.api_error":               {action: "session.error", category: "session"},
+	"claude_code.api_refusal":             {action: "session.status", category: "session"},
+	"claude_code.api_request_body":        {action: "session.activity", category: "session"},
+	"claude_code.api_response_body":       {action: "session.activity", category: "session"},
+	ClaudeToolDecision:                    {},
+	"claude_code.permission_mode_changed": {action: "session.status", category: "session"},
+	"claude_code.auth":                    {action: "session.activity", category: "session"},
+	"claude_code.mcp_server_connection":   {action: "mcp.connection", category: "mcp"},
+	"claude_code.internal_error":          {action: "session.error", category: "session"},
+	"claude_code.plugin_installed":        {action: "session.activity", category: "session"},
+	"claude_code.plugin_loaded":           {action: "session.activity", category: "session"},
+	"claude_code.skill_activated":         {action: "session.activity", category: "session"},
+	"claude_code.at_mention":              {action: "session.activity", category: "session"},
+	"claude_code.api_retries_exhausted":   {action: "session.error", category: "session"},
+	"claude_code.hook_registered":         {action: "session.activity", category: "session"},
+	"claude_code.hook_execution_start":    {action: "session.activity", category: "session"},
+	"claude_code.hook_execution_complete": {action: "session.activity", category: "session"},
+	"claude_code.hook_plugin_metrics":     {action: "session.activity", category: "session"},
+	"claude_code.compaction":              {action: "session.activity", category: "session"},
+	"claude_code.feedback_survey":         {action: "session.activity", category: "session"},
+}
 
 var allowedCodexLogEvents = map[string]struct{}{
 	CodexConversationStarts: {},
@@ -259,12 +294,13 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 
 func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) Event {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	body := record.Body().AsString()
 	ts := Timestamp(record.Timestamp().AsTime())
 	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	if action == "" {
-		action = InferAction(attrs, record.Body().AsString())
+		action = InferAction(attrs, body)
 	}
-	message := FirstNonEmpty(record.Body().AsString(), FirstString(attrs, "message", "log.message", "event.name"))
+	message := FirstNonEmpty(body, FirstString(attrs, "message", "log.message", "event.name"))
 	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "category")), Severity(record.SeverityText(), record.SeverityNumber().String()), HarnessName(attrs, message), ts)
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
@@ -279,6 +315,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 		"severity":    record.SeverityText(),
 	})
 	c.NormalizeCodexLogEvent(&event, attrs)
+	c.NormalizeClaudeLogEvent(&event, attrs, body)
 	return event
 }
 
@@ -395,6 +432,162 @@ func codexArgumentCommand(args string) string {
 		return ""
 	}
 	return strings.TrimSpace(payload.Cmd)
+}
+
+func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interface{}, body string) {
+	if event == nil || event.Harness.Name != "claude_code" {
+		return
+	}
+	originalAction := event.Event.Action
+	originalCategory := event.Event.Category
+	preserveAction := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
+	preserveCategory := preserveAction || FirstString(attrs, "beacon.event.category", "event.category", "category") != ""
+
+	eventName := ClaudeLogEventName(attrs, body)
+	switch eventName {
+	case ClaudeToolDecision:
+		NormalizeClaudeToolDecision(event, attrs)
+	case ClaudeToolResult:
+		NormalizeClaudeToolResult(event, attrs)
+	case "":
+		return
+	default:
+		classification, ok := claudeLogEventClassifications[eventName]
+		if !ok {
+			classification = eventClassification{action: "session.activity", category: "session"}
+		}
+		event.Event.Action = classification.action
+		event.Event.Category = classification.category
+	}
+	if preserveAction {
+		event.Event.Action = originalAction
+	}
+	if preserveCategory {
+		event.Event.Category = originalCategory
+	}
+}
+
+func ClaudeLogEventName(attrs map[string]interface{}, body string) string {
+	if normalized := strings.ToLower(strings.TrimSpace(body)); strings.HasPrefix(normalized, "claude_code.") {
+		return normalized
+	}
+	normalized := strings.ToLower(strings.TrimSpace(FirstString(attrs, "event.name")))
+	if strings.HasPrefix(normalized, "claude_code.") {
+		if _, ok := claudeLogEventClassifications[normalized]; ok {
+			return normalized
+		}
+		return ""
+	}
+	if normalized != "" {
+		candidate := "claude_code." + normalized
+		if _, ok := claudeLogEventClassifications[candidate]; ok {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func NormalizeClaudeToolDecision(event *Event, attrs map[string]interface{}) {
+	toolName := FirstString(attrs, "tool_name", "tool.name")
+	decision := FirstString(attrs, "decision")
+	switch strings.ToLower(decision) {
+	case "accept", "approve", "approved", "allow", "allowed":
+		event.Event.Action = "approval.allowed"
+	case "reject", "rejected", "deny", "denied":
+		event.Event.Action = "approval.denied"
+	default:
+		event.Event.Action = "approval.requested"
+	}
+	event.Event.Category = "approval"
+	event.Approval = &ApprovalInfo{
+		Required: true,
+		Decision: decision,
+		Reason:   FirstString(attrs, "source"),
+	}
+	ensureClaudeTool(event, toolName)
+
+	params := JSONMapAttr(attrs, "tool_parameters")
+	if command := claudeCommand(nil, params); command != "" {
+		event.Command = &CommandInfo{Command: command}
+		event.Tool.Command = command
+	}
+	if path := FirstString(params, "file_path", "notebook_path"); path != "" {
+		event.File = &FileInfo{Path: path, Operation: claudeFileOperation(toolName)}
+		event.Tool.Path = path
+	}
+}
+
+func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
+	toolName := FirstString(attrs, "tool_name", "tool.name")
+	ensureClaudeTool(event, toolName)
+	input := JSONMapAttr(attrs, "tool_input")
+	params := JSONMapAttr(attrs, "tool_parameters")
+
+	switch strings.ToLower(toolName) {
+	case "bash":
+		command := claudeCommand(input, params)
+		event.Event.Action = "command.executed"
+		event.Event.Category = "command"
+		event.Command = &CommandInfo{Command: command}
+		if duration, ok := Int64Attr(attrs, "duration_ms"); ok {
+			event.Command.DurationMS = duration
+		}
+		event.Tool.Command = command
+	case "read":
+		normalizeClaudeFileResult(event, toolName, input, "file.read")
+	case "write", "edit", "notebookedit":
+		normalizeClaudeFileResult(event, toolName, input, "file.modified")
+	}
+}
+
+func ensureClaudeTool(event *Event, toolName string) {
+	if event.Tool == nil {
+		event.Tool = &ToolInfo{}
+	}
+	if toolName != "" {
+		event.Tool.Name = toolName
+	}
+}
+
+func normalizeClaudeFileResult(event *Event, toolName string, input map[string]interface{}, action string) {
+	path := FirstString(input, "file_path", "notebook_path")
+	event.Event.Action = action
+	event.Event.Category = "file"
+	event.File = &FileInfo{
+		Path:      path,
+		Operation: claudeFileOperation(toolName),
+	}
+	event.Tool.Path = path
+}
+
+func claudeFileOperation(toolName string) string {
+	switch strings.ToLower(toolName) {
+	case "read":
+		return "read"
+	case "write":
+		return "create"
+	case "edit", "notebookedit":
+		return "modify"
+	default:
+		return ""
+	}
+}
+
+func claudeCommand(input, params map[string]interface{}) string {
+	return FirstNonEmpty(
+		FirstString(input, "command"),
+		FirstString(params, "full_command"),
+		FirstString(params, "bash_command"),
+	)
+}
+
+func JSONMapAttr(attrs map[string]interface{}, key string) map[string]interface{} {
+	value, ok := AnyAttr(attrs, key)
+	if !ok {
+		return nil
+	}
+	decoded, _ := value.(map[string]interface{})
+	return decoded
 }
 
 func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) Event {

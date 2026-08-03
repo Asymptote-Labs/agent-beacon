@@ -75,6 +75,37 @@ Asymptote detects Claude Code through the `claude` executable and Claude setting
 
 Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Pre-tool matching includes common Claude tools such as `Bash`, `Edit`, `Write`, `MultiEdit`, `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, and `mcp__.*`.
 
+## Normalized OTLP events
+
+Beacon maps Claude Code's OTLP logs into canonical endpoint actions instead of
+treating every unrecognized record as a tool invocation:
+
+- `user_prompt` becomes `prompt.submitted`.
+- A successful or failed `Bash` `tool_result` becomes `command.executed`, with
+  the decoded command in `command.command` and the reported duration in
+  `command.duration_ms`.
+- `Read` results become `file.read`; `Write`, `Edit`, and `NotebookEdit` results
+  become `file.modified`, with the decoded path in `file.path`.
+- Accepted and rejected `tool_decision` records become `approval.allowed` and
+  `approval.denied`. Bash decisions also retain the full command when Claude
+  provides it.
+- API requests, assistant responses, hooks, plugins, skills, compaction, and
+  other ordinary lifecycle records become session activity. API and internal
+  errors become `session.error`; refusals and permission-mode changes become
+  `session.status`.
+- MCP server connection lifecycle records become `mcp.connection`, not
+  `mcp.tool_invoked`.
+
+Claude reports tool success and duration but does not provide an exact process
+exit status, so Beacon does not invent `command.exit_code`. The original OTLP
+attributes remain under `raw.attributes`, subject to the configured redaction
+and event-size controls. Future full-body `claude_code.*` lifecycle records
+default to `session.activity` until Beacon assigns a more specific mapping.
+
+Optional hook events are an additional telemetry source. A hook pre-tool
+observation can appear as `tool.invoked`; the completed OTLP `tool_result` is
+the record that supplies the canonical command or file action.
+
 Detailed tool inputs can contain sensitive command arguments, paths, URLs, search terms, and MCP request data. Beacon sends this telemetry only to the configured local collector during normal endpoint execution; apply the same access, retention, and redaction controls used for other retained prompt and tool data.
 
 ## Deployment notes

@@ -46,7 +46,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 
 | Runtime | Collection path | Notes |
 |---------|-----------------|-------|
-| [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Uses Claude settings to enable telemetry and point OTLP to localhost; optional hooks add lifecycle, subagent, permission, and tool event detail. |
+| [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Uses Claude settings to enable telemetry and point OTLP to localhost; Beacon decodes nested tool operands and separates API/session lifecycle from tool execution, while optional hooks add lifecycle, subagent, permission, and tool detail. |
 | [Codex CLI](/runtimes/codex-cli) | Local OTLP logs, traces, and metrics | Beacon writes structured Codex OTLP config and filters noisy internal transport spans. |
 | [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP logs, traces, and metrics | Beacon writes Gemini telemetry settings and maps Gemini prompts, tool calls, MCP activity, file operations, and approval events into endpoint events. |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP export | Beacon validates Copilot's effective launch environment and maps Copilot spans into prompt, session, tool, and approval-like endpoint events. |
