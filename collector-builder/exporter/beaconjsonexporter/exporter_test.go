@@ -1194,6 +1194,118 @@ func TestCodexToolResultExtractsShellCommand(t *testing.T) {
 	}
 }
 
+func TestConsumeLogsNormalizesCapturedClaudeCodeToolEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := capturedClaudeLogs(t, "claude-code-2.1.220.json")
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+
+	output, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime JSONL: %v", err)
+	}
+	var sawAPI, sawAllowed, sawCommand, sawWrite, sawRead bool
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		var event beaconEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode runtime event: %v", err)
+		}
+		switch event.Event.Action {
+		case "session.activity":
+			if event.Message == "claude_code.api_request" {
+				sawAPI = sawAPI || event.Event.Category == "session"
+			}
+		case "approval.allowed":
+			sawAllowed = sawAllowed || event.Approval != nil && event.Command != nil && event.Command.Command == "echo CLAUDE_MARKER"
+		case "command.executed":
+			sawCommand = sawCommand || event.Command != nil && event.Command.Command == "echo CLAUDE_MARKER" && event.Command.DurationMS == 94 && event.Command.ExitCode == nil
+			if attrs, ok := event.Raw["attributes"].(map[string]interface{}); !ok || attrs["tool_input"] == "" {
+				t.Fatalf("command raw attributes missing: %#v", event.Raw)
+			}
+		case "file.modified":
+			sawWrite = sawWrite || event.File != nil && event.File.Path == "/tmp/beacon-otel-fixture/CLAUDE_FILE_MARKER.txt"
+		case "file.read":
+			sawRead = sawRead || event.File != nil && event.File.Path == "/tmp/beacon-otel-fixture/CLAUDE_FILE_MARKER.txt"
+		}
+	}
+	if !sawAPI || !sawAllowed || !sawCommand || !sawWrite || !sawRead {
+		t.Fatalf("normalized events missing: api=%v allowed=%v command=%v write=%v read=%v\n%s", sawAPI, sawAllowed, sawCommand, sawWrite, sawRead, output)
+	}
+}
+
+func TestConsumeLogsClassifiesCapturedClaudeCodeLifecycleEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	logs := capturedClaudeLogs(t, "claude-code-lifecycle-2.1.220.json")
+	unknown := logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().AppendEmpty()
+	unknown.Body().SetStr("claude_code.future_lifecycle_event")
+	unknown.Attributes().PutStr("service.name", "claude-code")
+	unknown.Attributes().PutStr("event.name", "future_lifecycle_event")
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+
+	output, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime JSONL: %v", err)
+	}
+	expected := map[string]eventInfo{
+		"claude_code.assistant_response":      {Action: "session.activity", Category: "session"},
+		"claude_code.api_error":               {Action: "session.error", Category: "session"},
+		"claude_code.api_refusal":             {Action: "session.status", Category: "session"},
+		"claude_code.permission_mode_changed": {Action: "session.status", Category: "session"},
+		"claude_code.mcp_server_connection":   {Action: "mcp.connection", Category: "mcp"},
+		"claude_code.internal_error":          {Action: "session.error", Category: "session"},
+		"claude_code.future_lifecycle_event":  {Action: "session.activity", Category: "session"},
+	}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		var event beaconEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode runtime event: %v", err)
+		}
+		if strings.HasPrefix(event.Message, "claude_code.") {
+			switch event.Event.Action {
+			case "tool.invoked", "command.executed", "mcp.tool_invoked":
+				t.Errorf("%s incorrectly serialized as %s", event.Message, event.Event.Action)
+			}
+		}
+		want, ok := expected[event.Message]
+		if !ok {
+			continue
+		}
+		if event.Event.Action != want.Action || event.Event.Category != want.Category {
+			t.Errorf("%s event = %#v, want %s/%s", event.Message, event.Event, want.Action, want.Category)
+		}
+		seen[event.Message] = true
+	}
+	for message := range expected {
+		if !seen[message] {
+			t.Errorf("missing representative lifecycle event %s", message)
+		}
+	}
+}
+
 func TestCodexPromptMessageKeepsTypedPrompt(t *testing.T) {
 	exp, err := newExporter(&Config{
 		Path:          filepath.Join(t.TempDir(), "runtime.jsonl"),
@@ -1715,6 +1827,33 @@ func TestVSCodeCopilotInvokeAgentUserRequestBecomesPrompt(t *testing.T) {
 	if event.Session == nil || event.Session.ID != "chat-session" {
 		t.Fatalf("session = %#v, want Copilot chat session", event.Session)
 	}
+}
+
+func capturedClaudeLogs(t *testing.T, name string) plog.Logs {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("internal", "beaconevent", "testdata", name))
+	if err != nil {
+		t.Fatalf("read captured Claude fixture: %v", err)
+	}
+	var fixture struct {
+		Records []struct {
+			Body       string                 `json:"body"`
+			Attributes map[string]interface{} `json:"attributes"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode captured Claude fixture: %v", err)
+	}
+	logs := plog.NewLogs()
+	scopeLogs := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty()
+	for _, captured := range fixture.Records {
+		record := scopeLogs.LogRecords().AppendEmpty()
+		record.Body().SetStr(captured.Body)
+		if err := record.Attributes().FromRaw(captured.Attributes); err != nil {
+			t.Fatalf("load captured attributes: %v", err)
+		}
+	}
+	return logs
 }
 
 func containsString(values []string, want string) bool {

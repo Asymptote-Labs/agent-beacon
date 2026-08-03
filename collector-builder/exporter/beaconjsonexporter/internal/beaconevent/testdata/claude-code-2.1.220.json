@@ -1,0 +1,84 @@
+{
+  "runtime": "Claude Code",
+  "version": "2.1.220",
+  "records": [
+    {
+      "name": "api_request",
+      "body": "claude_code.api_request",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_request",
+        "session.id": "claude-session",
+        "model": "claude-opus-5",
+        "duration_ms": 2183,
+        "input_tokens": 2,
+        "output_tokens": 101,
+        "cache_read_tokens": 15398,
+        "cache_creation_tokens": 4415
+      }
+    },
+    {
+      "name": "bash_decision",
+      "body": "claude_code.tool_decision",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "tool_decision",
+        "session.id": "claude-session",
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_fixture_bash",
+        "decision": "accept",
+        "source": "config",
+        "tool_source": "builtin",
+        "tool_parameters": "{\"bash_command\":\"echo\",\"full_command\":\"echo CLAUDE_MARKER\",\"description\":\"Echo a marker string\"}"
+      }
+    },
+    {
+      "name": "bash_result",
+      "body": "claude_code.tool_result",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "tool_result",
+        "session.id": "claude-session",
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_fixture_bash",
+        "success": "true",
+        "duration_ms": "94",
+        "tool_input": "{\"command\":\"echo CLAUDE_MARKER\",\"description\":\"Echo a marker string\"}",
+        "tool_parameters": "{\"bash_command\":\"echo\",\"full_command\":\"echo CLAUDE_MARKER\",\"description\":\"Echo a marker string\"}"
+      }
+    },
+    {
+      "name": "write_result",
+      "body": "claude_code.tool_result",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "tool_result",
+        "session.id": "claude-session",
+        "tool_name": "Write",
+        "tool_use_id": "toolu_fixture_write",
+        "success": "true",
+        "duration_ms": "2",
+        "tool_input": "{\"file_path\":\"/tmp/beacon-otel-fixture/CLAUDE_FILE_MARKER.txt\",\"content\":\"CLAUDE_FILE_MARKER\\n\"}"
+      }
+    },
+    {
+      "name": "read_result",
+      "body": "claude_code.tool_result",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "tool_result",
+        "session.id": "claude-session",
+        "tool_name": "Read",
+        "tool_use_id": "toolu_fixture_read",
+        "success": "true",
+        "duration_ms": "6",
+        "tool_input": "{\"file_path\":\"/tmp/beacon-otel-fixture/CLAUDE_FILE_MARKER.txt\"}"
+      }
+    }
+  ]
+}
