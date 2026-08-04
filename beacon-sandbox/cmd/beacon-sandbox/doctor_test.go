@@ -407,7 +407,7 @@ func TestMutationsRefuseToNoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"corrupt-line", "plant-secret", "drop-commands"} {
-		if _, err := applyMutation(empty, mode); err == nil {
+		if _, _, err := applyMutation(empty, mode); err == nil {
 			t.Errorf("%s on an empty log must error rather than report a passing self-test", mode)
 		}
 	}
@@ -425,7 +425,7 @@ func TestPlantSecretWorksWithoutTheMessageAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mutatedPath, err := applyMutation(p, "plant-secret")
+	mutatedPath, planted, err := applyMutation(p, "plant-secret")
 	if err != nil {
 		t.Fatalf("plant-secret should handle any object, got: %v", err)
 	}
@@ -433,8 +433,11 @@ func TestPlantSecretWorksWithoutTheMessageAnchor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), key) {
-		t.Fatalf("the credential was not planted:\n%s", body)
+	if planted == "" {
+		t.Fatal("plant-secret must report what it planted so the judge can search for it")
+	}
+	if !strings.Contains(string(body), planted) {
+		t.Fatalf("the planted credential is not in the mutated log:\n%s", body)
 	}
 	// It should still be parseable, so the planted secret trips the leak check rather than the
 	// parse invariant -- otherwise the self-test would pass for the wrong reason.
@@ -455,7 +458,7 @@ func TestPlantSecretWithTheMessageAnchorStaysValidJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mutatedPath, err := applyMutation(p, "plant-secret")
+	mutatedPath, planted, err := applyMutation(p, "plant-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +467,8 @@ func TestPlantSecretWithTheMessageAnchorStaysValidJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &m); err != nil {
 		t.Fatalf("planting broke the JSON: %v\n%s", err, body)
 	}
-	if m["leaked"] != key {
-		t.Errorf("expected the key under \"leaked\", got %v", m["leaked"])
+	if m["leaked"] != planted {
+		t.Errorf("expected the planted value under \"leaked\", got %v", m["leaked"])
 	}
 }
 
@@ -537,5 +540,51 @@ func TestOfflineSentinelDecodingNeverInventsAnIdleAgent(t *testing.T) {
 	// The dangerous combination: a confident "the agent did nothing" invented from nothing.
 	if probed, present := decodeSentinel(map[string]string{}); probed && !present {
 		t.Error("absent metadata must never decode as a probed-and-absent sentinel")
+	}
+}
+
+// plant-secret must exercise the leak check on any run directory, with any credential arrangement
+// including none. Planting the ambient ANTHROPIC_API_KEY only worked when it happened to be the key
+// the run was captured with -- the leak check is withheld for a provider secret, a rotated key, or a
+// run predating credential fingerprints -- so the planted value went unsearched and the self-test
+// passed having exercised nothing. Refusing in those cases was honest but left the mutation
+// unavailable on most existing runs. Planting a value the judge is told to search for removes the
+// precondition entirely.
+func TestPlantSecretNeedsNoAmbientCredential(t *testing.T) {
+	// Deliberately no ANTHROPIC_API_KEY, the case that used to be refused outright.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	p := filepath.Join(t.TempDir(), "runtime.jsonl")
+	line := `{"timestamp":"2026-08-02T18:00:00Z","vendor":"beacon","message":"m"}`
+	if err := os.WriteFile(p, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mutatedPath, planted, err := applyMutation(p, "plant-secret")
+	if err != nil {
+		t.Fatalf("plant-secret must work without an ambient credential: %v", err)
+	}
+	if planted == "" {
+		t.Fatal("the planted value must be reported so the judge can search for it")
+	}
+	body, err := os.ReadFile(mutatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), planted) {
+		t.Errorf("the planted value is missing from the mutated log:\n%s", body)
+	}
+	// It must not be a fixed string, or two concurrent self-tests could collide, and a real log
+	// containing the constant would produce a false leak.
+	_, second, err := applyMutation(p, "plant-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == planted {
+		t.Error("the planted value must be unique per invocation")
+	}
+	// And it must be recognisable as a synthetic self-test value rather than a plausible real key.
+	if !strings.Contains(planted, "selftest") {
+		t.Errorf("the planted value should identify itself as a self-test artifact, got %q", planted)
 	}
 }

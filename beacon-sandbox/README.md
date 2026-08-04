@@ -104,9 +104,8 @@ go run ./cmd/beacon-sandbox verify --mutate corrupt-line runs/<id>/  # a PASS mu
 ```
 
 Every mutation refuses to be a no-op, so a self-test can never pass without having damaged
-anything. `plant-secret` additionally needs a run captured with the `ANTHROPIC_API_KEY` currently
-set, since otherwise the leak check is withheld and the planted key would never be searched for;
-it refuses and names the modes that do work.
+anything. `plant-secret` plants a unique synthetic credential and the leak check is told to search
+for it, so it works on any run directory with any credential arrangement, including none.
 
 Tests need no Modal account, no API key, and no sandbox, so they cost nothing. (They still
 resolve Go modules, like every other test suite in this repo.)

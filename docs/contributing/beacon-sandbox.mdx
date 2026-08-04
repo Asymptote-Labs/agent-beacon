@@ -218,9 +218,7 @@ The mutation must turn a `PASS` into a `FAIL`. Available modes: `corrupt-line`, 
 
 Every mutation refuses to be a no-op — an empty log, or an action the log does not contain, is an error rather than a passing self-test that proved nothing.
 
-<Warning>
-  `plant-secret` only works on a run captured with the `ANTHROPIC_API_KEY` currently set. It plants that key and expects the leak check to find it, but the leak check is withheld when the value is not the one the run used — a provider secret, a rotated key, or a run recorded before credential fingerprints existed. Rather than report a passing self-test that exercised nothing, it refuses and names the modes that do work on that run.
-</Warning>
+`plant-secret` needs no credential of its own: it plants a unique synthetic value and the leak check is told to search for that, so the check is exercised on any run directory whatever credential the run used — including none.
 
 Two Beacon behaviors the matcher models deliberately, because ignoring either produces false failures: identical events written within a **two-second window** are collapsed by duplicate suppression, so a repeated command yields one event; and token totals must come from `beacon token-usage --json` rather than summing the raw JSONL, because overlapping-channel deduplication zeroes metric-channel usage when the log channel already reported it.
 

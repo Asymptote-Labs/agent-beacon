@@ -351,14 +351,14 @@ func TestProvenanceIsTrustedWhileItMatchesTheBinary(t *testing.T) {
 	if err := writeProvenance(root, "v1.0.6"); err != nil {
 		t.Fatal(err)
 	}
-	if got := recordedRelease(root); got != "v1.0.6" {
-		t.Errorf("an untouched binary must keep its provenance, got %q", got)
+	if got, state := recordedRelease(root); got != "v1.0.6" || state != provenanceTrusted {
+		t.Errorf("an untouched binary must keep its provenance, got %q state=%v", got, state)
 	}
 
 	// Replace the binary: the marker no longer describes it.
 	writeFile(t, CollectorPath(root), "something-else-entirely")
-	if got := recordedRelease(root); got != "" {
-		t.Errorf("a replaced binary must invalidate the marker, got %q", got)
+	if _, state := recordedRelease(root); state == provenanceTrusted {
+		t.Error("a replaced binary must not keep a trusted marker")
 	}
 }
 
@@ -368,8 +368,8 @@ func TestLegacyProvenanceWithoutIdentityIsNotTrusted(t *testing.T) {
 	writeFile(t, CollectorPath(root), "binary")
 	writeFile(t, provenancePath(root), "release:v1.0.5\n")
 
-	if got := recordedRelease(root); got != "" {
-		t.Errorf("an unverifiable marker must not be trusted, got %q", got)
+	if _, state := recordedRelease(root); state == provenanceTrusted {
+		t.Error("an unverifiable marker must not be trusted")
 	}
 }
 
@@ -508,5 +508,90 @@ func TestResolvableTagWithNoDriftStaysFresh(t *testing.T) {
 
 	if stale, why := CollectorIsStale(root); stale {
 		t.Errorf("a resolvable tag at HEAD has no drift, got stale: %s", why)
+	}
+}
+
+// The false green Bugbot reported: a downloaded release binary whose provenance is absent or no
+// longer describes it. CollectorIsStale then skipped release-drift detection and fell back to
+// comparing mtimes -- and a downloaded binary is essentially always newer than local sources, so
+// committed exporter changes since that release went unreported and the check went green while the
+// run verified the wrong beacon-otelcol.
+func TestUnprovenancedBinaryWithExporterDriftIsNotFresh(t *testing.T) {
+	root := gitRepo(t)
+	src := filepath.Join(root, "collector-builder", "exporter", "exp.go")
+	writeFile(t, src, "package exp\n")
+	commitAll(t, root, "base")
+	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
+		t.Fatalf("tag: %v: %s", err, out)
+	}
+	// Exporter changes land after that release.
+	writeFile(t, src, "package exp\n// the change under test\n")
+	commitAll(t, root, "change the exporter")
+
+	// A binary with no provenance at all, newer than the sources -- which is what a download
+	// looks like, and also what a local build looks like. Origin is genuinely unknown.
+	writeFile(t, CollectorPath(root), "binary-of-unknown-origin")
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(CollectorPath(root), later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	stale, why := CollectorIsStale(root)
+	if !stale {
+		t.Fatal("exporter drift since the last release plus an unknown origin cannot be called fresh")
+	}
+	for _, want := range []string{"v1.0.6", "origin is unrecorded", "exp.go"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("the reason should name the release, the gap, and the file; got %q", why)
+		}
+	}
+}
+
+// The narrowing that keeps this off the common path: no exporter changes since the last release
+// means an unprovenanced binary cannot be carrying stale exporter code, so no warning.
+func TestUnprovenancedBinaryWithNoDriftStaysQuiet(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
+	commitAll(t, root, "base")
+	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
+		t.Fatalf("tag: %v: %s", err, out)
+	}
+	writeFile(t, CollectorPath(root), "binary-of-unknown-origin")
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(CollectorPath(root), later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	if stale, why := CollectorIsStale(root); stale {
+		t.Errorf("no exporter drift since the release means nothing to warn about, got: %s", why)
+	}
+}
+
+// A provenance marker whose identity no longer matches is the documented local rebuild, so the
+// mtime comparison governs and a rebuilt-from-current-sources binary is fresh.
+func TestStaleProvenanceFallsBackToTheMtimeComparison(t *testing.T) {
+	root := gitRepo(t)
+	src := filepath.Join(root, "collector-builder", "exporter", "exp.go")
+	writeFile(t, src, "package exp\n")
+	commitAll(t, root, "base")
+	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
+		t.Fatalf("tag: %v: %s", err, out)
+	}
+	writeFile(t, src, "package exp\n// changed\n")
+	commitAll(t, root, "change the exporter")
+
+	writeFile(t, CollectorPath(root), "downloaded")
+	if err := writeProvenance(root, "v1.0.6"); err != nil {
+		t.Fatal(err)
+	}
+	// The documented rebuild replaces the binary, invalidating the marker's identity.
+	writeFile(t, CollectorPath(root), "rebuilt-locally-with-a-different-size")
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(CollectorPath(root), later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	if stale, why := CollectorIsStale(root); stale {
+		t.Errorf("a local rebuild from current sources is fresh, got: %s", why)
 	}
 }

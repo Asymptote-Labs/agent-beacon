@@ -10,6 +10,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -25,6 +27,16 @@ import (
 )
 
 const appName = "beacon-sandbox"
+
+// randomHex makes the planted self-test credential unique per invocation, so it cannot collide
+// with anything already in a collected log.
+func randomHex() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "fallback0000000"
+	}
+	return hex.EncodeToString(b)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -179,7 +191,7 @@ func cmdRun(args []string) error {
 				verdicts = append(verdicts, v)
 				continue
 			}
-			v, log := judge(sc, art, creds)
+			v, log := judge(sc, art, creds, "")
 			fmt.Print(indent(v.Report()))
 			if art.Dir != "" {
 				_ = v.WriteJSON(filepath.Join(art.Dir, "verdict.json"))
@@ -193,7 +205,7 @@ func cmdRun(args []string) error {
 
 // judge is the pure step: artifacts in, verdict out. Returns the parsed log too so callers
 // can build a fingerprint without re-reading it.
-func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolved) (check.Verdict, check.Log) {
+func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolved, planted string) (check.Verdict, check.Log) {
 	v := check.Verdict{Scenario: sc.ID, Meta: art.Meta}
 
 	// Host escape and credential-in-argv come from run metadata, not from the log, so they must
@@ -218,6 +230,15 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 		secrets.Values = map[string]string{credentials.EnvVar: creds.Value}
 	} else {
 		secrets.Withheld = map[string]string{credentials.EnvVar: creds.WithheldReason()}
+	}
+	// A self-test plants a synthetic credential, and the leak check has to be searching for it or
+	// the mutation proves nothing. Searched in addition to the real credential, never instead of
+	// it, so a mutated run still reports on the genuine one.
+	if planted != "" {
+		if secrets.Values == nil {
+			secrets.Values = map[string]string{}
+		}
+		secrets.Values["planted self-test credential"] = planted
 	}
 	check.Invariants(&v, log, secrets)
 	check.Expectations(&v, log, sc, art.Canary, check.Sentinel{
@@ -349,24 +370,9 @@ func cmdVerify(args []string) error {
 		}
 
 		logPath := filepath.Join(dir, "runtime.jsonl")
-		if *mutate == "plant-secret" {
-			// The mutation plants the local key, but offline judging withholds the leak search
-			// for provider-secret runs and for fingerprint mismatches. In those cases the
-			// planted credential could never trip invariant.no_secret_leak, so the self-test
-			// would report PASS and prove nothing -- a self-test that cannot fail is exactly
-			// what this tool refuses to ship. Reported by Cursor Bugbot.
-			if c := offlineCredential(meta); !c.LeakCheckPossible() {
-				return fmt.Errorf("plant-secret cannot self-test %s.\n"+
-					"  The leak check is withheld for this run because %s.\n"+
-					"  A planted credential would therefore never be searched for, and the "+
-					"mutation would report PASS while proving nothing.\n"+
-					"  Use a run captured with the ANTHROPIC_API_KEY currently set, or try a "+
-					"different mutation: corrupt-line, drop-commands, drop-action:<action>.",
-					dir, c.WithheldReason())
-			}
-		}
+		var planted string
 		if *mutate != "" {
-			logPath, err = applyMutation(logPath, *mutate)
+			logPath, planted, err = applyMutation(logPath, *mutate)
 			if err != nil {
 				return err
 			}
@@ -383,7 +389,8 @@ func cmdVerify(args []string) error {
 		art.SentinelDetail = meta["sentinel_detail"]
 		art.SentinelProbed, art.SentinelPresent = decodeSentinel(meta)
 		art.SessionKnown, art.SessionOK = decodeSession(meta)
-		v, log := judge(sc, art, offlineCredential(meta))
+		creds := offlineCredential(meta)
+		v, log := judge(sc, art, creds, planted)
 		fmt.Print(v.Report())
 		// Refresh both artifacts, or neither. Only the fingerprint was rewritten before, so a
 		// re-judge with changed expectations left verdict.json holding the old outcome while
@@ -448,10 +455,10 @@ func findScenario(root, id string) (scenario.Scenario, error) {
 
 // applyMutation deliberately damages a copy of the log. If the checks still pass afterwards
 // they are not actually checking anything, so this is a self-test of the oracle.
-func applyMutation(path, mode string) (string, error) {
+func applyMutation(path, mode string) (mutated string, planted string, err error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// strings.Split("", "\n") yields one empty element, so an empty log would otherwise be
 	// treated as having a phantom line -- corrupt-line would "damage" a line that never existed
@@ -480,14 +487,14 @@ func applyMutation(path, mode string) (string, error) {
 			out = append(out, l)
 		}
 		if dropped == 0 {
-			return "", fmt.Errorf("mutation %q removed nothing: no %q events in this log, "+
+			return "", "", fmt.Errorf("mutation %q removed nothing: no %q events in this log, "+
 				"so the self-test would prove nothing", mode, action)
 		}
 		tmp := path + ".mutated"
 		if err := os.WriteFile(tmp, []byte(strings.Join(out, "\n")+"\n"), 0o644); err != nil {
-			return "", err
+			return "", "", err
 		}
-		return tmp, nil
+		return tmp, planted, nil
 	}
 
 	// A mutation that changes nothing proves nothing, so every branch below has to actually
@@ -503,21 +510,31 @@ func applyMutation(path, mode string) (string, error) {
 			out[len(out)/2] = `{"vendor":"beacon","this is not json`
 		}
 	case "plant-secret":
-		key := os.Getenv("ANTHROPIC_API_KEY")
-		if key == "" {
-			return "", fmt.Errorf("plant-secret needs ANTHROPIC_API_KEY to plant")
-		}
+		// A synthetic credential, not the run's own.
+		//
+		// Planting the ambient ANTHROPIC_API_KEY only worked when it happened to be the key the
+		// run was captured with: the leak check is withheld for a provider secret, a rotated
+		// key, or a run predating credential fingerprints, so the planted value would never be
+		// searched for and the self-test reported PASS having exercised nothing. The previous
+		// fix refused in those cases, which was honest but meant the mutation was unavailable on
+		// most existing run directories.
+		//
+		// Planting a value the judge is then told to search for removes the precondition
+		// entirely: the leak check is exercised on any run, with any credential arrangement,
+		// including none at all. The synthetic value is unique per invocation so it cannot
+		// collide with real log content.
+		planted = "sk-ant-beacon-sandbox-selftest-" + randomHex()
 		out = append(out, lines...)
 		if len(out) > 0 {
-			out[0] = plantSecret(out[0], key)
+			out[0] = plantSecret(out[0], planted)
 		}
-		if len(out) == 0 || !strings.Contains(out[0], key) {
-			return "", fmt.Errorf("plant-secret could not insert the credential into %s: "+
+		if len(out) == 0 || !strings.Contains(out[0], planted) {
+			return "", "", fmt.Errorf("plant-secret could not insert a credential into %s: "+
 				"the first line is empty or not an object, so the leak check would never see "+
 				"it and the self-test would prove nothing", path)
 		}
 	default:
-		return "", fmt.Errorf("unknown mutation %q (want drop-commands, drop-action:<action>, "+
+		return "", "", fmt.Errorf("unknown mutation %q (want drop-commands, drop-action:<action>, "+
 			"corrupt-line, or plant-secret)", mode)
 	}
 
@@ -525,16 +542,16 @@ func applyMutation(path, mode string) (string, error) {
 	// bodies, because appending the trailing newline made an empty log look like it had changed
 	// from "" to "\n" -- a difference in the file that is no difference in the events, which is
 	// the only thing a self-test cares about.
-	mutated := strings.Join(out, "\n") + "\n"
-	if len(out) == 0 || strings.TrimRight(mutated, "\n") == trimmed {
-		return "", fmt.Errorf("mutation %q left %s unchanged, so the self-test would prove "+
+	body := strings.Join(out, "\n") + "\n"
+	if len(out) == 0 || strings.TrimRight(body, "\n") == trimmed {
+		return "", "", fmt.Errorf("mutation %q left %s unchanged, so the self-test would prove "+
 			"nothing (is the log empty?)", mode, path)
 	}
 	tmp := path + ".mutated"
-	if err := os.WriteFile(tmp, []byte(mutated), 0o644); err != nil {
-		return "", err
+	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+		return "", "", err
 	}
-	return tmp, nil
+	return tmp, planted, nil
 }
 
 // plantSecret inserts a credential into a JSONL event line.

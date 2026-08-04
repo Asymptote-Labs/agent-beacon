@@ -168,11 +168,9 @@ Other mutations: `drop-action:<action>`, `drop-commands`, `plant-secret`.
 Every mutation refuses to be a no-op: an empty log, or an action the log does not contain, errors
 rather than reporting a self-test that proved nothing.
 
-**`plant-secret` only works on a run captured with the `ANTHROPIC_API_KEY` currently set.** It
-plants that key and expects the leak check to find it, but the leak check is withheld when the value
-is not the one the run used — a provider secret, a rotated key, or a run recorded before credential
-fingerprints existed. It refuses in that case and names the modes that do work, so if you hit that
-error pick `corrupt-line` instead rather than treating it as a bug.
+`plant-secret` needs no credential of its own. It plants a unique synthetic value and the leak check
+is told to search for that, so it works on any run directory regardless of which credential the run
+used, or whether one is set at all.
 
 ## Writing or editing a scenario
 

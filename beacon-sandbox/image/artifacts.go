@@ -124,7 +124,8 @@ func CollectorIsStale(repoRoot string) (bool, string) {
 		return false, ""
 	}
 
-	if tag := recordedRelease(repoRoot); tag != "" {
+	tag, state := recordedRelease(repoRoot)
+	if state == provenanceTrusted {
 		changed, resolved := collectorChangesSince(repoRoot, tag)
 		switch {
 		case resolved && changed != "":
@@ -141,10 +142,35 @@ func CollectorIsStale(repoRoot string) (bool, string) {
 		}
 	}
 
-	// Locally built: a source file newer than the binary means the binary predates it.
+	// A source file newer than the binary means the binary predates it, whatever its origin.
 	if newer := sourcesNewerThan(repoRoot, fi.ModTime()); newer != "" {
 		return true, "collector-builder/ sources are newer than the built binary: " + newer
 	}
+
+	// Sources are older than the binary, which for a local rebuild means fresh -- but with no
+	// trustworthy provenance there is no way to tell a local build from a release download, and a
+	// downloaded binary is essentially always newer than local sources. So this signal cannot rule
+	// out release drift, and saying "fresh" here is exactly the false green this check exists to
+	// prevent.
+	if state == provenanceAbsent {
+		// Warning on every unprovenanced binary would penalise the common legitimate case -- a
+		// local build -- to guard a case that is now closed for fresh downloads, since
+		// EnsureCollector always records provenance. So the warning is narrowed to the situation
+		// where the ambiguity can actually bite: the tree carries exporter changes since the most
+		// recent release it knows about, and the binary might predate them.
+		//
+		// A contributor who has not touched the exporter sees nothing. One who has, with a binary
+		// of unknown origin, is told the truth: this cannot be ruled out either way.
+		if tag, ok := newestLocalReleaseTag(repoRoot); ok {
+			if changed, resolved := collectorChangesSince(repoRoot, tag); resolved && changed != "" {
+				return true, fmt.Sprintf("collector-builder/ has changed since release %s (%s) and "+
+					"this binary's origin is unrecorded, so it cannot be confirmed to contain "+
+					"those changes (rebuild it, or delete it and rerun `doctor --fix`)", tag, changed)
+			}
+		}
+	}
+	// provenanceStale: the binary was replaced after a recorded download, which is the documented
+	// rebuild. The mtime comparison above is then meaningful, and it passed.
 	return false, ""
 }
 
@@ -171,16 +197,33 @@ func uncommittedCollectorChanges(repoRoot string) string {
 	return summarize3(files)
 }
 
-// recordedRelease returns the release tag a downloaded binary came from, empty when the binary was
-// built locally, predates provenance recording, or has been replaced since the marker was written.
+// provenanceState describes how much the recorded provenance can be trusted.
+type provenanceState int
+
+const (
+	// provenanceAbsent means no usable marker: never recorded, or recorded before the binary's
+	// identity was captured. The binary's origin is unknown.
+	provenanceAbsent provenanceState = iota
+	// provenanceStale means a marker exists but describes a different binary, so the binary was
+	// replaced after it was written -- almost always a local rebuild.
+	provenanceStale
+	// provenanceTrusted means the marker still describes the binary on disk.
+	provenanceTrusted
+)
+
+// recordedRelease returns the release a binary was downloaded from, and how much that can be
+// trusted.
 //
-// That last case is the important one: a marker that outlives the binary it described would keep a
-// freshness warning permanently lit after a local rebuild, so the size and mtime recorded at
-// download time are checked against the binary that is actually there now.
-func recordedRelease(repoRoot string) string {
+// Collapsing all three states into an empty tag was a false-green generator. When the tag was
+// empty, CollectorIsStale skipped release-drift detection entirely and fell back to comparing
+// mtimes -- and a downloaded release binary is essentially always newer than local sources, so
+// committed exporter changes since that release went unreported and the check went green while the
+// run verified the wrong binary. Reported by Cursor Bugbot, and the same shape as the
+// unresolvable-tag case: unknowable rendered as clean.
+func recordedRelease(repoRoot string) (tag string, state provenanceState) {
 	b, err := os.ReadFile(provenancePath(repoRoot))
 	if err != nil {
-		return ""
+		return "", provenanceAbsent
 	}
 	fields := map[string]string{}
 	for _, line := range strings.Split(string(b), "\n") {
@@ -188,25 +231,25 @@ func recordedRelease(repoRoot string) string {
 			fields[k] = v
 		}
 	}
-	tag := strings.TrimSpace(fields["release"])
+	tag = strings.TrimSpace(fields["release"])
 	if tag == "" {
-		return ""
+		return "", provenanceAbsent
 	}
 	fi, err := os.Stat(CollectorPath(repoRoot))
 	if err != nil {
-		return ""
+		return "", provenanceAbsent
 	}
-	// A marker written before identity was recorded cannot be validated, so it is not trusted.
+	// A marker written before identity was recorded cannot be validated either way.
 	if fields["size"] == "" || fields["mtime"] == "" {
-		return ""
+		return tag, provenanceAbsent
 	}
 	if fields["size"] != strconv.FormatInt(fi.Size(), 10) ||
 		fields["mtime"] != strconv.FormatInt(fi.ModTime().UnixNano(), 10) {
-		// The binary was replaced after the marker was written -- almost certainly a local
-		// rebuild, which is what we asked for. Fall through to the mtime comparison.
-		return ""
+		// Replaced after the marker was written, so the marker's release says nothing about what
+		// is on disk now. Treated as a local rebuild, which the mtime comparison can judge.
+		return tag, provenanceStale
 	}
-	return tag
+	return tag, provenanceTrusted
 }
 
 // collectorChangesSince lists collector-builder/ files that changed between a release tag and HEAD,
@@ -442,4 +485,19 @@ func downloadCollector(rel releaseAsset, dst string, log func(string, ...any)) e
 		}
 		return os.Rename(tmp, dst)
 	}
+}
+
+// newestLocalReleaseTag returns the most recent v* tag reachable from HEAD.
+//
+// Used as a conservative reference point when a binary's origin is unrecorded: if the exporter has
+// not changed since the last release this clone knows about, then a binary of unknown origin cannot
+// be carrying stale exporter code, whatever its provenance. That keeps the unprovenanced warning
+// off the common local-build path while still catching the case that matters.
+func newestLocalReleaseTag(repoRoot string) (string, bool) {
+	out, err := exec.Command("git", "-C", repoRoot, "describe", "--tags", "--abbrev=0", "--match", "v*").Output()
+	if err != nil {
+		return "", false
+	}
+	tag := strings.TrimSpace(string(out))
+	return tag, tag != ""
 }
