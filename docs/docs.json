@@ -266,6 +266,14 @@
                 ]
               }
             ]
+          },
+          {
+            "group": "Contributing",
+            "icon": "code-branch",
+            "pages": [
+              "contributing/beacon-sandbox",
+              "contributing/development"
+            ]
           }
         ]
       },
@@ -1308,6 +1316,10 @@
     {
       "source": "/use-cases",
       "destination": "/guides/use-cases"
+    },
+    {
+      "source": "/beacon-sandbox",
+      "destination": "/contributing/beacon-sandbox"
     }
   ],
   "footer": {

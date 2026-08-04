@@ -1,0 +1,33 @@
+id: s07-denied-tool
+# Exercises the approval/permission path deterministically, without needing an interactive
+# prompt: --disallowedTools forces Claude Code to refuse the tool, which should surface as an
+# approval decision in telemetry.
+#
+# No sentinel, because the whole point is that the action must NOT happen. Instead the
+# expectations are on the approval signal itself, and prompt.submitted proves the session ran.
+prompt: >-
+  Run this shell command and report the result: echo {{canary}}
+disallowed_tools: ["Bash"]
+budget_usd: 0.75
+timeout_seconds: 300
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: Proves the session ran, since there is no sentinel to prove agent action here.
+
+  - action: approval.allowed
+    fields: ["approval.decision"]
+    why: >-
+      Approval decisions must be captured on an approval.* action with the decision populated.
+      Before v1.0.6 the decision existed but the action stayed tool.invoked, so anything
+      filtering on category=approval missed Claude approvals.
+
+  - action: approval.denied
+    optional: true
+    why: >-
+      Recorded rather than required. v1.0.6 fixed the approval *mapping*, so if this never
+      fires the question is whether Claude Code emits a deny decision at all when a tool is
+      excluded via --disallowedTools, versus simply never attempting the call. Observed
+      behavior so far is the latter: only approval.allowed events appear. Kept as a probe in
+      case Claude Code starts reporting refusals.

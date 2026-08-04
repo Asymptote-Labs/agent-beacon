@@ -32,6 +32,9 @@ Useful contributions include:
 - `collector-builder`: OpenTelemetry Collector distribution and
   `beaconjson` exporter.
 - `packaging`: macOS package scripts, deployment helpers, and MDM assets.
+- `beacon-sandbox`: end-to-end verification tool that runs a real Claude Code
+  session in a disposable Linux sandbox and checks what Beacon captured. See
+  [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox).
 
 Removed mirror trees and old product surfaces are not active contribution
 targets. New work should stay focused on the Beacon paths above unless a
@@ -126,12 +129,32 @@ cd cli/beacon && go test ./...
 cd cli/beacon && go test -race ./internal/endpoint/...
 cd cli/beacon-hooks && go test ./...
 cd collector-builder/exporter/beaconjsonexporter && go test ./...
+cd beacon-sandbox && go test ./...
 sh packaging/macos/test-endpoint-scripts.sh
 sh packaging/macos/smoke-endpoint.sh
 ```
 
 If you cannot run a relevant check locally, mention that in the pull request and
 explain why.
+
+### Optional End-To-End Verification
+
+For changes to telemetry capture — the CLI, the hook adapter, or the `beaconjson`
+exporter — you can verify against a real Claude Code session instead of only
+asserting on synthetic payloads:
+
+```bash
+cd beacon-sandbox
+go run ./cmd/beacon-sandbox doctor
+go run ./cmd/beacon-sandbox run --scenario s02-bash-command
+```
+
+This runs in a disposable Linux sandbox and costs a small amount of real money,
+so it is optional rather than a gate. Its own unit tests, included above, are
+hermetic and cost nothing. See
+[Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox)
+for setup and limitations, including the fact that it cannot verify the macOS
+build.
 
 ## Contribution Guidelines
 
@@ -153,7 +176,11 @@ explain why.
   fake binaries, and free local ports. Avoid tests that require root, real
   `launchctl` service changes, Wazuh, a live Collector, or external network
   access. Gate macOS-only behavior with `runtime.GOOS == "darwin"` or assert the
-  non-Darwin contract explicitly.
+  non-Darwin contract explicitly. `beacon-sandbox` is the deliberate exception:
+  it reaches the network by design, but only when a contributor runs it
+  explicitly, and it is developer tooling rather than part of endpoint or hook
+  execution, so Beacon's local-only runtime posture is unaffected. Its own unit
+  tests follow the rule above and need no network.
 - **Update relevant docs:** Keep documentation current when install, packaging,
   Collector, dashboard, or event schema behavior changes. The top-level
   `README.md` and module-level READMEs should stay consistent with user-visible

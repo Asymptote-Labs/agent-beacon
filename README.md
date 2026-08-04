@@ -235,6 +235,19 @@ cd cli/beacon
 make build
 ```
 
+To verify a change against a **real** Claude Code session rather than only
+synthetic payloads, `beacon-sandbox` runs one in a disposable Linux sandbox and
+checks what Beacon actually captured:
+
+```bash
+cd beacon-sandbox
+go run ./cmd/beacon-sandbox doctor
+go run ./cmd/beacon-sandbox run --scenario s02-bash-command
+```
+
+See [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox)
+for setup, what it can verify, and its limitations.
+
 For setup, deployment, integrations, and command details, see the
 [Beacon CLI docs](https://docs.asymptotelabs.ai).
 

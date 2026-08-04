@@ -1,0 +1,35 @@
+id: s06-subagent
+# Subagent lifecycle. Beacon's Claude hook installer registers SubagentStart/SubagentStop
+# (internal/endpoint/hooks/claude.go), and the hook binary has subagent-start/subagent-stop
+# subcommands emitting subagent.started / subagent.stopped -- but this suite drives the OTel
+# path only, so the question is whether subagent activity is visible there at all.
+#
+# The sentinel is what the subagent is told to produce, so a missing event is distinguishable
+# from the model deciding to answer directly instead of delegating (which it often will).
+prompt: >-
+  Use the Task tool to launch a subagent whose job is to write the single line {{canary}}
+  into the file {{sentinel}}. Wait for it to finish, then confirm the file contents.
+sentinel: /home/agent/work/s06-subagent.txt
+budget_usd: 2.0
+timeout_seconds: 480
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: Baseline.
+
+  - action: subagent.started
+    optional: true
+    why: >-
+      Recorded rather than required. subagent.started is emitted by the hook path
+      (beacon-hooks subagent-start), and this suite configures only OTel, so absence here is
+      expected and tells us the OTel path carries no subagent lifecycle. If it ever appears,
+      Claude Code started exporting it. Making this required would just assert a known
+      architectural boundary.
+
+  - action: file.modified
+    fields: ["file.path"]
+    why: >-
+      Even though subagent lifecycle is invisible on the OTel path, the subagent's actual work
+      must still be captured. If this is absent, subagent tool activity is being dropped
+      entirely rather than merely unlabelled -- a materially worse gap.
