@@ -75,6 +75,58 @@ archives:
       - src: release-collectors/{{ .Os }}_{{ .Arch }}/beacon-otelcol
         dst: beacon-otelcol
 
+nfpms:
+  # Native packages are the Linux counterpart of the signed macOS .pkg: installing one should
+  # produce a running system-mode endpoint, not a pile of binaries plus a manual step. The payload
+  # deliberately mirrors /opt/beacon so that selfupdate's classifyInstall recognises a package
+  # install and seamless updates work the same way on both platforms.
+  - id: beacon
+    package_name: beacon
+    ids:
+      - beacon
+      - beacon-hooks
+    vendor: Asymptote Labs
+    homepage: https://docs.asymptotelabs.ai
+    maintainer: Asymptote Labs <support@asymptotelabs.ai>
+    description: |-
+      Endpoint telemetry agent for AI coding agents.
+      Captures prompts, commands, file activity, tokens and approvals from local agent
+      runtimes and writes normalized events to local or customer-managed destinations.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    # Not FHS, and deliberately: /opt is the correct home for a self-contained vendor bundle,
+    # it matches the macOS package layout, and selfupdate keys off this path.
+    bindir: /opt/beacon/bin
+    contents:
+      - src: ../../collector-builder/dist/beacon-otelcol/linux_{{ .Arch }}/beacon-otelcol
+        dst: /opt/beacon/bin/beacon-otelcol
+        file_info:
+          mode: 0755
+      - src: ../../packaging/linux/install-endpoint.sh
+        dst: /opt/beacon/scripts/install-endpoint.sh
+        file_info:
+          mode: 0755
+      - src: ../../packaging/linux/uninstall-endpoint.sh
+        dst: /opt/beacon/scripts/uninstall-endpoint.sh
+        file_info:
+          mode: 0755
+    scripts:
+      postinstall: ../../packaging/linux/nfpm/postinstall.sh
+      preremove: ../../packaging/linux/nfpm/preremove.sh
+      postremove: ../../packaging/linux/nfpm/postremove.sh
+    # systemd is required for the service backend the package registers. Without it the endpoint
+    # falls back to a supervised collector that nothing restarts, which is not what a package
+    # install should silently deliver.
+    dependencies:
+      - systemd
+    rpm:
+      group: Applications/System
+    deb:
+      fields:
+        Bugs: https://github.com/asymptote-labs/agent-beacon/issues
+
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
