@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -480,4 +481,85 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return data
+}
+
+// The installer is chosen by artifact suffix, and getting this wrong is easy: filepath.Ext reports
+// ".gz" for a .tar.gz, so an Ext-based switch silently fails to match the tarball the test seam
+// uses. It also has to leave every non-Linux format on exactly the path it took before Linux
+// support existed, or this becomes a macOS behaviour change disguised as a Linux feature.
+func TestInstallerCommandDispatchesBySuffix(t *testing.T) {
+	cases := []struct {
+		path     string
+		wantName string
+		wantArg  string
+	}{
+		{"/stage/beacon_1.0.6_linux_amd64.deb", "dpkg", "--install"},
+		{"/stage/beacon_1.0.6_linux_arm64.rpm", "rpm", "--upgrade"},
+		{"/stage/BeaconEndpointAgent-1.0.6-arm64.pkg", "installer", "-pkg"},
+		// The test seam stages a tarball. It must keep reaching the previous installer path.
+		{"/stage/beacon_1.0.6_darwin_arm64.tar.gz", "installer", "-pkg"},
+		{"/stage/beacon.tgz", "installer", "-pkg"},
+	}
+	for _, c := range cases {
+		name, args := installerCommand(c.path, "/")
+		if name != c.wantName {
+			t.Errorf("%s -> %q, want %q", c.path, name, c.wantName)
+			continue
+		}
+		if len(args) == 0 || args[0] != c.wantArg {
+			t.Errorf("%s -> args %v, want first arg %q", c.path, args, c.wantArg)
+		}
+		// The artifact must be passed through, or the installer would act on nothing.
+		found := false
+		for _, a := range args {
+			if a == c.path {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: the artifact path is missing from args %v", c.path, args)
+		}
+	}
+}
+
+// dpkg and rpm are invoked directly rather than through apt or dnf. The artifact is already
+// downloaded and checksum-verified, so there is no repository to consult, and the higher-level
+// tools would add a resolution step that can prompt or reach the network. An unattended update
+// must not become interactive.
+func TestLinuxInstallersUpgradeInPlaceAndDoNotUseAptOrDnf(t *testing.T) {
+	for _, path := range []string{"/s/x.deb", "/s/x.rpm"} {
+		name, args := installerCommand(path, "/")
+		if name == "apt" || name == "apt-get" || name == "dnf" || name == "yum" {
+			t.Errorf("%s uses %q; a local verified artifact needs no repository resolution", path, name)
+		}
+		joined := name + " " + strings.Join(args, " ")
+		// Upgrade rather than fresh install, so the running version is replaced not conflicted.
+		if !strings.Contains(joined, "--install") && !strings.Contains(joined, "--upgrade") {
+			t.Errorf("%s -> %q does not upgrade in place", path, joined)
+		}
+	}
+}
+
+// Verification differs by platform and must be recorded rather than implied, so a weaker check is
+// visible in telemetry instead of being indistinguishable from the stronger one.
+func TestPackageExtPrefersTheURLThenThePlatform(t *testing.T) {
+	cases := map[string]string{
+		"https://x/beacon_1.0.6_linux_amd64.deb": ".deb",
+		"https://x/beacon_1.0.6_linux_arm64.rpm": ".rpm",
+		"https://x/beacon.tar.gz":                ".tar.gz",
+		"https://x/beacon.tgz":                   ".tgz",
+	}
+	for url, want := range cases {
+		if got := packageExt(url); got != want {
+			t.Errorf("packageExt(%q) = %q, want %q", url, got, want)
+		}
+	}
+	// A URL with no recognised suffix falls back to the platform's native format.
+	got := packageExt("https://x/beacon-release")
+	if runtime.GOOS == "darwin" && got != ".pkg" {
+		t.Errorf("on darwin the fallback should be .pkg, got %q", got)
+	}
+	if runtime.GOOS == "linux" && got != ".deb" && got != ".rpm" {
+		t.Errorf("on linux the fallback should be a native package format, got %q", got)
+	}
 }

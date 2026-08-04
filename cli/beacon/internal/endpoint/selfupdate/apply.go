@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -40,6 +41,10 @@ type ApplyResult struct {
 	Applied     bool
 	RolledBack  bool
 	Message     string
+	// Verification names the checks the artifact actually passed. Recorded rather than implied,
+	// because it differs by platform: macOS adds notarization on top of the checksum, Linux has
+	// no OS-level equivalent, and "verified" must not paper over which of the two happened.
+	Verification string
 }
 
 // Applier performs the full download → verify → install → health-check →
@@ -166,7 +171,20 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 		a.emit(false, result, err.Error())
 		return result, fmt.Errorf("verify checksum: %w", err)
 	}
-	if !a.SkipGatekeeper {
+	// Gatekeeper is macOS-only: pkgutil, stapler and spctl do not exist elsewhere, and there is
+	// no OS-level equivalent on Linux. Skipped explicitly and logged rather than silently, so
+	// the weaker verification is visible in the system log rather than assumed.
+	//
+	// SHA-256 verification above still applies on every platform and is not optional. The trust
+	// root that leaves is HTTPS plus the release checksum -- which is the same trust root the
+	// user relied on to obtain the package they are updating, so this is parity with the install
+	// path rather than a downgrade. Notarization gives macOS assurance above that; adding a
+	// comparable Linux story means a signing scheme (GPG-signed metadata or Sigstore) with real
+	// key management, and that is a deliberate decision rather than something to bolt on here.
+	if runtime.GOOS != "darwin" {
+		result.Verification = "sha256"
+	} else if !a.SkipGatekeeper {
+		result.Verification = "sha256+notarization"
 		if err := a.verifyGatekeeper(ctx, pkgPath, manifest.TeamID); err != nil {
 			a.emit(false, result, err.Error())
 			return result, fmt.Errorf("verify signature/notarization: %w", err)
@@ -390,11 +408,48 @@ func (a *Applier) install(ctx context.Context, pkgPath string) error {
 	if a.AllowInsecureTest {
 		return extractTarballInto(pkgPath, a.prefix())
 	}
-	out, err := a.runner()(ctx, "installer", "-pkg", pkgPath, "-target", a.prefix())
+	name, args := installerCommand(pkgPath, a.prefix())
+	out, err := a.runner()(ctx, name, args...)
 	if err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(out), err)
 	}
 	return nil
+}
+
+// installerCommand picks the tool that installs a staged package.
+//
+// dpkg and rpm are used directly rather than apt or dnf: the artifact is a local file already
+// downloaded and checksum-verified, so there is no repository to consult, and the higher-level
+// tools would only add a dependency-resolution step that can prompt or reach the network. An
+// update must not become interactive halfway through.
+//
+// Both are asked to upgrade in place rather than install fresh, so the running version is
+// replaced rather than conflicting with itself.
+func installerCommand(pkgPath, prefix string) (string, []string) {
+	switch {
+	case strings.HasSuffix(pkgPath, ".deb"):
+		return "dpkg", []string{"--install", pkgPath}
+	case strings.HasSuffix(pkgPath, ".rpm"):
+		return "rpm", []string{"--upgrade", "--replacepkgs", pkgPath}
+	default:
+		// Everything else keeps the path it took before Linux support existed, so macOS
+		// behaviour is unchanged. Note filepath.Ext is unusable here: it reports ".gz" for a
+		// .tar.gz, which is why this matches suffixes the way packageExt does.
+		return "installer", []string{"-pkg", pkgPath, "-target", prefix}
+	}
+}
+
+// linuxPackageExt reports which native package format this host can install.
+func linuxPackageExt() string {
+	if _, err := exec.LookPath("dpkg"); err == nil {
+		return ".deb"
+	}
+	if _, err := exec.LookPath("rpm"); err == nil {
+		return ".rpm"
+	}
+	// Neither is present, so no native install is possible. Assume deb so the resulting failure
+	// names dpkg, which is actionable, rather than the absence of the macOS installer.
+	return ".deb"
 }
 
 // installDir is the root of the installed tree under the active prefix.
@@ -524,12 +579,23 @@ func versionLineMatches(out, want string) bool {
 	return false
 }
 
+// packageExt names the staged artifact so the installer that runs on it can dispatch correctly.
+//
+// The URL wins when it already carries a recognised extension, because the manifest is the
+// authority on what was published. Otherwise fall back to the platform's native format: .pkg on
+// macOS, and on Linux whichever of dpkg or rpm this host actually has.
 func packageExt(url string) string {
 	switch {
 	case strings.HasSuffix(url, ".tar.gz"):
 		return ".tar.gz"
 	case strings.HasSuffix(url, ".tgz"):
 		return ".tgz"
+	case strings.HasSuffix(url, ".deb"):
+		return ".deb"
+	case strings.HasSuffix(url, ".rpm"):
+		return ".rpm"
+	case runtime.GOOS == "linux":
+		return linuxPackageExt()
 	default:
 		return ".pkg"
 	}
