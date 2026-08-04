@@ -102,6 +102,19 @@ func (m UpdaterManager) UnitPaths() []string {
 	return []string{m.UnitPath()}
 }
 
+// RemoveUnits deletes every file WriteUnit installed.
+//
+// Exists so no caller has to remember that systemd needs two files removed and launchd one. The
+// previous shape -- callers looping over UnitPaths themselves -- was better than callers using
+// UnitPath, but it still left the knowledge duplicated at four sites, and one of them was missed:
+// `reconcileUpdaterFromConfig` kept removing only the timer, so turning auto-update off left
+// beacon-updater.service behind. A method that owns the whole set cannot be half-adopted.
+func (m UpdaterManager) RemoveUnits() {
+	for _, path := range m.UnitPaths() {
+		_ = os.Remove(path)
+	}
+}
+
 // WriteUnit installs the updater definition invoking the given program.
 func (m UpdaterManager) WriteUnit(program string) (string, error) {
 	if !m.Supported() {

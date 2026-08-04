@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -120,15 +121,33 @@ func TestLinuxActiveConsoleUserWithoutSudoOrLogindIsNotAnError(t *testing.T) {
 	_ = os.Getenv("PATH")
 }
 
-// fakeLoginctl puts a stub `loginctl` on PATH that answers list-sessions with the given table and
-// reports every session active. A fake binary is the only way to drive this: the resolution shells
-// out, and the answer depends on which session logind names first.
-func fakeLoginctl(t *testing.T, sessionTable string) {
+// fakeLoginctl puts a stub `loginctl` on PATH that reproduces what systemd 255 actually prints.
+//
+// The fixture matters as much as the assertion here. The first version emitted a 3-column table with
+// a blank seat for unseated rows, so the test passed against code that treated any non-empty seat
+// column as seated -- while real loginctl prints `-` there and the code misclassified every ssh
+// session. These strings were captured from a live logind in a container, not written from memory:
+//
+//	11 1002 remoteuser -     ""   active online no -
+//	 9 1001 tester     seat0 tty7 online no     -
+//
+// and per session, `show-session -p Name -p State -p Seat` printing self-labeling Key=Value lines.
+func fakeLoginctl(t *testing.T, sessions []fakeSession) {
 	t.Helper()
+	var table, cases strings.Builder
+	for _, sess := range sessions {
+		seat := sess.seat
+		if seat == "" {
+			seat = "-" // what loginctl really prints for an unseated session
+		}
+		fmt.Fprintf(&table, "%s 1000 %s %s tty1 %s no -\n", sess.id, sess.user, seat, sess.state)
+		fmt.Fprintf(&cases, "  %s) printf 'Name=%s\\nSeat=%s\\nState=%s\\n' ;;\n",
+			sess.id, sess.user, sess.seat, sess.state)
+	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\ncase \"$1\" in\n" +
-		"list-sessions) printf '%s' " + shellSingleQuote(sessionTable) + " ;;\n" +
-		"show-session) echo active ;;\n" +
+		"list-sessions) printf '%s' " + shellSingleQuote(table.String()) + " ;;\n" +
+		"show-session)\n  case \"$2\" in\n" + cases.String() + "  esac ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "loginctl"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -136,57 +155,97 @@ func fakeLoginctl(t *testing.T, sessionTable string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+type fakeSession struct {
+	id, user, seat, state string
+}
+
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// A host with both a graphical login and an earlier ssh or service session must resolve the person
-// at the machine. loginctl lists sessions oldest-first, so taking the first active one picks the ssh
-// session -- and the postinstall would configure the wrong user's agent runtime. The comment claimed
-// this ordering before the code implemented it.
-func TestLinuxActiveConsoleUserPrefersASeatedSession(t *testing.T) {
+func stubLookup(t *testing.T) {
+	t.Helper()
+	restore := lookupConsoleUser
+	lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: name, HomeDir: "/home/" + name}, true, nil
+	}
+	t.Cleanup(func() { lookupConsoleUser = restore })
+}
+
+// The case verified against real logind: the person at the machine is seated but reports state
+// "online" (they are not the foreground session on their seat), while an ssh login reports "active".
+// Requiring "active" therefore picks the *remote* user and rejects the one at the keyboard -- the
+// opposite of the intent -- and reading the table's seat column classifies the ssh row as seated,
+// which collapses the preference entirely.
+func TestLinuxActiveConsoleUserPrefersTheUserAtTheMachine(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("linux-only resolution")
 	}
 	t.Setenv("SUDO_USER", "")
-	// Unseated session listed first, seated second -- the order that exposes the bug.
-	fakeLoginctl(t, "  7 1002 remote      \n  3 1001 desktop seat0 tty2\n")
-
-	var asked []string
-	restore := lookupConsoleUser
-	lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
-		asked = append(asked, name)
-		return consoleUserInfo{Username: name, HomeDir: "/home/" + name}, true, nil
-	}
-	t.Cleanup(func() { lookupConsoleUser = restore })
+	stubLookup(t)
+	// Listed remote-first, which is what loginctl does: sessions come out oldest first.
+	fakeLoginctl(t, []fakeSession{
+		{id: "11", user: "remoteuser", seat: "", state: "active"},
+		{id: "9", user: "desktop", seat: "seat0", state: "online"},
+	})
 
 	info, ok, err := linuxActiveConsoleUser()
 	if err != nil || !ok {
 		t.Fatalf("linuxActiveConsoleUser() = %+v, %v, %v; want the seated user", info, ok, err)
 	}
 	if info.Username != "desktop" {
-		t.Errorf("resolved %q, want the seated session's user; lookups=%v", info.Username, asked)
+		t.Errorf("resolved %q, want the seated user even though the remote one is \"active\"",
+			info.Username)
 	}
 }
 
-// An unseated session is still a real human whose agent runs on that host, so it is accepted when
-// there is no seated one -- the preference is an ordering, not a filter.
+// A foreground seated session outranks a background one, so a shared workstation resolves whoever is
+// actually in front.
+func TestLinuxActiveConsoleUserPrefersTheForegroundSeatedSession(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{
+		{id: "3", user: "background", seat: "seat0", state: "online"},
+		{id: "5", user: "foreground", seat: "seat0", state: "active"},
+	})
+
+	info, _, _ := linuxActiveConsoleUser()
+	if info.Username != "foreground" {
+		t.Errorf("resolved %q, want the foreground seated session", info.Username)
+	}
+}
+
+// An unseated session is still a real human whose agent runs on this host, so the preference is an
+// ordering and not a filter.
 func TestLinuxActiveConsoleUserAcceptsAnUnseatedSessionWhenItIsAll(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("linux-only resolution")
 	}
 	t.Setenv("SUDO_USER", "")
-	fakeLoginctl(t, "  7 1002 remote      \n")
-
-	restore := lookupConsoleUser
-	lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: name, HomeDir: "/home/" + name}, true, nil
-	}
-	t.Cleanup(func() { lookupConsoleUser = restore })
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{{id: "7", user: "remoteuser", seat: "", state: "active"}})
 
 	info, ok, err := linuxActiveConsoleUser()
-	if err != nil || !ok || info.Username != "remote" {
+	if err != nil || !ok || info.Username != "remoteuser" {
 		t.Fatalf("linuxActiveConsoleUser() = %+v, %v, %v; want the unseated user accepted",
 			info, ok, err)
+	}
+}
+
+// A session mid-transition is nobody to configure, and skipping it must not be mistaken for having
+// found them.
+func TestLinuxActiveConsoleUserIgnoresClosingSessions(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{{id: "4", user: "leaving", seat: "seat0", state: "closing"}})
+
+	if info, ok, _ := linuxActiveConsoleUser(); ok {
+		t.Errorf("resolved %+v from a closing session", info)
 	}
 }

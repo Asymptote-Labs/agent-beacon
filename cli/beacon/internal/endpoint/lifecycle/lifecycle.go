@@ -29,9 +29,7 @@ var (
 	removeUpdaterJob     = func() {
 		updater := service.UpdaterManager{}
 		_ = updater.Unload()
-		for _, path := range updater.UnitPaths() {
-			_ = os.Remove(path)
-		}
+		updater.RemoveUnits()
 	}
 )
 
@@ -345,7 +343,7 @@ func reconcileUpdaterFromConfig(logPath string) error {
 	mgr := service.UpdaterManager{}
 	if mode == selfupdate.ModeOff {
 		_ = mgr.Unload()
-		_ = os.Remove(mgr.UnitPath())
+		mgr.RemoveUnits()
 		return nil
 	}
 	if _, err := mgr.WriteUnit(selfupdate.SystemBeaconPath()); err != nil {

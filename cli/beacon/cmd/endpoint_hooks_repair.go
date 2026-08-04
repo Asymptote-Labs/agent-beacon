@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/user"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -191,39 +192,90 @@ func linuxActiveConsoleUser() (consoleUserInfo, bool, error) {
 	if u := strings.TrimSpace(os.Getenv("SUDO_USER")); u != "" {
 		return lookupConsoleUser(u)
 	}
-	// loginctl lists sessions as: SESSION UID USER SEAT [TTY]. A session with a seat is someone at
-	// the machine; one without is an ssh login or a service. Both can be a real human whose agent
-	// runs there, so both are acceptable -- but a seated session is the better answer when a host
-	// has both, which is why this makes two passes instead of taking whichever loginctl printed
-	// first. An earlier version claimed that ordering in a comment while the code took the first
-	// active session it saw.
+	// The session table is used only to enumerate ids. Every other column is read back through
+	// `show-session`, which reports `Key=Value` lines -- unambiguous, self-labeling, and free of the
+	// table's placeholders.
+	//
+	// Parsing the table directly is a trap, and two separate ones. Its unseated rows print `-` in
+	// the seat column rather than leaving it blank, so "non-empty means seated" classifies every ssh
+	// session as seated. And `--value` returns properties in alphabetical order, not the order
+	// requested, so reading two values positionally silently swaps them. Both were verified against
+	// systemd 255 rather than assumed.
 	out, err := exec.Command("loginctl", "list-sessions", "--no-legend").Output()
 	if err != nil {
 		// No logind, or it refused. Not an error worth failing an install over: this is a
 		// best-effort identification, and the caller already handles "unknown".
 		return consoleUserInfo{}, false, nil
 	}
-	lines := strings.Split(string(out), "\n")
-	for _, seatedOnly := range []bool{true, false} {
-		for _, line := range lines {
-			fields := strings.Fields(line)
-			if len(fields) < 3 {
-				continue
-			}
-			seated := len(fields) > 3 && strings.TrimSpace(fields[3]) != ""
-			if seated != seatedOnly {
-				continue
-			}
-			st, err := exec.Command("loginctl", "show-session", fields[0], "-p", "State", "--value").Output()
-			if err != nil || strings.TrimSpace(string(st)) != "active" {
-				continue
-			}
-			if info, ok, err := lookupConsoleUser(fields[2]); ok || err != nil {
-				return info, ok, err
-			}
+	var sessions []logindSession
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if s, ok := describeLogindSession(fields[0]); ok {
+			sessions = append(sessions, s)
+		}
+	}
+	// Best answer first: someone at the machine in the foreground, then anyone at the machine, then
+	// a remote login. Ranked rather than filtered -- a remote session is still a real human whose
+	// agent runs on this host, so it is the right answer when it is the only one.
+	sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].rank() > sessions[j].rank() })
+	for _, sess := range sessions {
+		if info, ok, err := lookupConsoleUser(sess.user); ok || err != nil {
+			return info, ok, err
 		}
 	}
 	return consoleUserInfo{}, false, nil
+}
+
+// logindSession is what one session says about itself.
+type logindSession struct {
+	user   string
+	seated bool
+	// foreground is logind's "active" state: the session currently in front on its seat. A logged-in
+	// user who is not in front reports "online" instead, which is still a real login -- requiring
+	// "active" alone would reject a seated graphical session in favour of an ssh one, since that is
+	// exactly what systemd 255 reports for each.
+	foreground bool
+}
+
+func (s logindSession) rank() int {
+	score := 0
+	if s.seated {
+		score += 2
+	}
+	if s.foreground {
+		score++
+	}
+	return score
+}
+
+// describeLogindSession reads one session's properties, skipping anything that is not a live login.
+func describeLogindSession(id string) (logindSession, bool) {
+	out, err := exec.Command("loginctl", "show-session", id, "-p", "Name", "-p", "State", "-p", "Seat").Output()
+	if err != nil {
+		return logindSession{}, false
+	}
+	props := map[string]string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if k, v, found := strings.Cut(strings.TrimSpace(line), "="); found {
+			props[k] = v
+		}
+	}
+	// closing and opening sessions are mid-transition and are not somebody to configure.
+	state := props["State"]
+	if state != "active" && state != "online" {
+		return logindSession{}, false
+	}
+	if props["Name"] == "" {
+		return logindSession{}, false
+	}
+	return logindSession{
+		user:       props["Name"],
+		seated:     strings.TrimSpace(props["Seat"]) != "",
+		foreground: state == "active",
+	}, true
 }
 
 // resolveConsoleUser validates a username and resolves its home directory.
