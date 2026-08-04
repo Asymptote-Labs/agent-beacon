@@ -2,6 +2,9 @@ package runner
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -187,6 +190,50 @@ func TestSessionOutcomeNeverInventsAFailure(t *testing.T) {
 		// The dangerous combination: a confident failure conjured from a missing field.
 		if c.name != "real failure" && known && !ok {
 			t.Errorf("%s: must not read as a known failure", c.name)
+		}
+	}
+}
+
+// The sampler is a shell program assembled in Go, so a syntax error in it is invisible to the
+// compiler and would surface as a silent "the check did not run" -- which the verdict reports as
+// unverified rather than failing loudly. Checked here with the host's own shell.
+func TestArgvSamplerScriptIsValidShell(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	f := filepath.Join(t.TempDir(), "sampler.sh")
+	if err := os.WriteFile(f, []byte(argvSamplerScript()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(sh, "-n", f).CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated sampler is not valid shell: %v\n%s", err, out)
+	}
+	// The inner sampler body is a heredoc, which `sh -n` does not parse. Extract and check it too,
+	// since that is where the polling loop lives.
+	body := argvSamplerScript()
+	start := strings.Index(body, "#!/bin/sh")
+	end := strings.Index(body, "\nSAMPLER\n")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("could not locate the inner sampler body; this test is no longer checking it")
+	}
+	inner := filepath.Join(t.TempDir(), "inner.sh")
+	if err := os.WriteFile(inner, []byte(body[start:end]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(sh, "-n", inner).CombinedOutput(); err != nil {
+		t.Fatalf("inner sampler body is not valid shell: %v\n%s", err, out)
+	}
+}
+
+// A clean verdict from a sampler that never saw an agent process must read as unverified. This is
+// the invariant the whole tool rests on: silence means verified-clean, never "we did not look."
+func TestArgvSamplerEmitsWhetherItSawTheAgent(t *testing.T) {
+	script := argvSamplerScript()
+	for _, want := range []string{"saw_agent=0", "saw_agent=$saw_agent", "*claude*"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("sampler no longer records whether the agent was in view (missing %q)", want)
 		}
 	}
 }

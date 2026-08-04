@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -594,5 +595,39 @@ func TestServiceNounNamesEachBackend(t *testing.T) {
 	// An unknown kind must still describe something rather than returning empty.
 	if Kind("weird").ServiceNoun() == "" {
 		t.Error("an unrecognised kind must still yield a description")
+	}
+}
+
+// The success path is the one that used to report nothing. EnableLinger returned an empty detail on
+// success, and the install path reads an empty detail as "linger does not apply" -- so linger
+// actually being enabled was the single outcome the manifest dropped.
+func TestEnableLingerReportsSuccessAndFailureDistinctly(t *testing.T) {
+	if !systemdIsInit() {
+		t.Skip("needs systemd as PID 1; linger does not apply otherwise")
+	}
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		t.Skip("needs a resolvable current user")
+	}
+	ok, detail := EnableLinger(u.Username)
+	if detail == "" {
+		t.Fatalf("EnableLinger(%q) = %v with no detail; an empty detail means "+
+			"\"does not apply\" to the caller, so every applicable outcome must say something",
+			u.Username, ok)
+	}
+}
+
+// The contract the install path depends on: an empty detail means "not applicable", never
+// "succeeded" and never "failed quietly".
+func TestEnableLingerNeverReportsAnEmptyDetailWhenItApplies(t *testing.T) {
+	// The non-applicable cases, which are the only ones allowed to be silent.
+	if _, detail := EnableLinger(""); detail == "" {
+		t.Error("an empty username is a reportable problem, not a silent skip")
+	}
+	if systemdIsInit() {
+		return
+	}
+	if _, detail := EnableLinger("anyone"); detail == "" {
+		t.Error("without systemd as PID 1, EnableLinger should still say why it did nothing")
 	}
 }

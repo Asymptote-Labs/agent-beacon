@@ -67,9 +67,11 @@ func ParseKind(s string) (Kind, error) {
 
 // EnableLingerIfNeeded makes a systemd --user unit survive logout, where that applies.
 //
-// Returns ("", ) for every other case -- system mode, and every backend but systemd -- so the
-// caller records nothing rather than reporting a step that was never relevant. launchd needs no
-// equivalent: its gui/<uid> domain persists for the login session by itself.
+// The empty detail means exactly one thing: linger does not apply here -- system mode, or any
+// backend but systemd. Every applicable case reports a detail, success included, so a caller can
+// use an empty detail to mean "we did not try" without that also swallowing "we tried and it
+// worked". launchd needs no equivalent: its gui/<uid> domain persists for the login session by
+// itself.
 func (m Manager) EnableLingerIfNeeded() (bool, string) {
 	if !m.UserMode || m.resolvedKind() != KindSystemd {
 		return false, ""

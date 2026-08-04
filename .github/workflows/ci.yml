@@ -189,6 +189,9 @@ jobs:
         run: |
           go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
           cd collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist. A fresh checkout
+          # has no dist/ at all, which is why this only failed in CI.
+          mkdir -p dist
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
           mkdir -p dist/beacon-otelcol/linux_amd64
           cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol
@@ -211,6 +214,8 @@ jobs:
         run: |
           go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
           cd collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist.
+          mkdir -p dist
           for arch in amd64 arm64; do
             GOOS=linux GOARCH=$arch CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
             mkdir -p dist/beacon-otelcol/linux_$arch

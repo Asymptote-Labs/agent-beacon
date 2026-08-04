@@ -208,10 +208,20 @@ func EnableLinger(username string) (bool, string) {
 	if username == "" {
 		return false, "no username provided"
 	}
-	if out, err := runLoginctlCommand("enable-linger", username); err != nil {
-		return false, strings.TrimSpace(out)
+	out, err := runLoginctlCommand("enable-linger", username)
+	if err != nil {
+		// loginctl does not always print anything on failure, and an empty detail here is
+		// indistinguishable from "linger does not apply" -- which is what the caller uses an empty
+		// detail to mean. The error is folded in so the outcome is always attributable.
+		if detail := strings.TrimSpace(out); detail != "" {
+			return false, detail
+		}
+		return false, "loginctl enable-linger " + username + " failed: " + err.Error()
 	}
-	return true, ""
+	// The success path must say so. It previously returned an empty detail, which the install path
+	// reads as "not applicable" -- so the one outcome worth recording, linger actually being
+	// enabled, was the one the manifest silently dropped.
+	return true, "linger enabled for " + username
 }
 
 // LingerEnabled reports whether linger is on for a user, so doctor can flag the gap.

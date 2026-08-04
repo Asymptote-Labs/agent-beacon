@@ -340,13 +340,24 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// argvSamplerScript for why this cannot be a post-session scan.
 	if r, err := p.Exec(ctx, inst, "cat "+shq(argvVerdictPath)+" 2>/dev/null || true",
 		sandbox.ExecOpts{User: "root", Timeout: time.Minute}); err == nil {
+		sawAgent := strings.Contains(r.Stdout, "saw_agent=1")
+		art.Meta["argv_saw_agent"] = fmt.Sprintf("%v", sawAgent)
 		switch {
 		case strings.Contains(r.Stdout, "ARGV_LEAK"):
+			// A leak is a leak regardless: the sampler found the key on a command line, which is
+			// positive evidence and needs no corroboration.
 			art.SecretInArgv, art.ArgvCheckRan = true, true
 			art.Meta["argv_leak_detail"] = oneLine(r.Stdout)
 			logf("argv leak detail: %s", art.Meta["argv_leak_detail"])
-		case strings.Contains(r.Stdout, "ARGV_CLEAN"):
+		case strings.Contains(r.Stdout, "ARGV_CLEAN") && sawAgent:
 			art.SecretInArgv, art.ArgvCheckRan = false, true
+		case strings.Contains(r.Stdout, "ARGV_CLEAN"):
+			// Clean, but the sampler never had the agent in view -- so it searched the wrong
+			// processes and proves nothing. Reported unverified rather than clean, which is the
+			// whole point of tracking whether a check could run separately from what it found.
+			art.ArgvCheckRan = false
+			logf("argv scan found nothing, but never observed an agent process: " +
+				"the result is unverified, not clean")
 		default:
 			// The sampler never wrote a verdict, so nothing was observed and the result
 			// proves nothing. Reported as unverified rather than clean.
@@ -574,21 +585,30 @@ scan() {
        END{exit !found}'
 }
 n=0
+saw_agent=0
 # Bounded so a leaked sandbox cannot spin forever; the instance is destroyed long before this.
 while [ "$n" -lt 900 ]; do
   n=$((n+1))
-  if ps -eo args= 2>/dev/null | scan; then
-    echo "ARGV_LEAK samples=$n via=ps" > "$VERDICT"
+  procs="$(ps -eo args= 2>/dev/null || true)"
+  # Whether the agent was ever in view at all. A clean verdict from a sampler that never saw the
+  # process holding the key is not evidence of anything -- and in the nested lane, where the agent
+  # runs in a child PID namespace, "the parent namespace sees its children" is an assumption worth
+  # confirming rather than trusting.
+  case "$procs" in *claude*) saw_agent=1 ;; esac
+  if printf '%%s\n' "$procs" | scan; then
+    echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=ps" > "$VERDICT"
     exit 0
   fi
   for f in /proc/[0-9]*/cmdline; do
     [ -r "$f" ] || continue
-    if tr '\0' '\n' < "$f" 2>/dev/null | scan; then
-      echo "ARGV_LEAK samples=$n via=proc" > "$VERDICT"
+    cmd="$(tr '\0' '\n' < "$f" 2>/dev/null || true)"
+    case "$cmd" in *claude*) saw_agent=1 ;; esac
+    if printf '%%s\n' "$cmd" | scan; then
+      echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=proc" > "$VERDICT"
       exit 0
     fi
   done
-  echo "ARGV_CLEAN samples=$n" > "$VERDICT"
+  echo "ARGV_CLEAN samples=$n saw_agent=$saw_agent" > "$VERDICT"
   sleep 1
 done
 SAMPLER

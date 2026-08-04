@@ -3,7 +3,6 @@ package diagnostics
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -89,13 +88,17 @@ func TestRunAndHasFailures(t *testing.T) {
 	if err := os.WriteFile(cfg.LogPath, []byte("{}\n"), 0644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	if runtime.GOOS == "darwin" {
-		plistPath := servicePlistPathForTest(true)
-		if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
-			t.Fatalf("mkdir plist dir: %v", err)
+	// Run names the service-definition check after whichever manager the host actually uses, so
+	// the fixture has to satisfy that manager rather than a hardcoded one. Keying off GOOS was
+	// enough while launchd was the only backend; it made this test pass on any host without
+	// systemd and fail on a GitHub runner, where systemd genuinely is PID 1 and a unit check runs
+	// that nothing had created a unit for.
+	if path := serviceUnitPathForTest(true); path != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("mkdir service dir: %v", err)
 		}
-		if err := os.WriteFile(plistPath, []byte("<plist/>"), 0644); err != nil {
-			t.Fatalf("write plist: %v", err)
+		if err := os.WriteFile(path, []byte("# fixture\n"), 0644); err != nil {
+			t.Fatalf("write service definition: %v", err)
 		}
 	}
 
@@ -127,6 +130,21 @@ func TestLaunchPlistPathMatchesServiceManager(t *testing.T) {
 
 // servicePlistPathForTest mirrors what the service package now owns, so these tests keep
 // exercising the launchd check without diagnostics duplicating the path logic.
+// serviceUnitPathForTest is the definition file the host's own service manager expects, or empty
+// when it has none -- the supervised backend has no unit file, so there is nothing to create.
+func serviceUnitPathForTest(userMode bool) string {
+	mgr := service.Manager{UserMode: userMode}
+	switch mgr.ResolvedKind() {
+	case service.KindLaunchd, service.KindSystemd:
+		path, err := mgr.UnitPath()
+		if err != nil {
+			return ""
+		}
+		return path
+	}
+	return ""
+}
+
 func servicePlistPathForTest(userMode bool) string {
 	path, err := (service.Manager{UserMode: userMode, Kind: service.KindLaunchd}).UnitPath()
 	if err != nil {
