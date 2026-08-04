@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
 func TestInstallFactorySettingsPreservesNonBeaconHooks(t *testing.T) {
@@ -244,7 +246,16 @@ func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Factory settings: %v", err)
 	}
-	if !strings.Contains(string(data), "BEACON_ENDPOINT_CONFIG='/Library/Application Support/Beacon/Endpoint/config.json'") {
-		t.Fatalf("Factory hook did not use system config for system log:\n%s", string(data))
+	// The point of this test is that a /var/log system log path selects the *system* config,
+	// not the user one. The system path is per-OS, so assert against the resolved value
+	// rather than a hardcoded macOS string -- which is what previously made this fail the
+	// moment the suite ran on Linux.
+	wantConfig := "BEACON_ENDPOINT_CONFIG='" + endpointconfig.SystemConfigPath() + "'"
+	if !strings.Contains(string(data), wantConfig) {
+		t.Fatalf("Factory hook did not use system config for system log; want %s in:\n%s",
+			wantConfig, string(data))
+	}
+	if strings.Contains(string(data), endpointconfig.ConfigPath(true)) {
+		t.Fatalf("Factory hook used the user config for a system log path:\n%s", string(data))
 	}
 }

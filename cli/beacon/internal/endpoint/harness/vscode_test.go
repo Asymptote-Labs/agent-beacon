@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -37,7 +38,9 @@ func TestVSCodeUserSettingsPathByOS(t *testing.T) {
 func TestConfigureVSCodePreservesSettingsAndDisablesContentCaptureByDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	path := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+	// VS Code stores user settings per platform; assert the platform-correct location rather
+	// than the macOS one, which silently passed only because tests never ran on Linux.
+	path := vscodeSettingsPathForTest(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -94,5 +97,18 @@ func TestVSCodeOTelStatus(t *testing.T) {
 	status, _ = VSCodeOTelStatus(path, "http://127.0.0.1:4318")
 	if status != TelemetryMisconfigured {
 		t.Fatalf("remote endpoint status = %s, want misconfigured", status)
+	}
+}
+
+// vscodeSettingsPathForTest mirrors vscodeUserDataDirsForOS so these tests exercise the real
+// per-platform layout.
+func vscodeSettingsPathForTest(home string) string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+	case "windows":
+		return filepath.Join(home, "AppData", "Roaming", "Code", "User", "settings.json")
+	default:
+		return filepath.Join(home, ".config", "Code", "User", "settings.json")
 	}
 }

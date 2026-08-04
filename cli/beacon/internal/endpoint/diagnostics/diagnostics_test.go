@@ -90,7 +90,7 @@ func TestRunAndHasFailures(t *testing.T) {
 		t.Fatalf("write log: %v", err)
 	}
 	if runtime.GOOS == "darwin" {
-		plistPath := launchPlistPath(true)
+		plistPath := servicePlistPathForTest(true)
 		if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
 			t.Fatalf("mkdir plist dir: %v", err)
 		}
@@ -112,15 +112,25 @@ func TestLaunchPlistPathMatchesServiceManager(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	userPath := launchPlistPath(true)
+	userPath := servicePlistPathForTest(true)
 	wantUserPath := filepath.Join(home, "Library", "LaunchAgents", service.UserLabel+".plist")
 	if userPath != wantUserPath {
 		t.Fatalf("user launchPlistPath = %q, want %q", userPath, wantUserPath)
 	}
 
-	systemPath := launchPlistPath(false)
+	systemPath := servicePlistPathForTest(false)
 	wantSystemPath := filepath.Join("/Library/LaunchDaemons", service.SystemLabel+".plist")
 	if systemPath != wantSystemPath {
 		t.Fatalf("system launchPlistPath = %q, want %q", systemPath, wantSystemPath)
 	}
+}
+
+// servicePlistPathForTest mirrors what the service package now owns, so these tests keep
+// exercising the launchd check without diagnostics duplicating the path logic.
+func servicePlistPathForTest(userMode bool) string {
+	path, err := (service.Manager{UserMode: userMode, Kind: service.KindLaunchd}).UnitPath()
+	if err != nil {
+		return ""
+	}
+	return path
 }

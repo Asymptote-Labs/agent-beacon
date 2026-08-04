@@ -9,12 +9,56 @@ import (
 	"strings"
 )
 
-// UpdaterLabel is the launchd label for the periodic endpoint updater job.
-const UpdaterLabel = "com.beacon.endpoint.updater"
+const (
+	// UpdaterLabel is the launchd label for the periodic endpoint updater job.
+	UpdaterLabel = "com.beacon.endpoint.updater"
+	// UpdaterTimerUnit and UpdaterServiceUnit are the systemd equivalents. systemd splits
+	// "what to run" from "when to run it", so a scheduled job needs both.
+	UpdaterServiceUnit = "beacon-updater.service"
+	UpdaterTimerUnit   = "beacon-updater.timer"
+)
 
-// UpdaterManager manages the endpoint updater launchd job. Unlike the collector
-// service it is system-only and runs on a schedule rather than KeepAlive.
-type UpdaterManager struct{}
+// UpdaterManager manages the periodic endpoint updater. Unlike the collector it is
+// system-only and runs on a schedule rather than staying resident.
+type UpdaterManager struct {
+	// Kind selects the backend; the zero value auto-detects.
+	Kind Kind
+}
+
+func (m UpdaterManager) resolvedKind() Kind {
+	if m.Kind != KindAuto {
+		return m.Kind
+	}
+	return DetectKind()
+}
+
+// Supported reports whether a scheduled updater can be installed here.
+//
+// Supervised mode has no scheduler, so there is deliberately no fallback: a timer that
+// silently never fires would be worse than refusing to install one.
+func (m UpdaterManager) Supported() bool {
+	switch m.resolvedKind() {
+	case KindLaunchd:
+		return runtime.GOOS == "darwin"
+	case KindSystemd:
+		return systemdIsInit()
+	default:
+		return false
+	}
+}
+
+// UnsupportedReason explains why Supported is false.
+func (m UpdaterManager) UnsupportedReason() string {
+	switch m.resolvedKind() {
+	case KindLaunchd:
+		return "launchd service management is supported only on macOS"
+	case KindSystemd:
+		return "systemd is not PID 1 on this host, so a scheduled updater cannot be installed"
+	default:
+		return "the scheduled updater needs launchd or systemd; a supervised collector has no scheduler. " +
+			"Update Beacon through your package manager or run `beacon endpoint update --apply` from your own scheduler."
+	}
+}
 
 var startDeferredUpdaterReload = func(path string) error {
 	cmd := exec.Command("/bin/sh", "-c", deferredUpdaterReloadScript(path))
@@ -32,50 +76,126 @@ func deferredUpdaterReloadScript(path string) string {
 	)
 }
 
-// PlistPath returns the LaunchDaemon plist path for the updater job.
-func (UpdaterManager) PlistPath() string {
+// UnitPath returns the on-disk path of the updater service definition. On systemd this is the
+// timer, since that is the unit an administrator enables and inspects.
+func (m UpdaterManager) UnitPath() string {
+	if m.resolvedKind() == KindSystemd {
+		return filepath.Join("/etc/systemd/system", UpdaterTimerUnit)
+	}
 	return filepath.Join("/Library/LaunchDaemons", UpdaterLabel+".plist")
 }
 
-// WritePlist writes the updater LaunchDaemon plist invoking the given program.
-func (m UpdaterManager) WritePlist(program string) (string, error) {
-	if runtime.GOOS != "darwin" {
-		return "", fmt.Errorf("launchd service management is supported only on macOS")
+// WriteUnit installs the updater definition invoking the given program.
+func (m UpdaterManager) WriteUnit(program string) (string, error) {
+	if !m.Supported() {
+		return "", fmt.Errorf("%s", m.UnsupportedReason())
 	}
-	path := m.PlistPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if m.resolvedKind() == KindSystemd {
+		return m.writeSystemdUnits(program)
+	}
+	path := m.UnitPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, []byte(updaterPlist(UpdaterLabel, program)), 0644)
+	return path, os.WriteFile(path, []byte(updaterPlist(UpdaterLabel, program)), 0o644)
 }
 
-// Load bootstraps the updater job into the system domain.
+// writeSystemdUnits writes the oneshot service plus the timer that drives it.
+func (m UpdaterManager) writeSystemdUnits(program string) (string, error) {
+	dir := "/etc/systemd/system"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	svc := filepath.Join(dir, UpdaterServiceUnit)
+	if err := os.WriteFile(svc, []byte(updaterServiceUnit(program)), 0o644); err != nil {
+		return "", err
+	}
+	timer := filepath.Join(dir, UpdaterTimerUnit)
+	if err := os.WriteFile(timer, []byte(updaterTimerUnit()), 0o644); err != nil {
+		return "", err
+	}
+	if out, err := runSystemctlCommand("daemon-reload"); err != nil {
+		return timer, systemctlError(out, err, "daemon-reload")
+	}
+	return timer, nil
+}
+
+// Load activates the updater schedule.
 func (m UpdaterManager) Load() error {
-	if runtime.GOOS != "darwin" {
+	if !m.Supported() {
+		return fmt.Errorf("%s", m.UnsupportedReason())
+	}
+	if m.resolvedKind() == KindSystemd {
+		if out, err := runSystemctlCommand("enable", "--now", UpdaterTimerUnit); err != nil {
+			return systemctlError(out, err, "enable --now "+UpdaterTimerUnit)
+		}
 		return nil
 	}
-	path := m.PlistPath()
+	path := m.UnitPath()
+	// A running updater must not be torn out from under itself mid-update, so the reload is
+	// deferred until the current invocation finishes.
 	if status := m.Status(); status.Loaded && status.Running {
 		return startDeferredUpdaterReload(path)
 	}
 	return loadLaunchdJob("system", UpdaterLabel, path)
 }
 
-// Unload boots the updater job out of the system domain.
+// Unload deactivates the updater schedule. A missing unit is not an error.
 func (m UpdaterManager) Unload() error {
-	if runtime.GOOS != "darwin" {
+	switch m.resolvedKind() {
+	case KindSystemd:
+		if !systemdIsInit() {
+			return nil
+		}
+		if out, err := runSystemctlCommand("stop", UpdaterTimerUnit); err != nil && !systemdUnitMissing(out) {
+			return systemctlError(out, err, "stop "+UpdaterTimerUnit)
+		}
+		if out, err := runSystemctlCommand("disable", UpdaterTimerUnit); err != nil && !systemdUnitMissing(out) {
+			return systemctlError(out, err, "disable "+UpdaterTimerUnit)
+		}
+		return nil
+	case KindLaunchd:
+		if runtime.GOOS != "darwin" {
+			return nil
+		}
+		return runLaunchctlWithContext("system", UpdaterLabel, "", "bootout", "system/"+UpdaterLabel)
+	default:
 		return nil
 	}
-	return runLaunchctlWithContext("system", UpdaterLabel, "", "bootout", "system/"+UpdaterLabel)
 }
 
-// Status reports whether the updater job is loaded.
+// Status reports whether the updater schedule is active.
 func (m UpdaterManager) Status() Status {
-	status := Status{Label: UpdaterLabel}
-	if runtime.GOOS != "darwin" {
-		status.Message = "service status is available only on macOS"
+	kind := m.resolvedKind()
+	if !m.Supported() {
+		label := UpdaterLabel
+		if kind == KindSystemd {
+			label = UpdaterTimerUnit
+		}
+		return Status{Label: label, Kind: string(kind), Message: m.UnsupportedReason()}
+	}
+
+	if kind == KindSystemd {
+		status := Status{Label: UpdaterTimerUnit, Kind: string(KindSystemd)}
+		enabledOut, _ := runSystemctlCommand("is-enabled", UpdaterTimerUnit)
+		switch strings.TrimSpace(enabledOut) {
+		case "enabled", "enabled-runtime", "static":
+			status.Loaded = true
+		}
+		activeOut, _ := runSystemctlCommand("is-active", UpdaterTimerUnit)
+		// A timer that is waiting for its next firing reports "active"; systemd does not
+		// distinguish waiting from running for timer units.
+		status.Running = strings.TrimSpace(activeOut) == "active"
+		if status.Running {
+			status.Loaded = true
+		}
+		if !status.Loaded && !status.Running {
+			status.Message = "timer not installed"
+		}
 		return status
 	}
+
+	status := Status{Label: UpdaterLabel, Kind: string(KindLaunchd)}
 	out, err := runLaunchctlCommand("print", "system/"+UpdaterLabel)
 	if err != nil {
 		status.Message = strings.TrimSpace(out)
@@ -86,9 +206,40 @@ func (m UpdaterManager) Status() Status {
 	return status
 }
 
-// updaterPlist renders the updater LaunchDaemon. It runs at business-hour
-// intervals in local time and does not
-// RunAtLoad or KeepAlive; each invocation resolves the configured mode.
+// updaterServiceUnit is the oneshot job the timer triggers.
+func updaterServiceUnit(program string) string {
+	return fmt.Sprintf(`[Unit]
+Description=Beacon endpoint scheduled update check
+Documentation=https://docs.asymptotelabs.ai/cli/endpoint
+
+[Service]
+Type=oneshot
+ExecStart=%s endpoint update --scheduled
+StandardOutput=journal
+StandardError=journal
+User=root
+`, program)
+}
+
+// updaterTimerUnit schedules the job at the same business-hour intervals the launchd plist
+// uses. Persistent=true is the meaningful addition: systemd will run a missed firing after a
+// laptop wakes, whereas launchd's StartCalendarInterval simply skips it.
+func updaterTimerUnit() string {
+	return fmt.Sprintf(`[Unit]
+Description=Beacon endpoint scheduled update check
+
+[Timer]
+OnCalendar=*-*-* 09,12,15,18,21:00:00
+Persistent=true
+Unit=%s
+
+[Install]
+WantedBy=timers.target
+`, UpdaterServiceUnit)
+}
+
+// updaterPlist renders the updater LaunchDaemon. It runs at business-hour intervals in local
+// time and does not RunAtLoad or KeepAlive; each invocation resolves the configured mode.
 func updaterPlist(label, program string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

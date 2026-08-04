@@ -5,14 +5,39 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 const (
-	SystemConfigPath = "/Library/Application Support/Beacon/Endpoint/config.json"
-	UserConfigPath   = ".beacon/endpoint/config.json"
-	DefaultGRPCPort  = 4317
-	DefaultHTTPPort  = 4318
+	// DarwinSystemBaseDir is the macOS system-mode state directory.
+	DarwinSystemBaseDir = "/Library/Application Support/Beacon/Endpoint"
+	// LinuxSystemBaseDir follows the FHS: configuration under /etc, which is where a
+	// package-managed install and an admin both expect to find it.
+	LinuxSystemBaseDir = "/etc/beacon/endpoint"
+
+	UserConfigPath  = ".beacon/endpoint/config.json"
+	DefaultGRPCPort = 4317
+	DefaultHTTPPort = 4318
 )
+
+// SystemBaseDir is the single source of truth for the system-mode state directory.
+//
+// Everything else derives from this, replacing what used to be several independently
+// hardcoded copies of the macOS path in the service, diagnostics, collector, and selfupdate
+// packages.
+func SystemBaseDir() string {
+	switch runtime.GOOS {
+	case "linux":
+		return LinuxSystemBaseDir
+	default:
+		return DarwinSystemBaseDir
+	}
+}
+
+// SystemConfigPath is the system-mode config file location.
+func SystemConfigPath() string {
+	return filepath.Join(SystemBaseDir(), "config.json")
+}
 
 const (
 	DefaultSplunkSource     = "beacon-endpoint-agent"
@@ -154,7 +179,7 @@ func BaseDir(userMode bool) string {
 		}
 		return filepath.Join(home, ".beacon", "endpoint")
 	}
-	return "/Library/Application Support/Beacon/Endpoint"
+	return SystemBaseDir()
 }
 
 func ConfigPath(userMode bool) string {
@@ -165,7 +190,7 @@ func ConfigPath(userMode bool) string {
 		}
 		return filepath.Join(home, UserConfigPath)
 	}
-	return SystemConfigPath
+	return SystemConfigPath()
 }
 
 func Load(userMode bool) (Config, error) {

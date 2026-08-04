@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	beaconauth "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
@@ -30,7 +29,7 @@ var (
 	removeUpdaterJob     = func() {
 		updater := service.UpdaterManager{}
 		_ = updater.Unload()
-		_ = os.Remove(updater.PlistPath())
+		_ = os.Remove(updater.UnitPath())
 	}
 )
 
@@ -46,6 +45,9 @@ type InstallOptions struct {
 	IncludeCodexSpans     bool
 	SplunkHEC             *endpointconfig.SplunkHEC
 	FalconHEC             *endpointconfig.FalconHEC
+	// ServiceKind selects the service manager. Empty auto-detects: launchd on macOS,
+	// systemd when it is PID 1, otherwise a supervised child process.
+	ServiceKind service.Kind
 }
 
 type UninstallOptions struct {
@@ -159,10 +161,10 @@ func (r *installRollback) Rollback(manifest Manifest) {
 
 func Install(opts InstallOptions) (InstallResult, error) {
 	cfg := buildConfig(opts)
-	if err := preflight(cfg, opts.StartService); err != nil {
+	if err := preflight(cfg, opts.StartService, opts.ServiceKind); err != nil {
 		return InstallResult{}, err
 	}
-	manager := service.Manager{UserMode: cfg.UserMode}
+	manager := service.Manager{UserMode: cfg.UserMode, Kind: opts.ServiceKind}
 	collectorBinary, err := endpointcollector.ResolveBinary(cfg.Collector.BinaryPath)
 	if err != nil {
 		return InstallResult{}, err
@@ -183,14 +185,14 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 
-	plistPath, err := manager.PlistPath()
+	plistPath, err := manager.UnitPath()
 	if err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
 	tx.Track(plistPath)
 	manifest.Files = append(manifest.Files, plistPath)
-	if _, err := manager.WritePlist(collectorBinary, cfg.Collector.ConfigPath); err != nil {
+	if _, err := manager.WriteUnit(collectorBinary, cfg.Collector.ConfigPath); err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
@@ -252,8 +254,14 @@ func Install(opts InstallOptions) (InstallResult, error) {
 
 func Uninstall(opts UninstallOptions) error {
 	cfg := loadOrDefault(opts.UserMode, opts.LogPath)
+	// Unload every backend that could plausibly hold this service, not just the one
+	// detection picks now. An install performed under systemd and uninstalled from a
+	// container would otherwise leave the unit enabled, and "uninstall" has to mean nothing
+	// is left behind. Unload already tolerates a backend that is unusable here.
 	manager := service.Manager{UserMode: cfg.UserMode}
-	_ = manager.Unload()
+	for _, kind := range []service.Kind{service.KindLaunchd, service.KindSystemd, service.KindSupervised} {
+		_ = (service.Manager{UserMode: cfg.UserMode, Kind: kind}).Unload()
+	}
 	if !cfg.UserMode && !opts.KeepUpdater {
 		removeUpdaterJob()
 	}
@@ -265,7 +273,7 @@ func Uninstall(opts UninstallOptions) error {
 		_ = os.Remove(path)
 	}
 	if len(manifest.Files) == 0 {
-		if path, err := manager.PlistPath(); err == nil {
+		if path, err := manager.UnitPath(); err == nil {
 			_ = os.Remove(path)
 		}
 		_ = os.Remove(cfg.Collector.ConfigPath)
@@ -318,10 +326,10 @@ func reconcileUpdaterFromConfig(logPath string) error {
 	mgr := service.UpdaterManager{}
 	if mode == selfupdate.ModeOff {
 		_ = mgr.Unload()
-		_ = os.Remove(mgr.PlistPath())
+		_ = os.Remove(mgr.UnitPath())
 		return nil
 	}
-	if _, err := mgr.WritePlist(selfupdate.SystemBeaconPath()); err != nil {
+	if _, err := mgr.WriteUnit(selfupdate.SystemBeaconPath()); err != nil {
 		return err
 	}
 	return mgr.Load()
@@ -563,12 +571,23 @@ func restoreFile(path string, snapshot fileSnapshot) {
 	_ = os.WriteFile(path, snapshot.Data, mode)
 }
 
-func preflight(cfg endpointconfig.Config, startService bool) error {
+func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) error {
 	if err := endpointconfig.ValidateDestinations(cfg.Destinations); err != nil {
 		return err
 	}
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("production endpoint install is currently supported only on macOS")
+	// Replaces a blanket "macOS only" refusal. What actually matters is whether a service
+	// manager can run the collector here, which is a property of the host rather than of the
+	// operating system name: a Linux VM with systemd is fully supported, and a container
+	// without an init system is supported through the supervised backend.
+	mgr := service.Manager{UserMode: cfg.UserMode, Kind: kind}
+	if !mgr.Available() {
+		reason := mgr.UnsupportedReason()
+		if kind == service.KindAuto {
+			// Detection picked something unusable, which should not happen since detection
+			// falls back to supervised; surface it rather than failing opaquely.
+			return fmt.Errorf("no usable service manager on this host: %s", reason)
+		}
+		return fmt.Errorf("--service=%s is not usable here: %s", kind, reason)
 	}
 	if !cfg.UserMode && os.Geteuid() != 0 {
 		return fmt.Errorf("system install requires root; rerun with sudo or omit --system for the default user install")

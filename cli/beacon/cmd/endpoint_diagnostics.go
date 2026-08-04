@@ -77,8 +77,8 @@ type plannedAction struct {
 }
 
 type repairServiceManager interface {
-	PlistPath() (string, error)
-	WritePlist(program, configPath string) (string, error)
+	UnitPath() (string, error)
+	WriteUnit(program, configPath string) (string, error)
 	Load() error
 	Unload() error
 }
@@ -778,7 +778,7 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func plannedInstallActions(repair bool) []plannedAction {
+func plannedInstallActions(repair bool, kind service.Kind) []plannedAction {
 	cfg := endpointconfig.Default(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
@@ -788,9 +788,25 @@ func plannedInstallActions(repair bool) []plannedAction {
 	if repair {
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "repair unloads existing endpoint service if present"})
 	}
+
+	// The plan has to reflect the service manager that will actually be used. It previously
+	// announced a launchd plist on every platform without consulting GOOS, so a Linux
+	// --dry-run advertised steps that could not execute.
+	mgr := service.Manager{UserMode: cfg.UserMode, Kind: kind}
+	serviceAction := plannedAction{Action: "write_unit", Message: "launchd service definition"}
+	if unitPath, err := mgr.UnitPath(); err == nil {
+		serviceAction.Target = unitPath
+	}
+	switch mgr.ResolvedKind() {
+	case service.KindSystemd:
+		serviceAction.Message = "systemd unit definition"
+	case service.KindSupervised:
+		serviceAction.Message = "supervised collector state (no service manager on this host)"
+	}
+
 	actions = append(actions,
 		plannedAction{Action: "write_file", Target: cfg.Collector.ConfigPath, Message: "collector configuration"},
-		plannedAction{Action: "write_plist", Message: "launchd service definition"},
+		serviceAction,
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
 	)
 	for _, h := range otlpTargets {
@@ -1176,7 +1192,7 @@ func repairCollectorServiceFromStatus(status lifecycle.Status) error {
 		return err
 	}
 	manager := newRepairServiceManager(userMode)
-	plistPath, err := manager.PlistPath()
+	plistPath, err := manager.UnitPath()
 	if err != nil {
 		return err
 	}
@@ -1198,7 +1214,7 @@ func repairCollectorServiceFromStatus(status lifecycle.Status) error {
 	if err := repairWriteCollectorConfig(cfg); err != nil {
 		return rollbackRepairError(err, rollback)
 	}
-	if _, err := manager.WritePlist(binary, cfg.Collector.ConfigPath); err != nil {
+	if _, err := manager.WriteUnit(binary, cfg.Collector.ConfigPath); err != nil {
 		return rollbackRepairError(err, rollback)
 	}
 	if err := manager.Load(); err != nil {

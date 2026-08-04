@@ -143,6 +143,60 @@ jobs:
         working-directory: cli/beacon
         run: make ${{ matrix.make_target }}
 
+  linux-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      # The embedded hooks binary must match the platform under test: the CLI validates its
+      # architecture at runtime, so a macOS placeholder fails hook installation on Linux.
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon
+        run: make build-hooks-current
+      - name: Test beacon CLI on Linux
+        working-directory: cli/beacon
+        run: go test ./...
+      - name: Test endpoint packages with the race detector
+        working-directory: cli/beacon
+        run: go test -race ./internal/endpoint/...
+      - name: Test hook adapter on Linux
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Test collector exporter on Linux
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
+      - name: Test observe SDK and threat rules on Linux
+        working-directory: pkg/asymptoteobserve
+        run: go test ./...
+
+  # Exercises the real systemd install path: unit generation, systemctl enable/active,
+  # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
+  # PID 1, which only a privileged container provides -- the GitHub runner's own systemd is not
+  # ours to install units into.
+  linux-systemd-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Build Linux beacon binary
+        working-directory: cli/beacon
+        run: make build-linux-amd64
+      - name: Build collector for Linux
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          cd collector-builder
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+          mkdir -p dist/beacon-otelcol/linux_amd64
+          cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol
+      - name: systemd endpoint smoke test
+        env:
+          BEACON_SMOKE_ARCH: amd64
+        run: sh packaging/linux/smoke-systemd.sh
+
   package-smoke:
     runs-on: macos-latest
     steps:

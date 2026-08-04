@@ -40,17 +40,8 @@ func TestUpdaterPlistContent(t *testing.T) {
 }
 
 func TestUpdaterPlistPath(t *testing.T) {
-	if got := (UpdaterManager{}).PlistPath(); got != "/Library/LaunchDaemons/com.beacon.endpoint.updater.plist" {
+	if got := (UpdaterManager{Kind: KindLaunchd}).UnitPath(); got != "/Library/LaunchDaemons/com.beacon.endpoint.updater.plist" {
 		t.Errorf("PlistPath = %q", got)
-	}
-}
-
-func TestUpdaterWritePlistNonDarwinContract(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin writes the plist; this asserts the non-darwin contract")
-	}
-	if _, err := (UpdaterManager{}).WritePlist("/opt/beacon/bin/beacon"); err == nil {
-		t.Error("expected error writing updater plist on non-darwin")
 	}
 }
 
@@ -78,13 +69,13 @@ func TestUpdaterLoadDefersReloadForRunningUpdater(t *testing.T) {
 		startDeferredUpdaterReload = oldDeferred
 	})
 
-	if err := (UpdaterManager{}).Load(); err != nil {
+	if err := (UpdaterManager{Kind: KindLaunchd}).Load(); err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
 	if len(calls) != 1 || calls[0] != "print system/"+UpdaterLabel {
 		t.Fatalf("launchctl calls = %#v, want only status print", calls)
 	}
-	if deferredPath != (UpdaterManager{}).PlistPath() {
+	if deferredPath != (UpdaterManager{Kind: KindLaunchd}).UnitPath() {
 		t.Fatalf("deferred reload path = %q, want updater plist", deferredPath)
 	}
 }
@@ -102,5 +93,62 @@ func TestDeferredUpdaterReloadScriptWaitsForParentExit(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("deferred reload script missing %q:\n%s", want, script)
 		}
+	}
+}
+
+func TestUpdaterLaunchdUnsupportedOffDarwin(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("launchd is supported here")
+	}
+	if _, err := (UpdaterManager{Kind: KindLaunchd}).WriteUnit("/opt/beacon/bin/beacon"); err == nil {
+		t.Error("launchd updater must not claim success off darwin")
+	}
+}
+
+// Supervised mode has no scheduler. Refusing is deliberate: installing a timer that silently
+// never fires would leave endpoints believing they auto-update when they do not.
+func TestUpdaterRefusesSupervisedMode(t *testing.T) {
+	m := UpdaterManager{Kind: KindSupervised}
+	if m.Supported() {
+		t.Fatal("supervised mode has no scheduler and must not report support")
+	}
+	_, err := m.WriteUnit("/opt/beacon/bin/beacon")
+	if err == nil {
+		t.Fatal("expected an error rather than a no-op timer")
+	}
+	if !strings.Contains(err.Error(), "scheduler") {
+		t.Errorf("error should explain the missing scheduler, got %v", err)
+	}
+	if st := m.Status(); st.Loaded || st.Running {
+		t.Errorf("supervised updater must not report loaded/running: %#v", st)
+	}
+}
+
+func TestUpdaterSystemdUnitsPairTimerWithService(t *testing.T) {
+	svc := updaterServiceUnit("/opt/beacon/bin/beacon")
+	for _, want := range []string{"Type=oneshot", "endpoint update --scheduled"} {
+		if !strings.Contains(svc, want) {
+			t.Errorf("updater service unit missing %q:\n%s", want, svc)
+		}
+	}
+	timer := updaterTimerUnit()
+	for _, want := range []string{
+		"OnCalendar=*-*-* 09,12,15,18,21:00:00", // same schedule as the launchd plist
+		"Persistent=true",                       // runs a firing missed while asleep
+		"Unit=" + UpdaterServiceUnit,
+		"WantedBy=timers.target",
+	} {
+		if !strings.Contains(timer, want) {
+			t.Errorf("updater timer missing %q:\n%s", want, timer)
+		}
+	}
+}
+
+func TestUpdaterUnitPathFollowsBackend(t *testing.T) {
+	if got := (UpdaterManager{Kind: KindLaunchd}).UnitPath(); got != "/Library/LaunchDaemons/com.beacon.endpoint.updater.plist" {
+		t.Errorf("launchd updater path = %q", got)
+	}
+	if got := (UpdaterManager{Kind: KindSystemd}).UnitPath(); got != "/etc/systemd/system/"+UpdaterTimerUnit {
+		t.Errorf("systemd updater path = %q, want the timer unit", got)
 	}
 }
