@@ -1,253 +1,277 @@
 ---
-title: "Verify Beacon In A Sandbox"
-description: "Run a real Claude Code session in a disposable Linux sandbox and confirm Beacon captured what happened"
+title: "Testing Beacon In A Sandbox"
+description: "Run a real AI coding session in a throwaway Linux machine and check that Beacon recorded it"
 ---
 
 ## Overview
 
-`beacon-sandbox` verifies Beacon against real agent activity. It rents a disposable Linux sandbox, installs the Beacon build from your working tree, runs an actual Claude Code session inside it, and then checks whether Beacon's runtime log contains what the agent really did.
+`beacon-sandbox` is a testing tool for Beacon contributors. It starts a throwaway Linux machine in the cloud, installs your local Beacon build on it, runs a real Claude Code session inside it, and then checks whether Beacon recorded what the agent actually did.
 
-It exists because unit tests cannot answer the question that matters most: when a live agent runs a command, does Beacon record it? That gap is not theoretical. This tool found a normalization defect that left `command.command` and `file.path` empty for every Claude Code session, which silently disabled an entire threat-rule category, and it then confirmed the fix.
+You would use it when you have changed something about how Beacon captures telemetry and you want proof that it still works against a live agent — not just that the unit tests pass.
 
-Testing an AI session is awkward because the agent does something slightly different every time, so there is no fixed expected output to compare against. Three cheap ideas replace one expensive oracle:
-
-- **A canary.** The prompt embeds a unique random marker, and the check asserts Beacon's log contains an event mentioning it. The match is exact because the sandbox chose the string.
-- **A sentinel.** The requested work also leaves a file behind, containing that canary. Only this run's agent could have put it there, so the file is proof the agent acted — mere existence is not, since a fixture could have created it.
-- **The agent's own result.** Some scenarios assert on prompt, token, cost and approval signals that leave no artifact at all, so there is no sentinel to check. For those, Claude Code's own success report is the evidence that there was anything to capture.
-
-Those last two are what make a verdict trustworthy. Without them, "Beacon dropped the event" and "the model declined the task" look identical.
-
-A fourth idea matters as much as the other three: **every check reports whether it could run, separately from what it found.** A probe that failed, a credential the process never held, a service listing that could not be read — each yields an explicit *unverified* warning rather than silence. Silence in this tool means verified-clean, never "we did not look."
+Nothing runs on your own machine, so your local Beacon setup is untouched, and the machine is destroyed when the test finishes.
 
 <Note>
-  This is contributor tooling, not part of Beacon's runtime. Beacon's endpoint and hook execution remain local-only with no network dependency; only this developer-facing sandbox reaches out, and only when you run it.
+  This is a tool for working *on* Beacon. It is not part of Beacon itself, it is not included in any release, and installing Beacon does not install this. Beacon's own telemetry collection stays local and offline as always.
 </Note>
 
-## What It Can Verify
+## Why A Sandbox Instead Of Unit Tests
 
-Each scenario asserts specific fields, not merely that events arrived:
+Beacon's unit tests feed it example telemetry and check the output. That catches a lot, but it cannot answer the question that matters most: *when a real agent runs a real command, does Beacon record it?*
 
-| Area | What is asserted |
-|------|------------------|
-| Session and prompt | `prompt.submitted` with retained `prompt.text`, `session.id`, `harness.name` |
-| Commands | `command.executed` with `command.command` and `command.duration_ms` populated |
-| Files | `file.read` / `file.modified` with `file.path` populated |
-| Approvals | `approval.allowed` with `approval.decision` |
-| Tokens and cost | `gen_ai.usage` counts and runtime-reported `cost_usd` |
-| Schema conformance | every line parses and passes the shipped `Event.Validate()` |
-| Redaction | the injected credential appears nowhere in collected artifacts |
-| Host isolation | your own `~/.beacon`, `/opt/beacon`, and services are provably untouched |
+Real agents produce messier telemetry than any handwritten example. A field can quietly stop being filled in, and every unit test still passes because none of them ever saw what the live agent actually sends.
 
-Field population matters more than event presence. Threat rules can only match scalar leaves such as `e.command.command` and `e.file.path`, so an event that arrives with an empty field leaves the corresponding rules unable to fire.
+The catch is that AI sessions are not repeatable. Ask an agent to run a command twice and you get two slightly different sessions, so there is no fixed expected output to compare against.
 
-## First-Time Setup
+The tool works around this with markers rather than exact comparison:
 
-Two external accounts are needed and cannot be automated away: a [Modal](https://modal.com/docs/guide/sandboxes) account, which provides the disposable Linux machines and includes free monthly credits, and an Anthropic API key with credit, because the sandbox runs a real agent session.
+- Each test puts a **random one-off string** into the prompt, then checks that string appears in Beacon's log. Since the tool invented the string, a match cannot be coincidence.
+- The agent is also asked to **write that string into a file**. If the file is there, the agent definitely did the work — so if Beacon has no record of it, that is Beacon's problem and not the model having a lazy day.
+
+That second part is what makes the results trustworthy. Without it, "Beacon missed the event" and "the agent never ran the command" look exactly the same.
+
+## Before You Start
+
+You need two accounts, and neither can be set up for you:
+
+| What | Why | Cost |
+|------|-----|------|
+| A [Modal](https://modal.com/docs/guide/sandboxes) account | Provides the throwaway Linux machines | Free tier includes monthly credits; a test uses a few cents of them |
+| An Anthropic API key with credit | The test runs a real Claude Code session | A few cents per test |
+
+You also need Go installed, and you should be working inside a clone of this repository.
+
+## Setup
 
 <Steps>
-  <Step title="Authenticate with Modal">
-    Installs the CLI and stores credentials in `~/.modal.toml`. In CI, set `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` instead.
+  <Step title="Install and sign in to Modal">
+    `modal token new` opens your browser to sign in, then saves credentials to `~/.modal.toml`. You only do this once.
   </Step>
-  <Step title="Supply an Anthropic credential">
-    Pick one of the three options below.
+  <Step title="Provide your Anthropic API key">
+    The simplest way is an environment variable. See [other options](#keeping-your-api-key-out-of-your-shell) if you would rather not put it there.
   </Step>
-  <Step title="Run doctor">
-    It checks every remaining prerequisite and prints the exact command to fix anything missing. With `--fix` it downloads the collector binary for you.
+  <Step title="Run the setup check">
+    `doctor` looks at everything else the tool needs and tells you exactly what to do about anything missing. `--fix` downloads what it can for you.
   </Step>
 </Steps>
 
-```bash title="First-time setup"
+```bash title="One-time setup"
 pip install modal && modal token new
 export ANTHROPIC_API_KEY=sk-ant-...
+
 cd beacon-sandbox
 go run ./cmd/beacon-sandbox doctor --fix
 ```
 
-<Accordion title="Sample output">
-On a fresh checkout, the two build artifacts are absent and `doctor` names the exact fix for each. It exits non-zero, so a script or agent can branch on it:
+When everything is ready, `doctor` finishes with the command to run next:
 
 ```text
 ok    go                     go version go1.26.4 darwin/arm64
 ok    modal_auth             authenticated
 ok    anthropic_credential   ANTHROPIC_API_KEY environment variable
-FAIL  beacon_binary          missing ~/agent-beacon/cli/beacon/beacon-linux-amd64
-      fix: cd cli/beacon && make build-linux-amd64
-FAIL  collector_binary       missing ~/agent-beacon/collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol
-      fix: beacon-sandbox doctor --fix    (downloads it from the latest release)
+ok    beacon_binary          cli/beacon/beacon-linux-amd64
+ok    collector_binary       collector-builder/dist/.../beacon-otelcol
 ok    collector_freshness    collector matches the exporter sources in this tree
 
-not ready — resolve the FAIL items above, then rerun doctor
-```
-
-After the build and `--fix`:
-
-```text
-  collector not found; downloading beacon-otelcol from release v1.0.6
-  collector ready at ~/agent-beacon/collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol
-...
 ready. next: go run ./cmd/beacon-sandbox run --scenario s02-bash-command
 ```
-</Accordion>
 
-`doctor --json` emits the same results as `{"checks": [...], "ready": true}`, for use by scripts and coding agents.
+If something is missing, `doctor` prints the fix beside it. Run the fix, then run `doctor` again.
 
 <Note>
-  `--fix` verifies what it downloads. The collector tarball is hashed and compared against the release's own `checksums.txt` before anything is extracted, and a release publishing no `checksums.txt` is refused rather than trusted. That binary is executed inside the sandbox, so an unauthenticated download would make a compromised proxy or mirror enough to run arbitrary code.
+  `doctor` is worth running any time a test behaves strangely. Most confusing failures turn out to be a missing or outdated build artifact, and it will tell you.
 </Note>
 
-### Supplying The Anthropic Credential
+### Keeping Your API Key Out Of Your Shell
 
-Three options, in the order the tool resolves them:
+Three ways to supply the key, in the order the tool looks for them:
 
-| Option | How | Trade-off |
-|--------|-----|-----------|
-| `--modal-secret NAME` | `modal secret create NAME ANTHROPIC_API_KEY=sk-ant-...` | Most secure: the value never touches local disk, your environment, or the sandbox process. But the artifact leak check has no value to search for, so it reports **unverified** rather than clean. |
-| `--api-key-command CMD` | e.g. `--api-key-command 'op read op://vault/anthropic/key'` | Keeps the key out of your environment and shell history. Leak check stays active. |
-| `ANTHROPIC_API_KEY` | `export ANTHROPIC_API_KEY=sk-ant-...` | Simplest. Leak check stays active. |
+| Option | Example |
+|--------|---------|
+| A secret stored with Modal | `--modal-secret my-anthropic-key` |
+| A command that prints the key | `--api-key-command 'op read op://vault/anthropic/key'` |
+| An environment variable | `export ANTHROPIC_API_KEY=sk-ant-...` |
 
-<Warning>
-  The most secure option is also the least verifiable. Because a Modal-stored secret never reaches the sandbox process, the collected-artifact leak check cannot run and reports `unverified` instead of `clean`. That is the correct failure mode — an unproven check must never read as a passed one — but it is a deliberate trade-off worth choosing consciously.
-</Warning>
+To create the Modal secret: `modal secret create my-anthropic-key ANTHROPIC_API_KEY=sk-ant-...`
 
-## Running It
+<Note>
+  The Modal secret option keeps the key furthest from your machine, but it comes with one small trade-off: because the tool never sees the key itself, it cannot double-check that the key never leaked into the collected logs. It will say so in the results rather than quietly skipping that check.
+</Note>
 
-```bash title="Verify a change"
+## Your First Test
+
+Build Beacon for Linux, then run a single test:
+
+```bash title="Run one test"
 cd cli/beacon && make build-linux-amd64
 cd ../../beacon-sandbox
-go run ./cmd/beacon-sandbox run --scenario s02-bash-command   # one scenario, ~3 min
-go run ./cmd/beacon-sandbox run                               # the whole suite: 7 scenarios, ~20 min
+go run ./cmd/beacon-sandbox run --scenario s02-bash-command
 ```
 
-`run` with no `--scenario` is the full-suite command. Use a single scenario while iterating and the
-suite before opening a pull request.
+This takes about three minutes and costs a few cents. You will see the sandbox start, the agent session run, and then a result:
 
-| Command | Purpose |
-|---------|---------|
-| `doctor [--fix] [--json]` | Check prerequisites; resolve the collector |
-| `run [--scenario ID] [--repeat N] [--keep-sandbox]` | Capture a session and judge it |
-| `verify <run-dir> [--mutate MODE]` | Re-judge collected artifacts offline, free |
-| `diff <before> <after>` | Compare capability fingerprints across runs |
-| `clean` | Remove local run artifacts |
+```text
+=== s02-bash-command ===
+  building image (cached layers are free)
+  sandbox sb-9OgBcX767y7O3LG3kP2qgM
+  running session (budget $1.00, timeout 5m0s)
+  claude: subtype=success is_error=false turns=2 cost=0.0568
+  sentinel present=true
+  PASS  s02-bash-command
+    20 events captured
+    actions: token.usage=8 session.activity=5 command.executed=1 prompt.submitted=1
+```
 
-**`verify` is the loop to iterate in.** It is a pure function of what is on disk: no sandbox, no model, no cost. Capture a session once, then re-check it as many times as you like while adjusting what counts as correct.
+`PASS` means Beacon recorded everything this test looked for.
 
-A run costs roughly $0.06 of sandbox time plus a few cents of API usage, so the Anthropic spend dominates. Each scenario caps itself with a per-scenario budget.
+## Understanding The Results
 
-<Warning>
-  If your change touches `collector-builder/`, rebuild the collector before running. Telemetry normalization compiles into `beacon-otelcol`, not the `beacon` CLI, so verifying an exporter change against a downloaded collector produces a passing run that proves nothing.
-</Warning>
+Every test ends in one of three states:
 
-`doctor`'s `collector_freshness` check covers three ways the binary can be wrong, not just one: uncommitted changes under `collector-builder/`; a downloaded release binary with exporter changes committed since that release; and a locally built binary older than its own sources. A release tag the local clone cannot resolve is reported as unknowable rather than assumed fresh — run `git fetch --tags`, or rebuild. Rebuilding locally clears the warning, since provenance is tied to the binary actually on disk.
+| Result | Meaning | What to do |
+|--------|---------|------------|
+| **PASS** | Beacon recorded what the test looked for | Nothing |
+| **FAIL** | Something the test expected is missing or empty | Read the failure detail below |
+| **INCONCLUSIVE** | The agent never did the requested work, so there was nothing to record | Run it again — this is not a Beacon problem |
 
-## Reading A Verdict
+A `FAIL` tells you which expectation broke and why that expectation exists:
 
-This is the real verdict that exposed the pre-v1.0.6 normalization defect:
-
-```text title="Sample verdict"
+```text
 FAIL  s02-bash-command
   20 events captured
-  actions: token.usage=8 tool.invoked=7 cost.usage=2 metric.observed=2 prompt.submitted=1
-  harness names: claude_code=20
-  [INFO] sentinel.agent_acted: confirmed: BEACON_SANDBOX_465969b932c3
-        why: a missing expectation below is therefore a genuine capture gap, not an
-             inactive agent
+  actions: token.usage=8 tool.invoked=7 prompt.submitted=1
+  [INFO] sentinel.agent_acted: confirmed
   [FAIL] expect[1].command.executed: no event with action "command.executed" was captured
-        why: Threat rules can only match scalar leaves, so e.command.command IS the
-             detection surface for the entire rules/risky-command/ category. If this is
-             empty those rules cannot fire for Claude Code no matter how correct their
-             CEL is.
+        why: Detection rules match on the command text, so if this is empty those
+             rules cannot fire.
 ```
 
-Read it in order. The sentinel confirmed the agent really ran the command, so the missing `command.executed` is a capture gap rather than an idle model. The histogram then says where the event went: seven `tool.invoked` and no `command.executed` at all, which is a misclassification, not a dropped event.
+Read it from the top. The agent demonstrably did the work, so the missing event is a real gap. The event counts then hint at where it went — seven events landed under a different name, which points at a labelling problem rather than a dropped event.
 
-Three outcomes:
+### Warnings Mean "Could Not Check"
 
-- **PASS** — Beacon captured what the scenario planted. Exit code 0.
-- **FAIL** — an expectation was not met, or an invariant or safety check failed, with the exact field and evidence line. Exit code 1.
-- **INCONCLUSIVE** — the agent never performed the requested work, so retry. Not a capture failure. **Exit code 1 when nothing else passed**, because "nothing was verified" must not read as success to a script.
+Alongside pass and fail, you may see `[WARN]` lines. These are not failures, but they are not clean results either — each one means a check could not run:
 
-A fail-severity finding always wins, including over `INCONCLUSIVE`. Invariants and safety checks do not depend on the agent having done the work, so an idle agent is no reason to stop reporting a leaked credential or a corrupt line.
+| Warning | What it means |
+|---------|---------------|
+| `sentinel ... could not be read` | The tool could not tell whether the agent did the work |
+| `cannot check for ANTHROPIC_API_KEY` | The key-leak check had nothing to search for |
+| `the argv scan did not run` | Key handling could not be checked for this run |
+| `service probe could not run` | Part of the "your machine was untouched" check could not run |
 
-Alongside those, findings carry a severity. **A `WARN` means a check could not run**, not that it passed:
+If you are reporting results to someone else, mention these. Silence from this tool is meant to mean "checked and clean", so a warning is worth passing on.
 
-| Warning | Meaning |
-|---------|---------|
-| `sentinel ... could not be read` | The guest probe failed, so whether the agent acted is unknown. Expectations are judged *without* that excuse. |
-| `the agent's own result could not be read` | Same, for a sentinel-less scenario. |
-| `cannot check for ANTHROPIC_API_KEY` | The leak check had no value to search for — a provider secret, or a key that does not match the one the run used. |
-| `the argv scan did not run` | Credential handling is unverified for that run. |
-| `service probe could not run` | Files were unchanged, but the service half of the host guard is unverified. |
+### A Failure Is Not Always A Beacon Bug
 
-None of these fail a run. All of them mean *do not read this as clean*.
+Tests encode what Beacon *should* do. When Beacon's behaviour legitimately improves, an old expectation can become out of date and start failing. Before concluding you have found a bug:
 
-Every run writes four files beside the collected `runtime.jsonl`: `verdict.json`, `fingerprint.json`, `meta.json`, and `claude-result.json`. Re-judging with `verify` refreshes the first two together, so they never disagree.
+1. Read the failing expectation's `why` and compare it against the event counts in the output. Did the event move somewhere else rather than disappear?
+2. If your change touched `collector-builder/`, check that you rebuilt it — see the warning below.
+3. Only then treat it as a gap in Beacon.
 
-A `FAIL` is not automatically a Beacon defect. Scenarios encode what Beacon *should* do, so when behavior legitimately improves an old assertion can become wrong — three scenarios had to be rewritten after v1.0.6, because they asserted `tool.invoked` precisely *because* that was the broken classification. Read the failing expectation's `why` against the verdict's action histogram before concluding anything.
+<Warning>
+  **If your change is in `collector-builder/`, rebuild it before testing.** Telemetry processing lives in a separate binary from the `beacon` command, so a test run will happily use an older copy and pass without ever exercising your change. `doctor` warns about this, and it is the single most common way to waste a test run.
+</Warning>
 
-## Writing A Scenario
+## The Tests You Can Run
 
-```yaml title="beacon-sandbox/scenarios/s02-bash-command.yaml"
-id: s02-bash-command
+```bash
+go run ./cmd/beacon-sandbox run --scenario s01-hello   # one test
+go run ./cmd/beacon-sandbox run                        # all of them, ~20 min
+```
+
+| Test | Covers |
+|------|--------|
+| `s01-hello` | Prompts, sessions, token counts, cost |
+| `s02-bash-command` | Shell commands, including the command text |
+| `s03-file-write` | File edits, including the file path |
+| `s04-file-read` | File reads |
+| `s05-repo-task` | A multi-step task in a git repository |
+| `s06-subagent` | Sub-agent activity |
+| `s07-denied-tool` | Approvals and denials |
+
+Use one test while you are iterating. Run all of them before opening a pull request.
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `doctor [--fix] [--json]` | Check the setup and say how to fix what is missing |
+| `run [--scenario ID] [--repeat N]` | Start a sandbox, run a session, check the results |
+| `verify <run-dir>` | Re-check a previous run's saved output. Free and instant |
+| `diff <before> <after>` | Compare what two runs managed to capture |
+| `clean` | Delete saved run output |
+
+`verify` is worth knowing about. Every run saves its output under `runs/`, and `verify` re-checks that saved output without starting a sandbox or calling the API. If you are adjusting what a test expects, use `verify` rather than paying for another run.
+
+## Writing Your Own Test
+
+Tests are YAML files in `beacon-sandbox/scenarios/`:
+
+```yaml title="A minimal test"
+id: my-test
 prompt: >-
-  Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}
-sentinel: /home/agent/work/s02.sentinel
-budget_usd: 1.0
+  Run exactly this shell command and report its output:
+  echo {{canary}} | tee {{sentinel}}
+sentinel: /home/agent/work/my-test.txt
 expect:
   - action: command.executed
     contains: ["{{canary}}"]
-    fields: ["command.command", "tool.name"]
-    why: >-
-      Threat rules match scalar leaves, so e.command.command IS the detection surface for the
-      entire rules/risky-command/ category.
+    fields: ["command.command"]
+    why: Detection rules match on the command text, so an empty value breaks them.
 ```
 
-`{{canary}}` is a unique per-run marker; `{{sentinel}}` and `{{workdir}}` expand too. Every expectation requires a `why`, because a failure that cannot explain what it protected is not actionable — a test enforces this. Use `optional: true` to record a known gap without failing the run.
+- `{{canary}}` becomes the random one-off string for that run. `{{sentinel}}` and `{{workdir}}` are also substituted.
+- `sentinel` is the file the agent must leave behind. It has to contain the canary, so a file created by setup does not count.
+- `why` is required on every expectation — a failure nobody can interpret is not useful.
+- `optional: true` records an expectation without failing the run, for something known to be missing.
 
-Validate scenario edits without spending anything: `go test ./scenario/`.
+Check your file without spending anything:
 
-## Trusting The Checks
+```bash
+go test ./scenario/
+```
 
-A check that cannot fail is worse than no check, because it converts "we did not look" into "we verified". The checks are therefore tested against deliberately damaged logs: a dropped command event must fail exactly that expectation, a corrupted line must trip the parse invariant, a planted credential must trip the leak check, an absent sentinel must yield `INCONCLUSIVE` rather than `FAIL`, and an unavailable credential must report *unverified* rather than clean.
+## Checking That The Checks Work
 
-```bash title="Self-test the checks"
-go test ./...
+A test that cannot fail is worse than no test, so you can deliberately damage a saved run and confirm the tool notices:
+
+```bash title="Confirm a PASS can become a FAIL"
 go run ./cmd/beacon-sandbox verify --mutate corrupt-line runs/<run-dir>/
 ```
 
-The mutation must turn a `PASS` into a `FAIL`. Available modes: `corrupt-line`, `drop-commands`, `drop-action:<action>`, `plant-secret`.
+Other options are `drop-commands`, `drop-action:<action>`, and `plant-secret`. Each should turn a `PASS` into a `FAIL`. The tool's own unit tests do this automatically and need no accounts, no API key, and no cost:
 
-Every mutation refuses to be a no-op — an empty log, or an action the log does not contain, is an error rather than a passing self-test that proved nothing.
-
-`plant-secret` needs no credential of its own: it plants a unique synthetic value and the leak check is told to search for that, so the check is exercised on any run directory whatever credential the run used — including none.
-
-Two Beacon behaviors the matcher models deliberately, because ignoring either produces false failures: identical events written within a **two-second window** are collapsed by duplicate suppression, so a repeated command yields one event; and token totals must come from `beacon token-usage --json` rather than summing the raw JSONL, because overlapping-channel deduplication zeroes metric-channel usage when the log channel already reported it.
+```bash
+go test ./...
+```
 
 ## Limitations
 
 <Warning>
-  Modal sandboxes are Linux-only, so this **cannot verify the macOS build at all** — launchd, the signed `.pkg`, and notarization are entirely outside its reach.
+  Modal only provides Linux machines, so **this cannot test the macOS build**. Anything macOS-specific — launchd, the signed installer, notarization — is out of reach.
 </Warning>
 
-- **Scope of what is verified.** Because Beacon's persistent `endpoint install` is macOS-only today, what this exercises is the `beacon ci exec` collector path. That is a genuine shipping path — it is how Beacon collects in GitHub Actions and cloud agent sandboxes — but it is narrower than "verifies Beacon".
-- **Presence, not completeness.** Marker checks prove the planted thing was captured. They cannot tell you Beacon captured four of seven tool calls, because they never learn there were seven.
-- **amd64 only.** Modal exposes no architecture selection, so Linux arm64 is not covered.
-- **Real cost and real time.** Each scenario spends money and takes minutes.
-- **Irreducible flakiness.** Telemetry arrives asynchronously, so "hasn't arrived yet" and "never coming" are separated only by a timeout. The runner waits for the log to go quiet rather than sleeping a fixed amount, and `--repeat` distinguishes flaky from broken.
-- **Agent version drift.** Claude Code's behavior can change between releases, so the version is pinned in the sandbox image; bumping it is a deliberate act.
+- **It tests one collection path.** Specifically the temporary-collector path Beacon uses in CI and cloud agents, not a permanently installed Beacon.
+- **It checks presence, not completeness.** It confirms the thing it planted was recorded. It cannot tell you whether Beacon missed something it never knew to look for.
+- **Linux x86 only.** Modal does not offer a choice of processor architecture.
+- **It costs money and takes minutes.** Each test is a real API session.
+- **Occasional flakiness is normal.** Telemetry arrives asynchronously, so the tool waits for activity to settle rather than a fixed delay. Use `--repeat 3` to tell a flaky result from a broken one.
+- **The agent version is pinned.** Claude Code's behaviour changes between releases, so the sandbox installs a fixed version. Updating it is a deliberate change.
 
 ## Related
 
 <Columns cols={2}>
-  <Card title="Validate Endpoint Telemetry" icon="flask-vial" href="/guides/local-testing/endpoint-validation">
-    Validate a Beacon install on your own machine, rather than verifying Beacon itself.
+  <Card title="Contributing" icon="code-branch" href="/contributing/development">
+    Building Beacon, running the test suites, and opening a pull request.
+  </Card>
+  <Card title="Validate a local install" icon="flask-vial" href="/guides/local-testing/endpoint-validation">
+    Checking Beacon on your own machine, rather than testing Beacon itself.
   </Card>
   <Card title="beacon ci exec" icon="terminal" href="/cli/ci-exec">
-    The ephemeral collector path this sandbox exercises.
+    The collection path these tests exercise.
   </Card>
-  <Card title="Endpoint event schema" icon="table" href="/telemetry-schema/event-schema">
-    The fields scenarios assert against.
-  </Card>
-  <Card title="Detections engine" icon="magnifying-glass" href="/detections/engine">
-    Why field population determines whether threat rules can match.
+  <Card title="Event schema" icon="table" href="/telemetry-schema/event-schema">
+    The fields tests can check.
   </Card>
 </Columns>
