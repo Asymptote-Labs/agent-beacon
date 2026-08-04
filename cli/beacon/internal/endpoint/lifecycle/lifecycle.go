@@ -29,7 +29,9 @@ var (
 	removeUpdaterJob     = func() {
 		updater := service.UpdaterManager{}
 		_ = updater.Unload()
-		_ = os.Remove(updater.UnitPath())
+		for _, path := range updater.UnitPaths() {
+			_ = os.Remove(path)
+		}
 	}
 )
 

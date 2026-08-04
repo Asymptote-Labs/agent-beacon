@@ -85,6 +85,23 @@ func (m UpdaterManager) UnitPath() string {
 	return filepath.Join("/Library/LaunchDaemons", UpdaterLabel+".plist")
 }
 
+// UnitPaths returns every file WriteUnit installs, so a caller removing the updater removes all of
+// it.
+//
+// UnitPath is not enough on systemd, and the asymmetry is easy to miss: WriteUnit writes both the
+// timer and the oneshot service it triggers, while UnitPath deliberately names only the timer --
+// the unit an administrator enables and inspects. Every removal site used UnitPath, so
+// beacon-updater.service was left behind under /etc/systemd/system by uninstall and by disable.
+func (m UpdaterManager) UnitPaths() []string {
+	if m.resolvedKind() == KindSystemd {
+		return []string{
+			filepath.Join("/etc/systemd/system", UpdaterTimerUnit),
+			filepath.Join("/etc/systemd/system", UpdaterServiceUnit),
+		}
+	}
+	return []string{m.UnitPath()}
+}
+
 // WriteUnit installs the updater definition invoking the given program.
 func (m UpdaterManager) WriteUnit(program string) (string, error) {
 	if !m.Supported() {

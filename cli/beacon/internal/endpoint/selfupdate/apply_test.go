@@ -708,3 +708,38 @@ func TestApplyChecksumMismatchAbortsBeforeInstall(t *testing.T) {
 		t.Errorf("nothing may run after a checksum mismatch; calls=%v", calls)
 	}
 }
+
+// Verification exists so an operator can tell a notarization-verified macOS update from a
+// checksum-only Linux one. It was computed into the result and never written into the event, so both
+// looked identical in the system log -- the field was decorative.
+func TestApplyRecordsVerificationInTelemetry(t *testing.T) {
+	artifact, sha := makeBeaconTarball(t, "9.9.9")
+	srv := manifestServer(t, "9.9.9", sha, artifact)
+	defer srv.Close()
+
+	a := testApplier(t, "0.0.1", srv)
+	a.restart = func() error { return nil }
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if filepath.Base(name) == "beacon" {
+			return "beacon version 9.9.9 (new) built on test", nil
+		}
+		return "", nil
+	}
+
+	res, err := a.Apply(context.Background())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Verification == "" {
+		t.Fatal("every applied update must name the checks the artifact passed")
+	}
+	log := string(mustRead(t, a.LogPath))
+	if !strings.Contains(log, `"verification"`) || !strings.Contains(log, res.Verification) {
+		t.Errorf("verification %q is missing from the system log:\n%s", res.Verification, log)
+	}
+	// The value must be interpretable, not just present.
+	if !strings.Contains(res.Verification, "sha256") {
+		t.Errorf("verification = %q; SHA-256 is enforced on every platform and should say so",
+			res.Verification)
+	}
+}

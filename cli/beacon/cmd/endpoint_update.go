@@ -240,5 +240,11 @@ func applyUpdate(parent context.Context, current string) error {
 		return nil
 	}
 	fmt.Printf("Updated Beacon to %s.\n", res.ToVersion)
+	// Say what the artifact was checked against. macOS verifies Apple notarization on top of the
+	// checksum and Linux has no OS-level equivalent, so stating it beats letting the reader assume
+	// whichever they are used to.
+	if res.Verification != "" {
+		fmt.Printf("Package verification: %s\n", res.Verification)
+	}
 	return nil
 }

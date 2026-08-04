@@ -12,6 +12,31 @@
 # thing that discards it.
 set -eu
 
+# An upgrade must not run any of this, and the reason is not obvious.
+#
+# Both package managers run the *old* package's pre-removal script during an upgrade, and rpm runs
+# it AFTER the new package's postinstall. So on an rpm upgrade this script would execute right after
+# the new version installed and started the collector, and tear down the service the upgrade had
+# just brought up -- leaving an upgraded host with configuration and no running endpoint. dpkg runs
+# prerm before unpacking, which is less destructive but still pointless work the new postinstall has
+# to undo.
+#
+# This also reaches `beacon endpoint update --apply`, which installs with `dpkg -i` / `rpm -U` and so
+# runs the same scripts. Without this guard a self-update would remove the endpoint it was updating.
+#
+# The argument says which case this is:
+#   dpkg  prerm  -> "upgrade" or "failed-upgrade" when upgrading, "remove" when removing
+#   rpm   %preun -> the count of remaining versions: "1" while upgrading, "0" on the final erase
+#
+# `beacon endpoint install` is idempotent and the new postinstall reconciles the unit, so skipping
+# here is not merely safe -- it is the correct behavior.
+case "${1:-}" in
+  upgrade|failed-upgrade|1)
+    echo "beacon: upgrade in progress, leaving the running endpoint in place"
+    exit 0
+    ;;
+esac
+
 CONFIG_DIR=/etc/beacon/endpoint
 STASH="$(mktemp -d)"
 saved=0

@@ -166,7 +166,9 @@ func runUpdateDisable(cmd *cobra.Command, args []string) error {
 	if err := mgr.Unload(); err != nil {
 		return fmt.Errorf("unload updater job: %w", err)
 	}
-	_ = os.Remove(mgr.UnitPath())
+	for _, path := range mgr.UnitPaths() {
+		_ = os.Remove(path)
+	}
 	fmt.Println("Update checks disabled; background updater removed.")
 	return nil
 }
@@ -195,7 +197,9 @@ func runUpdateInstallDaemon(cmd *cobra.Command, args []string) error {
 	mgr := service.UpdaterManager{}
 	if mode == selfupdate.ModeOff {
 		_ = mgr.Unload()
-		_ = os.Remove(mgr.UnitPath())
+		for _, path := range mgr.UnitPaths() {
+			_ = os.Remove(path)
+		}
 		fmt.Println("Auto-update is off; updater daemon not installed.")
 		return nil
 	}

@@ -123,6 +123,12 @@ nfpms:
       - systemd
     rpm:
       group: Applications/System
+      scripts:
+        # rpm runs the outgoing package's %preun after the incoming package's %post during an
+        # upgrade, so an older package can stop the service the new one just started -- and nothing
+        # in the new package can change what the old script does. %posttrans runs last in the
+        # transaction, which makes it the only place that can have the final say.
+        posttrans: ../../packaging/linux/nfpm/posttrans.sh
     deb:
       fields:
         Bugs: https://github.com/asymptote-labs/agent-beacon/issues

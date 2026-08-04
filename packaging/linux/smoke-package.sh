@@ -179,11 +179,52 @@ if not svc.get('running'):
 print("ok: status reports a running systemd service")
 PY
 
-docker exec "$CONTAINER" /opt/beacon/bin/beacon endpoint doctor --system >/tmp/beacon-doctor.log 2>&1 || true
-if grep -qiE "^fail|\[fail\]" /tmp/beacon-doctor.log; then
-  echo "doctor reported failures:" >&2; cat /tmp/beacon-doctor.log >&2; exit 1
-fi
-echo "ok: doctor reports no failures"
+# Read as JSON, not by grepping the human-readable output. The first version of this check greped
+# for "^fail" and "[fail]", neither of which doctor ever prints -- its text form says
+# "<name>: fail ..." -- so a failing doctor passed CI. A check that cannot fail is worse than no
+# check, because it reads as coverage.
+docker exec "$CONTAINER" /opt/beacon/bin/beacon endpoint doctor --system --json \
+  >/tmp/beacon-doctor.json 2>/tmp/beacon-doctor.err || true
+python3 - <<'PY' || exit 1
+import json, sys
+try:
+    with open('/tmp/beacon-doctor.json') as f:
+        report = json.load(f)
+except Exception as exc:
+    print(f"  could not read doctor --json ({exc}), so its result is unknown", file=sys.stderr)
+    print(open('/tmp/beacon-doctor.err').read(), file=sys.stderr)
+    sys.exit(1)
+checks = report.get('checks')
+if not checks:
+    print("  doctor reported no checks at all, so nothing was verified", file=sys.stderr)
+    sys.exit(1)
+failed = [c for c in checks if c.get('status') == 'fail']
+if failed:
+    for c in failed:
+        print(f"  FAIL {c.get('name')} target={c.get('target')}: {c.get('message')}", file=sys.stderr)
+    sys.exit(1)
+print(f"ok: doctor reports no failures across {len(checks)} checks")
+PY
+
+# Reinstalling the same package is an upgrade as far as both package managers are concerned, and it
+# is the exact sequence `beacon endpoint update --apply` performs. It is worth its own assertion
+# because the old package's pre-removal script runs during an upgrade -- and on rpm it runs *after*
+# the new postinstall, so a script that unconditionally tears the service down would leave an
+# upgraded host with configuration and no running endpoint.
+case "$FORMAT" in
+  deb) docker exec "$CONTAINER" sh -c "dpkg --install /var/tmp/beacon.deb" >/tmp/beacon-upgrade.log 2>&1 ;;
+  rpm) docker exec "$CONTAINER" sh -c "rpm --upgrade --replacepkgs /var/tmp/beacon.rpm" >/tmp/beacon-upgrade.log 2>&1 ;;
+esac || { echo "upgrade failed:" >&2; tail -20 /tmp/beacon-upgrade.log >&2; exit 1; }
+after_upgrade="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.service 2>/dev/null || true)"
+[ "$after_upgrade" = active ] || {
+  echo "collector is $after_upgrade after an upgrade; the upgrade tore down its own service" >&2
+  tail -20 /tmp/beacon-upgrade.log >&2
+  docker exec "$CONTAINER" systemctl status beacon-collector.service --no-pager >&2 || true
+  exit 1
+}
+docker exec "$CONTAINER" test -f /etc/beacon/endpoint/config.json || {
+  echo "an upgrade must not remove the config" >&2; exit 1; }
+echo "ok: upgrade left the service running and the config in place"
 
 # Removal must stop the service while the binaries it points at still exist, and must not destroy
 # collected telemetry.

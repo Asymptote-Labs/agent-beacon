@@ -3,7 +3,9 @@ package cmd
 import (
 	"os"
 	"os/user"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -116,4 +118,75 @@ func TestLinuxActiveConsoleUserWithoutSudoOrLogindIsNotAnError(t *testing.T) {
 		t.Error("reported a console user with no sudo environment and no logind")
 	}
 	_ = os.Getenv("PATH")
+}
+
+// fakeLoginctl puts a stub `loginctl` on PATH that answers list-sessions with the given table and
+// reports every session active. A fake binary is the only way to drive this: the resolution shells
+// out, and the answer depends on which session logind names first.
+func fakeLoginctl(t *testing.T, sessionTable string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncase \"$1\" in\n" +
+		"list-sessions) printf '%s' " + shellSingleQuote(sessionTable) + " ;;\n" +
+		"show-session) echo active ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(dir, "loginctl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// A host with both a graphical login and an earlier ssh or service session must resolve the person
+// at the machine. loginctl lists sessions oldest-first, so taking the first active one picks the ssh
+// session -- and the postinstall would configure the wrong user's agent runtime. The comment claimed
+// this ordering before the code implemented it.
+func TestLinuxActiveConsoleUserPrefersASeatedSession(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	// Unseated session listed first, seated second -- the order that exposes the bug.
+	fakeLoginctl(t, "  7 1002 remote      \n  3 1001 desktop seat0 tty2\n")
+
+	var asked []string
+	restore := lookupConsoleUser
+	lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
+		asked = append(asked, name)
+		return consoleUserInfo{Username: name, HomeDir: "/home/" + name}, true, nil
+	}
+	t.Cleanup(func() { lookupConsoleUser = restore })
+
+	info, ok, err := linuxActiveConsoleUser()
+	if err != nil || !ok {
+		t.Fatalf("linuxActiveConsoleUser() = %+v, %v, %v; want the seated user", info, ok, err)
+	}
+	if info.Username != "desktop" {
+		t.Errorf("resolved %q, want the seated session's user; lookups=%v", info.Username, asked)
+	}
+}
+
+// An unseated session is still a real human whose agent runs on that host, so it is accepted when
+// there is no seated one -- the preference is an ordering, not a filter.
+func TestLinuxActiveConsoleUserAcceptsAnUnseatedSessionWhenItIsAll(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	fakeLoginctl(t, "  7 1002 remote      \n")
+
+	restore := lookupConsoleUser
+	lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: name, HomeDir: "/home/" + name}, true, nil
+	}
+	t.Cleanup(func() { lookupConsoleUser = restore })
+
+	info, ok, err := linuxActiveConsoleUser()
+	if err != nil || !ok || info.Username != "remote" {
+		t.Fatalf("linuxActiveConsoleUser() = %+v, %v, %v; want the unseated user accepted",
+			info, ok, err)
+	}
 }

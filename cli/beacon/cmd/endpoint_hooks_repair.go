@@ -191,29 +191,36 @@ func linuxActiveConsoleUser() (consoleUserInfo, bool, error) {
 	if u := strings.TrimSpace(os.Getenv("SUDO_USER")); u != "" {
 		return lookupConsoleUser(u)
 	}
-	// loginctl lists sessions; the seated, active one is the graphical or console login. --value
-	// keeps the output a bare field so no parsing of loginctl's table layout is needed.
+	// loginctl lists sessions as: SESSION UID USER SEAT [TTY]. A session with a seat is someone at
+	// the machine; one without is an ssh login or a service. Both can be a real human whose agent
+	// runs there, so both are acceptable -- but a seated session is the better answer when a host
+	// has both, which is why this makes two passes instead of taking whichever loginctl printed
+	// first. An earlier version claimed that ordering in a comment while the code took the first
+	// active session it saw.
 	out, err := exec.Command("loginctl", "list-sessions", "--no-legend").Output()
 	if err != nil {
 		// No logind, or it refused. Not an error worth failing an install over: this is a
 		// best-effort identification, and the caller already handles "unknown".
 		return consoleUserInfo{}, false, nil
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		// SESSION UID USER SEAT ... -- a session with no seat is an ssh login or a service, not
-		// someone at the machine, but it is still a real human whose agent runs there, so it is
-		// accepted after seated sessions have been considered.
-		id := fields[0]
-		st, err := exec.Command("loginctl", "show-session", id, "-p", "State", "--value").Output()
-		if err != nil || strings.TrimSpace(string(st)) != "active" {
-			continue
-		}
-		if info, ok, err := lookupConsoleUser(fields[2]); ok || err != nil {
-			return info, ok, err
+	lines := strings.Split(string(out), "\n")
+	for _, seatedOnly := range []bool{true, false} {
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			seated := len(fields) > 3 && strings.TrimSpace(fields[3]) != ""
+			if seated != seatedOnly {
+				continue
+			}
+			st, err := exec.Command("loginctl", "show-session", fields[0], "-p", "State", "--value").Output()
+			if err != nil || strings.TrimSpace(string(st)) != "active" {
+				continue
+			}
+			if info, ok, err := lookupConsoleUser(fields[2]); ok || err != nil {
+				return info, ok, err
+			}
 		}
 	}
 	return consoleUserInfo{}, false, nil

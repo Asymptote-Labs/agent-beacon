@@ -181,9 +181,15 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 	// path rather than a downgrade. Notarization gives macOS assurance above that; adding a
 	// comparable Linux story means a signing scheme (GPG-signed metadata or Sigstore) with real
 	// key management, and that is a deliberate decision rather than something to bolt on here.
-	if runtime.GOOS != "darwin" {
+	switch {
+	case runtime.GOOS != "darwin":
 		result.Verification = "sha256"
-	} else if !a.SkipGatekeeper {
+	case a.SkipGatekeeper:
+		// Explicitly named rather than left empty. An empty value is indistinguishable from "we
+		// did not record it", and this is the one case where a macOS update carries less assurance
+		// than a macOS update normally does -- exactly the thing a reader needs told.
+		result.Verification = "sha256 (notarization check skipped)"
+	default:
 		result.Verification = "sha256+notarization"
 		if err := a.verifyGatekeeper(ctx, pkgPath, manifest.TeamID); err != nil {
 			a.emit(false, result, err.Error())
