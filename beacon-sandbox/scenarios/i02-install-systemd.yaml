@@ -1,0 +1,54 @@
+id: i02-install-systemd
+# The scenario a Linux user actually lives: a system-mode install managed by systemd, capturing a
+# real agent session.
+#
+# i01 proves `beacon endpoint install` works and that an installed collector receives telemetry,
+# but it runs the supervised backend -- the fallback for containers, where nothing restarts the
+# collector and no unit file is involved. So it says nothing about the systemd path, which is what
+# a package install on a Linux workstation uses.
+#
+# `needs_real_systemd` is what makes this possible. The sandbox provider's own init holds PID 1, and
+# systemd exits immediately when it is not PID 1, so the runner starts a privileged container where
+# systemd genuinely is PID 1 and performs the whole scenario in there. Everything else -- canary,
+# sentinel, quiescence, verdict -- is the same code as every other scenario.
+#
+# What this proves that nothing else can: a systemd unit that systemd accepts and reports active,
+# a collector started by that unit, the installing user's Claude Code pointed at it, and a live
+# session's telemetry landing in the system runtime log.
+install:
+  mode: system
+  service: systemd
+  needs_real_systemd: true
+  expect_status_running: true
+  # Not redundant with the above. The supervised backend also reports running, so without this a
+  # host where systemd detection failed would pass this scenario while testing the fallback.
+  expect_service_kind: systemd
+
+prompt: >-
+  Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}
+sentinel: /home/agent/work/i02.sentinel
+budget_usd: 1.0
+timeout_seconds: 420
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    fields: ["prompt.text", "session.id", "harness.name"]
+    why: >-
+      The end of the chain: systemd started the collector, the install pointed the user's agent at
+      it, and the session's prompt arrived. A failure here means one of those three links is
+      broken, and the install output plus `systemctl status` in the run metadata says which.
+
+  - action: token.usage
+    fields: ["gen_ai.usage.input_tokens", "model"]
+    why: >-
+      Metrics travel a separate pipeline from logs, so a working prompt event does not imply a
+      working metrics path through a unit-started collector.
+
+  - action: command.executed
+    contains: ["{{canary}}"]
+    fields: ["command.command"]
+    why: >-
+      The detection surface that matters most, asserted through the systemd path. Non-optional on
+      purpose: a systemd-managed collector is never allowed to look healthier than the supervised
+      one for the same telemetry.

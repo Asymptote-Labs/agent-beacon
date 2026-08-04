@@ -347,3 +347,27 @@ func TestInstallModeAndServiceAreValidated(t *testing.T) {
 		}
 	}
 }
+
+// A systemd requirement combined with the supervised backend, or without system mode, would
+// silently exercise something other than what the scenario claims — and the run would pass,
+// reporting coverage it does not have.
+func TestNeedsRealSystemdRejectsContradictions(t *testing.T) {
+	base := func(in *Install) Scenario {
+		return Scenario{ID: "i", Prompt: "do a thing", Install: in,
+			Expect: []Expect{{Action: "prompt.submitted", Why: "baseline"}}}
+	}
+	contradictory := []*Install{
+		{NeedsRealSystemd: true, Mode: "system", Service: "none"},
+		{NeedsRealSystemd: true, Mode: "user", Service: "systemd"},
+		{NeedsRealSystemd: true}, // mode defaults to user
+	}
+	for _, in := range contradictory {
+		if err := base(in).Validate(); err == nil {
+			t.Errorf("%+v is contradictory and must be rejected", in)
+		}
+	}
+	// The coherent combination must be accepted.
+	if err := base(&Install{NeedsRealSystemd: true, Mode: "system", Service: "systemd"}).Validate(); err != nil {
+		t.Errorf("system+systemd is the intended combination: %v", err)
+	}
+}

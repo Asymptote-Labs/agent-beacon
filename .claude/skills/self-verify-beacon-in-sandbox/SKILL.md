@@ -52,7 +52,7 @@ confusingly.
 
 ```bash
 go run ./cmd/beacon-sandbox run --scenario s02-bash-command   # one scenario -- do this while iterating
-go run ./cmd/beacon-sandbox run                               # the whole suite: all 7 scenarios, ~20 min
+go run ./cmd/beacon-sandbox run                               # the whole suite, ~30 min
 ```
 
 Pick the scenario matching what changed:
@@ -63,7 +63,14 @@ Pick the scenario matching what changed:
 | File read or write signals | `s03-file-write` or `s04-file-read` |
 | Prompt, session, token, or cost capture | `s01-hello` |
 | Approval or permission handling | `s07-denied-tool` |
+| `endpoint install`, config paths, service startup | `i01-install-supervised` |
+| The systemd backend, unit files, Linux system mode | `i02-install-systemd` |
 | Something broad, or preparing a PR | the whole suite (bare `run`) |
+
+The `s0*` scenarios collect through `beacon ci exec`, a temporary collector. The `i0*` scenarios
+install Beacon first, so they are the only ones that cover installation and service management.
+`i02` runs inside a nested privileged container, because systemd will not start unless it is PID 1
+and the sandbox provider's own init holds that slot — expect it to take several minutes longer.
 
 Other flags: `--repeat N` to tell flaky from broken, `--keep-sandbox` to leave the instance up for
 debugging.

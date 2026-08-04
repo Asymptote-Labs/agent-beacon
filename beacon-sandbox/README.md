@@ -27,7 +27,7 @@ cd cli/beacon && make build-linux-amd64                        # the Beacon bein
 cd ../../beacon-sandbox
 go run ./cmd/beacon-sandbox doctor --fix                       # checks the setup
 go run ./cmd/beacon-sandbox run --scenario s02-bash-command    # one test, ~3 min
-go run ./cmd/beacon-sandbox run                                # all seven, ~20 min
+go run ./cmd/beacon-sandbox run                                # all of them, ~30 min
 ```
 
 `doctor` checks everything the tool needs and prints the exact fix for anything missing, so it is
@@ -97,8 +97,12 @@ Other options are `drop-commands`, `drop-action:<action>`, and `plant-secret`. E
 ## Limitations
 
 Modal only provides Linux x86 machines, so this **cannot test the macOS build** — launchd, the
-signed installer, and notarization are out of reach. It also tests one collection path (the
-temporary collector Beacon uses in CI and cloud agents) rather than a permanently installed Beacon,
-and it confirms the thing it planted was recorded rather than proving nothing else was missed.
+signed installer, and notarization are out of reach. It also confirms the thing it planted was
+recorded rather than proving nothing else was missed.
+
+The `i0*` tests install Beacon for real and cover installation and service management; the `s0*`
+tests use a temporary collector instead, the path Beacon uses in CI and cloud agents. `i02` runs
+inside a nested privileged container, since systemd only starts as PID 1 and Modal's own init holds
+that slot, so it takes several minutes longer than the rest.
 
 The [full guide](https://docs.asymptotelabs.ai/contributing/beacon-sandbox) has the complete list.

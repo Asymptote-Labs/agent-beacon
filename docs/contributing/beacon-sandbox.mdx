@@ -177,7 +177,7 @@ Tests encode what Beacon *should* do. When Beacon's behaviour legitimately impro
 
 ```bash
 go run ./cmd/beacon-sandbox run --scenario s01-hello   # one test
-go run ./cmd/beacon-sandbox run                        # all of them, ~20 min
+go run ./cmd/beacon-sandbox run                        # all of them, ~30 min
 ```
 
 | Test | Covers |
@@ -189,8 +189,35 @@ go run ./cmd/beacon-sandbox run                        # all of them, ~20 min
 | `s05-repo-task` | A multi-step task in a git repository |
 | `s06-subagent` | Sub-agent activity |
 | `s07-denied-tool` | Approvals and denials |
+| `i01-install-supervised` | `beacon endpoint install`, then a session against the installed collector |
+| `i02-install-systemd` | A system-mode install managed by systemd, then a session against it |
 
 Use one test while you are iterating. Run all of them before opening a pull request.
+
+The `s0*` tests collect through a temporary collector — the path Beacon uses in CI and cloud agents.
+The `i0*` tests install Beacon properly first, so they cover things the others cannot: whether config
+lands where Beacon says it did, whether the service actually starts, and whether a permanently
+installed collector receives telemetry.
+
+`i02` is the slowest test by some margin, and the reason is worth knowing. A system-mode install on
+Linux is managed by systemd, and systemd only runs as process 1 — but Modal's own startup process
+holds that slot, so systemd refuses to start. The way around it is a privileged container inside the
+sandbox, where systemd *is* process 1, and running the whole test in there. The tool sets this up for
+you when a test asks for it:
+
+```yaml title="Asking for a real systemd"
+install:
+  mode: system
+  service: systemd
+  needs_real_systemd: true
+  expect_status_running: true
+  expect_service_kind: systemd
+```
+
+`expect_service_kind` is not redundant with `expect_status_running`. Beacon falls back to a plain
+background collector when it finds no service manager, and that fallback also reports itself as
+running — so without naming the backend you expect, a test meant to cover systemd could quietly pass
+while covering the fallback instead.
 
 ## Commands
 
@@ -252,7 +279,7 @@ go test ./...
   Modal only provides Linux machines, so **this cannot test the macOS build**. Anything macOS-specific — launchd, the signed installer, notarization — is out of reach.
 </Warning>
 
-- **It tests one collection path.** Specifically the temporary-collector path Beacon uses in CI and cloud agents, not a permanently installed Beacon.
+- **The systemd tests run nested.** `i02` runs inside a container within the sandbox, so it is slower and needs a few more minutes of patience than the others.
 - **It checks presence, not completeness.** It confirms the thing it planted was recorded. It cannot tell you whether Beacon missed something it never knew to look for.
 - **Linux x86 only.** Modal does not offer a choice of processor architecture.
 - **It costs money and takes minutes.** Each test is a real API session.

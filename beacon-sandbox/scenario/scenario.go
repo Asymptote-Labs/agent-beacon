@@ -52,6 +52,19 @@ type Install struct {
 	Service string `yaml:"service,omitempty"`
 	// ExpectStatusRunning requires the collector service to report running after install.
 	ExpectStatusRunning bool `yaml:"expect_status_running,omitempty"`
+	// ExpectServiceKind requires the endpoint to report this service backend after install.
+	//
+	// Which backend got selected is the substance of a service-manager scenario, and it is not
+	// implied by "running": the supervised fallback also reports running, so a systemd scenario
+	// on a host without systemd would otherwise pass while testing the wrong thing.
+	ExpectServiceKind string `yaml:"expect_service_kind,omitempty"`
+	// NeedsRealSystemd runs the install inside a nested privileged container where systemd is
+	// genuinely PID 1.
+	//
+	// The sandbox provider cannot offer that directly: its own init holds PID 1, so systemctl
+	// refuses. Rather than make a scenario describe VM lanes and Docker, it states the
+	// requirement and the runner arranges it.
+	NeedsRealSystemd bool `yaml:"needs_real_systemd,omitempty"`
 }
 
 // Scenario is one declarative case.
@@ -126,6 +139,22 @@ func (s Scenario) Validate() error {
 			case "", "user", "system":
 			default:
 				return fmt.Errorf("%s: install.mode %q must be user or system", s.ID, s.Install.Mode)
+			}
+			// A systemd requirement with the supervised backend, or without system mode, would
+			// silently exercise something other than what the scenario claims to test.
+			if s.Install.NeedsRealSystemd && s.Install.Service == "none" {
+				return fmt.Errorf("%s: needs_real_systemd with service=none is contradictory; "+
+					"the supervised backend does not use systemd", s.ID)
+			}
+			if s.Install.NeedsRealSystemd && s.Install.Mode != "system" {
+				return fmt.Errorf("%s: needs_real_systemd requires mode=system; a user unit in a "+
+					"container has no logind session to attach to", s.ID)
+			}
+			switch s.Install.ExpectServiceKind {
+			case "", "systemd", "launchd", "none":
+			default:
+				return fmt.Errorf("%s: install.expect_service_kind %q must be systemd, launchd or none",
+					s.ID, s.Install.ExpectServiceKind)
 			}
 			switch s.Install.Service {
 			case "", "auto", "systemd", "launchd", "none":
@@ -272,4 +301,9 @@ func isFilenameByte(b byte) bool {
 		return true
 	}
 	return false
+}
+
+// NeedsRealSystemd reports whether this scenario must run somewhere systemd is genuinely PID 1.
+func (s Scenario) NeedsRealSystemd() bool {
+	return s.Install != nil && s.Install.NeedsRealSystemd
 }
