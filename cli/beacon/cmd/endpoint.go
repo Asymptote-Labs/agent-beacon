@@ -394,7 +394,7 @@ func init() {
 
 	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 
@@ -427,7 +427,7 @@ func init() {
 	registerSplunkFlags(endpointRepairCmd)
 	registerFalconFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.dashboardAddr, "addr", dashboard.DefaultAddr, "Local dashboard listen address")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.dashboardOpen, "open", false, "Open the dashboard in a browser")
@@ -468,7 +468,7 @@ func init() {
 	endpointIntegrationsValidateCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print validation as JSON")
 	for _, c := range []*cobra.Command{endpointCoworkPrintConfigCmd, endpointCoworkSetupCmd, endpointCoworkStatusCmd, endpointCoworkValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointCoworkPrintConfigCmd.Flags().StringVar(&endpointOpts.coworkHeaders, "headers", "", "Optional OTLP headers to show in setup guidance")
@@ -486,7 +486,7 @@ func init() {
 	endpointCoworkStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointOpenClawPrintConfigCmd, endpointOpenClawStatusCmd, endpointOpenClawValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
 	endpointOpenClawPrintConfigCmd.Flags().StringVar(&endpointOpts.openClawEndpoint, "endpoint", "", "OTLP HTTP endpoint to show in setup guidance")
@@ -495,7 +495,7 @@ func init() {
 	endpointOpenClawStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointVSCodePrintConfigCmd, endpointVSCodeSetupCmd, endpointVSCodeStatusCmd, endpointVSCodeValidateCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 		c.Flags().StringVar(&endpointOpts.vscodeEndpoint, "endpoint", "", "OTLP HTTP endpoint for VS Code Copilot")
 		c.Flags().StringVar(&endpointOpts.vscodeWorkspace, "workspace", "", "Workspace path for .vscode/settings.json")
@@ -506,13 +506,13 @@ func init() {
 	endpointVSCodeStatusCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print status as JSON")
 	for _, c := range []*cobra.Command{endpointHooksInstallCmd, endpointHooksUninstallCmd, endpointHooksStatusCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 		c.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "cursor", "Comma-separated hook harnesses")
 		c.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")
 	}
 	endpointHooksRepairInstalledCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-	endpointHooksRepairInstalledCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+	endpointHooksRepairInstalledCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	endpointHooksRepairInstalledCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	endpointHooksRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookHarnesses, "harness", "", "Comma-separated hook harnesses to refresh; empty refreshes already-installed Beacon hooks")
 	endpointHooksRepairInstalledCmd.Flags().StringVar(&endpointOpts.hookLevel, "level", "user", "Hook install level: user or project")

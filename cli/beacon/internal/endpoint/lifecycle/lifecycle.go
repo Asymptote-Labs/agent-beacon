@@ -111,6 +111,11 @@ type Manifest struct {
 	HarnessConfigs []string `json:"harness_configs,omitempty"`
 	ServiceLabel   string   `json:"service_label"`
 	LogPath        string   `json:"log_path"`
+	// LingerEnabled and LingerDetail record whether a systemd --user unit was made to survive
+	// logout. Recorded rather than silently attempted, so status and doctor can report the gap
+	// instead of the user discovering it after their next logout. Absent on other backends.
+	LingerEnabled bool   `json:"linger_enabled,omitempty"`
+	LingerDetail  string `json:"linger_detail,omitempty"`
 }
 
 type fileSnapshot struct {
@@ -218,6 +223,18 @@ func Install(opts InstallOptions) (InstallResult, error) {
 			return InstallResult{}, err
 		}
 		tx.ServiceLoaded = true
+		// A systemd --user unit is torn down when the user logs out unless linger is set, so
+		// without this a user-mode install silently stops collecting at logout. launchd has no
+		// equivalent: its gui/<uid> domain persists for the login session on its own.
+		//
+		// Best-effort and non-fatal: enabling linger needs privileges a plain user may not
+		// have, and refusing to install over it would be worse than collecting until logout.
+		// The outcome is recorded so status and doctor can report the gap rather than leaving
+		// the user to discover it after their next logout.
+		if ok, detail := manager.EnableLingerIfNeeded(); detail != "" {
+			manifest.LingerEnabled = ok
+			manifest.LingerDetail = detail
+		}
 		if err := endpointcollector.WaitUntilReady(cfg, 10*time.Second); err != nil {
 			tx.Rollback(manifest)
 			return InstallResult{}, err
@@ -600,7 +617,7 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 	if grpcAvailable && httpAvailable {
 		return nil
 	}
-	if existingCollectorReady(cfg) {
+	if existingCollectorReady(cfg, kind) {
 		return nil
 	}
 	if err := endpointcollector.WaitForPortsAvailable(cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, 10*time.Second); err != nil {
@@ -609,8 +626,11 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 	return nil
 }
 
-func existingCollectorReady(cfg endpointconfig.Config) bool {
-	if !(service.Manager{UserMode: cfg.UserMode}).Status().Loaded {
+// The kind is threaded through rather than re-detected: preflight already honours an explicit
+// --service=, and auto-detecting here would consult a different backend than the one the install
+// is about to use.
+func existingCollectorReady(cfg endpointconfig.Config, kind service.Kind) bool {
+	if !(service.Manager{UserMode: cfg.UserMode, Kind: kind}).Status().Loaded {
 		return false
 	}
 	status := endpointcollector.CheckStatus(cfg)

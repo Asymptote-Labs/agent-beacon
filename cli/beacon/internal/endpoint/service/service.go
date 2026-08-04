@@ -15,6 +15,7 @@ package service
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -61,6 +62,43 @@ func ParseKind(s string) (Kind, error) {
 		return KindSupervised, nil
 	default:
 		return "", fmt.Errorf("unsupported service kind %q; want auto, launchd, systemd, or none", s)
+	}
+}
+
+// EnableLingerIfNeeded makes a systemd --user unit survive logout, where that applies.
+//
+// Returns ("", ) for every other case -- system mode, and every backend but systemd -- so the
+// caller records nothing rather than reporting a step that was never relevant. launchd needs no
+// equivalent: its gui/<uid> domain persists for the login session by itself.
+func (m Manager) EnableLingerIfNeeded() (bool, string) {
+	if !m.UserMode || m.resolvedKind() != KindSystemd {
+		return false, ""
+	}
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		return false, "could not determine the current user, so logout persistence is unverified"
+	}
+	if LingerEnabled(u.Username) {
+		return true, "linger already enabled for " + u.Username
+	}
+	return EnableLinger(u.Username)
+}
+
+// ServiceNoun names what this backend installs, for user-facing messages.
+//
+// Shared rather than duplicated: the install planner and the doctor fix planner both describe
+// the same artifact, and the codebase already had several independently hardcoded copies of
+// macOS-specific wording that had to be hunted down when systemd support landed.
+func (k Kind) ServiceNoun() string {
+	switch k {
+	case KindLaunchd:
+		return "launchd service definition"
+	case KindSystemd:
+		return "systemd unit definition"
+	case KindSupervised:
+		return "supervised collector state (no service manager on this host)"
+	default:
+		return "collector service definition"
 	}
 }
 

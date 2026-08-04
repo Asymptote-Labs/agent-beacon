@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"fmt"
 	"os"
+	"os/user"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -52,8 +53,31 @@ func Run(cfg endpointconfig.Config) []Check {
 		if path, err := mgr.UnitPath(); err == nil {
 			checks = append(checks, checkFile("systemd_unit", path, true))
 		}
+		// A --user unit stops at logout unless linger is set, and that failure is invisible
+		// until the user next logs out and telemetry quietly stops. Surfaced as a warning
+		// rather than a failure: collecting until logout is degraded, not broken.
+		if cfg.UserMode {
+			checks = append(checks, lingerCheck())
+		}
 	}
 	return checks
+}
+
+func lingerCheck() Check {
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		return Check{Name: "systemd_user_linger", Status: StatusWarn,
+			Message:  "could not determine the current user, so logout persistence is unverified",
+			Evidence: "linger_unknown"}
+	}
+	if service.LingerEnabled(u.Username) {
+		return Check{Name: "systemd_user_linger", Status: StatusOK, Target: u.Username,
+			Message: "user unit will survive logout"}
+	}
+	return Check{Name: "systemd_user_linger", Status: StatusWarn, Target: u.Username,
+		Message:  "linger is not enabled, so the collector stops when this user logs out",
+		Evidence: "linger_disabled",
+		Action:   "sudo loginctl enable-linger " + u.Username}
 }
 
 func checkCollectorHealth(cfg endpointconfig.Config) Check {

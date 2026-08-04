@@ -315,3 +315,35 @@ func TestSentinelBasenameMatchRespectsPathBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// An install scenario reaches the guest as CLI flags, so a typo would fail mid-run after a
+// sandbox has already been paid for. Validate catches it while it is still free.
+func TestInstallModeAndServiceAreValidated(t *testing.T) {
+	base := func(in *Install) Scenario {
+		return Scenario{ID: "i", Prompt: "do a thing", Install: in,
+			Expect: []Expect{{Action: "prompt.submitted", Why: "baseline"}}}
+	}
+	for _, in := range []*Install{
+		{Mode: "systemwide"},
+		{Mode: "root"},
+		{Service: "launchd2"},
+		{Service: "upstart"},
+	} {
+		if err := base(in).Validate(); err == nil {
+			t.Errorf("install %+v must be rejected", in)
+		}
+	}
+	// Every documented spelling must be accepted, including the empty auto-detect default.
+	for _, in := range []*Install{
+		{},
+		{Mode: "user"},
+		{Mode: "system", Service: "systemd"},
+		{Service: "none"},
+		{Service: "auto"},
+		{Mode: "user", Service: "launchd", ExpectStatusRunning: true},
+	} {
+		if err := base(in).Validate(); err != nil {
+			t.Errorf("install %+v must be accepted: %v", in, err)
+		}
+	}
+}

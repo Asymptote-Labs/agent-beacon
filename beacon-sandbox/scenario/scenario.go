@@ -38,10 +38,29 @@ type Expect struct {
 	Why string `yaml:"why,omitempty"`
 }
 
+// Install describes a persistent `beacon endpoint install` to perform before the session,
+// instead of the default ephemeral `beacon ci exec` collector.
+//
+// This is what exercises the parity surface: service manager selection, unit installation,
+// status reporting, and whether a real installed collector actually receives telemetry. A
+// scenario without it tests capture through the CI path, which is a different shipping path
+// and cannot tell you whether `endpoint install` works at all.
+type Install struct {
+	// Mode is "user" (default) or "system". System mode runs as root.
+	Mode string `yaml:"mode,omitempty"`
+	// Service selects the service manager: empty auto-detects, or "systemd" / "none".
+	Service string `yaml:"service,omitempty"`
+	// ExpectStatusRunning requires the collector service to report running after install.
+	ExpectStatusRunning bool `yaml:"expect_status_running,omitempty"`
+}
+
 // Scenario is one declarative case.
 type Scenario struct {
 	ID     string `yaml:"id"`
 	Prompt string `yaml:"prompt"`
+	// Install, when set, performs a persistent endpoint install and runs the session against
+	// it, with no `beacon ci exec` wrapper anywhere.
+	Install *Install `yaml:"install,omitempty"`
 	// Sentinel is a path the agent's work must create. Its presence proves the agent
 	// acted; its absence makes the run inconclusive.
 	Sentinel string `yaml:"sentinel,omitempty"`
@@ -100,6 +119,22 @@ func (s Scenario) Validate() error {
 		if strings.TrimSpace(e.Action) == "" {
 			return fmt.Errorf("%s: expect[%d] is missing action", s.ID, i)
 		}
+		// An unrecognised mode or service would reach the guest as a bad flag and fail mid-run,
+		// after a sandbox has already been paid for. Catch it here instead.
+		if s.Install != nil {
+			switch s.Install.Mode {
+			case "", "user", "system":
+			default:
+				return fmt.Errorf("%s: install.mode %q must be user or system", s.ID, s.Install.Mode)
+			}
+			switch s.Install.Service {
+			case "", "auto", "systemd", "launchd", "none":
+			default:
+				return fmt.Errorf("%s: install.service %q must be auto, systemd, launchd, or none",
+					s.ID, s.Install.Service)
+			}
+		}
+
 		// A setup step that writes the sentinel makes the gate unfalsifiable: the file is present
 		// before the agent runs, so INCONCLUSIVE can never fire and an idle agent is misreported as
 		// a capture failure. s04 shipped with exactly this mistake, so the rule is enforced here

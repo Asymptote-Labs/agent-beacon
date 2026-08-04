@@ -549,3 +549,50 @@ func TestDetectKindMatchesHost(t *testing.T) {
 		}
 	}
 }
+
+// Linger is the one behavior with no launchd counterpart: a systemd --user unit is torn down at
+// logout unless it is set, so a user-mode install silently stops collecting. EnableLinger and
+// LingerEnabled existed but had zero callers, which meant every user-mode systemd install
+// inherited exactly that bug. These pin the wrapper that now invokes them.
+func TestEnableLingerIfNeededOnlyAppliesToSystemdUserUnits(t *testing.T) {
+	// Not applicable: nothing should be attempted or reported, so the caller records nothing.
+	for _, m := range []Manager{
+		{UserMode: false, Kind: KindSystemd}, // system units are not session-scoped
+		{UserMode: true, Kind: KindLaunchd},  // gui/<uid> persists on its own
+		{UserMode: true, Kind: KindSupervised},
+		{UserMode: false, Kind: KindLaunchd},
+	} {
+		ok, detail := m.EnableLingerIfNeeded()
+		if ok || detail != "" {
+			t.Errorf("%+v should not attempt linger, got ok=%v detail=%q", m, ok, detail)
+		}
+	}
+}
+
+// The applicable case must actually report something, or the manifest and doctor would have
+// nothing to show and the gap would stay invisible.
+func TestEnableLingerIfNeededReportsForSystemdUserUnits(t *testing.T) {
+	_, detail := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
+	if detail == "" {
+		t.Error("a systemd user unit must report a linger outcome, whether or not it succeeded")
+	}
+}
+
+// The noun is shared by the install planner and the doctor fix planner. Duplicating it is how
+// macOS-specific wording survived into the Linux paths in the first place.
+func TestServiceNounNamesEachBackend(t *testing.T) {
+	cases := map[Kind]string{
+		KindLaunchd:    "launchd",
+		KindSystemd:    "systemd",
+		KindSupervised: "supervised",
+	}
+	for k, want := range cases {
+		if got := k.ServiceNoun(); !strings.Contains(got, want) {
+			t.Errorf("%s noun = %q, want it to mention %q", k, got, want)
+		}
+	}
+	// An unknown kind must still describe something rather than returning empty.
+	if Kind("weird").ServiceNoun() == "" {
+		t.Error("an unrecognised kind must still yield a description")
+	}
+}

@@ -85,7 +85,7 @@ func init() {
 
 	for _, c := range []*cobra.Command{ingestStatusCmd, ingestEndpointStatusCmd, ingestEndpointUploadCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 		c.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print output as JSON")
 	}

@@ -191,23 +191,46 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		logf("argv sampler failed to start: %v", err)
 	}
 
-	// The collector is started by `beacon ci exec`, which wraps the agent session. That is a
-	// real shipping code path -- it is how Beacon collects in GitHub Actions and cloud agent
-	// sandboxes -- and it needs no persistent service manager, so it works on any host.
-	logf("running session (budget $%.2f, timeout %s)", sc.Budget(), sc.Timeout())
-	res, err := p.Exec(ctx, inst, sessionScript(sc, prompt, logPath), sandbox.ExecOpts{
-		User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
-		PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
-	})
-	if err != nil {
-		logf("session exec error: %v", err)
-	}
-	art.Meta["ci_exec"] = oneLine(res.Stdout)
-	// Recorded explicitly so a failing collector is visible in the run metadata rather than
-	// inferred from a missing log later.
-	art.Meta["ci_exec_rc"] = fmt.Sprintf("%d", res.ExitCode)
-	if res.ExitCode != 0 {
-		logf("beacon ci exec exited %d -- the collected log may be incomplete", res.ExitCode)
+	// Two ways to get a collector, and which one a scenario uses is the whole point of the
+	// distinction. `beacon ci exec` wraps the session in an ephemeral collector -- a real
+	// shipping path, used in GitHub Actions and cloud agent sandboxes, needing no service
+	// manager. A persistent install instead exercises `beacon endpoint install`: service
+	// manager selection, unit installation, status reporting, and whether an installed
+	// collector actually receives telemetry. Nothing else in the suite can tell you that.
+	var res sandbox.Result
+	if sc.Install != nil {
+		installedLog, err := doInstall(ctx, p, inst, sc, agent, &art, logf)
+		if err != nil {
+			return art, err
+		}
+		logPath = installedLog
+		logf("running session against the installed endpoint (budget $%.2f, timeout %s)",
+			sc.Budget(), sc.Timeout())
+		res, err = p.Exec(ctx, inst, plainSessionScript(sc, prompt), sandbox.ExecOpts{
+			User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
+			PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
+		})
+		if err != nil {
+			logf("session exec error: %v", err)
+		}
+		art.Meta["session"] = oneLine(res.Stdout)
+	} else {
+		logf("running session (budget $%.2f, timeout %s)", sc.Budget(), sc.Timeout())
+		var err error
+		res, err = p.Exec(ctx, inst, sessionScript(sc, prompt, logPath), sandbox.ExecOpts{
+			User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
+			PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
+		})
+		if err != nil {
+			logf("session exec error: %v", err)
+		}
+		art.Meta["ci_exec"] = oneLine(res.Stdout)
+		// Recorded explicitly so a failing collector is visible in the run metadata rather
+		// than inferred from a missing log later.
+		art.Meta["ci_exec_rc"] = fmt.Sprintf("%d", res.ExitCode)
+		if res.ExitCode != 0 {
+			logf("beacon ci exec exited %d -- the collected log may be incomplete", res.ExitCode)
+		}
 	}
 
 	// Claude's own result JSON tells us whether the session itself succeeded, which
@@ -549,4 +572,118 @@ func sampleCountOf(verdict string) string {
 		}
 	}
 	return "0"
+}
+
+// doInstall performs a persistent `beacon endpoint install` and returns the runtime log the
+// installed collector writes to.
+//
+// The log path comes from `endpoint status --json` rather than being assumed, because the whole
+// point of an install scenario is to check what Beacon actually did — hardcoding the expected
+// path would make the scenario agree with itself instead of with Beacon.
+func doInstall(ctx context.Context, p sandbox.Provider, inst sandbox.Instance,
+	sc scenario.Scenario, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) (string, error) {
+
+	in := sc.Install
+	system := in.Mode == "system"
+	scope := "--user"
+	if system {
+		scope = "--system"
+	}
+	svc := ""
+	if in.Service != "" {
+		svc = " --service=" + in.Service
+	}
+	// System-mode install requires root; user mode must not have it, or the install would
+	// write system paths while claiming to be a user install.
+	opts := agent
+	if system {
+		opts = sandbox.ExecOpts{User: "root", Dir: image.WorkDir, Timeout: 5 * time.Minute,
+			PathPrepend: image.PathPrepend()}
+	}
+	art.Meta["install_mode"] = in.Mode
+	art.Meta["install_service"] = in.Service
+
+	// Dry run first. It is free, and it is where a plan that advertises the wrong service
+	// manager for the host would show up — so a regression there needs no second scenario.
+	if r, err := p.Exec(ctx, inst, "beacon endpoint install "+scope+svc+" --harness claude --dry-run 2>&1", opts); err == nil {
+		art.Meta["install_dry_run"] = oneLine(r.Stdout)
+		logf("dry-run plan: %s", art.Meta["install_dry_run"])
+	}
+
+	r, err := p.Exec(ctx, inst, "beacon endpoint install "+scope+svc+" --harness claude 2>&1", opts)
+	art.Meta["install_output"] = oneLine(r.Stdout + r.Stderr)
+	if err != nil || r.ExitCode != 0 {
+		logf("install FAILED rc=%d: %s", r.ExitCode, art.Meta["install_output"])
+		return "", fmt.Errorf("endpoint install failed (rc=%d): %s",
+			r.ExitCode, oneLine(r.Stdout+r.Stderr))
+	}
+	logf("install ok: %s", art.Meta["install_output"])
+
+	logPath, err := installedLogPath(ctx, p, inst, scope, opts, in, art, logf)
+	if err != nil {
+		return "", err
+	}
+	// Doctor output is recorded whether or not it passes: on a failure it is the first thing
+	// worth reading, and it costs one exec.
+	if d, err := p.Exec(ctx, inst, "beacon endpoint doctor "+scope+" --json 2>&1", opts); err == nil {
+		art.Meta["install_doctor"] = oneLine(d.Stdout)
+	}
+	return logPath, nil
+}
+
+// installedLogPath reads `endpoint status --json` for the service state and log path.
+//
+// A status that cannot be parsed is not fatal — the run can still proceed against the
+// documented default path — but ExpectStatusRunning is enforced, since a scenario asking for a
+// running service and silently accepting an unparseable status would verify nothing.
+func installedLogPath(ctx context.Context, p sandbox.Provider, inst sandbox.Instance,
+	scope string, opts sandbox.ExecOpts, in *scenario.Install, art *Artifacts,
+	logf func(string, ...any)) (string, error) {
+
+	s, err := p.Exec(ctx, inst, "beacon endpoint status "+scope+" --json 2>&1", opts)
+	if err == nil {
+		art.Meta["install_status"] = oneLine(s.Stdout)
+		var status struct {
+			LogPath string `json:"log_path"`
+			Service struct {
+				Label   string `json:"label"`
+				Loaded  bool   `json:"loaded"`
+				Running bool   `json:"running"`
+				Kind    string `json:"kind"`
+				Message string `json:"message"`
+			} `json:"service"`
+		}
+		if json.Unmarshal([]byte(s.Stdout), &status) == nil {
+			art.Meta["service_kind"] = status.Service.Kind
+			art.Meta["service_label"] = status.Service.Label
+			art.Meta["service_loaded"] = fmt.Sprintf("%v", status.Service.Loaded)
+			art.Meta["service_running"] = fmt.Sprintf("%v", status.Service.Running)
+			logf("service: kind=%s label=%s loaded=%v running=%v %s",
+				status.Service.Kind, status.Service.Label, status.Service.Loaded,
+				status.Service.Running, status.Service.Message)
+			if in.ExpectStatusRunning && !status.Service.Running {
+				return "", fmt.Errorf("service did not report running after install: %s",
+					status.Service.Message)
+			}
+			if status.LogPath != "" {
+				return status.LogPath, nil
+			}
+		}
+	}
+	if in.ExpectStatusRunning {
+		return "", fmt.Errorf("could not read service status, so a running service cannot be " +
+			"confirmed; refusing to report a pass the run did not earn")
+	}
+	logf("status unparseable; falling back to the documented default log path")
+	if in.Mode == "system" {
+		return "/var/log/beacon-agent/runtime.jsonl", nil
+	}
+	return image.AgentHome + "/.beacon/endpoint/logs/runtime.jsonl", nil
+}
+
+// plainSessionScript runs the agent with no collector wrapper, for install scenarios where a
+// persistent collector is already running as a service.
+func plainSessionScript(sc scenario.Scenario, prompt string) string {
+	return "claude " + strings.Join(claudeFlags(sc, prompt), " ") +
+		" > claude-out.json 2> claude-err.txt; echo CLAUDE_RC=$?"
 }
