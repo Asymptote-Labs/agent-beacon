@@ -21,6 +21,7 @@ if [ -z "$ARCH" ]; then
   esac
 fi
 FORMAT="${BEACON_SMOKE_FORMAT:-deb}"
+SMOKE_USER="${BEACON_SMOKE_USER:-beaconsmoke}"
 
 PKG="${BEACON_SMOKE_PKG:-}"
 if [ -z "$PKG" ]; then
@@ -92,7 +93,17 @@ echo "ok: systemd is PID 1"
 # mounts a tmpfs over /tmp once PID 1 starts -- so a file copied to /tmp before that is shadowed
 # and dnf reports it as unopenable. Ubuntu does not do this, which is why only the rpm lane hit it.
 docker cp "$PKG" "$CONTAINER":/var/tmp/beacon."$FORMAT" >/dev/null
-if ! docker exec "$CONTAINER" sh -c "$PKGMGR_INSTALL" >/tmp/beacon-pkg-install.log 2>&1; then
+
+# A human has to exist for the install to have anyone to configure. A system endpoint runs as root,
+# so `endpoint install` configures root's agent settings -- and the postinstall's second step is what
+# points the actual operator's Claude Code at the collector. SUDO_USER is how that operator is
+# identified, and dpkg/rpm pass their environment through to maintainer scripts, so setting it here
+# is the same thing `sudo apt install ./beacon.deb` does.
+docker exec "$CONTAINER" useradd -m -s /bin/bash "$SMOKE_USER" >/dev/null 2>&1 || true
+docker exec "$CONTAINER" test -d "/home/$SMOKE_USER" || {
+  echo "could not create the test user $SMOKE_USER" >&2; exit 1; }
+
+if ! docker exec -e SUDO_USER="$SMOKE_USER" "$CONTAINER" sh -c "$PKGMGR_INSTALL" >/tmp/beacon-pkg-install.log 2>&1; then
   echo "package install failed:" >&2
   tail -30 /tmp/beacon-pkg-install.log >&2
   exit 1
@@ -117,6 +128,24 @@ for f in /etc/beacon/endpoint/config.json /etc/beacon/endpoint/otelcol.yaml; do
   docker exec "$CONTAINER" test -f "$f" || { echo "missing $f" >&2; exit 1; }
 done
 echo "ok: system config written to /etc/beacon/endpoint"
+
+# The step that makes any of this useful. A running collector with nothing exporting to it captures
+# an empty file, and that failure is silent -- status and doctor both look fine.
+SETTINGS="/home/$SMOKE_USER/.claude/settings.json"
+docker exec "$CONTAINER" test -f "$SETTINGS" || {
+  echo "$SETTINGS was not written, so $SMOKE_USER's agent exports nowhere" >&2
+  grep -i "user-config\|could not configure" /tmp/beacon-pkg-install.log >&2 || true
+  exit 1
+}
+docker exec "$CONTAINER" grep -q "127.0.0.1:4317" "$SETTINGS" || {
+  echo "$SETTINGS does not point at the local collector" >&2
+  docker exec "$CONTAINER" cat "$SETTINGS" >&2 || true
+  exit 1
+}
+owner="$(docker exec "$CONTAINER" stat -c %U "$SETTINGS" 2>/dev/null || true)"
+[ "$owner" = "$SMOKE_USER" ] || {
+  echo "$SETTINGS is owned by $owner, so $SMOKE_USER cannot read it" >&2; exit 1; }
+echo "ok: the installing user's Claude Code points at the collector"
 
 # The two commands the docs tell a new user to run. Both must report healthy with no manual setup.
 if ! docker exec "$CONTAINER" /opt/beacon/bin/beacon endpoint status --system --json >/tmp/beacon-status.json 2>&1; then
