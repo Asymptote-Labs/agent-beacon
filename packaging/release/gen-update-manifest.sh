@@ -4,11 +4,16 @@
 # Usage:
 #   gen-update-manifest.sh VERSION TAG REPO TEAM_ID \
 #     darwin_arm64=/path/BeaconEndpointAgent-1.0.6-arm64.pkg \
-#     linux_amd64=/path/beacon_1.0.6_linux_amd64.deb \
-#     linux_arm64=/path/beacon_1.0.6_linux_arm64.deb
+#     linux_amd64_deb=/path/beacon_1.0.6_linux_amd64.deb \
+#     linux_amd64_rpm=/path/beacon_1.0.6_linux_amd64.rpm
 #
 # Keys are GOOS_GOARCH, matching updatecheck.RuntimeArchKey() on the consumer side. A bare arch
 # (arm64=...) is still accepted and treated as darwin, so existing release tooling keeps working.
+#
+# Linux keys carry the package format as well, because .deb and .rpm hosts share an architecture and
+# an unqualified key cannot say which of them an artifact is for. The consumer looks for
+# linux_<arch>_<format> first and only falls back to linux_<arch> when what it points at is
+# installable on that host.
 #
 # Lives under packaging/release/ rather than packaging/macos/ because it now describes artifacts
 # for both platforms.

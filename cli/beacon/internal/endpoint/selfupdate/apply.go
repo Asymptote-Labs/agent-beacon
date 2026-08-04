@@ -141,10 +141,10 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 	}
 	result.ToVersion = manifest.Version
 
-	artifact, ok := manifest.ArtifactFor(updatecheck.RuntimeArchKey())
+	artifact, key, ok := selectArtifact(manifest, a.AllowInsecureTest)
 	if !ok {
-		a.emit(false, result, fmt.Sprintf("no update artifact for %s", updatecheck.RuntimeArchKey()))
-		return result, fmt.Errorf("no update artifact for %s", updatecheck.RuntimeArchKey())
+		a.emit(false, result, fmt.Sprintf("no update artifact this host can install (looked for %s)", key))
+		return result, fmt.Errorf("no update artifact this host can install (looked for %s)", key)
 	}
 
 	// Serialize concurrent updaters.
@@ -448,8 +448,18 @@ func linuxPackageExt() string {
 		return ".rpm"
 	}
 	// Neither is present, so no native install is possible. Assume deb so the resulting failure
-	// names dpkg, which is actionable, rather than the absence of the macOS installer.
+	// names dpkg, which is actionable, rather than the absence of the macOS installer. Callers that
+	// need to know whether an install is possible at all must ask hasPackageManager, not this.
 	return ".deb"
+}
+
+// hasPackageManager reports whether this host has any native package tool.
+func hasPackageManager() bool {
+	if _, err := exec.LookPath("dpkg"); err == nil {
+		return true
+	}
+	_, err := exec.LookPath("rpm")
+	return err == nil
 }
 
 // installDir is the root of the installed tree under the active prefix.
@@ -577,6 +587,58 @@ func versionLineMatches(out, want string) bool {
 		}
 	}
 	return false
+}
+
+// selectArtifact picks the release artifact this host can actually install.
+//
+// One key per architecture is not enough on Linux, because two incompatible package formats share
+// an architecture. A manifest that published only the .deb for linux_arm64 would hand a Fedora host
+// a .deb, and installerCommand would dutifully run dpkg -- which is not installed there. The update
+// would fail at the last step, after downloading and verifying, with an error about a missing
+// program rather than about the wrong format.
+//
+// So a format-qualified key is preferred (linux_arm64_rpm), and the bare architecture key is
+// accepted only when what it points at is installable here. That keeps a single-format manifest
+// working on the platform it was built for while refusing, clearly, on the platform it was not.
+// extractsTarballs is the applier's AllowInsecureTest seam: with it on, `install` expands a tarball
+// into a temp prefix, so a tarball artifact is genuinely installable. It is threaded through rather
+// than assumed, because the answer to "can this host install this" differs between the two modes and
+// guessing either way breaks something real.
+func selectArtifact(m updatecheck.UpdateManifest, extractsTarballs bool) (updatecheck.Artifact, string, bool) {
+	arch := updatecheck.RuntimeArchKey()
+	if runtime.GOOS != "linux" {
+		a, ok := m.ArtifactFor(arch)
+		return a, arch, ok
+	}
+	format := strings.TrimPrefix(linuxPackageExt(), ".")
+	qualified := arch + "_" + format
+	if a, ok := m.ArtifactFor(qualified); ok {
+		return a, qualified, true
+	}
+	if a, ok := m.ArtifactFor(arch); ok && installableHere(a.URL, extractsTarballs) {
+		return a, arch, true
+	}
+	return updatecheck.Artifact{}, qualified, false
+}
+
+// installableHere reports whether a URL names something this host can install.
+//
+// A native package qualifies only in the format this host has a tool for. A tarball qualifies only
+// when the caller extracts tarballs: in production `install` does not, so a .tar.gz reaches
+// installerCommand's default branch and is handed to the macOS `installer`, which cannot open it and
+// does not exist on Linux at all. Accepting one unconditionally would mean downloading and
+// checksum-verifying an artifact and only then discovering it is uninstallable.
+func installableHere(url string, extractsTarballs bool) bool {
+	if strings.HasSuffix(url, ".tar.gz") || strings.HasSuffix(url, ".tgz") {
+		return extractsTarballs
+	}
+	if !strings.HasSuffix(url, ".deb") && !strings.HasSuffix(url, ".rpm") {
+		return false
+	}
+	// linuxPackageExt falls back to .deb when neither tool exists, so the absence of a package
+	// manager has to be checked separately or a .deb would look installable on a host with no dpkg
+	// at all.
+	return hasPackageManager() && strings.HasSuffix(url, linuxPackageExt())
 }
 
 // packageExt names the staged artifact so the installer that runs on it can dispatch correctly.

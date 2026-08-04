@@ -225,19 +225,32 @@ jobs:
           # download them and checksum the bytes that were actually released rather than
           # trusting a value computed somewhere else.
           mkdir -p dist/linux
-          for f in "beacon_${VERSION}_linux_amd64.deb" "beacon_${VERSION}_linux_arm64.deb"; do
-            if gh release download "$TAG" --repo "$REPO" --pattern "$f" --dir dist/linux; then
-              echo "downloaded $f"
-            else
-              echo "::warning::$f not found on the release; omitting it from update-manifest.json"
-            fi
+          # Both formats, both arches. A single artifact per architecture is not enough: .deb and
+          # .rpm hosts share an architecture, and handing an RPM host a .deb makes `endpoint update
+          # --apply` fail at the install step after downloading and verifying.
+          for arch in amd64 arm64; do
+            for fmt in deb rpm; do
+              f="beacon_${VERSION}_linux_${arch}.${fmt}"
+              if gh release download "$TAG" --repo "$REPO" --pattern "$f" --dir dist/linux; then
+                echo "downloaded $f"
+              else
+                echo "::warning::$f not found on the release; omitting it from update-manifest.json"
+              fi
+            done
           done
 
           set -- "$VERSION" "$TAG" "$REPO" "$APPLE_TEAM_ID" \
             "darwin_arm64=$(ls dist/macos/*-${VERSION}-arm64.pkg)"
           for arch in amd64 arm64; do
-            deb="dist/linux/beacon_${VERSION}_linux_${arch}.deb"
-            [ -f "$deb" ] && set -- "$@" "linux_${arch}=$deb"
+            for fmt in deb rpm; do
+              pkg="dist/linux/beacon_${VERSION}_linux_${arch}.${fmt}"
+              # Written as an if, not `[ -f x ] && set -- ...`: under `set -e` a failing AND-list at
+              # the end of a loop body exits the step, which would turn the missing-artifact warning
+              # above into a hard failure of the whole release.
+              if [ -f "$pkg" ]; then
+                set -- "$@" "linux_${arch}_${fmt}=$pkg"
+              fi
+            done
           done
           sh packaging/release/gen-update-manifest.sh "$@" > dist/macos/update-manifest.json
           cat dist/macos/update-manifest.json

@@ -46,14 +46,41 @@ func makeBeaconTarball(t *testing.T, version string) ([]byte, string) {
 
 // manifestServer serves a manifest pointing at /artifact.tar.gz and the artifact.
 func manifestServer(t *testing.T, version, sha string, artifact []byte) *httptest.Server {
+	return manifestServerNamed(t, version, sha, artifact, "/artifact.tar.gz")
+}
+
+// nativeManifestServer publishes the artifact under a name and key this host would really install,
+// for the tests that exercise the production install path rather than the tarball seam.
+//
+// On Linux the artifact key carries the package format, because .deb and .rpm hosts share an
+// architecture. A tarball name would resolve to no artifact at all there, so a test written for
+// macOS's `installer` would fail before reaching what it meant to check.
+func nativeManifestServer(t *testing.T, version, sha string, artifact []byte) *httptest.Server {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		return manifestServerNamed(t, version, sha, artifact, "/artifact.pkg")
+	}
+	ext := linuxPackageExt()
+	return manifestServerNamed(t, version, sha, artifact, "/artifact"+ext,
+		updatecheck.RuntimeArchKey()+"_"+strings.TrimPrefix(ext, "."))
+}
+
+// manifestServerNamed serves one artifact at the given path, keyed by archKey (defaulting to this
+// platform's).
+func manifestServerNamed(t *testing.T, version, sha string, artifact []byte, artifactPath string,
+	archKey ...string) *httptest.Server {
+	t.Helper()
+	key := updatecheck.RuntimeArchKey()
+	if len(archKey) > 0 {
+		key = archKey[0]
+	}
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
 	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"schema":1,"version":%q,"team_id":"TEAMID","artifacts":{%q:{"url":%q,"sha256":%q}}}`,
-			version, updatecheck.RuntimeArchKey(), srv.URL+"/artifact.tar.gz", sha)
+			version, key, srv.URL+artifactPath, sha)
 	})
-	mux.HandleFunc("/artifact.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(artifactPath, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(artifact)
 	})
 	return srv
@@ -256,6 +283,13 @@ func TestApplyHealthFailRollsBack(t *testing.T) {
 }
 
 func TestApplyGatekeeperAbortsBeforeInstall(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		// Gatekeeper is an Apple mechanism, and verifyGatekeeper is skipped elsewhere by design, so
+		// there is no signature step for an installer to run after. The non-Darwin contract --
+		// checksum enforcement still aborts before any installer -- is asserted separately in
+		// TestApplyChecksumMismatchAbortsBeforeInstall.
+		t.Skip("Gatekeeper verification is macOS-only")
+	}
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()
@@ -331,7 +365,9 @@ func TestVerifyGatekeeperFailsStaplerValidationFailure(t *testing.T) {
 
 func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
-	srv := manifestServer(t, "9.9.9", sha, artifact)
+	// The production install path, not the extraction seam -- the stubbed runner below stands in
+	// for the platform's installer. So the artifact has to be named like one this host installs.
+	srv := nativeManifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()
 
 	a := NewApplier("0.0.1")
@@ -350,7 +386,7 @@ func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
 		switch filepath.Base(name) {
 		case "pkgutil":
 			return "Developer ID Installer: Example (TEAMID)", nil
-		case "stapler", "spctl", "installer":
+		case "stapler", "spctl", "installer", "dpkg", "rpm":
 			return "", nil
 		case "beacon":
 			return "beacon version 9.9.9 (new) built on test", nil
@@ -561,5 +597,114 @@ func TestPackageExtPrefersTheURLThenThePlatform(t *testing.T) {
 	}
 	if runtime.GOOS == "linux" && got != ".deb" && got != ".rpm" {
 		t.Errorf("on linux the fallback should be a native package format, got %q", got)
+	}
+}
+
+// Two package formats share one architecture on Linux, so an architecture key alone cannot say
+// which artifact a host can install. These pin the behavior that keeps a Fedora host from
+// downloading, verifying, and then failing to install a .deb.
+func TestSelectArtifactPrefersTheFormatQualifiedKey(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("format-qualified keys only exist on Linux")
+	}
+	arch := updatecheck.RuntimeArchKey()
+	format := strings.TrimPrefix(linuxPackageExt(), ".")
+	m := updatecheck.UpdateManifest{Artifacts: map[string]updatecheck.Artifact{
+		arch:                    {URL: "https://x/wrong.tar.gz", SHA256: strings.Repeat("a", 64)},
+		arch + "_" + format:     {URL: "https://x/right." + format, SHA256: strings.Repeat("b", 64)},
+		arch + "_somethingelse": {URL: "https://x/other.pkg", SHA256: strings.Repeat("c", 64)},
+	}}
+	got, key, ok := selectArtifact(m, false)
+	if !ok {
+		t.Fatal("a manifest with a format-qualified key must resolve")
+	}
+	if key != arch+"_"+format {
+		t.Errorf("key = %q, want the format-qualified one", key)
+	}
+	if !strings.HasSuffix(got.URL, "."+format) {
+		t.Errorf("URL = %q, want the artifact for this host's package format", got.URL)
+	}
+}
+
+func TestSelectArtifactRefusesAForeignPackageFormat(t *testing.T) {
+	if runtime.GOOS != "linux" || !hasPackageManager() {
+		t.Skip("needs a Linux host with a package manager")
+	}
+	// Whichever format this host cannot install.
+	foreign := ".rpm"
+	if linuxPackageExt() == ".rpm" {
+		foreign = ".deb"
+	}
+	m := updatecheck.UpdateManifest{Artifacts: map[string]updatecheck.Artifact{
+		updatecheck.RuntimeArchKey(): {URL: "https://x/pkg" + foreign, SHA256: strings.Repeat("a", 64)},
+	}}
+	if _, key, ok := selectArtifact(m, false); ok {
+		t.Errorf("resolved a %s artifact on a host that cannot install one", foreign)
+	} else if !strings.Contains(key, strings.TrimPrefix(linuxPackageExt(), ".")) {
+		t.Errorf("the refusal names %q; it should name the format this host wanted", key)
+	}
+}
+
+// A tarball under the architecture key must be refused, not accepted. `install` extracts a tarball
+// only under the test seam; in production it goes to the macOS `installer`, which does not exist on
+// Linux. Refusing here means the failure arrives before a download rather than after one.
+func TestSelectArtifactRefusesATarballOnLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-only fallback")
+	}
+	m := updatecheck.UpdateManifest{Artifacts: map[string]updatecheck.Artifact{
+		updatecheck.RuntimeArchKey(): {URL: "https://x/beacon.tar.gz", SHA256: strings.Repeat("a", 64)},
+	}}
+	if _, _, ok := selectArtifact(m, false); ok {
+		t.Error("a tarball is not installable in production and must not resolve")
+	}
+	// With the extraction seam on, the same artifact is installable -- which is why the answer is
+	// threaded through rather than decided from the host alone.
+	if _, _, ok := selectArtifact(m, true); !ok {
+		t.Error("a tarball must resolve when the caller extracts tarballs")
+	}
+}
+
+func TestSelectArtifactOnDarwinUsesTheArchKeyUnchanged(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only behavior")
+	}
+	arch := updatecheck.RuntimeArchKey()
+	m := updatecheck.UpdateManifest{Artifacts: map[string]updatecheck.Artifact{
+		arch: {URL: "https://x/BeaconEndpointAgent.pkg", SHA256: strings.Repeat("a", 64)},
+	}}
+	got, key, ok := selectArtifact(m, false)
+	if !ok || key != arch || !strings.HasSuffix(got.URL, ".pkg") {
+		t.Fatalf("selectArtifact = %+v, %q, %v; macOS must be unchanged", got, key, ok)
+	}
+}
+
+// The platform-independent half of the guarantee TestApplyGatekeeperAbortsBeforeInstall makes on
+// macOS: nothing is installed unless the bytes matched. Gatekeeper adds assurance on macOS and has
+// no Linux equivalent, but SHA-256 is enforced everywhere, and this asserts it on every platform
+// rather than leaving Linux with no coverage of "verify before install".
+func TestApplyChecksumMismatchAbortsBeforeInstall(t *testing.T) {
+	artifact, _ := makeBeaconTarball(t, "9.9.9")
+	// A syntactically valid checksum that does not match the artifact.
+	srv := manifestServer(t, "9.9.9", strings.Repeat("0", 64), artifact)
+	defer srv.Close()
+
+	a := NewApplier("0.0.1")
+	a.ManifestURL = srv.URL + "/manifest.json"
+	a.StageDir = t.TempDir()
+	a.InstallPrefix = t.TempDir()
+	a.LogPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	a.SkipGatekeeper = true // isolate the checksum: this test is not about signatures
+	var calls []string
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, name)
+		return "", nil
+	}
+
+	if _, err := a.Apply(context.Background()); err == nil {
+		t.Fatal("a checksum mismatch must fail the update")
+	}
+	if len(calls) != 0 {
+		t.Errorf("nothing may run after a checksum mismatch; calls=%v", calls)
 	}
 }
