@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
@@ -277,12 +276,18 @@ func TestSupervisedLifecycleStartsAndStopsAProcess(t *testing.T) {
 		t.Fatal("Load with nothing recorded should error")
 	}
 
-	// `sleep` stands in for the collector: long-lived and harmless.
-	sleepBin, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Skip("no sleep binary available")
+	// A stand-in collector: long-lived, harmless, and tolerant of the arguments the loader
+	// actually passes.
+	//
+	// `sleep` itself cannot be used, though it was. The loader starts the recorded program as
+	// `<program> --config <path>`, which every sleep implementation rejects as an invalid interval,
+	// so the child exited immediately and the assertion below only passed when it won a race
+	// against the process being reaped. That made it pass on macOS and fail on a Linux runner.
+	stub := filepath.Join(home, "fake-collector")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexec sleep 300\n"), 0o755); err != nil {
+		t.Fatalf("write stub collector: %v", err)
 	}
-	if _, err := m.WriteUnit(sleepBin, "300"); err != nil {
+	if _, err := m.WriteUnit(stub, "300"); err != nil {
 		t.Fatalf("WriteUnit: %v", err)
 	}
 	if err := m.Load(); err != nil {

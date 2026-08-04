@@ -147,6 +147,23 @@ owner="$(docker exec "$CONTAINER" stat -c %U "$SETTINGS" 2>/dev/null || true)"
   echo "$SETTINGS is owned by $owner, so $SMOKE_USER cannot read it" >&2; exit 1; }
 echo "ok: the installing user's Claude Code points at the collector"
 
+# The hook half of the same step, and the only free coverage of the root-side child-process launch.
+# Installing hooks for another user runs the CLI as them -- via runuser when root on Linux, since a
+# minimal Debian or RPM system may have no sudo at all. If that launch silently did nothing, the
+# native config above would still be written and this would be the only signal.
+docker exec "$CONTAINER" grep -q '"hooks"' "$SETTINGS" || {
+  echo "$SETTINGS has no hooks block, so hook telemetry was not installed for $SMOKE_USER" >&2
+  grep -i "hook" /tmp/beacon-pkg-install.log >&2 || true
+  exit 1
+}
+ADAPTER="/home/$SMOKE_USER/.beacon/endpoint/hooks/beacon-hooks"
+docker exec "$CONTAINER" test -x "$ADAPTER" || {
+  echo "$ADAPTER is missing or not executable, so the configured hooks cannot run" >&2; exit 1; }
+adapter_owner="$(docker exec "$CONTAINER" stat -c %U "$ADAPTER" 2>/dev/null || true)"
+[ "$adapter_owner" = "$SMOKE_USER" ] || {
+  echo "$ADAPTER is owned by $adapter_owner, not $SMOKE_USER" >&2; exit 1; }
+echo "ok: hooks installed for the user and runnable by them"
+
 # The two commands the docs tell a new user to run. Both must report healthy with no manual setup.
 if ! docker exec "$CONTAINER" /opt/beacon/bin/beacon endpoint status --system --json >/tmp/beacon-status.json 2>&1; then
   echo "endpoint status failed:" >&2; cat /tmp/beacon-status.json >&2; exit 1
