@@ -5,7 +5,9 @@ description: "Inspect local Beacon endpoint health, diagnostics, and runtime log
 
 ## Command Overview
 
-`beacon endpoint status` reports the current local endpoint configuration, collector status, launchd service state, discovered harnesses, diagnostics, destination status, and the last observed Beacon event.
+`beacon endpoint status` reports the current local endpoint configuration, collector status, service state, discovered harnesses, diagnostics, destination status, and the last observed Beacon event.
+
+The service state names the backend it found: `launchd` on macOS, `systemd` on Linux, or `supervised` where there is no init system to register with. A supervised collector is reported as such rather than as a healthy service, because nothing restarts it.
 
 ```bash title="Command syntax"
 beacon endpoint status
@@ -54,7 +56,7 @@ Status includes:
 - Config path and runtime log path
 - Runtime-log source warnings if a system collector may be writing OTLP events to a different log
 - Collector health and configured OTLP ports
-- launchd service status
+- Service status, and which service manager it came from
 - Discovered agent harnesses, including Beacon-managed or customer-managed telemetry state for Gemini CLI, VS Code Copilot, GitHub Copilot CLI, and Factory Droid when present
 - Endpoint diagnostics
 - Destination configuration in JSON output, including Splunk HEC or Falcon LogScale HEC endpoint, index, source, and sourcetype when configured

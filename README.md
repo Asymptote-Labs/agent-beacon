@@ -162,8 +162,14 @@ Agent Beacon is designed for Security and IT teams to deploy and validate
 through standard MDM workflows.
 
 Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
-`.pkg` to GitHub Releases for MDM/manual download. Homebrew and release archives
-remain available for CLI installs across supported macOS/Linux architectures.
+`.pkg` to GitHub Releases for MDM/manual download, along with `.deb` and `.rpm`
+packages for Linux on amd64 and arm64. Homebrew and release archives remain
+available for CLI installs across supported macOS/Linux architectures.
+
+Installing a Linux package performs the system-mode install itself: it registers
+and starts a systemd unit, writes configuration to `/etc/beacon/endpoint`, and
+points the installing user's agent runtimes at the local collector. See the
+[Linux install guide](https://docs.asymptotelabs.ai/cli/endpoint-linux).
 
 | MDM platform | Support path |
 | --- | --- |

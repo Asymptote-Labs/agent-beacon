@@ -24,16 +24,16 @@ Doctor verifies:
 - Collector configuration file
 - Runtime JSONL log path
 - Runtime log permissions
-- launchd plist on macOS
+- Service definition: launchd plist on macOS, systemd unit on Linux
 - Configured harness telemetry and recent observed events
 
 The runtime log itself can be missing before the first event is written. In that case, doctor reports a warning instead of a hard failure.
 
 ## Fix mode
 
-`beacon endpoint doctor --fix` plans and applies safe remediations for supported findings. It can create a missing runtime log and, on macOS, recreate managed collector configuration and launchd service files when the endpoint configuration is valid.
+`beacon endpoint doctor --fix` plans and applies safe remediations for supported findings. It can create a missing runtime log, and recreate managed collector configuration and the service definition — a launchd plist or a systemd unit — when the endpoint configuration is valid.
 
-Fix mode deliberately skips cases that need operator intent, such as invalid endpoint configuration, missing harness setup, missing observed runtime events, unsafe runtime log permissions, or non-macOS service repair. If a collector service repair fails, Beacon rolls back the files and service state it changed where possible, then refreshes doctor results so the printed checks reflect any partial fixes that succeeded.
+Fix mode deliberately skips cases that need operator intent, such as invalid endpoint configuration, missing harness setup, missing observed runtime events, unsafe runtime log permissions, or service repair on a host with no service manager to repair. If a collector service repair fails, Beacon rolls back the files and service state it changed where possible, then refreshes doctor results so the printed checks reflect any partial fixes that succeeded.
 
 JSON output includes applied and skipped fix details so deployment scripts can distinguish remediated checks from findings that still need manual action.
 

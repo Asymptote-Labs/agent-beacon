@@ -329,6 +329,7 @@
                 "root": "cli/endpoint",
                 "pages": [
                   "cli/endpoint-install",
+                  "cli/endpoint-linux",
                   "cli/endpoint-status",
                   "cli/endpoint-doctor",
                   "cli/endpoint-inventory",
