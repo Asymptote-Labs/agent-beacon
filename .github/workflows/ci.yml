@@ -96,6 +96,26 @@ jobs:
             fi
           done
 
+  beacon-sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: beacon-sandbox/go.mod
+      # These tests are hermetic: no Modal account, no Anthropic key, no sandbox, and no
+      # paid resources. (Go module downloads still happen, as in every other job here.)
+      # They gate because they are what makes a green verification run mean
+      # something -- the adversarial cases assert a damaged log still fails, so
+      # if they rot, the sandbox can pass without having checked anything.
+      # The end-to-end sandbox run itself costs real money and is not run in CI.
+      - name: Test beacon-sandbox
+        working-directory: beacon-sandbox
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+
   cross-build:
     runs-on: ubuntu-latest
     strategy:
