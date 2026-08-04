@@ -236,6 +236,23 @@ func LingerEnabled(username string) bool {
 	return strings.EqualFold(strings.TrimSpace(out), "yes")
 }
 
+// systemdArg renders one value as a single ExecStart argument.
+//
+// systemd splits ExecStart on whitespace, so an unquoted path containing a space becomes two
+// arguments and the unit fails with a confusing "No such file or directory". That is not exotic:
+// a user-mode install lives under the user's home directory, and `--collector` takes an arbitrary
+// path from the caller.
+//
+// Double quotes are systemd's own quoting, inside which backslash escapes apply -- so both the
+// quote and the backslash have to be escaped. `%` is separate: it introduces a unit specifier
+// anywhere on the line, quoted or not, and is escaped by doubling.
+func systemdArg(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	value = strings.ReplaceAll(value, "%", "%%")
+	return `"` + value + `"`
+}
+
 // unitFile renders the collector unit.
 func unitFile(program, configPath string, userMode bool) string {
 	var b strings.Builder
@@ -247,7 +264,7 @@ func unitFile(program, configPath string, userMode bool) string {
 	b.WriteString("After=network.target\n")
 	b.WriteString("\n[Service]\n")
 	b.WriteString("Type=simple\n")
-	fmt.Fprintf(&b, "ExecStart=%s --config %s\n", program, configPath)
+	fmt.Fprintf(&b, "ExecStart=%s --config %s\n", systemdArg(program), systemdArg(configPath))
 	// KeepAlive equivalent.
 	b.WriteString("Restart=always\n")
 	b.WriteString("RestartSec=5\n")

@@ -387,7 +387,8 @@ func TestSystemdLabelAndUnitPath(t *testing.T) {
 func TestSystemdUnitPreservesLaunchdSemantics(t *testing.T) {
 	content := unitFile("/opt/beacon/bin/beacon-otelcol", "/etc/beacon/endpoint/otelcol.yaml", false)
 	for _, want := range []string{
-		"ExecStart=/opt/beacon/bin/beacon-otelcol --config /etc/beacon/endpoint/otelcol.yaml",
+		// Quoted, so systemd takes each path as one argument -- see systemdArg.
+		`ExecStart="/opt/beacon/bin/beacon-otelcol" --config "/etc/beacon/endpoint/otelcol.yaml"`,
 		"Restart=always",             // KeepAlive
 		"WantedBy=multi-user.target", // RunAtLoad
 		"StandardOutput=journal",     // replaces /tmp/<label>.out
@@ -634,5 +635,55 @@ func TestEnableLingerNeverReportsAnEmptyDetailWhenItApplies(t *testing.T) {
 	}
 	if _, detail := EnableLinger("anyone"); detail == "" {
 		t.Error("without systemd as PID 1, EnableLinger should still say why it did nothing")
+	}
+}
+
+// systemd splits ExecStart on whitespace, so a path containing a space silently becomes two
+// arguments and the unit fails with "No such file or directory". That is not an exotic input: a
+// user-mode install lives under the user's home, and --collector takes an arbitrary path.
+func TestSystemdUnitQuotesExecStartArguments(t *testing.T) {
+	program := "/home/first last/.beacon/endpoint/beacon-otelcol"
+	config := "/home/first last/.beacon/endpoint/otelcol.yaml"
+	unit := unitFile(program, config, true)
+
+	var execStart string
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "ExecStart=") {
+			execStart = line
+		}
+	}
+	if execStart == "" {
+		t.Fatal("unit has no ExecStart line")
+	}
+	// Each path must arrive as one quoted argument, not as bare text systemd would split.
+	for _, want := range []string{`"` + program + `"`, `"` + config + `"`} {
+		if !strings.Contains(execStart, want) {
+			t.Errorf("ExecStart does not carry %s as a single quoted argument:\n%s", want, execStart)
+		}
+	}
+}
+
+// A `%` in a path is a unit specifier prefix anywhere on the line, quoted or not, so it has to be
+// doubled or systemd expands it into something else entirely.
+func TestSystemdArgEscapesSpecifiersAndQuotes(t *testing.T) {
+	cases := map[string]string{
+		"/opt/beacon/bin/beacon": `"/opt/beacon/bin/beacon"`,
+		"/tmp/100% sure/beacon":  `"/tmp/100%% sure/beacon"`,
+		`/tmp/quote"here/beacon`: `"/tmp/quote\"here/beacon"`,
+		`/tmp/back\slash/beacon`: `"/tmp/back\\slash/beacon"`,
+	}
+	for in, want := range cases {
+		if got := systemdArg(in); got != want {
+			t.Errorf("systemdArg(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The updater unit is written by a separate function and had the same defect.
+func TestUpdaterUnitQuotesExecStart(t *testing.T) {
+	program := "/home/first last/bin/beacon"
+	unit := updaterServiceUnit(program)
+	if !strings.Contains(unit, `ExecStart="`+program+`" endpoint update --scheduled`) {
+		t.Errorf("updater ExecStart does not quote the program path:\n%s", unit)
 	}
 }

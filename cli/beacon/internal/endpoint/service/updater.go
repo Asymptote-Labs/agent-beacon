@@ -248,7 +248,7 @@ ExecStart=%s endpoint update --scheduled
 StandardOutput=journal
 StandardError=journal
 User=root
-`, program)
+`, systemdArg(program))
 }
 
 // updaterTimerUnit schedules the job at the same business-hour intervals the launchd plist

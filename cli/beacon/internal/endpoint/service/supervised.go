@@ -128,7 +128,13 @@ func (b supervisedBackend) load(userMode bool) error {
 	if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
 		cmd.Stdout = f
 		cmd.Stderr = f
-		defer f.Close()
+		// Discarding this Close error is correct rather than sloppy, which is worth saying because
+		// a write handle closed without checking normally is a data-loss bug. cmd.Start duplicates
+		// the descriptor into the child, so this handle is the parent's copy and the parent never
+		// writes a byte through it -- there is nothing buffered for a close to fail to flush. The
+		// child holds the descriptor that matters and keeps it for its lifetime. Closing here is
+		// what stops the parent leaking a descriptor.
+		defer func() { _ = f.Close() }()
 	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start supervised collector: %w", err)
