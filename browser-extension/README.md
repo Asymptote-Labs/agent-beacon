@@ -9,23 +9,56 @@ It ships with a **fully automated, self-verifying build/test loop**: recorded ch
 replayed through the real, loaded extension in headless Chromium and asserted against — no login,
 no API cost, deterministic.
 
-## How it reaches Beacon
+## Architecture
 
-The extension never writes files (it can't — extensions are sandboxed). Instead its service
-worker POSTs **OTLP GenAI logs** to the beacon collector already listening on
-`http://127.0.0.1:4318/v1/logs`, which normalizes, redacts, rotates, and forwards them exactly
-like every other source.
+The extension never writes files (it can't — extensions are sandboxed). Instead its service worker
+POSTs **OTLP GenAI logs** to the Beacon collector already listening on `http://127.0.0.1:4318/v1/logs`,
+which normalizes, redacts, rotates, and forwards them exactly like every other source.
 
+```mermaid
+flowchart TB
+    subgraph PAGE["Chat page — claude.ai / chatgpt.com"]
+        direction TB
+        FETCH["site's streamed SSE response (window.fetch)"]
+        MAIN["interceptor.js · MAIN world<br/>monkeypatch fetch → response.clone() tee"]
+        ISO["content.js · ISOLATED world<br/>validate + relay"]
+        FETCH -->|clone stream| MAIN
+        MAIN -->|window.postMessage| ISO
+    end
+
+    subgraph SW["Extension service worker (background)"]
+        direction TB
+        ASM["assembler.ts<br/>accumulate per (tab, request)"]
+        ADP["per-site adapter · claude.ts / chatgpt.ts<br/>parse SSE → ChatTurn"]
+        NRM["normalize.ts — pure, site-agnostic<br/>ChatTurn → OTLP GenAI logs<br/>prompt.submitted · agent.response.completed · tool.invoked"]
+        DLV["delivery.ts<br/>durable queue (chrome.storage) + retry (chrome.alarms)"]
+        ASM --> ADP --> NRM --> DLV
+    end
+
+    subgraph BEACON["Local Beacon agent (already running)"]
+        direction TB
+        COL["beacon-otelcol<br/>OTLP receiver · 127.0.0.1:4318"]
+        JSONL["runtime.jsonl<br/>normalize · redact · rotate"]
+        VEC["Vector forwarders"]
+        COL --> JSONL --> VEC
+    end
+
+    subgraph DOWN["Downstream"]
+        direction TB
+        OBJ["S3 / GCS"]
+        DASH["ClickHouse → telemetry dashboard"]
+        OBJ --> DASH
+    end
+
+    ISO -->|"chrome.runtime.sendMessage (BEACON_RAW)"| ASM
+    DLV -->|"OTLP/HTTP POST /v1/logs"| COL
+    VEC --> OBJ
 ```
-claude.ai / chatgpt.com page
-  │  interceptor.js (MAIN world) — tees the streamed SSE via response.clone()
-  ▼
-content.js (ISOLATED world) — relays raw events to the service worker
-  ▼
-service worker — per-site adapter parses SSE → ChatTurn → normalize() → OTLP → batched POST
-  ▼
-http://127.0.0.1:4318/v1/logs  →  beacon-otelcol  →  runtime.jsonl  →  Vector → GCS/S3
-```
+
+**Two capture surfaces per page:** the **MAIN-world** `interceptor.js` runs in the page's own JS
+context so it can tee `window.fetch`'s streamed SSE via `response.clone()`; the **ISOLATED-world**
+`content.js` holds the privileged `chrome.runtime` channel to the service worker. Everything from
+`ChatTurn` onward is **site-agnostic** — only the per-site adapters know each site's wire format.
 
 ## Setup
 
