@@ -32,7 +32,10 @@ const SITES: Record<string, SiteConfig> = {
   },
   chatgpt: {
     startUrl: 'https://chatgpt.com/',
-    isCompletion: (u) => /\/backend-api\/(conversation|f\/conversation)\b/.test(u),
+    // The message-send endpoint is a POST to /backend-api/conversation (or the
+    // /f/conversation variant), NOT sub-resources like /conversation/init,
+    // /conversation/{id}, or /conversation/gen_title — hence the end/query anchor.
+    isCompletion: (u) => /\/backend-(api|anon)\/(f\/)?conversation(?:\?|$)/.test(u),
   },
 };
 
@@ -76,7 +79,7 @@ async function main() {
   const pending = new Map<string, { url: string; postData?: string }>();
 
   client.on('Network.requestWillBeSent', (e: any) => {
-    if (cfg.isCompletion(e.request.url)) {
+    if ((e.request.method || '').toUpperCase() === 'POST' && cfg.isCompletion(e.request.url)) {
       pending.set(e.requestId, { url: e.request.url, postData: e.request.postData });
     }
   });

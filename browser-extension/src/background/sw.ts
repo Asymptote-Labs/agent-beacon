@@ -2,6 +2,7 @@
 // completed turns to the durable delivery queue.
 
 import '../adapters/claude.js'; // registers the Claude adapter (side effect)
+import '../adapters/chatgpt.js'; // registers the ChatGPT adapter (side effect)
 import type { ChatTurn, RelayMessage, Settings } from '../shared/types.js';
 import { getSettings, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';

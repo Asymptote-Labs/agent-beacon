@@ -1,0 +1,24 @@
+event: delta_encoding
+data: "v1"
+
+data: {"type": "resume_conversation_token", "kind": "topic", "token": "REDACTED", "conversation_id": "6a73b75a-18d8-83ea-bbcf-984208806963"}
+
+event: delta
+data: {"p": "", "o": "add", "v": {"message": {"id": "seed-system", "author": {"role": "system", "name": null, "metadata": {}}, "content": {"content_type": "text", "parts": [""]}, "status": "finished_successfully", "recipient": "all", "metadata": {}}}}
+
+event: delta
+data: {"v": {"message": {"id": "asst-0001", "author": {"role": "assistant", "name": null, "metadata": {}}, "content": {"content_type": "text", "parts": [""]}, "status": "in_progress", "recipient": "all", "metadata": {"model_slug": "gpt-5-6-thinking"}}}}
+
+event: delta
+data: {"p": "/message/content/parts/0", "o": "append", "v": "Good evening"}
+
+event: delta
+data: {"v": "! Hello to you as well."}
+
+event: delta
+data: {"o": "patch", "p": "", "v": [{"p": "/message/content/parts/0", "o": "append", "v": " Hope your day is going well."}, {"p": "/message/status", "o": "replace", "v": "finished_successfully"}, {"p": "/message/end_turn", "o": "replace", "v": true}, {"p": "/message/metadata", "o": "append", "v": {"search_result_groups": []}}]}
+
+data: {"type": "message_stream_complete", "conversation_id": "6a73b75a-18d8-83ea-bbcf-984208806963"}
+
+data: [DONE]
+

@@ -37,7 +37,9 @@ export function adapterForHost(host: string): SiteAdapter | undefined {
 /** Permissive request predicate for the MAIN-world interceptor (which is
  *  site-agnostic). The SW's adapter makes the authoritative decision. */
 export function looksLikeChatRequest(url: string): boolean {
-  return /(\/backend-api\/conversation|\/backend-anon\/conversation|chat_conversations\/.+\/(completion|retry_completion)|\/completion\b)/.test(
+  // Over-matches on purpose (the SW's adapter.matchesRequest makes the precise
+  // call); must include ChatGPT's /f/conversation variant so it gets teed.
+  return /(\/backend-(api|anon)\/(f\/)?conversation|chat_conversations\/.+\/(completion|retry_completion)|\/completion\b)/.test(
     url,
   );
 }

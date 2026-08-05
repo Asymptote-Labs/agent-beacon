@@ -51,16 +51,16 @@ export async function startReplayServer(): Promise<ReplayServer> {
   const server = https.createServer({ key, cert }, (req, res) => {
     const url = new URL(req.url ?? '/', 'https://claude.ai');
 
-    // The completion endpoint: stream the recorded SSE for that conversation.
-    if (req.method === 'POST' && url.pathname.includes('/chat_conversations/')) {
-      const convId = url.pathname.match(/chat_conversations\/([^/]+)\//)?.[1] ?? '';
-      const c = cases.get(convId);
-      if (!c) {
-        res.writeHead(404).end('no case for conversation');
-        return;
+    // The completion endpoint: match the POST path against a registered case's
+    // completion path (site-agnostic — Claude embeds the conv id in the path;
+    // ChatGPT posts to a fixed /backend-api/f/conversation).
+    if (req.method === 'POST') {
+      for (const c of cases.values()) {
+        if (url.pathname === c.completionPath.replace('{conv}', c.conversationId)) {
+          streamFixture(res, c);
+          return;
+        }
       }
-      streamFixture(res, c);
-      return;
     }
 
     // Anything else → the chat page for the requested (or default) conversation.
@@ -125,6 +125,19 @@ function chunkify(body: string): string[] {
 /** Minimal page that mirrors a chat message list and fires the completion fetch. */
 function pageHtml(c: ReplayCase): string {
   const completionUrl = c.completionPath.replace('{conv}', c.conversationId);
+  // Per-site request body: ChatGPT posts messages[].content.parts (conv id comes
+  // back in the stream); Claude posts {prompt, conversation_id}.
+  const bodyStr =
+    c.site === 'chatgpt'
+      ? JSON.stringify({
+          action: 'next',
+          conversation_id: null,
+          model: 'gpt-5-6-thinking',
+          messages: [
+            { author: { role: 'user' }, content: { content_type: 'text', parts: [c.prompt] } },
+          ],
+        })
+      : JSON.stringify({ prompt: c.prompt, conversation_id: c.conversationId });
   return `<!doctype html>
 <html>
   <head><meta charset="utf-8" /><title>${c.site} (replay)</title></head>
@@ -141,9 +154,7 @@ function pageHtml(c: ReplayCase): string {
         const init = {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt: ${JSON.stringify(c.prompt)}, conversation_id: ${JSON.stringify(
-            c.conversationId,
-          )} }),
+          body: ${JSON.stringify(bodyStr)},
         };
         const res = await ${
           c.requestStyle === 'request' ? 'fetch(new Request(url, init))' : 'fetch(url, init)'
