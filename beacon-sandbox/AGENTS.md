@@ -59,11 +59,13 @@ real money on the user's account, so:
 | File read or write signals | `--scenario s03-file-write` or `s04-file-read` |
 | Prompt, session, token, or cost capture | `--scenario s01-hello` |
 | Approval or permission handling | `--scenario s07-denied-tool` |
+| `endpoint install`, config paths, service startup | `--scenario i01-install-supervised` |
+| The systemd backend, unit files, Linux system mode | `--scenario i02-install-systemd` |
 | Something broad, or preparing a PR | the whole suite (no `--scenario`) |
 
 ```bash
 go run ./cmd/beacon-sandbox run --scenario s02-bash-command   # one scenario
-go run ./cmd/beacon-sandbox run                               # the whole suite: all 7, ~20 min, ~$0.50
+go run ./cmd/beacon-sandbox run                               # the whole suite, ~30 min, ~$0.70
 ```
 
 `run` with no `--scenario` is the suite command. Other flags: `--repeat N` to tell flaky from

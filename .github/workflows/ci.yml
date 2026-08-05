@@ -143,6 +143,101 @@ jobs:
         working-directory: cli/beacon
         run: make ${{ matrix.make_target }}
 
+  linux-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      # The embedded hooks binary must match the platform under test: the CLI validates its
+      # architecture at runtime, so a macOS placeholder fails hook installation on Linux.
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon
+        run: make build-hooks-current
+      - name: Test beacon CLI on Linux
+        working-directory: cli/beacon
+        run: go test ./...
+      - name: Test endpoint packages with the race detector
+        working-directory: cli/beacon
+        run: go test -race ./internal/endpoint/...
+      - name: Test hook adapter on Linux
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Test collector exporter on Linux
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
+      - name: Test observe SDK and threat rules on Linux
+        working-directory: pkg/asymptoteobserve
+        run: go test ./...
+
+  # Exercises the real systemd install path: unit generation, systemctl enable/active,
+  # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
+  # PID 1, which only a privileged container provides -- the GitHub runner's own systemd is not
+  # ours to install units into.
+  linux-systemd-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Build Linux beacon binary
+        working-directory: cli/beacon
+        run: make build-linux-amd64
+      - name: Build collector for Linux
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          cd collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist. A fresh checkout
+          # has no dist/ at all, which is why this only failed in CI.
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+          mkdir -p dist/beacon-otelcol/linux_amd64
+          cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol
+      - name: systemd endpoint smoke test
+        env:
+          BEACON_SMOKE_ARCH: amd64
+        run: sh packaging/linux/smoke-systemd.sh
+
+  # Installs the built .deb in a container where systemd is PID 1 and asserts that installing the
+  # package alone yields a running system-mode endpoint. smoke-systemd covers the service backend;
+  # this covers the package postinstall doing it for the user, which is what they actually do.
+  linux-package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Build collector for Linux
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          cd collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist.
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+            mkdir -p dist/beacon-otelcol/linux_$arch
+            cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_$arch/beacon-otelcol
+          done
+          # The goreleaser before-hook stages all four targets, so darwin must exist too.
+          for arch in amd64 arm64; do
+            mkdir -p dist/beacon-otelcol/darwin_$arch
+            cp dist/beacon-otelcol/linux_$arch/beacon-otelcol dist/beacon-otelcol/darwin_$arch/beacon-otelcol
+          done
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          install-only: true
+      - name: Build packages
+        working-directory: cli/beacon
+        run: goreleaser release --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+      - name: Install the .deb and verify the endpoint
+        env:
+          BEACON_SMOKE_ARCH: amd64
+        run: sh packaging/linux/smoke-package.sh
+
   package-smoke:
     runs-on: macos-latest
     steps:

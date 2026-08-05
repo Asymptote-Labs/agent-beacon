@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -77,8 +76,8 @@ type plannedAction struct {
 }
 
 type repairServiceManager interface {
-	PlistPath() (string, error)
-	WritePlist(program, configPath string) (string, error)
+	UnitPath() (string, error)
+	WriteUnit(program, configPath string) (string, error)
 	Load() error
 	Unload() error
 }
@@ -778,7 +777,7 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func plannedInstallActions(repair bool) []plannedAction {
+func plannedInstallActions(repair bool, kind service.Kind) []plannedAction {
 	cfg := endpointconfig.Default(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
@@ -788,9 +787,18 @@ func plannedInstallActions(repair bool) []plannedAction {
 	if repair {
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "repair unloads existing endpoint service if present"})
 	}
+
+	// The plan has to reflect the service manager that will actually be used. It previously
+	// announced a launchd plist on every platform without consulting GOOS, so a Linux
+	// --dry-run advertised steps that could not execute.
+	mgr := service.Manager{UserMode: cfg.UserMode, Kind: kind}
+	serviceAction := plannedAction{Action: "write_unit", Message: mgr.ResolvedKind().ServiceNoun()}
+	if unitPath, err := mgr.UnitPath(); err == nil {
+		serviceAction.Target = unitPath
+	}
 	actions = append(actions,
 		plannedAction{Action: "write_file", Target: cfg.Collector.ConfigPath, Message: "collector configuration"},
-		plannedAction{Action: "write_plist", Message: "launchd service definition"},
+		serviceAction,
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
 	)
 	for _, h := range otlpTargets {
@@ -1127,12 +1135,23 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 			} else if check.Evidence == "last_event_missing" {
 				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
 			}
-		case "collector_config", "launchd_plist", "collector_health", "collector_reachability", "service":
-			if runtime.GOOS != "darwin" {
-				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "launchd service repair is only available on macOS"})
-			} else if configUsable {
-				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and launchd service"})
-			} else {
+		// systemd_unit belongs here alongside launchd_plist: diagnostics emits whichever the
+		// resolved backend uses, and omitting it meant a broken systemd unit produced neither a
+		// fix nor a skip -- it fell through the switch and was silently unreported.
+		//
+		// The repair itself is platform-neutral (repairCollectorServiceFromStatus goes through
+		// UnitPath/WriteUnit), so the check is whether a service manager is usable here rather
+		// than what the OS is called. The old GOOS gate additionally printed "launchd service
+		// repair is only available on macOS", which stopped being true when systemd support
+		// landed.
+		case "collector_config", "launchd_plist", "systemd_unit", "collector_health", "collector_reachability", "service":
+			mgr := service.Manager{UserMode: status.RuntimeLog.EffectiveUserMode}
+			switch {
+			case !mgr.Available():
+				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: mgr.UnsupportedReason()})
+			case configUsable:
+				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and " + mgr.ResolvedKind().ServiceNoun()})
+			default:
 				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "skipped because endpoint config is invalid"})
 			}
 		case "config", "config_valid":
@@ -1176,7 +1195,7 @@ func repairCollectorServiceFromStatus(status lifecycle.Status) error {
 		return err
 	}
 	manager := newRepairServiceManager(userMode)
-	plistPath, err := manager.PlistPath()
+	plistPath, err := manager.UnitPath()
 	if err != nil {
 		return err
 	}
@@ -1198,7 +1217,7 @@ func repairCollectorServiceFromStatus(status lifecycle.Status) error {
 	if err := repairWriteCollectorConfig(cfg); err != nil {
 		return rollbackRepairError(err, rollback)
 	}
-	if _, err := manager.WritePlist(binary, cfg.Collector.ConfigPath); err != nil {
+	if _, err := manager.WriteUnit(binary, cfg.Collector.ConfigPath); err != nil {
 		return rollbackRepairError(err, rollback)
 	}
 	if err := manager.Load(); err != nil {

@@ -315,3 +315,59 @@ func TestSentinelBasenameMatchRespectsPathBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// An install scenario reaches the guest as CLI flags, so a typo would fail mid-run after a
+// sandbox has already been paid for. Validate catches it while it is still free.
+func TestInstallModeAndServiceAreValidated(t *testing.T) {
+	base := func(in *Install) Scenario {
+		return Scenario{ID: "i", Prompt: "do a thing", Install: in,
+			Expect: []Expect{{Action: "prompt.submitted", Why: "baseline"}}}
+	}
+	for _, in := range []*Install{
+		{Mode: "systemwide"},
+		{Mode: "root"},
+		{Service: "launchd2"},
+		{Service: "upstart"},
+	} {
+		if err := base(in).Validate(); err == nil {
+			t.Errorf("install %+v must be rejected", in)
+		}
+	}
+	// Every documented spelling must be accepted, including the empty auto-detect default.
+	for _, in := range []*Install{
+		{},
+		{Mode: "user"},
+		{Mode: "system", Service: "systemd"},
+		{Service: "none"},
+		{Service: "auto"},
+		{Mode: "user", Service: "launchd", ExpectStatusRunning: true},
+	} {
+		if err := base(in).Validate(); err != nil {
+			t.Errorf("install %+v must be accepted: %v", in, err)
+		}
+	}
+}
+
+// A systemd requirement combined with the supervised backend, or without system mode, would
+// silently exercise something other than what the scenario claims — and the run would pass,
+// reporting coverage it does not have.
+func TestNeedsRealSystemdRejectsContradictions(t *testing.T) {
+	base := func(in *Install) Scenario {
+		return Scenario{ID: "i", Prompt: "do a thing", Install: in,
+			Expect: []Expect{{Action: "prompt.submitted", Why: "baseline"}}}
+	}
+	contradictory := []*Install{
+		{NeedsRealSystemd: true, Mode: "system", Service: "none"},
+		{NeedsRealSystemd: true, Mode: "user", Service: "systemd"},
+		{NeedsRealSystemd: true}, // mode defaults to user
+	}
+	for _, in := range contradictory {
+		if err := base(in).Validate(); err == nil {
+			t.Errorf("%+v is contradictory and must be rejected", in)
+		}
+	}
+	// The coherent combination must be accepted.
+	if err := base(&Install{NeedsRealSystemd: true, Mode: "system", Service: "systemd"}).Validate(); err != nil {
+		t.Errorf("system+systemd is the intended combination: %v", err)
+	}
+}

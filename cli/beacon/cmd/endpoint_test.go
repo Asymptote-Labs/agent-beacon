@@ -81,7 +81,7 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.noStart = true
 
-	actions := plannedInstallActions(false)
+	actions := plannedInstallActions(false, service.KindAuto)
 	counts := map[string]int{}
 	for _, action := range actions {
 		if action.Action == "configure_harness" {
@@ -419,11 +419,11 @@ type fakeRepairServiceManager struct {
 	unloads   int
 }
 
-func (m *fakeRepairServiceManager) PlistPath() (string, error) {
+func (m *fakeRepairServiceManager) UnitPath() (string, error) {
 	return m.plistPath, nil
 }
 
-func (m *fakeRepairServiceManager) WritePlist(program, configPath string) (string, error) {
+func (m *fakeRepairServiceManager) WriteUnit(program, configPath string) (string, error) {
 	return m.plistPath, os.WriteFile(m.plistPath, []byte("new plist"), 0644)
 }
 

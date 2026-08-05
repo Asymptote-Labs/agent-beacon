@@ -5,19 +5,26 @@
 package selfupdate
 
 import (
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// SystemInstallDir is where the signed macOS .pkg installs Beacon.
+// SystemInstallDir is where a native package installs Beacon. Shared by the macOS .pkg and the
+// Linux .deb/.rpm, so classifyInstall recognises both as a system install.
 const (
 	SystemInstallDir = "/opt/beacon"
 	SystemBinDir     = "/opt/beacon/bin"
-	// SystemSupportDir holds endpoint config and self-update state for the
-	// system install.
-	SystemSupportDir = "/Library/Application Support/Beacon/Endpoint"
 )
+
+// SystemSupportDir holds endpoint config and self-update state for the system install.
+//
+// A function rather than a const, because the location differs by platform:
+// /Library/Application Support/... on macOS, /etc/beacon/endpoint on Linux. It was previously
+// hardcoded to the macOS path, so on Linux the update state directory and the managed-config
+// path both resolved somewhere that does not exist.
+func SystemSupportDir() string { return endpointconfig.SystemBaseDir() }
 
 // InstallKind classifies how the running beacon binary was installed, which
 // determines whether seamless self-update is possible.
@@ -87,7 +94,7 @@ func isHomebrewPath(path string) bool {
 // StateDir is where the updater stores its lock, staged packages, and state
 // for the system install.
 func StateDir() string {
-	return filepath.Join(SystemSupportDir, "updates")
+	return filepath.Join(SystemSupportDir(), "updates")
 }
 
 // SystemBeaconPath is the installed beacon binary the launchd updater invokes.

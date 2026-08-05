@@ -9,13 +9,26 @@ The developer setup uses per-user paths and writes endpoint events to `~/.beacon
 
 ## 1. Install Beacon
 
-```bash
+<CodeGroup>
+```bash title="macOS"
 brew tap asymptote-labs/tap
 brew install beacon
 beacon endpoint install
 ```
 
-See [Asymptote Open Source](/deployment/open-source) for install details and runtime-specific notes.
+```bash title="Linux"
+# Download the .deb or .rpm for your architecture from the latest release.
+# Installing it performs the endpoint setup for you.
+sudo apt install ./beacon_<version>_linux_amd64.deb
+```
+</CodeGroup>
+
+On Linux the package installs a system-mode endpoint managed by systemd, so the paths differ from the
+per-user layout described above — see [Linux](/platforms/linux). For a per-user Linux install instead,
+run `beacon endpoint install` after installing the CLI.
+
+See [Asymptote Open Source](/deployment/open-source) for install details and runtime-specific notes,
+or [macOS](/platforms/macos) for the platform detail.
 
 ## 2. Confirm collection health
 

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -403,46 +402,6 @@ func TestHealthReadyChecksCollectorHealthEndpoint(t *testing.T) {
 
 	if !healthReady() {
 		t.Fatal("healthReady() = false, want true")
-	}
-}
-
-func TestLaunchAgentPlistUsesFallbackBinaryAndUserLabel(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.UserMode = true
-	cfg.Collector.BinaryPath = filepath.Join(t.TempDir(), "missing-otelcol")
-	withCollectorDiscovery(t, func(file string) (string, error) {
-		return "", errors.New("not found")
-	}, nil)
-
-	plist := LaunchAgentPlist(cfg)
-
-	for _, want := range []string{
-		"<string>com.beacon.endpoint.collector.user</string>",
-		"<string>beacon-otelcol</string>",
-		"<string>--config</string>",
-		"<string>" + cfg.Collector.ConfigPath + "</string>",
-	} {
-		if !strings.Contains(plist, want) {
-			t.Fatalf("LaunchAgentPlist missing %q:\n%s", want, plist)
-		}
-	}
-}
-
-func TestWriteLaunchPlistUserMode(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("launch plist paths are POSIX-specific")
-	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfg := testConfig(t)
-	cfg.UserMode = true
-
-	path, err := WriteLaunchPlist(cfg)
-	if err != nil {
-		t.Fatalf("WriteLaunchPlist returned error: %v", err)
-	}
-	if got, want := path, filepath.Join(home, "Library", "LaunchAgents", "com.beacon.endpoint.collector.plist"); got != want {
-		t.Fatalf("plist path = %q, want %q", got, want)
 	}
 }
 

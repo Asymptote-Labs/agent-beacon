@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,7 +39,11 @@ type endpointHookRepairResult struct {
 }
 
 var (
-	activeConsoleUser   = defaultActiveConsoleUser
+	activeConsoleUser = defaultActiveConsoleUser
+	// lookupConsoleUser is a seam so the SUDO_USER-before-logind ordering can be tested without
+	// depending on which accounts happen to exist on the machine running the tests -- as root in
+	// a container, the obvious test skips, which left the ordering unverified.
+	lookupConsoleUser   = resolveConsoleUser
 	runHookRepairAsUser = defaultRunHookRepairAsUser
 )
 
@@ -157,10 +163,145 @@ func withUserHome[T any](homeDir string, fn func() (T, error)) (T, error) {
 	return fn()
 }
 
+// defaultActiveConsoleUser resolves the human whose runtime configuration a system install should
+// reach.
+//
+// A system endpoint runs as root, and `endpoint install` configures the *installing* user's
+// Claude Code and Codex settings -- which for a package install is root, not the person at the
+// keyboard. Everything the operator actually wants captured therefore depends on resolving that
+// person, which is what this does. When it cannot, callers report "no active console user" and
+// skip rather than pretending to have configured someone.
 func defaultActiveConsoleUser() (consoleUserInfo, bool, error) {
-	if runtime.GOOS != "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
+		return darwinActiveConsoleUser()
+	case "linux":
+		return linuxActiveConsoleUser()
+	}
+	return consoleUserInfo{}, false, nil
+}
+
+// linuxActiveConsoleUser resolves the console user from sudo's environment, then from logind.
+//
+// SUDO_USER comes first because it is the exact question being asked -- "who invoked this install"
+// -- and it is set for every realistic path (`sudo apt install ./beacon.deb`, `sudo dpkg -i`,
+// `sudo rpm -U`, `sudo ./install-endpoint.sh`). logind is the fallback for the cases sudo cannot
+// answer: an unattended fleet run, a root shell, or a re-run from a systemd unit. Neither is
+// guessed at: an unresolvable user is reported as absent.
+func linuxActiveConsoleUser() (consoleUserInfo, bool, error) {
+	if u := strings.TrimSpace(os.Getenv("SUDO_USER")); u != "" {
+		return lookupConsoleUser(u)
+	}
+	// The session table is used only to enumerate ids. Every other column is read back through
+	// `show-session`, which reports `Key=Value` lines -- unambiguous, self-labeling, and free of the
+	// table's placeholders.
+	//
+	// Parsing the table directly is a trap, and two separate ones. Its unseated rows print `-` in
+	// the seat column rather than leaving it blank, so "non-empty means seated" classifies every ssh
+	// session as seated. And `--value` returns properties in alphabetical order, not the order
+	// requested, so reading two values positionally silently swaps them. Both were verified against
+	// systemd 255 rather than assumed.
+	out, err := exec.Command("loginctl", "list-sessions", "--no-legend").Output()
+	if err != nil {
+		// No logind, or it refused. Not an error worth failing an install over: this is a
+		// best-effort identification, and the caller already handles "unknown".
 		return consoleUserInfo{}, false, nil
 	}
+	var sessions []logindSession
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if s, ok := describeLogindSession(fields[0]); ok {
+			sessions = append(sessions, s)
+		}
+	}
+	// Best answer first: someone at the machine in the foreground, then anyone at the machine, then
+	// a remote login. Ranked rather than filtered -- a remote session is still a real human whose
+	// agent runs on this host, so it is the right answer when it is the only one.
+	sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].rank() > sessions[j].rank() })
+	for _, sess := range sessions {
+		if info, ok, err := lookupConsoleUser(sess.user); ok || err != nil {
+			return info, ok, err
+		}
+	}
+	return consoleUserInfo{}, false, nil
+}
+
+// logindSession is what one session says about itself.
+type logindSession struct {
+	user   string
+	seated bool
+	// foreground is logind's "active" state: the session currently in front on its seat. A logged-in
+	// user who is not in front reports "online" instead, which is still a real login -- requiring
+	// "active" alone would reject a seated graphical session in favour of an ssh one, since that is
+	// exactly what systemd 255 reports for each.
+	foreground bool
+}
+
+func (s logindSession) rank() int {
+	score := 0
+	if s.seated {
+		score += 2
+	}
+	if s.foreground {
+		score++
+	}
+	return score
+}
+
+// describeLogindSession reads one session's properties, skipping anything that is not a live login.
+func describeLogindSession(id string) (logindSession, bool) {
+	out, err := exec.Command("loginctl", "show-session", id, "-p", "Name", "-p", "State", "-p", "Seat").Output()
+	if err != nil {
+		return logindSession{}, false
+	}
+	props := map[string]string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if k, v, found := strings.Cut(strings.TrimSpace(line), "="); found {
+			props[k] = v
+		}
+	}
+	// closing and opening sessions are mid-transition and are not somebody to configure.
+	state := props["State"]
+	if state != "active" && state != "online" {
+		return logindSession{}, false
+	}
+	if props["Name"] == "" {
+		return logindSession{}, false
+	}
+	return logindSession{
+		user:       props["Name"],
+		seated:     strings.TrimSpace(props["Seat"]) != "",
+		foreground: state == "active",
+	}, true
+}
+
+// resolveConsoleUser validates a username and resolves its home directory.
+//
+// root is rejected: a system install has already configured root, and treating it as the console
+// user would report success for configuring nobody. A user without a real home is rejected for
+// the same reason -- there is nowhere for a settings file to go.
+func resolveConsoleUser(username string) (consoleUserInfo, bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" || username == "root" {
+		return consoleUserInfo{}, false, nil
+	}
+	u, err := user.Lookup(username)
+	if err != nil {
+		return consoleUserInfo{}, false, nil
+	}
+	if u.HomeDir == "" || u.HomeDir == "/" || u.HomeDir == "/nonexistent" {
+		return consoleUserInfo{}, false, nil
+	}
+	if _, err := os.Stat(u.HomeDir); err != nil {
+		return consoleUserInfo{}, false, nil
+	}
+	return consoleUserInfo{Username: username, HomeDir: u.HomeDir}, true, nil
+}
+
+func darwinActiveConsoleUser() (consoleUserInfo, bool, error) {
 	out, err := exec.Command("stat", "-f", "%Su", "/dev/console").Output()
 	if err != nil {
 		return consoleUserInfo{}, false, err
@@ -187,9 +328,20 @@ func defaultRunHookRepairAsUser(info consoleUserInfo, args ...string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmdArgs := []string{"-u", info.Username, "env", "HOME=" + info.HomeDir, "USER=" + info.Username, "LOGNAME=" + info.Username, bin}
+	// runuser is the root-side tool for this and ships with util-linux, so it is present on a
+	// minimal Debian or RPM system where sudo may not be installed at all -- and a package
+	// postinstall runs as root, which is exactly runuser's precondition. sudo remains the path
+	// everywhere else, including macOS.
+	launcher, cmdArgs := "sudo", []string{"-u", info.Username}
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		if path, err := exec.LookPath("runuser"); err == nil {
+			launcher, cmdArgs = path, []string{"-u", info.Username, "--"}
+		}
+	}
+	cmdArgs = append(cmdArgs, "env", "HOME="+info.HomeDir, "USER="+info.Username,
+		"LOGNAME="+info.Username, bin)
 	cmdArgs = append(cmdArgs, args...)
-	out, err := exec.CommandContext(ctx, "sudo", cmdArgs...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, launcher, cmdArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("refresh hooks for %s: %s: %w", info.Username, strings.TrimSpace(string(out)), err)
 	}

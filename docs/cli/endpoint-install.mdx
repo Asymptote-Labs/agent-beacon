@@ -5,7 +5,9 @@ description: "Install or update the local Beacon endpoint collector and runtime 
 
 ## Command Overview
 
-`beacon endpoint install` configures the local endpoint agent, writes the OpenTelemetry Collector configuration, installs the launchd service, configures selected agent harnesses, and optionally adds Splunk HEC or Falcon LogScale HEC collector destinations.
+`beacon endpoint install` configures the local endpoint agent, writes the OpenTelemetry Collector configuration, installs the collector service, configures selected agent harnesses, and optionally adds Splunk HEC or Falcon LogScale HEC collector destinations.
+
+The service is a launchd job on macOS and a systemd unit on Linux. Where neither is available, Beacon runs a supervised collector instead and says so. See [macOS](/platforms/macos) or [Linux](/platforms/linux) for the platform setup, including the Linux packages and the `--service` flag.
 
 ```bash title="Command syntax"
 beacon endpoint install
@@ -24,7 +26,7 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
-| `--no-start` | Write files without starting the launchd service |
+| `--no-start` | Write files without starting the collector service |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
 | `--include-codex-spans` | Include high-volume Codex OTLP spans for troubleshooting. By default, Beacon records Codex semantic logs and suppresses raw Codex spans |
 | `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
@@ -50,9 +52,9 @@ Install with the default per-user paths:
 beacon endpoint install
 ```
 
-Install without starting the launchd service:
+Install without starting the collector service:
 
-```bash title="Install without starting the launchd service"
+```bash title="Install without starting the collector service"
 beacon endpoint install --no-start
 ```
 
@@ -155,7 +157,7 @@ beacon endpoint hooks install --harness grok --level project
 ```
 
 <Note>
-  Production endpoint install is currently supported on macOS. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather than Beacon-managed shell-profile edits.
+  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather than Beacon-managed shell-profile edits.
 </Note>
 
 ## Related

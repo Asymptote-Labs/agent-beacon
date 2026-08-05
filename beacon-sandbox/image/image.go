@@ -37,6 +37,13 @@ type Spec struct {
 	ClaudeVersion string
 	// RepoRoot locates the Beacon build artifacts.
 	RepoRoot string
+	// WithDocker adds a Docker daemon, for scenarios that need a real systemd as PID 1.
+	//
+	// Modal cannot provide that directly -- its own init holds PID 1 in both lanes -- but systemd
+	// can be PID 1 inside a privileged container, so systemd scenarios run nested. This layer is
+	// opt-in because it is a large install that every other scenario would pay for and none of
+	// them need.
+	WithDocker bool
 }
 
 // LinuxArtifacts are the binaries the sandbox needs, as host paths.
@@ -93,6 +100,19 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 	}
 
 	pkgs := "curl ca-certificates git tar ripgrep procps sudo python3 jq"
+	if spec.WithDocker {
+		// docker.io rather than the upstream repo: it is one apt line, and the daemon only has
+		// to be new enough to run a privileged container with a host cgroup namespace.
+		//
+		// systemd is installed here, in the image, even though nothing in the sandbox itself can
+		// use it -- the provider's init owns PID 1. It is here because the nested container is
+		// built by importing this very filesystem, and an image build is the only moment with
+		// unrestricted network. Installing it later, inside the nested build, is what the first
+		// attempt did: the pull succeeded because the daemon shares the sandbox's network, then
+		// apt failed because a build container's traffic is NATed through docker0 and the
+		// sandbox's egress allowlist does not cover it.
+		pkgs += " docker.io iproute2 systemd systemd-sysv dbus"
+	}
 
 	layers := []string{
 		"ENV DEBIAN_FRONTEND=noninteractive",
@@ -110,6 +130,13 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 			"git config user.email a@b.c && git config user.name beacon-sandbox && "+
 			"printf \"# fixture\\n\" > README.md && git add -A && git commit -qm initial'",
 			AgentUser, WorkDir, WorkDir),
+	}
+
+	if spec.WithDocker {
+		// Group membership is set at image build time; adding it later would need a re-login to
+		// take effect, and the session runs as this user.
+		layers = append(layers,
+			fmt.Sprintf("RUN usermod -aG docker %s", AgentUser))
 	}
 
 	return sandbox.ImageSpec{

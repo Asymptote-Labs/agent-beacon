@@ -38,10 +38,42 @@ type Expect struct {
 	Why string `yaml:"why,omitempty"`
 }
 
+// Install describes a persistent `beacon endpoint install` to perform before the session,
+// instead of the default ephemeral `beacon ci exec` collector.
+//
+// This is what exercises the parity surface: service manager selection, unit installation,
+// status reporting, and whether a real installed collector actually receives telemetry. A
+// scenario without it tests capture through the CI path, which is a different shipping path
+// and cannot tell you whether `endpoint install` works at all.
+type Install struct {
+	// Mode is "user" (default) or "system". System mode runs as root.
+	Mode string `yaml:"mode,omitempty"`
+	// Service selects the service manager: empty auto-detects, or "systemd" / "none".
+	Service string `yaml:"service,omitempty"`
+	// ExpectStatusRunning requires the collector service to report running after install.
+	ExpectStatusRunning bool `yaml:"expect_status_running,omitempty"`
+	// ExpectServiceKind requires the endpoint to report this service backend after install.
+	//
+	// Which backend got selected is the substance of a service-manager scenario, and it is not
+	// implied by "running": the supervised fallback also reports running, so a systemd scenario
+	// on a host without systemd would otherwise pass while testing the wrong thing.
+	ExpectServiceKind string `yaml:"expect_service_kind,omitempty"`
+	// NeedsRealSystemd runs the install inside a nested privileged container where systemd is
+	// genuinely PID 1.
+	//
+	// The sandbox provider cannot offer that directly: its own init holds PID 1, so systemctl
+	// refuses. Rather than make a scenario describe VM lanes and Docker, it states the
+	// requirement and the runner arranges it.
+	NeedsRealSystemd bool `yaml:"needs_real_systemd,omitempty"`
+}
+
 // Scenario is one declarative case.
 type Scenario struct {
 	ID     string `yaml:"id"`
 	Prompt string `yaml:"prompt"`
+	// Install, when set, performs a persistent endpoint install and runs the session against
+	// it, with no `beacon ci exec` wrapper anywhere.
+	Install *Install `yaml:"install,omitempty"`
 	// Sentinel is a path the agent's work must create. Its presence proves the agent
 	// acted; its absence makes the run inconclusive.
 	Sentinel string `yaml:"sentinel,omitempty"`
@@ -100,6 +132,38 @@ func (s Scenario) Validate() error {
 		if strings.TrimSpace(e.Action) == "" {
 			return fmt.Errorf("%s: expect[%d] is missing action", s.ID, i)
 		}
+		// An unrecognised mode or service would reach the guest as a bad flag and fail mid-run,
+		// after a sandbox has already been paid for. Catch it here instead.
+		if s.Install != nil {
+			switch s.Install.Mode {
+			case "", "user", "system":
+			default:
+				return fmt.Errorf("%s: install.mode %q must be user or system", s.ID, s.Install.Mode)
+			}
+			// A systemd requirement with the supervised backend, or without system mode, would
+			// silently exercise something other than what the scenario claims to test.
+			if s.Install.NeedsRealSystemd && s.Install.Service == "none" {
+				return fmt.Errorf("%s: needs_real_systemd with service=none is contradictory; "+
+					"the supervised backend does not use systemd", s.ID)
+			}
+			if s.Install.NeedsRealSystemd && s.Install.Mode != "system" {
+				return fmt.Errorf("%s: needs_real_systemd requires mode=system; a user unit in a "+
+					"container has no logind session to attach to", s.ID)
+			}
+			switch s.Install.ExpectServiceKind {
+			case "", "systemd", "launchd", "none":
+			default:
+				return fmt.Errorf("%s: install.expect_service_kind %q must be systemd, launchd or none",
+					s.ID, s.Install.ExpectServiceKind)
+			}
+			switch s.Install.Service {
+			case "", "auto", "systemd", "launchd", "none":
+			default:
+				return fmt.Errorf("%s: install.service %q must be auto, systemd, launchd, or none",
+					s.ID, s.Install.Service)
+			}
+		}
+
 		// A setup step that writes the sentinel makes the gate unfalsifiable: the file is present
 		// before the agent runs, so INCONCLUSIVE can never fire and an idle agent is misreported as
 		// a capture failure. s04 shipped with exactly this mistake, so the rule is enforced here
@@ -237,4 +301,9 @@ func isFilenameByte(b byte) bool {
 		return true
 	}
 	return false
+}
+
+// NeedsRealSystemd reports whether this scenario must run somewhere systemd is genuinely PID 1.
+func (s Scenario) NeedsRealSystemd() bool {
+	return s.Install != nil && s.Install.NeedsRealSystemd
 }

@@ -3,8 +3,7 @@ package diagnostics
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
+	"os/user"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -40,10 +39,45 @@ func Run(cfg endpointconfig.Config) []Check {
 		checkLogPermissions(cfg.LogPath),
 		checkCollectorHealth(cfg),
 	}
-	if runtime.GOOS == "darwin" {
-		checks = append(checks, checkFile("launchd_plist", launchPlistPath(cfg.UserMode), true))
+	// The service definition check is named after whichever manager is actually in use, so
+	// the output is interpretable on a mixed fleet and a Linux host is not told to look for a
+	// launchd plist. Supervised mode has no unit file to check -- its pidfile is runtime
+	// state, not configuration, so a missing one just means "not started".
+	mgr := service.Manager{UserMode: cfg.UserMode}
+	switch mgr.ResolvedKind() {
+	case service.KindLaunchd:
+		if path, err := mgr.UnitPath(); err == nil {
+			checks = append(checks, checkFile("launchd_plist", path, true))
+		}
+	case service.KindSystemd:
+		if path, err := mgr.UnitPath(); err == nil {
+			checks = append(checks, checkFile("systemd_unit", path, true))
+		}
+		// A --user unit stops at logout unless linger is set, and that failure is invisible
+		// until the user next logs out and telemetry quietly stops. Surfaced as a warning
+		// rather than a failure: collecting until logout is degraded, not broken.
+		if cfg.UserMode {
+			checks = append(checks, lingerCheck())
+		}
 	}
 	return checks
+}
+
+func lingerCheck() Check {
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		return Check{Name: "systemd_user_linger", Status: StatusWarn,
+			Message:  "could not determine the current user, so logout persistence is unverified",
+			Evidence: "linger_unknown"}
+	}
+	if service.LingerEnabled(u.Username) {
+		return Check{Name: "systemd_user_linger", Status: StatusOK, Target: u.Username,
+			Message: "user unit will survive logout"}
+	}
+	return Check{Name: "systemd_user_linger", Status: StatusWarn, Target: u.Username,
+		Message:  "linger is not enabled, so the collector stops when this user logs out",
+		Evidence: "linger_disabled",
+		Action:   "sudo loginctl enable-linger " + u.Username}
 }
 
 func checkCollectorHealth(cfg endpointconfig.Config) Check {
@@ -94,15 +128,4 @@ func checkLogPermissions(path string) Check {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
 	}
 	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo, Message: fmt.Sprintf("mode %o", mode), Evidence: fmt.Sprintf("mode_%o", mode)}
-}
-
-func launchPlistPath(userMode bool) string {
-	if userMode {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join("Library", "LaunchAgents", service.UserLabel+".plist")
-		}
-		return filepath.Join(home, "Library", "LaunchAgents", service.UserLabel+".plist")
-	}
-	return filepath.Join("/Library/LaunchDaemons", service.SystemLabel+".plist")
 }

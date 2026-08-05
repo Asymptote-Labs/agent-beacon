@@ -10,18 +10,18 @@ import (
 const maxSkillsPerRoot = 200
 
 type Skill struct {
-	Runtime          string `json:"runtime"`
-	SkillName        string `json:"skill_name,omitempty"`
-	SkillNameHash    string `json:"skill_name_hash,omitempty"`
-	RootPath         string `json:"root_path,omitempty"`
-	RootPathHash     string `json:"root_path_hash,omitempty"`
-	SourceScope      string `json:"source_scope"`
-	ManifestPath     string `json:"manifest_path,omitempty"`
-	ManifestPathHash string `json:"manifest_path_hash,omitempty"`
-	Exists           bool   `json:"exists"`
-	Readable         bool   `json:"readable"`
-	Reason           string `json:"reason,omitempty"`
-	ParserStatus     string `json:"parser_status"`
+	Runtime          string           `json:"runtime"`
+	SkillName        string           `json:"skill_name,omitempty"`
+	SkillNameHash    string           `json:"skill_name_hash,omitempty"`
+	RootPath         string           `json:"root_path,omitempty"`
+	RootPathHash     string           `json:"root_path_hash,omitempty"`
+	SourceScope      string           `json:"source_scope"`
+	ManifestPath     string           `json:"manifest_path,omitempty"`
+	ManifestPathHash string           `json:"manifest_path_hash,omitempty"`
+	Exists           bool             `json:"exists"`
+	Readable         bool             `json:"readable"`
+	Reason           string           `json:"reason,omitempty"`
+	ParserStatus     string           `json:"parser_status"`
 	FileSHA256       string           `json:"file_sha256,omitempty"`
 	ModifiedAt       string           `json:"modified_at,omitempty"`
 	Redaction        string           `json:"redaction"`

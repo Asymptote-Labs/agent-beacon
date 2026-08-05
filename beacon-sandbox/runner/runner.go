@@ -120,6 +120,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	imgSpec, err := image.Build(image.Spec{
 		RepoRoot:      opts.RepoRoot,
 		ClaudeVersion: opts.ClaudeVersion,
+		WithDocker:    sc.NeedsRealSystemd(),
 	}, logf)
 	if err != nil {
 		return art, err
@@ -131,7 +132,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	art.Meta["image"] = img.Ref()
 	logf("image %s", img.Ref())
 
-	inst, err := p.Launch(ctx, img, sandbox.LaunchSpec{
+	launch := sandbox.LaunchSpec{
 		CPU:         2,
 		MemLimitMiB: 4096,
 		Timeout:     sc.Timeout() + 5*time.Minute, // headroom for setup and collection
@@ -144,7 +145,21 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 			// here, which is how the local-only posture gets asserted rather than assumed.
 			"api.anthropic.com", "statsig.anthropic.com", "*.anthropic.com",
 		},
-	})
+	}
+	if sc.NeedsRealSystemd() {
+		// The VM lane has a real kernel and cgroup2, which dockerd needs; the default lane does
+		// not. Neither lane makes our entrypoint PID 1, hence the nested container -- see
+		// startNested.
+		launch.Lane = sandbox.LaneVM
+		launch.CPU, launch.MemLimitMiB = 4, 8192 // dockerd + systemd + collector + the agent
+		launch.Timeout = sc.Timeout() + 20*time.Minute
+		// The allowlist is deliberately not widened. Building the nested image from the sandbox's
+		// own filesystem needs no network, so these scenarios assert exactly the same egress
+		// posture as every other one -- which is worth more than the convenience of a registry
+		// pull would have been.
+		art.Meta["lane"] = string(launch.Lane)
+	}
+	inst, err := p.Launch(ctx, img, launch)
 	if err != nil {
 		return art, fmt.Errorf("launch: %w", err)
 	}
@@ -162,20 +177,44 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	}
 
 	// Finish the artifact layer: the snapshot captured the files, but chmod and symlinks
-	// have to happen in a live instance.
+	// have to happen in a live instance. Always the sandbox itself, never the guest -- this
+	// prepares the very tree the guest will mount.
 	if _, err := p.Exec(ctx, inst, image.PostPushLayers(), sandbox.ExecOpts{User: "root", Timeout: time.Minute}); err != nil {
 		return art, fmt.Errorf("prepare binaries: %w", err)
 	}
 
-	if v, err := p.Exec(ctx, inst, "beacon version; claude --version; id -un; uname -m", agent); err == nil {
-		art.Meta["versions"] = oneLine(v.Stdout)
-		logf("versions: %s", art.Meta["versions"])
+	// Everything the scenario itself does happens in the guest. For most scenarios that is the
+	// sandbox; a scenario needing a real systemd gets a nested container instead. See guest.go.
+	var g guest = directGuest{p: p, inst: inst}
+	if sc.NeedsRealSystemd() {
+		ng, err := startNested(ctx, p, inst, logf)
+		if err != nil {
+			return art, err
+		}
+		g = ng
+		art.Meta["systemd_state"] = ng.systemdState
+		art.Meta["docker_version"] = ng.dockerVersion
+	}
+	art.Meta["guest"] = g.Describe()
+
+	// Not just recorded -- checked. An empty version line means beacon or claude is not reachable
+	// in the guest, and every later failure is then a symptom of that rather than of Beacon. The
+	// first nested run printed "versions:" with nothing after it and kept going.
+	v, err := g.Exec(ctx, "beacon version; claude --version; id -un; uname -m", agent)
+	if err != nil {
+		return art, fmt.Errorf("could not run commands in the %s guest: %w", g.Describe(), err)
+	}
+	art.Meta["versions"] = oneLine(v.Stdout)
+	logf("versions: %s", art.Meta["versions"])
+	if !strings.Contains(v.Stdout, "beacon version") {
+		return art, fmt.Errorf("the guest did not report a Beacon version, so the binary under "+
+			"test is not reachable there (rc=%d): %s", v.ExitCode, oneLine(v.Stdout+v.Stderr))
 	}
 
 	sentinel := scenario.Expand(sc.Sentinel, canary, "", image.WorkDir)
 	if sc.Setup != "" {
 		setup := scenario.Expand(sc.Setup, canary, sentinel, image.WorkDir)
-		if r, err := p.Exec(ctx, inst, setup, agent); err != nil || r.ExitCode != 0 {
+		if r, err := g.Exec(ctx, setup, agent); err != nil || r.ExitCode != 0 {
 			return art, fmt.Errorf("scenario setup failed (rc=%d): %v %s", r.ExitCode, err, oneLine(r.Stderr))
 		}
 	}
@@ -191,23 +230,46 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		logf("argv sampler failed to start: %v", err)
 	}
 
-	// The collector is started by `beacon ci exec`, which wraps the agent session. That is a
-	// real shipping code path -- it is how Beacon collects in GitHub Actions and cloud agent
-	// sandboxes -- and it needs no persistent service manager, so it works on any host.
-	logf("running session (budget $%.2f, timeout %s)", sc.Budget(), sc.Timeout())
-	res, err := p.Exec(ctx, inst, sessionScript(sc, prompt, logPath), sandbox.ExecOpts{
-		User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
-		PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
-	})
-	if err != nil {
-		logf("session exec error: %v", err)
-	}
-	art.Meta["ci_exec"] = oneLine(res.Stdout)
-	// Recorded explicitly so a failing collector is visible in the run metadata rather than
-	// inferred from a missing log later.
-	art.Meta["ci_exec_rc"] = fmt.Sprintf("%d", res.ExitCode)
-	if res.ExitCode != 0 {
-		logf("beacon ci exec exited %d -- the collected log may be incomplete", res.ExitCode)
+	// Two ways to get a collector, and which one a scenario uses is the whole point of the
+	// distinction. `beacon ci exec` wraps the session in an ephemeral collector -- a real
+	// shipping path, used in GitHub Actions and cloud agent sandboxes, needing no service
+	// manager. A persistent install instead exercises `beacon endpoint install`: service
+	// manager selection, unit installation, status reporting, and whether an installed
+	// collector actually receives telemetry. Nothing else in the suite can tell you that.
+	var res sandbox.Result
+	if sc.Install != nil {
+		installedLog, err := doInstall(ctx, g, sc, agent, &art, logf)
+		if err != nil {
+			return art, err
+		}
+		logPath = installedLog
+		logf("running session against the installed endpoint (budget $%.2f, timeout %s)",
+			sc.Budget(), sc.Timeout())
+		res, err = g.Exec(ctx, plainSessionScript(sc, prompt), sandbox.ExecOpts{
+			User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
+			PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
+		})
+		if err != nil {
+			logf("session exec error: %v", err)
+		}
+		art.Meta["session"] = oneLine(res.Stdout)
+	} else {
+		logf("running session (budget $%.2f, timeout %s)", sc.Budget(), sc.Timeout())
+		var err error
+		res, err = g.Exec(ctx, sessionScript(sc, prompt, logPath), sandbox.ExecOpts{
+			User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
+			PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
+		})
+		if err != nil {
+			logf("session exec error: %v", err)
+		}
+		art.Meta["ci_exec"] = oneLine(res.Stdout)
+		// Recorded explicitly so a failing collector is visible in the run metadata rather
+		// than inferred from a missing log later.
+		art.Meta["ci_exec_rc"] = fmt.Sprintf("%d", res.ExitCode)
+		if res.ExitCode != 0 {
+			logf("beacon ci exec exited %d -- the collected log may be incomplete", res.ExitCode)
+		}
 	}
 
 	// Claude's own result JSON tells us whether the session itself succeeded, which
@@ -219,7 +281,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// disabling exactly the signal that distinguishes a dead agent from a capture gap.
 	outPath := shq(sessionFile(sc, "claude-out.json"))
 	errPath := shq(sessionFile(sc, "claude-err.txt"))
-	if r, err := p.Exec(ctx, inst, "cat "+outPath+" 2>/dev/null || true", agent); err == nil {
+	if r, err := g.Exec(ctx, "cat "+outPath+" 2>/dev/null || true", agent); err == nil {
 		var result map[string]any
 		if json.Unmarshal([]byte(strings.TrimSpace(r.Stdout)), &result) == nil {
 			art.SessionOK, art.SessionKnown = sessionOutcome(result)
@@ -232,7 +294,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 			logf("claude: %s", art.Meta["claude_result"])
 			_ = os.WriteFile(filepath.Join(runDir, "claude-result.json"), []byte(r.Stdout), 0o600)
 		} else {
-			if e, err2 := p.Exec(ctx, inst, "tail -c 800 "+errPath+" 2>/dev/null || true", agent); err2 == nil {
+			if e, err2 := g.Exec(ctx, "tail -c 800 "+errPath+" 2>/dev/null || true", agent); err2 == nil {
 				art.Meta["claude_stderr"] = oneLine(e.Stdout)
 			}
 		}
@@ -250,7 +312,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		// sentinel file, which would have misreported the second as a broken probe.
 		probe := fmt.Sprintf("if [ -f %[1]s ]; then echo __FOUND__; cat %[1]s; else echo __MISSING__; fi",
 			shq(sentinel))
-		r, execErr := p.Exec(ctx, inst, probe, agent)
+		r, execErr := g.Exec(ctx, probe, agent)
 		art.SentinelProbed = execErr == nil &&
 			(strings.Contains(r.Stdout, "__FOUND__") || strings.Contains(r.Stdout, "__MISSING__"))
 		if !art.SentinelProbed {
@@ -278,13 +340,24 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// argvSamplerScript for why this cannot be a post-session scan.
 	if r, err := p.Exec(ctx, inst, "cat "+shq(argvVerdictPath)+" 2>/dev/null || true",
 		sandbox.ExecOpts{User: "root", Timeout: time.Minute}); err == nil {
+		sawAgent := strings.Contains(r.Stdout, "saw_agent=1")
+		art.Meta["argv_saw_agent"] = fmt.Sprintf("%v", sawAgent)
 		switch {
 		case strings.Contains(r.Stdout, "ARGV_LEAK"):
+			// A leak is a leak regardless: the sampler found the key on a command line, which is
+			// positive evidence and needs no corroboration.
 			art.SecretInArgv, art.ArgvCheckRan = true, true
 			art.Meta["argv_leak_detail"] = oneLine(r.Stdout)
 			logf("argv leak detail: %s", art.Meta["argv_leak_detail"])
-		case strings.Contains(r.Stdout, "ARGV_CLEAN"):
+		case strings.Contains(r.Stdout, "ARGV_CLEAN") && sawAgent:
 			art.SecretInArgv, art.ArgvCheckRan = false, true
+		case strings.Contains(r.Stdout, "ARGV_CLEAN"):
+			// Clean, but the sampler never had the agent in view -- so it searched the wrong
+			// processes and proves nothing. Reported unverified rather than clean, which is the
+			// whole point of tracking whether a check could run separately from what it found.
+			art.ArgvCheckRan = false
+			logf("argv scan found nothing, but never observed an agent process: " +
+				"the result is unverified, not clean")
 		default:
 			// The sampler never wrote a verdict, so nothing was observed and the result
 			// proves nothing. Reported as unverified rather than clean.
@@ -320,12 +393,12 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// Wait for quiescence rather than sleeping a fixed amount: the collector batches at 5s
 	// and Claude Code's metric interval defaults to 60s, so a fixed sleep is either wasteful
 	// or wrong. Record how long it took -- that latency is itself a finding.
-	stable, waited := waitForQuiescence(ctx, p, inst, agent, logPath, logf)
+	stable, waited := waitForQuiescence(ctx, g, agent, logPath, logf)
 	art.Meta["quiescence_seconds"] = fmt.Sprintf("%.0f", waited.Seconds())
 	art.Meta["quiescent"] = fmt.Sprintf("%v", stable)
 
 	local := filepath.Join(runDir, "runtime.jsonl")
-	if err := p.Get(ctx, inst, logPath, local); err != nil {
+	if err := g.Get(ctx, logPath, local); err != nil {
 		return art, fmt.Errorf("collect runtime log: %w", err)
 	}
 	art.RuntimeLog = local
@@ -394,7 +467,7 @@ func sessionScript(sc scenario.Scenario, prompt, logPath string) string {
 }
 
 // waitForQuiescence polls the log until its size stops changing, bounded.
-func waitForQuiescence(ctx context.Context, p sandbox.Provider, inst sandbox.Instance,
+func waitForQuiescence(ctx context.Context, g guest,
 	opts sandbox.ExecOpts, logPath string, logf func(string, ...any)) (bool, time.Duration) {
 
 	const (
@@ -407,7 +480,7 @@ func waitForQuiescence(ctx context.Context, p sandbox.Provider, inst sandbox.Ins
 	stableSince := time.Time{}
 
 	for time.Since(start) < maxWait {
-		r, err := p.Exec(ctx, inst, "wc -c < "+shq(logPath)+" 2>/dev/null || echo 0", opts)
+		r, err := g.Exec(ctx, "wc -c < "+shq(logPath)+" 2>/dev/null || echo 0", opts)
 		if err == nil {
 			cur := strings.TrimSpace(r.Stdout)
 			if cur == last && cur != "0" {
@@ -512,21 +585,30 @@ scan() {
        END{exit !found}'
 }
 n=0
+saw_agent=0
 # Bounded so a leaked sandbox cannot spin forever; the instance is destroyed long before this.
 while [ "$n" -lt 900 ]; do
   n=$((n+1))
-  if ps -eo args= 2>/dev/null | scan; then
-    echo "ARGV_LEAK samples=$n via=ps" > "$VERDICT"
+  procs="$(ps -eo args= 2>/dev/null || true)"
+  # Whether the agent was ever in view at all. A clean verdict from a sampler that never saw the
+  # process holding the key is not evidence of anything -- and in the nested lane, where the agent
+  # runs in a child PID namespace, "the parent namespace sees its children" is an assumption worth
+  # confirming rather than trusting.
+  case "$procs" in *claude*) saw_agent=1 ;; esac
+  if printf '%%s\n' "$procs" | scan; then
+    echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=ps" > "$VERDICT"
     exit 0
   fi
   for f in /proc/[0-9]*/cmdline; do
     [ -r "$f" ] || continue
-    if tr '\0' '\n' < "$f" 2>/dev/null | scan; then
-      echo "ARGV_LEAK samples=$n via=proc" > "$VERDICT"
+    cmd="$(tr '\0' '\n' < "$f" 2>/dev/null || true)"
+    case "$cmd" in *claude*) saw_agent=1 ;; esac
+    if printf '%%s\n' "$cmd" | scan; then
+      echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=proc" > "$VERDICT"
       exit 0
     fi
   done
-  echo "ARGV_CLEAN samples=$n" > "$VERDICT"
+  echo "ARGV_CLEAN samples=$n saw_agent=$saw_agent" > "$VERDICT"
   sleep 1
 done
 SAMPLER
@@ -549,4 +631,150 @@ func sampleCountOf(verdict string) string {
 		}
 	}
 	return "0"
+}
+
+// doInstall performs a persistent `beacon endpoint install` and returns the runtime log the
+// installed collector writes to.
+//
+// The log path comes from `endpoint status --json` rather than being assumed, because the whole
+// point of an install scenario is to check what Beacon actually did — hardcoding the expected
+// path would make the scenario agree with itself instead of with Beacon.
+func doInstall(ctx context.Context, g guest,
+	sc scenario.Scenario, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) (string, error) {
+
+	in := sc.Install
+	system := in.Mode == "system"
+	scope := "--user"
+	if system {
+		scope = "--system"
+	}
+	svc := ""
+	if in.Service != "" {
+		svc = " --service=" + in.Service
+	}
+	// System-mode install requires root; user mode must not have it, or the install would
+	// write system paths while claiming to be a user install.
+	opts := agent
+	if system {
+		opts = sandbox.ExecOpts{User: "root", Dir: image.WorkDir, Timeout: 5 * time.Minute,
+			PathPrepend: image.PathPrepend()}
+	}
+	art.Meta["install_mode"] = in.Mode
+	art.Meta["install_service"] = in.Service
+
+	// Dry run first. It is free, and it is where a plan that advertises the wrong service
+	// manager for the host would show up — so a regression there needs no second scenario.
+	if r, err := g.Exec(ctx, "beacon endpoint install "+scope+svc+" --harness claude --dry-run 2>&1", opts); err == nil {
+		art.Meta["install_dry_run"] = oneLine(r.Stdout)
+		logf("dry-run plan: %s", art.Meta["install_dry_run"])
+	}
+
+	r, err := g.Exec(ctx, "beacon endpoint install "+scope+svc+" --harness claude 2>&1", opts)
+	art.Meta["install_output"] = oneLine(r.Stdout + r.Stderr)
+	if err != nil || r.ExitCode != 0 {
+		logf("install FAILED rc=%d: %s", r.ExitCode, art.Meta["install_output"])
+		return "", fmt.Errorf("endpoint install failed (rc=%d): %s",
+			r.ExitCode, oneLine(r.Stdout+r.Stderr))
+	}
+	logf("install ok: %s", art.Meta["install_output"])
+
+	// A system install configures the *installing* user's agent runtime, which for a package
+	// install is root -- not the person whose sessions matter. The package postinstall therefore
+	// runs a second step to resolve that person and point their Claude Code at the collector, and
+	// a system-mode scenario has to do the same or its capture assertions would be testing
+	// nothing but root's unused settings file.
+	//
+	// SUDO_USER is how the real path identifies them (`sudo apt install ./beacon.deb`), so it is
+	// what gets set here rather than inventing a flag that no user would pass.
+	if system {
+		cmd := fmt.Sprintf("SUDO_USER=%s beacon endpoint user-config repair-installed "+
+			"--system --harness claude --json 2>&1", image.AgentUser)
+		u, err := g.Exec(ctx, cmd, opts)
+		art.Meta["install_user_config"] = oneLine(u.Stdout + u.Stderr)
+		if err != nil || u.ExitCode != 0 {
+			return "", fmt.Errorf("configuring %s's agent runtime failed (rc=%d): %v %s",
+				image.AgentUser, u.ExitCode, err, art.Meta["install_user_config"])
+		}
+		logf("user config: %s", art.Meta["install_user_config"])
+		// A skip is not a pass. The command reports one rather than failing, because on a real
+		// unattended host there may be nobody to configure -- but in this scenario there is, and
+		// treating a skip as success would let a broken resolver produce a green run.
+		if strings.Contains(art.Meta["install_user_config"], "skipped_reason") {
+			return "", fmt.Errorf("user-config skipped instead of configuring %s: %s",
+				image.AgentUser, art.Meta["install_user_config"])
+		}
+	}
+
+	logPath, err := installedLogPath(ctx, g, scope, opts, in, art, logf)
+	if err != nil {
+		return "", err
+	}
+	// Doctor output is recorded whether or not it passes: on a failure it is the first thing
+	// worth reading, and it costs one exec.
+	if d, err := g.Exec(ctx, "beacon endpoint doctor "+scope+" --json 2>&1", opts); err == nil {
+		art.Meta["install_doctor"] = oneLine(d.Stdout)
+	}
+	return logPath, nil
+}
+
+// installedLogPath reads `endpoint status --json` for the service state and log path.
+//
+// A status that cannot be parsed is not fatal — the run can still proceed against the
+// documented default path — but ExpectStatusRunning is enforced, since a scenario asking for a
+// running service and silently accepting an unparseable status would verify nothing.
+func installedLogPath(ctx context.Context, g guest,
+	scope string, opts sandbox.ExecOpts, in *scenario.Install, art *Artifacts,
+	logf func(string, ...any)) (string, error) {
+
+	s, err := g.Exec(ctx, "beacon endpoint status "+scope+" --json 2>&1", opts)
+	if err == nil {
+		art.Meta["install_status"] = oneLine(s.Stdout)
+		var status struct {
+			LogPath string `json:"log_path"`
+			Service struct {
+				Label   string `json:"label"`
+				Loaded  bool   `json:"loaded"`
+				Running bool   `json:"running"`
+				Kind    string `json:"kind"`
+				Message string `json:"message"`
+			} `json:"service"`
+		}
+		if json.Unmarshal([]byte(s.Stdout), &status) == nil {
+			art.Meta["service_kind"] = status.Service.Kind
+			art.Meta["service_label"] = status.Service.Label
+			art.Meta["service_loaded"] = fmt.Sprintf("%v", status.Service.Loaded)
+			art.Meta["service_running"] = fmt.Sprintf("%v", status.Service.Running)
+			logf("service: kind=%s label=%s loaded=%v running=%v %s",
+				status.Service.Kind, status.Service.Label, status.Service.Loaded,
+				status.Service.Running, status.Service.Message)
+			if in.ExpectStatusRunning && !status.Service.Running {
+				return "", fmt.Errorf("service did not report running after install: %s",
+					status.Service.Message)
+			}
+			if in.ExpectServiceKind != "" && status.Service.Kind != in.ExpectServiceKind {
+				return "", fmt.Errorf("service backend is %q, want %q: the scenario would "+
+					"otherwise verify a different service manager than it claims to",
+					status.Service.Kind, in.ExpectServiceKind)
+			}
+			if status.LogPath != "" {
+				return status.LogPath, nil
+			}
+		}
+	}
+	if in.ExpectStatusRunning || in.ExpectServiceKind != "" {
+		return "", fmt.Errorf("could not read service status, so neither a running service nor " +
+			"the selected backend can be confirmed; refusing to report a pass the run did not earn")
+	}
+	logf("status unparseable; falling back to the documented default log path")
+	if in.Mode == "system" {
+		return "/var/log/beacon-agent/runtime.jsonl", nil
+	}
+	return image.AgentHome + "/.beacon/endpoint/logs/runtime.jsonl", nil
+}
+
+// plainSessionScript runs the agent with no collector wrapper, for install scenarios where a
+// persistent collector is already running as a service.
+func plainSessionScript(sc scenario.Scenario, prompt string) string {
+	return "claude " + strings.Join(claudeFlags(sc, prompt), " ") +
+		" > claude-out.json 2> claude-err.txt; echo CLAUDE_RC=$?"
 }

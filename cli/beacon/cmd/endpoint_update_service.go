@@ -138,7 +138,7 @@ func runUpdateEnable(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write auto-update config: %w", err)
 	}
 	mgr := service.UpdaterManager{}
-	if _, err := mgr.WritePlist(selfupdate.SystemBeaconPath()); err != nil {
+	if _, err := mgr.WriteUnit(selfupdate.SystemBeaconPath()); err != nil {
 		return fmt.Errorf("write updater plist: %w", err)
 	}
 	if err := mgr.Load(); err != nil {
@@ -166,7 +166,7 @@ func runUpdateDisable(cmd *cobra.Command, args []string) error {
 	if err := mgr.Unload(); err != nil {
 		return fmt.Errorf("unload updater job: %w", err)
 	}
-	_ = os.Remove(mgr.PlistPath())
+	mgr.RemoveUnits()
 	fmt.Println("Update checks disabled; background updater removed.")
 	return nil
 }
@@ -195,11 +195,11 @@ func runUpdateInstallDaemon(cmd *cobra.Command, args []string) error {
 	mgr := service.UpdaterManager{}
 	if mode == selfupdate.ModeOff {
 		_ = mgr.Unload()
-		_ = os.Remove(mgr.PlistPath())
+		mgr.RemoveUnits()
 		fmt.Println("Auto-update is off; updater daemon not installed.")
 		return nil
 	}
-	if _, err := mgr.WritePlist(selfupdate.SystemBeaconPath()); err != nil {
+	if _, err := mgr.WriteUnit(selfupdate.SystemBeaconPath()); err != nil {
 		return fmt.Errorf("write updater plist: %w", err)
 	}
 	if err := mgr.Load(); err != nil {
