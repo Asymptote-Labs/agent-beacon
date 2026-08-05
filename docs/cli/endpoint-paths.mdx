@@ -26,7 +26,7 @@ what is actually running as PID 1, not at which tools are installed, so a contai
 
 | Platform | Service manager | System mode | User mode |
 |---|---|---|---|
-| macOS | launchd | `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist` | `~/Library/LaunchAgents/com.beacon.endpoint.collector.plist` |
+| macOS | launchd | `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist` | `~/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist` |
 | Linux | systemd | `/etc/systemd/system/beacon-collector.service` | `~/.config/systemd/user/beacon-collector.service` |
 | Containers, no init | supervised | `/etc/beacon/endpoint/collector.pid` | `~/.beacon/endpoint/collector.pid` |
 

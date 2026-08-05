@@ -169,7 +169,7 @@ available for CLI installs across supported macOS/Linux architectures.
 Installing a Linux package performs the system-mode install itself: it registers
 and starts a systemd unit, writes configuration to `/etc/beacon/endpoint`, and
 points the installing user's agent runtimes at the local collector. See the
-[Linux install guide](https://docs.asymptotelabs.ai/cli/endpoint-linux).
+[Linux install guide](https://docs.asymptotelabs.ai/platforms/linux).
 
 | MDM platform | Support path |
 | --- | --- |

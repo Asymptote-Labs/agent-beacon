@@ -286,6 +286,14 @@
             "icon": "download",
             "pages": [
               "cli/install",
+              {
+                "group": "Platforms",
+                "icon": "laptop",
+                "pages": [
+                  "platforms/macos",
+                  "platforms/linux"
+                ]
+              },
               "cli/upgrade",
               "cli/manual-install"
             ]
@@ -329,7 +337,6 @@
                 "root": "cli/endpoint",
                 "pages": [
                   "cli/endpoint-install",
-                  "cli/endpoint-linux",
                   "cli/endpoint-status",
                   "cli/endpoint-doctor",
                   "cli/endpoint-inventory",
@@ -1321,6 +1328,10 @@
     {
       "source": "/beacon-sandbox",
       "destination": "/contributing/beacon-sandbox"
+    },
+    {
+      "source": "/cli/endpoint-linux",
+      "destination": "/platforms/linux"
     }
   ],
   "footer": {

@@ -3,6 +3,20 @@ title: "Install Beacon"
 description: "Install the Beacon CLI with Homebrew or platform archives"
 ---
 
+## Choose your platform
+
+This page installs the **CLI**. Setting up the endpoint agent — the local collector that captures
+agent activity — differs by operating system, so start with your platform:
+
+<Columns cols={2}>
+  <Card title="macOS" icon="apple" href="/platforms/macos">
+    Homebrew for your own machine, or the signed `.pkg` for a managed fleet. launchd.
+  </Card>
+  <Card title="Linux" icon="linux" href="/platforms/linux">
+    A `.deb` or `.rpm` that installs and starts the endpoint for you. systemd.
+  </Card>
+</Columns>
+
 ## Homebrew
 
 Install the Beacon CLI with Homebrew:
@@ -24,10 +38,13 @@ beacon version 0.0.66
 
 Beacon releases publish macOS and Linux archives for `amd64` and `arm64` alongside Homebrew builds. For archive-based installs or source builds, see [Manual CLI Installation](/cli/manual-install).
 
-Apple Silicon endpoint package releases are attached to GitHub Releases as
-signed, notarized, and stapled `.pkg` assets for MDM or manual system installs.
-Use those package assets when you want `/opt/beacon`, the local collector
-LaunchDaemon, and the bundled Vector forwarder helpers installed together.
+Releases also attach native endpoint packages, which install the CLI, the collector, and the service
+together rather than leaving you a second step:
+
+| Platform | Package | Installs |
+|---|---|---|
+| macOS (Apple Silicon) | Signed, notarized, stapled `.pkg` | `/opt/beacon`, the collector LaunchDaemon, and the bundled Vector forwarder helpers |
+| Linux (amd64, arm64) | `.deb` and `.rpm` | `/opt/beacon`, the `beacon-collector` systemd unit, and your agent runtime configuration |
 
 ## Next steps
 

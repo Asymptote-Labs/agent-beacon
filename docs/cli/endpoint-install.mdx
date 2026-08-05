@@ -7,7 +7,7 @@ description: "Install or update the local Beacon endpoint collector and runtime 
 
 `beacon endpoint install` configures the local endpoint agent, writes the OpenTelemetry Collector configuration, installs the collector service, configures selected agent harnesses, and optionally adds Splunk HEC or Falcon LogScale HEC collector destinations.
 
-The service is a launchd job on macOS and a systemd unit on Linux. Where neither is available, Beacon runs a supervised collector instead and says so. See [Linux install](/cli/endpoint-linux) for the Linux packages and the `--service` flag.
+The service is a launchd job on macOS and a systemd unit on Linux. Where neither is available, Beacon runs a supervised collector instead and says so. See [macOS](/platforms/macos) or [Linux](/platforms/linux) for the platform setup, including the Linux packages and the `--service` flag.
 
 ```bash title="Command syntax"
 beacon endpoint install

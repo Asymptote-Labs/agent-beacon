@@ -27,21 +27,82 @@ sudo dnf install ./beacon-<version>-linux-amd64.rpm
 
 `amd64` and `arm64` packages are published for both formats.
 
-Then check it:
-
-```bash title="Verify the install"
-beacon endpoint status --system
-beacon endpoint doctor --system
-```
-
-`status` should report the service as running with `kind: systemd`. `doctor` checks the whole chain —
-unit, collector, config, log, harness settings — and prints the command to fix anything it finds.
-
 <Note>
   The package depends on systemd, because the service it registers is a systemd unit. On a
   distribution without systemd, install the CLI from the tarball and run `beacon endpoint install`
   without `--system`; see [Without systemd](#without-systemd).
 </Note>
+
+## Confirm it worked
+
+```bash title="Verify the install"
+beacon endpoint status --system
+```
+
+```
+Beacon Endpoint Agent 1.0.6
+Config: /etc/beacon/endpoint/config.json
+Runtime log: /var/log/beacon-agent/runtime.jsonl
+Collector: grpc=true http=true
+Service: loaded=true running=true
+Harness: Claude Code  telemetry=enabled
+Last event: present
+```
+
+`beacon endpoint doctor --system` goes further, checking the whole chain — unit, collector, config,
+log permissions, and each harness's settings — and printing the command to fix anything it finds.
+
+On a fresh install it reports one warning, and it is not a problem:
+
+```
+Beacon endpoint doctor: warn
+harness_observed: warn target=claude_code (telemetry is configured but no matching event has
+  been observed yet) action="run Claude Code or beacon endpoint test-event"
+Summary: 0 failure(s), 1 warning(s)
+```
+
+That says "configured correctly, but you have not used it yet." It clears the first time you run
+your agent. What matters is `0 failure(s)`.
+
+If you would rather confirm the pipeline before running a real session, write a synthetic event:
+
+```bash title="Prove the collector is receiving and writing events"
+sudo beacon endpoint test-event --system
+```
+
+<Note>
+  Pass `--system` here. Without it the command targets the *user-mode* log under `~/.beacon`, which
+  is not the log a system install writes to — so it would report success against the wrong file.
+</Note>
+
+## Using it
+
+Nothing to remember. Run your agent the way you normally do:
+
+```bash
+claude
+```
+
+Prompts, the commands the agent runs, files it reads and writes, token counts and cost, approvals
+and denials all land in `/var/log/beacon-agent/runtime.jsonl` — one JSON object per line. Two
+independent paths feed it, which is why a gap in one still leaves you with data:
+
+| Path | Carries |
+|---|---|
+| OpenTelemetry | Prompts, tool calls, token usage, cost — via `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317` in your agent settings |
+| Hooks | Session start and end, tool use, permission requests, subagent activity, reasoning |
+
+Both are loopback-only. Nothing leaves the machine.
+
+From there:
+
+```bash title="Look at what was captured"
+beacon endpoint dashboard    # local web view of sessions, timelines, and event detail
+beacon scan                  # run threat detection rules over the log
+beacon token-usage           # token and cost rollups
+```
+
+See the [event schema](/telemetry-schema/event-schema) for the full field reference.
 
 ## What the install does
 
@@ -199,5 +260,11 @@ sudo beacon endpoint uninstall --system
   </Card>
   <Card title="Endpoint doctor" icon="stethoscope" href="/cli/endpoint-doctor">
     Diagnose and repair an existing install.
+  </Card>
+  <Card title="Local dashboard" icon="chart-line" href="/cli/dashboard">
+    Browse captured sessions, timelines, and event detail locally.
+  </Card>
+  <Card title="Threat detection" icon="shield-halved" href="/cli/scan">
+    Run the open threat rules over your runtime log, offline.
   </Card>
 </Columns>
