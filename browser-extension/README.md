@@ -58,7 +58,7 @@ Make sure the beacon endpoint agent is running (it provides the `127.0.0.1:4318`
 | Path | Purpose |
 |---|---|
 | `src/shared/` | Site-agnostic core. `normalize.ts` (pure `ChatTurn → OTLP`), `otlp.ts`, `vocab.ts`, `types.ts`, `ids.ts`. |
-| `src/adapters/` | The only site-specific code. `claude.ts` (done), `chatgpt.ts` (next). `sse.ts` shared SSE framing. |
+| `src/adapters/` | The only site-specific code. `claude.ts` + `chatgpt.ts` (both done). `sse.ts` shared SSE framing. |
 | `src/interceptor/` | MAIN-world `fetch`/stream tee. |
 | `src/content/` | ISOLATED-world relay + (future) DOM fallback. |
 | `src/background/` | Service worker: `assembler.ts`, `delivery.ts` (durable queue + backoff), `settings.ts`, `sw.ts`. |
@@ -87,8 +87,8 @@ Beacon collector (prompt → response → tool calls → `runtime.jsonl` → S3 
 - ✅ Claude capture end-to-end + autonomous replay e2e
 - ✅ Resilience: multi-tab correlation + aborted/partial stream (e2e)
 - ✅ Content-script context-invalidation guard (survives extension reloads)
-- ⬜ ChatGPT adapter
-- ⬜ DOM-fallback capture, XHR transport
+- ✅ ChatGPT capture (`delta_encoding: v1` parser) + autonomous replay e2e
+- ⬜ ChatGPT stream-handoff/resume case (see limitations); DOM-fallback capture, XHR transport
 - ⬜ Real-collector integration test + live-smoke/fixture-recorder as CI layers
 
 ### Known limitations (V0 — intentionally deferred)
@@ -105,6 +105,12 @@ Beacon collector (prompt → response → tool calls → `runtime.jsonl` → S3 
   service worker for streaming would need additional interception (deferred).
 - **Single capture path.** No DOM-scraping fallback yet; if a site changes its SSE wire format, the
   adapter needs updating (the live-smoke drift alarm is designed to catch this).
+- **ChatGPT stream-handoff turns.** ChatGPT streams the answer as `delta_encoding: v1` SSE, usually
+  *inline* on the `POST /backend-api/f/conversation` response (which we tee). Occasionally it instead
+  returns a `stream_handoff` and streams the tokens on a **resume-SSE endpoint** — those turns are
+  currently missed. That resume stream is also SSE-over-fetch (no WebSocket needed for tokens; the
+  `wss://ws.chatgpt.com` socket only carries control messages), so teeing the resume GET is a
+  follow-up, not a rearchitecture. ChatGPT web (like Claude web) doesn't stream token usage.
 - **Telemetry integrity on the injected page.** The MAIN-world interceptor and any other page script
   share the same JS world, so the ISOLATED content script cannot cryptographically distinguish the
   extension's own `postMessage` events from forged ones. A malicious script already running on
