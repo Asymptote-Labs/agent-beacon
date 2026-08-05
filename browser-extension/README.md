@@ -43,8 +43,9 @@ npm run typecheck     # tsc --noEmit
 npm run test:unit     # pure adapter + normalization tests (vitest, no browser)
 npm test              # builds dist/, runs the Playwright replay e2e (THE autonomous loop)
 npm run test:headed   # watch it drive a browser
-npm run test:integration   # opt-in: route through the real beacon-otelcol binary (Phase 4)
-npm run test:live          # opt-in: headed smoke vs the real sites in an authed profile (Phase 4)
+npm run record:fixtures -- --site claude|chatgpt --name <n>   # capture a fixture (headed, authed)
+npm run test:integration   # opt-in, NOT YET WIRED (no spec): route through the real beacon-otelcol
+npm run test:live          # opt-in, NOT YET WIRED (no spec): headed smoke vs the real sites
 npm run report        # open the last HTML report
 ```
 
@@ -65,7 +66,7 @@ Make sure the beacon endpoint agent is running (it provides the `127.0.0.1:4318`
 | `src/popup/`, `src/options/` | On/off, retention toggle, endpoint + per-site config. |
 | `e2e/` | Playwright fixtures + helpers (`mock-collector`, `sse-replay-server`, `otlp-assertions`) + specs. |
 | `test/unit/` | vitest unit tests. |
-| `fixtures/<site>/*.sse` | Recorded chat streams (currently **synthetic**, pending real capture). |
+| `fixtures/<site>/*.sse` | Recorded, sanitized chat streams — real captures for `claude/` and `chatgpt/`. |
 
 ## Testing model (layered by fidelity/cost)
 
@@ -80,8 +81,9 @@ Make sure the beacon endpoint agent is running (it provides the `127.0.0.1:4318`
 
 ## Status
 
-This is a **V0 MVP**: Claude.ai capture proven end-to-end against the real site and the real
-Beacon collector (prompt → response → tool calls → `runtime.jsonl` → S3 → dashboard).
+This is a **V0 MVP**: both **Claude.ai** and **ChatGPT** capture are proven end-to-end against the
+real sites and the real Beacon collector (prompt → response → tool calls → `runtime.jsonl` → S3 →
+dashboard), including interleaved sessions with no cross-contamination.
 
 - ✅ Shared core + normalization (unit-tested)
 - ✅ Claude capture end-to-end + autonomous replay e2e
@@ -118,12 +120,15 @@ Beacon collector (prompt → response → tool calls → `runtime.jsonl` → S3 
   telemetry *integrity* only (no credential/code exposure). A proper fix is service-worker-driven
   MAIN injection (`chrome.scripting`) with a per-tab nonce the page can't read; deferred for V0.
 
-> **Fixtures.** `fixtures/claude/simple-turn.sse` is a **real, sanitized** claude.ai capture
-> (via `npm run record:fixtures`); the adapter is verified against it. `with-tool-call.sse` is
-> still synthetic (written to the documented Anthropic tool-use shape) pending a real tool-call
-> capture. Raw recorder output (`*.page.html`, `*.meta.json`, `real-*.sse`) is git-ignored because
-> it can contain personal chat/account data — only hand-sanitized `*.sse` fixtures are committed.
+> **Fixtures.** The committed `*.sse` files are **real, sanitized** captures (via
+> `npm run record:fixtures`): `fixtures/claude/simple-turn.sse` (claude.ai) and
+> `fixtures/chatgpt/simple-turn.sse` (ChatGPT). `claude/with-tool-call.sse` is synthetic (documented
+> Anthropic tool-use shape) pending a real tool-call capture. Raw recorder output (`*.page.html`,
+> `*.meta.json`, `real-*.sse`, `diag-*.sse`) is git-ignored — it can contain personal chat/account
+> data, so only hand-sanitized `*.sse` fixtures are committed.
 >
-> Notable real-format findings: claude.ai emits a leading `conversation_ready` event, nests the
-> model in `message_start.message.model`, and does **not** stream token usage (so `gen_ai.usage.*`
-> is absent for `claude_web`).
+> Real-format notes: **claude.ai** emits a leading `conversation_ready` event and nests the model in
+> `message_start.message.model` (typed Anthropic events). **ChatGPT** posts to
+> `/backend-api/f/conversation` and streams OpenAI `delta_encoding: v1` JSON-patch ops (add/append/patch
+> with bare-value path inheritance), model in `metadata.model_slug`. Neither site streams token usage,
+> so `gen_ai.usage.*` is absent for both.
