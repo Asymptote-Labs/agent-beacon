@@ -31,13 +31,19 @@ beacon version 0.0.48
 
 ## Configure endpoint telemetry
 
-<Note>
-  Setting up the endpoint differs by operating system. This section describes the per-user install,
-  which works on both. For the platform detail — packages, service management, and fleet deployment —
-  see [macOS](/platforms/macos) or [Linux](/platforms/linux).
-</Note>
+Setting up the endpoint differs by operating system. Start with your platform if you want the
+packages, service management, and fleet deployment for it:
 
-For most individual developer setups, continue with the default per-user endpoint install:
+<Columns cols={2}>
+  <Card title="macOS" icon="apple" href="/platforms/macos">
+    Homebrew, or the signed `.pkg` for MDM. launchd.
+  </Card>
+  <Card title="Linux" icon="linux" href="/platforms/linux">
+    `.deb` and `.rpm` packages. systemd.
+  </Card>
+</Columns>
+
+The per-user install below works the same on both, and is the quickest way to try it on one machine:
 
 ```bash title="Configure endpoint telemetry"
 beacon endpoint install
