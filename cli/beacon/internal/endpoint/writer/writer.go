@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const (
@@ -126,12 +126,17 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if err != nil {
 		return err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	held, err := filelock.Exclusive(lock)
+	if err != nil {
 		_ = lock.Close()
 		return err
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// Unlock before closing. The previous form deferred the unlock first and the close second,
+	// which LIFO ordering ran in the opposite order -- it worked only because closing a descriptor
+	// releases the lock implicitly, leaving the explicit unlock to fail on a closed handle and have
+	// its error discarded.
 	defer lock.Close()
+	defer held.Release()
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}

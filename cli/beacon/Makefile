@@ -89,12 +89,17 @@ build-linux-arm64:
 	$(MAKE) build-hooks-for-platform TARGET_OS=linux TARGET_ARCH=arm64
 	GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BINARY)-linux-arm64 .
 
-build-windows: build-windows-amd64
+build-windows: build-windows-amd64 build-windows-arm64
 
 build-windows-amd64:
 	@echo "Building for Windows (amd64)..."
 	$(MAKE) build-hooks-for-platform TARGET_OS=windows TARGET_ARCH=amd64
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINARY)-windows-amd64.exe .
+
+build-windows-arm64:
+	@echo "Building for Windows (arm64)..."
+	$(MAKE) build-hooks-for-platform TARGET_OS=windows TARGET_ARCH=arm64
+	GOOS=windows GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BINARY)-windows-arm64.exe .
 
 # Clean build artifacts
 clean:

@@ -4,12 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"syscall"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
@@ -222,19 +219,6 @@ func collapseUserConfigBackups(path string) error {
 	return nil
 }
 
-func chownUserConfigArtifacts(info consoleUserInfo, path string) error {
-	uid, gid, err := userOwnership(info)
-	if err != nil {
-		return err
-	}
-	for _, candidate := range userConfigArtifacts(path) {
-		if err := os.Chown(candidate, uid, gid); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
 func userConfigArtifacts(path string) []string {
 	artifacts := []string{filepath.Dir(path), path}
 	if matches, err := filepath.Glob(path + ".beacon.*.bak"); err == nil {
@@ -242,23 +226,4 @@ func userConfigArtifacts(path string) []string {
 	}
 	artifacts = append(artifacts, path+".beacon.bak")
 	return artifacts
-}
-
-func userOwnership(info consoleUserInfo) (int, int, error) {
-	if u, err := user.Lookup(info.Username); err == nil {
-		uid, uidErr := strconv.Atoi(u.Uid)
-		gid, gidErr := strconv.Atoi(u.Gid)
-		if uidErr == nil && gidErr == nil {
-			return uid, gid, nil
-		}
-	}
-	stat, err := os.Stat(info.HomeDir)
-	if err != nil {
-		return 0, 0, err
-	}
-	sys, ok := stat.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, 0, fmt.Errorf("could not determine ownership for %s", info.HomeDir)
-	}
-	return int(sys.Uid), int(sys.Gid), nil
 }

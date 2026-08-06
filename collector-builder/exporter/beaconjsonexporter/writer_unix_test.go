@@ -1,3 +1,5 @@
+//go:build !windows
+
 package beaconjsonexporter
 
 import (
@@ -6,6 +8,13 @@ import (
 	"syscall"
 	"testing"
 )
+
+// The collector runs elevated in a system-mode install and creates the runtime log, while hooks
+// running as the console user append to the same file. A restrictive umask would leave the hooks
+// unable to write, and telemetry would stop while the collector looked healthy.
+//
+// Unix-only because umask is. On Windows the equivalent property is an ACL on the system log
+// directory, which is a real gap there rather than a non-issue.
 
 func TestAppendJSONLCreatesSharedRuntimeFilesDespiteUmask(t *testing.T) {
 	oldUmask := syscall.Umask(0022)
