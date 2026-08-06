@@ -55,8 +55,8 @@ passed. Silence from this tool is meant to mean "checked and clean".
 
 | Command | What it does |
 |---------|--------------|
-| `doctor [--fix] [--json]` | Check the setup and say how to fix what is missing |
-| `run [--scenario ID] [--repeat N] [--keep-sandbox]` | Start a sandbox, run a session, check results |
+| `doctor [--fix] [--json] [--provider NAME]` | Check the setup and say how to fix what is missing |
+| `run [--scenario ID] [--repeat N] [--keep-sandbox] [--provider NAME]` | Start a sandbox, run a session, check results |
 | `verify <run-dir> [--mutate MODE]` | Re-check a saved run. Free and instant |
 | `diff <before> <after>` | Compare what two runs captured |
 | `clean` | Delete saved run output |
@@ -67,6 +67,33 @@ expects, rather than paying for another run.
 
 Three ways to supply the API key, in the order the tool looks: `--modal-secret NAME`,
 `--api-key-command CMD`, or `ANTHROPIC_API_KEY`.
+
+## Testing on Windows
+
+Modal has no Windows machines, so Windows scenarios run on a GitHub Actions Windows runner
+instead — which is already a disposable machine with a real Service Control Manager and
+administrator rights. You dispatch the run, it happens there, and the artifacts come back and are
+judged on your machine by the same code that judges a Modal run:
+
+```bash
+go run ./cmd/beacon-sandbox doctor --provider github        # checks gh, the workflow, the secret
+go run ./cmd/beacon-sandbox run --provider github --scenario w00-probe
+```
+
+Two things to know. A dispatch runs **the pushed ref**, not your working tree, so uncommitted work
+is not under test — `doctor` warns when that is the case, which is the Windows equivalent of the
+stale-collector trap below. And the agent's API key comes from the workflow's `windows-sandbox`
+environment secret rather than from your shell, so the artifact leak check has no value to search
+for and reports *unverified*, exactly as `--modal-secret` does. The in-runner argv scan still runs,
+because the key genuinely is present there.
+
+Scenarios say which platform they are written for (`platform: windows`), defaulting to Linux, and
+`run` reports how many it set aside rather than silently narrowing the suite.
+
+`--provider local` is what the workflow itself uses: it runs scenarios on the machine it is already
+on. It refuses to start unless that machine is a GitHub-hosted runner, because a scenario installs
+Beacon and registers services for real — on a workstation that is damage, not a test. Override with
+`--allow-host-mutation` only on a VM you are happy to lose.
 
 ## Layout
 
@@ -97,8 +124,11 @@ Other options are `drop-commands`, `drop-action:<action>`, and `plant-secret`. E
 ## Limitations
 
 Modal only provides Linux x86 machines, so this **cannot test the macOS build** — launchd, the
-signed installer, and notarization are out of reach. It also confirms the thing it planted was
-recorded rather than proving nothing else was missed.
+signed installer, and notarization are out of reach. Windows is covered by dispatching to a CI
+runner instead (see above), which has its own limitation: the run happens somewhere you cannot
+attach to, so a scenario that fails opaquely is debugged from the uploaded artifacts and the job
+log rather than interactively. It also confirms the thing it planted was recorded rather than
+proving nothing else was missed.
 
 The `i0*` tests install Beacon for real and cover installation and service management; the `s0*`
 tests use a temporary collector instead, the path Beacon uses in CI and cloud agents. `i02` runs
