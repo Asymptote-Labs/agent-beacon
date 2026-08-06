@@ -21,6 +21,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/check"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/credentials"
+	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/dispatch"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/runner"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/sandbox"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/scenario"
@@ -72,10 +73,15 @@ func usage() {
 	fmt.Fprint(os.Stderr, `beacon-sandbox -- verify Beacon against real agent activity in a disposable sandbox
 
   doctor  [--fix] [--json]        check prerequisites and say how to fix what is missing
-  run     [--scenario ID] [--repeat N] [--keep-sandbox] [--suite DIR]
+  run     [--scenario ID] [--repeat N] [--keep-sandbox] [--suite DIR] [--provider NAME]
   verify  <run-dir>...   [--mutate MODE]
   diff    <before-dir> <after-dir>
   clean   [--dir runs]
+
+Where scenarios run (--provider):
+  modal    a disposable Linux sandbox. The default, and Linux-only
+  github   dispatch to a GitHub Actions Windows runner, then collect and judge locally
+  local    this machine, for use inside a disposable CI runner
 
 Anthropic credential, in the order they resolve:
   --modal-secret NAME    a secret already stored with the provider; the value never enters
@@ -120,20 +126,33 @@ func cmdRun(args []string) error {
 	claudeVer := fs.String("claude-version", "", "pin Claude Code version (default: image default)")
 	modalSecret := fs.String("modal-secret", "", "name of a Modal secret holding ANTHROPIC_API_KEY; the value never enters this process")
 	keyCommand := fs.String("api-key-command", "", "command whose stdout is the Anthropic API key (e.g. 'op read op://vault/anthropic/key')")
+	provider := fs.String("provider", "modal", "where scenarios run: modal (disposable Linux), github (dispatch to a Windows runner), or local (this machine)")
+	allowHostMutation := fs.Bool("allow-host-mutation", false, "with --provider local, run on a machine this tool cannot prove is disposable")
+	repo := fs.String("repo", "", "with --provider github, the owner/name to dispatch to (default: inferred from this checkout)")
+	ref := fs.String("ref", "", "with --provider github, the branch or tag to run (default: the workflow's default branch)")
 	fs.Parse(args)
 
 	root, err := repoRoot()
 	if err != nil {
 		return err
 	}
-	creds, err := credentials.Resolve(credentials.Options{
-		ProviderSecretName: *modalSecret,
-		KeyCommand:         *keyCommand,
-	})
-	if err != nil {
-		return err
+	// A dispatched run authenticates the agent from the workflow's environment secret, so no local
+	// credential is needed or read. Resolving one anyway would fail on a machine that has none, and
+	// printing it would claim this process supplied a key it never sent.
+	var creds credentials.Resolved
+	if *provider == "github" {
+		fmt.Printf("credential: the %s workflow's environment secret (nothing is read locally)\n",
+			dispatch.Workflow)
+	} else {
+		creds, err = credentials.Resolve(credentials.Options{
+			ProviderSecretName: *modalSecret,
+			KeyCommand:         *keyCommand,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("credential: %s\n", creds.Describe())
 	}
-	fmt.Printf("credential: %s\n", creds.Describe())
 
 	// A plain directory path, absolute or relative to the repo root. An earlier version
 	// rewrote any value without a path separator to the default directory, so `--suite core`
@@ -155,18 +174,43 @@ func cmdRun(args []string) error {
 		out = filepath.Join(root, "beacon-sandbox", "runs")
 	}
 
+	// A dispatched run is a different shape: the harness executes inside a CI job, and this side
+	// only starts it, waits, collects and judges. Handled before a Provider is opened because
+	// there is no machine here to drive.
+	if *provider == "github" {
+		return dispatchRun(sui, dispatchOptions{
+			repo: *repo, ref: *ref, scenario: *only, claudeVersion: *claudeVer,
+			outDir: out, suiteDir: scDir,
+		})
+	}
+
 	ctx := context.Background()
-	prov, err := sandbox.NewModal(ctx, appName)
+	prov, closeProv, err := openProvider(ctx, *provider, *allowHostMutation)
 	if err != nil {
 		return err
 	}
-	defer prov.Close()
+	defer closeProv()
+
+	// Scenarios are not portable, so run only the ones written for this guest -- and say how many
+	// were set aside. `run` with no --scenario is the "everything" command, and silently returning
+	// a subset of it would read as full coverage.
+	target := platformOf(prov)
+	sui, skipped := sui.For(target)
+	if skipped > 0 {
+		fmt.Printf("suite: %d %s scenario(s); %d written for another platform and not run\n",
+			len(sui.Scenarios), target, skipped)
+	}
+	if len(sui.Scenarios) == 0 {
+		return fmt.Errorf("no %s scenarios in %s, so this run would assert nothing", target, scDir)
+	}
 
 	var verdicts []check.Verdict
+	matched := false
 	for _, sc := range sui.Scenarios {
 		if *only != "" && sc.ID != *only {
 			continue
 		}
+		matched = true
 		for i := 0; i < *repeat; i++ {
 			label := sc.ID
 			if *repeat > 1 {
@@ -200,7 +244,114 @@ func cmdRun(args []string) error {
 			verdicts = append(verdicts, v)
 		}
 	}
+	// A --scenario that matched nothing must not exit 0 with an empty summary: the caller asked
+	// for a specific check and got none, which is a failure to run rather than a clean result.
+	// A typo'd id, or one belonging to the other platform, both land here.
+	if *only != "" && !matched {
+		return fmt.Errorf("no %s scenario with id %q in %s; `--provider %s` runs %s scenarios",
+			target, *only, scDir, *provider, target)
+	}
 	return summarize(verdicts)
+}
+
+// openProvider resolves the --provider choice, returning a cleanup function so a Modal client is
+// always closed.
+func openProvider(ctx context.Context, name string, allowHostMutation bool) (sandbox.Provider, func(), error) {
+	switch name {
+	case "modal":
+		p, err := sandbox.NewModal(ctx, appName)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		return p, p.Close, nil
+	case "local":
+		p, err := sandbox.NewLocalExec(sandbox.LocalExecOptions{AllowHostMutation: allowHostMutation})
+		if err != nil {
+			return nil, func() {}, err
+		}
+		return p, func() {}, nil
+	default:
+		return nil, func() {}, fmt.Errorf("unknown --provider %q; want modal, github, or local", name)
+	}
+}
+
+type dispatchOptions struct {
+	repo, ref, scenario, claudeVersion, outDir, suiteDir string
+}
+
+// dispatchRun starts the Windows workflow, waits for it, and judges what it collected.
+//
+// No credential is resolved here, and that is not an omission: the agent's key lives in the
+// workflow's environment secret and never reaches this process. The consequence is recorded
+// rather than hidden -- the artifact leak check has no value to search for, so it reports
+// unverified, exactly as the --modal-secret path does. The in-runner argv sampler still runs,
+// because there the key genuinely is present.
+func dispatchRun(sui scenario.Suite, opts dispatchOptions) error {
+	// Fail before spending a runner on a scenario that does not exist or is not a Windows one.
+	// The workflow would otherwise start, install an agent, and only then find nothing to run.
+	windows, _ := sui.For(scenario.PlatformWindows)
+	if len(windows.Scenarios) == 0 {
+		return fmt.Errorf("no windows scenarios in %s, so a dispatched run would assert nothing",
+			opts.suiteDir)
+	}
+	if opts.scenario != "" {
+		found := false
+		for _, sc := range windows.Scenarios {
+			if sc.ID == opts.scenario {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("no windows scenario with id %q in %s; --provider github runs "+
+				"windows scenarios", opts.scenario, opts.suiteDir)
+		}
+	}
+
+	res, dispatchErr := dispatch.Run(dispatch.Options{
+		Repo: opts.repo, Ref: opts.ref, Scenario: opts.scenario,
+		ClaudeVersion: opts.claudeVersion, OutDir: opts.outDir,
+		Log: func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) },
+	})
+	// Judge whatever came back before reporting the dispatch error. A failing job still uploads
+	// its artifacts, and those artifacts carry the host-state and argv findings that matter most
+	// precisely when something went wrong -- the same reason cmdRun folds them in on a failed run
+	// rather than replacing the verdict with a generic message.
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	var verdicts []check.Verdict
+	for _, dir := range res.RunDirs {
+		v, err := judgeRunDir(root, dir, "")
+		if err != nil {
+			fmt.Printf("  could not judge %s: %v\n", dir, err)
+			continue
+		}
+		fmt.Print(indent(v.Report()))
+		verdicts = append(verdicts, v)
+	}
+	if dispatchErr != nil {
+		if len(verdicts) > 0 {
+			_ = summarize(verdicts)
+		}
+		return dispatchErr
+	}
+	// GitHub's own conclusion is reported alongside the verdicts rather than instead of them: a
+	// red job with a passing scenario means the workflow broke around the run, and a green job
+	// with a failing scenario is impossible by construction but worth noticing if it ever happens.
+	if res.Conclusion != "success" {
+		fmt.Printf("  the workflow run concluded %q: %s\n", res.Conclusion, res.URL)
+	}
+	return summarize(verdicts)
+}
+
+// platformOf maps a provider's guest platform onto the scenario vocabulary.
+func platformOf(p sandbox.Provider) scenario.Platform {
+	if p.Platform().IsWindows() {
+		return scenario.PlatformWindows
+	}
+	return scenario.PlatformLinux
 }
 
 // judge is the pure step: artifacts in, verdict out. Returns the parsed log too so callers
@@ -257,9 +408,10 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 // credential disclosure are the two findings that must survive every other kind of failure.
 func safetyOf(v *check.Verdict, art runner.Artifacts) {
 	check.Safety(v, check.HostSafety{
-		HostChanged:  art.Meta["host_state"],
-		SecretInArgv: art.Meta["secret_in_argv"] == "true",
-		ArgvCheckRan: art.Meta["argv_check_ran"] == "true",
+		HostChanged:   art.Meta["host_state"],
+		SecretInArgv:  art.Meta["secret_in_argv"] == "true",
+		ArgvCheckRan:  art.Meta["argv_check_ran"] == "true",
+		Disposability: art.Meta["disposability"],
 	})
 }
 
@@ -356,61 +508,76 @@ func cmdVerify(args []string) error {
 	}
 	var verdicts []check.Verdict
 	for _, dir := range dirs {
-		meta := map[string]string{}
-		if b, err := os.ReadFile(filepath.Join(dir, "meta.json")); err == nil {
-			_ = json.Unmarshal(b, &meta)
-		}
-		scID := meta["scenario"]
-		if scID == "" {
-			scID = filepath.Base(dir)
-		}
-		sc, err := findScenario(root, scID)
+		v, err := judgeRunDir(root, dir, *mutate)
 		if err != nil {
 			return err
 		}
-
-		logPath := filepath.Join(dir, "runtime.jsonl")
-		var planted string
-		if *mutate != "" {
-			logPath, planted, err = applyMutation(logPath, *mutate)
-			if err != nil {
-				return err
-			}
-			defer os.Remove(logPath)
-			fmt.Printf("(mutation %q applied: a PASS becoming FAIL is the check working)\n", *mutate)
-		}
-
-		art := runner.Artifacts{RuntimeLog: logPath, Meta: meta}
-		art.Canary = meta["canary"]
-		// Sentinel state is not re-derivable offline, so trust what the run recorded -- including
-		// the detail, which is the evidence a finding quotes. Dropping it made re-judged verdicts
-		// show an empty detail for a sentinel the capture path had already described. Reported by
-		// Cursor Bugbot.
-		art.SentinelDetail = meta["sentinel_detail"]
-		art.SentinelProbed, art.SentinelPresent = decodeSentinel(meta)
-		art.SessionKnown, art.SessionOK = decodeSession(meta)
-		creds := offlineCredential(meta)
-		v, log := judge(sc, art, creds, planted)
 		fmt.Print(v.Report())
-		// Refresh both artifacts, or neither. Only the fingerprint was rewritten before, so a
-		// re-judge with changed expectations left verdict.json holding the old outcome while
-		// fingerprint.json held the new one -- the two files on disk actively disagreeing about
-		// the same run, with anything reading the verdict trusting a stale judgment. Reported by
-		// Cursor Bugbot, and visible in this repo's own run directories.
-		//
-		// Neither is written for a mutated run: a self-test deliberately damages the input, so
-		// persisting its verdict would overwrite the run's real record with a fabricated failure.
-		if *mutate == "" {
-			if err := v.WriteJSON(filepath.Join(dir, "verdict.json")); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not update verdict.json in %s: %v\n", dir, err)
-			}
-			if err := v.Fingerprint(log).WriteJSON(filepath.Join(dir, "fingerprint.json")); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not update fingerprint.json in %s: %v\n", dir, err)
-			}
-		}
 		verdicts = append(verdicts, v)
 	}
 	return summarize(verdicts)
+}
+
+// judgeRunDir judges one collected run directory, offline.
+//
+// Shared by `verify` and by the dispatched-run path rather than duplicated, because the decoding
+// it performs carries several corrections that are easy to lose in a second copy: the sentinel and
+// session signals must decode as *unknown* rather than as known failures when the metadata
+// predates them, and the credential the leak check searches for must be provably the one the run
+// used or the check reports unverified. A second implementation would drift back into false greens.
+func judgeRunDir(root, dir, mutate string) (check.Verdict, error) {
+	meta := map[string]string{}
+	if b, err := os.ReadFile(filepath.Join(dir, "meta.json")); err == nil {
+		_ = json.Unmarshal(b, &meta)
+	}
+	scID := meta["scenario"]
+	if scID == "" {
+		scID = filepath.Base(dir)
+	}
+	sc, err := findScenario(root, scID)
+	if err != nil {
+		return check.Verdict{}, err
+	}
+
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	var planted string
+	if mutate != "" {
+		logPath, planted, err = applyMutation(logPath, mutate)
+		if err != nil {
+			return check.Verdict{}, err
+		}
+		defer os.Remove(logPath)
+		fmt.Printf("(mutation %q applied: a PASS becoming FAIL is the check working)\n", mutate)
+	}
+
+	art := runner.Artifacts{RuntimeLog: logPath, Meta: meta}
+	art.Canary = meta["canary"]
+	// Sentinel state is not re-derivable offline, so trust what the run recorded -- including
+	// the detail, which is the evidence a finding quotes. Dropping it made re-judged verdicts
+	// show an empty detail for a sentinel the capture path had already described. Reported by
+	// Cursor Bugbot.
+	art.SentinelDetail = meta["sentinel_detail"]
+	art.SentinelProbed, art.SentinelPresent = decodeSentinel(meta)
+	art.SessionKnown, art.SessionOK = decodeSession(meta)
+	creds := offlineCredential(meta)
+	v, log := judge(sc, art, creds, planted)
+	// Refresh both artifacts, or neither. Only the fingerprint was rewritten before, so a
+	// re-judge with changed expectations left verdict.json holding the old outcome while
+	// fingerprint.json held the new one -- the two files on disk actively disagreeing about
+	// the same run, with anything reading the verdict trusting a stale judgment. Reported by
+	// Cursor Bugbot, and visible in this repo's own run directories.
+	//
+	// Neither is written for a mutated run: a self-test deliberately damages the input, so
+	// persisting its verdict would overwrite the run's real record with a fabricated failure.
+	if mutate == "" {
+		if err := v.WriteJSON(filepath.Join(dir, "verdict.json")); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not update verdict.json in %s: %v\n", dir, err)
+		}
+		if err := v.Fingerprint(log).WriteJSON(filepath.Join(dir, "fingerprint.json")); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not update fingerprint.json in %s: %v\n", dir, err)
+		}
+	}
+	return v, nil
 }
 
 // cmdDiff compares two runs' capability fingerprints.

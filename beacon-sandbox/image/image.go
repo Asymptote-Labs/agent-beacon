@@ -9,6 +9,7 @@ package image
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/sandbox"
@@ -30,6 +31,137 @@ const (
 	// offers no arch selection, so this is amd64.
 	DefaultBase = "ubuntu:24.04"
 )
+
+// Layout is where things live inside the guest.
+//
+// Split out from the package constants because those describe one environment -- the Linux
+// image this package builds -- and Windows runs somewhere this package does not provision at
+// all. The CI job places the binaries and creates the work directory there, so the harness
+// needs to *describe* the layout without owning it.
+type Layout struct {
+	Platform sandbox.Platform
+	// AgentUser is the account the session runs as. Empty means "whoever is already running",
+	// which is the Windows case: there is no way to become another user without a password.
+	AgentUser string
+	AgentHome string
+	WorkDir   string
+	BeaconDir string
+	// PathPrepend is prepended to PATH so both the agent and Beacon are reachable.
+	PathPrepend []string
+}
+
+// LinuxLayout is the layout of the image this package builds.
+func LinuxLayout() Layout {
+	return Layout{
+		Platform:    sandbox.PlatformPosix,
+		AgentUser:   AgentUser,
+		AgentHome:   AgentHome,
+		WorkDir:     WorkDir,
+		BeaconDir:   BeaconDir,
+		PathPrepend: PathPrepend(),
+	}
+}
+
+// WindowsLayout is the layout the windows-sandbox CI job provisions.
+//
+// No AgentUser: the runner is already an administrator with UAC disabled, and this backend
+// cannot switch users anyway. Whether that is acceptable to the agent is an open question the
+// w00-probe scenario answers -- Claude Code refuses --dangerously-skip-permissions as root on
+// POSIX, and if it refuses for an elevated Windows user too, the CI job will have to create a
+// standard account and run the whole harness as them.
+func WindowsLayout() Layout {
+	home := windowsHome()
+	beaconDir := `C:\beacon-sandbox\bin`
+	return Layout{
+		Platform:  sandbox.PlatformWindows,
+		AgentHome: home,
+		WorkDir:   `C:\beacon-sandbox\work`,
+		BeaconDir: beaconDir,
+		// The agent installs to %LOCALAPPDATA%\Programs, which is where install.ps1 puts it.
+		PathPrepend: []string{beaconDir, filepath.Join(home, "AppData", "Local", "Programs", "claude")},
+	}
+}
+
+// LayoutFor selects the layout for a platform.
+func LayoutFor(p sandbox.Platform) Layout {
+	if p.IsWindows() {
+		return WindowsLayout()
+	}
+	return LinuxLayout()
+}
+
+// PrivilegedUser names the account a privileged step runs as, or empty when this platform has
+// no account to switch to.
+//
+// Windows is the empty case, and that is not a gap: the runner is already an administrator with
+// UAC disabled, so a system-mode install has the rights it needs without becoming anyone. There
+// is also no way to become another user without a password, so asking would fail rather than
+// escalate.
+func (l Layout) PrivilegedUser() string {
+	if l.Platform.IsWindows() {
+		return ""
+	}
+	return "root"
+}
+
+// DefaultLogPath is where Beacon writes the runtime log when `endpoint status --json` could not
+// be parsed.
+//
+// A fallback only. The install scenarios read the real path out of status, because a scenario
+// that hardcodes the expected path agrees with itself rather than with Beacon -- which is the
+// one thing an install scenario exists to check.
+func (l Layout) DefaultLogPath(system bool) string {
+	if l.Platform.IsWindows() {
+		if system {
+			programData := os.Getenv("ProgramData")
+			if programData == "" {
+				programData = `C:\ProgramData`
+			}
+			return filepath.Join(programData, "Beacon", "Endpoint", "logs", "runtime.jsonl")
+		}
+		return filepath.Join(l.AgentHome, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	}
+	if system {
+		return "/var/log/beacon-agent/runtime.jsonl"
+	}
+	return l.AgentHome + "/.beacon/endpoint/logs/runtime.jsonl"
+}
+
+// ConsoleUser names the human whose agent runtime a system-mode install must configure.
+//
+// A system endpoint runs elevated, and `endpoint install` configures the *installing* user's
+// settings -- which for a package install is not the person at the keyboard. Beacon resolves
+// that person from SUDO_USER and then logind; a system-mode scenario has to name them or its
+// capture assertions would be testing an unused settings file. On Windows there is one account,
+// so it is that one.
+func (l Layout) ConsoleUser() string {
+	if l.AgentUser != "" {
+		return l.AgentUser
+	}
+	if v := os.Getenv("USERNAME"); v != "" {
+		return v
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	return filepath.Base(l.AgentHome)
+}
+
+// windowsHome resolves the guest home directory.
+//
+// USERPROFILE is the value Windows programs actually read. Falling back to a literal rather
+// than to an error keeps a dispatched run from failing on a runner that has not exported it;
+// the layout is only ever used to build guest paths, so a wrong guess surfaces immediately as
+// a missing file rather than silently.
+func windowsHome() string {
+	if v := os.Getenv("USERPROFILE"); v != "" {
+		return v
+	}
+	if v := os.Getenv("HOME"); v != "" {
+		return v
+	}
+	return `C:\Users\runneradmin`
+}
 
 // Spec parameterizes the environment.
 type Spec struct {

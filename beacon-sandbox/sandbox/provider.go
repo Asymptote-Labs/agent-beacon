@@ -20,6 +20,23 @@ const (
 	LaneVM      Lane = "vm"
 )
 
+// Platform names the guest operating-system family.
+//
+// It decides two things that cannot be guessed from anything else: which dialect Exec
+// interprets a script as, and which path syntax a scenario has to speak. Everything above
+// the provider branches on this rather than on the *host's* runtime.GOOS, because those are
+// not the same question -- a Mac dispatching a Windows run is the normal case.
+type Platform string
+
+const (
+	PlatformPosix   Platform = "posix"
+	PlatformWindows Platform = "windows"
+)
+
+// IsWindows is a readability shorthand for the many call sites that only care which side of
+// the split they are on.
+func (p Platform) IsWindows() bool { return p == PlatformWindows }
+
 // ImageSpec describes a reproducible environment. Layers are ordered and cached by the
 // provider, so an unchanged prefix is free on re-run.
 type ImageSpec struct {
@@ -101,6 +118,20 @@ type Instance interface {
 type Provider interface {
 	// Name identifies the backend in run metadata.
 	Name() string
+
+	// Platform reports the guest OS family, so callers know which script dialect Exec
+	// accepts and which path syntax to build.
+	Platform() Platform
+
+	// MutatesHost reports whether this backend runs the scenario on the same machine the
+	// caller is on, rather than in a separate instance.
+	//
+	// This is not a detail: hostguard exists to prove Beacon was never installed outside the
+	// sandbox, and it compares the *caller's* machine before and after. When guest and host
+	// are the same machine that comparison inverts -- a correct install trips the most serious
+	// finding this tool has. A backend that says true is telling the runner to assert
+	// disposability some other way instead of silently skipping the check.
+	MutatesHost() bool
 
 	// EnsureImage builds or resolves an environment. Implementations should be
 	// idempotent and lean on content-addressed caching.

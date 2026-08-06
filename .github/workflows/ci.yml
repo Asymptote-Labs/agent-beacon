@@ -134,6 +134,9 @@ jobs:
           - goos: linux
             goarch: arm64
             make_target: build-linux-arm64
+          - goos: windows
+            goarch: amd64
+            make_target: build-windows-amd64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -169,6 +172,47 @@ jobs:
         run: go test ./...
       - name: Test observe SDK and threat rules on Linux
         working-directory: pkg/asymptoteobserve
+        run: go test ./...
+
+  # Runs the unit suites on a real Windows runner. The cross-build matrix proves the code compiles
+  # for windows/amd64; this proves the per-OS implementations behave -- file locking through
+  # LockFileEx, file identity through GetFileInformationByHandle, and process liveness through
+  # OpenProcess, none of which a cross-compile exercises at all.
+  windows-test:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      # The embedded hooks binary must match the platform under test: the CLI validates its
+      # architecture at runtime, so a placeholder fails hook installation on Windows.
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon-hooks
+        run: |
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+      - name: Test beacon CLI on Windows
+        working-directory: cli/beacon
+        run: go test ./...
+      - name: Test endpoint packages with the race detector
+        working-directory: cli/beacon
+        run: go test -race ./internal/endpoint/...
+      - name: Test hook adapter on Windows
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Test collector exporter on Windows
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
+      - name: Test observe SDK and threat rules on Windows
+        working-directory: pkg/asymptoteobserve
+        run: go test ./...
+      # Runs the generated-PowerShell parse test, which skips on a machine without pwsh.
+      - name: Test the sandbox harness on Windows
+        working-directory: beacon-sandbox
         run: go test ./...
 
   # Exercises the real systemd install path: unit generation, systemctl enable/active,

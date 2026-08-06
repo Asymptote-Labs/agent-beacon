@@ -8,11 +8,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const (
@@ -353,12 +353,14 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if err != nil {
 		return err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	held, err := filelock.Exclusive(lock)
+	if err != nil {
 		_ = lock.Close()
 		return err
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// Unlock before closing: LIFO defer ordering means the close listed first runs last.
 	defer lock.Close()
+	defer held.Release()
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}

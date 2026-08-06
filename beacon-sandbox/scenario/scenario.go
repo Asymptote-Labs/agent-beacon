@@ -67,10 +67,27 @@ type Install struct {
 	NeedsRealSystemd bool `yaml:"needs_real_systemd,omitempty"`
 }
 
+// Platform selects the guest OS family a scenario is written for.
+//
+// A scenario is not portable by default and pretending otherwise would be worse than declaring
+// it: the prompt names shell commands, the sentinel is an absolute path, and the expectations
+// assert what Beacon captured from a particular runtime. So a scenario says which world it
+// belongs to, and the suite loader runs only the ones that match the target.
+type Platform string
+
+const (
+	// PlatformLinux is the default, so every scenario written before Windows existed keeps
+	// working unchanged.
+	PlatformLinux   Platform = "linux"
+	PlatformWindows Platform = "windows"
+)
+
 // Scenario is one declarative case.
 type Scenario struct {
-	ID     string `yaml:"id"`
-	Prompt string `yaml:"prompt"`
+	ID string `yaml:"id"`
+	// Platform defaults to linux when unset.
+	Platform Platform `yaml:"platform,omitempty"`
+	Prompt   string   `yaml:"prompt"`
 	// Install, when set, performs a persistent endpoint install and runs the session against
 	// it, with no `beacon ci exec` wrapper anywhere.
 	Install *Install `yaml:"install,omitempty"`
@@ -101,6 +118,14 @@ type Suite struct {
 	Scenarios []Scenario
 }
 
+// TargetPlatform resolves the platform with its default.
+func (s Scenario) TargetPlatform() Platform {
+	if s.Platform == "" {
+		return PlatformLinux
+	}
+	return s.Platform
+}
+
 // Timeout resolves the session bound with a sane default.
 func (s Scenario) Timeout() time.Duration {
 	if s.TimeoutSeconds > 0 {
@@ -128,6 +153,27 @@ func (s Scenario) Validate() error {
 	if len(s.Expect) == 0 {
 		return fmt.Errorf("%s: at least one expectation is required, else the run asserts nothing", s.ID)
 	}
+	switch s.TargetPlatform() {
+	case PlatformLinux, PlatformWindows:
+	default:
+		return fmt.Errorf("%s: platform %q must be linux or windows", s.ID, s.Platform)
+	}
+	if s.TargetPlatform() == PlatformWindows {
+		// systemd does not exist on Windows, and the nested-container recipe that provides it is
+		// a Linux arrangement. A scenario asking for both would be arranged as neither and would
+		// then quietly verify whatever backend happened to be selected.
+		if s.NeedsRealSystemd() {
+			return fmt.Errorf("%s: needs_real_systemd cannot apply to a windows scenario; "+
+				"the Windows service manager is the SCM, which is always present", s.ID)
+		}
+		// An absolute POSIX sentinel on Windows is the mistake that would be hardest to notice:
+		// the agent writes somewhere, the probe looks somewhere else, and the run reports the
+		// agent idle rather than the scenario being wrong.
+		if strings.HasPrefix(s.Sentinel, "/") {
+			return fmt.Errorf("%s: sentinel %q is a POSIX path in a windows scenario; use "+
+				"{{workdir}} or a drive-qualified path", s.ID, s.Sentinel)
+		}
+	}
 	for i, e := range s.Expect {
 		if strings.TrimSpace(e.Action) == "" {
 			return fmt.Errorf("%s: expect[%d] is missing action", s.ID, i)
@@ -151,16 +197,16 @@ func (s Scenario) Validate() error {
 					"container has no logind session to attach to", s.ID)
 			}
 			switch s.Install.ExpectServiceKind {
-			case "", "systemd", "launchd", "none":
+			case "", "systemd", "launchd", "windows-service", "none":
 			default:
-				return fmt.Errorf("%s: install.expect_service_kind %q must be systemd, launchd or none",
-					s.ID, s.Install.ExpectServiceKind)
+				return fmt.Errorf("%s: install.expect_service_kind %q must be systemd, launchd, "+
+					"windows-service or none", s.ID, s.Install.ExpectServiceKind)
 			}
 			switch s.Install.Service {
-			case "", "auto", "systemd", "launchd", "none":
+			case "", "auto", "systemd", "launchd", "windows-service", "none":
 			default:
-				return fmt.Errorf("%s: install.service %q must be auto, systemd, launchd, or none",
-					s.ID, s.Install.Service)
+				return fmt.Errorf("%s: install.service %q must be auto, systemd, launchd, "+
+					"windows-service, or none", s.ID, s.Install.Service)
 			}
 		}
 
@@ -210,6 +256,10 @@ func Load(path string) (Scenario, error) {
 }
 
 // LoadSuite reads every *.yaml in dir, sorted by filename so ordering is deterministic.
+//
+// Every scenario is validated, including ones this platform will not run: a syntax error or a
+// stale field in a Windows scenario should fail a Linux contributor's `go test`, not wait for
+// somebody to dispatch a Windows run.
 func LoadSuite(dir string) (Suite, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
 	if err != nil {
@@ -227,6 +277,23 @@ func LoadSuite(dir string) (Suite, error) {
 		suite.Scenarios = append(suite.Scenarios, s)
 	}
 	return suite, nil
+}
+
+// For returns the scenarios written for one platform.
+//
+// Reports how many were set aside rather than silently narrowing the suite. `run` with no
+// --scenario is the "everything" command, and a caller who asked for everything and got two
+// thirds of it is entitled to know -- silent truncation reads as full coverage.
+func (s Suite) For(p Platform) (matching Suite, skipped int) {
+	out := Suite{Name: s.Name}
+	for _, sc := range s.Scenarios {
+		if sc.TargetPlatform() == p {
+			out.Scenarios = append(out.Scenarios, sc)
+			continue
+		}
+		skipped++
+	}
+	return out, skipped
 }
 
 // Expand substitutes run-scoped placeholders into a template string.

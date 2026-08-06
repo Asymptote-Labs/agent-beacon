@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/ingest"
 )
@@ -50,7 +48,7 @@ func readFileBatches(path string, activePath string, state ingest.State, maxEven
 	if err != nil {
 		return nil, err
 	}
-	fileID := fileIdentity(info)
+	fileID := fileIdentity(file, info)
 	startOffset := startOffsetForFile(path, activePath, state, info.Size(), fileID)
 
 	if startOffset > 0 {
@@ -204,12 +202,4 @@ func boundedOffset(offset int64, fileSize int64) int64 {
 		return 0
 	}
 	return offset
-}
-
-func fileIdentity(info os.FileInfo) string {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return ""
-	}
-	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino)
 }

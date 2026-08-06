@@ -1,11 +1,12 @@
 module github.com/asymptote-labs/agent-beacon/cli/beacon
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/spf13/cobra v1.8.1
+	golang.org/x/sys v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

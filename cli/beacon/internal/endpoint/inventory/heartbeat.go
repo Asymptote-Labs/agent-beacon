@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const stateFileName = "inventory-state.json"
@@ -31,6 +31,7 @@ type State struct {
 type LockedState struct {
 	path string
 	file *os.File
+	lock *filelock.Lock
 }
 
 func StatePath(userMode bool) string {
@@ -63,17 +64,18 @@ func LockState(path string) (*LockedState, State, error) {
 	if err != nil {
 		return nil, State{}, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	held, err := filelock.Exclusive(file)
+	if err != nil {
 		_ = file.Close()
 		return nil, State{}, err
 	}
 	state, err := ReadState(path)
 	if err != nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = held.Release()
 		_ = file.Close()
 		return nil, State{}, err
 	}
-	return &LockedState{path: path, file: file}, state, nil
+	return &LockedState{path: path, file: file, lock: held}, state, nil
 }
 
 func (s *LockedState) Save(state State) error {
@@ -94,7 +96,7 @@ func (s *LockedState) Close() error {
 	if s == nil || s.file == nil {
 		return nil
 	}
-	unlockErr := syscall.Flock(int(s.file.Fd()), syscall.LOCK_UN)
+	unlockErr := s.lock.Release()
 	closeErr := s.file.Close()
 	if unlockErr != nil {
 		return unlockErr
