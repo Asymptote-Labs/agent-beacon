@@ -51,6 +51,8 @@ func cmdDoctor(args []string) error {
 	fix := fs.Bool("fix", false, "resolve what can be resolved automatically (downloads the collector)")
 	modalSecret := fs.String("modal-secret", "", "name of a Modal secret holding ANTHROPIC_API_KEY")
 	keyCommand := fs.String("api-key-command", "", "command whose stdout is the Anthropic API key")
+	provider := fs.String("provider", "modal", "check the prerequisites for this provider: modal, github, or local")
+	repo := fs.String("repo", "", "with --provider github, the owner/name that will be dispatched to")
 	fs.Parse(args)
 
 	root, err := repoRoot()
@@ -70,60 +72,75 @@ func cmdDoctor(args []string) error {
 			Fix:    "install Go 1.24+ from https://go.dev/dl/"})
 	}
 
-	// --- sandbox provider auth ---
-	// Attempting a real connection is the only honest check: credentials can be present but
-	// expired, and discovering that mid-run wastes a session.
-	ctx := context.Background()
-	if prov, err := sandbox.NewModal(ctx, appName); err == nil {
-		prov.Close()
-		add(doctorCheck{Name: "modal_auth", Status: statusOK, Detail: "authenticated"})
-	} else {
-		add(doctorCheck{Name: "modal_auth", Status: statusFail,
-			Detail: firstLine(err.Error()),
-			Fix:    "pip install modal && modal token new    (or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET)"})
-	}
-
-	// --- agent credential ---
-	creds, credErr := credentials.Resolve(credentials.Options{
-		ProviderSecretName: *modalSecret,
-		KeyCommand:         *keyCommand,
-	})
-	add(credentialCheck(creds, credErr, *keyCommand))
-
-	// --- Beacon binary under test ---
-	beaconPath := image.BeaconPath(root)
-	if fi, err := os.Stat(beaconPath); err == nil && fi.Size() > 0 {
-		add(doctorCheck{Name: "beacon_binary", Status: statusOK, Detail: beaconPath})
-	} else {
-		add(doctorCheck{Name: "beacon_binary", Status: statusFail,
-			Detail: "missing " + beaconPath,
-			Fix:    image.BuildBeaconHint})
-	}
-
-	// --- collector ---
-	collectorPath := image.CollectorPath(root)
-	if fi, err := os.Stat(collectorPath); err == nil && fi.Size() > 0 {
-		add(doctorCheck{Name: "collector_binary", Status: statusOK, Detail: collectorPath})
-	} else if *fix {
-		if p, err := image.EnsureCollector(root, func(f string, a ...any) {
-			if !*asJSON {
-				fmt.Printf("  "+f+"\n", a...)
-			}
-		}); err == nil {
-			add(doctorCheck{Name: "collector_binary", Status: statusOK, Detail: "downloaded to " + p})
-		} else {
-			add(doctorCheck{Name: "collector_binary", Status: statusFail, Detail: firstLine(err.Error()),
-				Fix: "see the build instructions in the error above"})
+	// The checks are per-provider, because a check that cannot apply must not be reported as a
+	// failure. Running the Modal checks before a dispatched Windows run would demand a Modal
+	// account and a Linux Beacon build for a run that uses neither, and `ready: false` on
+	// prerequisites the chosen provider does not have would train people to ignore the field.
+	switch *provider {
+	case "github":
+		for _, c := range githubChecks(root, *repo) {
+			add(c)
 		}
-	} else {
-		add(doctorCheck{Name: "collector_binary", Status: statusFail,
-			Detail: "missing " + collectorPath,
-			Fix:    "beacon-sandbox doctor --fix    (downloads it from the latest release)"})
-	}
+	case "local":
+		for _, c := range localChecks() {
+			add(c)
+		}
+	default:
+		// --- sandbox provider auth ---
+		// Attempting a real connection is the only honest check: credentials can be present but
+		// expired, and discovering that mid-run wastes a session.
+		ctx := context.Background()
+		if prov, err := sandbox.NewModal(ctx, appName); err == nil {
+			prov.Close()
+			add(doctorCheck{Name: "modal_auth", Status: statusOK, Detail: "authenticated"})
+		} else {
+			add(doctorCheck{Name: "modal_auth", Status: statusFail,
+				Detail: firstLine(err.Error()),
+				Fix:    "pip install modal && modal token new    (or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET)"})
+		}
 
-	// --- the trap: local exporter changes a downloaded collector will not contain ---
-	stale, reason := image.CollectorIsStale(root)
-	add(freshnessCheck(stale, reason))
+		// --- agent credential ---
+		creds, credErr := credentials.Resolve(credentials.Options{
+			ProviderSecretName: *modalSecret,
+			KeyCommand:         *keyCommand,
+		})
+		add(credentialCheck(creds, credErr, *keyCommand))
+
+		// --- Beacon binary under test ---
+		beaconPath := image.BeaconPath(root)
+		if fi, err := os.Stat(beaconPath); err == nil && fi.Size() > 0 {
+			add(doctorCheck{Name: "beacon_binary", Status: statusOK, Detail: beaconPath})
+		} else {
+			add(doctorCheck{Name: "beacon_binary", Status: statusFail,
+				Detail: "missing " + beaconPath,
+				Fix:    image.BuildBeaconHint})
+		}
+
+		// --- collector ---
+		collectorPath := image.CollectorPath(root)
+		if fi, err := os.Stat(collectorPath); err == nil && fi.Size() > 0 {
+			add(doctorCheck{Name: "collector_binary", Status: statusOK, Detail: collectorPath})
+		} else if *fix {
+			if p, err := image.EnsureCollector(root, func(f string, a ...any) {
+				if !*asJSON {
+					fmt.Printf("  "+f+"\n", a...)
+				}
+			}); err == nil {
+				add(doctorCheck{Name: "collector_binary", Status: statusOK, Detail: "downloaded to " + p})
+			} else {
+				add(doctorCheck{Name: "collector_binary", Status: statusFail, Detail: firstLine(err.Error()),
+					Fix: "see the build instructions in the error above"})
+			}
+		} else {
+			add(doctorCheck{Name: "collector_binary", Status: statusFail,
+				Detail: "missing " + collectorPath,
+				Fix:    "beacon-sandbox doctor --fix    (downloads it from the latest release)"})
+		}
+
+		// --- the trap: local exporter changes a downloaded collector will not contain ---
+		stale, reason := image.CollectorIsStale(root)
+		add(freshnessCheck(stale, reason))
+	}
 
 	res.Ready = true
 	for _, c := range res.Checks {

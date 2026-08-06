@@ -10,8 +10,13 @@ documentation is in `README.md` and on the docs site; this file is the operating
 
 ```bash
 cd beacon-sandbox
-go run ./cmd/beacon-sandbox doctor
+go run ./cmd/beacon-sandbox doctor                      # for a Linux run (the default)
+go run ./cmd/beacon-sandbox doctor --provider github    # for a Windows run
 ```
+
+`--provider` decides which prerequisites are checked, because they differ: a Linux run needs a
+Modal account and a local Beacon build, a Windows run needs `gh` and a dispatchable workflow.
+Running the wrong set reports failures for things the chosen provider does not use.
 
 `doctor` is free, needs no sandbox, and catches the failure modes that otherwise appear
 mid-run as something else entirely. Add `--fix` to let it download the collector binary.
@@ -61,6 +66,7 @@ real money on the user's account, so:
 | Approval or permission handling | `--scenario s07-denied-tool` |
 | `endpoint install`, config paths, service startup | `--scenario i01-install-supervised` |
 | The systemd backend, unit files, Linux system mode | `--scenario i02-install-systemd` |
+| Anything Windows | `--provider github --scenario w00-probe` |
 | Something broad, or preparing a PR | the whole suite (no `--scenario`) |
 
 ```bash
@@ -201,9 +207,35 @@ Rules:
   visible but not blocking.
 - Validate without spending anything: `go test ./scenario/`.
 
+## Windows runs
+
+Windows scenarios do not run on Modal, which has no Windows machines. They are dispatched to a
+GitHub Actions Windows runner, which runs the harness against `--provider local` and uploads what
+it collected; this side downloads it and judges it with the same `check` package.
+
+```bash
+go run ./cmd/beacon-sandbox run --provider github --scenario w00-probe
+```
+
+Four things to tell the user about a Windows run, because none of them are visible in the verdict's
+outcome line:
+
+- **A dispatch tests the pushed ref, not the working tree.** Uncommitted or unpushed work is
+  silently not under test. `doctor --provider github` reports this as `dispatch_ref`; treat it the
+  same way you treat `collector_freshness` — do what it asks before believing the result.
+- **The credential is not verifiable from here.** The agent authenticates from the workflow's
+  `windows-sandbox` environment secret, so the artifact leak check reports *unverified* rather than
+  clean. Say so; never paraphrase it as a pass.
+- **Host isolation is asserted, not compared.** The guest is the runner, so the before/after
+  comparison every Modal run gets cannot happen. Those runs carry a `safety.host_untouched` warning
+  naming their disposability evidence. That warning is expected and is not a failure — and it is
+  also not a clean bill of health.
+- **You cannot attach to a failing run.** Debug from the uploaded `runs/` artifacts and the job log.
+
 ## Environment constraints worth knowing
 
-- The sandbox is **Linux/amd64 only**. This cannot verify the macOS build.
+- The Modal sandbox is **Linux/amd64 only**. It cannot verify the macOS build, and Windows goes
+  through the dispatched path above.
 - Claude Code must run as a **non-root** user; it refuses `--dangerously-skip-permissions` as root.
 - Switching user with `su -` strips the injected credential (login shell resets the environment).
   The code uses `su -p`; a test pins this.
