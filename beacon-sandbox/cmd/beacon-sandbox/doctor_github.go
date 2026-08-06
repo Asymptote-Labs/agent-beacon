@@ -102,6 +102,11 @@ func workflowDispatchableCheck(repo string) doctorCheck {
 // the same class of wasted investigation the stale-collector warning exists to prevent, so it gets
 // the same treatment: a warning naming exactly what is not covered, satisfiable by doing what it
 // asks.
+//
+// The ref in question is the current branch, because dispatch.Run resolves it that way rather than
+// letting `gh workflow run` fall back to the default branch. Both halves are load-bearing: this
+// check compares against the current branch's upstream, so if the dispatcher ran main instead, a
+// clean feature branch would pass the check while the run exercised entirely different code.
 func dispatchRefCheck(root string) doctorCheck {
 	// Only the trees a Windows run actually exercises. Warning on unrelated edits would make the
 	// check fire constantly and be ignored.
@@ -128,16 +133,24 @@ func dispatchRefCheck(root string) doctorCheck {
 
 	// Committed but unpushed is the subtler half: `git status` is clean, so everything looks fine,
 	// and the dispatch quietly runs the previous commit.
-	if b, err := exec.Command("git", "-C", root, "rev-list", "--count", "@{upstream}..HEAD").Output(); err == nil {
-		if n := strings.TrimSpace(string(b)); n != "" && n != "0" {
-			return doctorCheck{Name: "dispatch_ref", Status: statusWarn,
-				Detail: n + " commit(s) ahead of the upstream branch; a dispatch would run the " +
-					"pushed ref, which does not include them",
-				Fix: "git push, then dispatch with --ref <branch>"}
-		}
+	b, err = exec.Command("git", "-C", root, "rev-list", "--count", "@{upstream}..HEAD").Output()
+	if err != nil {
+		// No upstream at all, which is worse than being ahead of one rather than better: a branch
+		// that was never pushed has no remote ref, so the dispatch cannot run it and fails outright.
+		// The previous version let this error fall through to the OK below, which reported a branch
+		// that cannot be dispatched as ready to dispatch.
+		return doctorCheck{Name: "dispatch_ref", Status: statusWarn,
+			Detail: "this branch has no upstream, so there is no pushed ref for a dispatch to run",
+			Fix:    "git push -u origin HEAD"}
+	}
+	if n := strings.TrimSpace(string(b)); n != "" && n != "0" {
+		return doctorCheck{Name: "dispatch_ref", Status: statusWarn,
+			Detail: n + " commit(s) ahead of the upstream branch; a dispatch runs the pushed ref, " +
+				"which does not include them",
+			Fix: "git push"}
 	}
 	return doctorCheck{Name: "dispatch_ref", Status: statusOK,
-		Detail: "the working tree matches the pushed ref, so a dispatch tests what you are looking at"}
+		Detail: "the working tree matches the pushed current branch, which is the ref a dispatch runs"}
 }
 
 // windowsSecretCheck reports whether the agent credential the workflow needs is configured.
