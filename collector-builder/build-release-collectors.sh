@@ -15,14 +15,20 @@ while read -r goos goarch; do
   echo "Building collector for ${goos}/${goarch}"
   rm -rf dist/beacon-otelcol
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$builder" --config builder.yaml
-  test -x dist/beacon-otelcol/beacon-otelcol
+  # The builder appends .exe for windows, so the produced name is target-dependent.
+  binary="beacon-otelcol"
+  if [ "$goos" = "windows" ]; then
+    binary="beacon-otelcol.exe"
+  fi
+  test -f "dist/beacon-otelcol/$binary"
   mkdir -p "$targets_dir/$target"
-  cp dist/beacon-otelcol/beacon-otelcol "$targets_dir/$target/beacon-otelcol"
+  cp "dist/beacon-otelcol/$binary" "$targets_dir/$target/$binary"
 done <<'TARGETS'
 darwin amd64
 darwin arm64
 linux amd64
 linux arm64
+windows amd64
 TARGETS
 
 rm -rf dist/beacon-otelcol

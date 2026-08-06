@@ -60,18 +60,15 @@ jobs:
         working-directory: beacon-sandbox
         run: go test ./...
 
-      # Beacon does not compile for Windows yet: internal/endpoint/writer, inventory, ingest and
-      # service/supervised all use POSIX-only syscalls. Until that is fixed the build is expected
-      # to fail, and the run continues so the probe can still report everything that does not
-      # depend on a Beacon binary. Once the portability layer lands, remove continue-on-error --
-      # a silently missing binary must not read as a passing run.
       # The Makefile's build-windows-amd64 target is not used: GNU make is not guaranteed on the
       # Windows image, and the two steps it performs are clearer spelled out than shimmed. The
       # ordering is the part that matters -- the hooks binary is embedded into the CLI, so it has
       # to exist before the CLI is built or the CLI embeds the placeholder.
+      #
+      # Not continue-on-error: Beacon compiles for Windows now, so a build failure is a real
+      # regression and a silently missing binary must not read as a passing run.
       - name: Build beacon and beacon-hooks for Windows
         id: build
-        continue-on-error: true
         run: |
           Set-Location cli\beacon-hooks
           go build -ldflags "-s -w" -o beacon-hooks.exe .
@@ -83,7 +80,6 @@ jobs:
 
       - name: Build the collector for Windows
         id: collector
-        continue-on-error: true
         run: |
           go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
           Set-Location collector-builder
@@ -103,12 +99,10 @@ jobs:
       - name: Stage the guest layout
         run: |
           New-Item -ItemType Directory -Force -Path C:\beacon-sandbox\bin, C:\beacon-sandbox\work | Out-Null
-          if (Test-Path cli\beacon\beacon-windows-amd64.exe) {
-            Copy-Item cli\beacon\beacon-windows-amd64.exe C:\beacon-sandbox\bin\beacon.exe
-          }
-          if (Test-Path collector-builder\dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe) {
-            Copy-Item collector-builder\dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe C:\beacon-sandbox\bin\beacon-otelcol.exe
-          }
+          # Both binaries must be present. A missing one would surface much later as a confusing
+          # capture gap, and the run would look like a Beacon bug rather than a staging failure.
+          Copy-Item cli\beacon\beacon-windows-amd64.exe C:\beacon-sandbox\bin\beacon.exe
+          Copy-Item collector-builder\dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe C:\beacon-sandbox\bin\beacon-otelcol.exe
           "C:\beacon-sandbox\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           # A seeded git repo gives scenarios somewhere realistic to work and exercises Beacon's
           # repository/branch enrichment, mirroring the Linux image's fixture.
@@ -144,10 +138,8 @@ jobs:
           Write-Output "identity: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
           $principal = New-Object Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
           Write-Output "elevated: $($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
-          Write-Output "beacon build: ${{ steps.build.outcome }}"
-          Write-Output "collector build: ${{ steps.collector.outcome }}"
           & claude --version
-          if (Test-Path C:\beacon-sandbox\bin\beacon.exe) { & C:\beacon-sandbox\bin\beacon.exe version }
+          & C:\beacon-sandbox\bin\beacon.exe version
 
       - name: Run the scenario
         id: run
