@@ -68,6 +68,52 @@ func TestFindRunDirsToleratesNothingCollected(t *testing.T) {
 	}
 }
 
+// The bug this pins is one that produced a confident wrong answer rather than an error: the run
+// listing is newest-first, and the freshly dispatched run usually does not exist on the first poll,
+// so accepting "the first id that differs from the pre-dispatch id" returned the second-newest
+// *historical* run. The dispatch then judged a previous run's artifacts as this run's result.
+//
+// Selection is pure given a listing, so it is tested directly rather than through gh.
+func TestNewRunSelectionRequiresAnIDGreaterThanTheFloor(t *testing.T) {
+	// A realistic listing at the moment of dispatch: history only, newest first, none of it ours.
+	history := []ghRun{{DatabaseID: 500}, {DatabaseID: 499}, {DatabaseID: 498}}
+	if got := pickNewRun(history, 500); got != 0 {
+		t.Errorf("with only pre-existing runs the selection must find nothing, got %d", got)
+	}
+	// The specific regression: 499 differs from 500 and is listed, but predates the dispatch.
+	if got := pickNewRun(history, 500); got == 499 {
+		t.Error("an older run must never be selected; that is the stale-verdict bug")
+	}
+
+	// Once ours appears it is selected.
+	withOurs := append([]ghRun{{DatabaseID: 501}}, history...)
+	if got := pickNewRun(withOurs, 500); got != 501 {
+		t.Errorf("the run created after the floor must be selected, got %d", got)
+	}
+
+	// Two dispatches racing: follow the earlier new run, which is ours.
+	withRace := append([]ghRun{{DatabaseID: 502}, {DatabaseID: 501}}, history...)
+	if got := pickNewRun(withRace, 500); got != 501 {
+		t.Errorf("with two new runs the earlier one is ours, got %d", got)
+	}
+
+	// A first-ever dispatch has no history, so the floor is zero and any real run qualifies.
+	if got := pickNewRun([]ghRun{{DatabaseID: 7}}, 0); got != 7 {
+		t.Errorf("a zero floor must accept the first run, got %d", got)
+	}
+}
+
+// The floor is the maximum, not the first element: it is what every later comparison rests on, so
+// it stays correct even if the listing order ever changes.
+func TestRunFloorIsTheMaximumID(t *testing.T) {
+	if got := maxRunID([]ghRun{{DatabaseID: 3}, {DatabaseID: 9}, {DatabaseID: 5}}); got != 9 {
+		t.Errorf("floor = %d, want 9", got)
+	}
+	if got := maxRunID(nil); got != 0 {
+		t.Errorf("no history must yield a zero floor, got %d", got)
+	}
+}
+
 // gh returns numeric run ids. Anything else means the output shape changed, and interpolating it
 // into a URL or a filesystem path would be worse than reporting it.
 func TestRunIDPatternRejectsAnythingButDigits(t *testing.T) {

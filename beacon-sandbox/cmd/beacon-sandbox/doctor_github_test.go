@@ -87,11 +87,88 @@ func TestDispatchRefCheckIgnoresUnrelatedEdits(t *testing.T) {
 	}
 }
 
-// newTestRepo builds a committed git repo with the directory shape the check watches.
-func newTestRepo(t *testing.T) string {
+// A branch that was never pushed has no remote ref, so a dispatch cannot run it and fails outright.
+// That is worse than being merely ahead of an upstream, not better -- and the first version of the
+// check let the `rev-list @{upstream}..HEAD` error fall through to OK, reporting a branch that
+// cannot be dispatched at all as ready to dispatch.
+func TestDispatchRefCheckWarnsWhenTheBranchWasNeverPushed(t *testing.T) {
+	root := newTestRepo(t, withoutUpstream)
+
+	got := dispatchRefCheck(root)
+	if got.Status == statusOK {
+		t.Error("a branch with no upstream has no ref to dispatch and must not pass")
+	}
+	if !strings.Contains(got.Detail, "upstream") {
+		t.Errorf("the warning should name the missing upstream, got %q", got.Detail)
+	}
+	if got.Fix == "" {
+		t.Error("the warning must be satisfiable by doing what it asks")
+	}
+}
+
+// A branch that is pushed but has local commits on top would dispatch the pushed commit, silently
+// running code the contributor is not looking at while `git status` reads clean.
+func TestDispatchRefCheckWarnsWhenAheadOfUpstream(t *testing.T) {
+	root := newTestRepo(t)
+	writeFile(t, root, filepath.Join("cli", "beacon", "extra.go"), "package main\n")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-qm", "local only")
+
+	got := dispatchRefCheck(root)
+	if got.Status != statusWarn {
+		t.Errorf("being ahead of upstream must warn, got %q: %s", got.Status, got.Detail)
+	}
+	if !strings.Contains(got.Detail, "ahead") {
+		t.Errorf("the warning should say the branch is ahead, got %q", got.Detail)
+	}
+}
+
+// repoOption tunes the fixture.
+type repoOption func(*repoConfig)
+
+type repoConfig struct{ upstream bool }
+
+// withoutUpstream leaves the branch unpushed.
+func withoutUpstream(c *repoConfig) { c.upstream = false }
+
+func writeFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gitIn runs git with a hermetic configuration.
+//
+// The global and system configs are neutralized because a contributor's own settings -- commit
+// signing, a hooks path, a default branch name -- would otherwise fail these commits for reasons
+// unrelated to what is being tested.
+func gitIn(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// newTestRepo builds a committed git repo with the directory shape the check watches, pushed to a
+// local bare remote so the branch has an upstream -- which is the normal state for a branch someone
+// is about to dispatch.
+func newTestRepo(t *testing.T, opts ...repoOption) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git on PATH")
+	}
+	cfg := repoConfig{upstream: true}
+	for _, o := range opts {
+		o(&cfg)
 	}
 	root := t.TempDir()
 	for _, dir := range []string{
@@ -104,27 +181,20 @@ func newTestRepo(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write := func(rel, body string) {
-		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(filepath.Join("cli", "beacon", "main.go"), "package main\n")
-	write("README.md", "# fixture\n")
+	writeFile(t, root, filepath.Join("cli", "beacon", "main.go"), "package main\n")
+	writeFile(t, root, "README.md", "# fixture\n")
 
-	run := func(args ...string) {
-		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-		// A contributor's global git config can set commit.gpgsign or a hooks path, either of
-		// which would fail the commit here for reasons unrelated to what is being tested.
-		cmd.Env = append(os.Environ(),
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
+	gitIn(t, root, "init", "-q", "-b", "work")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-qm", "initial")
+
+	if cfg.upstream {
+		// A local bare repo stands in for the remote. Real enough for the check, which only asks
+		// git whether the branch has an upstream and how far ahead of it HEAD is.
+		remote := t.TempDir()
+		gitIn(t, remote, "init", "-q", "--bare")
+		gitIn(t, root, "remote", "add", "origin", remote)
+		gitIn(t, root, "push", "-q", "-u", "origin", "work")
 	}
-	run("init", "-q")
-	run("add", "-A")
-	run("commit", "-qm", "initial")
 	return root
 }

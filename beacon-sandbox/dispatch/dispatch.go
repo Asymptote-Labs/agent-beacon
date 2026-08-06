@@ -31,7 +31,13 @@ const Workflow = "windows-sandbox.yml"
 type Options struct {
 	// Repo is owner/name. Empty lets gh infer it from the checkout.
 	Repo string
-	// Ref is the branch or tag to run. Empty uses the current branch.
+	// Ref is the branch or tag to run.
+	//
+	// Empty is resolved to the current branch by Run, not left to gh -- `gh workflow run` with no
+	// --ref uses the repository's *default* branch, so an unset value would silently run main while
+	// the caller believed they were testing the branch they are on. That is not a hypothetical: the
+	// doctor check that exists to catch exactly this class of mistake asserted the opposite.
+	// Reported by Cursor Bugbot.
 	Ref string
 	// Scenario is the scenario id, or empty for every Windows scenario.
 	Scenario string
@@ -73,6 +79,18 @@ func Run(opts Options) (Result, error) {
 	if err := requireGH(); err != nil {
 		return Result{}, err
 	}
+	// Resolve the ref before dispatching so the run tests the branch the caller is on rather than
+	// the default branch. Reported rather than silent, because which ref ran decides what the
+	// verdict is about.
+	if strings.TrimSpace(opts.Ref) == "" {
+		branch, err := currentBranch()
+		if err != nil {
+			return Result{}, fmt.Errorf("could not determine the current branch to dispatch, and "+
+				"leaving it unset would silently run the default branch instead: %w", err)
+		}
+		opts.Ref = branch
+	}
+	logf("dispatching against ref %s", opts.Ref)
 
 	// The newest run id *before* dispatching, so the new one can be identified without guessing.
 	// `gh workflow run` prints nothing machine-readable and returns no id, which is the whole
@@ -130,6 +148,22 @@ func Run(opts Options) (Result, error) {
 	return res, nil
 }
 
+// currentBranch reports the checked-out branch name.
+//
+// A detached HEAD has no branch to dispatch, and is reported rather than guessed at: workflow_dispatch
+// takes a ref by name, so there is nothing sensible to substitute.
+func currentBranch() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "" || branch == "HEAD" {
+		return "", fmt.Errorf("HEAD is detached, so there is no branch to dispatch; pass --ref explicitly")
+	}
+	return branch, nil
+}
+
 // requireGH fails early with the fix rather than letting exec produce "file not found".
 func requireGH() error {
 	if _, err := exec.LookPath("gh"); err != nil {
@@ -177,40 +211,78 @@ func listRuns(opts Options, limit int) ([]ghRun, error) {
 	return runs, nil
 }
 
-func latestRunID(opts Options) (string, error) {
-	runs, err := listRuns(opts, 1)
+// latestRunID returns the highest existing run id, or 0 when there is no history.
+//
+// The maximum rather than the first listed: the ordering is documented as newest-first but this
+// value is the floor every later comparison rests on, and taking the max is correct even if the
+// ordering ever changes.
+func latestRunID(opts Options) (int64, error) {
+	runs, err := listRuns(opts, 10)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	if len(runs) == 0 {
-		// No history yet, which is normal on the first dispatch.
-		return "", nil
-	}
-	return fmt.Sprint(runs[0].DatabaseID), nil
+	// Zero is the correct floor when there is no history, which is normal on a first dispatch:
+	// every real run id is greater than it.
+	return maxRunID(runs), nil
 }
 
-// awaitNewRun waits for a run id that differs from the one seen before dispatching.
+// awaitNewRun waits for a run created after the dispatch.
 //
-// Identifying the run by "newest that is not the one already there" rather than by "newest" is
-// what stops a still-running earlier dispatch being mistaken for this one -- which would report
-// somebody else's verdict as yours.
-func awaitNewRun(opts Options, before string, logf func(string, ...any)) (string, error) {
+// Compared numerically, and that is the whole correctness of this function. GitHub run ids
+// increase monotonically, so "created after ours" is exactly "id greater than the newest id that
+// existed before we dispatched".
+//
+// An earlier version accepted the first listed run whose id merely *differed* from that one, which
+// is wrong in a way that produces a confident wrong answer rather than an error: the listing is
+// newest-first, the freshly dispatched run usually does not exist yet on the first poll, so the
+// second-newest *historical* run satisfied "differs" and was returned. The dispatch then waited on,
+// downloaded and judged a previous run's artifacts and reported that stale verdict as this run's
+// result -- the precise confusion this function exists to prevent. Reported by Cursor Bugbot.
+//
+// The smallest qualifying id is taken rather than the newest, so that if another dispatch lands
+// while we poll, we follow the earlier one -- ours.
+func awaitNewRun(opts Options, before int64, logf func(string, ...any)) (string, error) {
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
-		runs, err := listRuns(opts, 5)
+		runs, err := listRuns(opts, 10)
 		if err != nil {
 			return "", err
 		}
-		for _, r := range runs {
-			id := fmt.Sprint(r.DatabaseID)
-			if id != before && runIDPattern.MatchString(id) {
-				return id, nil
-			}
+		if found := pickNewRun(runs, before); found > 0 {
+			return fmt.Sprint(found), nil
 		}
 		time.Sleep(5 * time.Second)
 	}
 	return "", fmt.Errorf("no new %s run appeared within 5 minutes of dispatching; check "+
 		"`gh run list --workflow %s`", Workflow, Workflow)
+}
+
+// pickNewRun returns the earliest run created after the floor, or 0 if none has appeared.
+//
+// Separated from the polling loop so the selection rule -- the part that was wrong -- is testable
+// without a GitHub account or a live workflow.
+func pickNewRun(runs []ghRun, before int64) int64 {
+	var found int64
+	for _, r := range runs {
+		if r.DatabaseID <= before {
+			continue
+		}
+		if found == 0 || r.DatabaseID < found {
+			found = r.DatabaseID
+		}
+	}
+	return found
+}
+
+// maxRunID is the floor "created after our dispatch" is measured against.
+func maxRunID(runs []ghRun) int64 {
+	var newest int64
+	for _, r := range runs {
+		if r.DatabaseID > newest {
+			newest = r.DatabaseID
+		}
+	}
+	return newest
 }
 
 // awaitCompletion polls until the run finishes, returning GitHub's conclusion.

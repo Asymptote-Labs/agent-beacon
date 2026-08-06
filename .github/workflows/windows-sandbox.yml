@@ -119,11 +119,18 @@ jobs:
       # The native installer, which is the only Windows install path that self-updates. Pinned so
       # a verdict is attributable to a specific agent build.
       - name: Install Claude Code
+        env:
+          # Through the environment for the same reason as SCENARIO below. The whitelist that
+          # follows guards what the value is *used for*; it cannot guard the interpolation itself,
+          # because `${{ }}` expands before PowerShell parses the line -- so a value containing a
+          # quote would already have closed the literal and started executing by the time the regex
+          # ran. Reading from $env: means no expansion happens at all.
+          CLAUDE_VERSION: ${{ inputs.claude_version }}
         run: |
-          $version = '${{ inputs.claude_version }}'
+          $version = $env:CLAUDE_VERSION
           if ([string]::IsNullOrWhiteSpace($version)) { $version = '2.1.220' }
-          # Whitelist rather than escape: the value reaches a shell, and Claude Code versions are
-          # dotted numerals, so anything else is a mistake worth rejecting outright.
+          # Whitelist rather than escape: the value reaches an installer, and Claude Code versions
+          # are dotted numerals, so anything else is a mistake worth rejecting outright.
           if ($version -notmatch '^[0-9]+(\.[0-9]+)*$') {
             throw "invalid claude_version '$version': expected a dotted numeric version"
           }
@@ -147,12 +154,23 @@ jobs:
         working-directory: beacon-sandbox
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Passed through the environment, never interpolated into the script. `${{ }}` expansion
+          # happens before PowerShell parses anything, so a value containing a quote would close the
+          # literal and the rest would execute as code -- in this step, with the API key in scope.
+          # claude_version is whitelisted above for the same reason; this makes the two consistent.
+          # Reported by Cursor Bugbot.
+          SCENARIO: ${{ inputs.scenario }}
         run: |
           # Not $args: that name is a PowerShell automatic variable holding the script's own
           # arguments, and appending to it does not behave the way it reads.
           $sandboxArgs = @('run', '--provider', 'local')
-          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.scenario }}')) {
-            $sandboxArgs += @('--scenario', '${{ inputs.scenario }}')
+          if (-not [string]::IsNullOrWhiteSpace($env:SCENARIO)) {
+            # Validated as well as passed safely. A scenario id is a lowercase slug, so anything
+            # else is a mistake worth rejecting outright rather than forwarding to a flag.
+            if ($env:SCENARIO -notmatch '^[a-z0-9][a-z0-9-]*$') {
+              throw "invalid scenario id '$env:SCENARIO': expected a lowercase slug such as w00-probe"
+            }
+            $sandboxArgs += @('--scenario', $env:SCENARIO)
           }
           go run ./cmd/beacon-sandbox @sandboxArgs
 
@@ -171,8 +189,14 @@ jobs:
       # Without this the job would go green on a failing scenario because of continue-on-error.
       - name: Reflect the scenario outcome
         if: always()
+        env:
+          # A step outcome is a GitHub-controlled enum rather than user input, so interpolating it
+          # would be safe. It goes through the environment anyway so that "no ${{ }} inside a run
+          # block" holds without exception -- a rule with one blessed exception is a rule nobody can
+          # check mechanically.
+          RUN_OUTCOME: ${{ steps.run.outcome }}
         run: |
-          Write-Output "scenario outcome: ${{ steps.run.outcome }}"
-          if ('${{ steps.run.outcome }}' -ne 'success') {
+          Write-Output "scenario outcome: $env:RUN_OUTCOME"
+          if ($env:RUN_OUTCOME -ne 'success') {
             throw "the scenario did not pass; read the uploaded runs/ artifacts and the verdict.json inside them"
           }

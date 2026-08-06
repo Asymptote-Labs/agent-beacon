@@ -204,10 +204,19 @@ func (l *LocalExec) Exec(ctx context.Context, _ Instance, script string, opts Ex
 	err := cmd.Run()
 
 	res := Result{Stdout: stdout.String(), Stderr: stderr.String()}
+	// The deadline is checked before the error is classified, and the order matters. When the
+	// context expires, CommandContext kills the child and Run returns an *ExitError like any other
+	// non-zero exit -- so classifying first would record a killed session as an exit status, and
+	// the verdict would read it as Beacon failing to capture rather than as the harness never
+	// having finished the run. "The command failed" and "we never ran it to completion" must not
+	// collapse into the same result. Reported by Cursor Bugbot.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return res, fmt.Errorf("exec %s did not complete (%w): the command was killed after %s",
+			l.shell, ctxErr, opts.Timeout)
+	}
 	// An ExitError carries the status and is not a failure of Exec itself; every caller reads
-	// ExitCode and decides what it means. Anything else -- the shell missing, a timeout -- is a
-	// harness failure and must surface as one, or "the command failed" and "we never ran it"
-	// become the same result.
+	// ExitCode and decides what it means. Anything else -- the shell missing, for instance -- is a
+	// harness failure and must surface as one.
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
