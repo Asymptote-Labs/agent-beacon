@@ -1,0 +1,59 @@
+id: w00-probe
+platform: windows
+# The first Windows scenario, and its job is to answer questions rather than to guard behavior.
+#
+# Beacon has no Windows support yet -- the CLI does not even compile for it at the time this was
+# written -- so this scenario runs against the `beacon ci exec` collector path and asks the four
+# things the rest of the Windows port needs settled before it can be designed. Every answer is
+# read out of the collected artifacts and the run log:
+#
+#   1. Will Claude Code run `-p --dangerously-skip-permissions` as an *elevated* user? It refuses
+#      as root on POSIX, and a GitHub Actions Windows runner is an administrator with UAC
+#      disabled. If it refuses, meta.claude_stderr says so and the harness needs a standard
+#      account to run sessions as -- the Windows analogue of the `agent` user in the Linux image.
+#   2. Does `beacon ci exec` supervise a PowerShell child correctly on Windows, and does the
+#      collector it starts write the runtime log? meta.ci_exec_rc and the collected runtime.jsonl
+#      answer that; internal/ci/session.go already carries Windows branches, so this is checking
+#      an existing claim rather than a new one.
+#   3. Does the capture pipeline populate the same fields it does on Linux once the paths are
+#      Windows paths? The expectations below are the Linux ones, deliberately unchanged.
+#   4. Does the argv credential sampler observe anything through Win32_Process? meta.argv_samples
+#      and meta.argv_saw_agent report it, and a clean-but-never-saw-the-agent result is recorded
+#      as unverified rather than clean.
+#
+# The command is deliberately PowerShell rather than bash: the agent's default shell on Windows
+# is PowerShell, and asking it for a bash command would test Git-for-Windows' presence instead
+# of Beacon.
+prompt: >-
+  Run exactly this PowerShell command and then report its output verbatim:
+  Write-Output '{{canary}}' | Tee-Object -FilePath '{{sentinel}}'
+sentinel: '{{workdir}}\w00.sentinel'
+budget_usd: 1.0
+timeout_seconds: 420
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: >-
+      Baseline. If this is absent nothing else below is interpretable, because the session either
+      never reached the model or the collector never received anything -- which is question 2, not
+      a capture gap.
+
+  - action: command.executed
+    contains: ["{{canary}}"]
+    fields: ["command.command", "tool.name"]
+    optional: true
+    why: >-
+      Threat rules match scalar leaves, so e.command.command is the detection surface for the
+      whole rules/risky-command/ category on Windows exactly as it is on Linux. Optional because
+      this probe is establishing whether it works at all -- a gap here is a finding to act on, not
+      a regression to block on, and marking it required would stop the probe reporting the other
+      three answers.
+
+  - action: approval.allowed
+    fields: ["approval.decision"]
+    optional: true
+    why: >-
+      Claude Code's tool_decision carries decision=accept regardless of platform. Optional for the
+      same reason as above: this scenario exists to find out, and the answer belongs in the
+      verdict either way.

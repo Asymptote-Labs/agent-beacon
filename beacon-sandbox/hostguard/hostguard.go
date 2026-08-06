@@ -97,8 +97,35 @@ func guardedPaths() []guarded {
 			guarded{filepath.Join(h, ".config", "systemd", "user"), watchBeaconEntries},
 			guarded{"/etc/systemd/system", watchBeaconEntries},
 		)
+	case "windows":
+		// For a contributor pointing the harness at a Windows VM they own. The dispatched CI
+		// path does not compare snapshots at all -- see EphemeralDescription -- but a guard that
+		// silently watched nothing on Windows would be indistinguishable from one that watched
+		// and found nothing, which is the conflation this package exists to avoid.
+		out = append(out,
+			guarded{filepath.Join(programData(), "Beacon", "Endpoint", "config.json"), watchFull},
+			guarded{filepath.Join(programData(), "Beacon", "Endpoint", "logs"), watchExistence},
+			guarded{filepath.Join(programFiles(), "Beacon"), watchExistence},
+		)
 	}
 	return out
+}
+
+// programData and programFiles resolve the Windows system directories, falling back to the
+// conventional locations. Read from the environment because a redirected or localized install
+// puts them elsewhere, and a guard watching the wrong path reports clean forever.
+func programData() string {
+	if v := os.Getenv("ProgramData"); v != "" {
+		return v
+	}
+	return `C:\ProgramData`
+}
+
+func programFiles() string {
+	if v := os.Getenv("ProgramFiles"); v != "" {
+		return v
+	}
+	return `C:\Program Files`
 }
 
 // GuardedPaths returns the watched paths, for reporting and tests.
@@ -204,6 +231,23 @@ func beaconServices() (services []string, available bool) {
 				out = append(out, fields[0])
 			}
 		}
+	case "windows":
+		// `sc.exe query type= service state= all` lists every service; the display name lines are
+		// what carry "beacon". Parsed rather than piped through PowerShell so the probe does not
+		// depend on which shell is installed.
+		b, err := exec.Command("sc.exe", "query", "type=", "service", "state=", "all").Output()
+		if err != nil {
+			return nil, false
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			name, ok := strings.CutPrefix(strings.TrimSpace(line), "SERVICE_NAME:")
+			if !ok {
+				continue
+			}
+			if name = strings.TrimSpace(name); strings.Contains(strings.ToLower(name), "beacon") {
+				out = append(out, name)
+			}
+		}
 	}
 	sort.Strings(out)
 	return out, true
@@ -235,6 +279,17 @@ const CleanDescription = "host state unchanged"
 // "nothing changed" and "nothing changed that I could see" are different claims, and the check
 // layer must be able to tell them apart without string-sniffing.
 const PartialDescription = "files unchanged; service probe unavailable, so services are unverified"
+
+// EphemeralDescription is recorded when the guest *is* this machine, so comparing before and
+// after cannot mean anything.
+//
+// A backend like that runs the scenario where the harness stands, which makes the install the
+// scenario is testing indistinguishable from the escape this guard looks for -- a correct run
+// would report the most serious finding the tool has. So isolation is claimed on a different
+// basis: the machine is disposable and somebody else destroys it. That is a genuinely weaker
+// claim than "nothing on the developer's machine moved", and it gets its own value rather than
+// borrowing CleanDescription precisely so a reader of a verdict can tell which one they got.
+const EphemeralDescription = "guest is this machine; isolation rests on it being disposable rather than on a comparison"
 
 func (d Diff) Describe() string {
 	if d.Clean() {

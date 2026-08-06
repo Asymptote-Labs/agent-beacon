@@ -80,6 +80,11 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		return Artifacts{}, fmt.Errorf("no Anthropic credential resolved; run `beacon-sandbox doctor`")
 	}
 
+	// The dialect and the guest layout both follow from the provider's platform, never from the
+	// host's runtime.GOOS -- a Mac dispatching a Windows run is the normal case, not the exception.
+	sh := shellFor(p.Platform())
+	lay := image.LayoutFor(p.Platform())
+
 	canary := "BEACON_SANDBOX_" + randomToken()
 	runDir := filepath.Join(opts.OutDir, fmt.Sprintf("%s-%s", sc.ID, canary[len(canary)-8:]))
 	// 0700, not 0755: these artifacts retain prompt text and command output, and a
@@ -94,34 +99,49 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		Meta: map[string]string{
 			"scenario": sc.ID,
 			"provider": p.Name(),
+			"platform": string(p.Platform()),
 		},
 	}
 
-	// Fingerprint the developer's own Beacon state before anything runs, so a stray local
-	// install would be caught rather than assumed impossible.
+	// Establish how isolation is proven for this run, and record it either way.
 	//
-	// The comparison and the meta write happen together in this defer, and deliberately so.
-	// An earlier version wrote meta.json inline before returning, which meant host_state --
-	// set here, after that write -- never reached disk. The live verdict was still correct
-	// because judging happens after Run returns, but an offline `verify` read the field as
-	// empty and treated the host check as clean. An unrunnable check that reads as a pass is
-	// the exact failure this tool exists to prevent. Writing here also means an early error
-	// return still leaves the metadata behind for debugging.
-	hostBefore := hostguard.Take()
+	// The usual proof is a comparison: fingerprint the developer's own Beacon state before and
+	// after, so a stray local install is caught rather than assumed impossible. That only means
+	// something when the guest is a *different* machine. A backend that runs the scenario where
+	// this process stands inverts it -- the install the scenario is testing is itself the change
+	// the guard would report -- so for those the claim has to rest on the machine being
+	// disposable instead, and say which of the two it relied on.
+	//
+	// The comparison and the meta write happen together in this defer, and deliberately so. An
+	// earlier version wrote meta.json inline before returning, which meant host_state -- set
+	// here, after that write -- never reached disk. The live verdict was still correct because
+	// judging happens after Run returns, but an offline `verify` read the field as empty and
+	// treated the host check as clean. An unrunnable check that reads as a pass is the exact
+	// failure this tool exists to prevent. Writing here also means an early error return still
+	// leaves the metadata behind for debugging.
+	local := p.MutatesHost()
+	var hostBefore hostguard.Snapshot
+	if !local {
+		hostBefore = hostguard.Take()
+	}
 	defer func() {
-		art.HostDiff = hostguard.Compare(hostBefore, hostguard.Take())
-		art.Meta["host_state"] = art.HostDiff.Describe()
+		if local {
+			art.Meta["host_state"] = hostguard.EphemeralDescription
+			art.Meta["disposability"] = sandbox.DisposabilityEvidence()
+		} else {
+			art.HostDiff = hostguard.Compare(hostBefore, hostguard.Take())
+			art.Meta["host_state"] = art.HostDiff.Describe()
+		}
 		if b, err := json.MarshalIndent(art.Meta, "", "  "); err == nil {
 			_ = os.WriteFile(filepath.Join(runDir, "meta.json"), append(b, '\n'), 0o600)
 		}
 	}()
+	if local {
+		logf("guest is this machine (%s); isolation rests on it being disposable: %s",
+			p.Name(), sandbox.DisposabilityEvidence())
+	}
 
-	logf("building image (cached layers are free)")
-	imgSpec, err := image.Build(image.Spec{
-		RepoRoot:      opts.RepoRoot,
-		ClaudeVersion: opts.ClaudeVersion,
-		WithDocker:    sc.NeedsRealSystemd(),
-	}, logf)
+	imgSpec, err := imageSpecFor(p.Platform(), sc, opts, logf)
 	if err != nil {
 		return art, err
 	}
@@ -136,7 +156,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		CPU:         2,
 		MemLimitMiB: 4096,
 		Timeout:     sc.Timeout() + 5*time.Minute, // headroom for setup and collection
-		Workdir:     image.WorkDir,
+		Workdir:     lay.WorkDir,
 		Secrets:     inlineSecrets(opts.Creds),
 		SecretNames: providerSecrets(opts.Creds),
 		BlockEgress: sc.BlockEgress,
@@ -172,15 +192,27 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	}
 
 	agent := sandbox.ExecOpts{
-		User: image.AgentUser, Dir: image.WorkDir, HomeDir: image.AgentHome,
-		PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: 5 * time.Minute,
+		User: lay.AgentUser, Dir: lay.WorkDir, HomeDir: lay.AgentHome,
+		PreserveEnv: true, PathPrepend: lay.PathPrepend, Timeout: 5 * time.Minute,
+	}
+	// privileged is the same options with whatever elevation this platform expresses. On POSIX
+	// that is the root account; on Windows there is no account to switch to -- the runner is
+	// already an administrator with UAC disabled, and the local backend cannot become anyone
+	// else. Naming the difference once keeps every later call site single-path.
+	privileged := sandbox.ExecOpts{
+		User: lay.PrivilegedUser(), Dir: lay.WorkDir, HomeDir: lay.AgentHome,
+		PreserveEnv: true, PathPrepend: lay.PathPrepend, Timeout: 5 * time.Minute,
 	}
 
-	// Finish the artifact layer: the snapshot captured the files, but chmod and symlinks
-	// have to happen in a live instance. Always the sandbox itself, never the guest -- this
-	// prepares the very tree the guest will mount.
-	if _, err := p.Exec(ctx, inst, image.PostPushLayers(), sandbox.ExecOpts{User: "root", Timeout: time.Minute}); err != nil {
-		return art, fmt.Errorf("prepare binaries: %w", err)
+	// Finish the artifact layer: the snapshot captured the files, but chmod and symlinks have to
+	// happen in a live instance. Skipped when nothing was pushed, which is the local backend's
+	// case -- the CI job placed the binaries before this process started, so there is no staged
+	// tree to fix up.
+	if len(imgSpec.Files) > 0 {
+		if _, err := p.Exec(ctx, inst, image.PostPushLayers(),
+			sandbox.ExecOpts{User: lay.PrivilegedUser(), Timeout: time.Minute}); err != nil {
+			return art, fmt.Errorf("prepare binaries: %w", err)
+		}
 	}
 
 	// Everything the scenario itself does happens in the guest. For most scenarios that is the
@@ -200,7 +232,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// Not just recorded -- checked. An empty version line means beacon or claude is not reachable
 	// in the guest, and every later failure is then a symptom of that rather than of Beacon. The
 	// first nested run printed "versions:" with nothing after it and kept going.
-	v, err := g.Exec(ctx, "beacon version; claude --version; id -un; uname -m", agent)
+	v, err := g.Exec(ctx, versionProbe(p.Platform()), agent)
 	if err != nil {
 		return art, fmt.Errorf("could not run commands in the %s guest: %w", g.Describe(), err)
 	}
@@ -211,21 +243,21 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 			"test is not reachable there (rc=%d): %s", v.ExitCode, oneLine(v.Stdout+v.Stderr))
 	}
 
-	sentinel := scenario.Expand(sc.Sentinel, canary, "", image.WorkDir)
+	sentinel := scenario.Expand(sc.Sentinel, canary, "", lay.WorkDir)
 	if sc.Setup != "" {
-		setup := scenario.Expand(sc.Setup, canary, sentinel, image.WorkDir)
+		setup := scenario.Expand(sc.Setup, canary, sentinel, lay.WorkDir)
 		if r, err := g.Exec(ctx, setup, agent); err != nil || r.ExitCode != 0 {
 			return art, fmt.Errorf("scenario setup failed (rc=%d): %v %s", r.ExitCode, err, oneLine(r.Stderr))
 		}
 	}
 
-	logPath := filepath.ToSlash(filepath.Join(image.WorkDir, "runtime.jsonl"))
-	prompt := scenario.Expand(sc.Prompt, canary, sentinel, image.WorkDir)
+	logPath := sh.Join(lay.WorkDir, "runtime.jsonl")
+	prompt := scenario.Expand(sc.Prompt, canary, sentinel, lay.WorkDir)
 
 	// Start the credential sampler BEFORE the session, so it observes the agent's own
-	// processes while they are alive. See argvSamplerScript.
-	if _, err := p.Exec(ctx, inst, argvSamplerScript(), sandbox.ExecOpts{
-		User: "root", Timeout: time.Minute,
+	// processes while they are alive. See shell.ArgvSampler.
+	if _, err := p.Exec(ctx, inst, sh.ArgvSampler(), sandbox.ExecOpts{
+		User: lay.PrivilegedUser(), Timeout: time.Minute,
 	}); err != nil {
 		logf("argv sampler failed to start: %v", err)
 	}
@@ -236,19 +268,21 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// manager. A persistent install instead exercises `beacon endpoint install`: service
 	// manager selection, unit installation, status reporting, and whether an installed
 	// collector actually receives telemetry. Nothing else in the suite can tell you that.
+	sessionDir := workDirFor(sc, lay, sh)
+	sessionOpts := sandbox.ExecOpts{
+		User: lay.AgentUser, Dir: sessionDir, HomeDir: lay.AgentHome,
+		PreserveEnv: true, PathPrepend: lay.PathPrepend, Timeout: sc.Timeout() + time.Minute,
+	}
 	var res sandbox.Result
 	if sc.Install != nil {
-		installedLog, err := doInstall(ctx, g, sc, agent, &art, logf)
+		installedLog, err := doInstall(ctx, g, sc, privileged, agent, lay, sh, &art, logf)
 		if err != nil {
 			return art, err
 		}
 		logPath = installedLog
 		logf("running session against the installed endpoint (budget $%.2f, timeout %s)",
 			sc.Budget(), sc.Timeout())
-		res, err = g.Exec(ctx, plainSessionScript(sc, prompt), sandbox.ExecOpts{
-			User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
-			PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
-		})
+		res, err = g.Exec(ctx, sh.PlainSession(sessionDir, claudeFlags(sc, prompt, sh)), sessionOpts)
 		if err != nil {
 			logf("session exec error: %v", err)
 		}
@@ -256,10 +290,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	} else {
 		logf("running session (budget $%.2f, timeout %s)", sc.Budget(), sc.Timeout())
 		var err error
-		res, err = g.Exec(ctx, sessionScript(sc, prompt, logPath), sandbox.ExecOpts{
-			User: image.AgentUser, Dir: workDirFor(sc), HomeDir: image.AgentHome,
-			PreserveEnv: true, PathPrepend: image.PathPrepend(), Timeout: sc.Timeout() + time.Minute,
-		})
+		res, err = g.Exec(ctx, sh.CIExecSession(logPath, sessionDir, claudeFlags(sc, prompt, sh)), sessionOpts)
 		if err != nil {
 			logf("session exec error: %v", err)
 		}
@@ -279,9 +310,9 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// the default working directory silently found nothing whenever `cwd:` was set -- s05 was
 	// the only such scenario and it reported session_ok=false on an otherwise perfect run,
 	// disabling exactly the signal that distinguishes a dead agent from a capture gap.
-	outPath := shq(sessionFile(sc, "claude-out.json"))
-	errPath := shq(sessionFile(sc, "claude-err.txt"))
-	if r, err := g.Exec(ctx, "cat "+outPath+" 2>/dev/null || true", agent); err == nil {
+	outPath := sessionFile(sc, "claude-out.json", lay, sh)
+	errPath := sessionFile(sc, "claude-err.txt", lay, sh)
+	if r, err := g.Exec(ctx, sh.ReadFile(outPath), agent); err == nil {
 		var result map[string]any
 		if json.Unmarshal([]byte(strings.TrimSpace(r.Stdout)), &result) == nil {
 			art.SessionOK, art.SessionKnown = sessionOutcome(result)
@@ -294,7 +325,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 			logf("claude: %s", art.Meta["claude_result"])
 			_ = os.WriteFile(filepath.Join(runDir, "claude-result.json"), []byte(r.Stdout), 0o600)
 		} else {
-			if e, err2 := g.Exec(ctx, "tail -c 800 "+errPath+" 2>/dev/null || true", agent); err2 == nil {
+			if e, err2 := g.Exec(ctx, sh.TailBytes(errPath, 800), agent); err2 == nil {
 				art.Meta["claude_stderr"] = oneLine(e.Stdout)
 			}
 		}
@@ -310,9 +341,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		// The probe always emits a marker, so its output is never ambiguous. `cat f || echo
 		// __MISSING__` produced empty stdout for both a failed exec and a legitimately empty
 		// sentinel file, which would have misreported the second as a broken probe.
-		probe := fmt.Sprintf("if [ -f %[1]s ]; then echo __FOUND__; cat %[1]s; else echo __MISSING__; fi",
-			shq(sentinel))
-		r, execErr := g.Exec(ctx, probe, agent)
+		r, execErr := g.Exec(ctx, sh.ProbeFile(sentinel), agent)
 		art.SentinelProbed = execErr == nil &&
 			(strings.Contains(r.Stdout, "__FOUND__") || strings.Contains(r.Stdout, "__MISSING__"))
 		if !art.SentinelProbed {
@@ -338,8 +367,8 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 
 	// Read what the in-session sampler observed while the agent was actually running. See
 	// argvSamplerScript for why this cannot be a post-session scan.
-	if r, err := p.Exec(ctx, inst, "cat "+shq(argvVerdictPath)+" 2>/dev/null || true",
-		sandbox.ExecOpts{User: "root", Timeout: time.Minute}); err == nil {
+	if r, err := p.Exec(ctx, inst, sh.ReadFile(sh.ArgvVerdictPath()),
+		sandbox.ExecOpts{User: lay.PrivilegedUser(), Timeout: time.Minute}); err == nil {
 		sawAgent := strings.Contains(r.Stdout, "saw_agent=1")
 		art.Meta["argv_saw_agent"] = fmt.Sprintf("%v", sawAgent)
 		switch {
@@ -393,16 +422,16 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	// Wait for quiescence rather than sleeping a fixed amount: the collector batches at 5s
 	// and Claude Code's metric interval defaults to 60s, so a fixed sleep is either wasteful
 	// or wrong. Record how long it took -- that latency is itself a finding.
-	stable, waited := waitForQuiescence(ctx, g, agent, logPath, logf)
+	stable, waited := waitForQuiescence(ctx, g, agent, sh, logPath, logf)
 	art.Meta["quiescence_seconds"] = fmt.Sprintf("%.0f", waited.Seconds())
 	art.Meta["quiescent"] = fmt.Sprintf("%v", stable)
 
-	local := filepath.Join(runDir, "runtime.jsonl")
-	if err := g.Get(ctx, logPath, local); err != nil {
+	localLog := filepath.Join(runDir, "runtime.jsonl")
+	if err := g.Get(ctx, logPath, localLog); err != nil {
 		return art, fmt.Errorf("collect runtime log: %w", err)
 	}
-	art.RuntimeLog = local
-	logf("collected %s", local)
+	art.RuntimeLog = localLog
+	logf("collected %s", localLog)
 
 	// meta.json is written by the deferred host-state block above, so it always includes the
 	// host comparison.
@@ -423,52 +452,47 @@ func sessionOutcome(result map[string]any) (ok, known bool) {
 	return !isErr, true
 }
 
+// versionProbe asks the guest to identify itself.
+//
+// Not just recorded but checked by the caller: an empty version line means beacon or claude is
+// not reachable in the guest, and every later failure is then a symptom of that rather than of
+// Beacon.
+func versionProbe(p sandbox.Platform) string {
+	if p.IsWindows() {
+		return "& beacon version; & claude --version; " +
+			"[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; $env:PROCESSOR_ARCHITECTURE"
+	}
+	return "beacon version; claude --version; id -un; uname -m"
+}
+
 // sessionFile resolves a file the agent session wrote, relative to the directory that session
 // actually ran in.
-func sessionFile(sc scenario.Scenario, name string) string {
-	return filepath.ToSlash(filepath.Join(workDirFor(sc), name))
+func sessionFile(sc scenario.Scenario, name string, lay image.Layout, sh shell) string {
+	return sh.Join(workDirFor(sc, lay, sh), name)
 }
 
 // claudeFlags builds the agent invocation shared by both session shapes.
-func claudeFlags(sc scenario.Scenario, prompt string) []string {
+func claudeFlags(sc scenario.Scenario, prompt string, sh shell) []string {
 	flags := []string{
-		"-p", shq(prompt),
+		"-p", sh.Quote(prompt),
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		fmt.Sprintf("--max-budget-usd %.2f", sc.Budget()),
 	}
 	if len(sc.Tools) > 0 {
-		flags = append(flags, "--tools", shq(strings.Join(sc.Tools, ",")))
+		flags = append(flags, "--tools", sh.Quote(strings.Join(sc.Tools, ",")))
 	} else if sc.Tools != nil {
-		flags = append(flags, "--tools", shq(""))
+		flags = append(flags, "--tools", sh.Quote(""))
 	}
 	if len(sc.DisallowedTools) > 0 {
-		flags = append(flags, "--disallowedTools", shq(strings.Join(sc.DisallowedTools, ",")))
+		flags = append(flags, "--disallowedTools", sh.Quote(strings.Join(sc.DisallowedTools, ",")))
 	}
 	return flags
 }
 
-// sessionScript builds the in-guest command.
-//
-// The child is wrapped in `sh -c` so Claude's stdout is redirected *inside* `beacon ci exec`.
-// Redirecting outside it would interleave Beacon's own report with Claude's JSON in one file,
-// which made the first M0 run's output unparseable.
-func sessionScript(sc scenario.Scenario, prompt, logPath string) string {
-	inner := "claude " + strings.Join(claudeFlags(sc, prompt), " ") +
-		" > claude-out.json 2> claude-err.txt"
-	// The script must exit with `beacon ci exec`'s status, not with `tail`'s. Ending on the tail
-	// made every session look successful to p.Exec no matter how ci exec fared, and nothing read
-	// CI_EXEC_RC either -- so a collector that failed outright was indistinguishable from one
-	// that worked. Reported by the Copilot reviewer.
-	return fmt.Sprintf("beacon ci exec --harness claude --log-path %s -- sh -c %s "+
-		"> ci-out.txt 2> ci-err.txt; rc=$?; echo CI_EXEC_RC=$rc; "+
-		"tail -c 400 ci-out.txt; exit $rc",
-		shq(logPath), shq(inner))
-}
-
 // waitForQuiescence polls the log until its size stops changing, bounded.
 func waitForQuiescence(ctx context.Context, g guest,
-	opts sandbox.ExecOpts, logPath string, logf func(string, ...any)) (bool, time.Duration) {
+	opts sandbox.ExecOpts, sh shell, logPath string, logf func(string, ...any)) (bool, time.Duration) {
 
 	const (
 		interval  = 3 * time.Second
@@ -480,7 +504,7 @@ func waitForQuiescence(ctx context.Context, g guest,
 	stableSince := time.Time{}
 
 	for time.Since(start) < maxWait {
-		r, err := g.Exec(ctx, "wc -c < "+shq(logPath)+" 2>/dev/null || echo 0", opts)
+		r, err := g.Exec(ctx, sh.FileSize(logPath), opts)
 		if err == nil {
 			cur := strings.TrimSpace(r.Stdout)
 			if cur == last && cur != "0" {
@@ -504,11 +528,33 @@ func waitForQuiescence(ctx context.Context, g guest,
 	return false, time.Since(start)
 }
 
-func workDirFor(sc scenario.Scenario) string {
+func workDirFor(sc scenario.Scenario, lay image.Layout, sh shell) string {
 	if sc.Cwd == "" {
-		return image.WorkDir
+		return lay.WorkDir
 	}
-	return filepath.ToSlash(filepath.Join(image.WorkDir, sc.Cwd))
+	return sh.Join(lay.WorkDir, sc.Cwd)
+}
+
+// imageSpecFor describes the environment a scenario needs.
+//
+// Windows takes the short path deliberately: nothing here provisions it. The CI job built the
+// binaries, installed the agent runtime and created the work directory before this process
+// started, so there is no image to build and no artifact to push. What would otherwise be
+// checked here -- that the binary under test is actually reachable -- is checked better a few
+// lines later by asking the guest for `beacon version`, which tests reachability rather than a
+// path guess.
+func imageSpecFor(p sandbox.Platform, sc scenario.Scenario, opts Options,
+	logf func(string, ...any)) (sandbox.ImageSpec, error) {
+
+	if p.IsWindows() {
+		return sandbox.ImageSpec{Base: "windows/amd64"}, nil
+	}
+	logf("building image (cached layers are free)")
+	return image.Build(image.Spec{
+		RepoRoot:      opts.RepoRoot,
+		ClaudeVersion: opts.ClaudeVersion,
+		WithDocker:    sc.NeedsRealSystemd(),
+	}, logf)
 }
 
 func randomToken() string {
@@ -639,8 +685,9 @@ func sampleCountOf(verdict string) string {
 // The log path comes from `endpoint status --json` rather than being assumed, because the whole
 // point of an install scenario is to check what Beacon actually did — hardcoding the expected
 // path would make the scenario agree with itself instead of with Beacon.
-func doInstall(ctx context.Context, g guest,
-	sc scenario.Scenario, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) (string, error) {
+func doInstall(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged, agent sandbox.ExecOpts, lay image.Layout, sh shell,
+	art *Artifacts, logf func(string, ...any)) (string, error) {
 
 	in := sc.Install
 	system := in.Mode == "system"
@@ -652,12 +699,14 @@ func doInstall(ctx context.Context, g guest,
 	if in.Service != "" {
 		svc = " --service=" + in.Service
 	}
-	// System-mode install requires root; user mode must not have it, or the install would
-	// write system paths while claiming to be a user install.
+	// System-mode install needs elevation; user mode must not have it, or the install would
+	// write system paths while claiming to be a user install. On Windows the two options differ
+	// only in what they cannot do -- there is one account, already elevated -- which is a real
+	// weakness of the Windows user-mode scenario and is why w02 asserts the supervised backend
+	// rather than trusting that it ran unprivileged.
 	opts := agent
 	if system {
-		opts = sandbox.ExecOpts{User: "root", Dir: image.WorkDir, Timeout: 5 * time.Minute,
-			PathPrepend: image.PathPrepend()}
+		opts = privileged
 	}
 	art.Meta["install_mode"] = in.Mode
 	art.Meta["install_service"] = in.Service
@@ -687,13 +736,13 @@ func doInstall(ctx context.Context, g guest,
 	// SUDO_USER is how the real path identifies them (`sudo apt install ./beacon.deb`), so it is
 	// what gets set here rather than inventing a flag that no user would pass.
 	if system {
-		cmd := fmt.Sprintf("SUDO_USER=%s beacon endpoint user-config repair-installed "+
-			"--system --harness claude --json 2>&1", image.AgentUser)
+		cmd := sh.WithEnv("SUDO_USER", lay.ConsoleUser(),
+			"beacon endpoint user-config repair-installed --system --harness claude --json 2>&1")
 		u, err := g.Exec(ctx, cmd, opts)
 		art.Meta["install_user_config"] = oneLine(u.Stdout + u.Stderr)
 		if err != nil || u.ExitCode != 0 {
 			return "", fmt.Errorf("configuring %s's agent runtime failed (rc=%d): %v %s",
-				image.AgentUser, u.ExitCode, err, art.Meta["install_user_config"])
+				lay.ConsoleUser(), u.ExitCode, err, art.Meta["install_user_config"])
 		}
 		logf("user config: %s", art.Meta["install_user_config"])
 		// A skip is not a pass. The command reports one rather than failing, because on a real
@@ -701,11 +750,11 @@ func doInstall(ctx context.Context, g guest,
 		// treating a skip as success would let a broken resolver produce a green run.
 		if strings.Contains(art.Meta["install_user_config"], "skipped_reason") {
 			return "", fmt.Errorf("user-config skipped instead of configuring %s: %s",
-				image.AgentUser, art.Meta["install_user_config"])
+				lay.ConsoleUser(), art.Meta["install_user_config"])
 		}
 	}
 
-	logPath, err := installedLogPath(ctx, g, scope, opts, in, art, logf)
+	logPath, err := installedLogPath(ctx, g, scope, opts, in, lay, art, logf)
 	if err != nil {
 		return "", err
 	}
@@ -723,7 +772,7 @@ func doInstall(ctx context.Context, g guest,
 // documented default path — but ExpectStatusRunning is enforced, since a scenario asking for a
 // running service and silently accepting an unparseable status would verify nothing.
 func installedLogPath(ctx context.Context, g guest,
-	scope string, opts sandbox.ExecOpts, in *scenario.Install, art *Artifacts,
+	scope string, opts sandbox.ExecOpts, in *scenario.Install, lay image.Layout, art *Artifacts,
 	logf func(string, ...any)) (string, error) {
 
 	s, err := g.Exec(ctx, "beacon endpoint status "+scope+" --json 2>&1", opts)
@@ -766,15 +815,5 @@ func installedLogPath(ctx context.Context, g guest,
 			"the selected backend can be confirmed; refusing to report a pass the run did not earn")
 	}
 	logf("status unparseable; falling back to the documented default log path")
-	if in.Mode == "system" {
-		return "/var/log/beacon-agent/runtime.jsonl", nil
-	}
-	return image.AgentHome + "/.beacon/endpoint/logs/runtime.jsonl", nil
-}
-
-// plainSessionScript runs the agent with no collector wrapper, for install scenarios where a
-// persistent collector is already running as a service.
-func plainSessionScript(sc scenario.Scenario, prompt string) string {
-	return "claude " + strings.Join(claudeFlags(sc, prompt), " ") +
-		" > claude-out.json 2> claude-err.txt; echo CLAUDE_RC=$?"
+	return lay.DefaultLogPath(in.Mode == "system"), nil
 }

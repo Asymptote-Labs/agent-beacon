@@ -266,6 +266,9 @@ type HostSafety struct {
 	SecretInArgv bool
 	// ArgvCheckRan is false when the scan could not run, so its result proves nothing.
 	ArgvCheckRan bool
+	// Disposability is the evidence a local-guest run offers in place of a comparison. Only
+	// meaningful when HostChanged is hostguard.EphemeralDescription.
+	Disposability string
 }
 
 // Safety adds findings for the host-isolation and credential-handling guarantees.
@@ -291,6 +294,26 @@ func Safety(v *Verdict, s HostSafety) {
 			Check: "safety.host_untouched", Severity: SevWarn,
 			Summary: "files unchanged, but the service probe could not run, so services are unverified",
 			Why:     "treat the service half as unproven; the file half of the guard did pass",
+		})
+	case s.HostChanged == hostguard.EphemeralDescription:
+		// The guest was this machine, so there was no comparison to make: the install the
+		// scenario is testing *is* the change a comparison would report. Isolation therefore
+		// rests on the machine being disposable, which is a real but weaker guarantee -- so it
+		// is reported rather than passed over in silence, and the evidence is named so a reader
+		// can tell "GitHub hands out a fresh VM per job" from "the operator said so".
+		//
+		// Warn, not fail: a dispatched CI run is a legitimate and intended configuration. Warn,
+		// not silence: the file-and-service comparison every other run gets did not happen here,
+		// and silence in this tool means verified-clean.
+		why := "the comparison every other run gets did not happen; isolation is only as good as " +
+			"the machine being disposable"
+		if s.Disposability != "" {
+			why += " (" + s.Disposability + ")"
+		}
+		v.Add(Finding{
+			Check: "safety.host_untouched", Severity: SevWarn,
+			Summary: "host isolation was not verified by comparison because the guest was this machine",
+			Why:     why,
 		})
 	case s.HostChanged != hostguard.CleanDescription:
 		v.Add(Finding{

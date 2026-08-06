@@ -72,10 +72,15 @@ func usage() {
 	fmt.Fprint(os.Stderr, `beacon-sandbox -- verify Beacon against real agent activity in a disposable sandbox
 
   doctor  [--fix] [--json]        check prerequisites and say how to fix what is missing
-  run     [--scenario ID] [--repeat N] [--keep-sandbox] [--suite DIR]
+  run     [--scenario ID] [--repeat N] [--keep-sandbox] [--suite DIR] [--provider NAME]
   verify  <run-dir>...   [--mutate MODE]
   diff    <before-dir> <after-dir>
   clean   [--dir runs]
+
+Where scenarios run (--provider):
+  modal    a disposable Linux sandbox. The default, and Linux-only
+  github   dispatch to a GitHub Actions Windows runner, then collect and judge locally
+  local    this machine, for use inside a disposable CI runner
 
 Anthropic credential, in the order they resolve:
   --modal-secret NAME    a secret already stored with the provider; the value never enters
@@ -120,6 +125,8 @@ func cmdRun(args []string) error {
 	claudeVer := fs.String("claude-version", "", "pin Claude Code version (default: image default)")
 	modalSecret := fs.String("modal-secret", "", "name of a Modal secret holding ANTHROPIC_API_KEY; the value never enters this process")
 	keyCommand := fs.String("api-key-command", "", "command whose stdout is the Anthropic API key (e.g. 'op read op://vault/anthropic/key')")
+	provider := fs.String("provider", "modal", "where scenarios run: modal (disposable Linux), github (dispatch to a Windows runner), or local (this machine)")
+	allowHostMutation := fs.Bool("allow-host-mutation", false, "with --provider local, run on a machine this tool cannot prove is disposable")
 	fs.Parse(args)
 
 	root, err := repoRoot()
@@ -156,17 +163,32 @@ func cmdRun(args []string) error {
 	}
 
 	ctx := context.Background()
-	prov, err := sandbox.NewModal(ctx, appName)
+	prov, closeProv, err := openProvider(ctx, *provider, *allowHostMutation)
 	if err != nil {
 		return err
 	}
-	defer prov.Close()
+	defer closeProv()
+
+	// Scenarios are not portable, so run only the ones written for this guest -- and say how many
+	// were set aside. `run` with no --scenario is the "everything" command, and silently returning
+	// a subset of it would read as full coverage.
+	target := platformOf(prov)
+	sui, skipped := sui.For(target)
+	if skipped > 0 {
+		fmt.Printf("suite: %d %s scenario(s); %d written for another platform and not run\n",
+			len(sui.Scenarios), target, skipped)
+	}
+	if len(sui.Scenarios) == 0 {
+		return fmt.Errorf("no %s scenarios in %s, so this run would assert nothing", target, scDir)
+	}
 
 	var verdicts []check.Verdict
+	matched := false
 	for _, sc := range sui.Scenarios {
 		if *only != "" && sc.ID != *only {
 			continue
 		}
+		matched = true
 		for i := 0; i < *repeat; i++ {
 			label := sc.ID
 			if *repeat > 1 {
@@ -200,7 +222,46 @@ func cmdRun(args []string) error {
 			verdicts = append(verdicts, v)
 		}
 	}
+	// A --scenario that matched nothing must not exit 0 with an empty summary: the caller asked
+	// for a specific check and got none, which is a failure to run rather than a clean result.
+	// A typo'd id, or one belonging to the other platform, both land here.
+	if *only != "" && !matched {
+		return fmt.Errorf("no %s scenario with id %q in %s; `--provider %s` runs %s scenarios",
+			target, *only, scDir, *provider, target)
+	}
 	return summarize(verdicts)
+}
+
+// openProvider resolves the --provider choice, returning a cleanup function so a Modal client is
+// always closed.
+func openProvider(ctx context.Context, name string, allowHostMutation bool) (sandbox.Provider, func(), error) {
+	switch name {
+	case "modal":
+		p, err := sandbox.NewModal(ctx, appName)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		return p, p.Close, nil
+	case "local":
+		p, err := sandbox.NewLocalExec(sandbox.LocalExecOptions{AllowHostMutation: allowHostMutation})
+		if err != nil {
+			return nil, func() {}, err
+		}
+		return p, func() {}, nil
+	case "github":
+		return nil, func() {}, fmt.Errorf("--provider github dispatches a workflow rather than " +
+			"driving a machine directly; it is not wired up yet")
+	default:
+		return nil, func() {}, fmt.Errorf("unknown --provider %q; want modal, github, or local", name)
+	}
+}
+
+// platformOf maps a provider's guest platform onto the scenario vocabulary.
+func platformOf(p sandbox.Provider) scenario.Platform {
+	if p.Platform().IsWindows() {
+		return scenario.PlatformWindows
+	}
+	return scenario.PlatformLinux
 }
 
 // judge is the pure step: artifacts in, verdict out. Returns the parsed log too so callers
@@ -257,9 +318,10 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 // credential disclosure are the two findings that must survive every other kind of failure.
 func safetyOf(v *check.Verdict, art runner.Artifacts) {
 	check.Safety(v, check.HostSafety{
-		HostChanged:  art.Meta["host_state"],
-		SecretInArgv: art.Meta["secret_in_argv"] == "true",
-		ArgvCheckRan: art.Meta["argv_check_ran"] == "true",
+		HostChanged:   art.Meta["host_state"],
+		SecretInArgv:  art.Meta["secret_in_argv"] == "true",
+		ArgvCheckRan:  art.Meta["argv_check_ran"] == "true",
+		Disposability: art.Meta["disposability"],
 	})
 }
 
