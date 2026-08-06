@@ -300,8 +300,24 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		// Both errors are reported, and the partial file is removed. A close failure can itself
+		// explain the copy failure -- a full disk surfaces on either call depending on buffering --
+		// which is the same reasoning image/artifacts.go already applies to its download. Leaving
+		// the truncated destination behind is the part that actually matters: for Get() that is a
+		// short runtime.jsonl in the run directory, which the check layer would judge as a corrupt
+		// log and report as a Beacon defect caused by a harness copy failure.
+		closeErr := out.Close()
+		_ = os.Remove(dst)
+		if closeErr != nil {
+			return fmt.Errorf("%w (and closing %s failed: %v)", err, dst, closeErr)
+		}
 		return err
 	}
-	return out.Close()
+	// Checked, not discarded: this handle was written through, so a close failure can be the first
+	// report of data that never reached disk.
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
+		return fmt.Errorf("close %s: %w", dst, err)
+	}
+	return nil
 }

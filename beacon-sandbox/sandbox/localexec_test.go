@@ -135,6 +135,31 @@ func TestExecCapturesBothStreams(t *testing.T) {
 	}
 }
 
+// A failed copy must not leave a truncated file behind. For Get() the destination is the run
+// directory's runtime.jsonl, and a short log there is judged by the check layer as a corrupt
+// log -- reporting a Beacon defect that was really a harness copy failure.
+//
+// The failure is provoked by copying from a directory: opening one for reading succeeds on Unix,
+// and the read then fails, which is a genuine mid-copy error rather than a mocked one.
+func TestAFailedCopyLeavesNoPartialFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("opening a directory for reading fails outright on Windows, so the copy never starts")
+	}
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "a-directory")
+	if err := os.Mkdir(srcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "out.jsonl")
+
+	if err := copyFile(srcDir, dst); err == nil {
+		t.Fatal("copying from a directory must fail")
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("a failed copy must not leave %s behind (stat err: %v)", dst, err)
+	}
+}
+
 // Snapshot must fail rather than quietly succeed. A caller that believes it snapshotted, and did
 // not, would reuse a stale environment and attribute the result to the wrong build.
 func TestSnapshotIsRefusedRatherThanFaked(t *testing.T) {
