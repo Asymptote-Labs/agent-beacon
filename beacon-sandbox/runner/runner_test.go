@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,8 +17,9 @@ import (
 // otherwise perfect run. That disabled precisely the signal that distinguishes "the agent never
 // ran" from "Beacon missed the event", which is the distinction the whole verdict model rests on.
 func TestSessionFilesResolveInsideTheScenarioWorkingDirectory(t *testing.T) {
+	lay, sh := image.LinuxLayout(), posixShell{}
 	withCwd := scenario.Scenario{ID: "s05-repo-task", Cwd: "repo"}
-	got := sessionFile(withCwd, "claude-out.json")
+	got := sessionFile(withCwd, "claude-out.json", lay, sh)
 
 	if !strings.HasSuffix(got, "/repo/claude-out.json") {
 		t.Errorf("a scenario with cwd:repo must read from that directory, got %q", got)
@@ -28,14 +28,16 @@ func TestSessionFilesResolveInsideTheScenarioWorkingDirectory(t *testing.T) {
 		t.Error("a bare relative name is what caused the original silent miss")
 	}
 	// It must be the same directory the session was launched in, or the two can drift apart.
-	if !strings.HasPrefix(got, workDirFor(withCwd)) {
-		t.Errorf("readback path %q is not under the session working dir %q", got, workDirFor(withCwd))
+	if !strings.HasPrefix(got, workDirFor(withCwd, lay, sh)) {
+		t.Errorf("readback path %q is not under the session working dir %q",
+			got, workDirFor(withCwd, lay, sh))
 	}
 }
 
 // The common case must keep working: no cwd means the default working directory.
 func TestSessionFilesDefaultToTheWorkDir(t *testing.T) {
-	got := sessionFile(scenario.Scenario{ID: "s01-hello"}, "claude-out.json")
+	got := sessionFile(scenario.Scenario{ID: "s01-hello"}, "claude-out.json",
+		image.LinuxLayout(), posixShell{})
 
 	want := image.WorkDir + "/claude-out.json"
 	if got != want {
@@ -46,7 +48,8 @@ func TestSessionFilesDefaultToTheWorkDir(t *testing.T) {
 // Paths are consumed by a POSIX shell inside the guest, so they must use forward slashes
 // regardless of the host that built them.
 func TestSessionFilePathsAreAlwaysSlashed(t *testing.T) {
-	got := sessionFile(scenario.Scenario{ID: "x", Cwd: "nested/dir"}, "claude-err.txt")
+	got := sessionFile(scenario.Scenario{ID: "x", Cwd: "nested/dir"}, "claude-err.txt",
+		image.LinuxLayout(), posixShell{})
 
 	if strings.Contains(got, `\`) {
 		t.Errorf("guest paths must be slash-separated, got %q", got)
@@ -56,12 +59,32 @@ func TestSessionFilePathsAreAlwaysSlashed(t *testing.T) {
 	}
 }
 
+// The mirror of the previous test for the other dialect. A Windows guest consumes these paths
+// through Windows APIs, so a forward slash that "mostly works" would still be wrong in every
+// verdict a human reads -- and a bare drive letter is a *relative* path, which is wrong in a way
+// that silently writes to the wrong directory.
+func TestWindowsSessionFilePathsUseBackslashesAndKeepTheDriveRoot(t *testing.T) {
+	lay, sh := image.WindowsLayout(), powerShell{}
+	got := sessionFile(scenario.Scenario{ID: "x", Cwd: "nested/dir"}, "claude-err.txt", lay, sh)
+
+	if strings.Contains(got, "/") {
+		t.Errorf("windows guest paths must be backslash-separated, got %q", got)
+	}
+	if !strings.HasSuffix(got, `\nested\dir\claude-err.txt`) {
+		t.Errorf("nested cwd not resolved, got %q", got)
+	}
+	// "C:" without a separator means the current directory on that drive, not its root.
+	if strings.HasPrefix(got, `C:`) && !strings.HasPrefix(got, `C:\`) {
+		t.Errorf("a drive letter must keep its separator, got %q", got)
+	}
+}
+
 // The argv scan is a disclosure claim, so it must rest on an observation actually made. An
 // earlier version scanned only after `beacon ci exec` returned, when every process that might
 // have held the key was already gone -- ARGV_CLEAN was close to vacuous. Cursor Bugbot flagged
 // it on the first commit. These pin the properties that make the sampler meaningful.
 func TestArgvSamplerRunsInBackgroundAndSamplesRepeatedly(t *testing.T) {
-	got := argvSamplerScript()
+	got := posixShell{}.ArgvSampler()
 
 	if !strings.Contains(got, "nohup") || !strings.HasSuffix(strings.TrimSpace(got), "ARGV_SAMPLER_STARTED") {
 		t.Error("the sampler must detach so the session can run alongside it")
@@ -79,7 +102,7 @@ func TestArgvSamplerRunsInBackgroundAndSamplesRepeatedly(t *testing.T) {
 
 // The matcher must never carry the key in its own argv, or the scan reports a leak it created.
 func TestArgvSamplerNeverPutsTheKeyInAnArgv(t *testing.T) {
-	got := argvSamplerScript()
+	got := posixShell{}.ArgvSampler()
 
 	if strings.Contains(got, `grep -qF "$ANTHROPIC_API_KEY"`) || strings.Contains(got, "grep -F $ANTHROPIC_API_KEY") {
 		t.Error("expanding the key into a matcher's argv is the self-poisoning bug")
@@ -92,7 +115,7 @@ func TestArgvSamplerNeverPutsTheKeyInAnArgv(t *testing.T) {
 // With no key there is nothing to search for, so the sampler must say so rather than write a
 // clean verdict. A check that cannot run must never read as one that passed.
 func TestArgvSamplerReportsInvalidRatherThanCleanWithoutAKey(t *testing.T) {
-	got := argvSamplerScript()
+	got := posixShell{}.ArgvSampler()
 
 	if !strings.Contains(got, "ARGV_CHECK_INVALID_NO_KEY") {
 		t.Error("a missing key must produce an explicit invalid marker")
@@ -126,7 +149,9 @@ func TestSampleCountIsExtractedForTheRecord(t *testing.T) {
 // either, so a collector that failed outright was indistinguishable from one that worked.
 // Reported by the Copilot reviewer.
 func TestSessionScriptPropagatesTheCollectorExitStatus(t *testing.T) {
-	got := sessionScript(scenario.Scenario{ID: "s01", Prompt: "hi"}, "hi", "/work/runtime.jsonl")
+	sh := posixShell{}
+	sc := scenario.Scenario{ID: "s01", Prompt: "hi"}
+	got := sh.CIExecSession("/work/runtime.jsonl", image.WorkDir, claudeFlags(sc, "hi", sh))
 
 	if !strings.Contains(got, "rc=$?") || !strings.Contains(got, "exit $rc") {
 		t.Errorf("the script must capture and re-raise ci exec's status:\n%s", got)
@@ -145,9 +170,7 @@ func TestSessionScriptPropagatesTheCollectorExitStatus(t *testing.T) {
 // be told apart -- and the first is an infrastructure problem while the second is a real absence of
 // agent work. An explicit marker on every branch removes the ambiguity.
 func TestSentinelProbeAlwaysEmitsAMarker(t *testing.T) {
-	// Rebuild the probe the runner uses, for the same sentinel path.
-	probe := fmt.Sprintf("if [ -f %[1]s ]; then echo __FOUND__; cat %[1]s; else echo __MISSING__; fi",
-		shq("/home/agent/work/out.txt"))
+	probe := posixShell{}.ProbeFile("/home/agent/work/out.txt")
 
 	for _, want := range []string{"__FOUND__", "__MISSING__"} {
 		if !strings.Contains(probe, want) {
@@ -203,7 +226,7 @@ func TestArgvSamplerScriptIsValidShell(t *testing.T) {
 		t.Skip("no sh on PATH")
 	}
 	f := filepath.Join(t.TempDir(), "sampler.sh")
-	if err := os.WriteFile(f, []byte(argvSamplerScript()), 0o600); err != nil {
+	if err := os.WriteFile(f, []byte(posixShell{}.ArgvSampler()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(sh, "-n", f).CombinedOutput()
@@ -212,7 +235,7 @@ func TestArgvSamplerScriptIsValidShell(t *testing.T) {
 	}
 	// The inner sampler body is a heredoc, which `sh -n` does not parse. Extract and check it too,
 	// since that is where the polling loop lives.
-	body := argvSamplerScript()
+	body := posixShell{}.ArgvSampler()
 	start := strings.Index(body, "#!/bin/sh")
 	end := strings.Index(body, "\nSAMPLER\n")
 	if start < 0 || end < 0 || end < start {
@@ -230,7 +253,7 @@ func TestArgvSamplerScriptIsValidShell(t *testing.T) {
 // A clean verdict from a sampler that never saw an agent process must read as unverified. This is
 // the invariant the whole tool rests on: silence means verified-clean, never "we did not look."
 func TestArgvSamplerEmitsWhetherItSawTheAgent(t *testing.T) {
-	script := argvSamplerScript()
+	script := posixShell{}.ArgvSampler()
 	for _, want := range []string{"saw_agent=0", "saw_agent=$saw_agent", "*claude*"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("sampler no longer records whether the agent was in view (missing %q)", want)
