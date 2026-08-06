@@ -206,6 +206,7 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
 	applyWorkspaceFields(fields, input, filepath.Dir(params.filePath))
+	applyGenAIUsageFields(fields, input)
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 

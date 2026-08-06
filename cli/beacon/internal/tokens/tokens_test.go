@@ -132,6 +132,49 @@ func TestAggregateDedupesDualChannelUsage(t *testing.T) {
 	}
 }
 
+func TestAggregateDedupesCursorSyncAgainstHookUsage(t *testing.T) {
+	// The Cursor state-store sync (beacon cursor sync-usage) emits usage as a
+	// metric channel (raw.metric_name = cursor.db.token.usage). If Cursor ever
+	// ships usage in hook payloads, those hook events form a log/span channel
+	// (no metric_name) in the same (harness, session) scope and must win —
+	// synced counts are suppressed instead of double counting.
+	events := []schema.Event{
+		// Hook-passthrough channel: per-generation usage, no metric_name.
+		usageEventFixture("2026-06-11T10:00:00Z", "cursor", "conv-a", "claude-4.5-sonnet", func(e *schema.Event) {
+			e.Event.Action = "tool.completed"
+			e.GenAI.Usage.InputTokens = int64Ptr(100)
+			e.GenAI.Usage.OutputTokens = int64Ptr(40)
+		}),
+		// Synced channel for the same session: same tokens, must be suppressed.
+		usageEventFixture("2026-06-11T10:00:01Z", "cursor", "conv-a", "claude-4.5-sonnet", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(100)
+			e.GenAI.Usage.OutputTokens = int64Ptr(40)
+			e.Raw = map[string]interface{}{"metric_name": "cursor.db.token.usage"}
+		}),
+		// A session only the sync saw: must be counted untouched.
+		usageEventFixture("2026-06-11T10:05:00Z", "cursor", "conv-b", "gpt-5.2", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(30)
+			e.GenAI.Usage.OutputTokens = int64Ptr(5)
+			e.Raw = map[string]interface{}{"metric_name": "cursor.db.token.usage"}
+		}),
+	}
+
+	report := Aggregate(events, Options{})
+	if got := report.Totals; got.InputTokens != 130 || got.OutputTokens != 45 {
+		t.Fatalf("totals double-counted or dropped: %#v", got)
+	}
+	bySession := map[string]Usage{}
+	for _, g := range report.BySession {
+		bySession[g.Key] = g.Usage
+	}
+	if a := bySession["conv-a"]; a.InputTokens != 100 || a.OutputTokens != 40 {
+		t.Fatalf("conv-a usage = %#v, want hook channel only", a)
+	}
+	if b := bySession["conv-b"]; b.InputTokens != 30 || b.OutputTokens != 5 {
+		t.Fatalf("conv-b sync-only usage was dropped: %#v", b)
+	}
+}
+
 func TestAggregateDedupesCumulativeSeries(t *testing.T) {
 	cumulative := func(ts string, value int64) schema.Event {
 		return usageEventFixture(ts, "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {

@@ -1,0 +1,104 @@
+---
+title: "beacon token-usage sync-cursor"
+description: "Sync Cursor token usage from the local state store into the runtime log"
+---
+
+## Command Overview
+
+`beacon token-usage sync-cursor` extracts runtime-recorded token usage from Cursor's
+local state store (`state.vscdb`) and appends it to the Beacon runtime log as
+canonical `token.usage` events, so [`beacon token-usage`](/cli/token-usage) and
+the dashboard token view cover Cursor sessions.
+
+```bash title="Command syntax"
+beacon token-usage sync-cursor [flags]
+```
+
+Cursor's hook payloads carry no token counts today, so hook telemetry alone
+cannot power the token views for Cursor. This explicit, user-initiated command
+is the local source for them.
+
+## How it works
+
+- **Read-only and offline.** The command copies the state store to a private
+  temporary snapshot before reading, never touches Cursor's live files, and
+  writes only to the local runtime JSONL log. It is safe to run while Cursor
+  is open.
+- **Best-effort extraction.** The store is Cursor's internal, undocumented
+  database. Generations without recorded token counts are skipped (some Cursor
+  builds record zeros), unparseable rows are skipped and counted in the
+  summary, and Beacon never estimates token counts or derives cost locally.
+- **Canonical output.** Synced events carry `gen_ai.usage` with the standard
+  disjoint token fields, `harness.name=cursor`, the model Cursor recorded, and
+  the conversation id as `session.id` — the same id Cursor hook events carry,
+  so per-session rollups join hook activity with synced usage.
+- **Idempotent.** Synced generations are remembered in a local state file
+  (default `~/.beacon/cursor/usage-sync-state.json`) and skipped on later
+  runs. If the state file is lost, it is rebuilt from the runtime log before
+  syncing.
+- **No double counting.** Synced events are marked as a metric channel
+  (`raw.metric_name=cursor.db.token.usage`). If a Cursor release starts
+  including usage in hook payloads, hook-reported usage takes precedence in
+  rollups and synced counts for the same session are suppressed.
+
+## Examples
+
+Sync Cursor usage into the per-user runtime log:
+
+```bash title="Sync Cursor token usage"
+beacon token-usage sync-cursor
+```
+
+Preview what would be synced without writing anything:
+
+```bash title="Dry run"
+beacon token-usage sync-cursor --print
+```
+
+Only sync generations from July 2026 onward:
+
+```bash title="Bound the backfill"
+beacon token-usage sync-cursor --since 2026-07-01T00:00:00Z
+```
+
+Then report on it:
+
+```bash title="Report Cursor usage"
+beacon token-usage --harness cursor
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--db <path>` | Cursor state database path. Defaults to Cursor's per-OS `state.vscdb` location |
+| `--state <path>` | Dedup state file path. Defaults to `~/.beacon/cursor/usage-sync-state.json` |
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print events as JSON without writing the log or recording state (dry run) |
+| `--since <timestamp>` | Only sync generations at or after this RFC3339 timestamp |
+| `--rebuild-state` | Rebuild the dedup state from the runtime log before syncing |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+## Summary output
+
+Each run prints one summary line so an empty sync is explainable:
+
+```text title="Example summary"
+token-usage sync-cursor: 412 bubbles, 37 emitted, 358 zero-count skipped, 17 already synced, 0 before --since, 0 parse errors
+```
+
+A high zero-count number usually means the installed Cursor version does not
+record per-generation token counts in its local store; Beacon reports only
+what Cursor recorded and never estimates.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Token usage report" icon="chart-line" href="/cli/token-usage">
+    Report token usage and attribution from Beacon runtime logs.
+  </Card>
+  <Card title="Cursor runtime" icon="i-cursor" href="/runtimes/cursor">
+    Cursor endpoint telemetry support details.
+  </Card>
+</Columns>

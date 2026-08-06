@@ -51,6 +51,7 @@ beacon endpoint hooks install --harness cursor --level project
 | Command, tool, and file telemetry | Supported for tool, shell command, MCP-like, approval, and file edit payloads where Cursor exposes them; Cursor Cloud support is limited to Cursor's [cloud-supported command hooks](https://cursor.com/docs/hooks#cloud-agent-support). |
 | Agent reasoning telemetry | Supported for local Cursor through `afterAgentThought` hooks. Each completed thinking block is recorded as an `agent.reasoning` event carrying the reasoning text in the OpenTelemetry GenAI output-messages shape (`gen_ai.output.messages` with a `reasoning` part), plus a `content` marker with the original text's hash and byte count. Reasoning is only available for models/modes where Cursor exposes visible thinking text. |
 | Repository and branch context | Events include the workspace path as `repository`, and `branch` is resolved from the workspace's local git checkout (`.git/HEAD`) when Cursor does not supply one; disable local git resolution with `BEACON_DISABLE_GIT_METADATA=1`. |
+| Token usage | Supported through [`beacon token-usage sync-cursor`](/cli/token-usage-sync-cursor), which extracts runtime-recorded token counts from Cursor's local state store into canonical `gen_ai.usage` events. Cursor's hook payloads carry no token counts today; if Cursor adds them, the hook adapter normalizes them into `gen_ai.usage` automatically and hook-reported usage takes precedence over synced usage in rollups. |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent; Cursor hooks are installed separately in the logged-in user's context. |
 
@@ -59,6 +60,27 @@ beacon endpoint hooks install --harness cursor --level project
 Restart Cursor after installing or removing hooks so the updated hook configuration is picked up by new sessions.
 
 Hook events include metadata such as file path, operation, language, diff hash, and diff byte count. Raw diffs and reasoning text are subject to Asymptote's redaction, sanitization, truncation, and event-size limits before writing.
+
+## Token usage
+
+Cursor's hook payloads do not include token counts today, so hook telemetry
+alone cannot power the token views for Cursor sessions. Two mechanisms close
+the gap:
+
+- **Local state-store sync.** [`beacon token-usage sync-cursor`](/cli/token-usage-sync-cursor)
+  reads a private snapshot of Cursor's local state store (`state.vscdb`) and
+  appends the runtime-recorded per-generation token counts to the runtime log
+  as `token.usage` events attributed to the `cursor` harness, keyed by the
+  same conversation id the hooks record. The store is undocumented and
+  best-effort: generations without recorded counts are skipped, and Beacon
+  never estimates token counts or derives cost locally.
+- **Hook passthrough.** If a Cursor release starts including usage fields in
+  hook payloads, the hook adapter normalizes them into `gen_ai.usage`
+  automatically, and rollups prefer hook-reported usage over synced usage for
+  the same session, so the two sources never double count.
+
+After syncing, Cursor usage appears in [`beacon token-usage`](/cli/token-usage)
+and the dashboard token view alongside other harnesses.
 
 ## Related
 
