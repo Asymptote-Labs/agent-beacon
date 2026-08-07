@@ -461,3 +461,48 @@ func TestOnboardingEnabledByEnv(t *testing.T) {
 		}
 	}
 }
+
+// Repair must resend a queued signup -- the docs promise it -- but must never prompt,
+// including for someone who has not been through onboarding at all.
+func TestRetryPendingOnboardingResendsWithoutPrompting(t *testing.T) {
+	h := newOnboardingHarness(t)
+	pending := onboarding.Submission{InstallID: "abc123", Email: "shukan@asymptotelabs.ai"}
+	h.loaded = onboarding.Profile{
+		InstallID:  "abc123",
+		Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-07T00:00:00Z", Outcome: onboarding.OutcomePending},
+		Pending:    &pending,
+	}
+
+	retryPendingOnboarding()
+
+	if h.asked {
+		t.Fatalf("repair prompted for onboarding")
+	}
+	if len(h.sent) != 1 || h.sent[0].InstallID != "abc123" {
+		t.Fatalf("sent = %+v, want the pending payload resent once", h.sent)
+	}
+	if len(h.saved) != 1 || h.saved[0].Pending != nil {
+		t.Fatalf("saved = %+v, want the payload cleared after delivery", h.saved)
+	}
+}
+
+func TestRetryPendingOnboardingIsSilentWithNothingQueued(t *testing.T) {
+	for name, profile := range map[string]onboarding.Profile{
+		"never onboarded":     {},
+		"onboarded, no queue": {Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-07T00:00:00Z", Outcome: onboarding.OutcomeSubmitted}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newOnboardingHarness(t)
+			h.loaded = profile
+
+			retryPendingOnboarding()
+
+			if h.asked {
+				t.Fatalf("repair prompted for onboarding")
+			}
+			if len(h.sent) != 0 || len(h.saved) != 0 {
+				t.Fatalf("repair touched the network or disk: sent=%d saved=%d", len(h.sent), len(h.saved))
+			}
+		})
+	}
+}

@@ -75,7 +75,9 @@ test -f "$LOG_PATH"
 # A non-interactive install must never ask for an email or record an onboarding
 # answer. Package postinstall scripts, MDM deployments, and CI all reach `endpoint
 # install` without a terminal, so a prompt here is a broken fleet rollout.
-if grep -qi 'How are you using Beacon\|^Email:' "$INSTALL_OUTPUT"; then
+# -E because the prompt strings are matched as alternates, and the second branch is
+# the current email prompt ("Email › "), not the old "Email:".
+if grep -qiE 'How are you using Beacon|Email .|free and open source' "$INSTALL_OUTPUT"; then
   echo "non-interactive endpoint install must not prompt for onboarding" >&2
   cat "$INSTALL_OUTPUT" >&2
   exit 1

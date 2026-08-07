@@ -221,6 +221,20 @@ func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, 
 	}
 }
 
+// retryPendingOnboarding resends a queued signup without ever prompting.
+//
+// Called from `endpoint repair`, which is a maintenance command and must never ask a
+// question -- including of someone who has not been through onboarding at all. It only
+// gives a submission that failed on a flaky network a second chance, which is what the
+// docs promise.
+func retryPendingOnboarding() {
+	profile := onboardingLoad()
+	if !profile.Prompted() || profile.Pending == nil {
+		return
+	}
+	resendPendingOnboarding(&profile)
+}
+
 // resendPendingOnboarding retries a submission that previously failed. Best effort
 // and silent: the user already answered and must not be bothered about it again.
 func resendPendingOnboarding(profile *onboarding.Profile) {
