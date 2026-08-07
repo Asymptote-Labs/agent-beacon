@@ -71,6 +71,20 @@ func shouldUseColor(out io.Writer) bool {
 	if !ok {
 		return false
 	}
+	return isCharDevice(file)
+}
+
+// isCharDevice reports whether a file is attached to a terminal rather than a pipe,
+// a redirect, or a file.
+//
+// Onboarding depends on this to stay out of the way of every non-interactive install
+// path: package postinstall scripts, MDM helpers, CI, and the packaging smoke tests
+// all reach `endpoint install` without a terminal, and a prompt there would hang a
+// fleet deployment.
+func isCharDevice(file *os.File) bool {
+	if file == nil {
+		return false
+	}
 	stat, err := file.Stat()
 	if err != nil {
 		return false

@@ -101,6 +101,11 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind))
 	}
+	// Asked once, on an interactive install, before anything is written to disk. Every
+	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
+	if err := maybeRunOnboarding(cmd); err != nil {
+		return err
+	}
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -244,6 +249,9 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(true, serviceKind))
 	}
+	// Resend only. Repair is a maintenance command and never asks a question, but a
+	// signup that failed on a flaky network deserves the retry the docs promise.
+	retryPendingOnboarding()
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,

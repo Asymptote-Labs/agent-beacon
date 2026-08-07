@@ -346,6 +346,7 @@
                   "cli/endpoint-repair",
                   "cli/endpoint-uninstall",
                   "cli/endpoint-config",
+                  "cli/endpoint-onboarding",
                   "cli/dashboard",
                   "cli/wazuh",
                   "cli/elastic",

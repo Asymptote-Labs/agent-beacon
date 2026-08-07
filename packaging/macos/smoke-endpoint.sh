@@ -48,11 +48,15 @@ echo "Building temporary beacon..."
   go build -o "$BEACON_BIN" .
 )
 
+# stdin comes from /dev/null so this behaves the same whether a developer runs it from
+# a terminal or CI runs it headless. `endpoint install --user` is the one command here
+# that would otherwise prompt for onboarding on a tty and hang the smoke test.
 run_beacon() {
-  HOME="$HOME_DIR" "$BEACON_BIN" "$@"
+  HOME="$HOME_DIR" "$BEACON_BIN" "$@" </dev/null
 }
 
 echo "Installing endpoint config in temporary HOME..."
+INSTALL_OUTPUT="$TMP_DIR/install-output.txt"
 run_beacon endpoint install \
   --user \
   --no-start \
@@ -60,12 +64,28 @@ run_beacon endpoint install \
   --log-path "$LOG_PATH" \
   --harness claude,codex \
   --otlp-grpc-port 55317 \
-  --otlp-http-port 55318
+  --otlp-http-port 55318 >"$INSTALL_OUTPUT" 2>&1
+cat "$INSTALL_OUTPUT"
 
 test -f "$HOME_DIR/.beacon/endpoint/config.json"
 test -f "$HOME_DIR/.beacon/endpoint/otelcol.yaml"
 test -f "$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist"
 test -f "$LOG_PATH"
+
+# A non-interactive install must never ask for an email or record an onboarding
+# answer. Package postinstall scripts, MDM deployments, and CI all reach `endpoint
+# install` without a terminal, so a prompt here is a broken fleet rollout.
+# -E because the prompt strings are matched as alternates, and the second branch is
+# the current email prompt ("Email › "), not the old "Email:".
+if grep -qiE 'How are you using Beacon|Email .|free and open source' "$INSTALL_OUTPUT"; then
+  echo "non-interactive endpoint install must not prompt for onboarding" >&2
+  cat "$INSTALL_OUTPUT" >&2
+  exit 1
+fi
+if [ -e "$HOME_DIR/.beacon/profile.json" ]; then
+  echo "non-interactive endpoint install must not write an onboarding profile" >&2
+  exit 1
+fi
 
 echo "Checking endpoint status..."
 run_beacon endpoint status --user --log-path "$LOG_PATH" >/dev/null
