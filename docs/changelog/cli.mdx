@@ -11,6 +11,39 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### v1.1.0 · August 7, 2026
+
+- **Beacon runs on Linux** · Full endpoint parity with macOS: systemd service
+  units, native `.deb` and `.rpm` packages, per-distribution install paths under
+  `/etc/beacon/endpoint`, and correct configuration of the installing user's
+  agent runtime rather than root's. Installing the package performs the endpoint
+  install, so there is no second manual step.
+- **Self-update from native Linux packages** · `beacon endpoint update --apply`
+  now applies updates through `dpkg` and `rpm`, picks an artifact the host can
+  actually install, and reconciles the endpoint after the package manager
+  finishes.
+- **One-time onboarding question** · The first `beacon endpoint install` run in a
+  terminal asks how you are using Beacon and for an email, and sends that once so
+  we can prioritize which agent runtimes to support next. It is asked once per
+  machine and never appears non-interactively: package postinstall scripts, MDM
+  deployments, `--system` installs, CI, `--dry-run`, and piped input all skip it.
+  Unattended installs can set `BEACON_ONBOARDING=0`, and fleet rollouts can supply
+  `BEACON_ONBOARDING_EMAIL` and `BEACON_ONBOARDING_USAGE` to record attribution
+  with no terminal. Nothing Beacon captures is ever sent — no prompts, file
+  contents, commands, or telemetry events.
+- **`beacon endpoint onboarding`** · Shows what was recorded, clears it with
+  `--reset`, or retries an undelivered signup with `--resend`. A failed submission
+  never fails an install; the answer is kept and resent on a later install or
+  repair.
+- **Linux install and deployment docs** · Install documentation is now organized
+  by operating system, and the harness support matrix no longer describes macOS
+  as the only deployment target.
+- **Linux correctness fixes** · Quoted paths in generated systemd `ExecStart`
+  lines, authoritative logind session state and seat reads, and a Linux test
+  suite that passes where systemd is PID 1.
+
+---
+
 ### v1.0.6 · August 3, 2026
 
 - **Claude Code threat-rule coverage** · Claude OTLP tool results now decode
