@@ -216,6 +216,57 @@ matching, fixtures, and supported event fields.
 See the [Quickstart](https://docs.asymptotelabs.ai/cli/quickstart) docs for the
 full setup paths.
 
+### First-run onboarding
+
+The first time you run `beacon endpoint install` in a terminal, Beacon asks two
+questions — your email and whether this is work or personal use — and sends the
+answers to Asymptote once. Knowing who runs Beacon is how we decide which runtimes
+and integrations to build next.
+
+Exactly what is sent, and nothing else:
+
+| Field | Example |
+| --- | --- |
+| Email you enter | `you@company.com` |
+| Work, personal, or evaluating | `work` |
+| OS, architecture, OS version | `darwin`, `arm64`, `15.5` |
+| Beacon version and install method | `v0.0.31`, `homebrew` |
+| Names of agent runtimes on this machine | `claude_code`, `cursor` |
+| A random install ID | `64871b2b…` |
+
+**Never sent:** prompts, file contents, commands, telemetry events, repository names,
+or anything else Beacon captures. The endpoint agent itself stays local-only — this is
+one HTTP request at install time, not an ongoing channel.
+
+It happens once per machine. The answer is recorded in `~/.beacon/profile.json`, which
+survives uninstall so a reinstall does not ask again.
+
+**It never runs non-interactively.** Package postinstall scripts, MDM deployments,
+`--system` installs, CI, `--dry-run`, and any piped or redirected stdin skip it
+silently. Unattended installs that still need it suppressed can set:
+
+```bash
+BEACON_ONBOARDING=0 beacon endpoint install
+```
+
+For a fleet rollout where you *do* want attribution but have no terminal, supply the
+answers up front:
+
+```bash
+BEACON_ONBOARDING_EMAIL=it@company.com BEACON_ONBOARDING_USAGE=work \
+  beacon endpoint install
+```
+
+Inspect or clear the record at any time:
+
+```bash
+beacon endpoint onboarding          # show what was recorded
+beacon endpoint onboarding --reset  # clear it
+```
+
+To have your record deleted, email the install ID shown by
+`beacon endpoint onboarding` to <support@asymptotelabs.ai>.
+
 ### For Security & IT Teams
 
 Start with the

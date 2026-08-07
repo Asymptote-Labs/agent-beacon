@@ -35,6 +35,8 @@ var endpointOpts struct {
 	noStart                  bool
 	serviceKind              string
 	dryRun                   bool
+	onboardingReset          bool
+	onboardingResend         bool
 	fix                      bool
 	allTargets               bool
 	coworkHeaders            string
@@ -361,6 +363,7 @@ func init() {
 	endpointCmd.AddCommand(endpointUninstallCmd)
 	endpointCmd.AddCommand(endpointRepairCmd)
 	endpointCmd.AddCommand(endpointDashboardCmd)
+	endpointCmd.AddCommand(endpointOnboardingCmd)
 	for _, c := range buildDestinationCommands() {
 		endpointCmd.AddCommand(c)
 	}
@@ -407,6 +410,11 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the collector service")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
+	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.onboardingReset, "reset", false, "Clear the onboarding record so the question is asked again")
+	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.onboardingResend, "resend", false, "Retry a signup that could not be delivered")
+	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the onboarding record as JSON")
+	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.contentRetention, "content-retention", "", "Deprecated no-op; Beacon always captures full content subject to redaction and size limits")
 	_ = endpointInstallCmd.Flags().MarkHidden("content-retention")
 	_ = endpointInstallCmd.Flags().MarkDeprecated("content-retention", "Beacon now always captures full content; this flag is ignored")

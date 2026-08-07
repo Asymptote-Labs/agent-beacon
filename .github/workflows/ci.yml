@@ -83,6 +83,7 @@ jobs:
           ./beacon --help > /tmp/beacon-help.txt
           ./beacon endpoint --help > /tmp/beacon-endpoint-help.txt
           ./beacon endpoint hooks --help > /tmp/beacon-hooks-help.txt
+          ./beacon endpoint onboarding --help > /tmp/beacon-onboarding-help.txt
           ./beacon endpoint integrations claude-cowork --help > /tmp/beacon-cowork-help.txt
           ./beacon endpoint wazuh --help > /tmp/beacon-wazuh-help.txt
           ./beacon endpoint rapid7 --help > /tmp/beacon-rapid7-help.txt
