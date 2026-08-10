@@ -299,11 +299,17 @@ jobs:
             mkdir -p dist/beacon-otelcol/linux_$arch
             cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_$arch/beacon-otelcol
           done
-          # The goreleaser before-hook stages all four targets, so darwin must exist too.
+          # The goreleaser before-hook stages every target, so each one must exist here. These are
+          # stand-ins: this job checks that packaging works, not that the binaries run, so a Linux
+          # build stood in a darwin directory is enough to exercise the archive and package steps.
           for arch in amd64 arm64; do
             mkdir -p dist/beacon-otelcol/darwin_$arch
             cp dist/beacon-otelcol/linux_$arch/beacon-otelcol dist/beacon-otelcol/darwin_$arch/beacon-otelcol
           done
+          # Windows is amd64 only, and carries the .exe the release archive ships -- the same name
+          # build-release-collectors.sh stages, so the before-hook finds it under either script.
+          mkdir -p dist/beacon-otelcol/windows_amd64
+          cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
