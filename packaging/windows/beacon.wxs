@@ -115,15 +115,22 @@
       <!-- NOT REMOVE, so this runs on a first install and on an upgrade, but not during removal. -->
       <Custom Action="BeaconInstallEndpoint" After="InstallFiles" Condition="NOT REMOVE" />
       <!--
-        Skipped during an upgrade, and the reason is the one the Linux preremove script documents at
-        length. MajorUpgrade removes the older product as part of the same transaction, which would
-        otherwise run this action and tear down the endpoint the upgrade is about to reinstall — work
-        that is at best pointless and at worst leaves a window with no running collector.
-        UPGRADINGPRODUCTCODE is set only during that removal half, which makes it the MSI equivalent
-        of dpkg's "upgrade" argument and rpm's remaining-version count.
+        Runs during an upgrade too, which is the opposite of what the Linux packaging does — and the
+        difference is the platform, not an inconsistency.
+        
+        preremove.sh skips itself during a dpkg or rpm upgrade because replacing a running binary is
+        fine there: the new file gets a new inode and the running process keeps the old one until it
+        restarts. Windows does not allow that. A running service holds beacon-otelcol.exe open, and
+        MSI cannot replace a locked file — it fails, or schedules the replacement for the next reboot,
+        or leaves the old binary in place. All three produce an "upgraded" install still running the
+        previous collector.
+        
+        So the endpoint is torn down before the files are replaced and brought back by the install
+        action afterwards. The brief gap with no collector is inherent to replacing an in-use binary
+        on this platform; it is the same constraint self-update has to obey, for the same reason.
+        Configuration survives because the uninstall script sets it aside and puts it back.
       -->
-      <Custom Action="BeaconUninstallEndpoint" Before="RemoveFiles"
-              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="BeaconUninstallEndpoint" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

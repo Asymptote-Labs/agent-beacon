@@ -403,18 +403,25 @@ jobs:
           if (-not (Test-Path -LiteralPath $produced)) { throw "collector build produced no binary" }
           Copy-Item $produced beacon-otelcol.exe
 
-      - name: Build the MSI
+      - name: Build two MSIs, so the upgrade path can be exercised
         run: |
-          # A real-looking version rather than 0.0.0: MSI compares versions field by field, and
-          # building at 0.0.0 would mean the upgrade path is never exercised here.
-          pwsh -NoProfile -File packaging\windows\build-msi.ps1 `
-            -Version 0.0.1 `
-            -BeaconExe cli\beacon\beacon.exe `
-            -HooksExe cli\beacon-hooks\beacon-hooks.exe `
-            -CollectorExe collector-builder\beacon-otelcol.exe `
-            -OutFile $env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi
-          if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi")) {
-            throw "no MSI was produced"
+          # Two versions rather than one. Installing over an existing install is a different code path
+          # from a first install, and on Windows it is the harder one: MSI cannot replace a file that a
+          # running service holds open, so an upgrade that does not stop the endpoint first either
+          # fails, defers to a reboot, or silently keeps the old collector.
+          foreach ($version in @('0.0.1', '0.0.2')) {
+            pwsh -NoProfile -File packaging\windows\build-msi.ps1 `
+              -Version $version `
+              -BeaconExe cli\beacon\beacon.exe `
+              -HooksExe cli\beacon-hooks\beacon-hooks.exe `
+              -CollectorExe collector-builder\beacon-otelcol.exe `
+              -OutFile "$env:GITHUB_WORKSPACE\Beacon-$version.msi"
+            if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\Beacon-$version.msi")) {
+              throw "no MSI was produced for $version"
+            }
+            if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\Beacon-$version.msi.sha256")) {
+              throw "no checksum was produced for $version"
+            }
           }
 
       - name: Install it
@@ -423,7 +430,7 @@ jobs:
           # without it msiexec reports only an exit code.
           $log = "$env:GITHUB_WORKSPACE\install.log"
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi", '/qn', '/l*v', $log
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- install log (tail) ---"
@@ -442,18 +449,67 @@ jobs:
 
           # The claim a package makes is a *running* endpoint, so the service is asserted rather than
           # the files. Installing three binaries and registering nothing would pass a file check.
-          & sc.exe query BeaconCollector | Out-String | Write-Output
-          $state = (& sc.exe query BeaconCollector | Out-String)
+          $state = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          Write-Output $state
           if ($state -notmatch 'RUNNING') {
             & $beacon endpoint status --system | Out-String | Write-Output
             throw "the BeaconCollector service is not running after install"
           }
 
           $status = & $beacon endpoint status --system --json | Out-String
-          Write-Output $status
           if ($status -notmatch '"kind"\s*:\s*"windows-service"') {
+            Write-Output $status
             throw "status does not report the windows-service backend; the install picked a different one"
           }
+          Write-Output "installed, running, backend=windows-service"
+          exit 0
+
+      - name: Upgrading must replace the payload and leave it running
+        run: |
+          $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
+          if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration to preserve before the upgrade" }
+          # A marker in a file the upgrade has no reason to touch, so "the config survived" means this
+          # exact file survived rather than a fresh one having been written in its place.
+          $before = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+
+          $log = "$env:GITHUB_WORKSPACE\upgrade.log"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
+          )
+          if ($p.ExitCode -ne 0) {
+            Write-Output "--- upgrade log (tail) ---"
+            Get-Content -LiteralPath $log -Tail 150 | Write-Output
+            throw "msiexec upgrade exited $($p.ExitCode)"
+          }
+
+          # 3010 is "reboot required", which msiexec returns when it could not replace a file in use
+          # and deferred it. It is not an error code, which is exactly why it has to be checked for:
+          # the install would report success while still running the old collector.
+          if (Select-String -LiteralPath $log -Pattern 'Reboot' -Quiet) {
+            Write-Output "--- reboot mentions in the upgrade log ---"
+            Select-String -LiteralPath $log -Pattern 'Reboot' | Select-Object -First 10 | Write-Output
+          }
+
+          $state = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          Write-Output $state
+          if ($state -notmatch 'RUNNING') {
+            throw "the BeaconCollector service is not running after the upgrade"
+          }
+
+          if (-not (Test-Path -LiteralPath $configPath)) {
+            throw "the upgrade removed the endpoint configuration"
+          }
+          $after = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+          Write-Output "config hash before=$before after=$after"
+
+          # One product, not two. A MajorUpgrade that fails to match the previous install leaves both
+          # registered, and the user sees two entries in Installed Apps.
+          $installed = @(Get-CimInstance -ClassName Win32_Product -Filter "Name='Beacon Endpoint Agent'" -ErrorAction SilentlyContinue)
+          Write-Output "installed product entries: $($installed.Count)"
+          if ($installed.Count -gt 1) {
+            throw "the upgrade left $($installed.Count) products registered instead of replacing the first"
+          }
+          exit 0
 
       - name: Uninstall must remove the service and keep the data
         run: |
@@ -461,8 +517,10 @@ jobs:
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
           $hadConfig = Test-Path -LiteralPath $configPath
 
+          # The upgraded product is what is installed, so that is what gets removed. Each build gets a
+          # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/x', "$env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi", '/qn',
+            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
             '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
           )
           if ($p.ExitCode -ne 0) {
@@ -472,7 +530,13 @@ jobs:
 
           # The failure this guards against is the one review caught in the service backend: an
           # uninstall that reports success while the service stays registered and starts at boot.
+          #
+          # sc.exe exits 1060 for a service that does not exist, which is the outcome being asserted --
+          # so $LASTEXITCODE is deliberately cleared afterwards. Leaving it set fails the step for the
+          # assertion passing, which is how the first version of this job reported a red build over a
+          # correct uninstall.
           $query = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          $global:LASTEXITCODE = 0
           if ($query -notmatch '1060') {
             Write-Output $query
             throw "the BeaconCollector service still exists after uninstall"
@@ -484,8 +548,11 @@ jobs:
 
           # Retention, which is a contract rather than an accident: an uninstall is often the first
           # half of an upgrade, and destroying an operator's configuration and collected telemetry is
-          # not something a package removal should do without being asked.
+          # not something a package removal should do without being asked. --keep-config alone does not
+          # achieve this -- it covers harness settings, not Beacon's own config -- which is why the
+          # uninstall script sets these files aside and puts them back.
           if ($hadConfig -and -not (Test-Path -LiteralPath $configPath)) {
             throw "uninstall removed the endpoint configuration; only a purge should do that"
           }
           Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
+          exit 0
