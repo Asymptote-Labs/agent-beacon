@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,7 +213,7 @@ func TestFactorySettingsPathProjectLevel(t *testing.T) {
 
 func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".factory", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
@@ -232,7 +233,7 @@ func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 
 func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	status, err := InstallFactory(FactoryOptions{
 		Level:    LevelUser,

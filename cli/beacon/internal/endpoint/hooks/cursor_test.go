@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,7 +159,7 @@ func TestInstallCursorHooksJSONDoesNotReplaceUserCommandWithBeaconEnvOnly(t *tes
 
 func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	status, err := InstallCursor(CursorOptions{Level: Level("workspace"), UserMode: true})
 	if err == nil {
 		t.Fatal("expected unknown hook level error")

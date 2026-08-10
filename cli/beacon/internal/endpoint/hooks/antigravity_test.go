@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,7 +107,7 @@ func TestReadAntigravityConfigReturnsCorruptJSONError(t *testing.T) {
 
 func TestAntigravityConfigPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	dir := t.TempDir()
 	t.Chdir(dir)
 
@@ -128,7 +129,7 @@ func TestAntigravityConfigPathLevels(t *testing.T) {
 
 func TestAntigravityHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".gemini", "config", "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)

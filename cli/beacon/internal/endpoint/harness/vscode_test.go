@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -110,7 +111,7 @@ func TestVSCodeOTelStatus(t *testing.T) {
 // a developer's own VS Code configuration.
 func isolateUserConfig(t *testing.T, home string) {
 	t.Helper()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 }
 

@@ -43,15 +43,3 @@ func stubCollectorPath(t *testing.T) string {
 	}
 	return exe
 }
-
-// setTestHome redirects the user's home directory for a test on every platform.
-//
-// t.Setenv("HOME") alone is a POSIX-only redirect: os.UserHomeDir reads USERPROFILE on Windows, so
-// a test that sets only HOME there silently keeps using the real profile. That is worse than a
-// plain failure -- tests write into the developer's actual ~/.beacon and then see each other's
-// state, which is why several of these reported "nothing installed yet" while finding an install.
-func setTestHome(t *testing.T, dir string) {
-	t.Helper()
-	t.Setenv("HOME", dir)
-	t.Setenv("USERPROFILE", dir)
-}

@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,7 @@ func TestRemoveGrokHooksOnlyRemovesManagedHookFile(t *testing.T) {
 
 func TestGrokHookPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if got, want := mustGrokHooksPath(t, LevelUser), filepath.Join(home, ".grok", "hooks", "beacon-endpoint.json"); got != want {
 		t.Fatalf("user Grok hook path = %q, want %q", got, want)
 	}

@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,7 +146,7 @@ func TestOpenCodeInstalledUsesManagedMarker(t *testing.T) {
 
 func TestOpenCodePluginPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if got, want := mustOpenCodePluginPath(t, LevelUser), filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"); got != want {
 		t.Fatalf("user plugin path = %q, want %q", got, want)
 	}
