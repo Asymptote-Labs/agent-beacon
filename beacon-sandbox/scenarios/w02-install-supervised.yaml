@@ -25,12 +25,10 @@ install:
 expect:
   - action: prompt.submitted
     contains: ["{{canary}}"]
-    optional: true
     why: >-
-      Recorded rather than gated, and for a narrower reason than it used to be. w01 and w03 have both
-      captured through installed hooks in system mode, so the hook command itself works on Windows.
-      What no run has yet observed is capture in *user* mode: the only attempt failed before the
-      session on an OTLP port conflict with a system collector the previous scenario left running.
-      That is fixed in the runner rather than here, but this stays optional until a run has actually
-      demonstrated it -- promoting it on the strength of the system-mode result would be assuming the
-      thing this scenario exists to check.
+      Capture through a user-mode endpoint, which is a different path from the system-mode scenarios:
+      a supervised collector rather than a service, and a log in the user's own profile rather than
+      under %ProgramData%. It stayed optional until a run demonstrated it, because the system-mode
+      result did not imply it -- the first attempt never reached the session, dying on an OTLP port
+      conflict with a collector the previous scenario left behind. With that fixed the scenario
+      captured 33 events, so the gap it was hedging against is closed.
