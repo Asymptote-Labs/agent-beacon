@@ -40,6 +40,33 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
+
+	// Export on a timer that fits the session, instead of relying on the flush at shutdown.
+	//
+	// The OpenTelemetry default metric interval is 60 seconds, and `ci exec` wraps sessions that
+	// finish in five or ten. Nothing is exported on a timer in that window, so every event depends on
+	// the exporter flushing during shutdown, before the process exits and before `ci exec` stops the
+	// collector behind it. That is a race, and it was being lost about two runs in three: three
+	// dispatched runs of the same commit captured 21 events once and zero twice, with the agent doing
+	// identical work each time and the passing run being the longest of the three (#320).
+	//
+	// A shutdown flush is still the backstop and still has to work. This just stops it being the only
+	// thing between a captured session and an empty log.
+	//
+	// Set only when the caller has not. Someone who has deliberately tuned these has a reason, and
+	// this is a wrapper around their session rather than an owner of their telemetry configuration.
+	for key, value := range map[string]string{
+		"OTEL_METRIC_EXPORT_INTERVAL": "5000",
+		// The batch processors default to 1s and 5s respectively, which is already inside a short
+		// session -- pinned anyway so the whole pipeline's timing is stated in one place rather than
+		// inherited from three different SDK defaults.
+		"OTEL_BLRP_SCHEDULE_DELAY": "1000",
+		"OTEL_BSP_SCHEDULE_DELAY":  "1000",
+	} {
+		if strings.TrimSpace(env[key]) == "" {
+			env[key] = value
+		}
+	}
 	return flattenEnv(env)
 }
 
