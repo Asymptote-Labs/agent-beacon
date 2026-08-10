@@ -177,6 +177,8 @@ func defaultActiveConsoleUser() (consoleUserInfo, bool, error) {
 		return darwinActiveConsoleUser()
 	case "linux":
 		return linuxActiveConsoleUser()
+	case "windows":
+		return windowsActiveConsoleUser()
 	}
 	return consoleUserInfo{}, false, nil
 }

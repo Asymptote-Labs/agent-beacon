@@ -111,12 +111,49 @@ func isRuntimeInstalled(runtime hookRuntime, opts RuntimeOptions) bool {
 	return runtime.isInstalled(configPath)
 }
 
+// endpointCommandPrefix builds the command a runtime will execute for each hook.
+//
+// The three endpoint settings are passed as flags rather than as an inline `VAR=value cmd` prefix.
+// That prefix is a POSIX shell construct: valid in sh, bash and zsh, and not valid in cmd.exe or
+// PowerShell, so it cannot deliver anything on a Windows runtime that uses either. Flags carry the
+// same values with no shell semantics involved beyond quoting the paths.
+//
+// What a runtime actually does with this string was measured rather than assumed, because it decides
+// the quoting and there is no form that works everywhere. Claude Code on Windows runs hook commands
+// through Git Bash -- $BASH_VERSION expands, %COMSPEC% does not -- so the string is parsed by a POSIX
+// shell on all three platforms for that runtime. Two results from the same measurement shape the code
+// below: a quoted executable path followed by flags runs correctly, and an *unquoted* Windows path
+// does not run at all, because bash consumes the backslashes as escapes.
 func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) string {
-	cliEnv := ""
-	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
-		cliEnv = " BEACON_ENDPOINT_CLI=" + shellQuote(cliPath)
+	args := []string{hookCommandQuote(binaryPath), "--platform", platform}
+	if logPath != "" {
+		args = append(args, "--log", hookCommandQuote(logPath))
 	}
-	return fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s%s %s --platform %s", shellQuote(logPath), shellQuote(configPath), cliEnv, shellQuote(binaryPath), platform)
+	if configPath != "" {
+		args = append(args, "--config", hookCommandQuote(configPath))
+	}
+	// Best-effort: the CLI path only enables the inventory heartbeat, and a hook with no --cli
+	// still captures everything else.
+	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
+		args = append(args, "--cli", hookCommandQuote(cliPath))
+	}
+	return strings.Join(args, " ")
+}
+
+// hookCommandQuote quotes one value for the shell that will parse this command.
+//
+// Single quotes, on every platform. In a POSIX shell they are fully literal, which is what a Windows
+// path needs: inside double quotes bash still processes `$`, a backtick, and a doubled backslash, so
+// a profile directory containing a `$` would be expanded away and a UNC path would lose a separator.
+// Single quotes have no such cases, and the measurement that showed Claude Code uses bash on Windows
+// is what makes them the right choice there too.
+//
+// The cost is stated rather than hidden: this is not valid quoting in cmd.exe, and in PowerShell a
+// quoted string in command position is an expression rather than a command. A Windows runtime that
+// invokes hooks through either would need a different form -- so if one turns up, this is the function
+// that grows a per-runtime branch, and the detection side already accepts both spellings.
+func hookCommandQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 // isEndpointHookCommand decides whether a command already in a runtime's config is one Beacon wrote.

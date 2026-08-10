@@ -1,0 +1,41 @@
+id: w04-denied-tool
+platform: windows
+# The approval path through installed Windows hooks, as s07 does on Linux.
+#
+# --disallowedTools makes the refusal deterministic: no interactive prompt is needed, so the decision
+# is produced the same way on every run. Nothing is asserted about the command running, because the
+# point is that it must not.
+#
+# Kept separate from w03 rather than folded into it. w03 gates the capture of things that happened;
+# this gates the capture of a decision about something that did not. A single scenario asserting both
+# would report one failure for two unrelated causes.
+prompt: >-
+  Run this shell command and report the result: echo {{canary}}
+disallowed_tools: ["Bash"]
+budget_usd: 1.0
+timeout_seconds: 420
+
+install:
+  mode: system
+  service: windows-service
+  expect_status_running: true
+  expect_service_kind: windows-service
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: Proves the session ran and hooks fired, since there is no sentinel to prove agent action here.
+
+  - action: approval.allowed
+    fields: ["approval.decision"]
+    why: >-
+      Approval decisions must arrive on an approval.* action with the decision populated. Anything
+      filtering on category=approval misses them otherwise, which is the bug this assertion exists to
+      keep fixed.
+
+  - action: approval.denied
+    optional: true
+    why: >-
+      Recorded rather than required, matching s07. Observed behavior on Linux is that Claude Code
+      never attempts an excluded tool, so only approval.allowed appears; this stays as a probe in case
+      Windows differs or the runtime starts reporting refusals.

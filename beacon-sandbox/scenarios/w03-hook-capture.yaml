@@ -1,0 +1,68 @@
+id: w03-hook-capture
+platform: windows
+# The scenario the Windows port exists to pass: does an *installed* Windows endpoint capture what an
+# agent actually did?
+#
+# w01 and w02 assert the service, and mark capture optional because hook installation was assumed to
+# be broken on Windows. This one gates on capture, and it is the first Windows scenario where a
+# missing event is a failure rather than a finding.
+#
+# It runs through installed hooks rather than `beacon ci exec`. That distinction is the whole point:
+# `ci exec` wraps the agent and collects from the outside, so it can pass while every hook is
+# misconfigured -- and on Windows it currently captures only intermittently (#320). Installed hooks
+# are what a real user gets, and the only thing that proves the emitted command string is one the
+# runtime can actually execute.
+#
+# What made that worth measuring rather than assuming: the hook command was rewritten to pass the
+# endpoint settings as flags, because the previous inline `VAR=value cmd` prefix is a POSIX shell
+# construct. A dispatched probe then found that Claude Code on Windows runs hook commands through Git
+# Bash -- $BASH_VERSION expands, %COMSPEC% does not -- and that an *unquoted* Windows path does not
+# run at all there, because bash consumes the backslashes as escapes. Both facts are encoded in the
+# command this scenario exercises, and neither is visible from reading the code.
+prompt: >-
+  Do both of these steps in order, then report what you did.
+  First run exactly this PowerShell command: Write-Output '{{canary}}' | Tee-Object -FilePath '{{sentinel}}'
+  Then create a file at {{workdir}}\w03-written.txt containing the single line {{canary}}
+sentinel: '{{workdir}}\w03.sentinel'
+budget_usd: 1.5
+timeout_seconds: 480
+
+install:
+  mode: system
+  service: windows-service
+  expect_status_running: true
+  expect_service_kind: windows-service
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: >-
+      The baseline, and on Windows a load-bearing one. A hook command the runtime cannot parse
+      produces exactly this absence and nothing else: the install reports success, the settings file
+      is valid, the service is healthy, and no event ever arrives. If this is missing, the emitted
+      command string is the first thing to look at.
+
+  - action: command.executed
+    contains: ["{{canary}}"]
+    fields: ["command.command", "tool.name"]
+    why: >-
+      e.command.command is the detection surface for the whole rules/risky-command/ category, and
+      threat rules match scalar leaves, so an empty value disables every one of those rules silently.
+      It also pins the exporter fix that taught it to read Claude Code's PowerShell tool rather than
+      only bash -- before that, this field was empty on Windows while every other field looked right.
+
+  - action: file.modified
+    fields: ["file.path"]
+    why: >-
+      A second, differently-shaped signal. A capture path can be broken in ways that still deliver
+      prompts -- one hook event configured correctly and the rest not -- so asserting only the prompt
+      would pass a half-installed endpoint.
+
+  - action: approval.allowed
+    fields: ["approval.decision"]
+    optional: true
+    why: >-
+      Claude Code's tool_decision carries decision=accept regardless of platform, so this is expected
+      to fire. Optional because w04 is the scenario that gates the approval path; recording it here
+      keeps the answer visible without making this scenario fail for a reason w04 would explain
+      better.

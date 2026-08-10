@@ -30,9 +30,8 @@ func TestInstallFactorySettingsPreservesNonBeaconHooks(t *testing.T) {
 		"enabledPlugins",
 		"logoAnimation",
 		"echo keep",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform factory",
 		"SessionStart",
 		"UserPromptSubmit",
@@ -270,7 +269,7 @@ func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	// identical, which is why the raw comparison held until Windows joined the gate.
 	//
 	// The resolved values are used rather than hardcoded strings, since both are per-OS.
-	wantConfig := jsonFragment(t, "BEACON_ENDPOINT_CONFIG='"+endpointconfig.SystemConfigPath()+"'")
+	wantConfig := jsonFragment(t, "--config '"+endpointconfig.SystemConfigPath()+"'")
 	if !strings.Contains(string(data), wantConfig) {
 		t.Fatalf("Factory hook did not use system config for system log; want %s in:\n%s",
 			wantConfig, string(data))

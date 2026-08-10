@@ -30,15 +30,25 @@ hooks:
 		t.Fatalf("read config: %v", err)
 	}
 	text := string(data)
+	// The command now begins with a quote, so the YAML emitter single-quotes the whole scalar and
+	// doubles the quotes inside it. The value a parser hands back is unchanged, which is what the hook
+	// assertions below are about -- so they are made against that rather than against the on-disk
+	// escaping. The preserved-settings assertions stay on the raw text, where the escaping is the point.
+	parsed := strings.ReplaceAll(text, "''", "'")
+	for _, want := range []string{
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
+		"'/tmp/beacon hooks' --platform hermes",
+	} {
+		if !strings.Contains(parsed, want) {
+			t.Fatalf("Hermes hook command missing %q:\n%s", want, text)
+		}
+	}
 	for _, want := range []string{
 		"model:",
 		"anthropic/claude-sonnet-4.6",
 		"hooks_auto_accept: true",
 		"~/.hermes/agent-hooks/user-policy.sh",
-		"env BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
-		"'/tmp/beacon hooks' --platform hermes",
 		"on_session_start:",
 		"pre_llm_call:",
 		"pre_tool_call:",
