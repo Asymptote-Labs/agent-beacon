@@ -135,6 +135,9 @@ jobs:
           - goos: linux
             goarch: arm64
             make_target: build-linux-arm64
+          - goos: windows
+            goarch: amd64
+            make_target: build-windows-amd64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -170,6 +173,74 @@ jobs:
         run: go test ./...
       - name: Test observe SDK and threat rules on Linux
         working-directory: pkg/asymptoteobserve
+        run: go test ./...
+
+  # Runs the unit suites on a real Windows runner. The cross-build matrix proves the code compiles
+  # for windows/amd64; this proves the per-OS implementations behave -- file locking through
+  # LockFileEx, file identity through GetFileInformationByHandle, and process liveness through
+  # OpenProcess, none of which a cross-compile exercises at all.
+  windows-test:
+    runs-on: windows-2025
+    # Bounded because a hang here is a plausible failure mode rather than a hypothetical: a pipe
+    # deadlock in a test helper held this job for the full 10-minute Go test timeout, and without a
+    # job bound the GitHub default of 6 hours would apply on top of it. Generous enough for a slow
+    # Windows runner, short enough that a hang reports as a failure the same morning.
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      # The embedded hooks binary must match the platform under test: the CLI validates its
+      # architecture at runtime, so a placeholder fails hook installation on Windows.
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon-hooks
+        run: |
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+      # Scoped to the packages this port actually gives Windows implementations, not `./...`.
+      #
+      # The rest of the cli/beacon suite has never run on Windows and assumes a POSIX host in ways
+      # unrelated to any of this: 47 tests redirect the home directory with t.Setenv("HOME"), which
+      # does nothing there because os.UserHomeDir reads USERPROFILE; 15 assert Unix file modes that
+      # Windows does not implement; others exec fixtures with no .exe extension. Running them here
+      # would produce a permanently red gate that says nothing about the code under test, and a red
+      # gate nobody can fix is one nobody reads.
+      #
+      # Tracked as follow-up work rather than dropped -- see #318. The scope
+      # widens as those packages are made portable; it must not widen by adding `./...` back while
+      # the assumptions remain.
+      - name: Test the ported packages on Windows
+        working-directory: cli/beacon
+        run: |
+          go test `
+            ./internal/endpoint/writer/... `
+            ./internal/endpoint/inventory/... `
+            ./internal/ingest/endpoint/... `
+            ./internal/endpoint/service/... `
+            ./internal/endpoint/selfupdate/...
+      - name: Test the ported packages with the race detector
+        working-directory: cli/beacon
+        run: |
+          go test -race `
+            ./internal/endpoint/writer/... `
+            ./internal/endpoint/inventory/... `
+            ./internal/endpoint/service/...
+      - name: Test hook adapter on Windows
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Test collector exporter on Windows
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
+      - name: Test observe SDK and threat rules on Windows
+        working-directory: pkg/asymptoteobserve
+        run: go test ./...
+      # Runs the generated-PowerShell parse test, which skips on a machine without pwsh.
+      - name: Test the sandbox harness on Windows
+        working-directory: beacon-sandbox
         run: go test ./...
 
   # Exercises the real systemd install path: unit generation, systemctl enable/active,

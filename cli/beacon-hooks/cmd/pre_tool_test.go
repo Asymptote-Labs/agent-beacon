@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -951,22 +953,60 @@ func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string),
 		_ = stdoutR.Close()
 	}()
 
-	if err := json.NewEncoder(stdinW).Encode(input); err != nil {
-		t.Fatalf("encode input: %v", err)
+	// Both pipes are serviced concurrently with the hook, and both halves are load-bearing.
+	//
+	// A pipe holds a bounded amount of unread data. Writing the whole payload before starting the
+	// hook works only while the payload fits in that buffer: past it, the write blocks until
+	// something drains the other end, and the only thing that would is the hook that has not been
+	// started yet. POSIX pipes buffer 64 KiB, which hid this for every input the suite had; Windows
+	// anonymous pipes default far smaller, and the deliberately long agent-thought payload
+	// deadlocked for the full 10-minute test timeout there.
+	//
+	// The stdout side is the same trap mirrored: the hook writes its result while nothing reads it,
+	// so a large enough response would block inside run(). It is drained concurrently for that
+	// reason rather than for symmetry. This is the same failure the sandbox's drainStreams already
+	// documents, in the opposite direction.
+	encodeErr := make(chan error, 1)
+	go func() {
+		err := json.NewEncoder(stdinW).Encode(input)
+		// Closed here, not deferred by the caller: the hook reads stdin to EOF, so it only returns
+		// once this end is closed.
+		if cerr := stdinW.Close(); err == nil {
+			err = cerr
+		}
+		encodeErr <- err
+	}()
+
+	type readResult struct {
+		data []byte
+		err  error
 	}
-	if err := stdinW.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
+	stdoutDone := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(stdoutR)
+		stdoutDone <- readResult{data, err}
+	}()
 
 	run(nil, nil)
 
+	// Closing the write end is what gives the reader EOF; without it ReadAll never returns.
 	if err := stdoutW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
 	}
 	os.Stdin = origStdin
 	os.Stdout = origStdout
+
+	if err := <-encodeErr; err != nil {
+		t.Fatalf("encode input: %v", err)
+	}
+	captured := <-stdoutDone
+	if captured.err != nil {
+		t.Fatalf("read hook output: %v", captured.err)
+	}
 	var out map[string]interface{}
-	if err := json.NewDecoder(stdoutR).Decode(&out); err != nil {
+	// Decoder rather than Unmarshal, so trailing output after the JSON value is tolerated exactly
+	// as it was before.
+	if err := json.NewDecoder(bytes.NewReader(captured.data)).Decode(&out); err != nil {
 		t.Fatalf("decode hook output: %v", err)
 	}
 	return out

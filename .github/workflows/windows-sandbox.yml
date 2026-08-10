@@ -1,0 +1,214 @@
+# Runs a beacon-sandbox scenario against a real Claude Code session on Windows.
+#
+# Why a workflow rather than a rented instance: Modal offers Linux only, and a GitHub-hosted
+# Windows runner is already a disposable machine with a real Service Control Manager,
+# administrator rights and UAC disabled -- everything an endpoint install needs. So the runner
+# *is* the sandbox, and `beacon-sandbox run --provider local` drives it from the inside. The
+# collected artifacts are uploaded and judged on the maintainer's machine by the same pure
+# `check` package that judges a Modal run, so a Windows verdict is produced by the same rules.
+#
+# workflow_dispatch only, and deliberately. The job needs ANTHROPIC_API_KEY to run a real agent
+# session with --dangerously-skip-permissions; on a public repository that secret must never be
+# reachable from untrusted code, so there is no pull_request trigger here and there must never be
+# a pull_request_target one.
+name: Windows sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario id to run (empty runs every windows scenario)"
+        required: false
+        type: string
+      claude_version:
+        description: "Claude Code version to pin"
+        required: false
+        default: "2.1.220"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time: concurrent runs would race on the runner-wide agent install and on the
+  # system-mode endpoint state, and a scenario that failed for that reason looks like a Beacon bug.
+  group: windows-sandbox
+  cancel-in-progress: false
+
+jobs:
+  sandbox:
+    runs-on: windows-2025
+    # The credential lives in an environment rather than at the repository level, matching how the
+    # release secrets are scoped.
+    environment: windows-sandbox
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      # Runs the generated-PowerShell parse test, which is skipped on a maintainer's machine
+      # without pwsh. The generated scripts are assembled in Go, so a syntax error in one is
+      # invisible to the compiler and would surface as "the check did not run" -- which a verdict
+      # reports as unverified rather than failing loudly. This is the gate that stops that.
+      - name: Test the harness itself
+        working-directory: beacon-sandbox
+        run: go test ./...
+
+      # The Makefile's build-windows-amd64 target is not used: GNU make is not guaranteed on the
+      # Windows image, and the two steps it performs are clearer spelled out than shimmed. The
+      # ordering is the part that matters -- the hooks binary is embedded into the CLI, so it has
+      # to exist before the CLI is built or the CLI embeds the placeholder.
+      #
+      # Not continue-on-error: Beacon compiles for Windows now, so a build failure is a real
+      # regression and a silently missing binary must not read as a passing run.
+      - name: Build beacon and beacon-hooks for Windows
+        id: build
+        run: |
+          Set-Location cli\beacon-hooks
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon-hooks does not build for windows/amd64 yet" }
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+          Set-Location ..\beacon
+          go build -o beacon-windows-amd64.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon does not build for windows/amd64 yet" }
+
+      - name: Build the collector for Windows
+        id: collector
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          Set-Location collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist. A fresh
+          # checkout has no dist/ at all, which is why this only ever failed in CI.
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $env:CGO_ENABLED = '0'
+          & "$(go env GOPATH)\bin\builder.exe" --config builder.yaml
+          if ($LASTEXITCODE -ne 0) { throw "collector build failed" }
+          # Detected, not assumed: the builder names its output from dist.name verbatim and does
+          # not append .exe for windows, even though it emits a PE binary. Both spellings are
+          # accepted so a future builder version that does append it keeps working.
+          $produced = 'dist\beacon-otelcol\beacon-otelcol'
+          if (-not (Test-Path -LiteralPath $produced) -and (Test-Path -LiteralPath "$produced.exe")) {
+            $produced = "$produced.exe"
+          }
+          if (-not (Test-Path -LiteralPath $produced)) {
+            Get-ChildItem dist\beacon-otelcol | Out-String | Write-Output
+            throw "the collector build produced no binary under dist\beacon-otelcol"
+          }
+          New-Item -ItemType Directory -Force -Path dist\beacon-otelcol\windows_amd64 | Out-Null
+          # Staged with .exe because that is what Windows needs to execute it, whatever it arrived as.
+          Copy-Item $produced dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe
+
+      # The layout beacon-sandbox's WindowsLayout() describes. Created here rather than by the
+      # harness because on this platform the CI job is what provisions the guest.
+      - name: Stage the guest layout
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\beacon-sandbox\bin, C:\beacon-sandbox\work | Out-Null
+          # Both binaries must be present. A missing one would surface much later as a confusing
+          # capture gap, and the run would look like a Beacon bug rather than a staging failure.
+          Copy-Item cli\beacon\beacon-windows-amd64.exe C:\beacon-sandbox\bin\beacon.exe
+          Copy-Item collector-builder\dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe C:\beacon-sandbox\bin\beacon-otelcol.exe
+          "C:\beacon-sandbox\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # A seeded git repo gives scenarios somewhere realistic to work and exercises Beacon's
+          # repository/branch enrichment, mirroring the Linux image's fixture.
+          Set-Location C:\beacon-sandbox\work
+          New-Item -ItemType Directory -Force -Path repo | Out-Null
+          Set-Location repo
+          git init -q
+          git config user.email a@b.c
+          git config user.name beacon-sandbox
+          "# fixture" | Out-File -FilePath README.md -Encoding utf8
+          git add -A
+          git commit -qm initial
+
+      # The native installer, which is the only Windows install path that self-updates. Pinned so
+      # a verdict is attributable to a specific agent build.
+      - name: Install Claude Code
+        env:
+          # Through the environment for the same reason as SCENARIO below. The whitelist that
+          # follows guards what the value is *used for*; it cannot guard the interpolation itself,
+          # because `${{ }}` expands before PowerShell parses the line -- so a value containing a
+          # quote would already have closed the literal and started executing by the time the regex
+          # ran. Reading from $env: means no expansion happens at all.
+          CLAUDE_VERSION: ${{ inputs.claude_version }}
+        run: |
+          $version = $env:CLAUDE_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) { $version = '2.1.220' }
+          # Whitelist rather than escape: the value reaches an installer, and Claude Code versions
+          # are dotted numerals, so anything else is a mistake worth rejecting outright.
+          if ($version -notmatch '^[0-9]+(\.[0-9]+)*$') {
+            throw "invalid claude_version '$version': expected a dotted numeric version"
+          }
+          $installer = Join-Path $env:TEMP 'install-claude.ps1'
+          Invoke-WebRequest -Uri 'https://claude.ai/install.ps1' -OutFile $installer
+          & $installer $version
+          "$env:LOCALAPPDATA\Programs\claude" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Report the environment the probe ran in
+        run: |
+          Write-Output "pwsh: $($PSVersionTable.PSVersion)"
+          Write-Output "identity: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+          $principal = New-Object Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+          Write-Output "elevated: $($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          & claude --version
+          & C:\beacon-sandbox\bin\beacon.exe version
+
+      - name: Run the scenario
+        id: run
+        continue-on-error: true
+        working-directory: beacon-sandbox
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Passed through the environment, never interpolated into the script. `${{ }}` expansion
+          # happens before PowerShell parses anything, so a value containing a quote would close the
+          # literal and the rest would execute as code -- in this step, with the API key in scope.
+          # claude_version is whitelisted above for the same reason; this makes the two consistent.
+          # Reported by Cursor Bugbot.
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          # Not $args: that name is a PowerShell automatic variable holding the script's own
+          # arguments, and appending to it does not behave the way it reads.
+          $sandboxArgs = @('run', '--provider', 'local')
+          if (-not [string]::IsNullOrWhiteSpace($env:SCENARIO)) {
+            # Validated as well as passed safely. A scenario id is a lowercase slug, so anything
+            # else is a mistake worth rejecting outright rather than forwarding to a flag.
+            if ($env:SCENARIO -notmatch '^[a-z0-9][a-z0-9-]*$') {
+              throw "invalid scenario id '$env:SCENARIO': expected a lowercase slug such as w00-probe"
+            }
+            $sandboxArgs += @('--scenario', $env:SCENARIO)
+          }
+          go run ./cmd/beacon-sandbox @sandboxArgs
+
+      # Always uploaded. A failed run's artifacts are exactly what a maintainer needs, and the
+      # host-state and argv metadata are recorded even when collection itself failed.
+      - name: Upload collected artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beacon-sandbox-runs
+          path: beacon-sandbox/runs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The scenario's own exit status decides the job, after the artifacts are safely uploaded.
+      # Without this the job would go green on a failing scenario because of continue-on-error.
+      - name: Reflect the scenario outcome
+        if: always()
+        env:
+          # A step outcome is a GitHub-controlled enum rather than user input, so interpolating it
+          # would be safe. It goes through the environment anyway so that "no ${{ }} inside a run
+          # block" holds without exception -- a rule with one blessed exception is a rule nobody can
+          # check mechanically.
+          RUN_OUTCOME: ${{ steps.run.outcome }}
+        run: |
+          Write-Output "scenario outcome: $env:RUN_OUTCOME"
+          if ($env:RUN_OUTCOME -ne 'success') {
+            throw "the scenario did not pass; read the uploaded runs/ artifacts and the verdict.json inside them"
+          }

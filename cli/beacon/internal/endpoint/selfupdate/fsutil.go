@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 // maxTarEntryBytes bounds a single file extracted from a test artifact.
@@ -22,12 +23,13 @@ func acquireLock(path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	held, err := filelock.TryExclusive(f)
+	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = held.Release()
 		_ = f.Close()
 	}, nil
 }

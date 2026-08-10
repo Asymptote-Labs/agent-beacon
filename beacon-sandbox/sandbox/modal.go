@@ -57,6 +57,14 @@ func (m *Modal) Close() {
 
 func (m *Modal) Name() string { return "modal" }
 
+// Platform is always POSIX: Modal offers Linux only, which is the whole reason a second
+// backend exists.
+func (m *Modal) Platform() Platform { return PlatformPosix }
+
+// MutatesHost is false -- a Modal sandbox is a different machine, so hostguard's comparison
+// means what it says.
+func (m *Modal) MutatesHost() bool { return false }
+
 func (m *Modal) EnsureImage(ctx context.Context, spec ImageSpec) (Image, error) {
 	img := m.client.Images.FromRegistry(spec.Base, nil)
 	if len(spec.Layers) > 0 {

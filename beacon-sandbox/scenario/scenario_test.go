@@ -348,6 +348,71 @@ func TestInstallModeAndServiceAreValidated(t *testing.T) {
 	}
 }
 
+// An unset platform must keep meaning Linux, or every scenario written before Windows existed
+// would silently stop being selected by the suite loader.
+func TestPlatformDefaultsToLinux(t *testing.T) {
+	if got := (Scenario{ID: "s"}).TargetPlatform(); got != PlatformLinux {
+		t.Errorf("an unset platform must default to linux, got %q", got)
+	}
+	if got := (Scenario{ID: "s", Platform: PlatformWindows}).TargetPlatform(); got != PlatformWindows {
+		t.Errorf("an explicit platform must be honored, got %q", got)
+	}
+}
+
+// A POSIX sentinel in a Windows scenario is the mistake hardest to notice at runtime: the agent
+// writes somewhere, the probe looks somewhere else, and the run reports the agent idle rather
+// than the scenario being wrong. So it is rejected at authoring time, before a runner is spent.
+func TestWindowsScenariosRejectPosixSentinelsAndSystemd(t *testing.T) {
+	base := func(mutate func(*Scenario)) Scenario {
+		s := Scenario{ID: "w", Platform: PlatformWindows, Prompt: "do a thing",
+			Expect: []Expect{{Action: "prompt.submitted", Why: "baseline"}}}
+		mutate(&s)
+		return s
+	}
+	if err := base(func(s *Scenario) { s.Sentinel = "/home/agent/work/out.txt" }).Validate(); err == nil {
+		t.Error("a POSIX absolute sentinel must be rejected in a windows scenario")
+	}
+	if err := base(func(s *Scenario) {
+		s.Install = &Install{Mode: "system", NeedsRealSystemd: true}
+	}).Validate(); err == nil {
+		t.Error("needs_real_systemd must be rejected in a windows scenario")
+	}
+	// The spellings a Windows scenario legitimately uses.
+	for _, sentinel := range []string{`{{workdir}}\out.txt`, `C:\work\out.txt`} {
+		if err := base(func(s *Scenario) { s.Sentinel = sentinel }).Validate(); err != nil {
+			t.Errorf("sentinel %q must be accepted: %v", sentinel, err)
+		}
+	}
+	// An unknown platform is a typo, and a typo that defaulted to linux would run a Windows
+	// scenario's PowerShell prompt against bash.
+	if err := (Scenario{ID: "w", Platform: "win32", Prompt: "x",
+		Expect: []Expect{{Action: "a", Why: "b"}}}).Validate(); err == nil {
+		t.Error("an unrecognized platform must be rejected rather than defaulting")
+	}
+}
+
+// The suite loader must report what it set aside. `run` with no --scenario is the "everything"
+// command, so returning a subset of it silently would read as full coverage.
+func TestSuiteForReportsWhatItSkipped(t *testing.T) {
+	suite := Suite{Scenarios: []Scenario{
+		{ID: "s01"},
+		{ID: "w00", Platform: PlatformWindows},
+		{ID: "s02", Platform: PlatformLinux},
+	}}
+
+	linux, skipped := suite.For(PlatformLinux)
+	if len(linux.Scenarios) != 2 || skipped != 1 {
+		t.Errorf("linux: got %d scenarios and %d skipped, want 2 and 1", len(linux.Scenarios), skipped)
+	}
+	win, skipped := suite.For(PlatformWindows)
+	if len(win.Scenarios) != 1 || skipped != 2 {
+		t.Errorf("windows: got %d scenarios and %d skipped, want 1 and 2", len(win.Scenarios), skipped)
+	}
+	if win.Scenarios[0].ID != "w00" {
+		t.Errorf("wrong scenario selected: %q", win.Scenarios[0].ID)
+	}
+}
+
 // A systemd requirement combined with the supervised backend, or without system mode, would
 // silently exercise something other than what the scenario claims — and the run would pass,
 // reporting coverage it does not have.

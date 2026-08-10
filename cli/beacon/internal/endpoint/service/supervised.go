@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -122,7 +121,7 @@ func (b supervisedBackend) load(userMode bool) error {
 	cmd := exec.Command(st.Program, "--config", st.ConfigPath)
 	// Detach from this process group so the collector outlives the CLI invocation that
 	// started it. Without this, the collector would die with the shell that ran install.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = detachAttrs()
 	// Logs go to a file next to the runtime log, since there is no journal here.
 	logPath := filepath.Join(stateDir(userMode), "collector.out")
 	if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
@@ -161,9 +160,10 @@ func (b supervisedBackend) unload(userMode bool) error {
 	if err != nil {
 		return nil
 	}
-	// SIGTERM lets the collector flush and shut down cleanly; the exporter closes its file
-	// on shutdown, so killing outright risks losing buffered events.
-	_ = proc.Signal(syscall.SIGTERM)
+	// Ask the collector to flush and shut down cleanly; the exporter closes its file on
+	// shutdown, so killing outright risks losing buffered events. What "ask" means is
+	// platform-specific -- see terminateGracefully.
+	_ = terminateGracefully(proc)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if !processAlive(st.PID) {
@@ -206,15 +206,10 @@ func (b supervisedBackend) status(userMode bool) Status {
 	return status
 }
 
-// processAlive reports whether a pid is live. Signal 0 performs the permission and existence
-// checks without delivering anything.
+// processAlive reports whether a pid is live.
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	return pidAlive(pid)
 }

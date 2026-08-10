@@ -3,6 +3,7 @@ package hostguard
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,12 @@ func TestLogDirCreationIsDetected(t *testing.T) {
 }
 
 func TestExistenceModeChangeIsDetected(t *testing.T) {
+	// os.Chmod on Windows only toggles the read-only attribute; there are no permission bits to
+	// change, so the signal this asserts cannot be produced there. The existence half of
+	// watchExistence is covered by the other tests on every platform.
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode bits are a POSIX concept")
+	}
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "opt-beacon")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -185,7 +192,15 @@ func TestUnchangedStateIsClean(t *testing.T) {
 // The guarded set must actually cover what a Beacon install touches, or the guard looks in the
 // wrong place and passes vacuously.
 func TestGuardedPathsCoverBeaconInstallSurface(t *testing.T) {
-	joined := strings.Join(GuardedPaths(), "\n")
+	// Compared with forward slashes, because the guarded set is built with filepath.Join and
+	// therefore renders with the host separator. The assertion is about which paths are guarded,
+	// not how they are spelled -- on Windows the backslash form made every one of these look
+	// uncovered while the guard was in fact watching exactly the right places.
+	slashed := make([]string, 0, len(GuardedPaths()))
+	for _, p := range GuardedPaths() {
+		slashed = append(slashed, filepath.ToSlash(p))
+	}
+	joined := strings.Join(slashed, "\n")
 	for _, want := range []string{
 		".beacon/endpoint/config.json",
 		".beacon/endpoint/otelcol.yaml",
