@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
@@ -117,8 +118,8 @@ func setConfigAutoUpdateModeAt(path, mode string) error {
 }
 
 func requireRootForUpdater() error {
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("managing the background updater requires root; rerun with sudo")
+	if !lifecycle.HasSystemPrivileges() {
+		return fmt.Errorf("managing the background updater needs elevated privileges; %s", lifecycle.SystemPrivilegeHint())
 	}
 	return nil
 }

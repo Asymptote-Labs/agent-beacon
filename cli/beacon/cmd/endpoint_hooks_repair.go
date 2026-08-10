@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -150,17 +151,56 @@ func repairTargetOrder() []string {
 	return []string{"claude", "codex", "cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 }
 
+// withUserHome runs fn as if it were executing inside another user's profile.
+//
+// Setting HOME alone was enough while every platform was POSIX. It is not on Windows:
+// os.UserHomeDir reads USERPROFILE there and ignores HOME entirely, so a system-mode repair would
+// resolve every runtime config path inside the *installing* account's profile and write hooks that
+// the person at the keyboard never runs -- the same silent shape as the Linux SUDO_USER bug this
+// whole code path exists to fix.
+//
+// APPDATA and LOCALAPPDATA come with it because several runtimes resolve their config from those
+// rather than from the profile root, and leaving them pointed at the installing account would move
+// the same bug one directory over. They are derived from the profile rather than read, since the
+// values in this process describe the wrong user by definition.
 func withUserHome[T any](homeDir string, fn func() (T, error)) (T, error) {
-	oldHome, hadHome := os.LookupEnv("HOME")
-	_ = os.Setenv("HOME", homeDir)
+	restore := make([]func(), 0, 4)
+	for _, entry := range profileEnvironment(homeDir) {
+		key, value := entry[0], entry[1]
+		previous, existed := os.LookupEnv(key)
+		restore = append(restore, func() {
+			if existed {
+				_ = os.Setenv(key, previous)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		})
+		_ = os.Setenv(key, value)
+	}
 	defer func() {
-		if hadHome {
-			_ = os.Setenv("HOME", oldHome)
-		} else {
-			_ = os.Unsetenv("HOME")
+		for _, undo := range restore {
+			undo()
 		}
 	}()
 	return fn()
+}
+
+// profileEnvironment lists the variables that make path resolution land in a given user's profile.
+//
+// Shared by the in-process path and the child-process one so the two cannot disagree about which
+// profile they are targeting.
+func profileEnvironment(homeDir string) [][2]string {
+	if runtime.GOOS != "windows" {
+		return [][2]string{{"HOME", homeDir}}
+	}
+	return [][2]string{
+		// HOME is still set: it is what Git and other POSIX-shaped tools on Windows read, and the
+		// hook commands Beacon writes are executed by Git Bash there.
+		{"HOME", homeDir},
+		{"USERPROFILE", homeDir},
+		{"APPDATA", filepath.Join(homeDir, "AppData", "Roaming")},
+		{"LOCALAPPDATA", filepath.Join(homeDir, "AppData", "Local")},
+	}
 }
 
 // defaultActiveConsoleUser resolves the human whose runtime configuration a system install should
@@ -330,6 +370,9 @@ func defaultRunHookRepairAsUser(info consoleUserInfo, args ...string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if runtime.GOOS == "windows" {
+		return runHookRepairInProfile(ctx, bin, info, args...)
+	}
 	// runuser is the root-side tool for this and ships with util-linux, so it is present on a
 	// minimal Debian or RPM system where sudo may not be installed at all -- and a package
 	// postinstall runs as root, which is exactly runuser's precondition. sudo remains the path
@@ -344,6 +387,45 @@ func defaultRunHookRepairAsUser(info consoleUserInfo, args ...string) error {
 		"LOGNAME="+info.Username, bin)
 	cmdArgs = append(cmdArgs, args...)
 	out, err := exec.CommandContext(ctx, launcher, cmdArgs...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("refresh hooks for %s: %s: %w", info.Username, strings.TrimSpace(string(out)), err)
+	}
+	if text := strings.TrimSpace(string(out)); text != "" {
+		fmt.Println(text)
+	}
+	return nil
+}
+
+// runHookRepairInProfile re-runs this binary against another user's profile on Windows.
+//
+// There is no sudo and no runuser there. The POSIX path uses them to *drop* privileges so the files it
+// writes end up owned by the person whose profile they live in; Windows has no comparable one-liner,
+// so this keeps the elevated identity and redirects the profile instead.
+//
+// That is a real difference, and it is acceptable for what these files are. A hook config written into
+// C:\Users\Jane\.cursor\ inherits that directory's ACL, which grants Jane full control -- so she can
+// read it, and her runtime can rewrite it, even though an administrator created it. What she does not
+// get is ownership, which nothing in this path depends on.
+//
+// The honest alternative is CreateProcessAsUser with the token WTS already hands back for the console
+// session, which would make the files hers outright. It is a good deal more code for a property no
+// caller relies on, so it is not done here rather than done badly.
+//
+// Still a child process rather than an in-process call, matching POSIX: the repair reconfigures global
+// state through env vars, and doing that inside the running process would leave a system install's own
+// paths pointed at a user profile if anything after it failed.
+func runHookRepairInProfile(ctx context.Context, bin string, info consoleUserInfo, args ...string) error {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	env := os.Environ()
+	for _, entry := range profileEnvironment(info.HomeDir) {
+		env = append(env, entry[0]+"="+entry[1])
+	}
+	// Appended rather than replaced: a later assignment wins in Go's exec, so these override the
+	// inherited values while everything else the child needs -- PATH, SystemRoot -- survives. Dropping
+	// SystemRoot in particular makes Windows networking and crypto calls fail in ways that read as
+	// unrelated bugs.
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("refresh hooks for %s: %s: %w", info.Username, strings.TrimSpace(string(out)), err)
 	}

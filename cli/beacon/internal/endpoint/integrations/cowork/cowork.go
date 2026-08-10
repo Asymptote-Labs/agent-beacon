@@ -78,6 +78,44 @@ Notes:
 `, AdminURL, cfg.Endpoint, cfg.Protocol, headerText(cfg.Headers), resourceAttributesText(cfg.ResourceAttributes), MinVersion)
 }
 
+// DesktopPathsForOS lists where Claude Desktop is installed on a given platform.
+//
+// Claude Cowork is configured in organization settings rather than locally, so all Beacon does here is
+// report whether the app is present -- which it could only ever answer for macOS, because the only
+// path it knew was /Applications/Claude.app. On Windows that meant a machine with Claude Desktop
+// installed reported it as absent, and the operator had no way to tell that from a machine without it.
+//
+// Parameterized on goos rather than reading runtime.GOOS, following vscodeUserDataDirsForOS: it makes
+// every platform's answer testable from a maintainer's Mac, so only genuinely OS-bound behavior needs
+// a runner.
+//
+// Windows has no per-user Applications directory to check as a fallback, and Claude Desktop installs
+// per-user under %LOCALAPPDATA%, so that is the whole list there. Read from the environment with a
+// fallback rather than hardcoded, since a redirected profile must not be missed.
+func DesktopPathsForOS(goos string) []string {
+	switch goos {
+	case "darwin":
+		return []string{
+			"/Applications/Claude.app",
+			filepath.Join(os.Getenv("HOME"), "Applications", "Claude.app"),
+		}
+	case "windows":
+		local := os.Getenv("LOCALAPPDATA")
+		if local == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil
+			}
+			local = filepath.Join(home, "AppData", "Local")
+		}
+		return []string{filepath.Join(local, "AnthropicClaude")}
+	default:
+		// Claude Desktop does not ship for Linux. Returning nothing is the honest answer, and it is
+		// distinct from "looked and did not find it".
+		return nil
+	}
+}
+
 func GetStatus(logPath string) Status {
 	status := Status{
 		Name:           Name,
@@ -86,16 +124,11 @@ func GetStatus(logPath string) Status {
 		Configuration:  "admin_configured",
 		Message:        "Configure Claude Cowork in Claude Desktop organization settings",
 	}
-	if runtime.GOOS == "darwin" {
-		for _, path := range []string{
-			"/Applications/Claude.app",
-			filepath.Join(os.Getenv("HOME"), "Applications", "Claude.app"),
-		} {
-			if info, err := os.Stat(path); err == nil && info.IsDir() {
-				status.Detected = true
-				status.DesktopPath = path
-				break
-			}
+	for _, path := range DesktopPathsForOS(runtime.GOOS) {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			status.Detected = true
+			status.DesktopPath = path
+			break
 		}
 	}
 	if last, ok := LastCoworkEvent(logPath); ok {
