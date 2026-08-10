@@ -77,8 +77,12 @@ func WindowsLayout() Layout {
 		AgentHome: home,
 		WorkDir:   `C:\beacon-sandbox\work`,
 		BeaconDir: beaconDir,
-		// The agent installs to %LOCALAPPDATA%\Programs, which is where install.ps1 puts it.
-		PathPrepend: []string{beaconDir, filepath.Join(home, "AppData", "Local", "Programs", "claude")},
+		// install.ps1 puts the agent in %USERPROFILE%\.local\bin -- the same ~/.local/bin
+		// convention the Linux image uses, not a Windows-specific Programs directory. Assuming
+		// otherwise cost a probe run: the install succeeded, `claude` was not on PATH, and the
+		// failure read as the agent being missing rather than as a wrong PATH entry. The
+		// installer prints its location, and this matches what it printed.
+		PathPrepend: []string{beaconDir, filepath.Join(home, ".local", "bin")},
 	}
 }
 
