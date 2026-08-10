@@ -27,6 +27,10 @@ expect:
     contains: ["{{canary}}"]
     optional: true
     why: >-
-      Same reason as w01: hook installation on Windows does not yet emit a command Windows can
-      execute, so capture is recorded rather than gated. The backend selection above is what this
-      scenario asserts today.
+      Recorded rather than gated, and for a narrower reason than it used to be. w01 and w03 have both
+      captured through installed hooks in system mode, so the hook command itself works on Windows.
+      What no run has yet observed is capture in *user* mode: the only attempt failed before the
+      session on an OTLP port conflict with a system collector the previous scenario left running.
+      That is fixed in the runner rather than here, but this stays optional until a run has actually
+      demonstrated it -- promoting it on the strength of the system-mode result would be assuming the
+      thing this scenario exists to check.

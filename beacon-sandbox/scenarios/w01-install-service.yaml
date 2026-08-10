@@ -9,11 +9,11 @@ platform: windows
 # so without it a host where SCM registration failed would pass while testing the wrong backend
 # entirely -- the same trap the Linux systemd scenario documents.
 #
-# Capture is asserted only optionally, and that is deliberate rather than lax. Hook installation on
-# Windows still emits a POSIX `VAR=value cmd` string that neither Windows shell accepts, so nothing
-# reaches the collector through hooks yet. Marking these required would make the scenario fail for
-# a known reason and stop it reporting the service facts it exists to establish. They become
-# required in the change that fixes the hook command format.
+# Capture is now required. It was optional while hook installation was believed to be broken on
+# Windows -- a belief a probe later disproved: Claude Code runs hook commands through Git Bash there,
+# which accepts the form Beacon was emitting. Once the command became one argv, a dispatched run of
+# this scenario captured 38 events, so there is no longer a known reason for these to fail and every
+# reason to gate on them.
 prompt: >-
   Run exactly this PowerShell command and then report its output verbatim:
   Write-Output '{{canary}}' | Tee-Object -FilePath '{{sentinel}}'
@@ -30,16 +30,15 @@ install:
 expect:
   - action: prompt.submitted
     contains: ["{{canary}}"]
-    optional: true
     why: >-
-      Capture through an installed Windows endpoint. Optional until hook installation emits a
-      command Windows can execute; the service assertions above are what this scenario gates on
-      today, and they are checked before the session runs.
+      Capture through an installed Windows endpoint, which together with the service assertions
+      above is the whole claim: the collector is registered with the SCM, it is running, and events
+      written by hooks actually reach it.
 
   - action: command.executed
     fields: ["command.command"]
-    optional: true
     why: >-
-      e.command.command is the detection surface for the whole rules/risky-command/ category. The
-      exporter now reads it from Claude Code's PowerShell tool, so this is the assertion that will
-      prove the fix end to end once hooks deliver events at all.
+      e.command.command is the detection surface for the whole rules/risky-command/ category, and
+      threat rules match scalar leaves, so an empty value disables every one of those rules with
+      nothing reporting it. This is the assertion that proves the exporter reads Claude Code's
+      PowerShell tool and not only bash.
