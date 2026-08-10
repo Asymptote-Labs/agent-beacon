@@ -176,14 +176,43 @@ func TestGrantCommandHintQuotesThePathItPrints(t *testing.T) {
 	if !strings.Contains(hint, `"C:\Program Files\Beacon\logs"`) {
 		t.Fatalf("GrantCommandHint left a path containing a space unquoted: %s", hint)
 	}
-	// The SID rather than a localized name, for the same reason the grant itself uses it.
-	if !strings.Contains(hint, "S-1-5-4") {
-		t.Fatalf("GrantCommandHint does not name the well-known SID: %s", hint)
+	// The rights string carries parentheses, which PowerShell reads as grouping rather than as
+	// part of an argument. Unquoted, the hint is a command that fails the moment it is pasted.
+	if !strings.Contains(hint, `"*S-1-5-4:(OI)(CI)(M)"`) {
+		t.Fatalf("GrantCommandHint left the rights string unquoted: %s; "+
+			"PowerShell would try to evaluate the parentheses", hint)
 	}
 	// Same definition as the applied grant, so the advice cannot drift from the implementation.
 	for _, arg := range grantArgs(`C:\Program Files\Beacon\logs`)[1:] {
 		if !strings.Contains(hint, arg) {
 			t.Fatalf("GrantCommandHint omits %q from the grant it claims to describe: %s", arg, hint)
+		}
+	}
+	// Plain flags stay readable: quoting everything would work but makes the line harder to scan,
+	// and this is read before it is run.
+	if !strings.Contains(hint, " /grant ") || !strings.HasSuffix(hint, " /T") {
+		t.Fatalf("GrantCommandHint quoted arguments that needed no quoting: %s", hint)
+	}
+}
+
+func TestQuoteForShellPasteCoversWhatBothWindowsShellsTreatSpecially(t *testing.T) {
+	// Safe in cmd.exe and PowerShell alike, so left alone.
+	for _, arg := range []string{`/T`, `/grant`, `C:\ProgramData\Beacon\logs`, `icacls`, `S-1-5-4`} {
+		if got := quoteForShellPaste(arg); got != arg {
+			t.Fatalf("quoteForShellPaste(%q) = %q, want it unchanged", arg, got)
+		}
+	}
+	// Each of these is special to at least one of the two shells.
+	for _, arg := range []string{
+		`*S-1-5-4:(OI)(CI)(M)`,
+		`C:\Program Files\Beacon`,
+		`C:\logs&more`,
+		`C:\logs;more`,
+		`C:\logs$more`,
+		`C:\logs'more`,
+	} {
+		if got := quoteForShellPaste(arg); got != `"`+arg+`"` {
+			t.Fatalf("quoteForShellPaste(%q) = %q, want it quoted", arg, got)
 		}
 	}
 }

@@ -60,17 +60,41 @@ func grantArgs(dir string) []string {
 //
 // Empty on platforms with no such grant, which is how callers tell that this remediation does not
 // apply rather than printing a Windows command on a Mac.
+//
+// Quoting matters here in a way it does not for the grant itself: applying it goes through argv
+// with no shell involved, while this is read by a person and pasted into whichever shell they have
+// open. The rights string carries parentheses, which PowerShell reads as grouping, so an unquoted
+// hint is a command that fails on paste -- and a remediation that fails on paste is worse than
+// none, because the operator concludes the diagnosis was wrong.
 func GrantCommandHint(dir string) string {
-	args := grantArgs(dir)
-	quoted := make([]string, 0, len(args)+1)
-	quoted = append(quoted, "icacls")
-	for _, arg := range args {
-		if strings.ContainsAny(arg, " \t") {
-			arg = `"` + arg + `"`
-		}
-		quoted = append(quoted, arg)
+	parts := make([]string, 0, len(grantArgs(dir))+1)
+	parts = append(parts, "icacls")
+	for _, arg := range grantArgs(dir) {
+		parts = append(parts, quoteForShellPaste(arg))
 	}
-	return strings.Join(quoted, " ")
+	return strings.Join(parts, " ")
+}
+
+// quoteForShellPaste wraps anything either Windows shell would not pass through literally.
+//
+// An allowlist rather than a list of metacharacters: cmd.exe and PowerShell disagree about which
+// characters are special, and the set that is safe in both is small and easy to state. Double
+// quotes work in both for everything here, and no argument in this command contains one, so simple
+// wrapping is enough -- if that ever changes this needs the escaping rules too, not just the quotes.
+func quoteForShellPaste(arg string) string {
+	safe := func(r rune) bool {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return true
+		}
+		return strings.ContainsRune(`\/.:_-`, r)
+	}
+	for _, r := range arg {
+		if !safe(r) {
+			return `"` + arg + `"`
+		}
+	}
+	return arg
 }
 
 // Rights that answer the question doctor is actually asking: can a hook running as the logged-on
