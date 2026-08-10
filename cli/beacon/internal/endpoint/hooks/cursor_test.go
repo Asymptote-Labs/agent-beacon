@@ -170,7 +170,7 @@ func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 }
 
 func TestEndpointConfigPathForHookUsesSystemConfigForSystemLog(t *testing.T) {
-	if got := endpointConfigPathForHook("/var/log/beacon-agent/runtime.jsonl", true); got != endpointconfig.ConfigPath(false) {
+	if got := endpointConfigPathForHook(endpointconfig.SystemLogPath(), true); got != endpointconfig.ConfigPath(false) {
 		t.Fatalf("system log config path = %q, want system endpoint config", got)
 	}
 	if got := endpointConfigPathForHook("/tmp/runtime.jsonl", true); got != endpointconfig.ConfigPath(true) {

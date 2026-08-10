@@ -237,7 +237,7 @@ func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 
 	status, err := InstallFactory(FactoryOptions{
 		Level:    LevelUser,
-		LogPath:  "/var/log/beacon-agent/runtime.jsonl",
+		LogPath:  endpointconfig.SystemLogPath(),
 		UserMode: true,
 	})
 	if err != nil {

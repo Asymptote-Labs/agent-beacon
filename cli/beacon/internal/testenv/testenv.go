@@ -12,6 +12,7 @@
 package testenv
 
 import (
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -25,6 +26,15 @@ func SetHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
+	if runtime.GOOS == "windows" {
+		// The per-user application directories are not derived from USERPROFILE by the programs
+		// that read them -- they have their own variables, and Windows sets all of them
+		// independently. Redirecting only the profile left anything resolving %APPDATA% (VS Code's
+		// settings, for one) writing into the developer's real roaming profile while the test
+		// believed it had been sandboxed.
+		t.Setenv("APPDATA", filepath.Join(dir, "AppData", "Roaming"))
+		t.Setenv("LOCALAPPDATA", filepath.Join(dir, "AppData", "Local"))
+	}
 }
 
 // RequirePOSIXFileModes skips a test whose assertion is about Unix permission bits.
@@ -41,5 +51,26 @@ func RequirePOSIXFileModes(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits do not exist on Windows; the equivalent is an ACL check")
+	}
+}
+
+// RequirePOSIXExecutableFixtures skips a test that stands in for a CLI with a shell script.
+//
+// Two things stop that working on Windows, and only one of them is the extension. exec.LookPath
+// resolves a bare name through PATHEXT, so a file written without one is invisible to it -- but
+// renaming the fixture to `codex.exe` fixes only the lookup. These tests then *execute* the stub to
+// read its --version output, and a `#!/bin/sh` file is not runnable on Windows whatever it is
+// called, because there are no shebangs. That is the difference from the collector fixtures, where
+// the extension alone was enough: discovery there only stats the file.
+//
+// Skipped rather than adapted because these tests are about discovery logic that is not
+// platform-specific, and the packages they live in are gated on Windows for their *path* handling.
+// A Windows fixture is possible -- copy the test binary and have TestMain impersonate the CLI, as
+// the service package does for its stub collector -- and is tracked in the Windows test-suite
+// issue rather than done here, where it would test nothing this change touches.
+func RequirePOSIXExecutableFixtures(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script executable fixtures cannot run on Windows; see the Windows test-suite issue")
 	}
 }

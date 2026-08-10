@@ -246,6 +246,7 @@ func TestDiscoverCodexDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 }
 
 func TestDiscoverCodexDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	binDir := t.TempDir()
@@ -434,6 +435,7 @@ func TestDiscoverGeminiDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 }
 
 func TestDiscoverGeminiDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	binDir := t.TempDir()
@@ -488,6 +490,7 @@ func TestGeminiStatusVariants(t *testing.T) {
 }
 
 func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Setenv("SHELL", "/bin/bash")
@@ -514,6 +517,7 @@ func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
 }
 
 func TestDiscoverCopilotCLIDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Setenv("SHELL", "/bin/bash")
@@ -558,6 +562,7 @@ func TestDiscoverCopilotCLIDetectsConfigFile(t *testing.T) {
 }
 
 func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	binDir := t.TempDir()
