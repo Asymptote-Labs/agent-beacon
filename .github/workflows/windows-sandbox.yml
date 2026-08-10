@@ -169,6 +169,69 @@ jobs:
           }
           Write-Output "claude installed at $claudeExe"
 
+      # Phase 3 registers beacon-otelcol.exe with the Service Control Manager directly, on the
+      # strength of the builder-generated main_windows.go calling svc.Run(otelcol.NewSvcHandler).
+      # That is an assumption about a code path nothing has exercised: running the binary as an
+      # ordinary child process proves it starts, not that it speaks the SCM control protocol. A
+      # service that never reaches the dispatcher is killed after about 30 seconds, so getting this
+      # wrong means the backend needs a service host rather than a direct registration -- a
+      # different design, and much cheaper to learn now than after it is written.
+      - name: Can the collector run as a Windows service
+        id: scm
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $svc = 'BeaconCollectorScmProbe'
+          $dir = 'C:\beacon-sandbox\scm'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $logPath = Join-Path $dir 'runtime.jsonl'
+          $cfgPath = Join-Path $dir 'otelcol.yaml'
+
+          # Built line by line rather than with a here-string: a here-string's body has to start at
+          # column zero, which is outside a YAML block scalar.
+          $cfg = @(
+            'receivers:'
+            '  otlp:'
+            '    protocols:'
+            '      grpc:'
+            '        endpoint: 127.0.0.1:14317'
+            'exporters:'
+            '  beaconjson:'
+            ('    path: ' + (ConvertTo-Json $logPath))
+            'service:'
+            '  pipelines:'
+            '    logs:'
+            '      receivers: [otlp]'
+            '      exporters: [beaconjson]'
+          )
+          Set-Content -LiteralPath $cfgPath -Value $cfg -Encoding utf8
+
+          # binPath is a single string with the arguments inside it, and the exe quoted, or the SCM
+          # splits it on the first space in the path.
+          $bin = 'C:\beacon-sandbox\bin\beacon-otelcol.exe'
+          & sc.exe create $svc binPath= "`"$bin`" --config `"$cfgPath`"" start= demand | Out-Null
+          & sc.exe start $svc | Out-Null
+
+          # Polled rather than read from the start command's status: a service that fails to reach
+          # the dispatcher is killed by the SCM, which start does not report.
+          $state = ''
+          foreach ($i in 1..15) {
+            Start-Sleep -Seconds 2
+            $q = & sc.exe query $svc 2>&1 | Out-String
+            if ($q -match 'STATE\s+:\s+\d+\s+(\w+)') { $state = $Matches[1] }
+            if ($state -eq 'RUNNING' -or $state -eq 'STOPPED') { break }
+          }
+          Write-Output "SCM_STATE=$state"
+          & sc.exe query $svc 2>&1 | Out-String | Write-Output
+
+          & sc.exe stop $svc 2>&1 | Out-Null
+          & sc.exe delete $svc 2>&1 | Out-Null
+
+          if ($state -ne 'RUNNING') {
+            throw "beacon-otelcol.exe did not reach RUNNING under the SCM (state=$state): Phase 3 would need a service host rather than direct registration"
+          }
+          Write-Output 'the collector runs as a Windows service with no wrapper'
+
       - name: Report the environment the probe ran in
         run: |
           Write-Output "pwsh: $($PSVersionTable.PSVersion)"
