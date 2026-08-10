@@ -94,12 +94,39 @@ func TestLinuxActiveConsoleUserDoesNotFallThroughFromABadSudoUser(t *testing.T) 
 	}
 }
 
+// The skip list must track the switch in defaultActiveConsoleUser. Windows joined it, and this test
+// asserted the opposite -- that Windows resolves nobody -- so it would have failed on a runner for the
+// new code working. It did not fail in CI only because ./cmd is not yet in the Windows test scope
+// (#318), which makes it exactly the kind of stale assertion that surfaces months later as a mystery.
 func TestDefaultActiveConsoleUserIsSilentOnUnsupportedPlatforms(t *testing.T) {
-	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
-		t.Skip("both have real implementations")
+	switch runtime.GOOS {
+	case "darwin", "linux", "windows":
+		t.Skip("these have real implementations")
 	}
 	if _, ok, err := defaultActiveConsoleUser(); ok || err != nil {
 		t.Fatalf("want a clean not-supported result, got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestWindowsActiveConsoleUserResolvesTheAccountRunningTheTest is the positive half.
+//
+// A test process is not LocalSystem, so resolution should take the "elevation does not change the
+// account" path and describe the account running it. Whatever it returns, it must never report a user
+// with no profile directory: callers build every runtime config path from that field, and an empty one
+// would send hook installation to the filesystem root.
+func TestWindowsActiveConsoleUserResolvesTheAccountRunningTheTest(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-only resolution")
+	}
+	info, ok, err := windowsActiveConsoleUser()
+	if err != nil {
+		t.Fatalf("windowsActiveConsoleUser: %v", err)
+	}
+	if !ok {
+		t.Fatal("no console user resolved while running as an interactive account")
+	}
+	if info.Username == "" || info.HomeDir == "" {
+		t.Fatalf("resolved a half-identified user %#v; callers build config paths from HomeDir", info)
 	}
 }
 
