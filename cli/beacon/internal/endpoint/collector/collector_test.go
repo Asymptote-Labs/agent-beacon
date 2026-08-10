@@ -2,6 +2,7 @@ package collector
 
 import (
 	"errors"
+	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"net"
 	"net/http"
@@ -40,7 +41,11 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"endpoint: 127.0.0.1:14317",
 		"endpoint: 127.0.0.1:14318",
 		"beaconjson:",
-		"path: " + `"` + cfg.LogPath + `"`,
+		// %q, matching how the config is generated. Hand-quoting the path only agreed with the
+		// generator by accident: a POSIX path contains nothing that needs escaping, while a
+		// Windows one is full of backslashes that a double-quoted YAML scalar must escape. The
+		// assertion now checks the contract -- a correctly quoted path -- rather than a coincidence.
+		fmt.Sprintf("path: %q", cfg.LogPath),
 		"max_event_bytes: 65536",
 		"rotate_bytes: 10485760",
 		"rotate_archives: 5",

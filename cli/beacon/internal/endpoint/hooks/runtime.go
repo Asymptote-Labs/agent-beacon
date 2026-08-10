@@ -121,7 +121,7 @@ func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) str
 
 func isEndpointHookCommand(command, platform string) bool {
 	hasPlatform := platform == "" || commandHasPlatform(command, platform)
-	hasBeaconBinary := strings.Contains(command, embedded.GetBinaryName())
+	hasBeaconBinary := strings.Contains(command, embedded.BinaryStem)
 	hasLegacyBinary := strings.Contains(command, "asym-hooks")
 
 	if strings.Contains(command, "BEACON_ENDPOINT_MODE=1") && hasBeaconBinary {

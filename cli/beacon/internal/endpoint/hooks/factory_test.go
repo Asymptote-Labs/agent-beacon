@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
@@ -231,6 +232,19 @@ func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	}
 }
 
+// jsonFragment renders a value as it appears inside a JSON document, minus the surrounding quotes.
+//
+// Assertions against marshaled settings must search for the encoded form: a Windows path is full
+// of backslashes, and JSON escapes every one of them.
+func jsonFragment(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode %q: %v", value, err)
+	}
+	return strings.Trim(string(encoded), `"`)
+}
+
 func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -247,16 +261,21 @@ func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Factory settings: %v", err)
 	}
-	// The point of this test is that a /var/log system log path selects the *system* config,
-	// not the user one. The system path is per-OS, so assert against the resolved value
-	// rather than a hardcoded macOS string -- which is what previously made this fail the
-	// moment the suite ran on Linux.
-	wantConfig := "BEACON_ENDPOINT_CONFIG='" + endpointconfig.SystemConfigPath() + "'"
+	// A system log path must select the *system* config, not the user one. Both halves are
+	// compared against the JSON-encoded form, because that is what lands in the file: Factory
+	// settings are marshaled, so a Windows path's backslashes are escaped on the way in and a
+	// search for the raw string finds nothing. That breaks the assertion in both directions --
+	// the positive check reports the system config as not chosen when it was, and the negative
+	// check cannot see the user config being chosen wrongly. On POSIX the two forms are
+	// identical, which is why the raw comparison held until Windows joined the gate.
+	//
+	// The resolved values are used rather than hardcoded strings, since both are per-OS.
+	wantConfig := jsonFragment(t, "BEACON_ENDPOINT_CONFIG='"+endpointconfig.SystemConfigPath()+"'")
 	if !strings.Contains(string(data), wantConfig) {
 		t.Fatalf("Factory hook did not use system config for system log; want %s in:\n%s",
 			wantConfig, string(data))
 	}
-	if strings.Contains(string(data), endpointconfig.ConfigPath(true)) {
+	if unwanted := jsonFragment(t, endpointconfig.ConfigPath(true)); strings.Contains(string(data), unwanted) {
 		t.Fatalf("Factory hook used the user config for a system log path:\n%s", string(data))
 	}
 }

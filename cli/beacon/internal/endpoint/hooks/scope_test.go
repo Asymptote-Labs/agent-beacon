@@ -59,3 +59,31 @@ func TestSystemLocationMatchIsPlatformAppropriate(t *testing.T) {
 		t.Errorf("%q-other must not be treated as being under %q", dir, dir)
 	}
 }
+
+// Detection matches the binary stem, not the platform-specific filename.
+//
+// A settings file is a portable artifact: it gets synced between machines, committed to dotfiles,
+// and written by older builds. Matching on GetBinaryName meant a Windows Beacon recognized only
+// "beacon-hooks.exe" and was blind to a command naming "beacon-hooks" -- so it would neither repair
+// nor remove a hook it had every reason to own, and `hooks status` would report not-installed for a
+// hook sitting in the file.
+func TestHookDetectionRecognizesBothBinarySpellings(t *testing.T) {
+	for _, command := range []string{
+		`BEACON_ENDPOINT_MODE=1 '/home/u/.beacon/endpoint/hooks/beacon-hooks' --platform cursor`,
+		`BEACON_ENDPOINT_MODE=1 'C:\Users\u\.beacon\endpoint\hooks\beacon-hooks.exe' --platform cursor`,
+	} {
+		if !isEndpointHookCommand(command, "cursor") {
+			t.Errorf("command not recognized as a Beacon hook: %s", command)
+		}
+	}
+
+	// Still not a licence to claim anything: an unrelated command must not be adopted.
+	for _, command := range []string{
+		`echo keep`,
+		`/usr/local/bin/some-other-tool --platform cursor`,
+	} {
+		if isEndpointHookCommand(command, "cursor") {
+			t.Errorf("unrelated command was claimed as a Beacon hook: %s", command)
+		}
+	}
+}
