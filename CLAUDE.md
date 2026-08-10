@@ -223,9 +223,16 @@ gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.conte
 gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
 ```
 
-The release should include the four GoReleaser CLI archives, `checksums.txt`,
-`threat-rules.tar.gz`, `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`,
-and `update-manifest.json`. Verify the package before announcing the release:
+The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
+`beacon_<version>_windows_amd64.zip`), `checksums.txt`, `threat-rules.tar.gz`,
+`BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
+and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`.
+
+The MSI is unsigned, so `pkgutil`/`stapler`/`spctl` have no Windows counterpart to
+run. Its `.sha256` is therefore the only integrity check it has, and the release
+job proves the package works by installing it on a runner before attaching it —
+verification by execution rather than by signature. Both change when Authenticode
+signing is added. Verify the package before announcing the release:
 
 ```bash
 tmpdir="$(mktemp -d)"
