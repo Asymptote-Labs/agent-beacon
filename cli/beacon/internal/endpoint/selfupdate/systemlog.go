@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"path/filepath"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -27,7 +28,7 @@ func SystemLogPath(runtimeLogPath string, userMode bool) string {
 	if userMode {
 		return filepath.Join(filepath.Dir(writer.DefaultPath(true)), SystemLogFileName)
 	}
-	return filepath.Join("/var/log", "beacon-agent", SystemLogFileName)
+	return filepath.Join(endpointconfig.SystemLogDir(), SystemLogFileName)
 }
 
 type CheckEventOptions struct {

@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,7 +261,7 @@ func TestDevinConfigPathProjectLevel(t *testing.T) {
 
 func TestDevinHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".config", "devin", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
@@ -280,7 +281,7 @@ func TestDevinHookStatusDetectsInstalled(t *testing.T) {
 
 func TestDevinDesktopHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".codeium", "windsurf", "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)

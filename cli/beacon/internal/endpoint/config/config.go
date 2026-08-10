@@ -14,6 +14,11 @@ const (
 	// LinuxSystemBaseDir follows the FHS: configuration under /etc, which is where a
 	// package-managed install and an admin both expect to find it.
 	LinuxSystemBaseDir = "/etc/beacon/endpoint"
+	// WindowsSystemBaseFallback is used when %ProgramData% is unset. Windows always defines it in
+	// practice, but a service running under an unusual profile can arrive without it, and writing
+	// to a relative path in that case would scatter machine state into whatever directory the
+	// process happened to start in.
+	WindowsSystemBaseFallback = `C:\ProgramData`
 
 	UserConfigPath  = ".beacon/endpoint/config.json"
 	DefaultGRPCPort = 4317
@@ -29,6 +34,21 @@ func SystemBaseDir() string {
 	switch runtime.GOOS {
 	case "linux":
 		return LinuxSystemBaseDir
+	case "windows":
+		// %ProgramData% is the documented home for machine-wide application state that outlives
+		// any one user, and is the closest equivalent to both /Library/Application Support and
+		// /etc. Read from the environment rather than hardcoded because a redirected or localized
+		// install puts it elsewhere, and writing to the wrong root would be silent.
+		//
+		// Windows is a named case rather than sharing the default: before it was, an endpoint
+		// there resolved its state directory to the *macOS* path, so the log directory derived
+		// from it came out as "\Library\Application Support\...". Nothing would have failed
+		// loudly; it would simply have written machine state to a directory no Windows tool,
+		// installer or admin looks in.
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			return filepath.Join(programData, "Beacon", "Endpoint")
+		}
+		return filepath.Join(WindowsSystemBaseFallback, "Beacon", "Endpoint")
 	default:
 		return DarwinSystemBaseDir
 	}
@@ -37,6 +57,34 @@ func SystemBaseDir() string {
 // SystemConfigPath is the system-mode config file location.
 func SystemConfigPath() string {
 	return filepath.Join(SystemBaseDir(), "config.json")
+}
+
+// SystemLogDir is the single source of truth for where a system-mode endpoint writes its logs.
+//
+// The runtime log path was previously a literal repeated in fourteen places -- every destination
+// pack, the writer, the hook adapter's default, the inventory heartbeat and the self-updater --
+// which is exactly the shape SystemBaseDir was introduced to remove for the config directory. One
+// function is what makes a second platform possible at all: fourteen literals cannot disagree with
+// each other on Linux, but they cannot be given a Windows value either.
+//
+// The Linux and macOS value is unchanged, and deliberately so. /var/log/beacon-agent is where
+// installed endpoints already write, where the packaging scripts create directories, and what the
+// forwarder packs tail; moving it would be a migration, not a refactor.
+func SystemLogDir() string {
+	switch runtime.GOOS {
+	case "windows":
+		// Alongside the config rather than under a separate root. Windows has no /var/log
+		// equivalent, and %ProgramData% is the documented home for machine-wide application state
+		// that outlives any one user.
+		return filepath.Join(SystemBaseDir(), "logs")
+	default:
+		return "/var/log/beacon-agent"
+	}
+}
+
+// SystemLogPath is the system-mode runtime log.
+func SystemLogPath() string {
+	return filepath.Join(SystemLogDir(), "runtime.jsonl")
 }
 
 const (

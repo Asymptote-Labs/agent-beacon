@@ -82,7 +82,7 @@ func validateExecutable(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("is a directory")
 	}
-	if info.Mode().Perm()&0111 == 0 {
+	if !isExecutableMode(info) {
 		return fmt.Errorf("is not executable")
 	}
 	return nil

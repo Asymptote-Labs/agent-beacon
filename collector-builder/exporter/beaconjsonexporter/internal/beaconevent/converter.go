@@ -521,7 +521,19 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 	params := JSONMapAttr(attrs, "tool_parameters")
 
 	switch strings.ToLower(toolName) {
-	case "bash":
+	// PowerShell alongside Bash, because they are the same signal under different names.
+	//
+	// Claude Code ships a native PowerShell tool that replaces Bash as the default shell on
+	// Windows, and it reports the command in the same tool_input.command field. With only "bash"
+	// here the event was still classified as command.executed -- but with an empty
+	// e.command.command, which is the leaf every rules/risky-command/ rule matches on. Command
+	// threat detection was therefore silently disabled on Windows while the telemetry carried the
+	// command all along.
+	//
+	// This is the same failure Bash had before v1.0.6, recurring under a new tool name, which is
+	// why the match is a set rather than one more literal: a shell tool is whatever the runtime
+	// calls the thing that runs commands.
+	case "bash", "powershell", "pwsh":
 		command := claudeCommand(input, params)
 		event.Event.Action = "command.executed"
 		event.Event.Category = "command"

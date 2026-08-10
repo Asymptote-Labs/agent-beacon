@@ -96,9 +96,14 @@ func (s posixShell) WithEnv(name, value, script string) string {
 // outright was indistinguishable from one that worked.
 func (s posixShell) CIExecSession(logPath, _ string, claudeArgs []string) string {
 	inner := "claude " + strings.Join(claudeArgs, " ") + " > claude-out.json 2> claude-err.txt"
+	// stderr is surfaced on failure, not just stdout. `beacon ci exec` reports why it could not
+	// start or supervise the collector on stderr, and tailing only ci-out.txt meant a non-zero exit
+	// arrived with no explanation at all -- the reason was sitting in a file nothing ever read.
 	return fmt.Sprintf("beacon ci exec --harness claude --log-path %s -- sh -c %s "+
 		"> ci-out.txt 2> ci-err.txt; rc=$?; echo CI_EXEC_RC=$rc; "+
-		"tail -c 400 ci-out.txt; exit $rc",
+		"tail -c 400 ci-out.txt; "+
+		"if [ \"$rc\" -ne 0 ]; then echo '--- ci exec stderr ---'; tail -c 800 ci-err.txt; fi; "+
+		"exit $rc",
 		s.Quote(logPath), s.Quote(inner))
 }
 
@@ -259,8 +264,12 @@ $rc = $LASTEXITCODE
 if ($null -eq $rc) { $rc = 0 }
 "CI_EXEC_RC=$rc"
 %s
+if ($rc -ne 0) {
+  '--- ci exec stderr ---'
+%s
+}
 exit $rc`,
-		inner, s.Quote(logPath), s.TailBytes("ci-out.txt", 400))
+		inner, s.Quote(logPath), s.TailBytes("ci-out.txt", 400), s.TailBytes("ci-err.txt", 800))
 }
 
 // PlainSession runs the agent directly, for install scenarios where a persistent collector is

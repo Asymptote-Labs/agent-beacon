@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,7 @@ func TestMergeCodexOTELReplacesExistingBlock(t *testing.T) {
 
 func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir claude config dir: %v", err)
@@ -87,7 +88,7 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 
 func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir claude config dir: %v", err)
@@ -149,7 +150,7 @@ func TestClaudeStatusVariants(t *testing.T) {
 
 func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir codex config dir: %v", err)
@@ -205,7 +206,7 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 
 func TestConfigureCodexEnablesPromptLogging(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	path, err := ConfigureCodex(ConfigureOptions{
 		Endpoint: "http://127.0.0.1:4317",
@@ -225,7 +226,7 @@ func TestConfigureCodexEnablesPromptLogging(t *testing.T) {
 
 func TestDiscoverCodexDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0755); err != nil {
@@ -245,8 +246,9 @@ func TestDiscoverCodexDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 }
 
 func TestDiscoverCodexDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	codexPath := filepath.Join(binDir, "codex")
@@ -328,7 +330,7 @@ func TestCodexStatusVariants(t *testing.T) {
 
 func TestConfigureGeminiWritesTelemetryAndBackup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".gemini", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir gemini config dir: %v", err)
@@ -385,7 +387,7 @@ func TestConfigureGeminiWritesTelemetryAndBackup(t *testing.T) {
 
 func TestConfigureGeminiEnablesPromptLoggingAndTraces(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	path, err := ConfigureGemini(ConfigureOptions{
 		Endpoint: "http://127.0.0.1:4317",
@@ -413,7 +415,7 @@ func TestConfigureGeminiEnablesPromptLoggingAndTraces(t *testing.T) {
 
 func TestDiscoverGeminiDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0755); err != nil {
@@ -433,8 +435,9 @@ func TestDiscoverGeminiDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 }
 
 func TestDiscoverGeminiDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	geminiPath := filepath.Join(binDir, "gemini")
@@ -487,8 +490,9 @@ func TestGeminiStatusVariants(t *testing.T) {
 }
 
 func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	t.Setenv("SHELL", "/bin/bash")
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
@@ -513,8 +517,9 @@ func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
 }
 
 func TestDiscoverCopilotCLIDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	t.Setenv("SHELL", "/bin/bash")
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
@@ -540,7 +545,7 @@ func TestDiscoverCopilotCLIDetectsExecutableOnPath(t *testing.T) {
 
 func TestDiscoverCopilotCLIDetectsConfigFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	t.Setenv("PATH", t.TempDir())
 	configPath := filepath.Join(home, ".copilot", "config.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -557,8 +562,9 @@ func TestDiscoverCopilotCLIDetectsConfigFile(t *testing.T) {
 }
 
 func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	devinPath := filepath.Join(binDir, "devin")
@@ -586,7 +592,7 @@ func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
 
 func TestDiscoverDevinDesktopDetectsAppSupport(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	appSupport := filepath.Join(home, "Library", "Application Support", "Devin")
 	if err := os.MkdirAll(appSupport, 0755); err != nil {
 		t.Fatalf("mkdir app support: %v", err)

@@ -53,7 +53,7 @@ func LogPath(runtimeLogPath string, userMode bool) string {
 		}
 		return filepath.Join(home, ".beacon", "endpoint", "logs", LogFileName)
 	}
-	return filepath.Join("/var/log", "beacon-agent", LogFileName)
+	return filepath.Join(endpointconfig.SystemLogDir(), LogFileName)
 }
 
 func LockState(path string) (*LockedState, State, error) {

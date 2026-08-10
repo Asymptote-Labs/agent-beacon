@@ -300,6 +300,14 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		art.Meta["ci_exec_rc"] = fmt.Sprintf("%d", res.ExitCode)
 		if res.ExitCode != 0 {
 			logf("beacon ci exec exited %d -- the collected log may be incomplete", res.ExitCode)
+			// Written whole, not folded into meta. meta values pass through oneLine, which caps
+			// them at 400 characters -- enough to show the middle of a stderr tail and cut off the
+			// error at its end, which is the only part worth having. A failing collector is exactly
+			// when the full text is needed, so it goes to the run directory intact.
+			if err := os.WriteFile(filepath.Join(runDir, "ci-exec-output.txt"),
+				[]byte(res.Stdout+"\n--- stderr ---\n"+res.Stderr), 0o600); err == nil {
+				logf("wrote the full ci exec output to ci-exec-output.txt")
+			}
 		}
 	}
 

@@ -182,6 +182,15 @@ func runGH(args ...string) (string, error) {
 	return string(out), err
 }
 
+// firstLine keeps a retry message to one line. A gh failure can be several lines of connection
+// advice, and repeating all of it on every poll would bury the progress it is interleaved with.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
+}
+
 // runIDPattern guards against a malformed id reaching a URL or a path. gh returns numeric ids;
 // anything else means the output shape changed and should be reported, not interpolated.
 var runIDPattern = regexp.MustCompile(`^[0-9]+$`)
@@ -243,15 +252,28 @@ func latestRunID(opts Options) (int64, error) {
 // while we poll, we follow the earlier one -- ours.
 func awaitNewRun(opts Options, before int64, logf func(string, ...any)) (string, error) {
 	deadline := time.Now().Add(5 * time.Minute)
+	var lastErr error
 	for time.Now().Before(deadline) {
 		runs, err := listRuns(opts, 10)
 		if err != nil {
-			return "", err
+			// Transient rather than fatal. A single failed API call used to abandon a run that was
+			// proceeding perfectly well, and the dispatch reported failure while the workflow it had
+			// just started went on to finish unobserved. Retried until the deadline, with the last
+			// error kept so a persistent outage still reports the real cause rather than a timeout.
+			lastErr = err
+			logf("could not list runs (%v); retrying", firstLine(err.Error()))
+			time.Sleep(5 * time.Second)
+			continue
 		}
+		lastErr = nil
 		if found := pickNewRun(runs, before); found > 0 {
 			return fmt.Sprint(found), nil
 		}
 		time.Sleep(5 * time.Second)
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("could not reach the GitHub API while waiting for a new %s run: %w",
+			Workflow, lastErr)
 	}
 	return "", fmt.Errorf("no new %s run appeared within 5 minutes of dispatching; check "+
 		"`gh run list --workflow %s`", Workflow, Workflow)
@@ -293,11 +315,19 @@ func maxRunID(runs []ghRun) int64 {
 func awaitCompletion(opts Options, runID string, logf func(string, ...any)) (string, error) {
 	deadline := time.Now().Add(opts.Timeout)
 	lastStatus := ""
+	var lastErr error
 	for time.Now().Before(deadline) {
 		runs, err := listRuns(opts, 20)
 		if err != nil {
-			return "", err
+			// Same reasoning as awaitNewRun: a blip on the way to api.github.com must not discard a
+			// run that is doing fine. This loop can be waiting 20+ minutes, so the odds of hitting
+			// one are correspondingly higher.
+			lastErr = err
+			logf("could not list runs (%v); retrying", firstLine(err.Error()))
+			time.Sleep(opts.PollInterval)
+			continue
 		}
+		lastErr = nil
 		for _, r := range runs {
 			if fmt.Sprint(r.DatabaseID) != runID {
 				continue
@@ -311,6 +341,10 @@ func awaitCompletion(opts Options, runID string, logf func(string, ...any)) (str
 			}
 		}
 		time.Sleep(opts.PollInterval)
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("could not reach the GitHub API while waiting for run %s (still "+
+			"running at %s): %w", runID, runURL(opts.Repo, runID), lastErr)
 	}
 	return "", fmt.Errorf("run %s did not complete within %s; it may still be going at %s",
 		runID, opts.Timeout, runURL(opts.Repo, runID))

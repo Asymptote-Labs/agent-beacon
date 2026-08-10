@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func TestRemoveVSCodeEndpointHooksPreservesOtherHooks(t *testing.T) {
 
 func TestVSCodeHooksPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	userPath, err := vscodeHooksPath(LevelUser)
 	if err != nil {
 		t.Fatalf("user path error: %v", err)

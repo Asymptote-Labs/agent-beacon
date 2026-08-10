@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -268,7 +269,7 @@ func TestLaunchdIsInertOffDarwin(t *testing.T) {
 // rather than the old "does nothing" assertion.
 func TestSupervisedLifecycleStartsAndStopsAProcess(t *testing.T) {
 	home := t.TempDir()
-	setTestHome(t, home)
+	testenv.SetHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
 
 	// Loading before install must explain itself rather than silently doing nothing.
@@ -332,7 +333,7 @@ func TestLaunchctlGuidance(t *testing.T) {
 
 func TestLaunchdLabelAndUnitPath(t *testing.T) {
 	home := t.TempDir()
-	setTestHome(t, home)
+	testenv.SetHome(t, home)
 
 	user := Manager{UserMode: true, Kind: KindLaunchd}
 	if got := user.Label(); got != UserLabel {
@@ -361,7 +362,7 @@ func TestLaunchdLabelAndUnitPath(t *testing.T) {
 
 func TestSystemdLabelAndUnitPath(t *testing.T) {
 	home := t.TempDir()
-	setTestHome(t, home)
+	testenv.SetHome(t, home)
 
 	user := Manager{UserMode: true, Kind: KindSystemd}
 	if got := user.Label(); got != SystemdUserUnit {
@@ -497,7 +498,7 @@ func TestSupervisedIsAlwaysAvailable(t *testing.T) {
 
 func TestSupervisedRecordsAndReportsState(t *testing.T) {
 	home := t.TempDir()
-	setTestHome(t, home)
+	testenv.SetHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
 
 	if st := m.Status(); st.Loaded || st.Running {

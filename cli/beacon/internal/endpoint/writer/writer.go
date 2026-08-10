@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const (
-	SystemLogPath         = "/var/log/beacon-agent/runtime.jsonl"
 	UserLogPath           = ".beacon/endpoint/logs/runtime.jsonl"
 	MaxEventBytes         = 64 * 1024
 	DefaultRotateBytes    = 10 * 1024 * 1024
@@ -32,6 +32,12 @@ type Options struct {
 	RotateArchives int
 }
 
+// SystemLogPath is the system-mode runtime log, resolved per platform.
+//
+// Delegated rather than duplicated: this was one of fourteen copies of the same literal, and the
+// copies could not be given a Windows value independently without disagreeing.
+func SystemLogPath() string { return endpointconfig.SystemLogPath() }
+
 func DefaultPath(userMode bool) string {
 	if userMode {
 		home, err := os.UserHomeDir()
@@ -40,7 +46,7 @@ func DefaultPath(userMode bool) string {
 		}
 		return filepath.Join(home, UserLogPath)
 	}
-	return SystemLogPath
+	return SystemLogPath()
 }
 
 func AppendEvent(event schema.Event, opts Options) (string, error) {

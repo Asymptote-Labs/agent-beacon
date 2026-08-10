@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 func TestDefaultUserConfigUsesHomeScopedPaths(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	cfg := Default(true, filepath.Join(home, "runtime.jsonl"))
 
@@ -51,7 +52,7 @@ func TestInventoryContentCaptureOptIn(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, "logs", "runtime.jsonl")
 
 	cfg := Default(true, logPath)
@@ -103,8 +104,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestSaveLoadSplunkHECRoundTripAndPrivatePermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
 	cfg.Destinations = &Destinations{SplunkHEC: &SplunkHEC{
 		Endpoint: "https://splunk.example:8088/services/collector",
@@ -142,7 +144,7 @@ func TestSaveLoadSplunkHECRoundTripAndPrivatePermissions(t *testing.T) {
 
 func TestSaveRejectsIncompleteSplunkHEC(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "runtime.jsonl"))
 	cfg.Destinations = &Destinations{SplunkHEC: &SplunkHEC{Endpoint: "https://splunk.example:8088/services/collector"}}
 
@@ -152,8 +154,9 @@ func TestSaveRejectsIncompleteSplunkHEC(t *testing.T) {
 }
 
 func TestSaveLoadFalconHECRoundTripAndPrivatePermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
 	cfg.Destinations = &Destinations{FalconHEC: &FalconHEC{
 		Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
@@ -191,7 +194,7 @@ func TestSaveLoadFalconHECRoundTripAndPrivatePermissions(t *testing.T) {
 
 func TestSaveRejectsIncompleteFalconHEC(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "runtime.jsonl"))
 	cfg.Destinations = &Destinations{FalconHEC: &FalconHEC{Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec"}}
 
@@ -202,7 +205,7 @@ func TestSaveRejectsIncompleteFalconHEC(t *testing.T) {
 
 func TestLoadIgnoresLegacyContentRetention(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, UserConfigPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -232,7 +235,7 @@ func TestLoadIgnoresLegacyContentRetention(t *testing.T) {
 
 func TestLoadRejectsCorruptJSON(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, UserConfigPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)

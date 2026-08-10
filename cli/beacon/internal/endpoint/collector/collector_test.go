@@ -2,11 +2,14 @@ package collector
 
 import (
 	"errors"
+	"fmt"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +41,11 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"endpoint: 127.0.0.1:14317",
 		"endpoint: 127.0.0.1:14318",
 		"beaconjson:",
-		"path: " + `"` + cfg.LogPath + `"`,
+		// %q, matching how the config is generated. Hand-quoting the path only agreed with the
+		// generator by accident: a POSIX path contains nothing that needs escaping, while a
+		// Windows one is full of backslashes that a double-quoted YAML scalar must escape. The
+		// assertion now checks the contract -- a correctly quoted path -- rather than a coincidence.
+		fmt.Sprintf("path: %q", cfg.LogPath),
 		"max_event_bytes: 65536",
 		"rotate_bytes: 10485760",
 		"rotate_archives: 5",
@@ -180,6 +187,7 @@ func TestWriteConfigCreatesConfigAndSpoolDirectory(t *testing.T) {
 }
 
 func TestWriteConfigUsesPrivatePermissionsWithSplunkToken(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	cfg := testConfig(t)
 	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{
 		Endpoint: "https://splunk.example:8088/services/collector",
@@ -199,6 +207,7 @@ func TestWriteConfigUsesPrivatePermissionsWithSplunkToken(t *testing.T) {
 }
 
 func TestWriteConfigUsesPrivatePermissionsWithFalconToken(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	cfg := testConfig(t)
 	cfg.Destinations = &endpointconfig.Destinations{FalconHEC: &endpointconfig.FalconHEC{
 		Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
@@ -259,8 +268,22 @@ func TestWaitForPortsAvailableReportsPersistentConflict(t *testing.T) {
 	}
 }
 
+// stubCollectorName returns the fixture file name a collector binary must have to be discoverable
+// on this platform.
+//
+// exec.LookPath resolves a bare name through PATHEXT on Windows, so a fixture written without an
+// extension is invisible to it however its bits are set -- DiscoverBinary would report no collector
+// installed while the file sat right there on PATH. The production BinaryName stays extensionless
+// because LookPath is what applies the extension.
+func stubCollectorName() string {
+	if runtime.GOOS == "windows" {
+		return BinaryName + ".exe"
+	}
+	return BinaryName
+}
+
 func TestDiscoverBinaryPrefersConfiguredExistingPath(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), BinaryName)
+	bin := filepath.Join(t.TempDir(), stubCollectorName())
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatalf("write fake collector: %v", err)
 	}
@@ -281,7 +304,7 @@ func TestResolveBinaryRejectsMissingConfiguredPath(t *testing.T) {
 
 func TestDiscoverBinaryFindsBeaconOtelcolOnPath(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, BinaryName)
+	bin := filepath.Join(dir, stubCollectorName())
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatalf("write fake collector: %v", err)
 	}
@@ -348,7 +371,7 @@ func TestCheckStatusDoesNotTreatOpenOTLPPortsAsHealthy(t *testing.T) {
 	if healthReady() {
 		t.Skip("collector health check endpoint is already active")
 	}
-	bin := filepath.Join(t.TempDir(), BinaryName)
+	bin := filepath.Join(t.TempDir(), stubCollectorName())
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatalf("write fake collector: %v", err)
 	}

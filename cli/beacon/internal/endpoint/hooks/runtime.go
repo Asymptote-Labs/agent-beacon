@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
@@ -120,7 +121,7 @@ func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) str
 
 func isEndpointHookCommand(command, platform string) bool {
 	hasPlatform := platform == "" || commandHasPlatform(command, platform)
-	hasBeaconBinary := strings.Contains(command, embedded.GetBinaryName())
+	hasBeaconBinary := strings.Contains(command, embedded.BinaryStem)
 	hasLegacyBinary := strings.Contains(command, "asym-hooks")
 
 	if strings.Contains(command, "BEACON_ENDPOINT_MODE=1") && hasBeaconBinary {
@@ -169,14 +170,49 @@ func defaultLogPath(userMode bool) string {
 			return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 		}
 	}
-	return "/var/log/beacon-agent/runtime.jsonl"
+	return endpointconfig.SystemLogPath()
 }
 
+// endpointConfigPathForHook picks which config a hook should read, from where its log lives.
+//
+// A log under a machine-wide location means the hook is feeding a system-mode endpoint, whatever
+// scope the caller asked for, so it must read the system config. That was decided by matching the
+// POSIX prefixes "/var/log/" and "/Library/" -- which named two of the three platforms' locations
+// and no Windows one, so a Windows system install would have sent its hooks to the *user* config
+// and pointed them at a log the collector never reads.
+//
+// Comparing against the resolved directories instead makes the question platform-independent, and
+// keeps working if either location ever moves.
 func endpointConfigPathForHook(logPath string, userMode bool) string {
-	if strings.HasPrefix(logPath, "/var/log/") || strings.HasPrefix(logPath, "/Library/") {
+	if underSystemLocation(logPath) {
 		return endpointconfig.ConfigPath(false)
 	}
 	return endpointconfig.ConfigPath(userMode)
+}
+
+// underSystemLocation reports whether a path sits beneath a machine-wide Beacon directory.
+//
+// Case-insensitive on Windows, where paths are, and separator-normalized so a value built with
+// either separator compares the same. A false negative here is the dangerous direction: it routes
+// a system-mode hook to the user config, which fails silently rather than loudly.
+func underSystemLocation(path string) bool {
+	norm := func(p string) string {
+		p = filepath.ToSlash(filepath.Clean(p))
+		if runtime.GOOS == "windows" {
+			p = strings.ToLower(p)
+		}
+		return strings.TrimSuffix(p, "/") + "/"
+	}
+	target := norm(path)
+	for _, root := range []string{endpointconfig.SystemLogDir(), endpointconfig.SystemBaseDir()} {
+		if root == "" {
+			continue
+		}
+		if strings.HasPrefix(target, norm(root)) {
+			return true
+		}
+	}
+	return false
 }
 
 func shellQuote(value string) string {

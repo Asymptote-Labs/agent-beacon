@@ -1148,3 +1148,42 @@ func TestHarnessNameHonorsBrowserExtensionAttr(t *testing.T) {
 		t.Errorf("HarnessName = %q, want claude_web", got)
 	}
 }
+
+// Claude Code ships a native PowerShell tool that replaces Bash as the default shell on Windows,
+// and it reports the command in the same tool_input.command field. Handling only "bash" left the
+// event classified as command.executed with an empty e.command.command -- the leaf every
+// rules/risky-command/ rule matches on -- so command threat detection was silently disabled on
+// Windows while the telemetry carried the command all along.
+//
+// The attributes below are copied from a real Windows session captured by the w00-probe scenario,
+// rather than invented, so this fails if the runtime's shape changes rather than only if the
+// mapping does.
+func TestClaudeShellToolsPopulateTheCommandDetectionSurface(t *testing.T) {
+	const want = `Write-Output 'BEACON_SANDBOX_2922d672fb2f' | Tee-Object -FilePath 'C:\beacon-sandbox\work\w00.sentinel'`
+
+	for _, toolName := range []string{"PowerShell", "pwsh", "Bash", "bash"} {
+		t.Run(toolName, func(t *testing.T) {
+			event := &Event{}
+			NormalizeClaudeToolResult(event, map[string]interface{}{
+				"tool_name":   toolName,
+				"tool_input":  `{"command":"` + strings.ReplaceAll(want, `\`, `\\`) + `","description":"write the sentinel"}`,
+				"duration_ms": int64(386),
+			})
+
+			if event.Event.Action != "command.executed" {
+				t.Fatalf("action = %q, want command.executed", event.Event.Action)
+			}
+			if event.Command == nil || event.Command.Command != want {
+				t.Fatalf("command.command = %#v, want %q -- this is the field every "+
+					"rules/risky-command/ rule matches on, so an empty value disables them all",
+					event.Command, want)
+			}
+			if event.Tool == nil || event.Tool.Command != want {
+				t.Errorf("tool.command = %#v, want the command mirrored", event.Tool)
+			}
+			if event.Command.DurationMS != 386 {
+				t.Errorf("duration_ms = %d, want 386", event.Command.DurationMS)
+			}
+		})
+	}
+}
