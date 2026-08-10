@@ -291,7 +291,8 @@
                 "icon": "laptop",
                 "pages": [
                   "platforms/macos",
-                  "platforms/linux"
+                  "platforms/linux",
+                  "platforms/windows"
                 ]
               },
               "cli/upgrade",

@@ -162,14 +162,22 @@ Agent Beacon is designed for Security and IT teams to deploy and validate
 through standard MDM workflows.
 
 Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
-`.pkg` to GitHub Releases for MDM/manual download, along with `.deb` and `.rpm`
-packages for Linux on amd64 and arm64. Homebrew and release archives remain
-available for CLI installs across supported macOS/Linux architectures.
+`.pkg` to GitHub Releases for MDM/manual download, `.deb` and `.rpm` packages for
+Linux on amd64 and arm64, and an x64 `.msi` for Windows. Homebrew and release
+archives remain available for CLI installs across supported macOS, Linux, and
+Windows architectures.
 
-Installing a Linux package performs the system-mode install itself: it registers
-and starts a systemd unit, writes configuration to `/etc/beacon/endpoint`, and
-points the installing user's agent runtimes at the local collector. See the
-[Linux install guide](https://docs.asymptotelabs.ai/platforms/linux).
+Installing a native package performs the system-mode install itself: it registers
+and starts the service, writes configuration to the platform's machine-wide
+location, and points the interactive user's agent runtimes at the local
+collector. See the [Linux install guide](https://docs.asymptotelabs.ai/platforms/linux)
+or the [Windows install guide](https://docs.asymptotelabs.ai/platforms/windows).
+
+| Platform | Package | Service manager | Notes |
+| --- | --- | --- | --- |
+| macOS | Signed, notarized `.pkg` (Apple Silicon) | launchd | Homebrew for single machines |
+| Linux | `.deb` / `.rpm` (amd64, arm64) | systemd | Supervised fallback without systemd |
+| Windows | `.msi` (x64) | Service Control Manager | Unsigned for now; verify the published `.sha256` |
 
 | MDM platform | Support path |
 | --- | --- |
