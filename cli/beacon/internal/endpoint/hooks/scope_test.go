@@ -54,9 +54,17 @@ func TestSystemLocationMatchIsPlatformAppropriate(t *testing.T) {
 			t.Errorf("windows path comparison must be case-insensitive, %q was not matched", mixed)
 		}
 	}
-	// A sibling directory whose name merely starts with the same characters is not underneath it.
-	if underSystemLocation(dir + "-other/runtime.jsonl") {
-		t.Errorf("%q-other must not be treated as being under %q", dir, dir)
+	// A sibling whose name merely starts with the same characters is not underneath it.
+	//
+	// The sibling is formed from the *outermost* guarded root, not the log directory. On POSIX the
+	// log directory sits outside the base directory (/var/log/beacon-agent versus /etc or
+	// /Library), so a sibling of either is outside both; on Windows the log directory is nested
+	// inside the base directory, so "<logdir>-other" is still under the base and legitimately
+	// matches. Testing the log directory's sibling therefore asserted a POSIX layout rather than
+	// the prefix-boundary property it was written for.
+	sibling := endpointconfig.SystemBaseDir() + "-other"
+	if underSystemLocation(filepath.Join(sibling, "runtime.jsonl")) {
+		t.Errorf("%q must not be treated as being under %q", sibling, endpointconfig.SystemBaseDir())
 	}
 }
 
