@@ -91,8 +91,20 @@ jobs:
           $env:CGO_ENABLED = '0'
           & "$(go env GOPATH)\bin\builder.exe" --config builder.yaml
           if ($LASTEXITCODE -ne 0) { throw "collector build failed" }
+          # Detected, not assumed: the builder names its output from dist.name verbatim and does
+          # not append .exe for windows, even though it emits a PE binary. Both spellings are
+          # accepted so a future builder version that does append it keeps working.
+          $produced = 'dist\beacon-otelcol\beacon-otelcol'
+          if (-not (Test-Path -LiteralPath $produced) -and (Test-Path -LiteralPath "$produced.exe")) {
+            $produced = "$produced.exe"
+          }
+          if (-not (Test-Path -LiteralPath $produced)) {
+            Get-ChildItem dist\beacon-otelcol | Out-String | Write-Output
+            throw "the collector build produced no binary under dist\beacon-otelcol"
+          }
           New-Item -ItemType Directory -Force -Path dist\beacon-otelcol\windows_amd64 | Out-Null
-          Copy-Item dist\beacon-otelcol\beacon-otelcol.exe dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe
+          # Staged with .exe because that is what Windows needs to execute it, whatever it arrived as.
+          Copy-Item $produced dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe
 
       # The layout beacon-sandbox's WindowsLayout() describes. Created here rather than by the
       # harness because on this platform the CI job is what provisions the guest.
