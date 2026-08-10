@@ -348,3 +348,144 @@ jobs:
       - name: Endpoint install smoke test
         run: sh packaging/macos/smoke-endpoint.sh
 
+
+  # Builds the MSI and installs it, because the only claim worth making about an installer is that
+  # installing it works. Everything else -- that the files are in the package, that the custom action
+  # is sequenced correctly -- is inference from a manifest.
+  #
+  # The mirror of linux-package-smoke, which installs the .deb and checks the endpoint came up.
+  windows-package-smoke:
+    runs-on: windows-2025
+    # Bounded for the same reason windows-test is: a wedged msiexec would otherwise hold a runner for
+    # the GitHub default of six hours.
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      # Cheap, and it runs before anything is built: a syntax error in a packaging script would
+      # otherwise surface inside an MSI custom action, where what the user sees is a rollback.
+      - name: Validate the packaging scripts
+        run: pwsh -NoProfile -File packaging/windows/test-endpoint-scripts.ps1
+
+      - name: Build the binaries
+        run: |
+          Set-Location cli\beacon-hooks
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon-hooks build failed" }
+          # Embedded before the CLI is built, or the CLI carries the placeholder and hook
+          # installation fails at runtime with an architecture mismatch.
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+          Set-Location ..\beacon
+          go build -o beacon.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon build failed" }
+
+      - name: Build the collector
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          Set-Location collector-builder
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
+          & "$(go env GOPATH)\bin\builder.exe" --config builder.yaml
+          if ($LASTEXITCODE -ne 0) { throw "collector build failed" }
+          # The builder names its output from dist.name verbatim and does not append .exe, even
+          # though what it emits is a PE binary. Both spellings are accepted so a future builder
+          # version that does append it keeps working.
+          $produced = 'dist\beacon-otelcol\beacon-otelcol'
+          if (-not (Test-Path -LiteralPath $produced) -and (Test-Path -LiteralPath "$produced.exe")) {
+            $produced = "$produced.exe"
+          }
+          if (-not (Test-Path -LiteralPath $produced)) { throw "collector build produced no binary" }
+          Copy-Item $produced beacon-otelcol.exe
+
+      - name: Build the MSI
+        run: |
+          # A real-looking version rather than 0.0.0: MSI compares versions field by field, and
+          # building at 0.0.0 would mean the upgrade path is never exercised here.
+          pwsh -NoProfile -File packaging\windows\build-msi.ps1 `
+            -Version 0.0.1 `
+            -BeaconExe cli\beacon\beacon.exe `
+            -HooksExe cli\beacon-hooks\beacon-hooks.exe `
+            -CollectorExe collector-builder\beacon-otelcol.exe `
+            -OutFile $env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi
+          if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi")) {
+            throw "no MSI was produced"
+          }
+
+      - name: Install it
+        run: |
+          # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
+          # without it msiexec reports only an exit code.
+          $log = "$env:GITHUB_WORKSPACE\install.log"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/i', "$env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi", '/qn', '/l*v', $log
+          )
+          if ($p.ExitCode -ne 0) {
+            Write-Output "--- install log (tail) ---"
+            Get-Content -LiteralPath $log -Tail 120 | Write-Output
+            throw "msiexec /i exited $($p.ExitCode)"
+          }
+
+      - name: The endpoint must be installed and running
+        run: |
+          $beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
+          if (-not (Test-Path -LiteralPath $beacon)) { throw "beacon.exe is not at $beacon" }
+          foreach ($name in @('beacon-hooks.exe', 'beacon-otelcol.exe')) {
+            $path = Join-Path $env:ProgramFiles "Beacon\bin\$name"
+            if (-not (Test-Path -LiteralPath $path)) { throw "$name is missing from the payload" }
+          }
+
+          # The claim a package makes is a *running* endpoint, so the service is asserted rather than
+          # the files. Installing three binaries and registering nothing would pass a file check.
+          & sc.exe query BeaconCollector | Out-String | Write-Output
+          $state = (& sc.exe query BeaconCollector | Out-String)
+          if ($state -notmatch 'RUNNING') {
+            & $beacon endpoint status --system | Out-String | Write-Output
+            throw "the BeaconCollector service is not running after install"
+          }
+
+          $status = & $beacon endpoint status --system --json | Out-String
+          Write-Output $status
+          if ($status -notmatch '"kind"\s*:\s*"windows-service"') {
+            throw "status does not report the windows-service backend; the install picked a different one"
+          }
+
+      - name: Uninstall must remove the service and keep the data
+        run: |
+          $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'
+          $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
+          $hadConfig = Test-Path -LiteralPath $configPath
+
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/x', "$env:GITHUB_WORKSPACE\BeaconEndpointAgent.msi", '/qn',
+            '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
+          )
+          if ($p.ExitCode -ne 0) {
+            Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
+            throw "msiexec /x exited $($p.ExitCode)"
+          }
+
+          # The failure this guards against is the one review caught in the service backend: an
+          # uninstall that reports success while the service stays registered and starts at boot.
+          $query = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          if ($query -notmatch '1060') {
+            Write-Output $query
+            throw "the BeaconCollector service still exists after uninstall"
+          }
+
+          if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe')) {
+            throw "the payload was not removed"
+          }
+
+          # Retention, which is a contract rather than an accident: an uninstall is often the first
+          # half of an upgrade, and destroying an operator's configuration and collected telemetry is
+          # not something a package removal should do without being asked.
+          if ($hadConfig -and -not (Test-Path -LiteralPath $configPath)) {
+            throw "uninstall removed the endpoint configuration; only a purge should do that"
+          }
+          Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
