@@ -114,7 +114,16 @@
     <InstallExecuteSequence>
       <!-- NOT REMOVE, so this runs on a first install and on an upgrade, but not during removal. -->
       <Custom Action="BeaconInstallEndpoint" After="InstallFiles" Condition="NOT REMOVE" />
-      <Custom Action="BeaconUninstallEndpoint" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <!--
+        Skipped during an upgrade, and the reason is the one the Linux preremove script documents at
+        length. MajorUpgrade removes the older product as part of the same transaction, which would
+        otherwise run this action and tear down the endpoint the upgrade is about to reinstall — work
+        that is at best pointless and at worst leaves a window with no running collector.
+        UPGRADINGPRODUCTCODE is set only during that removal half, which makes it the MSI equivalent
+        of dpkg's "upgrade" argument and rpm's remaining-version count.
+      -->
+      <Custom Action="BeaconUninstallEndpoint" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
   </Package>
 </Wix>
