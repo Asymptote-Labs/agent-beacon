@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
+	"runtime"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 type Check struct {
@@ -120,6 +123,9 @@ func checkLogPermissions(path string) Check {
 	if err != nil {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: "runtime log not created yet", Evidence: "runtime_log_missing"}
 	}
+	if runtime.GOOS == "windows" {
+		return checkLogACL(path)
+	}
 	mode := info.Mode().Perm()
 	if mode&0222 == 0 {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh, Message: fmt.Sprintf("runtime log is not writable: %o", mode), Evidence: "not_writable"}
@@ -128,4 +134,37 @@ func checkLogPermissions(path string) Check {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
 	}
 	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo, Message: fmt.Sprintf("mode %o", mode), Evidence: fmt.Sprintf("mode_%o", mode)}
+}
+
+// checkLogACL is the Windows form of the same question: can the people whose sessions this
+// endpoint captures write to its log?
+//
+// The mode-bit check above cannot answer it there. Windows reports 0666 for any ordinary file
+// regardless of its ACL, so `mode&0222 == 0` is never true and the check would report OK for
+// exactly the configuration it exists to catch -- a %ProgramData% log that only administrators can
+// write, with every hook write failing silently.
+//
+// Read from the ACL rather than by attempting a write, because doctor usually runs elevated: a
+// test write would succeed for the very user whose access is not in question.
+func checkLogACL(path string) Check {
+	dir := filepath.Dir(path)
+	ok, err := writer.SystemLogWritableByUsers(dir)
+	switch {
+	case err != nil:
+		// Unknown is reported as unknown. Claiming either answer here would be worse than saying
+		// the check could not run.
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusWarn,
+			Severity: SeverityLow, Message: "could not read the log directory ACL: " + err.Error(),
+			Evidence: "acl_unreadable"}
+	case !ok:
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusFail,
+			Severity: SeverityHigh,
+			Message: "interactive users cannot write to the log directory, so agent hooks will " +
+				"fail silently while the collector reports healthy",
+			Evidence: "acl_missing_interactive_write"}
+	default:
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusOK,
+			Severity: SeverityInfo, Message: "interactive users may write to the log directory",
+			Evidence: "acl_interactive_write"}
+	}
 }

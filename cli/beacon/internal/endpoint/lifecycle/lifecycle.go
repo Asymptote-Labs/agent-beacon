@@ -182,6 +182,24 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		LogPath:      cfg.LogPath,
 	}
 
+	// Make the log directory writable by the people whose sessions this endpoint captures, before
+	// anything writes to it.
+	//
+	// A no-op on POSIX, where the file mode carries the same guarantee. On Windows a system-mode
+	// log lives under %ProgramData%, which denies ordinary users write access -- and hooks run as
+	// the console user. Skipping this produces an install where every visible signal is healthy
+	// (the service runs, status and doctor agree) and nothing the agent does is ever recorded,
+	// because all of those describe the collector rather than the hooks exporting to it.
+	//
+	// Only for system mode: a user-mode log lives in that user's own profile, which they can
+	// already write, and widening its ACL would hand their prompt text to every interactive
+	// account on the machine.
+	if !cfg.UserMode {
+		if err := writer.EnsureSystemLogWritable(filepath.Dir(cfg.LogPath)); err != nil {
+			return InstallResult{}, fmt.Errorf("prepare the log directory: %w", err)
+		}
+	}
+
 	tx := newInstallRollback(manager)
 	tx.Track(cfg.Collector.ConfigPath)
 	manifest.Files = append(manifest.Files, cfg.Collector.ConfigPath)

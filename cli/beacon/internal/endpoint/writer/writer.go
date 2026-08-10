@@ -88,6 +88,23 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	return opts.Path, nil
 }
 
+// EnsureSystemLogWritable makes a machine-wide log directory writable by the people whose agent
+// sessions this endpoint captures.
+//
+// A no-op on POSIX, where the file mode carries the same guarantee. On Windows it is the step
+// without which a system-mode install produces a healthy collector that records nothing the agent
+// did: %ProgramData% denies ordinary users write access, hooks run as the console user, and
+// nothing reports an error because status and doctor both describe the collector rather than the
+// hooks exporting to it.
+func EnsureSystemLogWritable(dir string) error {
+	return grantInteractiveUsersWrite(dir)
+}
+
+// SystemLogWritableByUsers reports whether that grant is in place, for doctor.
+func SystemLogWritableByUsers(dir string) (bool, error) {
+	return interactiveUsersCanWrite(dir)
+}
+
 // EnsureRuntimeFile creates the shared runtime log with the shared writable
 // mode without appending an event, for doctor --fix and setup flows that
 // pre-create the log so user-run hooks can append to it later.
