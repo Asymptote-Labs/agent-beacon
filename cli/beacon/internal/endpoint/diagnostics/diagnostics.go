@@ -39,7 +39,7 @@ func Run(cfg endpointconfig.Config) []Check {
 		checkFile("config", endpointconfig.ConfigPath(cfg.UserMode), true),
 		checkFile("collector_config", cfg.Collector.ConfigPath, true),
 		checkFile("runtime_log", cfg.LogPath, false),
-		checkLogPermissions(cfg.LogPath),
+		checkLogPermissions(cfg.LogPath, cfg.UserMode),
 		checkCollectorHealth(cfg),
 	}
 	// The service definition check is named after whichever manager is actually in use, so
@@ -118,12 +118,18 @@ func checkFile(name, path string, required bool) Check {
 	return Check{Name: name, Target: path, Status: StatusOK, Severity: SeverityInfo, Message: path, Evidence: "file_exists"}
 }
 
-func checkLogPermissions(path string) Check {
+func checkLogPermissions(path string, userMode bool) Check {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: "runtime log not created yet", Evidence: "runtime_log_missing"}
 	}
 	if runtime.GOOS == "windows" {
+		// The two scopes fail differently there, so they are asked different questions. Only a
+		// system-mode install has a privileged writer and unprivileged hooks; a user-mode log lives
+		// in that user's own profile and is written by processes running as them.
+		if userMode {
+			return checkLogWritableByThisUser(path)
+		}
 		return checkLogACL(path)
 	}
 	mode := info.Mode().Perm()
@@ -136,8 +142,33 @@ func checkLogPermissions(path string) Check {
 	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo, Message: fmt.Sprintf("mode %o", mode), Evidence: fmt.Sprintf("mode_%o", mode)}
 }
 
-// checkLogACL is the Windows form of the same question: can the people whose sessions this
-// endpoint captures write to its log?
+// checkLogWritableByThisUser is the user-mode Windows form of the question.
+//
+// The INTERACTIVE grant that system mode installs is deliberately absent here: a user-mode log
+// holds that person's prompt text, and widening its ACL to every interactive account would hand it
+// to anyone else who logs on. Running the system-mode check anyway would report a high-severity
+// failure on every correctly configured user-mode endpoint -- a doctor that cries wolf on the
+// normal case is one nobody reads when it finally has something to say.
+//
+// A test write is the right instrument in this scope, and only in this scope. The trap it falls
+// into in system mode -- doctor runs elevated, so it proves access for a user whose access was
+// never in question -- does not apply when the hooks run as the same person doctor does.
+func checkLogWritableByThisUser(path string) Check {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail,
+			Severity: SeverityHigh,
+			Message:  "the runtime log is not writable by this user: " + err.Error(),
+			Evidence: "not_writable"}
+	}
+	_ = f.Close()
+	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK,
+		Severity: SeverityInfo, Message: "the runtime log is writable by this user",
+		Evidence: "writable_by_owner"}
+}
+
+// checkLogACL is the system-mode Windows form of the same question: can the people whose sessions
+// this endpoint captures write to its log?
 //
 // The mode-bit check above cannot answer it there. Windows reports 0666 for any ordinary file
 // regardless of its ACL, so `mode&0222 == 0` is never true and the check would report OK for

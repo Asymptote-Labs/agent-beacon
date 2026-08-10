@@ -7,6 +7,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestCheckFileRequiredOptionalAndDirectory(t *testing.T) {
@@ -33,38 +34,41 @@ func TestCheckFileRequiredOptionalAndDirectory(t *testing.T) {
 }
 
 func TestCheckLogPermissions(t *testing.T) {
+	// Mode bits are the POSIX form of this question; Windows answers it through the ACL and the
+	// per-user write test instead, both of which need a real Windows host to exercise.
+	testenv.RequirePOSIXFileModes(t)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "runtime.jsonl")
 
-	if check := checkLogPermissions(logPath); check.Status != "warn" || check.Severity != "low" {
+	if check := checkLogPermissions(logPath, false); check.Status != "warn" || check.Severity != "low" {
 		t.Fatalf("missing log permissions check = %#v", check)
 	}
 
 	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	if check := checkLogPermissions(logPath); check.Status != "ok" {
+	if check := checkLogPermissions(logPath, false); check.Status != "ok" {
 		t.Fatalf("0644 log permissions check = %#v", check)
 	}
 
 	if err := os.Chmod(logPath, 0666); err != nil {
 		t.Fatalf("chmod writable log: %v", err)
 	}
-	if check := checkLogPermissions(logPath); check.Status != "ok" {
+	if check := checkLogPermissions(logPath, false); check.Status != "ok" {
 		t.Fatalf("0666 log permissions check = %#v", check)
 	}
 
 	if err := os.Chmod(logPath, 0200); err != nil {
 		t.Fatalf("chmod unreadable log: %v", err)
 	}
-	if check := checkLogPermissions(logPath); check.Status != "warn" || check.Severity != "low" {
+	if check := checkLogPermissions(logPath, false); check.Status != "warn" || check.Severity != "low" {
 		t.Fatalf("0200 log permissions check = %#v", check)
 	}
 
 	if err := os.Chmod(logPath, 0444); err != nil {
 		t.Fatalf("chmod non-writable log: %v", err)
 	}
-	if check := checkLogPermissions(logPath); check.Status != "fail" || check.Severity != "high" || check.Evidence != "not_writable" {
+	if check := checkLogPermissions(logPath, false); check.Status != "fail" || check.Severity != "high" || check.Evidence != "not_writable" {
 		t.Fatalf("0444 log permissions check = %#v", check)
 	}
 }

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // grantInteractiveUsersWrite makes a machine-wide log directory writable by ordinary users.
@@ -32,6 +35,9 @@ func grantInteractiveUsersWrite(dir string) error {
 	// icacls rather than the security APIs directly: it is present on every supported Windows,
 	// its argument form is stable, and the equivalent through SetNamedSecurityInfo means building
 	// an ACL by hand for a grant an administrator can read and audit in one line.
+	//
+	// The `*` prefix passes the well-known SID literally, so this does not depend on the machine's
+	// display language the way a `INTERACTIVE` or `INTERAKTIV` spelling would.
 	cmd := exec.Command("icacls", dir, "/grant", `*S-1-5-4:(OI)(CI)(M)`, "/T")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -41,31 +47,101 @@ func grantInteractiveUsersWrite(dir string) error {
 	return nil
 }
 
+// Rights that answer the question doctor is actually asking: can a hook running as the logged-on
+// user create the runtime log if it is missing, and append to it if it is not.
+//
+// Both bits are required. FILE_APPEND_DATA alone cannot create the file, and FILE_WRITE_DATA alone
+// on a directory does not permit adding entries to it, so a grant carrying only one of them leaves
+// a hook that still fails -- just at a different call.
+const writeAccessMask = uint32(windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA)
+
+// inheritOnlyACE marks an entry that applies to children but not to the object carrying it.
+// Not exported by x/sys/windows, and needed here because such an entry must not read as a grant:
+// the directory itself has to be writable for a hook to create the log in the first place.
+const inheritOnlyACE = 0x08
+
+type aceVerdict int
+
+const (
+	aceIrrelevant aceVerdict = iota
+	aceAllowsWrite
+	aceDeniesWrite
+)
+
+// classifyACE decides what one access control entry says about interactive write access.
+//
+// Split out from the DACL walk so it can be tested against entry shapes that are tedious to
+// construct on a real directory -- inherit-only grants, deny entries, partial masks.
+func classifyACE(aceType, aceFlags uint8, mask uint32, matchesSID bool) aceVerdict {
+	if !matchesSID || aceFlags&inheritOnlyACE != 0 {
+		return aceIrrelevant
+	}
+	switch aceType {
+	case windows.ACCESS_DENIED_ACE_TYPE:
+		// Any overlap denies. A deny of one of the two bits is enough to break a hook, and Windows
+		// evaluates a matching deny ahead of any grant, so partial credit would be wrong here.
+		if mask&writeAccessMask != 0 {
+			return aceDeniesWrite
+		}
+	case windows.ACCESS_ALLOWED_ACE_TYPE:
+		// GENERIC_WRITE is normally mapped to its specific rights when an entry is stored, but it
+		// survives in entries written by some tooling, and it subsumes both bits.
+		if mask&writeAccessMask == writeAccessMask || mask&windows.GENERIC_WRITE != 0 {
+			return aceAllowsWrite
+		}
+	}
+	return aceIrrelevant
+}
+
 // interactiveUsersCanWrite reports whether the grant is in place, for doctor.
 //
 // Checked by reading the ACL rather than by attempting a write: doctor runs elevated, so a test
 // write would succeed regardless and report healthy for exactly the configuration that is broken.
 // That is the trap this check exists to avoid, so it must not fall into it.
+//
+// Read through the security APIs rather than by parsing `icacls` output. The text form is a
+// rendering for humans and varies with the things a rendering varies with: it resolves the SID to a
+// localized account name, so a correctly granted directory reads as ungranted on a German or
+// Japanese install, and it prints an expanded rights list instead of the short `(M)` alias whenever
+// the mask is not exactly one of the aliases. Both produce the same wrong answer -- doctor telling
+// an administrator their working endpoint is broken -- and neither is visible from an English test
+// machine, which is every machine this would be tested on.
 func interactiveUsersCanWrite(dir string) (bool, error) {
-	out, err := exec.Command("icacls", dir).CombinedOutput()
+	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
-		return false, fmt.Errorf("read the ACL on %s: %w: %s", dir, err, strings.TrimSpace(string(out)))
+		return false, fmt.Errorf("read the access control list on %s: %w", dir, err)
 	}
-	text := string(out)
-	// icacls renders the well-known SID as a localized account name, so the SID itself is not
-	// reliably present in the output. Both spellings are accepted: the localized name varies by
-	// system language, and matching only the English one would report a correct grant as missing
-	// on a German or Japanese install.
-	for _, marker := range []string{"S-1-5-4", "INTERACTIVE"} {
-		for _, line := range strings.Split(text, "\n") {
-			if !strings.Contains(strings.ToUpper(line), strings.ToUpper(marker)) {
-				continue
-			}
-			// (M) is modify, (F) is full control; either is enough to append.
-			if strings.Contains(line, "(M)") || strings.Contains(line, "(F)") || strings.Contains(line, "(W)") {
-				return true, nil
-			}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return false, fmt.Errorf("read the discretionary access control list on %s: %w", dir, err)
+	}
+	if dacl == nil {
+		// A NULL DACL grants everyone full control. Alarming, and worth surfacing elsewhere, but
+		// the question here is only whether hooks can write -- and they can.
+		return true, nil
+	}
+
+	interactive, err := windows.CreateWellKnownSid(windows.WinInteractiveSid)
+	if err != nil {
+		return false, fmt.Errorf("resolve the INTERACTIVE security identifier: %w", err)
+	}
+
+	allowed := false
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			return false, fmt.Errorf("read access control entry %d on %s: %w", i, dir, err)
+		}
+		// Every ACE type this cares about carries its SID at the same offset; the field is named
+		// SidStart because the identifier is variable length and runs past the struct.
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		switch classifyACE(ace.Header.AceType, ace.Header.AceFlags, uint32(ace.Mask), sid.Equals(interactive)) {
+		case aceDeniesWrite:
+			// A deny anywhere in the list settles it, whatever else grants.
+			return false, nil
+		case aceAllowsWrite:
+			allowed = true
 		}
 	}
-	return false, nil
+	return allowed, nil
 }

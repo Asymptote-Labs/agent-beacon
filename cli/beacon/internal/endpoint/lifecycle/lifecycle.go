@@ -294,7 +294,7 @@ func Uninstall(opts UninstallOptions) error {
 	// container would otherwise leave the unit enabled, and "uninstall" has to mean nothing
 	// is left behind. Unload already tolerates a backend that is unusable here.
 	manager := service.Manager{UserMode: cfg.UserMode}
-	for _, kind := range []service.Kind{service.KindLaunchd, service.KindSystemd, service.KindSupervised} {
+	for _, kind := range service.ManagedKinds() {
 		_ = (service.Manager{UserMode: cfg.UserMode, Kind: kind}).Unload()
 	}
 	if !cfg.UserMode && !opts.KeepUpdater {

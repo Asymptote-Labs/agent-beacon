@@ -107,8 +107,20 @@ func setRecoveryActions(s *mgr.Service) error {
 // CreateService takes the executable and its arguments separately and quotes them itself, but
 // UpdateConfig takes one string, so the quoting is ours to get right. An unquoted path breaks at
 // the first space -- and the default install location is under %ProgramFiles%, which contains one.
+//
+// Escaped exactly the way CreateService escapes, by calling the same function it calls. Go's %q is
+// the wrong tool and fails in a way that only shows up on the upgrade path: it doubles every
+// backslash, so `C:\Program Files\Beacon\bin\beacon-otelcol.exe` is written to the registry as
+// `C:\\Program Files\\...`, which the SCM does not unescape. A fresh install would work, the
+// upgrade would report success, and the service would fail to start after the next reboot with a
+// file-not-found the operator has no reason to connect to an upgrade. Sharing the escaper also
+// means create and update cannot drift apart.
 func serviceBinaryPath(program, configPath string) string {
-	return fmt.Sprintf("%q --config %q", program, configPath)
+	parts := make([]string, 0, 3)
+	for _, arg := range []string{program, "--config", configPath} {
+		parts = append(parts, windows.EscapeArg(arg))
+	}
+	return strings.Join(parts, " ")
 }
 
 func startService() error {

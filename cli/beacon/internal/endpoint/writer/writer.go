@@ -96,7 +96,15 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 // did: %ProgramData% denies ordinary users write access, hooks run as the console user, and
 // nothing reports an error because status and doctor both describe the collector rather than the
 // hooks exporting to it.
+//
+// Creates the directory first. Install calls this before anything has written a log there, so on a
+// fresh system-mode install the directory does not exist yet -- and granting access to a path that
+// is not there fails, taking the whole install down before the service is ever registered. Ensure
+// means ensure.
 func EnsureSystemLogWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create the log directory %s: %w", dir, err)
+	}
 	return grantInteractiveUsersWrite(dir)
 }
 

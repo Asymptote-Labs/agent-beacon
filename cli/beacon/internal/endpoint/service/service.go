@@ -58,6 +58,18 @@ const (
 	KindWindowsService Kind = "windows-service"
 )
 
+// ManagedKinds is every concrete backend a Beacon install could be running under.
+//
+// Uninstall and repair unload all of them rather than only the one detection picks right now, so an
+// endpoint installed under one manager and removed under another leaves nothing registered. The
+// list lives here, beside the kinds themselves, because the bug it prevents is silent at the call
+// site: a backend added without being added to the caller's own list leaves a service running after
+// an uninstall that reported success, and nothing surfaces it until the machine is rebooted and the
+// collector comes back from the dead.
+func ManagedKinds() []Kind {
+	return []Kind{KindLaunchd, KindSystemd, KindSupervised, KindWindowsService}
+}
+
 // ParseKind validates a user-supplied service kind.
 func ParseKind(s string) (Kind, error) {
 	switch Kind(strings.ToLower(strings.TrimSpace(s))) {
