@@ -119,31 +119,130 @@ func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) str
 	return fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s%s %s --platform %s", shellQuote(logPath), shellQuote(configPath), cliEnv, shellQuote(binaryPath), platform)
 }
 
+// isEndpointHookCommand decides whether a command already in a runtime's config is one Beacon wrote.
+//
+// This is the detection surface for status, repair and uninstall across every runtime, so both
+// directions are costly. A false negative makes repair add a second hook beside the first and leaves
+// uninstall's behind; a false positive rewrites or deletes a hook somebody else installed.
 func isEndpointHookCommand(command, platform string) bool {
 	hasPlatform := platform == "" || commandHasPlatform(command, platform)
+	namesPlatform := commandNamesPlatform(command)
 	hasBeaconBinary := strings.Contains(command, embedded.BinaryStem)
 	hasLegacyBinary := strings.Contains(command, "asym-hooks")
 
-	if strings.Contains(command, "BEACON_ENDPOINT_MODE=1") && hasBeaconBinary {
-		return hasPlatform || !strings.Contains(command, "--platform ")
+	if commandCarriesEndpointSettings(command) && hasBeaconBinary {
+		return hasPlatform || !namesPlatform
 	}
-	if hasBeaconBinary && !strings.Contains(command, "--platform ") {
+	if hasBeaconBinary && !namesPlatform {
 		return true
 	}
 	return hasLegacyBinary && hasPlatform
 }
 
-func commandHasPlatform(command, platform string) bool {
-	fields := strings.Fields(command)
-	for i, field := range fields {
-		if field == "--platform" && i+1 < len(fields) {
-			return strings.Trim(fields[i+1], `"'`) == platform
+// commandCarriesEndpointSettings reports whether a command was written by an endpoint install, as
+// opposed to being some other invocation of the same binary.
+//
+// Two spellings, because the values moved from the environment to flags. An inline
+// `BEACON_ENDPOINT_MODE=1 ...` prefix is a POSIX shell construct that neither Windows shell accepts,
+// so a Windows hook carries `--log`/`--config`/`--cli` instead. Both must be recognized: already
+// installed POSIX hooks use the prefix, and until a repair rewrites them one machine has both.
+//
+// Recognizing only the prefix is what made this worth extracting. A flags-form command matched
+// nothing -- it has no prefix, and it does name a platform, so it fell past both branches above and
+// reported false. Every runtime's repair would have added a duplicate hook next to the one Beacon
+// had just written, and uninstall would have left it in place.
+func commandCarriesEndpointSettings(command string) bool {
+	for _, field := range commandFields(command) {
+		if field == "BEACON_ENDPOINT_MODE=1" {
+			return true
 		}
-		if strings.HasPrefix(field, "--platform=") {
-			return strings.Trim(strings.TrimPrefix(field, "--platform="), `"'`) == platform
+		for _, name := range []string{"--log", "--config", "--cli"} {
+			if field == name || strings.HasPrefix(field, name+"=") {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// commandNamesPlatform reports whether a command specifies a platform at all.
+//
+// A command that names none is treated as an any-platform install, which is how hooks written before
+// the flag existed are still recognized. Asked as a token rather than by searching for the substring
+// "--platform " with a trailing space: that spelling missed `--platform=cursor`, so such a hook was
+// treated as platform-less and matched when asked about *any* runtime -- the false-positive direction,
+// where repair rewrites somebody else's hook.
+func commandNamesPlatform(command string) bool {
+	for _, field := range commandFields(command) {
+		if field == "--platform" || strings.HasPrefix(field, "--platform=") {
+			return true
+		}
+	}
+	return false
+}
+
+func commandHasPlatform(command, platform string) bool {
+	fields := commandFields(command)
+	for i, field := range fields {
+		if field == "--platform" {
+			return i+1 < len(fields) && fields[i+1] == platform
+		}
+		if value, found := strings.CutPrefix(field, "--platform="); found {
+			return value == platform
+		}
+	}
+	return false
+}
+
+// commandFields splits a hook command into argv-like tokens, keeping quoted runs together.
+//
+// strings.Fields is not enough once paths are Windows paths. The default install location is under
+// %ProgramFiles% or a user profile, both of which routinely contain a space, so a quoted path splits
+// into fragments and any token comparison after it is being made against half a path. Quoting is
+// stripped rather than preserved because callers compare against bare values like "cursor".
+//
+// Both quote characters, because the command may have been written for either shell -- POSIX hooks
+// are single-quoted and Windows ones double-quoted -- and this function only has to recover tokens,
+// not to reproduce a particular shell's semantics. It deliberately does not handle backslash escapes:
+// on Windows a backslash is a path separator, and treating it as an escape would corrupt every path
+// this parses.
+func commandFields(command string) []string {
+	var (
+		fields  []string
+		current strings.Builder
+		quote   rune
+		started bool
+	)
+	flush := func() {
+		if started {
+			fields = append(fields, current.String())
+			current.Reset()
+			started = false
+		}
+	}
+	for _, r := range command {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+				break
+			}
+			current.WriteRune(r)
+		case r == '"' || r == '\'':
+			// Marks the token as started even if the quotes turn out to be empty, so `--platform ""`
+			// yields an empty value rather than dropping the argument and shifting every token after
+			// it left by one.
+			quote = r
+			started = true
+		case r == ' ' || r == '\t':
+			flush()
+		default:
+			current.WriteRune(r)
+			started = true
+		}
+	}
+	flush()
+	return fields
 }
 
 func writeEndpointHookBinary(userMode bool) (string, error) {
