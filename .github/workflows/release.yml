@@ -6,6 +6,9 @@ name: Release
 #   2. package     — (after goreleaser) builds, signs, notarizes, and staples the
 #                    macOS .pkg for both arches and attaches them plus the
 #                    package update manifest to the same release.
+#   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
+#                    goreleaser just published, installs it to prove it works, and
+#                    attaches it. Unsigned for now, so it needs no secrets.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
 # never receive secrets) cannot run it. All release secrets live in the protected
@@ -276,3 +279,111 @@ jobs:
         if: always()
         run: |
           security delete-keychain "$BEACON_SIGNING_KEYCHAIN" 2>/dev/null || true
+
+  # The MSI, built from the archive the release just published.
+  #
+  # Downloading that archive rather than rebuilding the binaries is the point. Go builds are close to
+  # reproducible but not guaranteed identical across build hosts, and an installer whose beacon.exe
+  # differs from the beacon.exe in the zip beside it is a provenance problem that nobody would notice
+  # until they compared hashes. This way the two are the same bytes by construction, which is the
+  # guarantee build-msi.ps1 already claims.
+  #
+  # It also means this job needs no Go toolchain and no collector build: everything it packages has
+  # already been built, tested and published by the job it depends on.
+  #
+  # No `environment: release`, deliberately. That environment exists to gate signing secrets, and this
+  # job has none to gate -- the MSI is unsigned for now. Putting it behind the same approval would add
+  # friction to a release without protecting anything.
+  windows-package:
+    needs: goreleaser
+    runs-on: windows-2025
+    # Bounded because a wedged msiexec is a plausible failure mode rather than a hypothetical one --
+    # the CI job that installs this same package documents it and bounds itself for the reason. This
+    # job does less than that one (no Go toolchain, no collector build), so it needs less headroom;
+    # what matters is that a hung installer fails the release the same morning instead of holding a
+    # runner for the six-hour GitHub default.
+    timeout-minutes: 20
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the published Windows archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
+          & gh release download $env:TAG --repo $env:REPO --pattern 'beacon_*_windows_amd64.zip' --dir dist\windows
+          if ($LASTEXITCODE -ne 0) { throw "could not download the Windows archive for $env:TAG" }
+
+          $zip = Get-ChildItem dist\windows -Filter 'beacon_*_windows_amd64.zip' | Select-Object -First 1
+          if (-not $zip) { throw "the release contains no Windows archive; goreleaser did not build one" }
+          Write-Output "packaging from $($zip.Name)"
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath dist\windows\extracted -Force
+
+          # Asserted rather than assumed: a missing collector would produce an MSI that installs a CLI
+          # which then reports no collector found, which is a worse outcome than failing here.
+          foreach ($name in @('beacon.exe', 'beacon-hooks.exe', 'beacon-otelcol.exe')) {
+            $path = Join-Path 'dist\windows\extracted' $name
+            if (-not (Test-Path -LiteralPath $path)) {
+              Get-ChildItem dist\windows\extracted | Out-String | Write-Output
+              throw "$name is not in the published archive"
+            }
+          }
+
+      - name: Build the MSI
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          pwsh -NoProfile -File packaging\windows\build-msi.ps1 `
+            -Version $version `
+            -BeaconExe dist\windows\extracted\beacon.exe `
+            -HooksExe dist\windows\extracted\beacon-hooks.exe `
+            -CollectorExe dist\windows\extracted\beacon-otelcol.exe `
+            -OutFile "dist\windows\BeaconEndpointAgent-$version-x64.msi"
+          if ($LASTEXITCODE -ne 0) { throw "building the MSI failed" }
+
+      - name: Install it, so a broken package cannot be published
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Get-ChildItem dist\windows -Filter '*.msi' | Select-Object -First 1).FullName
+          $log = "$env:GITHUB_WORKSPACE\release-install.log"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $msi, '/qn', '/l*v', $log)
+          if ($p.ExitCode -ne 0) {
+            Get-Content -LiteralPath $log -Tail 120 | Write-Output
+            throw "the release MSI failed to install (exit $($p.ExitCode))"
+          }
+
+          # The same claim the CI gate makes, made once more against the artifact that is about to be
+          # published rather than against one built from the same source. A package that installs a
+          # CLI but registers no service is the failure worth catching before a tag goes out.
+          $state = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          $global:LASTEXITCODE = 0
+          Write-Output $state
+          if ($state -notmatch 'RUNNING') { throw "the release MSI did not leave a running collector" }
+
+          # The version a user will see, checked against the tag being released.
+          $beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
+          $reported = (& $beacon version | Out-String).Trim()
+          Write-Output "beacon version: $reported"
+          $expected = $env:TAG.TrimStart('v')
+          if ($reported -notmatch [regex]::Escape($expected)) {
+            throw "the packaged binary reports '$reported', which does not contain the released version $expected"
+          }
+
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $msi, '/qn')
+          if ($p.ExitCode -ne 0) { throw "the release MSI failed to uninstall (exit $($p.ExitCode))" }
+          exit 0
+
+      - name: Attach the MSI to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & gh release upload $env:TAG (Get-ChildItem dist\windows -Filter '*.msi').FullName (Get-ChildItem dist\windows -Filter '*.msi.sha256').FullName --repo $env:REPO --clobber
+          if ($LASTEXITCODE -ne 0) { throw "uploading the MSI failed" }
