@@ -11,7 +11,10 @@
 // that needs it -- is what produced the inconsistency in the first place.
 package testenv
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 // SetHome redirects the user's home directory for the duration of a test, on every platform.
 //
@@ -22,4 +25,21 @@ func SetHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
+}
+
+// RequirePOSIXFileModes skips a test whose assertion is about Unix permission bits.
+//
+// Windows does not implement them: os.Chmod only toggles a read-only attribute, and Go reports
+// 0666 for any ordinary file. A mode assertion there is not merely unsupported, it is misleading --
+// it would either fail for a reason unrelated to the property or pass vacuously.
+//
+// The property these tests protect is real on both platforms: a config file holding a credential
+// must not be readable by other users. Windows expresses that as an ACL rather than a mode, so
+// this is the seam where a Windows equivalent belongs once the endpoint sets ACLs on the files it
+// writes. Skipping is honest in the meantime; asserting 0666 == 0600 would not be.
+func RequirePOSIXFileModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not exist on Windows; the equivalent is an ACL check")
+	}
 }

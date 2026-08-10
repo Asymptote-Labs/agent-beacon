@@ -3,6 +3,7 @@ package elastic
 import (
 	"embed"
 	"fmt"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,9 +16,12 @@ import (
 var packFS embed.FS
 
 const (
-	DefaultLogPath   = "/var/log/beacon-agent/runtime.jsonl"
 	DefaultOutputDir = "beacon-elastic-pack"
 )
+
+// DefaultLogPath is a var rather than a const because the system log location is now
+// resolved per platform by one function instead of repeated as a literal in every pack.
+var DefaultLogPath = endpointconfig.SystemLogPath()
 
 type File struct {
 	Name    string

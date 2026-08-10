@@ -2,6 +2,7 @@ package wazuh
 
 import (
 	"embed"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,9 @@ import (
 //go:embed pack/*
 var packFS embed.FS
 
-const DefaultLogPath = "/var/log/beacon-agent/runtime.jsonl"
+// DefaultLogPath is a var rather than a const because the system log location is now
+// resolved per platform by one function instead of repeated as a literal in every pack.
+var DefaultLogPath = endpointconfig.SystemLogPath()
 
 type File struct {
 	Name    string

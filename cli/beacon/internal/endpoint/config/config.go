@@ -39,6 +39,34 @@ func SystemConfigPath() string {
 	return filepath.Join(SystemBaseDir(), "config.json")
 }
 
+// SystemLogDir is the single source of truth for where a system-mode endpoint writes its logs.
+//
+// The runtime log path was previously a literal repeated in fourteen places -- every destination
+// pack, the writer, the hook adapter's default, the inventory heartbeat and the self-updater --
+// which is exactly the shape SystemBaseDir was introduced to remove for the config directory. One
+// function is what makes a second platform possible at all: fourteen literals cannot disagree with
+// each other on Linux, but they cannot be given a Windows value either.
+//
+// The Linux and macOS value is unchanged, and deliberately so. /var/log/beacon-agent is where
+// installed endpoints already write, where the packaging scripts create directories, and what the
+// forwarder packs tail; moving it would be a migration, not a refactor.
+func SystemLogDir() string {
+	switch runtime.GOOS {
+	case "windows":
+		// Alongside the config rather than under a separate root. Windows has no /var/log
+		// equivalent, and %ProgramData% is the documented home for machine-wide application state
+		// that outlives any one user.
+		return filepath.Join(SystemBaseDir(), "logs")
+	default:
+		return "/var/log/beacon-agent"
+	}
+}
+
+// SystemLogPath is the system-mode runtime log.
+func SystemLogPath() string {
+	return filepath.Join(SystemLogDir(), "runtime.jsonl")
+}
+
 const (
 	DefaultSplunkSource     = "beacon-endpoint-agent"
 	DefaultSplunkSourcetype = "beacon:endpoint"

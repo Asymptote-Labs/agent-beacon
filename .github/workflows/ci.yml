@@ -203,12 +203,14 @@ jobs:
           Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
       # Scoped to the packages this port actually gives Windows implementations, not `./...`.
       #
-      # The rest of the cli/beacon suite has never run on Windows and assumes a POSIX host in ways
-      # unrelated to any of this: 47 tests redirect the home directory with t.Setenv("HOME"), which
-      # does nothing there because os.UserHomeDir reads USERPROFILE; 15 assert Unix file modes that
-      # Windows does not implement; others exec fixtures with no .exe extension. Running them here
-      # would produce a permanently red gate that says nothing about the code under test, and a red
-      # gate nobody can fix is one nobody reads.
+      # The scope grows as packages are made portable. config, collector, harness and hooks joined
+      # when the Windows filesystem work needed them gated -- which immediately paid for itself by
+      # surfacing a production bug: validateExecutable tested the POSIX executable bit, which is
+      # never set on Windows, so DiscoverBinary rejected every collector binary there.
+      #
+      # The remaining cli/beacon packages still assume a POSIX host and are not scoped in. Running
+      # them here would produce a permanently red gate that says nothing about the code under test,
+      # and a red gate nobody can fix is one nobody reads.
       #
       # Tracked as follow-up work rather than dropped -- see #318. The scope
       # widens as those packages are made portable; it must not widen by adding `./...` back while
@@ -221,7 +223,11 @@ jobs:
             ./internal/endpoint/inventory/... `
             ./internal/ingest/endpoint/... `
             ./internal/endpoint/service/... `
-            ./internal/endpoint/selfupdate/...
+            ./internal/endpoint/selfupdate/... `
+            ./internal/endpoint/config/... `
+            ./internal/endpoint/collector/... `
+            ./internal/endpoint/harness/... `
+            ./internal/endpoint/hooks/...
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |

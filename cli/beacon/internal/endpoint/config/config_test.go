@@ -104,6 +104,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestSaveLoadSplunkHECRoundTripAndPrivatePermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
@@ -153,6 +154,7 @@ func TestSaveRejectsIncompleteSplunkHEC(t *testing.T) {
 }
 
 func TestSaveLoadFalconHECRoundTripAndPrivatePermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
