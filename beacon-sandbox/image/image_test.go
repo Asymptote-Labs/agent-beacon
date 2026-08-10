@@ -116,7 +116,10 @@ func TestArtifactsErrorNamesTheBuildCommand(t *testing.T) {
 	if !strings.Contains(err.Error(), BuildBeaconHint) {
 		t.Errorf("error should tell the user how to build it, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), beaconRelPath) {
+	// Slash-normalized for the same reason as the guarded-path assertion: the error embeds a
+	// filepath.Join'd path, so it renders with the host separator while beaconRelPath is written
+	// with forward slashes.
+	if !strings.Contains(filepath.ToSlash(err.Error()), beaconRelPath) {
 		t.Errorf("error should name the missing path, got: %v", err)
 	}
 }
