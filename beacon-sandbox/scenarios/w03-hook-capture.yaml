@@ -52,11 +52,16 @@ expect:
       only bash -- before that, this field was empty on Windows while every other field looked right.
 
   - action: file.modified
+    contains: ["w03-written"]
     fields: ["file.path"]
     why: >-
       A second, differently-shaped signal. A capture path can be broken in ways that still deliver
       prompts -- one hook event configured correctly and the rest not -- so asserting only the prompt
-      would pass a half-installed endpoint.
+      would pass a half-installed endpoint. Scoped to this scenario's filename rather than asserting
+      the field alone: every system-mode scenario installs to the same log path, so an expectation
+      that only requires a field to be present can be satisfied by the previous scenario's events.
+      Teardown removes the log between scenarios, and this makes the assertion correct even when it
+      does not.
 
   - action: approval.allowed
     fields: ["approval.decision"]

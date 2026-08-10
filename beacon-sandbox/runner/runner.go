@@ -859,9 +859,19 @@ func teardownInstall(ctx context.Context, g guest, sc scenario.Scenario,
 	if sc.Install != nil && sc.Install.Mode == "system" {
 		scope = "--system"
 	}
-	// --keep-logs because the runtime log is the artifact this whole run exists to collect, and the
-	// collection step runs after this one.
-	res, err := g.Exec(ctx, "beacon endpoint uninstall "+scope+" --keep-logs 2>&1", privileged)
+	// The log is deliberately *not* kept.
+	//
+	// Collection happens inline, before any deferred function runs, so this cannot take away an
+	// artifact the run still needs. Keeping it does active harm: every system-mode scenario installs
+	// to the same %ProgramData% path and the collector appends, so a kept log carries the previous
+	// scenario's events into the next one's verdict. Three scenarios in one suite reported 38, then
+	// 87, then 129 events -- 38 + 49 is 87, which is the accumulation showing through rather than a
+	// scenario capturing more.
+	//
+	// An expectation scoped by the run's canary survives that; one that only requires a field to be
+	// present does not, and would pass on a leftover from the scenario before. Removing the log is
+	// what makes each scenario judge its own run.
+	res, err := g.Exec(ctx, "beacon endpoint uninstall "+scope+" 2>&1", privileged)
 	switch {
 	case err != nil:
 		logf("teardown: uninstall %s did not run: %v", scope, err)

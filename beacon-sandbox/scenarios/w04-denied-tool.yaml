@@ -33,6 +33,13 @@ expect:
       filtering on category=approval misses them otherwise, which is the bug this assertion exists to
       keep fixed.
 
+      Nothing here ties the decision to this run's canary, because an approval event carries a tool
+      decision rather than the prompt text. That makes this assertion dependent on the log holding
+      only this scenario's events -- which is what teardown between scenarios provides, and which it
+      did not, in the first suite run: three system-mode scenarios shared one appended log, so this
+      could have been satisfied by the scenario before it. Worth knowing if it ever passes on a run
+      where the prompt assertion above failed.
+
   - action: approval.denied
     optional: true
     why: >-
