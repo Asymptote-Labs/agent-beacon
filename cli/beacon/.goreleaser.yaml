@@ -8,11 +8,14 @@ before:
     - go mod tidy
     - bash -c 'cd ../beacon-hooks && go mod tidy'
     - rm -rf ./release-collectors
-    - mkdir -p ./release-collectors/darwin_amd64 ./release-collectors/darwin_arm64 ./release-collectors/linux_amd64 ./release-collectors/linux_arm64
+    - mkdir -p ./release-collectors/darwin_amd64 ./release-collectors/darwin_arm64 ./release-collectors/linux_amd64 ./release-collectors/linux_arm64 ./release-collectors/windows_amd64
     - cp ../../collector-builder/dist/beacon-otelcol/darwin_amd64/beacon-otelcol ./release-collectors/darwin_amd64/beacon-otelcol
     - cp ../../collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol ./release-collectors/darwin_arm64/beacon-otelcol
     - cp ../../collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol ./release-collectors/linux_amd64/beacon-otelcol
     - cp ../../collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol ./release-collectors/linux_arm64/beacon-otelcol
+    # .exe because that is the name the target needs, which build-release-collectors.sh already
+    # stages -- the collector builder itself emits an extensionless PE binary.
+    - cp ../../collector-builder/dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe ./release-collectors/windows_amd64/beacon-otelcol.exe
     # Package the external threat-rule pack (repo rules/, not embedded in the binary)
     # as a release asset users install with `beacon rules pull <asset-url>`.
     - bash -c 'mkdir -p release-rules && COPYFILE_DISABLE=1 tar --exclude="._*" --exclude=".DS_Store" -czf release-rules/threat-rules.tar.gz -C ../.. rules'
@@ -33,9 +36,17 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
+    ignore:
+      # No Windows ARM build, because there is no Windows ARM collector to put in the archive.
+      # build-release-collectors.sh builds windows/amd64 only, and an archive containing the CLI but
+      # not the collector is worse than no archive: `endpoint install` would report that no collector
+      # is installed, on a machine where the user had just installed Beacon.
+      - goos: windows
+        goarch: arm64
     hooks:
       pre:
         # Build the hooks binary for this target platform and embed it.
@@ -59,21 +70,38 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
+    ignore:
+      # Matches the beacon build above. The two are packaged into one archive, so a target either
+      # has both or neither.
+      - goos: windows
+        goarch: arm64
 
 archives:
   - formats:
       - tar.gz
+    # zip on Windows, which is what the platform can extract without installing anything. A tar.gz
+    # is a worse first impression than a missing build for someone who has to go find a tool to open
+    # it before they can run anything.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     ids:
       - beacon
       - beacon-hooks
     files:
       - README*
-      - src: release-collectors/{{ .Os }}_{{ .Arch }}/beacon-otelcol
-        dst: beacon-otelcol
+      # Globbed and flattened rather than named, because the collector is beacon-otelcol on POSIX and
+      # beacon-otelcol.exe on Windows, and a `dst` cannot vary by platform. strip_parent puts it at
+      # the archive root next to the two binaries, which is the layout DiscoverBinary looks for: a
+      # collector sitting beside the CLI that was run.
+      - src: release-collectors/{{ .Os }}_{{ .Arch }}/beacon-otelcol*
+        strip_parent: true
 
 nfpms:
   # Native packages are the Linux counterpart of the signed macOS .pkg: installing one should

@@ -66,10 +66,20 @@ func DiscoverBinary(configured string) string {
 	return ""
 }
 
+// defaultBinaryCandidates lists where to look for the collector when it is not on PATH.
+//
+// A sibling of the running CLI comes first, because that is what an extracted release archive looks
+// like: beacon and beacon-otelcol next to each other in whatever directory the user unpacked them
+// into. The machine-wide install location follows, for a package install.
+//
+// Both are asked for by their on-disk name rather than by BinaryName. Those differ on Windows -- the
+// file is beacon-otelcol.exe, while BinaryName is what exec.LookPath is given so PATHEXT can resolve
+// it -- and using the PATH spelling for a direct stat meant an extracted archive reported no
+// collector at all.
 func defaultBinaryCandidates() []string {
-	paths := []string{PackagedBinaryPath}
+	paths := packagedBinaryPaths()
 	if executable, err := currentExecutable(); err == nil {
-		paths = append([]string{filepath.Join(filepath.Dir(executable), BinaryName)}, paths...)
+		paths = append([]string{filepath.Join(filepath.Dir(executable), binaryFileName())}, paths...)
 	}
 	return paths
 }
