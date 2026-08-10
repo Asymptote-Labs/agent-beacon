@@ -290,6 +290,105 @@ jobs:
             throw 'no hook ran at all: this says nothing about command forms, only that UserPromptSubmit did not fire'
           }
 
+      # Splits #320 in half instead of guessing at it.
+      #
+      # `beacon ci exec` on Windows captures sometimes and not others, with the agent doing identical
+      # work either way. Two very different things could produce that, and no amount of reading tells
+      # them apart: either the collector never receives what the agent sends, or the agent never sends
+      # it. Fixing the wrong half is free to do and expensive to discover.
+      #
+      # So this asks the first half on its own, with no agent involved: start the collector, send it
+      # one OTLP request by hand, and see whether a line appears in the log. A pass here says the
+      # receiver and the Beacon exporter work on Windows and moves the whole question onto the agent's
+      # exporter. A failure says the opposite, and would explain the intermittency directly.
+      - name: Does the collector record an OTLP request at all
+        id: otlp
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $dir = 'C:\beacon-sandbox\otlp'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $logPath = Join-Path $dir 'runtime.jsonl'
+          $cfgPath = Join-Path $dir 'otelcol.yaml'
+
+          # HTTP rather than gRPC, deliberately: it can be driven with Invoke-WebRequest and no client
+          # library, so this step tests Beacon's receiving side without importing whatever the agent's
+          # gRPC stack might be doing wrong. If HTTP lands and the agent's gRPC does not, that
+          # difference is itself the finding.
+          $cfg = @(
+            'receivers:'
+            '  otlp:'
+            '    protocols:'
+            '      http:'
+            '        endpoint: 127.0.0.1:14318'
+            'exporters:'
+            '  beaconjson:'
+            ('    path: ' + (ConvertTo-Json $logPath))
+            'service:'
+            '  pipelines:'
+            '    logs:'
+            '      receivers: [otlp]'
+            '      exporters: [beaconjson]'
+          )
+          Set-Content -LiteralPath $cfgPath -Value $cfg -Encoding utf8
+
+          $proc = Start-Process -FilePath 'C:\beacon-sandbox\bin\beacon-otelcol.exe' `
+            -ArgumentList @('--config', $cfgPath) -PassThru -WindowStyle Hidden
+          try {
+            # Polled rather than slept: a fixed sleep is how a slow start becomes a mystery failure.
+            $ready = $false
+            foreach ($i in 1..30) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $c = New-Object System.Net.Sockets.TcpClient
+                $c.Connect('127.0.0.1', 14318)
+                $c.Close()
+                $ready = $true
+                break
+              } catch { }
+            }
+            if (-not $ready) { throw 'the collector never listened on 127.0.0.1:14318' }
+
+            $body = @{
+              resourceLogs = @(@{
+                resource = @{ attributes = @(@{ key = 'service.name'; value = @{ stringValue = 'otlp-probe' } }) }
+                scopeLogs = @(@{ logRecords = @(@{
+                  timeUnixNano = '1700000000000000000'
+                  body = @{ stringValue = 'BEACON_OTLP_PROBE' }
+                  attributes = @(@{ key = 'event.name'; value = @{ stringValue = 'probe' } })
+                }) })
+              })
+            } | ConvertTo-Json -Depth 12
+
+            $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:14318/v1/logs' -Method Post `
+              -ContentType 'application/json' -Body $body -UseBasicParsing
+            Write-Output "OTLP_POST_STATUS=$($resp.StatusCode)"
+
+            # The exporter writes on its own schedule, so the log is polled rather than read once.
+            $landed = $false
+            foreach ($i in 1..20) {
+              Start-Sleep -Seconds 1
+              if ((Test-Path -LiteralPath $logPath) -and
+                  (Select-String -LiteralPath $logPath -Pattern 'BEACON_OTLP_PROBE' -Quiet)) {
+                $landed = $true
+                break
+              }
+            }
+            Write-Output "OTLP_LANDED=$landed"
+            if (Test-Path -LiteralPath $logPath) {
+              Write-Output "log bytes: $((Get-Item -LiteralPath $logPath).Length)"
+              Get-Content -LiteralPath $logPath -TotalCount 2 | Write-Output
+            } else {
+              Write-Output 'the exporter never created the log file'
+            }
+            if (-not $landed) {
+              throw 'the collector accepted an OTLP request and no event reached the log: the receiving half is broken, not the agent'
+            }
+            Write-Output 'the collector receives OTLP and writes Beacon JSONL on Windows'
+          } finally {
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
       # Phase 3 registers beacon-otelcol.exe with the Service Control Manager directly, on the
       # strength of the builder-generated main_windows.go calling svc.Run(otelcol.NewSvcHandler).
       # That is an assumption about a code path nothing has exercised: running the binary as an
