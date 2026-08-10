@@ -501,13 +501,37 @@ jobs:
           }
           $after = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
           Write-Output "config hash before=$before after=$after"
+          # Compared, not merely printed. Existence alone would accept a config the upgrade rewrote
+          # from defaults, which is the same loss as deleting it -- an operator's ports, harness list
+          # and destinations would be gone while the file looked present.
+          if ($after -ne $before) {
+            throw "the upgrade replaced the endpoint configuration instead of preserving it"
+          }
 
-          # One product, not two. A MajorUpgrade that fails to match the previous install leaves both
-          # registered, and the user sees two entries in Installed Apps.
-          $installed = @(Get-CimInstance -ClassName Win32_Product -Filter "Name='Beacon Endpoint Agent'" -ErrorAction SilentlyContinue)
-          Write-Output "installed product entries: $($installed.Count)"
-          if ($installed.Count -gt 1) {
-            throw "the upgrade left $($installed.Count) products registered instead of replacing the first"
+          # Exactly one product, asserted in both directions. A MajorUpgrade that fails to match its
+          # predecessor leaves both registered, which a user sees as two entries in Installed Apps.
+          #
+          # Read from the uninstall registry keys rather than Win32_Product: that class enumerates by
+          # reconfiguring every installed MSI, which is slow and has side effects, and a failed query
+          # returns nothing -- so counting its results would have passed on zero, meaning a completely
+          # broken upgrade would satisfy a check written to catch a duplicated one.
+          #
+          # Both registry views are searched because a 32-bit installer writes under Wow6432Node.
+          $keys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          )
+          $entries = @(
+            Get-ItemProperty -Path $keys -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -eq 'Beacon Endpoint Agent' }
+          )
+          Write-Output "registered product entries: $($entries.Count)"
+          foreach ($entry in $entries) { Write-Output "  $($entry.DisplayName) $($entry.DisplayVersion)" }
+          if ($entries.Count -ne 1) {
+            throw "expected exactly one registered product after the upgrade, found $($entries.Count)"
+          }
+          if ($entries[0].DisplayVersion -ne '0.0.2') {
+            throw "the registered product reports version $($entries[0].DisplayVersion), not the 0.0.2 that was just installed"
           }
           exit 0
 

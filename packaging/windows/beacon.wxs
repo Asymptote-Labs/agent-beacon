@@ -100,16 +100,24 @@
                   Return="check" />
 
     <!--
-      Return="ignore" on removal, and Before="RemoveFiles" because the script needs beacon.exe to
-      still exist. A failed uninstall action leaves the package half-removed, which is a worse state
-      for a user than a leftover service they can see and stop.
+      Before="RemoveFiles" because the script needs beacon.exe to still exist.
+
+      Return="check", not "ignore", now that an upgrade depends on this action having stopped the
+      collector: ignoring its result would let MSI proceed to replace binaries the old service still
+      holds open, which is the failure this action exists to prevent.
+
+      That is not a reversal of "a failed uninstall must not wedge a removal" — it moves that judgment
+      into the script, which is the only place that can tell an ordinary problem from a real one. It
+      exits zero when there is nothing to remove, and warns rather than throwing when `endpoint
+      uninstall` reports a problem, because the service and its registration are what matter. What
+      does fail is the script being unable to run at all, and an upgrade should stop for that.
     -->
     <CustomAction Id="BeaconUninstallEndpoint"
                   Directory="ScriptsFolder"
                   ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;uninstall-endpoint.ps1&quot;"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="ignore" />
+                  Return="check" />
 
     <InstallExecuteSequence>
       <!-- NOT REMOVE, so this runs on a first install and on an upgrade, but not during removal. -->
