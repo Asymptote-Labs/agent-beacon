@@ -219,6 +219,86 @@ background collector when it finds no service manager, and that fallback also re
 running — so without naming the backend you expect, a test meant to cover systemd could quietly pass
 while covering the fallback instead.
 
+## Testing The Windows Build
+
+Modal offers Linux machines only, so Windows needs a different disposable machine. It uses a
+GitHub-hosted Windows runner, which is already one: a fresh virtual machine per job, with
+administrator rights, UAC disabled, and a real Service Control Manager — everything an endpoint
+install needs.
+
+The difference from the Linux path is where the sandbox is. On Modal the tool starts a machine and
+drives it from outside. On Windows **the runner is the sandbox**, and the tool runs inside it. The
+collected output is uploaded and judged on your machine afterwards by the same code that judges a
+Modal run, so a Windows verdict is produced by the same rules as a Linux one.
+
+Runner minutes are free on this public repository, so unlike the Linux tests these cost only the
+Anthropic API session.
+
+### Running One
+
+```bash title="Dispatch a Windows test"
+gh workflow run windows-sandbox.yml -f scenario=w03-hook-capture
+gh run watch
+```
+
+Leave `scenario` empty to run every Windows test. Each takes a few minutes; the whole set is about
+fifteen.
+
+| Test | Covers |
+|------|--------|
+| `w00-probe` | The `beacon ci exec` collection path. Known to be unreliable on Windows — see [#320](https://github.com/asymptote-labs/agent-beacon/issues/320) |
+| `w01-install-service` | A system-mode install registered with the Service Control Manager, then a session against it |
+| `w02-install-supervised` | A user-mode install, which falls back to a supervised collector because Windows has no per-user service manager |
+| `w03-hook-capture` | Capture through *installed* hooks: prompts, command text, and file edits |
+| `w04-denied-tool` | Approvals and denials through installed hooks |
+
+`w03` is the one that matters most. It goes through hooks Beacon installed rather than a temporary
+collector, which is what a real user gets — and it is the only test that can tell you the command
+string Beacon writes into a runtime's settings is one that runtime can actually execute.
+
+### Setting It Up
+
+Dispatching needs write access to the repository, plus an `ANTHROPIC_API_KEY` secret in the
+`windows-sandbox` environment. Scoped to an environment rather than the repository, matching how the
+release secrets are handled:
+
+```bash title="Store the key, without it entering your shell history"
+gh api -X PUT repos/asymptote-labs/agent-beacon/environments/windows-sandbox
+printf '%s' "$ANTHROPIC_API_KEY" | gh secret set ANTHROPIC_API_KEY \
+  --repo asymptote-labs/agent-beacon --env windows-sandbox
+```
+
+Use a dedicated, budget-capped key. The harness runs a real agent with
+`--dangerously-skip-permissions`, and the per-session budget in a scenario is a client-side cap
+rather than an account guard.
+
+<Note>
+  The workflow is `workflow_dispatch` only, and deliberately. It needs an API key to run a real
+  session, and on a public repository that secret must never be reachable from a fork's pull request —
+  so there is no `pull_request` trigger and there must never be a `pull_request_target` one.
+</Note>
+
+### One Check Works Differently There
+
+Every Linux run fingerprints your own Beacon state before and after, so a test that accidentally
+installed something on your machine is caught rather than assumed impossible. That comparison only
+means something when the sandbox is a *different* machine.
+
+On Windows it is not — the install being tested is itself the change the guard would report. So the
+run records a different kind of evidence: that the machine is disposable (a GitHub-hosted runner, one
+fresh VM per job). The verdict says which of the two it relied on rather than silently reporting the
+comparison as clean:
+
+```
+[WARN] safety.host_untouched: host isolation was not verified by comparison because the guest
+       was this machine
+       why: isolation is only as good as the machine being disposable
+       (github-hosted ephemeral runner (fresh VM per job))
+```
+
+That warning is expected on every Windows run. It is not a problem to fix; it is the tool declining to
+claim a check it could not perform.
+
 ## Commands
 
 | Command | What it does |
@@ -276,12 +356,14 @@ go test ./...
 ## Limitations
 
 <Warning>
-  Modal only provides Linux machines, so **this cannot test the macOS build**. Anything macOS-specific — launchd, the signed installer, notarization — is out of reach.
+  **The macOS build cannot be tested this way.** Modal provides Linux machines, and the Windows path
+  above uses a GitHub-hosted Windows runner; neither offers macOS. Anything macOS-specific — launchd,
+  the signed installer, notarization — is out of reach and has to be checked by hand on a Mac.
 </Warning>
 
 - **The systemd tests run nested.** `i02` runs inside a container within the sandbox, so it is slower and needs a few more minutes of patience than the others.
 - **It checks presence, not completeness.** It confirms the thing it planted was recorded. It cannot tell you whether Beacon missed something it never knew to look for.
-- **Linux x86 only.** Modal does not offer a choice of processor architecture.
+- **Linux x86 only on Modal, x64 only on Windows.** Neither backend offers a choice of processor architecture, so the ARM builds are not covered.
 - **It costs money and takes minutes.** Each test is a real API session.
 - **Occasional flakiness is normal.** Telemetry arrives asynchronously, so the tool waits for activity to settle rather than a fixed delay. Use `--repeat 3` to tell a flaky result from a broken one.
 - **The agent version is pinned.** Claude Code's behaviour changes between releases, so the sandbox installs a fixed version. Updating it is a deliberate change.
