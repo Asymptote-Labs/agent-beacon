@@ -159,7 +159,10 @@ func checkLogWritableByThisUser(path string) Check {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail,
 			Severity: SeverityHigh,
 			Message:  "the runtime log is not writable by this user: " + err.Error(),
-			Evidence: "not_writable"}
+			// Distinct from the POSIX not_writable on purpose. Evidence strings are what decide the
+			// remediation doctor prints and what fleet tooling keys on, and the two have nothing in
+			// common but the symptom: one is fixed by chmod, which does not exist here.
+			Evidence: "acl_not_writable_by_user"}
 	}
 	_ = f.Close()
 	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK,

@@ -32,19 +32,45 @@ import (
 // (OI)(CI) makes the grant inherit to files and subdirectories created later, so the log and its
 // rotated archives are covered without re-running this after every rotation.
 func grantInteractiveUsersWrite(dir string) error {
-	// icacls rather than the security APIs directly: it is present on every supported Windows,
-	// its argument form is stable, and the equivalent through SetNamedSecurityInfo means building
-	// an ACL by hand for a grant an administrator can read and audit in one line.
-	//
-	// The `*` prefix passes the well-known SID literally, so this does not depend on the machine's
-	// display language the way a `INTERACTIVE` or `INTERAKTIV` spelling would.
-	cmd := exec.Command("icacls", dir, "/grant", `*S-1-5-4:(OI)(CI)(M)`, "/T")
-	out, err := cmd.CombinedOutput()
+	out, err := exec.Command("icacls", grantArgs(dir)...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("grant interactive users write access to %s: %w: %s",
 			dir, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// grantArgs is the single definition of the grant.
+//
+// icacls rather than the security APIs directly: it is present on every supported Windows, its
+// argument form is stable, and the equivalent through SetNamedSecurityInfo means building an ACL by
+// hand for a grant an administrator can read and audit in one line.
+//
+// The `*` prefix passes the well-known SID literally, so this does not depend on the machine's
+// display language the way an `INTERACTIVE` or `INTERAKTIV` spelling would.
+//
+// One definition because doctor prints this command as the remediation for a missing grant. Advice
+// that has drifted from the implementation is worse than no advice: an operator runs it, doctor
+// still reports the failure, and the next thing they doubt is the diagnosis rather than the hint.
+func grantArgs(dir string) []string {
+	return []string{dir, "/grant", `*S-1-5-4:(OI)(CI)(M)`, "/T"}
+}
+
+// GrantCommandHint renders the grant as a command an operator can paste.
+//
+// Empty on platforms with no such grant, which is how callers tell that this remediation does not
+// apply rather than printing a Windows command on a Mac.
+func GrantCommandHint(dir string) string {
+	args := grantArgs(dir)
+	quoted := make([]string, 0, len(args)+1)
+	quoted = append(quoted, "icacls")
+	for _, arg := range args {
+		if strings.ContainsAny(arg, " \t") {
+			arg = `"` + arg + `"`
+		}
+		quoted = append(quoted, arg)
+	}
+	return strings.Join(quoted, " ")
 }
 
 // Rights that answer the question doctor is actually asking: can a hook running as the logged-on

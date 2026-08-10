@@ -12,3 +12,8 @@ func grantInteractiveUsersWrite(dir string) error { return nil }
 // EnsureRuntimeFile already establishes. Reporting false here would make doctor demand a fix that
 // does not exist on this platform.
 func interactiveUsersCanWrite(dir string) (bool, error) { return true, nil }
+
+// GrantCommandHint is empty because there is no grant to run here. Callers use the empty string to
+// mean "this remediation does not apply on this platform" rather than printing an icacls command to
+// someone on a Mac.
+func GrantCommandHint(dir string) string { return "" }

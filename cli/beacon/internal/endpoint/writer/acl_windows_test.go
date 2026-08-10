@@ -165,3 +165,25 @@ func TestGrantAndReadBackAgree(t *testing.T) {
 			"the grant was read without the deny that overrides it")
 	}
 }
+
+// TestGrantCommandHintQuotesThePathItPrints covers the half of the grant an operator runs by hand.
+//
+// doctor prints this when the grant is missing, and the default log directory lives under
+// %ProgramData%. A hint that breaks at the first space would be pasted, would fail, and would send
+// the operator looking for a problem in the diagnosis instead of the advice.
+func TestGrantCommandHintQuotesThePathItPrints(t *testing.T) {
+	hint := GrantCommandHint(`C:\Program Files\Beacon\logs`)
+	if !strings.Contains(hint, `"C:\Program Files\Beacon\logs"`) {
+		t.Fatalf("GrantCommandHint left a path containing a space unquoted: %s", hint)
+	}
+	// The SID rather than a localized name, for the same reason the grant itself uses it.
+	if !strings.Contains(hint, "S-1-5-4") {
+		t.Fatalf("GrantCommandHint does not name the well-known SID: %s", hint)
+	}
+	// Same definition as the applied grant, so the advice cannot drift from the implementation.
+	for _, arg := range grantArgs(`C:\Program Files\Beacon\logs`)[1:] {
+		if !strings.Contains(hint, arg) {
+			t.Fatalf("GrantCommandHint omits %q from the grant it claims to describe: %s", arg, hint)
+		}
+	}
+}
