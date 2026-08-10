@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -197,13 +198,32 @@ func (b supervisedBackend) status(userMode bool) Status {
 	status.Running = st.PID > 0 && processAlive(st.PID)
 	switch {
 	case status.Running:
-		status.Message = fmt.Sprintf("supervised pid %d (no automatic restart: no service manager)", st.PID)
+		status.Message = fmt.Sprintf("supervised pid %d (%s)", st.PID, supervisedCaveats(userMode))
 	case status.Loaded:
-		status.Message = "recorded but not running"
+		status.Message = "recorded but not running (" + supervisedCaveats(userMode) + ")"
 	default:
 		status.Message = "no supervised collector recorded"
 	}
 	return status
+}
+
+// supervisedCaveats names what this backend cannot promise, for status to report in-band.
+//
+// Stated wherever an installed collector is described, not only while one happens to be running:
+// an operator reading `endpoint status` on a configured-but-stopped endpoint is exactly the person
+// who needs to know nothing will start it again.
+//
+// Logout is a Windows-only caveat and is named only there, because it is only true there. A
+// detached process on POSIX has its own session -- that is what setsid buys -- and outlives the
+// login that started it. Windows terminates the session's processes at logoff, so a user-mode
+// collector there stops when the person walks away, which is a materially worse guarantee and one
+// they should not have to discover from an empty log.
+func supervisedCaveats(userMode bool) string {
+	const noRestart = "no automatic restart: no service manager"
+	if userMode && runtime.GOOS == "windows" {
+		return noRestart + "; does not survive logout"
+	}
+	return noRestart
 }
 
 // processAlive reports whether a pid is live.

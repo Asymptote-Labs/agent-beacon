@@ -1,0 +1,45 @@
+id: w01-install-service
+platform: windows
+# Exercises `beacon endpoint install --system` on Windows: does it register a service with the
+# Service Control Manager, does that service reach running, and does the endpoint report the
+# backend it actually selected?
+#
+# The service question is settled before the agent is involved. expect_service_kind is what makes
+# this scenario mean what it claims: "running" alone is satisfied by the supervised fallback too,
+# so without it a host where SCM registration failed would pass while testing the wrong backend
+# entirely -- the same trap the Linux systemd scenario documents.
+#
+# Capture is asserted only optionally, and that is deliberate rather than lax. Hook installation on
+# Windows still emits a POSIX `VAR=value cmd` string that neither Windows shell accepts, so nothing
+# reaches the collector through hooks yet. Marking these required would make the scenario fail for
+# a known reason and stop it reporting the service facts it exists to establish. They become
+# required in the change that fixes the hook command format.
+prompt: >-
+  Run exactly this PowerShell command and then report its output verbatim:
+  Write-Output '{{canary}}' | Tee-Object -FilePath '{{sentinel}}'
+sentinel: '{{workdir}}\w01.sentinel'
+budget_usd: 1.0
+timeout_seconds: 420
+
+install:
+  mode: system
+  service: windows-service
+  expect_status_running: true
+  expect_service_kind: windows-service
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    optional: true
+    why: >-
+      Capture through an installed Windows endpoint. Optional until hook installation emits a
+      command Windows can execute; the service assertions above are what this scenario gates on
+      today, and they are checked before the session runs.
+
+  - action: command.executed
+    fields: ["command.command"]
+    optional: true
+    why: >-
+      e.command.command is the detection surface for the whole rules/risky-command/ category. The
+      exporter now reads it from Claude Code's PowerShell tool, so this is the assertion that will
+      prove the fix end to end once hooks deliver events at all.

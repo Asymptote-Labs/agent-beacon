@@ -31,6 +31,13 @@ const (
 	// short lowercase names rather than launchd's reverse-DNS labels.
 	SystemdSystemUnit = "beacon-collector.service"
 	SystemdUserUnit   = "beacon-collector.service"
+
+	// WindowsServiceName is the SCM service name. Windows convention is a short PascalCase
+	// identifier rather than launchd's reverse-DNS label or systemd's unit filename.
+	WindowsServiceName = "BeaconCollector"
+	// WindowsServiceDisplayName is what an operator sees in services.msc, where the terse
+	// service name is not the column people read.
+	WindowsServiceDisplayName = "Beacon endpoint collector"
 )
 
 // Kind identifies which service manager backs a Manager.
@@ -47,7 +54,21 @@ const (
 	// KindSupervised is a detached child process tracked by a pidfile. No OS service
 	// manager is involved, so it works in containers, CI, and on systems without systemd.
 	KindSupervised Kind = "none"
+	// KindWindowsService is the Windows Service Control Manager.
+	KindWindowsService Kind = "windows-service"
 )
+
+// ManagedKinds is every concrete backend a Beacon install could be running under.
+//
+// Uninstall and repair unload all of them rather than only the one detection picks right now, so an
+// endpoint installed under one manager and removed under another leaves nothing registered. The
+// list lives here, beside the kinds themselves, because the bug it prevents is silent at the call
+// site: a backend added without being added to the caller's own list leaves a service running after
+// an uninstall that reported success, and nothing surfaces it until the machine is rebooted and the
+// collector comes back from the dead.
+func ManagedKinds() []Kind {
+	return []Kind{KindLaunchd, KindSystemd, KindSupervised, KindWindowsService}
+}
 
 // ParseKind validates a user-supplied service kind.
 func ParseKind(s string) (Kind, error) {
@@ -60,8 +81,10 @@ func ParseKind(s string) (Kind, error) {
 		return KindSystemd, nil
 	case KindSupervised, "supervised":
 		return KindSupervised, nil
+	case KindWindowsService, "scm", "windows":
+		return KindWindowsService, nil
 	default:
-		return "", fmt.Errorf("unsupported service kind %q; want auto, launchd, systemd, or none", s)
+		return "", fmt.Errorf("unsupported service kind %q; want auto, launchd, systemd, windows-service, or none", s)
 	}
 }
 
@@ -97,6 +120,8 @@ func (k Kind) ServiceNoun() string {
 		return "launchd service definition"
 	case KindSystemd:
 		return "systemd unit definition"
+	case KindWindowsService:
+		return "Windows service registration"
 	case KindSupervised:
 		return "supervised collector state (no service manager on this host)"
 	default:
@@ -159,6 +184,8 @@ func DetectKind() Kind {
 			return KindSystemd
 		}
 		return KindSupervised
+	case "windows":
+		return KindWindowsService
 	default:
 		return KindSupervised
 	}
@@ -177,6 +204,16 @@ func (m Manager) backend() backend {
 		return launchdBackend{}
 	case KindSystemd:
 		return systemdBackend{}
+	case KindWindowsService:
+		// User mode falls back to supervised, because Windows has no per-user service manager:
+		// there is no equivalent of `systemctl --user` or launchd's gui/<uid> domain. Reported
+		// honestly by the supervised backend's status rather than pretended around -- a user-mode
+		// collector there does not survive logout, and saying so is the whole point of having the
+		// supervised backend be a real answer instead of a failure.
+		if m.UserMode {
+			return supervisedBackend{}
+		}
+		return windowsBackend{}
 	default:
 		return supervisedBackend{}
 	}

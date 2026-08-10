@@ -979,8 +979,24 @@ func actionForCheck(check diagnostics.Check, runtimeLog lifecycle.RuntimeLogSour
 	case "runtime_log":
 		return "beacon endpoint doctor --fix"
 	case "runtime_log_permissions":
-		if check.Evidence == "runtime_log_missing" || check.Evidence == "missing_optional_file" {
+		// Branch on evidence rather than falling through to chmod. Windows reaches this check too
+		// now, and chmod neither exists there nor would restore an ACL if it did -- so the single
+		// most consequential remediation string on that platform, the one printed for a system-mode
+		// log that hooks cannot write, was advice that could not work.
+		switch check.Evidence {
+		case "runtime_log_missing", "missing_optional_file":
 			return "beacon endpoint doctor --fix"
+		case "acl_missing_interactive_write":
+			// Printed rather than only offered through --fix: this one needs an elevated shell, and
+			// an operator who cannot elevate right now still deserves to know the exact command.
+			if hint := writer.GrantCommandHint(check.Target); hint != "" {
+				return hint
+			}
+			return "beacon endpoint doctor --fix"
+		case "acl_not_writable_by_user":
+			return "grant your account write access to " + check.Target
+		case "acl_unreadable":
+			return "inspect the access control list on " + check.Target
 		}
 		return "chmod 666 " + check.Target
 	case "runtime_log_source":
@@ -1130,10 +1146,28 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 		}
 		switch check.Name {
 		case "runtime_log", "runtime_log_permissions", "last_event":
-			if check.Evidence == "missing_optional_file" || check.Evidence == "runtime_log_missing" {
+			switch check.Evidence {
+			case "missing_optional_file", "runtime_log_missing":
 				addFix(plannedAction{Action: "create_runtime_log", Target: status.LogPath, Message: "create runtime log file and parent directory"})
-			} else if check.Evidence == "last_event_missing" {
+			case "last_event_missing":
 				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
+			// The one permission failure that is repairable in place, and the one that matters
+			// most: without this grant a system-mode Windows endpoint runs a healthy collector
+			// that records nothing an agent did, because hooks cannot write to its log.
+			case "acl_missing_interactive_write":
+				addFix(plannedAction{Action: "grant_log_access", Target: check.Target, Message: "grant interactive users write access to the log directory"})
+			default:
+				// Anything else here is a permission problem doctor cannot repair. Reported as a
+				// skip rather than dropped: falling out of this switch is how a broken systemd unit
+				// once produced neither a fix nor a skip, and a check that silently repairs nothing
+				// reads exactly like a check that found nothing.
+				if check.Name == "runtime_log_permissions" {
+					message := "review the log permissions manually"
+					if check.Action != "" {
+						message = "run " + check.Action
+					}
+					addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: message})
+				}
 			}
 		// systemd_unit belongs here alongside launchd_plist: diagnostics emits whichever the
 		// resolved backend uses, and omitting it meant a broken systemd unit produced neither a
@@ -1181,6 +1215,12 @@ func applyDoctorFixes(plan doctorFixPlan, status lifecycle.Status) error {
 			}
 		case "repair_collector_service":
 			if err := repairCollectorServiceFromStatus(status); err != nil {
+				errs = append(errs, fmt.Errorf("%s %s: %w", action.Action, action.Target, err))
+			}
+		case "grant_log_access":
+			// The same call install makes, so a repaired endpoint and a fresh one end up with the
+			// same ACL rather than two grants that drift.
+			if err := writer.EnsureSystemLogWritable(action.Target); err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", action.Action, action.Target, err))
 			}
 		}

@@ -1,0 +1,32 @@
+id: w02-install-supervised
+platform: windows
+# User-mode install on Windows, which is the supervised backend rather than a second service.
+#
+# Windows has no per-user service manager -- no equivalent of `systemctl --user` or launchd's
+# gui/<uid> domain -- so `--user` falls back to a detached child tracked by a pidfile. That is a
+# real limitation, and this scenario exists to pin it: expect_service_kind asserts the fallback
+# actually happened rather than a service being registered under the user's name, which is what a
+# future change to the routing would silently do.
+#
+# The honest consequence, which status reports in-band: nothing restarts this collector, and it
+# does not survive logout.
+prompt: >-
+  Run exactly this PowerShell command and then report its output verbatim:
+  Write-Output '{{canary}}' | Tee-Object -FilePath '{{sentinel}}'
+sentinel: '{{workdir}}\w02.sentinel'
+budget_usd: 1.0
+timeout_seconds: 420
+
+install:
+  mode: user
+  expect_status_running: true
+  expect_service_kind: none
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    optional: true
+    why: >-
+      Same reason as w01: hook installation on Windows does not yet emit a command Windows can
+      execute, so capture is recorded rather than gated. The backend selection above is what this
+      scenario asserts today.
