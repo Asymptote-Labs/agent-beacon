@@ -100,6 +100,14 @@ func testApplier(t *testing.T, current string, srv *httptest.Server) *Applier {
 }
 
 func TestApplyHappyPath(t *testing.T) {
+	// The staged artifact is a `#!/bin/sh` stand-in for the beacon binary, and Apply's health check
+	// executes it. Windows has no shebangs, so the check cannot run -- and the Windows apply path
+	// is a different flow entirely (msiexec plus an Authenticode check, rather than a tarball into
+	// an install prefix), which does not exist yet. Skipped rather than adapted so the skip
+	// disappears when that flow lands instead of hiding it.
+	if runtime.GOOS == "windows" {
+		t.Skip("the POSIX apply flow stages an executable shell stub; the Windows flow is not implemented yet")
+	}
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()
@@ -124,6 +132,14 @@ func TestApplyHappyPath(t *testing.T) {
 }
 
 func TestApplyCleansSuccessfulUpdateStaging(t *testing.T) {
+	// The staged artifact is a `#!/bin/sh` stand-in for the beacon binary, and Apply's health check
+	// executes it. Windows has no shebangs, so the check cannot run -- and the Windows apply path
+	// is a different flow entirely (msiexec plus an Authenticode check, rather than a tarball into
+	// an install prefix), which does not exist yet. Skipped rather than adapted so the skip
+	// disappears when that flow lands instead of hiding it.
+	if runtime.GOOS == "windows" {
+		t.Skip("the POSIX apply flow stages an executable shell stub; the Windows flow is not implemented yet")
+	}
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := manifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()

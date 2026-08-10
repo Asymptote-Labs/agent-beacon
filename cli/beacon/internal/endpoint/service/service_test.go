@@ -268,7 +268,7 @@ func TestLaunchdIsInertOffDarwin(t *testing.T) {
 // rather than the old "does nothing" assertion.
 func TestSupervisedLifecycleStartsAndStopsAProcess(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
 
 	// Loading before install must explain itself rather than silently doing nothing.
@@ -283,10 +283,12 @@ func TestSupervisedLifecycleStartsAndStopsAProcess(t *testing.T) {
 	// `<program> --config <path>`, which every sleep implementation rejects as an invalid interval,
 	// so the child exited immediately and the assertion below only passed when it won a race
 	// against the process being reaped. That made it pass on macOS and fail on a Linux runner.
-	stub := filepath.Join(home, "fake-collector")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexec sleep 300\n"), 0o755); err != nil {
-		t.Fatalf("write stub collector: %v", err)
-	}
+	//
+	// Nor can a shell script, which is what replaced it: Windows has no shebangs and decides
+	// executability by extension, so the stub could not be started there at all -- leaving process
+	// detach, graceful termination and liveness untested on the one platform where all three are
+	// newly written. See stubCollectorPath.
+	stub := stubCollectorPath(t)
 	if _, err := m.WriteUnit(stub, "300"); err != nil {
 		t.Fatalf("WriteUnit: %v", err)
 	}
@@ -330,7 +332,7 @@ func TestLaunchctlGuidance(t *testing.T) {
 
 func TestLaunchdLabelAndUnitPath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	user := Manager{UserMode: true, Kind: KindLaunchd}
 	if got := user.Label(); got != UserLabel {
@@ -359,7 +361,7 @@ func TestLaunchdLabelAndUnitPath(t *testing.T) {
 
 func TestSystemdLabelAndUnitPath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	user := Manager{UserMode: true, Kind: KindSystemd}
 	if got := user.Label(); got != SystemdUserUnit {
@@ -495,7 +497,7 @@ func TestSupervisedIsAlwaysAvailable(t *testing.T) {
 
 func TestSupervisedRecordsAndReportsState(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
 
 	if st := m.Status(); st.Loaded || st.Running {
