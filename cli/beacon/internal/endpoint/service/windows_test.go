@@ -41,11 +41,36 @@ func TestWindowsUserModeFallsBackToSupervised(t *testing.T) {
 		t.Errorf("user mode backend = %q, want %q -- Windows has no per-user service manager",
 			got, KindSupervised)
 	}
-	if runtime.GOOS == "windows" {
-		st := user.Status()
-		if !strings.Contains(strings.ToLower(st.Message), "restart") {
-			t.Errorf("user-mode status must disclose that nothing restarts it, got %q", st.Message)
-		}
+}
+
+// The fallback's limitations have to reach the operator, and reach them wherever an installed
+// endpoint is described -- not only while one happens to be running. Someone reading status on a
+// configured-but-stopped Windows user-mode endpoint is exactly the person who needs to know that
+// nothing will start it again and that it stops when they log off.
+//
+// Asserted against the message builder rather than through Status, because Status on a fresh
+// machine reports "nothing recorded" and would let the claim go untested -- which is how the first
+// version of this test passed locally and failed on a clean runner.
+func TestSupervisedStatusNamesWhatItCannotPromise(t *testing.T) {
+	caveats := supervisedCaveats(true)
+	if !strings.Contains(caveats, "no automatic restart") {
+		t.Errorf("caveats = %q, want the absence of restart-on-failure named", caveats)
+	}
+
+	// Logout is Windows-only and must be claimed only there: a detached POSIX process has its own
+	// session and outlives the login that started it, so saying otherwise would be false.
+	mentionsLogout := strings.Contains(caveats, "logout")
+	if runtime.GOOS == "windows" && !mentionsLogout {
+		t.Errorf("windows user mode must disclose that it stops at logout, got %q", caveats)
+	}
+	if runtime.GOOS != "windows" && mentionsLogout {
+		t.Errorf("a detached POSIX collector does survive logout; %q claims otherwise", caveats)
+	}
+
+	// System mode never carries the logout caveat: it is not tied to a login session on any
+	// platform, and on Windows it is not even this backend.
+	if strings.Contains(supervisedCaveats(false), "logout") {
+		t.Error("system mode must not claim a logout limitation")
 	}
 }
 
