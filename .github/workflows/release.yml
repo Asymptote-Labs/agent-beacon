@@ -297,6 +297,12 @@ jobs:
   windows-package:
     needs: goreleaser
     runs-on: windows-2025
+    # Bounded because a wedged msiexec is a plausible failure mode rather than a hypothetical one --
+    # the CI job that installs this same package documents it and bounds itself for the reason. This
+    # job does less than that one (no Go toolchain, no collector build), so it needs less headroom;
+    # what matters is that a hung installer fails the release the same morning instead of holding a
+    # runner for the six-hour GitHub default.
+    timeout-minutes: 20
     env:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
