@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -203,8 +204,12 @@ func emitManualCheckEvent(opts selfupdate.CheckEventOptions) error {
 func applyUpdate(parent context.Context, current string) error {
 	insecure := endpointUpdateOpts.allowInsecure
 	if !insecure {
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("applying an update requires root; rerun with sudo")
+		// Asked through lifecycle so the answer and the advice match the platform. os.Geteuid
+		// returns -1 on Windows unconditionally, so the previous check rejected every apply there
+		// and told the operator to use sudo -- advice that does not exist on the platform it was
+		// printed on.
+		if !lifecycle.HasSystemPrivileges() {
+			return fmt.Errorf("applying an update needs elevated privileges; %s", lifecycle.SystemPrivilegeHint())
 		}
 		if install := detectUpdateInstall(); !install.SupportsSeamlessUpdate() {
 			return fmt.Errorf("automatic apply is only supported for the system package install (detected: %s)", install.Kind)

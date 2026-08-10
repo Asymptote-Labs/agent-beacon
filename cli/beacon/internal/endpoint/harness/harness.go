@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"gopkg.in/yaml.v3"
 )
 
@@ -277,9 +279,16 @@ func DiscoverDevinDesktop() Harness {
 
 func DiscoverClaudeCowork() Harness {
 	h := Harness{Name: "claude_cowork", DisplayName: "Claude Cowork", Capability: "admin_otel"}
-	if fileExists("/Applications/Claude.app/Contents/Info.plist") {
-		h.Detected = true
-		h.ExecutablePath = "/Applications/Claude.app"
+	// Detection asks the cowork package where Claude Desktop lives, rather than keeping a second copy
+	// of that list here. The two answers were allowed to drift and did: this one knew only the macOS
+	// path, so a Windows machine with Claude Desktop installed reported it as absent -- and an operator
+	// could not tell that from a machine that genuinely does not have it.
+	for _, path := range cowork.DesktopPathsForOS(runtime.GOOS) {
+		if dirExists(path) {
+			h.Detected = true
+			h.ExecutablePath = path
+			break
+		}
 	}
 	h.TelemetryStatus = TelemetryMissing
 	h.Message = "Claude Cowork telemetry is configured in Claude organization settings"

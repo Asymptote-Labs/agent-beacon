@@ -169,6 +169,127 @@ jobs:
           }
           Write-Output "claude installed at $claudeExe"
 
+      # The question the hook work is gated on, and the one that cannot be answered from docs:
+      # what does a runtime actually do with a hook `command` string on Windows?
+      #
+      # It matters because the obvious answer is wrong in a way that produces silence. Beacon emits
+      # a quoted executable path followed by flags, which is correct in cmd.exe and in bash -- and a
+      # parse error in PowerShell, where a quoted string in command position is an expression that
+      # evaluates to itself and the arguments after it are a syntax error. The install would look
+      # perfect, the settings file would be valid, and no hook would ever run.
+      #
+      # Asked by testing the candidate forms rather than by identifying the shell, because the form
+      # is what has to work. Each form writes its own marker; whichever markers exist is the answer.
+      # Two forms also identify the shell outright, which turns "form A failed" into a reason.
+      - name: Which command forms does a Windows hook accept
+        id: hookshell
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $probe = 'C:\beacon-sandbox\hookprobe'
+          # A path with a space in it, because that is the case that makes quoting necessary at all:
+          # the real install path is under %ProgramData% or a user profile, and "C:\Users\Jane Doe"
+          # is ordinary.
+          $spaced = 'C:\beacon-sandbox\hook probe'
+          New-Item -ItemType Directory -Force -Path $probe, $spaced | Out-Null
+
+          # A batch file rather than an exe: it needs no build step, and the question is about how
+          # the command line is parsed, not about what runs at the end of it. cmd's own redirect
+          # writes ANSI, avoiding the UTF-16 that PowerShell 5.1's `>` would produce.
+          $body = @('@echo off', ('echo %1 1>"' + $probe + '\out-%1.txt"'))
+          $markSpaced = Join-Path $spaced 'mark.cmd'
+          $markPlain = Join-Path $probe 'mark.cmd'
+          Set-Content -LiteralPath $markSpaced -Value $body -Encoding ascii
+          Set-Content -LiteralPath $markPlain -Value $body -Encoding ascii
+
+          $forms = [ordered]@{
+            # What Beacon emits today, modulo the env prefix: quoted path, then flags.
+            A = '"' + $markSpaced + '" A'
+            # The PowerShell call operator, which is how that form is written there.
+            B = '& "' + $markSpaced + '" B'
+            # Explicitly through cmd, which would work from either shell at the cost of a
+            # process and of nested quoting.
+            C = 'cmd /c ""' + $markSpaced + '" C"'
+            # Unquoted and space-free: works everywhere, and is what Beacon would be relying on
+            # if it simply never quoted. Included to show that the harness itself works even when
+            # every quoted form fails.
+            E = $markPlain + ' E'
+            # Shell tells. cmd expands %COMSPEC%; PowerShell and bash write it literally. bash
+            # expands $BASH_VERSION; the other two do not.
+            D = 'echo %COMSPEC% 1>"' + $probe + '\out-D.txt"'
+            H = 'echo "$BASH_VERSION" > "' + $probe + '\out-H.txt"'
+          }
+
+          $entries = @()
+          foreach ($key in $forms.Keys) {
+            Write-Output ("form {0}: {1}" -f $key, $forms[$key])
+            $entries += @{ type = 'command'; command = $forms[$key] }
+          }
+
+          $claudeDir = Join-Path $env:USERPROFILE '.claude'
+          New-Item -ItemType Directory -Force -Path $claudeDir | Out-Null
+          $settingsPath = Join-Path $claudeDir 'settings.json'
+          # Preserved and put back, because the scenario that runs after this one reads the same
+          # file. A probe that leaves the machine different from how it found it turns the next
+          # failure into an investigation of the wrong thing.
+          $backup = $null
+          if (Test-Path -LiteralPath $settingsPath) {
+            $backup = Get-Content -Raw -LiteralPath $settingsPath
+          }
+          # Built as an object and serialized, rather than written as literal JSON: these commands
+          # are full of backslashes and quotes, and hand-escaping them is how a probe ends up
+          # testing its own escaping instead of the thing it was written to ask.
+          $settings = @{ hooks = @{ UserPromptSubmit = @(@{ hooks = $entries }) } }
+          $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+          Get-Content -LiteralPath $settingsPath | Write-Output
+
+          # A trivial prompt: the session only has to reach prompt submission, which is when
+          # UserPromptSubmit fires. No tools, so no permission decisions are involved.
+          & claude -p 'reply with the single word ok' --dangerously-skip-permissions 2>&1 |
+            Out-String | Write-Output
+          if ($LASTEXITCODE -ne 0) {
+            # Question 1 of the original probe: the runner is an administrator with UAC disabled,
+            # and Claude Code refuses to run as root on POSIX. If that is what happened, say so
+            # rather than reporting the forms as failed.
+            Write-Output "claude exited $LASTEXITCODE with the skip-permissions flag; retrying without it"
+            & claude -p 'reply with the single word ok' 2>&1 | Out-String | Write-Output
+            Write-Output "second attempt exited $LASTEXITCODE"
+          }
+
+          $found = @{}
+          Get-ChildItem -LiteralPath $probe -Filter 'out-*.txt' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              $name = $_.BaseName -replace '^out-', ''
+              $text = (Get-Content -Raw -LiteralPath $_.FullName -ErrorAction SilentlyContinue)
+              if ($null -eq $text) { $text = '' }
+              $found[$name] = $text.Trim()
+              Write-Output ("MARKER {0} = {1}" -f $name, $found[$name])
+            }
+
+          foreach ($key in $forms.Keys) {
+            if (-not $found.ContainsKey($key)) { Write-Output ("MISSING {0}" -f $key) }
+          }
+
+          $shell = 'unknown'
+          if ($found.ContainsKey('D') -and $found['D'] -match 'cmd\.exe') { $shell = 'cmd.exe' }
+          elseif ($found.ContainsKey('H') -and $found['H'] -match '^\d+\.') { $shell = 'bash' }
+          elseif ($found.ContainsKey('D') -or $found.ContainsKey('H')) { $shell = 'powershell' }
+          Write-Output ("HOOK_SHELL={0}" -f $shell)
+          Write-Output ("QUOTED_EXE_WITH_ARGS={0}" -f $found.ContainsKey('A'))
+
+          # Restored before the scenario runs. Beacon's own install merges into this file, and hooks
+          # left behind here would fire during the scenario and be indistinguishable from Beacon's.
+          if ($null -ne $backup) {
+            Set-Content -LiteralPath $settingsPath -Value $backup -NoNewline -Encoding utf8
+          } else {
+            Remove-Item -LiteralPath $settingsPath -Force -ErrorAction SilentlyContinue
+          }
+          if ($found.Count -eq 0) {
+            throw 'no hook ran at all: this says nothing about command forms, only that UserPromptSubmit did not fire'
+          }
+
       # Phase 3 registers beacon-otelcol.exe with the Service Control Manager directly, on the
       # strength of the builder-generated main_windows.go calling svc.Run(otelcol.NewSvcHandler).
       # That is an assumption about a code path nothing has exercised: running the binary as an

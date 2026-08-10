@@ -1555,15 +1555,30 @@ func TestEndpointUpdateApplyFlagRegistered(t *testing.T) {
 	}
 }
 
-func TestApplyUpdateRequiresRoot(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can apply updates")
+// TestApplyUpdateRequiresElevation asks the same question the code now asks.
+//
+// It used to check for the literal words "requires root", which is the POSIX spelling. That phrasing
+// was wrong on Windows in both directions: os.Geteuid returns -1 there so the guard could never pass,
+// and the advice it printed -- rerun with sudo -- names a command the platform does not have. The
+// requirement is elevation; what elevation is called is the platform's business.
+func TestApplyUpdateRequiresElevation(t *testing.T) {
+	if lifecycle.HasSystemPrivileges() {
+		t.Skip("an elevated process can apply updates")
 	}
 	oldAllow := endpointUpdateOpts.allowInsecure
 	t.Cleanup(func() { endpointUpdateOpts.allowInsecure = oldAllow })
 	endpointUpdateOpts.allowInsecure = false
-	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires root") {
-		t.Fatalf("applyUpdate error = %v, want root requirement", err)
+	err := applyUpdate(context.Background(), "0.0.1")
+	if err == nil {
+		t.Fatal("applyUpdate succeeded without elevation")
+	}
+	if !strings.Contains(err.Error(), "elevated privileges") {
+		t.Fatalf("applyUpdate error = %v, want it to name the elevation requirement", err)
+	}
+	// The advice has to be runnable on the platform that printed it.
+	if !strings.Contains(err.Error(), lifecycle.SystemPrivilegeHint()) {
+		t.Fatalf("applyUpdate error = %v, want it to carry this platform's hint (%q)",
+			err, lifecycle.SystemPrivilegeHint())
 	}
 }
 

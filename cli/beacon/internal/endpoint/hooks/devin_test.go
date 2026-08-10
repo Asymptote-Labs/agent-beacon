@@ -26,9 +26,8 @@ func TestInstallDevinProjectHooksPreservesNonBeaconHooks(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"echo keep",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform devin",
 		"PermissionRequest",
 		"permission-request",

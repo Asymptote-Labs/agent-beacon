@@ -111,8 +111,17 @@ run_beacon endpoint hooks install --harness cursor --user --log-path "$LOG_PATH"
 run_beacon endpoint hooks status --harness cursor --user --log-path "$LOG_PATH" >/dev/null
 test -f "$HOME_DIR/.cursor/hooks.json"
 
-if ! grep -q 'BEACON_ENDPOINT_MODE=1' "$HOME_DIR/.cursor/hooks.json"; then
-  echo "expected Beacon hook command in Cursor hooks.json" >&2
+# The installed command passes its settings as flags rather than as an inline BEACON_ENDPOINT_MODE=1
+# prefix, so that prefix is no longer what identifies a Beacon hook. Asserting the log flag and the
+# platform instead: the flag is what makes it an endpoint hook, and the platform is what scopes it to
+# this runtime.
+if ! grep -q -- "--log " "$HOME_DIR/.cursor/hooks.json"; then
+  echo "expected Beacon hook command with --log in Cursor hooks.json" >&2
+  exit 1
+fi
+
+if ! grep -q -- "--platform cursor" "$HOME_DIR/.cursor/hooks.json"; then
+  echo "expected Beacon hook command scoped to cursor in Cursor hooks.json" >&2
   exit 1
 fi
 

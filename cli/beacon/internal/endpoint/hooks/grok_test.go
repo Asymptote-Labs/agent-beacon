@@ -41,10 +41,9 @@ func TestInstallGrokHooksWritesManagedHookFile(t *testing.T) {
 		}
 		command := groups[0].Hooks[0].Command
 		for _, want := range []string{
-			"BEACON_ENDPOINT_MODE=1",
 			"--platform grok",
-			"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-			"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+			"--log '/tmp/runtime.jsonl'",
+			"--config '/tmp/config.json'",
 			commandName,
 		} {
 			if !strings.Contains(command, want) {

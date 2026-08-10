@@ -276,6 +276,21 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	var res sandbox.Result
 	if sc.Install != nil {
 		installedLog, err := doInstall(ctx, g, sc, privileged, agent, lay, sh, &art, logf)
+		// Uninstall afterwards when the sandbox is this machine, whether or not the install
+		// succeeded -- a partial install still holds the OTLP ports.
+		//
+		// A disposable per-scenario instance makes this unnecessary: Terminate throws the machine
+		// away and the next scenario starts clean. LocalExec has no machine to throw away, so an
+		// installed endpoint outlives the scenario that installed it, and the next install fails on
+		// "OTLP gRPC port 4317 and HTTP port 4318 are already in use". That is what happened: a
+		// system-mode scenario left its collector running and the user-mode scenario after it could
+		// not bind, so the suite's result depended on the order its scenarios happened to run in.
+		//
+		// Deferred rather than run inline because artifact collection happens further down this
+		// function and needs the log to still be there; --keep-logs is what makes that safe.
+		if local && !opts.KeepInstance {
+			defer teardownInstall(ctx, g, sc, privileged, logf)
+		}
 		if err != nil {
 			return art, err
 		}
@@ -824,4 +839,45 @@ func installedLogPath(ctx context.Context, g guest,
 	}
 	logf("status unparseable; falling back to the documented default log path")
 	return lay.DefaultLogPath(in.Mode == "system"), nil
+}
+
+// teardownInstall removes an endpoint the scenario installed, so the next scenario on this machine
+// starts from the same state the first one did.
+//
+// Only reached when the provider mutates the host. Everywhere else the instance is discarded, which
+// is a stronger guarantee than any uninstall: it also takes back whatever the install touched that
+// uninstall does not know about.
+//
+// Failures are logged rather than returned. This runs after the scenario has been judged, so turning
+// a cleanup problem into a scenario failure would report the wrong thing -- but staying silent would
+// leave the *next* scenario to fail for a reason that has nothing to do with it, which is exactly the
+// confusion this function exists to prevent. Naming it here is what makes that traceable.
+func teardownInstall(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged sandbox.ExecOpts, logf func(string, ...any)) {
+
+	scope := "--user"
+	if sc.Install != nil && sc.Install.Mode == "system" {
+		scope = "--system"
+	}
+	// The log is deliberately *not* kept.
+	//
+	// Collection happens inline, before any deferred function runs, so this cannot take away an
+	// artifact the run still needs. Keeping it does active harm: every system-mode scenario installs
+	// to the same %ProgramData% path and the collector appends, so a kept log carries the previous
+	// scenario's events into the next one's verdict. Three scenarios in one suite reported 38, then
+	// 87, then 129 events -- 38 + 49 is 87, which is the accumulation showing through rather than a
+	// scenario capturing more.
+	//
+	// An expectation scoped by the run's canary survives that; one that only requires a field to be
+	// present does not, and would pass on a leftover from the scenario before. Removing the log is
+	// what makes each scenario judge its own run.
+	res, err := g.Exec(ctx, "beacon endpoint uninstall "+scope+" 2>&1", privileged)
+	switch {
+	case err != nil:
+		logf("teardown: uninstall %s did not run: %v", scope, err)
+	case res.ExitCode != 0:
+		logf("teardown: uninstall %s exited %d: %s", scope, res.ExitCode, oneLine(res.Stdout))
+	default:
+		logf("teardown: uninstalled the %s endpoint", strings.TrimPrefix(scope, "--"))
+	}
 }

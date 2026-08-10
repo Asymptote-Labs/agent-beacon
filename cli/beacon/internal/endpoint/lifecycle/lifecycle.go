@@ -624,8 +624,9 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 		}
 		return fmt.Errorf("--service=%s is not usable here: %s", kind, reason)
 	}
-	if !cfg.UserMode && os.Geteuid() != 0 {
-		return fmt.Errorf("system install requires root; rerun with sudo or omit --system for the default user install")
+	if !cfg.UserMode && !HasSystemPrivileges() {
+		return fmt.Errorf("system install needs elevated privileges; %s, or omit --system for the default user install",
+			SystemPrivilegeHint())
 	}
 	if !startService {
 		return nil
