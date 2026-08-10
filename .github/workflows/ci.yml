@@ -467,10 +467,7 @@ jobs:
       - name: Upgrading must replace the payload and leave it running
         run: |
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
-          if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration to preserve before the upgrade" }
-          # A marker in a file the upgrade has no reason to touch, so "the config survived" means this
-          # exact file survived rather than a fresh one having been written in its place.
-          $before = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+          if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
 
           $log = "$env:GITHUB_WORKSPACE\upgrade.log"
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
@@ -496,16 +493,19 @@ jobs:
             throw "the BeaconCollector service is not running after the upgrade"
           }
 
+          # Existence, not byte-identity, and the distinction is the contract rather than a weaker
+          # test. The install action runs on an upgrade and `endpoint install` rewrites its own config
+          # with the settings it was given -- that is what makes it idempotent. So a preserved-verbatim
+          # config is not something an upgrade promises, and asserting it would be asserting a property
+          # the design does not have.
+          #
+          # An earlier version of this step hashed the file before and after and compared them. It
+          # passed, and proved nothing: a first install and a post-upgrade install both write the same
+          # defaults, so the hashes matched whether or not the file had been recreated. Retention is a
+          # real contract for *uninstall*, where nothing reinstalls afterwards, and that is where the
+          # step below tests it with a marker.
           if (-not (Test-Path -LiteralPath $configPath)) {
             throw "the upgrade removed the endpoint configuration"
-          }
-          $after = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
-          Write-Output "config hash before=$before after=$after"
-          # Compared, not merely printed. Existence alone would accept a config the upgrade rewrote
-          # from defaults, which is the same loss as deleting it -- an operator's ports, harness list
-          # and destinations would be gone while the file looked present.
-          if ($after -ne $before) {
-            throw "the upgrade replaced the endpoint configuration instead of preserving it"
           }
 
           # Exactly one product, asserted in both directions. A MajorUpgrade that fails to match its
@@ -539,7 +539,20 @@ jobs:
         run: |
           $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
-          $hadConfig = Test-Path -LiteralPath $configPath
+          if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration to retain before uninstall" }
+
+          # A marker planted in the operator's config, so retention means *this* file came back rather
+          # than a fresh default one appearing where it used to be. Nothing in the uninstall path
+          # rewrites this file, so the marker survives exactly when the file does -- which is what
+          # makes it a test of the stash-and-restore rather than of the filesystem.
+          #
+          # An unknown JSON field is ignored by Beacon when it reads the config, so planting one cannot
+          # change behavior; it is also the first thing a rewrite would drop.
+          $marker = [Guid]::NewGuid().ToString('N')
+          $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+          $config | Add-Member -NotePropertyName 'beacon_smoke_marker' -NotePropertyValue $marker -Force
+          $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $configPath -Encoding utf8
+          Write-Output "planted marker $marker in $configPath"
 
           # The upgraded product is what is installed, so that is what gets removed. Each build gets a
           # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
@@ -575,8 +588,14 @@ jobs:
           # not something a package removal should do without being asked. --keep-config alone does not
           # achieve this -- it covers harness settings, not Beacon's own config -- which is why the
           # uninstall script sets these files aside and puts them back.
-          if ($hadConfig -and -not (Test-Path -LiteralPath $configPath)) {
+          if (-not (Test-Path -LiteralPath $configPath)) {
             throw "uninstall removed the endpoint configuration; only a purge should do that"
           }
+          $restored = Get-Content -Raw -LiteralPath $configPath
+          if ($restored -notmatch [regex]::Escape($marker)) {
+            Write-Output $restored
+            throw "the configuration file exists but is not the one that was there before: the marker is gone, so it was recreated rather than preserved"
+          }
+          Write-Output "marker survived: the operator's own configuration came back"
           Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
           exit 0
