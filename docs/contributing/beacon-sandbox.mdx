@@ -1,15 +1,28 @@
 ---
 title: "Testing Beacon In A Sandbox"
-description: "Run a real AI coding session in a throwaway Linux machine and check that Beacon recorded it"
+description: "Run a real AI coding session in a throwaway Linux or Windows machine and check that Beacon recorded it"
 ---
 
 ## Overview
 
-`beacon-sandbox` is a testing tool for Beacon contributors. It starts a throwaway Linux machine in the cloud, installs your local Beacon build on it, runs a real Claude Code session inside it, and then checks whether Beacon recorded what the agent actually did.
+`beacon-sandbox` is a testing tool for Beacon contributors. It starts a throwaway machine, installs your local Beacon build on it, runs a real Claude Code session inside it, and then checks whether Beacon recorded what the agent actually did.
 
 You would use it when you have changed something about how Beacon captures telemetry and you want proof that it still works against a live agent — not just that the unit tests pass.
 
 Nothing runs on your own machine, so your local Beacon setup is untouched, and the machine is destroyed when the test finishes.
+
+It runs on two platforms, and where the throwaway machine comes from is the only real difference:
+
+| Testing | Machine | What you need |
+|---|---|---|
+| Linux | A Modal sandbox, rented per test | A Modal account and an Anthropic API key |
+| Windows | A GitHub-hosted runner, which is already disposable | Write access to this repository and an Anthropic API key |
+| macOS | — | Not possible; neither backend offers macOS. See [Limitations](#limitations) |
+
+Everything after that is shared — the same scenario files, the same checks, the same verdicts, the same
+`verify` and `--mutate` commands. Most of this page applies to both. If you are working on Windows,
+read [Testing The Windows Build](#testing-the-windows-build) for the parts that differ, and skip the
+Modal setup below.
 
 <Note>
   This is a tool for working *on* Beacon. It is not part of Beacon itself, it is not included in any release, and installing Beacon does not install this. Beacon's own telemetry collection stays local and offline as always.
@@ -31,6 +44,9 @@ The tool works around this with markers rather than exact comparison:
 That second part is what makes the results trustworthy. Without it, "Beacon missed the event" and "the agent never ran the command" look exactly the same.
 
 ## Before You Start
+
+This section covers the **Linux** backend. Testing the Windows build needs neither a Modal account nor
+any of the setup below — see [Setting It Up](#setting-it-up) in the Windows section instead.
 
 You need two accounts, and neither can be set up for you:
 
@@ -174,6 +190,9 @@ Tests encode what Beacon *should* do. When Beacon's behaviour legitimately impro
 </Warning>
 
 ## The Tests You Can Run
+
+These run on the Linux backend. The Windows ones are listed in
+[Testing The Windows Build](#running-one).
 
 ```bash
 go run ./cmd/beacon-sandbox run --scenario s01-hello   # one test
