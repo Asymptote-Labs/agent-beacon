@@ -166,12 +166,33 @@ run_beacon endpoint hooks uninstall --harness opencode --user --log-path "$LOG_P
 test ! -f "$OPENCODE_PLUGIN"
 
 echo "Uninstalling endpoint config..."
+PLIST="$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist"
+
 run_beacon endpoint uninstall --user --log-path "$LOG_PATH" --keep-logs >/dev/null
 
 if [ -f "$HOME_DIR/.beacon/endpoint/config.json" ]; then
   echo "endpoint config was not removed by uninstall" >&2
   exit 1
 fi
+
+# The macOS counterpart of the Linux test's "unit file survived uninstall". A service definition left
+# behind is how a collector comes back at the next login after the operator was told it was removed --
+# the failure this whole assertion exists for, and the one that shipped once on Windows.
+if [ -f "$PLIST" ]; then
+  echo "launchd plist survived uninstall: $PLIST" >&2
+  exit 1
+fi
+echo "ok: the launchd plist was removed"
+
+# Deliberately not asked of launchd. This install passes --no-start into a temporary HOME, so no job is
+# ever bootstrapped -- which means any answer launchctl gave would be about some *other* install of the
+# same label: a real one on the machine running this script. Asserting on that would fail for a
+# developer who has Beacon installed and pass for one who does not, neither for a reason this test
+# caused.
+#
+# So the file is the honest subject. This install wrote that exact plist and the uninstall must take it
+# away. Whether launchd deregisters a job it had actually loaded is a real question that this test does
+# not answer; it needs a genuine login session, which no CI runner provides.
 
 test -f "$LOG_PATH"
 

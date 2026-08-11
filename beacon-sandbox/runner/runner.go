@@ -456,6 +456,13 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	art.RuntimeLog = localLog
 	logf("collected %s", localLog)
 
+	// Uninstall last, and only when the scenario asked. The runtime log is already on the host, so
+	// removing the endpoint cannot affect any capture assertion -- which is what makes it safe to do
+	// inside the same run rather than needing a scenario of its own.
+	if sc.Install != nil && sc.Install.VerifyUninstall {
+		probeUninstall(ctx, g, sc, privileged, agent, lay, sh, &art, logf)
+	}
+
 	// meta.json is written by the deferred host-state block above, so it always includes the
 	// host comparison.
 	return art, nil
@@ -802,8 +809,9 @@ func installedLogPath(ctx context.Context, g guest,
 	if err == nil {
 		art.Meta["install_status"] = oneLine(s.Stdout)
 		var status struct {
-			LogPath string `json:"log_path"`
-			Service struct {
+			LogPath    string `json:"log_path"`
+			ConfigPath string `json:"config_path"`
+			Service    struct {
 				Label   string `json:"label"`
 				Loaded  bool   `json:"loaded"`
 				Running bool   `json:"running"`
@@ -812,6 +820,10 @@ func installedLogPath(ctx context.Context, g guest,
 			} `json:"service"`
 		}
 		if json.Unmarshal([]byte(s.Stdout), &status) == nil {
+			// Recorded so a later uninstall probe checks the paths Beacon actually used rather than
+			// the ones a scenario assumed.
+			art.Meta["install_log_path"] = status.LogPath
+			art.Meta["install_config_path"] = status.ConfigPath
 			art.Meta["service_kind"] = status.Service.Kind
 			art.Meta["service_label"] = status.Service.Label
 			art.Meta["service_loaded"] = fmt.Sprintf("%v", status.Service.Loaded)
@@ -879,5 +891,86 @@ func teardownInstall(ctx context.Context, g guest, sc scenario.Scenario,
 		logf("teardown: uninstall %s exited %d: %s", scope, res.ExitCode, oneLine(res.Stdout))
 	default:
 		logf("teardown: uninstalled the %s endpoint", strings.TrimPrefix(scope, "--"))
+	}
+}
+
+// probeUninstall removes the endpoint and records what survived.
+//
+// Deliberately records rather than judges. Every other verdict in this tool is produced by the pure
+// check package from collected artifacts, which is what makes `verify` able to re-judge a saved run
+// for free -- so this writes observations into meta and leaves the conclusions to check.Uninstall.
+//
+// The observations are gathered by asking the operating system, not by asking Beacon. `endpoint
+// status` reporting "not installed" is Beacon's opinion of its own state; whether the service is
+// still registered is a fact about the machine, and those are exactly the two that came apart in the
+// bug this exists to catch.
+func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged, agent sandbox.ExecOpts, lay image.Layout, sh shell,
+	art *Artifacts, logf func(string, ...any)) {
+
+	system := sc.Install.Mode == "system"
+	scope := "--user"
+	opts := agent
+	if system {
+		scope = "--system"
+		opts = privileged
+	}
+
+	// The service label and kind were recorded at install time. Without them there is nothing to ask
+	// the service manager about, so the probe says so rather than reporting a removal it could not
+	// verify.
+	label := art.Meta["service_label"]
+	kind := art.Meta["service_kind"]
+
+	// The log path comes from the install status, so the probe checks the path Beacon actually used
+	// rather than the one the scenario assumed.
+	//
+	// The endpoint config is deliberately not checked. `endpoint uninstall` removes everything in its
+	// install manifest, which includes config.json and otelcol.yaml, and --keep-config does not change
+	// that -- it governs *harness* telemetry settings. Retaining Beacon's own config is a contract the
+	// packaging layer keeps by stashing those files around a removal, not one the CLI offers, so
+	// asserting it here would fail every correct run.
+	logPath := art.Meta["install_log_path"]
+
+	// --keep-logs, because keeping collected telemetry through a removal is a real contract: an
+	// uninstall is often the first half of a reinstall. Asserting that it held is half of what this
+	// probe is for; the other half is that the service actually went.
+	r, err := g.Exec(ctx, "beacon endpoint uninstall "+scope+" --keep-logs 2>&1", opts)
+	art.Meta["uninstall_ran"] = "true"
+	art.Meta["uninstall_output"] = oneLine(r.Stdout + r.Stderr)
+	art.Meta["uninstall_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	if err != nil {
+		art.Meta["uninstall_exec_error"] = oneLine(err.Error())
+	}
+	logf("uninstall rc=%d: %s", r.ExitCode, art.Meta["uninstall_output"])
+
+	// Asked of the service manager directly. A supervised collector has no manager to ask, so its
+	// absence is established from the pidfile instead, and the probe records which question it asked.
+	if label != "" && kind != "" && kind != "none" {
+		query := sh.ServiceQuery(kind, label)
+		if query != "" {
+			q, _ := g.Exec(ctx, query, opts)
+			art.Meta["uninstall_service_query"] = oneLine(q.Stdout + q.Stderr)
+			art.Meta["uninstall_service_query_rc"] = fmt.Sprintf("%d", q.ExitCode)
+			art.Meta["uninstall_service_gone"] = fmt.Sprintf("%v", sh.ServiceAbsent(kind, q.ExitCode, q.Stdout+q.Stderr))
+			logf("service %s after uninstall: gone=%s", label, art.Meta["uninstall_service_gone"])
+		}
+	} else if kind == "none" {
+		// The supervised backend's registration *is* its pidfile, so that is the thing that has to
+		// be gone.
+		art.Meta["uninstall_service_kind_supervised"] = "true"
+	}
+
+	// Retention, asked of the filesystem. An absent path is reported as unknown rather than as
+	// retained: a check that could not look must not conclude the file survived.
+	if logPath != "" {
+		e, _ := g.Exec(ctx, sh.PathExists(logPath), opts)
+		art.Meta["uninstall_log_retained"] = fmt.Sprintf("%v", e.ExitCode == 0)
+	}
+
+	// Beacon's own account of itself, recorded alongside the machine's. When the two disagree, that
+	// disagreement is the finding.
+	if s, err := g.Exec(ctx, "beacon endpoint status "+scope+" --json 2>&1", opts); err == nil {
+		art.Meta["uninstall_status"] = oneLine(s.Stdout)
 	}
 }

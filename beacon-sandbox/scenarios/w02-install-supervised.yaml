@@ -21,6 +21,7 @@ install:
   mode: user
   expect_status_running: true
   expect_service_kind: none
+  verify_uninstall: true
 
 expect:
   - action: prompt.submitted
