@@ -26,6 +26,7 @@ install:
   service: windows-service
   expect_status_running: true
   expect_service_kind: windows-service
+  verify_uninstall: true
 
 expect:
   - action: prompt.submitted

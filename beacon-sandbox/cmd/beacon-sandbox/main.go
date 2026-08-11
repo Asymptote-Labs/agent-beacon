@@ -398,6 +398,20 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 		Probed:   art.SentinelProbed,
 		Detail:   art.SentinelDetail,
 	}, check.Session{Known: art.SessionKnown, OK: art.SessionOK})
+	// Read from meta rather than from a live probe, so `verify` re-judges a saved run's removal for
+	// free exactly as it re-judges its capture.
+	check.Uninstall(&v, check.Removal{
+		Ran:            art.Meta["uninstall_ran"],
+		ExitCode:       art.Meta["uninstall_rc"],
+		Output:         art.Meta["uninstall_output"],
+		ServiceKind:    art.Meta["service_kind"],
+		ServiceLabel:   art.Meta["service_label"],
+		ServiceGone:    art.Meta["uninstall_service_gone"],
+		ServiceQuery:   art.Meta["uninstall_service_query"],
+		ConfigRetained: art.Meta["uninstall_config_retained"],
+		LogRetained:    art.Meta["uninstall_log_retained"],
+		Status:         art.Meta["uninstall_status"],
+	})
 	v.Resolve()
 	return v, log
 }
@@ -542,12 +556,20 @@ func judgeRunDir(root, dir, mutate string) (check.Verdict, error) {
 	logPath := filepath.Join(dir, "runtime.jsonl")
 	var planted string
 	if mutate != "" {
-		logPath, planted, err = applyMutation(logPath, mutate)
-		if err != nil {
-			return check.Verdict{}, err
+		// The uninstall checks read what the runner observed about the machine, not the event log, so
+		// damaging the log could never exercise them. Their mutations rewrite the recorded observation
+		// instead -- which is the same idea applied to a different artifact, and the only way a check
+		// that reads meta can be shown to be capable of failing.
+		if applyMetaMutation(meta, mutate) {
+			fmt.Printf("(mutation %q applied to run metadata: a PASS becoming FAIL is the check working)\n", mutate)
+		} else {
+			logPath, planted, err = applyMutation(logPath, mutate)
+			if err != nil {
+				return check.Verdict{}, err
+			}
+			defer os.Remove(logPath)
+			fmt.Printf("(mutation %q applied: a PASS becoming FAIL is the check working)\n", mutate)
 		}
-		defer os.Remove(logPath)
-		fmt.Printf("(mutation %q applied: a PASS becoming FAIL is the check working)\n", mutate)
 	}
 
 	art := runner.Artifacts{RuntimeLog: logPath, Meta: meta}
@@ -702,7 +724,7 @@ func applyMutation(path, mode string) (mutated string, planted string, err error
 		}
 	default:
 		return "", "", fmt.Errorf("unknown mutation %q (want drop-commands, drop-action:<action>, "+
-			"corrupt-line, or plant-secret)", mode)
+			"corrupt-line, plant-secret, leave-service, or drop-retained-config)", mode)
 	}
 
 	// The shared post-condition: the log must differ from what it was. Compared on the trimmed
@@ -811,4 +833,33 @@ func indent(s string) string {
 		b.WriteString("  " + line + "\n")
 	}
 	return b.String()
+}
+
+// applyMetaMutation damages a recorded observation rather than the event log, and reports whether it
+// recognised the mode.
+//
+// The uninstall checks judge what the runner saw the machine do — whether a service was still
+// registered, whether configuration survived. None of that is in runtime.jsonl, so the log mutations
+// cannot exercise them, and a check that cannot be made to fail is worse than no check at all.
+//
+// Each mode inverts exactly one observation, so the resulting failure names the check under test
+// rather than a cascade.
+func applyMetaMutation(meta map[string]string, mode string) bool {
+	if meta == nil || meta["uninstall_ran"] != "true" {
+		// Nothing to damage. A run that never uninstalled cannot demonstrate an uninstall check, and
+		// silently "succeeding" here would report a self-test as passed when it never ran.
+		return false
+	}
+	switch mode {
+	case "leave-service":
+		// The failure this simulates is the one that shipped: uninstall reports success while the
+		// service stays registered and starts at boot.
+		meta["uninstall_service_gone"] = "false"
+		return true
+	case "drop-retained-config":
+		// The opposite direction: a removal that took the operator's configuration with it.
+		meta["uninstall_config_retained"] = "false"
+		return true
+	}
+	return false
 }

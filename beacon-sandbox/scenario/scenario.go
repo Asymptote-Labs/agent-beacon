@@ -58,6 +58,16 @@ type Install struct {
 	// implied by "running": the supervised fallback also reports running, so a systemd scenario
 	// on a host without systemd would otherwise pass while testing the wrong thing.
 	ExpectServiceKind string `yaml:"expect_service_kind,omitempty"`
+	// VerifyUninstall removes the endpoint after the capture assertions and checks that it went.
+	//
+	// Worth asking separately from install because uninstall fails in a shape nothing else catches:
+	// it reports success while leaving the service registered, so the collector returns at the next
+	// reboot after the operator was told it was gone. That shipped once in this repository and was
+	// caught by a reviewer reading a diff, because no run had ever asked the question.
+	//
+	// The removal is real, not a rehearsal. It runs after the runtime log has been collected, so the
+	// capture assertions are already settled and cannot be affected by it.
+	VerifyUninstall bool `yaml:"verify_uninstall,omitempty"`
 	// NeedsRealSystemd runs the install inside a nested privileged container where systemd is
 	// genuinely PID 1.
 	//

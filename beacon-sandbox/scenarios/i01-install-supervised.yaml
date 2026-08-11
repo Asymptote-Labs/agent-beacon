@@ -21,6 +21,7 @@ install:
   # Asserted rather than assumed: if systemd detection ever started returning true in a container,
   # this scenario would silently stop covering the fallback backend it exists to cover.
   expect_service_kind: none
+  verify_uninstall: true
 
 prompt: >-
   Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}

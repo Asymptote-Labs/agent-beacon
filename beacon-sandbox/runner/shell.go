@@ -41,6 +41,18 @@ type shell interface {
 	ArgvSampler() string
 	// ArgvVerdictPath is where the sampler writes what it saw.
 	ArgvVerdictPath() string
+	// PathExists exits zero when the path is there, non-zero when it is not.
+	PathExists(path string) string
+	// ServiceQuery asks the platform's service manager about a service by name, or returns empty
+	// when this backend has no manager to ask.
+	ServiceQuery(kind, label string) string
+	// ServiceAbsent interprets a ServiceQuery result as "no such service".
+	//
+	// Split from ServiceQuery because absence is spelled differently on each platform, and getting it
+	// wrong is the dangerous direction: a query whose failure is misread as absence would report a
+	// still-registered service as removed, which is precisely the bug an uninstall check exists to
+	// catch.
+	ServiceAbsent(kind string, exitCode int, output string) bool
 }
 
 // shellFor returns the dialect for a platform.
@@ -355,4 +367,69 @@ if (-not $env:ANTHROPIC_API_KEY) {
 [System.IO.File]::WriteAllText(%[2]s, [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('%[3]s')))
 Start-Process -FilePath 'pwsh' -ArgumentList '-NoProfile','-NonInteractive','-File',%[2]s,%[1]s -WindowStyle Hidden
 'ARGV_SAMPLER_STARTED'`, s.Quote(verdict), s.Quote(scriptPath), enc)
+}
+
+// PathExists uses test, which is a shell builtin and needs no external binary -- a minimal image may
+// have no coreutils.
+func (posixShell) PathExists(path string) string {
+	return "test -e " + (posixShell{}).Quote(path)
+}
+
+// ServiceQuery asks the manager that actually registered the service.
+//
+// Only systemd and launchd have anything to ask. The supervised backend's registration is its
+// pidfile, which the caller checks as a path instead, so this returns empty rather than inventing a
+// query that would always succeed.
+func (posixShell) ServiceQuery(kind, label string) string {
+	switch kind {
+	case "systemd":
+		// list-unit-files rather than status: status reports on a unit that no longer exists with the
+		// same exit code as one that is merely stopped, so it cannot distinguish removed from
+		// inactive. This prints nothing at all once the unit file is gone.
+		return "systemctl list-unit-files " + (posixShell{}).Quote(label) + " --no-legend 2>&1"
+	case "launchd":
+		return "launchctl print system/" + (posixShell{}).Quote(label) + " 2>&1"
+	}
+	return ""
+}
+
+// ServiceAbsent reads the query output for each manager's spelling of "not there".
+func (posixShell) ServiceAbsent(kind string, exitCode int, output string) bool {
+	trimmed := strings.TrimSpace(output)
+	switch kind {
+	case "systemd":
+		// A removed unit produces no rows. Non-zero with output is a different problem -- systemd
+		// unreachable, say -- and must not read as absence.
+		return trimmed == "" || strings.Contains(trimmed, "0 unit files listed")
+	case "launchd":
+		// launchctl prints this for a job it does not know about.
+		return exitCode != 0 && (strings.Contains(trimmed, "Could not find service") ||
+			strings.Contains(trimmed, "No such process"))
+	}
+	return false
+}
+
+// PathExists uses Test-Path and turns it into an exit code, because the caller compares exit codes
+// across platforms rather than parsing output.
+func (powerShell) PathExists(path string) string {
+	return "if (Test-Path -LiteralPath " + (powerShell{}).Quote(path) + ") { exit 0 } else { exit 1 }"
+}
+
+// ServiceQuery asks the Service Control Manager. The supervised backend has no manager, same as on
+// POSIX, so it gets no query.
+func (powerShell) ServiceQuery(kind, label string) string {
+	if kind == "windows-service" {
+		return "sc.exe query " + (powerShell{}).Quote(label) + " 2>&1"
+	}
+	return ""
+}
+
+// ServiceAbsent looks for error 1060, which is what sc.exe returns for a service that does not
+// exist. Matched on the number rather than the message text, because the message is localized and a
+// German or Japanese machine would otherwise report a removed service as still present.
+func (powerShell) ServiceAbsent(kind string, exitCode int, output string) bool {
+	if kind != "windows-service" {
+		return false
+	}
+	return strings.Contains(output, "1060")
 }

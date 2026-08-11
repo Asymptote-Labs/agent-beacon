@@ -65,3 +65,46 @@ func TestWindowsScenariosDeclareTheirPlatform(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryPlatformVerifiesUninstallSomewhere encodes the gap this closed.
+//
+// The gap was not "one scenario is missing an assertion" — it was that *no* scenario on *any* platform
+// ever asked whether uninstall removed anything. Every one installed, captured, and stopped. So the
+// property worth pinning is per-platform coverage, which stays true as capture scenarios are added and
+// would go false again if the lifecycle ones lost the flag.
+//
+// Deliberately not "every install scenario verifies uninstall". w03 and w04 install in order to test
+// capture; making them assert removal too would report an uninstall regression against a capture
+// scenario, which sends whoever reads it to the wrong code.
+func TestEveryPlatformVerifiesUninstallSomewhere(t *testing.T) {
+	suite, err := LoadSuite("../scenarios")
+	if err != nil {
+		t.Fatalf("LoadSuite: %v", err)
+	}
+
+	installs := map[Platform]int{}
+	verifies := map[Platform]int{}
+	for _, scenario := range suite.Scenarios {
+		if scenario.Install == nil {
+			continue
+		}
+		platform := scenario.TargetPlatform()
+		installs[platform]++
+		if scenario.Install.VerifyUninstall {
+			verifies[platform]++
+		}
+	}
+
+	if len(installs) == 0 {
+		t.Fatal("no scenario installs an endpoint, so nothing covers the install path at all")
+	}
+	for platform, count := range installs {
+		if verifies[platform] == 0 {
+			t.Errorf("%s has %d install scenario(s) and none of them verifies uninstall; "+
+				"an uninstall that reports success while leaving the service registered would go "+
+				"unnoticed on this platform", platform, count)
+		} else {
+			t.Logf("%s: %d/%d install scenarios verify uninstall", platform, verifies[platform], count)
+		}
+	}
+}

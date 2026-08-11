@@ -23,6 +23,7 @@ install:
   # Not redundant with the above. The supervised backend also reports running, so without this a
   # host where systemd detection failed would pass this scenario while testing the fallback.
   expect_service_kind: systemd
+  verify_uninstall: true
 
 prompt: >-
   Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}
