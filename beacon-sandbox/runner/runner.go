@@ -922,15 +922,20 @@ func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
 	label := art.Meta["service_label"]
 	kind := art.Meta["service_kind"]
 
-	// Config and log paths come from the install status, so the probe checks the paths Beacon
-	// actually used rather than the ones the scenario assumed.
-	configPath := art.Meta["install_config_path"]
+	// The log path comes from the install status, so the probe checks the path Beacon actually used
+	// rather than the one the scenario assumed.
+	//
+	// The endpoint config is deliberately not checked. `endpoint uninstall` removes everything in its
+	// install manifest, which includes config.json and otelcol.yaml, and --keep-config does not change
+	// that -- it governs *harness* telemetry settings. Retaining Beacon's own config is a contract the
+	// packaging layer keeps by stashing those files around a removal, not one the CLI offers, so
+	// asserting it here would fail every correct run.
 	logPath := art.Meta["install_log_path"]
 
-	// --keep-logs and --keep-config, because that is the contract a package removal keeps: an
-	// uninstall is often the first half of a reinstall, and destroying collected telemetry is a
-	// separate, deliberate act. Asserting the retention is half of what this probe is for.
-	r, err := g.Exec(ctx, "beacon endpoint uninstall "+scope+" --keep-logs --keep-config 2>&1", opts)
+	// --keep-logs, because keeping collected telemetry through a removal is a real contract: an
+	// uninstall is often the first half of a reinstall. Asserting that it held is half of what this
+	// probe is for; the other half is that the service actually went.
+	r, err := g.Exec(ctx, "beacon endpoint uninstall "+scope+" --keep-logs 2>&1", opts)
 	art.Meta["uninstall_ran"] = "true"
 	art.Meta["uninstall_output"] = oneLine(r.Stdout + r.Stderr)
 	art.Meta["uninstall_rc"] = fmt.Sprintf("%d", r.ExitCode)
@@ -956,17 +961,11 @@ func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
 		art.Meta["uninstall_service_kind_supervised"] = "true"
 	}
 
-	// Retention, asked of the filesystem. Absent paths are reported as unknown rather than as
-	// retained: a check that cannot see the file must not conclude it survived.
-	for key, path := range map[string]string{
-		"uninstall_config_retained": configPath,
-		"uninstall_log_retained":    logPath,
-	} {
-		if path == "" {
-			continue
-		}
-		e, _ := g.Exec(ctx, sh.PathExists(path), opts)
-		art.Meta[key] = fmt.Sprintf("%v", e.ExitCode == 0)
+	// Retention, asked of the filesystem. An absent path is reported as unknown rather than as
+	// retained: a check that could not look must not conclude the file survived.
+	if logPath != "" {
+		e, _ := g.Exec(ctx, sh.PathExists(logPath), opts)
+		art.Meta["uninstall_log_retained"] = fmt.Sprintf("%v", e.ExitCode == 0)
 	}
 
 	// Beacon's own account of itself, recorded alongside the machine's. When the two disagree, that

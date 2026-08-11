@@ -4,7 +4,7 @@ import "testing"
 
 // The meta mutations must turn a clean removal into a failure, or they prove nothing.
 func TestMetaMutationsInvertARecordedRemoval(t *testing.T) {
-	for _, mode := range []string{"leave-service", "drop-retained-config"} {
+	for _, mode := range []string{"leave-service", "drop-retained-log"} {
 		meta := map[string]string{
 			"uninstall_ran":             "true",
 			"uninstall_service_gone":    "true",
@@ -13,7 +13,7 @@ func TestMetaMutationsInvertARecordedRemoval(t *testing.T) {
 		if !applyMetaMutation(meta, mode) {
 			t.Fatalf("%s was not recognised as a meta mutation", mode)
 		}
-		if meta["uninstall_service_gone"] == "true" && meta["uninstall_config_retained"] == "true" {
+		if meta["uninstall_service_gone"] == "true" && meta["uninstall_log_retained"] == "true" {
 			t.Fatalf("%s changed nothing", mode)
 		}
 	}

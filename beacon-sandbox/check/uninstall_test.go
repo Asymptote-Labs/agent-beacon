@@ -9,15 +9,14 @@ import (
 // status agreeing.
 func clean() Removal {
 	return Removal{
-		Ran:            "true",
-		ExitCode:       "0",
-		Output:         "Endpoint uninstalled",
-		ServiceKind:    "systemd",
-		ServiceLabel:   "beacon-collector.service",
-		ServiceGone:    "true",
-		ConfigRetained: "true",
-		LogRetained:    "true",
-		Status:         `{"service":{"running":false}}`,
+		Ran:          "true",
+		ExitCode:     "0",
+		Output:       "Endpoint uninstalled",
+		ServiceKind:  "systemd",
+		ServiceLabel: "beacon-collector.service",
+		ServiceGone:  "true",
+		LogRetained:  "true",
+		Status:       `{"service":{"running":false}}`,
 	}
 }
 
@@ -100,12 +99,6 @@ func TestAnUnaskedServiceQuestionIsWarnedNotPassed(t *testing.T) {
 // rather than too little.
 func TestDestroyedDataFails(t *testing.T) {
 	r := clean()
-	r.ConfigRetained = "false"
-	if !has(findingsFor(r), "uninstall.data_retained", SevFail) {
-		t.Fatal("configuration destroyed by a non-purge uninstall did not fail")
-	}
-
-	r = clean()
 	r.LogRetained = "false"
 	if !has(findingsFor(r), "uninstall.data_retained", SevFail) {
 		t.Fatal("a runtime log destroyed by a non-purge uninstall did not fail")
@@ -114,7 +107,6 @@ func TestDestroyedDataFails(t *testing.T) {
 
 func TestUncheckedRetentionIsWarnedNotPassed(t *testing.T) {
 	r := clean()
-	r.ConfigRetained = ""
 	r.LogRetained = ""
 	findings := findingsFor(r)
 	if has(findings, "uninstall.data_retained", SevInfo) {

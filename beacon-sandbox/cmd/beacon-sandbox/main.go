@@ -401,16 +401,15 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 	// Read from meta rather than from a live probe, so `verify` re-judges a saved run's removal for
 	// free exactly as it re-judges its capture.
 	check.Uninstall(&v, check.Removal{
-		Ran:            art.Meta["uninstall_ran"],
-		ExitCode:       art.Meta["uninstall_rc"],
-		Output:         art.Meta["uninstall_output"],
-		ServiceKind:    art.Meta["service_kind"],
-		ServiceLabel:   art.Meta["service_label"],
-		ServiceGone:    art.Meta["uninstall_service_gone"],
-		ServiceQuery:   art.Meta["uninstall_service_query"],
-		ConfigRetained: art.Meta["uninstall_config_retained"],
-		LogRetained:    art.Meta["uninstall_log_retained"],
-		Status:         art.Meta["uninstall_status"],
+		Ran:          art.Meta["uninstall_ran"],
+		ExitCode:     art.Meta["uninstall_rc"],
+		Output:       art.Meta["uninstall_output"],
+		ServiceKind:  art.Meta["service_kind"],
+		ServiceLabel: art.Meta["service_label"],
+		ServiceGone:  art.Meta["uninstall_service_gone"],
+		ServiceQuery: art.Meta["uninstall_service_query"],
+		LogRetained:  art.Meta["uninstall_log_retained"],
+		Status:       art.Meta["uninstall_status"],
 	})
 	v.Resolve()
 	return v, log
@@ -724,7 +723,7 @@ func applyMutation(path, mode string) (mutated string, planted string, err error
 		}
 	default:
 		return "", "", fmt.Errorf("unknown mutation %q (want drop-commands, drop-action:<action>, "+
-			"corrupt-line, plant-secret, leave-service, or drop-retained-config)", mode)
+			"corrupt-line, plant-secret, leave-service, or drop-retained-log)", mode)
 	}
 
 	// The shared post-condition: the log must differ from what it was. Compared on the trimmed
@@ -856,9 +855,9 @@ func applyMetaMutation(meta map[string]string, mode string) bool {
 		// service stays registered and starts at boot.
 		meta["uninstall_service_gone"] = "false"
 		return true
-	case "drop-retained-config":
-		// The opposite direction: a removal that took the operator's configuration with it.
-		meta["uninstall_config_retained"] = "false"
+	case "drop-retained-log":
+		// The opposite direction: a removal that took the collected telemetry with it.
+		meta["uninstall_log_retained"] = "false"
 		return true
 	}
 	return false

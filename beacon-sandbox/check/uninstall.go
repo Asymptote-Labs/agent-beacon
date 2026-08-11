@@ -24,9 +24,14 @@ type Removal struct {
 	// ServiceGone is "true"/"false" when the service manager was asked, empty when it was not.
 	ServiceGone  string
 	ServiceQuery string
-	// ConfigRetained and LogRetained are "true"/"false" when the path was checked, empty otherwise.
-	ConfigRetained string
-	LogRetained    string
+	// LogRetained is "true"/"false" when the path was checked, empty otherwise.
+	//
+	// Only the log. `endpoint uninstall` removes everything in its install manifest -- which includes
+	// config.json and otelcol.yaml -- and --keep-config does not change that, because it governs
+	// *harness* telemetry settings rather than Beacon's own configuration. Retaining that is a
+	// contract the packaging layer keeps by stashing the files around a removal, so asserting it at
+	// this level would fail every correct run.
+	LogRetained string
 	// Status is `endpoint status --json` after the removal, which is Beacon's own account of itself.
 	Status string
 }
@@ -92,26 +97,23 @@ func Uninstall(v *Verdict, r Removal) {
 
 	// Retention is the other half of the contract, and it fails in the opposite direction: too much
 	// removed rather than too little. An uninstall is often the first half of a reinstall, and
-	// destroying an operator's configuration and collected telemetry is a separate, deliberate act.
+	// destroying collected telemetry is a separate, deliberate act.
 	for name, retained := range map[string]string{
-		"configuration": r.ConfigRetained,
-		"runtime log":   r.LogRetained,
+		"runtime log": r.LogRetained,
 	} {
 		switch retained {
 		case "true":
 			v.Add(Finding{
 				Check:    "uninstall.data_retained",
 				Severity: SevInfo,
-				Summary:  fmt.Sprintf("%s survived the uninstall, as --keep-logs and --keep-config ask", name),
+				Summary:  fmt.Sprintf("the %s survived the uninstall, as --keep-logs asks", name),
 			})
 		case "false":
 			v.Add(Finding{
 				Check:    "uninstall.data_retained",
 				Severity: SevFail,
-				Summary:  fmt.Sprintf("%s was removed despite --keep-logs and --keep-config", name),
-				Why: "Removing the product must not destroy what it collected unless a purge asks for " +
-					"it. Note that --keep-config governs harness settings rather than Beacon's own " +
-					"config, which is why packaging stashes those files around a removal.",
+				Summary:  fmt.Sprintf("the %s was removed despite --keep-logs", name),
+				Why:      "Removing the product must not destroy what it collected unless a purge asks for it.",
 			})
 		default:
 			v.Add(Finding{
