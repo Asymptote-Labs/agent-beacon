@@ -167,16 +167,6 @@ test ! -f "$OPENCODE_PLUGIN"
 
 echo "Uninstalling endpoint config..."
 PLIST="$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist"
-LABEL="com.beacon.endpoint.collector.user"
-
-# Recorded before the uninstall, so the check after it means something. launchd may never have been
-# told about this job at all -- the plist lives in a temporary HOME rather than the real
-# ~/Library/LaunchAgents, and a CI runner has no GUI session to bootstrap into -- and a job launchd
-# never knew cannot demonstrate that uninstall deregisters anything.
-KNOWN_BEFORE=no
-if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-  KNOWN_BEFORE=yes
-fi
 
 run_beacon endpoint uninstall --user --log-path "$LOG_PATH" --keep-logs >/dev/null
 
@@ -194,18 +184,15 @@ if [ -f "$PLIST" ]; then
 fi
 echo "ok: the launchd plist was removed"
 
-# Asked of launchd itself, not just the filesystem. Skipped loudly rather than silently when launchd
-# never knew the job: an unrun check must not read as a passing one.
-if [ "$KNOWN_BEFORE" = yes ]; then
-  if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-    echo "launchd still knows $LABEL after uninstall" >&2
-    exit 1
-  fi
-  echo "ok: launchd no longer knows $LABEL"
-else
-  echo "note: launchd never had $LABEL bootstrapped (temporary HOME, headless runner), so"
-  echo "      deregistration is unverified here; the plist removal above is what was checked"
-fi
+# Deliberately not asked of launchd. This install passes --no-start into a temporary HOME, so no job is
+# ever bootstrapped -- which means any answer launchctl gave would be about some *other* install of the
+# same label: a real one on the machine running this script. Asserting on that would fail for a
+# developer who has Beacon installed and pass for one who does not, neither for a reason this test
+# caused.
+#
+# So the file is the honest subject. This install wrote that exact plist and the uninstall must take it
+# away. Whether launchd deregisters a job it had actually loaded is a real question that this test does
+# not answer; it needs a genuine login session, which no CI runner provides.
 
 test -f "$LOG_PATH"
 
