@@ -201,33 +201,47 @@ jobs:
         run: |
           go build -ldflags "-s -w" -o beacon-hooks.exe .
           Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
-      # Scoped to the packages this port actually gives Windows implementations, not `./...`.
+      # Scoped rather than `./...`, and the list is measured rather than assumed.
       #
-      # The scope grows as packages are made portable. config, collector, harness and hooks joined
-      # when the Windows filesystem work needed them gated -- which immediately paid for itself by
-      # surfacing a production bug: validateExecutable tested the POSIX executable bit, which is
-      # never set on Windows, so DiscoverBinary rejected every collector binary there.
+      # A survey run on this runner tested every package and reported 25 passing and 16 failing, so
+      # every one of these is here because it was observed to pass on Windows -- not because it looked
+      # portable. That distinction matters: internal/endpoint/hooks shows the most POSIX-looking
+      # assertions in the repository and passes, because most of those hits are literal path strings
+      # inside assertions rather than paths the test uses. Guessing from grep would have scoped in the
+      # wrong set in both directions.
       #
-      # The remaining cli/beacon packages still assume a POSIX host and are not scoped in. Running
-      # them here would produce a permanently red gate that says nothing about the code under test,
-      # and a red gate nobody can fix is one nobody reads.
+      # Widening has repeatedly paid for itself by surfacing production bugs rather than test noise:
+      # validateExecutable tested the POSIX executable bit, which is never set on Windows, so
+      # DiscoverBinary rejected every collector binary there.
       #
-      # Tracked as follow-up work rather than dropped -- see #318. The scope
-      # widens as those packages are made portable; it must not widen by adding `./...` back while
-      # the assumptions remain.
+      # The 16 that still fail are listed in #318 with the reason each one fails. They are excluded
+      # rather than tolerated: a permanently red gate is one nobody reads. The scope widens as they are
+      # fixed, and must not widen by adding `./...` back while the assumptions remain.
       - name: Test the ported packages on Windows
         working-directory: cli/beacon
         run: |
           go test `
-            ./internal/endpoint/writer/... `
-            ./internal/endpoint/inventory/... `
-            ./internal/ingest/endpoint/... `
-            ./internal/endpoint/service/... `
-            ./internal/endpoint/selfupdate/... `
-            ./internal/endpoint/config/... `
+            ./internal/devincloud/... `
+            ./internal/embedded/... `
+            ./internal/endpoint/activity/... `
             ./internal/endpoint/collector/... `
+            ./internal/endpoint/config/... `
+            ./internal/endpoint/detect/... `
             ./internal/endpoint/harness/... `
-            ./internal/endpoint/hooks/...
+            ./internal/endpoint/hooks/... `
+            ./internal/endpoint/integrations/... `
+            ./internal/endpoint/inventory/... `
+            ./internal/endpoint/schema/... `
+            ./internal/endpoint/selfupdate/... `
+            ./internal/endpoint/sentinel/... `
+            ./internal/endpoint/service/... `
+            ./internal/endpoint/wazuh/... `
+            ./internal/endpoint/writer/... `
+            ./internal/ingest/... `
+            ./internal/mcpserver/... `
+            ./internal/tokens/... `
+            ./internal/updatecheck/... `
+            ./internal/version/...
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |
