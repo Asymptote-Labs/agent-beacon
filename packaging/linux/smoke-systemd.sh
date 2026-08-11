@@ -116,11 +116,28 @@ echo "ok: Restart=always restarted the collector ($before -> $after)"
 in_container '/beacon/beacon endpoint doctor --system' >/dev/null 2>&1 \
   || echo "note: doctor reported warnings (expected: no agent session ran here)"
 
+# The exact query beacon-sandbox uses to decide a unit is gone, checked here because this job has a
+# real systemd and the sandbox's Linux scenarios currently cannot reach their uninstall probe.
+#
+# Asserted in both directions. `list-unit-files` printing nothing is how the sandbox reads "removed",
+# and a query that prints nothing for a unit that is still installed would make every removal look
+# successful — so the pre-uninstall row is what proves the empty result afterwards means something.
+listed_before="$(in_container 'systemctl list-unit-files beacon-collector.service --no-legend 2>&1' || true)"
+[ -n "$(printf '%s' "$listed_before" | tr -d '[:space:]')" ] \
+  || fail "list-unit-files printed nothing for an installed unit, so its silence after uninstall would prove nothing"
+echo "ok: list-unit-files reports the installed unit ($listed_before)"
+
 in_container '/beacon/beacon endpoint uninstall --system' >/dev/null || fail "uninstall failed"
 in_container 'test ! -f /etc/systemd/system/beacon-collector.service' || fail "unit file survived uninstall"
 in_container 'test ! -f /etc/beacon/endpoint/config.json' || fail "config survived uninstall"
 [ "$(in_container 'systemctl is-enabled beacon-collector.service 2>&1' || true)" = "not-found" ] \
   || fail "unit still known to systemd after uninstall"
+
+listed_after="$(in_container 'systemctl list-unit-files beacon-collector.service --no-legend 2>&1' || true)"
+[ -z "$(printf '%s' "$listed_after" | tr -d '[:space:]')" ] \
+  || fail "list-unit-files still reports the unit after uninstall ($listed_after): beacon-sandbox reads a non-empty result as a unit that was never removed"
+echo "ok: list-unit-files is silent after uninstall, which is what beacon-sandbox reads as removed"
+
 echo "ok: uninstall left nothing behind"
 
 echo
