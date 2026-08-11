@@ -201,58 +201,47 @@ jobs:
         run: |
           go build -ldflags "-s -w" -o beacon-hooks.exe .
           Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
-      # Scoped to the packages this port actually gives Windows implementations, not `./...`.
+      # Scoped rather than `./...`, and the list is measured rather than assumed.
       #
-      # The scope grows as packages are made portable. config, collector, harness and hooks joined
-      # when the Windows filesystem work needed them gated -- which immediately paid for itself by
-      # surfacing a production bug: validateExecutable tested the POSIX executable bit, which is
-      # never set on Windows, so DiscoverBinary rejected every collector binary there.
+      # A survey run on this runner tested every package and reported 25 passing and 16 failing, so
+      # every one of these is here because it was observed to pass on Windows -- not because it looked
+      # portable. That distinction matters: internal/endpoint/hooks shows the most POSIX-looking
+      # assertions in the repository and passes, because most of those hits are literal path strings
+      # inside assertions rather than paths the test uses. Guessing from grep would have scoped in the
+      # wrong set in both directions.
       #
-      # The remaining cli/beacon packages still assume a POSIX host and are not scoped in. Running
-      # them here would produce a permanently red gate that says nothing about the code under test,
-      # and a red gate nobody can fix is one nobody reads.
+      # Widening has repeatedly paid for itself by surfacing production bugs rather than test noise:
+      # validateExecutable tested the POSIX executable bit, which is never set on Windows, so
+      # DiscoverBinary rejected every collector binary there.
       #
-      # Tracked as follow-up work rather than dropped -- see #318. The scope
-      # widens as those packages are made portable; it must not widen by adding `./...` back while
-      # the assumptions remain.
+      # The 16 that still fail are listed in #318 with the reason each one fails. They are excluded
+      # rather than tolerated: a permanently red gate is one nobody reads. The scope widens as they are
+      # fixed, and must not widen by adding `./...` back while the assumptions remain.
       - name: Test the ported packages on Windows
         working-directory: cli/beacon
         run: |
           go test `
-            ./internal/endpoint/writer/... `
-            ./internal/endpoint/inventory/... `
-            ./internal/ingest/endpoint/... `
-            ./internal/endpoint/service/... `
-            ./internal/endpoint/selfupdate/... `
-            ./internal/endpoint/config/... `
+            ./internal/devincloud/... `
+            ./internal/embedded/... `
+            ./internal/endpoint/activity/... `
             ./internal/endpoint/collector/... `
+            ./internal/endpoint/config/... `
+            ./internal/endpoint/detect/... `
             ./internal/endpoint/harness/... `
-            ./internal/endpoint/hooks/...
-      # One-off diagnostic while widening the scope (#318). Informational: it runs the whole suite to
-      # find out which packages actually pass on Windows, rather than guessing from grep. Not a gate --
-      # the scoped run above is the gate -- and it is removed once the scope has been widened.
-      - name: Which packages pass on Windows (informational)
-        id: survey
-        continue-on-error: true
-        working-directory: cli/beacon
-        run: |
-          $ErrorActionPreference = 'Continue'
-          # -count=1 defeats the cache so a previously-green package is re-run, and JSON output lets the
-          # per-package result be summarized rather than read out of thousands of lines.
-          go test ./... -count=1 -json 2>&1 | Tee-Object -FilePath survey.jsonl | Out-Null
-          $results = @{}
-          foreach ($line in Get-Content survey.jsonl) {
-            try { $e = $line | ConvertFrom-Json } catch { continue }
-            if (-not $e.Package) { continue }
-            if ($e.Action -in @('pass','fail','skip')) { $results[$e.Package] = $e.Action }
-          }
-          $failed = $results.GetEnumerator() | Where-Object { $_.Value -eq 'fail' } | Sort-Object Name
-          $passed = $results.GetEnumerator() | Where-Object { $_.Value -eq 'pass' } | Sort-Object Name
-          Write-Output "=== PASS ($($passed.Count)) ==="
-          $passed | ForEach-Object { Write-Output "  $($_.Name)" }
-          Write-Output "=== FAIL ($($failed.Count)) ==="
-          $failed | ForEach-Object { Write-Output "  $($_.Name)" }
-
+            ./internal/endpoint/hooks/... `
+            ./internal/endpoint/integrations/... `
+            ./internal/endpoint/inventory/... `
+            ./internal/endpoint/schema/... `
+            ./internal/endpoint/selfupdate/... `
+            ./internal/endpoint/sentinel/... `
+            ./internal/endpoint/service/... `
+            ./internal/endpoint/wazuh/... `
+            ./internal/endpoint/writer/... `
+            ./internal/ingest/... `
+            ./internal/mcpserver/... `
+            ./internal/tokens/... `
+            ./internal/updatecheck/... `
+            ./internal/version/...
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |
