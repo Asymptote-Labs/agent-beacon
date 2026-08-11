@@ -228,6 +228,31 @@ jobs:
             ./internal/endpoint/collector/... `
             ./internal/endpoint/harness/... `
             ./internal/endpoint/hooks/...
+      # One-off diagnostic while widening the scope (#318). Informational: it runs the whole suite to
+      # find out which packages actually pass on Windows, rather than guessing from grep. Not a gate --
+      # the scoped run above is the gate -- and it is removed once the scope has been widened.
+      - name: Which packages pass on Windows (informational)
+        id: survey
+        continue-on-error: true
+        working-directory: cli/beacon
+        run: |
+          $ErrorActionPreference = 'Continue'
+          # -count=1 defeats the cache so a previously-green package is re-run, and JSON output lets the
+          # per-package result be summarized rather than read out of thousands of lines.
+          go test ./... -count=1 -json 2>&1 | Tee-Object -FilePath survey.jsonl | Out-Null
+          $results = @{}
+          foreach ($line in Get-Content survey.jsonl) {
+            try { $e = $line | ConvertFrom-Json } catch { continue }
+            if (-not $e.Package) { continue }
+            if ($e.Action -in @('pass','fail','skip')) { $results[$e.Package] = $e.Action }
+          }
+          $failed = $results.GetEnumerator() | Where-Object { $_.Value -eq 'fail' } | Sort-Object Name
+          $passed = $results.GetEnumerator() | Where-Object { $_.Value -eq 'pass' } | Sort-Object Name
+          Write-Output "=== PASS ($($passed.Count)) ==="
+          $passed | ForEach-Object { Write-Output "  $($_.Name)" }
+          Write-Output "=== FAIL ($($failed.Count)) ==="
+          $failed | ForEach-Object { Write-Output "  $($_.Name)" }
+
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |
