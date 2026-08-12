@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -15,6 +14,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/osuser"
 	"github.com/spf13/cobra"
 )
 
@@ -325,12 +325,20 @@ func describeLogindSession(id string) (logindSession, bool) {
 // root is rejected: a system install has already configured root, and treating it as the console
 // user would report success for configuring nobody. A user without a real home is rejected for
 // the same reason -- there is nowhere for a settings file to go.
+//
+// The lookup goes through osuser rather than os/user directly, and that is the whole difference
+// between working and not working on a directory-backed fleet. Beacon is built CGO_ENABLED=0, so
+// os/user reads /etc/passwd and never consults NSS; on a host whose accounts come from OpenLDAP or
+// SSSD, every developer is invisible to a by-name lookup. Both callers reach this function -- the
+// SUDO_USER path and the logind path -- so this is the single point where that was decided, and
+// the logind case made it especially wasteful: logind is NSS-aware and hands over the correct
+// username, which this function then discarded by re-resolving it somewhere it could not be found.
 func resolveConsoleUser(username string) (consoleUserInfo, bool, error) {
 	username = strings.TrimSpace(username)
 	if username == "" || username == "root" {
 		return consoleUserInfo{}, false, nil
 	}
-	u, err := user.Lookup(username)
+	u, err := osuser.Lookup(username)
 	if err != nil {
 		return consoleUserInfo{}, false, nil
 	}
@@ -340,7 +348,9 @@ func resolveConsoleUser(username string) (consoleUserInfo, bool, error) {
 	if _, err := os.Stat(u.HomeDir); err != nil {
 		return consoleUserInfo{}, false, nil
 	}
-	return consoleUserInfo{Username: username, HomeDir: u.HomeDir}, true, nil
+	// The resolved spelling rather than the requested one: a directory service may answer with the
+	// account's canonical name, and that is what the settings file and its ownership should use.
+	return consoleUserInfo{Username: u.Username, HomeDir: u.HomeDir}, true, nil
 }
 
 func darwinActiveConsoleUser() (consoleUserInfo, bool, error) {

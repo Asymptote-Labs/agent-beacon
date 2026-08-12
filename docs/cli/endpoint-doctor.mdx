@@ -26,8 +26,31 @@ Doctor verifies:
 - Runtime log permissions
 - Service definition: launchd plist on macOS, systemd unit on Linux
 - Configured harness telemetry and recent observed events
+- Whether a real user's agent runtime points at the collector (system mode only)
 
 The runtime log itself can be missing before the first event is written. In that case, doctor reports a warning instead of a hard failure.
+
+### `console_user_configured`
+
+System-mode only, and worth understanding because it is the one failure that a completely healthy
+endpoint can still report.
+
+A system endpoint runs as root, so it has to work out *whose* agent settings to configure — the
+collector is useless if nothing exports to it. This check asks whether that actually happened:
+
+```
+console_user_configured: fail target=alice (alice has no agent runtime pointed at this
+  collector, so their sessions are not being captured)
+  action="sudo beacon endpoint user-config repair-installed --system"
+```
+
+Everything else can be green when this fails. The collector is running, the service is loaded, and
+the harness check passes — because `doctor --system` runs as root and sees the settings the install
+wrote for root, which are correct. The person whose sessions matter is the one with nothing.
+
+If no logged-in user can be identified at all, this reports a warning rather than a failure: an
+unattended host legitimately has nobody to configure, and that is not something an operator can act
+on.
 
 ## Fix mode
 

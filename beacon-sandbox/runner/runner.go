@@ -584,6 +584,7 @@ func imageSpecFor(p sandbox.Platform, sc scenario.Scenario, opts Options,
 		RepoRoot:      opts.RepoRoot,
 		ClaudeVersion: opts.ClaudeVersion,
 		WithDocker:    sc.NeedsRealSystemd(),
+		NSSOnlyUser:   sc.NeedsNSSOnlyUser(),
 	}, logf)
 }
 

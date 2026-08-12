@@ -5,7 +5,30 @@ description: "Install the Beacon CLI from platform archives or build it from sou
 
 ## Archive Collection
 
-Beacon releases publish platform archives for macOS and Linux on `amd64` and `arm64`. Each archive includes the `beacon` CLI and the matching `beacon-otelcol` collector binary, with SHA-256 checksums published alongside the release.
+Beacon releases publish platform archives for macOS and Linux on `amd64` and `arm64`, plus a
+`.zip` for Windows. Each archive contains three binaries — the `beacon` CLI, the `beacon-hooks`
+adapter that captures tool activity, and the matching `beacon-otelcol` collector — with SHA-256
+checksums published alongside the release in `checksums.txt`.
+
+All three matter. `beacon-hooks` is what supported runtimes invoke to record prompts, tool calls,
+and approvals, so an install that keeps only the CLI and the collector captures OpenTelemetry data
+and nothing from the hook path.
+
+```bash title="Download, verify, and extract (Linux amd64)"
+VERSION=1.2.0   # or whichever release you are installing
+BASE=https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}
+curl -fsSLO ${BASE}/beacon_${VERSION}_linux_amd64.tar.gz
+curl -fsSLO ${BASE}/checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+
+tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
+beacon version
+```
+
+Swap `linux_amd64` for `linux_arm64`, `darwin_arm64`, or `darwin_amd64` as needed; on macOS use
+`shasum -a 256 -c` in place of `sha256sum --check`. The archive layout is identical across
+platforms.
 
 For managed endpoint rollouts on Apple Silicon Macs, GitHub Releases also attach
 a signed, notarized, and stapled `BeaconEndpointAgent-<version>-arm64.pkg`. The

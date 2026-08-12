@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func HasRecentHarnessEvent(logPath, harnessName string) bool {
@@ -31,7 +33,17 @@ func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
 	}
 	defer file.Close()
 
-	want := strings.ToLower(strings.TrimSpace(harnessName))
+	// Compared canonically on both sides, because the two names come from different places and do
+	// not agree on spelling. Discovery names a runtime for the CLI surface -- "vscode" is what
+	// `--harness vscode` accepts -- while events carry the canonical telemetry name, which for that
+	// runtime is "vscode_copilot". An exact comparison therefore asks whether two unrelated
+	// vocabularies happen to coincide, and it silently answers "no" for a runtime that is working
+	// perfectly: doctor's harness_observed never clears, and the operator is told to run an agent
+	// they have already been running.
+	//
+	// This was wrong in both directions before it was normalized. Claude Code discovers as
+	// "claude_code" while its hooks emitted "claude", so its observed check never cleared either.
+	want := asymptoteobserve.NormalizeHarnessName(harnessName)
 	var last time.Time
 	found := false
 	scanner := bufio.NewScanner(file)
@@ -42,7 +54,7 @@ func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
 			continue
 		}
 		if harness, ok := event["harness"].(map[string]interface{}); ok {
-			if name, _ := harness["name"].(string); strings.ToLower(strings.TrimSpace(name)) == want {
+			if name, _ := harness["name"].(string); asymptoteobserve.NormalizeHarnessName(name) == want {
 				found = true
 				if ts, ok := event["timestamp"].(string); ok {
 					if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil && parsed.After(last) {

@@ -164,6 +164,26 @@ adapter_owner="$(docker exec "$CONTAINER" stat -c %U "$ADAPTER" 2>/dev/null || t
   echo "$ADAPTER is owned by $adapter_owner, not $SMOKE_USER" >&2; exit 1; }
 echo "ok: hooks installed for the user and runnable by them"
 
+# Reachable by name, not just by absolute path.
+#
+# Every check in this file used /opt/beacon/bin/beacon, so the package could ship with nothing on
+# PATH and this smoke test would still pass -- which is exactly what happened. The documentation
+# and this package's own postinstall both tell the user to run `beacon endpoint status --system`,
+# and that failed with "command not found" on a correctly installed system.
+#
+# Checked as the unprivileged user and through sudo, because they resolve differently: sudo
+# replaces PATH with secure_path, so a symlink somewhere only the user's PATH covers would pass
+# one and fail the other, and most system-mode documentation is written with sudo.
+docker exec "$CONTAINER" su - "$SMOKE_USER" -c 'command -v beacon' >/dev/null 2>&1 || {
+  echo "beacon is not on PATH for $SMOKE_USER, so every documented command fails for them" >&2
+  exit 1; }
+docker exec "$CONTAINER" sh -c 'command -v beacon' >/dev/null 2>&1 || {
+  echo "beacon is not on root's PATH, so the sudo form of every documented command fails" >&2
+  exit 1; }
+docker exec "$CONTAINER" su - "$SMOKE_USER" -c 'beacon --version' >/dev/null 2>&1 || {
+  echo "beacon resolves on PATH but does not execute" >&2; exit 1; }
+echo "ok: beacon is reachable by name, as the documentation says it is"
+
 # The two commands the docs tell a new user to run. Both must report healthy with no manual setup.
 if ! docker exec "$CONTAINER" /opt/beacon/bin/beacon endpoint status --system --json >/tmp/beacon-status.json 2>&1; then
   echo "endpoint status failed:" >&2; cat /tmp/beacon-status.json >&2; exit 1

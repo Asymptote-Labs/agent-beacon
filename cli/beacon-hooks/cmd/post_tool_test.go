@@ -655,8 +655,11 @@ func TestRunPostToolEmitsClaudeToolEvents(t *testing.T) {
 		if got := events[i]["event"].(map[string]interface{})["action"]; got != want {
 			t.Fatalf("event[%d].action = %q, want %q", i, got, want)
 		}
-		if harness := events[i]["harness"].(map[string]interface{})["name"]; harness != "claude" {
-			t.Fatalf("event[%d] harness = %q, want claude", i, harness)
+		// claude_code, not the raw --platform value: the OTLP path reports the canonical name for
+		// the same session, and emitting the raw one here split a single session across two names
+		// for anything grouping by harness.name.
+		if harness := events[i]["harness"].(map[string]interface{})["name"]; harness != "claude_code" {
+			t.Fatalf("event[%d] harness = %q, want claude_code", i, harness)
 		}
 	}
 	if file := events[0]["file"].(map[string]interface{}); file["path"] != "/repo/main.go" || file["operation"] != "modify" {
