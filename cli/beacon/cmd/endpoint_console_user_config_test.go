@@ -117,6 +117,41 @@ func TestConsoleUserConfigCheckAcceptsLocalhostSpelling(t *testing.T) {
 	}
 }
 
+// A port is a number, not a string prefix. Matching `host:port` as a substring has no right-hand
+// boundary, so an endpoint on port 431 would accept a file pointing at 4317 -- a false OK on the
+// check that is trusted when it says the user *is* captured. That direction is the dangerous one:
+// a false failure sends someone to run a repair, a false pass tells them a silent capture gap is
+// fine.
+func TestConsoleUserConfigCheckDoesNotMatchAPortPrefix(t *testing.T) {
+	settings := `{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:4317"}}`
+
+	for name, tc := range map[string]struct {
+		grpc, http int
+		want       bool
+	}{
+		"exact port matches":            {4317, 4318, true},
+		"prefix of the configured port": {431, 432, false},
+		"configured port is longer":     {43170, 43180, false},
+		"unrelated ports":               {9999, 9998, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := targetsCollectorPort(settings, tc.grpc, tc.http); got != tc.want {
+				t.Errorf("targetsCollectorPort(:%d/:%d) = %v, want %v", tc.grpc, tc.http, got, tc.want)
+			}
+		})
+	}
+}
+
+// The three loopback spellings a runtime config could legitimately carry, all against the same
+// collector.
+func TestConsoleUserConfigCheckAcceptsEveryLoopbackSpelling(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:4317", "localhost:4317", "[::1]:4317"} {
+		if !targetsCollectorPort(`{"endpoint":"http://`+addr+`"}`, 4317, 4318) {
+			t.Errorf("%s did not read as pointed at the collector", addr)
+		}
+	}
+}
+
 // Hook-only runtimes count as configured: the installed hook command names the hook binary, which
 // is what points that runtime at the endpoint.
 func TestConsoleUserConfigCheckAcceptsAHookOnlyRuntime(t *testing.T) {

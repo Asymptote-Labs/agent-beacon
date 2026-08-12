@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1127,7 +1128,7 @@ func consoleUserHarnessConfigured(info consoleUserInfo, cfg endpointconfig.Confi
 	if len(paths) == 0 {
 		return false, "no agent runtime configuration found in " + info.HomeDir
 	}
-	markers := collectorEndpointMarkers(cfg)
+	grpc, http := collectorPorts(cfg)
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -1140,20 +1141,43 @@ func consoleUserHarnessConfigured(info consoleUserInfo, cfg endpointconfig.Confi
 		if strings.Contains(text, embedded.BinaryStem) {
 			return true, p
 		}
-		for _, marker := range markers {
-			if strings.Contains(text, marker) {
-				return true, p
-			}
+		if targetsCollectorPort(text, grpc, http) {
+			return true, p
 		}
 	}
 	return false, "found " + strconv.Itoa(len(paths)) + " runtime config file(s), none pointed at this collector"
 }
 
-// collectorEndpointMarkers are the address spellings a configured runtime could contain.
+// loopbackEndpointPattern finds loopback addresses and captures the port as a whole number.
 //
-// Both loopback spellings, because Beacon writes 127.0.0.1 but a user or an MDM profile may have
-// written localhost against the same collector, and reporting that as unconfigured would be wrong.
-func collectorEndpointMarkers(cfg endpointconfig.Config) []string {
+// All three spellings, because Beacon writes 127.0.0.1 but a user or an MDM profile may have
+// written localhost or ::1 against the same collector, and reporting that as unconfigured would be
+// wrong.
+var loopbackEndpointPattern = regexp.MustCompile(`(?:127\.0\.0\.1|\[::1\]|localhost):(\d+)`)
+
+// targetsCollectorPort reports whether the text points at this endpoint's collector.
+//
+// The port is captured and compared as a number rather than matched as a substring. A substring
+// has no right-hand boundary, so an endpoint configured on port 431 would match a file pointing at
+// 4317 -- a false OK on the one check that is being trusted when it says the user *is* captured,
+// which is the direction that matters most here: a false failure sends someone to run a repair,
+// while a false pass tells them a silent capture gap is fine.
+func targetsCollectorPort(text string, grpc, http int) bool {
+	for _, match := range loopbackEndpointPattern.FindAllStringSubmatch(text, -1) {
+		port, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		if port == grpc || port == http {
+			return true
+		}
+	}
+	return false
+}
+
+// collectorPorts resolves the ports this endpoint actually listens on, falling back to the
+// defaults for a configuration that predates them being recorded.
+func collectorPorts(cfg endpointconfig.Config) (int, int) {
 	grpc := cfg.Collector.GRPCPort
 	if grpc == 0 {
 		grpc = endpointconfig.DefaultGRPCPort
@@ -1162,14 +1186,7 @@ func collectorEndpointMarkers(cfg endpointconfig.Config) []string {
 	if http == 0 {
 		http = endpointconfig.DefaultHTTPPort
 	}
-	var markers []string
-	for _, host := range []string{"127.0.0.1", "localhost"} {
-		markers = append(markers,
-			host+":"+strconv.Itoa(grpc),
-			host+":"+strconv.Itoa(http),
-		)
-	}
-	return markers
+	return grpc, http
 }
 
 // consoleUserConfigPaths lists the runtime configuration files that exist in a specific user's
