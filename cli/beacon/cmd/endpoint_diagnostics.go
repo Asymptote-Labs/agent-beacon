@@ -1086,7 +1086,7 @@ func consoleUserConfigCheck() diagnostics.Check {
 			Action:   "run 'beacon endpoint user-config repair-installed --system' as the user whose sessions should be captured",
 		}
 	}
-	configured, detail := consoleUserHarnessConfigured(info)
+	configured, detail := consoleUserHarnessConfigured(info, loadConfigForMode(false, endpointOpts.logPath))
 	if !configured {
 		return diagnostics.Check{
 			Name:     name,
@@ -1114,7 +1114,12 @@ func consoleUserConfigCheck() diagnostics.Check {
 //
 // At least one rather than all of them: a developer who uses only Claude Code is fully configured,
 // and demanding every detected runtime would produce a failure nobody should act on.
-func consoleUserHarnessConfigured(info consoleUserInfo) (bool, string) {
+//
+// The markers come from the endpoint's own configuration rather than from constants. An install
+// with --otlp-grpc-port writes that port into the user's settings, and a check that only knew the
+// defaults would call a correctly configured user unconfigured -- a false failure in the one check
+// whose entire value is being trusted when it says something is wrong.
+func consoleUserHarnessConfigured(info consoleUserInfo, cfg endpointconfig.Config) (bool, string) {
 	paths, err := consoleUserConfigPaths(info)
 	if err != nil {
 		return false, err.Error()
@@ -1122,21 +1127,49 @@ func consoleUserHarnessConfigured(info consoleUserInfo) (bool, string) {
 	if len(paths) == 0 {
 		return false, "no agent runtime configuration found in " + info.HomeDir
 	}
+	markers := collectorEndpointMarkers(cfg)
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			continue
 		}
-		// The endpoint marker is the collector address the install writes. Matching on it rather
-		// than on the file existing distinguishes "configured for this endpoint" from "the user
-		// happens to have a settings file", which is the difference that matters here.
-		if strings.Contains(string(data), "127.0.0.1:4317") ||
-			strings.Contains(string(data), "127.0.0.1:4318") ||
-			strings.Contains(string(data), embedded.BinaryStem) {
+		// Matching on the collector address, or on the hook binary for hook-only runtimes, rather
+		// than on the file existing: that is the difference between "configured for this endpoint"
+		// and "the user happens to have used this agent before".
+		text := string(data)
+		if strings.Contains(text, embedded.BinaryStem) {
 			return true, p
+		}
+		for _, marker := range markers {
+			if strings.Contains(text, marker) {
+				return true, p
+			}
 		}
 	}
 	return false, "found " + strconv.Itoa(len(paths)) + " runtime config file(s), none pointed at this collector"
+}
+
+// collectorEndpointMarkers are the address spellings a configured runtime could contain.
+//
+// Both loopback spellings, because Beacon writes 127.0.0.1 but a user or an MDM profile may have
+// written localhost against the same collector, and reporting that as unconfigured would be wrong.
+func collectorEndpointMarkers(cfg endpointconfig.Config) []string {
+	grpc := cfg.Collector.GRPCPort
+	if grpc == 0 {
+		grpc = endpointconfig.DefaultGRPCPort
+	}
+	http := cfg.Collector.HTTPPort
+	if http == 0 {
+		http = endpointconfig.DefaultHTTPPort
+	}
+	var markers []string
+	for _, host := range []string{"127.0.0.1", "localhost"} {
+		markers = append(markers,
+			host+":"+strconv.Itoa(grpc),
+			host+":"+strconv.Itoa(http),
+		)
+	}
+	return markers
 }
 
 // consoleUserConfigPaths lists the runtime configuration files that exist in a specific user's

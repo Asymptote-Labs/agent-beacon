@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 )
 
@@ -73,6 +74,46 @@ func TestConsoleUserConfigCheckWarnsWhenNobodyIsLoggedIn(t *testing.T) {
 	got := consoleUserConfigCheck()
 	if got.Status != diagnostics.StatusWarn {
 		t.Errorf("status = %v, want warn when no console user exists", got.Status)
+	}
+}
+
+// An install with --otlp-grpc-port writes that port into the user's settings. A check that only
+// knew the defaults would call a correctly configured user unconfigured -- a false failure in the
+// one check whose entire value is being believed when it says something is wrong.
+func TestConsoleUserConfigCheckHonoursCustomOTLPPorts(t *testing.T) {
+	info := userHomeWith(t, ".claude/settings.json",
+		`{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:5317"}}`)
+
+	cfg := endpointconfig.Config{}
+	cfg.Collector.GRPCPort = 5317
+	cfg.Collector.HTTPPort = 5318
+
+	if ok, detail := consoleUserHarnessConfigured(info, cfg); !ok {
+		t.Errorf("a user pointed at the configured port read as unconfigured: %s", detail)
+	}
+
+	// The same settings against an endpoint on the default ports is genuinely not configured for
+	// it, and must still say so.
+	def := endpointconfig.Config{}
+	def.Collector.GRPCPort = endpointconfig.DefaultGRPCPort
+	def.Collector.HTTPPort = endpointconfig.DefaultHTTPPort
+	if ok, _ := consoleUserHarnessConfigured(info, def); ok {
+		t.Error("settings pointed at :5317 matched an endpoint listening on :4317")
+	}
+}
+
+// Beacon writes 127.0.0.1, but a user or an MDM profile may have written localhost against the
+// same collector. Reporting that as unconfigured would be wrong.
+func TestConsoleUserConfigCheckAcceptsLocalhostSpelling(t *testing.T) {
+	info := userHomeWith(t, ".claude/settings.json",
+		`{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://localhost:4317"}}`)
+
+	cfg := endpointconfig.Config{}
+	cfg.Collector.GRPCPort = endpointconfig.DefaultGRPCPort
+	cfg.Collector.HTTPPort = endpointconfig.DefaultHTTPPort
+
+	if ok, detail := consoleUserHarnessConfigured(info, cfg); !ok {
+		t.Errorf("the localhost spelling read as unconfigured: %s", detail)
 	}
 }
 
