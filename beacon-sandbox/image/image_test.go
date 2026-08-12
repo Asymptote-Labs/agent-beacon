@@ -1,6 +1,7 @@
 package image
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -60,7 +61,9 @@ func TestBuildCreatesNonRootAgentUser(t *testing.T) {
 	}
 	joined := strings.Join(spec.Layers, "\n")
 
-	if !strings.Contains(joined, "useradd -m -s /bin/bash "+AgentUser) {
+	// Matched on the command and the account rather than the exact flag string: the assertion is
+	// that an unprivileged account gets created, not the order its options happen to appear in.
+	if !strings.Contains(joined, "useradd") || !strings.Contains(joined, AgentUser) {
 		t.Errorf("image must create the %s user:\n%s", AgentUser, joined)
 	}
 	if !strings.Contains(joined, "su - "+AgentUser+" -c 'curl -fsSL https://claude.ai/install.sh") {
@@ -68,6 +71,55 @@ func TestBuildCreatesNonRootAgentUser(t *testing.T) {
 	}
 	if AgentUser == "root" {
 		t.Fatal("AgentUser must not be root")
+	}
+}
+
+// The NSS-only lane exists to reproduce a directory-backed fleet, where an account resolves
+// through getent but is absent from /etc/passwd. If the image ever creates that account with
+// useradd anyway, the lane silently becomes an ordinary one and the scenario built on it reports
+// that a bug is fixed when it was never exercised.
+func TestBuildNSSOnlyUserDoesNotWriteEtcPasswd(t *testing.T) {
+	spec, err := Build(Spec{RepoRoot: stubRepo(t), NSSOnlyUser: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(spec.Layers, "\n")
+
+	if strings.Contains(joined, "useradd") {
+		t.Errorf("the NSS-only lane must not create a local account:\n%s", joined)
+	}
+	if !strings.Contains(joined, "libnss-extrausers") {
+		t.Errorf("the NSS-only lane needs an NSS module to resolve through:\n%s", joined)
+	}
+	if !strings.Contains(joined, "/var/lib/extrausers/passwd") {
+		t.Errorf("the account must live in the NSS database:\n%s", joined)
+	}
+	if !strings.Contains(joined, "extrausers") || !strings.Contains(joined, "/etc/nsswitch.conf") {
+		t.Errorf("nsswitch must route passwd lookups through the NSS module:\n%s", joined)
+	}
+	// The image asserts its own property at build time; losing that check would let a broken NSS
+	// module produce a lane that looks right and tests nothing.
+	if !strings.Contains(joined, "getent passwd "+AgentUser) {
+		t.Errorf("the image must verify getent resolves %s:\n%s", AgentUser, joined)
+	}
+	if !strings.Contains(joined, "/etc/passwd") {
+		t.Errorf("the image must verify %s did not leak into /etc/passwd:\n%s", AgentUser, joined)
+	}
+}
+
+// Both lanes must produce the same account identity, so a scenario comparing them is comparing
+// visibility and nothing else.
+func TestBothAccountLanesAgreeOnIdentity(t *testing.T) {
+	local := strings.Join(accountLayers(false), "\n")
+	nss := strings.Join(accountLayers(true), "\n")
+
+	for _, want := range []string{AgentUser, AgentHome, fmt.Sprint(AgentUID)} {
+		if !strings.Contains(local, want) {
+			t.Errorf("local lane missing %q:\n%s", want, local)
+		}
+		if !strings.Contains(nss, want) {
+			t.Errorf("NSS lane missing %q:\n%s", want, nss)
+		}
 	}
 }
 

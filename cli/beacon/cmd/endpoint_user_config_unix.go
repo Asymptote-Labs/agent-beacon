@@ -5,9 +5,9 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/user"
-	"strconv"
 	"syscall"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/osuser"
 )
 
 // chownUserConfigArtifacts gives the console user ownership of the settings files a system-mode
@@ -31,16 +31,16 @@ func chownUserConfigArtifacts(info consoleUserInfo, path string) error {
 
 // userOwnership resolves the console user's numeric uid and gid.
 //
-// The user database first, since that is the authoritative answer. Falling back to the home
-// directory's owner covers a user whose account is not in the local database -- LDAP, SSSD, a
-// container with a bare passwd file -- where the directory itself still records who they are.
+// The account database first, since that is the authoritative answer, and osuser consults NSS so
+// a directory-backed account resolves rather than falling straight through. Falling back to the
+// home directory's owner still covers what NSS cannot answer -- a container with a bare passwd
+// file, or a host with no getent -- where the directory itself still records who they are.
+//
+// Both this and resolveConsoleUser go through osuser deliberately. They answer the same question
+// and disagreeing about it is how a settings file ends up owned by someone who cannot read it.
 func userOwnership(info consoleUserInfo) (int, int, error) {
-	if u, err := user.Lookup(info.Username); err == nil {
-		uid, uidErr := strconv.Atoi(u.Uid)
-		gid, gidErr := strconv.Atoi(u.Gid)
-		if uidErr == nil && gidErr == nil {
-			return uid, gid, nil
-		}
+	if u, err := osuser.Lookup(info.Username); err == nil {
+		return u.UID, u.GID, nil
 	}
 	stat, err := os.Stat(info.HomeDir)
 	if err != nil {

@@ -175,8 +175,8 @@ func TestVSCodeHooksEmitLowNoiseTelemetry(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
 		t.Fatalf("event.action = %q, want tool.invoked", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode" {
-		t.Fatalf("harness = %q, want vscode", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode_copilot" {
+		t.Fatalf("harness = %q, want vscode_copilot", harness)
 	}
 	if _, ok := event["raw"].(map[string]interface{})["vscode"]; !ok {
 		t.Fatalf("raw.vscode missing: %#v", event["raw"])
@@ -204,8 +204,8 @@ func TestRunSubagentLifecycleEmitsVSCodeEvents(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "subagent.started" {
 		t.Fatalf("event.action = %q, want subagent.started", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode" {
-		t.Fatalf("harness = %q, want vscode", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode_copilot" {
+		t.Fatalf("harness = %q, want vscode_copilot", harness)
 	}
 	if _, ok := event["tool"]; ok {
 		t.Fatalf("subagent event should not be encoded as tool: %#v", event["tool"])
@@ -325,8 +325,8 @@ func TestRunPromptSubmitEmitsAntigravityPromptEvent(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
 		t.Fatalf("event.action = %q, want prompt.submitted", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity" {
-		t.Fatalf("harness = %q, want antigravity", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
+		t.Fatalf("harness = %q, want antigravity_cli", harness)
 	}
 	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
 		t.Fatalf("prompt.text = %q, want redacted prompt", got)
@@ -578,8 +578,8 @@ func TestRunPreToolEmitsClaudeTelemetryWithoutDecision(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
 		t.Fatalf("event.action = %q, want tool.invoked", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "claude" {
-		t.Fatalf("harness = %q, want claude", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "claude_code" {
+		t.Fatalf("harness = %q, want claude_code", harness)
 	}
 	if _, ok := event["approval"]; ok {
 		t.Fatalf("Claude PreToolUse should not emit approval telemetry: %#v", event["approval"])
@@ -618,8 +618,8 @@ func TestRunPreToolEmitsAntigravityCommandTelemetry(t *testing.T) {
 	}
 
 	event := lastEndpointEvent(t, logPath)
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity" {
-		t.Fatalf("harness = %q, want antigravity", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
+		t.Fatalf("harness = %q, want antigravity_cli", harness)
 	}
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
 		t.Fatalf("event.action = %q, want tool.invoked", action)

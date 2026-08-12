@@ -19,6 +19,10 @@ const (
 	// AgentUser is unprivileged on purpose: Claude Code refuses
 	// --dangerously-skip-permissions when running as root.
 	AgentUser = "agent"
+	// AgentUID is pinned so the local and NSS-only lanes produce the same numeric identity, and so
+	// ownership assertions mean the same thing in both. 1001 because ubuntu:24.04 already ships an
+	// `ubuntu` account at 1000.
+	AgentUID  = 1001
 	AgentHome = "/home/agent"
 	WorkDir   = "/home/agent/work"
 	BeaconDir = "/opt/beacon/bin"
@@ -180,6 +184,11 @@ type Spec struct {
 	// opt-in because it is a large install that every other scenario would pay for and none of
 	// them need.
 	WithDocker bool
+
+	// NSSOnlyUser creates the agent account in an NSS source instead of /etc/passwd, reproducing
+	// a directory-backed fleet. See scenario.Install.NSSOnlyUser for why that distinction decides
+	// whether a system-mode install can configure anyone at all.
+	NSSOnlyUser bool
 }
 
 // LinuxArtifacts are the binaries the sandbox needs, as host paths.
@@ -236,6 +245,13 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 	}
 
 	pkgs := "curl ca-certificates git tar ripgrep procps sudo python3 jq"
+	if spec.NSSOnlyUser {
+		// libnss-extrausers is a real NSS module that reads its own database, which is exactly the
+		// property a directory service has and /etc/passwd does not. It reproduces OpenLDAP/SSSD
+		// account visibility without running a directory server, so the lane stays cheap enough to
+		// be a regression test rather than an occasional manual exercise.
+		pkgs += " libnss-extrausers"
+	}
 	if spec.WithDocker {
 		// docker.io rather than the upstream repo: it is one apt line, and the daemon only has
 		// to be new enough to run a privileged container with a host cgroup namespace.
@@ -253,9 +269,10 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 	layers := []string{
 		"ENV DEBIAN_FRONTEND=noninteractive",
 		"RUN apt-get update -qq && apt-get install -y -qq " + pkgs + " >/dev/null",
-		fmt.Sprintf("RUN useradd -m -s /bin/bash %s && mkdir -p %s && chown -R %s:%s %s",
-			AgentUser, WorkDir, AgentUser, AgentUser, AgentHome),
-		"RUN mkdir -p " + BeaconDir,
+	}
+	layers = append(layers, accountLayers(spec.NSSOnlyUser)...)
+	layers = append(layers,
+		"RUN mkdir -p "+BeaconDir,
 		// Claude Code's native installer needs no Node. Pinned for reproducibility, and
 		// installed as the agent user so it lands in that user's ~/.local/bin.
 		fmt.Sprintf("RUN su - %s -c 'curl -fsSL https://claude.ai/install.sh | bash -s %s'",
@@ -266,7 +283,7 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 			"git config user.email a@b.c && git config user.name beacon-sandbox && "+
 			"printf \"# fixture\\n\" > README.md && git add -A && git commit -qm initial'",
 			AgentUser, WorkDir, WorkDir),
-	}
+	)
 
 	if spec.WithDocker {
 		// Group membership is set at image build time; adding it later would need a re-login to
@@ -283,6 +300,50 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 			BeaconDir + "/beacon-otelcol": art.Collector,
 		},
 	}, nil
+}
+
+// accountLayers create the session account, either locally or visible only through NSS.
+//
+// The two forms differ in exactly one respect -- whether the account appears in /etc/passwd -- and
+// are otherwise identical in username, uid, home directory and shell. That is deliberate: a
+// scenario comparing an NSS-only lane against a local one is then comparing account *visibility*
+// and nothing else, so a difference in outcome has one available explanation.
+func accountLayers(nssOnly bool) []string {
+	if !nssOnly {
+		return []string{
+			fmt.Sprintf("RUN useradd -m -u %d -s /bin/bash %s && mkdir -p %s && chown -R %s:%s %s",
+				AgentUID, AgentUser, WorkDir, AgentUser, AgentUser, AgentHome),
+		}
+	}
+	return []string{
+		// files first, so root and the system accounts still resolve normally; extrausers supplies
+		// only what files does not have. This is the same ordering a real SSSD host uses.
+		"RUN sed -i -e 's/^passwd:.*/passwd:         files extrausers/' " +
+			"-e 's/^group:.*/group:          files extrausers/' " +
+			"-e 's/^shadow:.*/shadow:         files extrausers/' /etc/nsswitch.conf",
+		fmt.Sprintf("RUN mkdir -p /var/lib/extrausers && "+
+			"printf '%s:x:%d:%d::%s:/bin/bash\\n' > /var/lib/extrausers/passwd && "+
+			"printf '%s:x:%d:\\n' > /var/lib/extrausers/group && "+
+			"printf '%s:!:20000:0:99999:7:::\\n' > /var/lib/extrausers/shadow && "+
+			"chmod 0644 /var/lib/extrausers/passwd /var/lib/extrausers/group && "+
+			"chmod 0640 /var/lib/extrausers/shadow && "+
+			"mkdir -p %s %s && chown -R %d:%d %s",
+			AgentUser, AgentUID, AgentUID, AgentHome,
+			AgentUser, AgentUID,
+			AgentUser,
+			AgentHome, WorkDir, AgentUID, AgentUID, AgentHome),
+		// Assert the lane actually has the property it exists to provide. Without this, a broken
+		// NSS module or a changed nsswitch format would leave the account resolvable the ordinary
+		// way, and the scenario would pass for the wrong reason -- reporting that a bug is fixed
+		// when it was merely never exercised. Failing at image build is far cheaper than failing
+		// that conclusion.
+		fmt.Sprintf("RUN getent passwd %s >/dev/null || "+
+			"{ echo 'nss lane broken: getent cannot resolve %s' >&2; exit 1; }",
+			AgentUser, AgentUser),
+		fmt.Sprintf("RUN if grep -q '^%s:' /etc/passwd; then "+
+			"echo 'nss lane broken: %s leaked into /etc/passwd' >&2; exit 1; fi",
+			AgentUser, AgentUser),
+	}
 }
 
 // PostPushLayers are the commands that must run after the artifact files land. The

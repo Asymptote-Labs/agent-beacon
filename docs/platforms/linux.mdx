@@ -21,11 +21,40 @@ sudo apt install ./beacon_<version>_linux_amd64.deb
 ```
 
 ```bash title="Fedora, RHEL, Rocky, Alma"
-sudo dnf install ./beacon-<version>-linux-amd64.rpm
+sudo dnf install ./beacon_<version>_linux_amd64.rpm
 ```
 </CodeGroup>
 
-`amd64` and `arm64` packages are published for both formats.
+`amd64` and `arm64` packages are published for both formats. The package puts `beacon` on your
+`PATH`, so every command below works by name.
+
+### Without root, or without a package manager
+
+If you are not an administrator on the machine, or you would rather not touch system paths, use the
+tarball and install in user mode:
+
+```bash title="Tarball install, no root required"
+VERSION=1.2.0   # or whichever release you are installing
+curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/beacon_${VERSION}_linux_amd64.tar.gz
+curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/checksums.txt
+
+# Verify before extracting. This is the integrity check for the tarball.
+sha256sum --check --ignore-missing checksums.txt
+
+tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
+
+# ~/.local/bin is already on PATH on most distributions; if `beacon version` fails, add it:
+#   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && exec $SHELL
+beacon version
+beacon endpoint install
+```
+
+The archive contains three binaries — the `beacon` CLI, the `beacon-hooks` adapter that captures
+tool activity, and the `beacon-otelcol` collector. All three are needed, and all three are
+statically linked with no shared-library dependencies.
+
+See [User-mode install](#user-mode-install) for what this sets up and its one caveat.
 
 <Note>
   The package depends on systemd, because the service it registers is a systemd unit. On a
@@ -63,6 +92,22 @@ Summary: 0 failure(s), 1 warning(s)
 
 That says "configured correctly, but you have not used it yet." It clears the first time you run
 your agent. What matters is `0 failure(s)`.
+
+<Warning>
+  One failure is worth knowing by name, because a system endpoint can be perfectly healthy and
+  still be capturing nobody:
+
+  ```
+  console_user_configured: fail target=alice (alice has no agent runtime pointed at this
+    collector, so their sessions are not being captured)
+    action="sudo beacon endpoint user-config repair-installed --system"
+  ```
+
+  A system-mode endpoint runs as root, so it has to work out *whose* agent settings to configure.
+  If it could not identify you at install time, the collector still starts and reports healthy —
+  it simply has nothing sending to it. Run the action above as the user whose sessions should be
+  captured and it clears.
+</Warning>
 
 If you would rather confirm the pipeline before running a real session, write a synthetic event:
 

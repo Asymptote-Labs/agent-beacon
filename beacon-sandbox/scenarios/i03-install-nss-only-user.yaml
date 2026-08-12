@@ -1,0 +1,62 @@
+id: i03-install-nss-only-user
+# The scenario a directory-backed fleet actually lives: a system-mode install on a host where the
+# developer's account comes from OpenLDAP/SSSD rather than /etc/passwd.
+#
+# i01 and i02 both create their account with `useradd`, which writes /etc/passwd. That makes them
+# structurally incapable of seeing this failure, and the gap is not hypothetical -- every scenario
+# in this suite passed on a build that configures nobody on such a fleet.
+#
+# The mechanism: Beacon ships CGO_ENABLED=0, which selects Go's pure-Go os/user. That
+# implementation parses /etc/passwd directly and never consults NSS, so `user.Lookup("agent")`
+# fails for an account only a directory service can see. A system install runs as root and must
+# resolve *someone else* by name to know whose Claude Code to configure -- so it resolves nobody,
+# skips the step, and reports success. The collector then runs perfectly and captures nothing.
+#
+# `nss_only_user` is what makes this visible. The account is identical to the other lanes in
+# username, uid, home directory and shell; only its visibility changes. So a difference in outcome
+# between this scenario and i01 has exactly one available explanation.
+#
+# Deliberately service=none rather than systemd: the defect is in user resolution, not service
+# management, and the supervised backend needs no nested privileged container. That keeps this
+# lane cheap enough to run on every change to the resolution path.
+install:
+  mode: system
+  service: none
+  nss_only_user: true
+  expect_status_running: true
+  # Not redundant with the above -- see i02. Asserting the backend keeps a detection failure from
+  # passing as a healthy install of something else.
+  expect_service_kind: none
+
+prompt: >-
+  Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}
+sentinel: /home/agent/work/i03.sentinel
+budget_usd: 1.0
+timeout_seconds: 420
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    fields: ["prompt.text", "session.id", "harness.name"]
+    why: >-
+      The whole chain, and the only assertion that can distinguish "installed" from "installed for
+      somebody". A prompt event exists only if the install resolved the NSS-only account and wrote
+      its settings.json. When this fails, the install step's own error names the cause: the
+      user-config step reports skipped_reason=no_active_console_user rather than failing, which is
+      exactly how this reaches production looking like a success.
+
+  - action: token.usage
+    fields: ["gen_ai.usage.input_tokens", "model"]
+    why: >-
+      Metrics travel a separate pipeline from logs, so a working prompt event does not imply a
+      working metrics path. Held to the same standard as i01 and i02 on purpose: an install on a
+      directory-backed host is never allowed to look healthier than one on a local-account host.
+
+  - action: command.executed
+    contains: ["{{canary}}"]
+    fields: ["command.command"]
+    why: >-
+      The hook path specifically. Hooks are installed into the resolved user's settings.json, so
+      this fails for the same root cause as prompt.submitted but through a different mechanism --
+      and it is the surface the rules/risky-command/ detections match on, so losing it silently
+      costs detection coverage rather than just telemetry.

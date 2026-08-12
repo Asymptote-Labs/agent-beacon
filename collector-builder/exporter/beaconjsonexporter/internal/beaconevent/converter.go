@@ -1584,43 +1584,13 @@ func HarnessName(attrs map[string]interface{}, hints ...string) string {
 	return "otel"
 }
 
+// NormalizeHarnessName maps a runtime's self-reported name onto Beacon's canonical harness name.
+//
+// Delegates to the shared module rather than keeping its own copy: the hook path writes the same
+// field from a different process, and when the two mappings drifted a single session was recorded
+// under two names. Keeping one implementation is what stops that recurring.
 func NormalizeHarnessName(name string) string {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case lower == "":
-		return ""
-	case strings.Contains(lower, "cowork") || strings.Contains(lower, "co-work"):
-		return "claude_cowork"
-	case strings.Contains(lower, "claude_agent_sdk") || strings.Contains(lower, "claude-agent-sdk") || strings.Contains(lower, "claude agent sdk"):
-		return "claude_agent_sdk"
-	// Browser-based chat collectors (agent-beacon-browser-extension). These must
-	// precede the generic "claude" rule below, which would otherwise coerce
-	// claude_web → claude_code.
-	case strings.Contains(lower, "claude_web") || strings.Contains(lower, "claude-web") || lower == "claude.ai":
-		return "claude_web"
-	case strings.Contains(lower, "chatgpt") || lower == "chatgpt.com" || strings.Contains(lower, "openai_web"):
-		return "chatgpt_web"
-	case strings.Contains(lower, "claude_code") || strings.Contains(lower, "claude-code") || strings.Contains(lower, "claude code") || strings.HasPrefix(lower, "claude_code."):
-		return "claude_code"
-	case lower == "claude" || strings.Contains(lower, "claude"):
-		return "claude_code"
-	case strings.Contains(lower, "openclaw") || strings.Contains(lower, "open-claw"):
-		return "openclaw_gateway"
-	case strings.Contains(lower, "antigravity") || strings.Contains(lower, "anti-gravity"):
-		return "antigravity_cli"
-	case strings.Contains(lower, "codex"):
-		return "codex_cli"
-	case strings.Contains(lower, "gemini"):
-		return "gemini_cli"
-	case strings.Contains(lower, "copilot-chat"):
-		return "vscode_copilot"
-	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
-		return "copilot_cli"
-	case name != "":
-		return name
-	default:
-		return ""
-	}
+	return asymptoteobserve.NormalizeHarnessName(name)
 }
 
 func InferAction(attrs map[string]interface{}, fallback string) string {

@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
 
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -146,6 +149,9 @@ func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorRes
 	}
 	checks = append(checks, actionableChecks(status.Diagnostics, status.RuntimeLog)...)
 	checks = append(checks, collectorCheck(status), serviceCheck(status), lastEventCheck(status))
+	if !status.RuntimeLog.EffectiveUserMode {
+		checks = append(checks, consoleUserConfigCheck())
+	}
 	for _, h := range status.Harnesses {
 		checks = append(checks, harnessCheck(h, status.LogPath, status.RuntimeLog.EffectiveUserMode))
 	}
@@ -1049,6 +1055,117 @@ func lastEventCheck(status lifecycle.Status) diagnostics.Check {
 		return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: "runtime log has events", Evidence: "last_event_present"}
 	}
 	return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityLow, Message: "runtime log has no events yet", Evidence: "last_event_missing", Action: "beacon endpoint test-event"}
+}
+
+// consoleUserConfigCheck asks the one question a system-mode doctor never asked: is there a human
+// whose agent runtime actually points at this collector?
+//
+// Every other check runs as root and resolves $HOME to /root, so it inspects the settings that
+// `endpoint install --system` wrote for root -- which are always correct, because the install just
+// wrote them. A system endpoint exists to capture the *operator's* sessions, and when the operator
+// could not be resolved the install skipped them, said so only under --json, and doctor reported a
+// green harness for root. The whole chain looked healthy while collecting nothing.
+//
+// That is not hypothetical: on a fleet whose accounts come from a directory service, it was the
+// steady state for every machine, and the only visible symptom was the harness_observed warning
+// that the documentation tells people to ignore on a fresh install.
+//
+// System mode only. In user mode the person running the command is the person being configured,
+// so the question answers itself.
+func consoleUserConfigCheck() diagnostics.Check {
+	const name = "console_user_configured"
+	info, ok, err := activeConsoleUser()
+	if err != nil || !ok {
+		return diagnostics.Check{
+			Name:     name,
+			Status:   diagnostics.StatusWarn,
+			Severity: diagnostics.SeverityMedium,
+			Message: "no logged-in user could be identified, so this endpoint may be collecting " +
+				"for nobody; the collector is healthy either way",
+			Evidence: "no_console_user",
+			Action:   "run 'beacon endpoint user-config repair-installed --system' as the user whose sessions should be captured",
+		}
+	}
+	configured, detail := consoleUserHarnessConfigured(info)
+	if !configured {
+		return diagnostics.Check{
+			Name:     name,
+			Target:   info.Username,
+			Status:   diagnostics.StatusFail,
+			Severity: diagnostics.SeverityHigh,
+			Message: fmt.Sprintf("%s has no agent runtime pointed at this collector, so their "+
+				"sessions are not being captured (%s)", info.Username, detail),
+			Evidence: "console_user_not_configured",
+			Action:   "sudo beacon endpoint user-config repair-installed --system",
+		}
+	}
+	return diagnostics.Check{
+		Name:     name,
+		Target:   info.Username,
+		Status:   diagnostics.StatusOK,
+		Severity: diagnostics.SeverityInfo,
+		Message:  fmt.Sprintf("%s's agent runtime is configured", info.Username),
+		Evidence: "console_user_configured",
+	}
+}
+
+// consoleUserHarnessConfigured reports whether the console user has at least one runtime pointed
+// at the local collector.
+//
+// At least one rather than all of them: a developer who uses only Claude Code is fully configured,
+// and demanding every detected runtime would produce a failure nobody should act on.
+func consoleUserHarnessConfigured(info consoleUserInfo) (bool, string) {
+	paths, err := consoleUserConfigPaths(info)
+	if err != nil {
+		return false, err.Error()
+	}
+	if len(paths) == 0 {
+		return false, "no agent runtime configuration found in " + info.HomeDir
+	}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		// The endpoint marker is the collector address the install writes. Matching on it rather
+		// than on the file existing distinguishes "configured for this endpoint" from "the user
+		// happens to have a settings file", which is the difference that matters here.
+		if strings.Contains(string(data), "127.0.0.1:4317") ||
+			strings.Contains(string(data), "127.0.0.1:4318") ||
+			strings.Contains(string(data), embedded.BinaryStem) {
+			return true, p
+		}
+	}
+	return false, "found " + strconv.Itoa(len(paths)) + " runtime config file(s), none pointed at this collector"
+}
+
+// consoleUserConfigPaths lists the runtime configuration files that exist in a specific user's
+// home directory.
+//
+// Resolved from their home directory rather than from harness discovery, which reads $HOME and
+// would answer for root -- the process running doctor -- instead of for them. That substitution is
+// the reason this check is needed at all, so it must not be repeated here.
+func consoleUserConfigPaths(info consoleUserInfo) ([]string, error) {
+	if info.HomeDir == "" {
+		return nil, fmt.Errorf("no home directory for %s", info.Username)
+	}
+	// The runtimes a system install configures natively. Hook-only runtimes are covered too,
+	// because an installed hook command names the hook binary and that is one of the markers.
+	candidates := []string{
+		filepath.Join(".claude", "settings.json"),
+		filepath.Join(".codex", "config.toml"),
+		filepath.Join(".gemini", "settings.json"),
+		filepath.Join(".cursor", "hooks.json"),
+		filepath.Join(".config", "Code", "User", "settings.json"),
+	}
+	var found []string
+	for _, rel := range candidates {
+		p := filepath.Join(info.HomeDir, rel)
+		if _, err := os.Stat(p); err == nil {
+			found = append(found, p)
+		}
+	}
+	return found, nil
 }
 
 func harnessCheck(h harness.Harness, logPath string, effectiveUserMode bool) diagnostics.Check {

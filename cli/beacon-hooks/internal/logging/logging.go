@@ -142,7 +142,12 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 		},
 		"user": user,
 		"harness": map[string]interface{}{
-			"name": l.platform,
+			// Normalized rather than written raw. The OTLP path already reports the canonical name
+			// for the same session, so emitting the raw --platform value here recorded one session
+			// under two names -- splitting it for any query or SIEM detection that groups by
+			// harness.name. The flag itself is unchanged, so existing installs are fixed without
+			// having their settings.json rewritten.
+			"name": asymptoteobserve.NormalizeHarnessName(l.platform),
 		},
 		"message": asymptoteobserve.CleanString(message, asymptoteobserve.DefaultStringLimit, true),
 	}

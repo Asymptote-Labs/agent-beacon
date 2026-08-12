@@ -75,6 +75,20 @@ type Install struct {
 	// refuses. Rather than make a scenario describe VM lanes and Docker, it states the
 	// requirement and the runner arranges it.
 	NeedsRealSystemd bool `yaml:"needs_real_systemd,omitempty"`
+	// NSSOnlyUser makes the session account resolvable through NSS but absent from /etc/passwd.
+	//
+	// This reproduces a directory-backed fleet -- OpenLDAP, SSSD, AD -- where `getent passwd alice`
+	// succeeds and `grep alice /etc/passwd` finds nothing. It matters because Beacon is built
+	// CGO_ENABLED=0, which selects Go's pure-Go os/user: that implementation parses /etc/passwd
+	// directly and never consults NSS, so a root-run system install cannot resolve the human whose
+	// runtime it is supposed to configure.
+	//
+	// The default image creates the same account with `useradd`, which writes /etc/passwd and makes
+	// the failure structurally invisible -- a scenario can assert capture, install success, and
+	// service health and still pass on a build that configures nobody on a real customer fleet.
+	// Only the account's *visibility* changes; the username, home directory and uid are otherwise
+	// identical, so everything a scenario asserts stays comparable to the local-account lanes.
+	NSSOnlyUser bool `yaml:"nss_only_user,omitempty"`
 }
 
 // Platform selects the guest OS family a scenario is written for.
@@ -205,6 +219,13 @@ func (s Scenario) Validate() error {
 			if s.Install.NeedsRealSystemd && s.Install.Mode != "system" {
 				return fmt.Errorf("%s: needs_real_systemd requires mode=system; a user unit in a "+
 					"container has no logind session to attach to", s.ID)
+			}
+			// A user-mode install configures $HOME directly and never resolves anyone by name, so
+			// the NSS gap it exists to expose is unreachable there. Allowing the combination would
+			// produce a scenario that passes without testing anything it claims to.
+			if s.Install.NSSOnlyUser && s.Install.Mode != "system" {
+				return fmt.Errorf("%s: nss_only_user requires mode=system; a user-mode install "+
+					"resolves $HOME and never looks the account up by name", s.ID)
 			}
 			switch s.Install.ExpectServiceKind {
 			case "", "systemd", "launchd", "windows-service", "none":
@@ -378,6 +399,11 @@ func isFilenameByte(b byte) bool {
 		return true
 	}
 	return false
+}
+
+// NeedsNSSOnlyUser reports whether the session account must be resolvable only through NSS.
+func (s Scenario) NeedsNSSOnlyUser() bool {
+	return s.Install != nil && s.Install.NSSOnlyUser
 }
 
 // NeedsRealSystemd reports whether this scenario must run somewhere systemd is genuinely PID 1.

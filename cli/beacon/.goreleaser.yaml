@@ -140,6 +140,21 @@ nfpms:
         dst: /opt/beacon/scripts/uninstall-endpoint.sh
         file_info:
           mode: 0755
+      # Without these the payload is unreachable by name and every documented command fails with
+      # "beacon: command not found" -- including the one this package's own postinstall prints.
+      # 103 documentation pages call the binary bare, so the package is the right place to make
+      # that true rather than rewriting them all to absolute paths.
+      #
+      # /usr/bin rather than /usr/local/bin for two reasons: Debian policy reserves /usr/local for
+      # the local administrator, and /usr/bin is in sudo's default secure_path, so `sudo beacon
+      # ...` -- which is most of the system-mode documentation -- resolves too. Google Chrome ships
+      # the same shape: an /opt payload with a /usr/bin symlink.
+      - src: /opt/beacon/bin/beacon
+        dst: /usr/bin/beacon
+        type: symlink
+      - src: /opt/beacon/bin/beacon-hooks
+        dst: /usr/bin/beacon-hooks
+        type: symlink
     scripts:
       postinstall: ../../packaging/linux/nfpm/postinstall.sh
       preremove: ../../packaging/linux/nfpm/preremove.sh

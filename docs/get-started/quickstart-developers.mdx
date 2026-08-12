@@ -17,18 +17,27 @@ beacon endpoint install
 ```
 
 ```bash title="Linux"
-# Download the .deb or .rpm for your architecture from the latest release.
-# Installing it performs the endpoint setup for you.
-sudo apt install ./beacon_<version>_linux_amd64.deb
+VERSION=1.2.0   # or whichever release you are installing
+curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/beacon_${VERSION}_linux_amd64.tar.gz
+curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+
+tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
+beacon endpoint install
 ```
 </CodeGroup>
 
-On Linux the package installs a system-mode endpoint managed by systemd, so the paths differ from the
-per-user layout described above — see [Linux](/platforms/linux). For a per-user Linux install instead,
-run `beacon endpoint install` after installing the CLI.
+<Note>
+  The Linux tab uses the tarball on purpose. This page is a per-user setup, and the `.deb`/`.rpm`
+  packages install a **system-mode** endpoint managed by systemd — which writes to
+  `/var/log/beacon-agent/runtime.jsonl` instead, so every command below would report on the wrong
+  log. If you want the system-mode package, follow [Linux](/platforms/linux) instead of this page.
+</Note>
 
 See [Asymptote Open Source](/deployment/open-source) for install details and runtime-specific notes,
-or [macOS](/platforms/macos) for the platform detail.
+or [macOS](/platforms/macos), [Linux](/platforms/linux), or [Windows](/platforms/windows) for the
+platform detail.
 
 ## 2. Confirm collection health
 
