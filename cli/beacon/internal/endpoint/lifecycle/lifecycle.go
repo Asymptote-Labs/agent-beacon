@@ -132,7 +132,7 @@ type fileSnapshot struct {
 // service manager. service.Manager satisfies this as-is.
 type serviceController interface {
 	Unload() error
-	Restart() error
+	Load() error
 }
 
 type installRollback struct {
@@ -173,25 +173,38 @@ func (r *installRollback) Rollback(manifest Manifest) {
 		rollback(manifest)
 		return
 	}
-	// Only tear down a service this install brought up. One that was already running belongs to the
-	// previous, working install, and taking it down is not this transaction's to do.
-	if r.ServiceLoaded && !r.ServiceWasRunning {
+	// Stop first, always, and while the service state on disk still describes the process this
+	// install started.
+	//
+	// Ordering is the whole of it. The supervised backend's "unit file" *is* its pidfile, and that
+	// file is one of the tracked files below -- so restoring it puts back the pid from before the
+	// install, which by then names a process that has already been terminated. Unloading after the
+	// restore would therefore look up a dead pid, stop nothing, and leave the collector this failed
+	// install started running on the new config, holding the ports, with a second one spawned
+	// beside it.
+	if r.ServiceLoaded {
 		_ = r.Manager.Unload()
 	}
+
 	restoreBackups(manifest.Backups)
 	for i := len(r.files) - 1; i >= 0; i-- {
 		path := r.files[i]
 		restoreFile(path, r.snapshots[path])
 	}
-	// Restart after the files are back, so the collector comes up on the restored configuration
-	// rather than the one this failed attempt wrote. Ordering matters: the collector reads its
-	// config at startup, so restarting before the restore would leave it running the very config
-	// that failed.
+
+	// Bring back a service that was running before this install, now that the configuration it was
+	// running is back on disk. A collector reads its config at startup, so this has to come after
+	// the restore to be worth doing at all.
 	//
-	// Best-effort. If the restart does not take, the endpoint is no worse off than the failure that
+	// Without it a failed reinstall of a healthy endpoint would leave the machine with the service
+	// stopped and, on systemd, disabled -- surviving reboot. The upgrade would not merely fail, it
+	// would end collection. A service this install created has no such claim: nothing was running
+	// before, and leaving a half-installed endpoint registered is worse than leaving it absent.
+	//
+	// Best-effort. If it does not come back, the endpoint is no worse off than the failure that
 	// brought us here, and the install error the caller receives is the more useful signal.
 	if r.ServiceLoaded && r.ServiceWasRunning {
-		_ = r.Manager.Restart()
+		_ = r.Manager.Load()
 	}
 }
 
