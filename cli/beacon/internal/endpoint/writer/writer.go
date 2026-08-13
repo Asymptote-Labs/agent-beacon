@@ -105,6 +105,21 @@ func EnsureSystemLogWritable(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create the log directory %s: %w", dir, err)
 	}
+	// Chmod after MkdirAll, and for an existing directory too.
+	//
+	// MkdirAll's mode is masked by the process umask, so on a host with umask 027 or 077 -- any
+	// CIS-hardened build -- this directory came out 0750 or 0700 owned by root. The runtime log
+	// inside it is deliberately 0666 so hooks running as the logged-in user can append, but a
+	// non-root process cannot open a file it cannot traverse to. Every hook write then failed with
+	// EACCES while the root-owned collector stayed perfectly healthy, so the endpoint looked fine
+	// and silently lost every hook-sourced event.
+	//
+	// 0755 rather than something narrower: hooks need traverse, and the sticky-bit dance that would
+	// let them create files here is not needed because the collector owns rotation. The file mode
+	// is what grants write, and openRuntimeFile sets that explicitly for the same umask reason.
+	if err := os.Chmod(dir, 0755); err != nil {
+		return fmt.Errorf("make the log directory %s traversable: %w", dir, err)
+	}
 	return grantInteractiveUsersWrite(dir)
 }
 

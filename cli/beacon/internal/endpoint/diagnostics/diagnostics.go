@@ -136,6 +136,32 @@ func checkLogPermissions(path string, userMode bool) Check {
 	if mode&0222 == 0 {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh, Message: fmt.Sprintf("runtime log is not writable: %o", mode), Evidence: "not_writable"}
 	}
+	// System mode asks a sharper question than "is this writable by somebody".
+	//
+	// The collector runs as root and hooks run as the logged-in user, so the check that matters is
+	// whether a *non-root* process can write here. mode&0222 cannot answer that: it is satisfied by
+	// the owner's write bit, so a root-owned 0600 log -- which no hook can write -- passed as OK.
+	// The Windows branch above was added for exactly this reason; the POSIX branch had the same
+	// hole and nobody had looked.
+	//
+	// Both parts have to hold. The file needs a world-write bit, and the directory needs to be
+	// traversable, because a hook that cannot enter the directory never gets as far as the file.
+	if !userMode {
+		if mode&0002 == 0 {
+			return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh,
+				Message:  fmt.Sprintf("runtime log is mode %o, so hooks running as the logged-in user cannot append to it and their events are lost", mode),
+				Evidence: "not_writable_by_hooks", Action: "sudo chmod 0666 " + path}
+		}
+		if dir := filepath.Dir(path); dir != "" {
+			if dirInfo, dirErr := os.Stat(dir); dirErr == nil {
+				if dirMode := dirInfo.Mode().Perm(); dirMode&0001 == 0 || dirMode&0004 == 0 {
+					return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusFail, Severity: SeverityHigh,
+						Message:  fmt.Sprintf("log directory is mode %o, so hooks running as the logged-in user cannot reach the runtime log inside it", dirMode),
+						Evidence: "log_dir_not_traversable", Action: "sudo chmod 0755 " + dir}
+				}
+			}
+		}
+	}
 	if mode&0044 == 0 {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
 	}

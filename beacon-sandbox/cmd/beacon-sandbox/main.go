@@ -411,6 +411,16 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 		LogRetained:  art.Meta["uninstall_log_retained"],
 		Status:       art.Meta["uninstall_status"],
 	})
+	lifecycle := check.Lifecycle{
+		Restarted:           art.Meta["reinstall_restarted"],
+		PIDBefore:           art.Meta["reinstall_pid_before"],
+		PIDAfter:            art.Meta["reinstall_pid_after"],
+		ReinstallErr:        art.Meta["reinstall_error"],
+		UnprivilegedRefused: art.Meta["unprivileged_uninstall_refused"],
+		UnprivilegedOutput:  art.Meta["unprivileged_uninstall_output"],
+	}
+	check.Reinstall(&v, lifecycle)
+	check.UnprivilegedUninstall(&v, lifecycle)
 	v.Resolve()
 	return v, log
 }

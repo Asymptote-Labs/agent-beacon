@@ -468,6 +468,17 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	art.RuntimeLog = localLog
 	logf("collected %s", localLog)
 
+	// Reinstall before uninstall, for the same reason uninstall runs here at all: the log is already
+	// on the host, so restarting the collector cannot disturb a capture assertion.
+	if sc.VerifiesRestartOnReinstall() {
+		probeReinstall(ctx, g, sc, privileged, agent, &art, logf)
+	}
+
+	// Unprivileged first, while there is still something installed for it to fail to remove.
+	if sc.VerifiesUnprivilegedUninstallFails() {
+		probeUnprivilegedUninstall(ctx, g, agent, &art, logf)
+	}
+
 	// Uninstall last, and only when the scenario asked. The runtime log is already on the host, so
 	// removing the endpoint cannot affect any capture assertion -- which is what makes it safe to do
 	// inside the same run rather than needing a scenario of its own.
@@ -956,6 +967,69 @@ func teardownInstall(ctx context.Context, g guest, sc scenario.Scenario,
 // status` reporting "not installed" is Beacon's opinion of its own state; whether the service is
 // still registered is a fact about the machine, and those are exactly the two that came apart in the
 // bug this exists to catch.
+// probeReinstall installs a second time and checks the collector process was replaced.
+//
+// Runs after the runtime log has been collected, so restarting the collector cannot affect any
+// capture assertion -- the same reason probeUninstall runs where it does.
+//
+// The pid is the evidence. Asking the service whether it is "running" proves nothing here: the
+// stale collector is running, which is precisely the bug. Only a changed pid distinguishes "the
+// install restarted it" from "the install found it alive and left it there".
+func probeReinstall(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) {
+
+	scope := "--user"
+	opts := agent
+	if sc.Install.Mode == "system" {
+		scope = "--system"
+		opts = privileged
+	}
+
+	before, _ := g.Exec(ctx, "pgrep -n beacon-otelcol", opts)
+	pidBefore := strings.TrimSpace(before.Stdout)
+	if pidBefore == "" {
+		art.Meta["reinstall_error"] = "no collector was running before the reinstall, so a restart cannot be observed"
+		logf("reinstall probe: %s", art.Meta["reinstall_error"])
+		return
+	}
+
+	args := "beacon endpoint install " + scope + " --harness claude"
+	if svc := sc.Install.Service; svc != "" {
+		args += " --service=" + svc
+	}
+	r, err := g.Exec(ctx, args+" 2>&1", opts)
+	art.Meta["reinstall_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	art.Meta["reinstall_output"] = oneLine(r.Stdout + r.Stderr)
+	if err != nil || r.ExitCode != 0 {
+		art.Meta["reinstall_error"] = "the second install failed: " + art.Meta["reinstall_output"]
+		logf("reinstall probe: %s", art.Meta["reinstall_error"])
+		return
+	}
+
+	after, _ := g.Exec(ctx, "pgrep -n beacon-otelcol", opts)
+	pidAfter := strings.TrimSpace(after.Stdout)
+
+	art.Meta["reinstall_pid_before"] = pidBefore
+	art.Meta["reinstall_pid_after"] = pidAfter
+	art.Meta["reinstall_restarted"] = fmt.Sprintf("%v", pidAfter != "" && pidAfter != pidBefore)
+	logf("reinstall: collector pid %s -> %s (restarted=%s)", pidBefore, pidAfter, art.Meta["reinstall_restarted"])
+}
+
+// probeUnprivilegedUninstall checks that a system removal without privileges reports failure.
+//
+// Run before the real uninstall, and deliberately as the unprivileged agent user. What makes this
+// worth its own probe is that the bug it catches is invisible from the elevated path: the removal
+// reported success, exited 0, and left the service registered.
+func probeUnprivilegedUninstall(ctx context.Context, g guest, agent sandbox.ExecOpts,
+	art *Artifacts, logf func(string, ...any)) {
+
+	r, _ := g.Exec(ctx, "beacon endpoint uninstall --system --keep-logs 2>&1", agent)
+	art.Meta["unprivileged_uninstall_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	art.Meta["unprivileged_uninstall_output"] = oneLine(r.Stdout + r.Stderr)
+	art.Meta["unprivileged_uninstall_refused"] = fmt.Sprintf("%v", r.ExitCode != 0)
+	logf("unprivileged uninstall: rc=%d refused=%s", r.ExitCode, art.Meta["unprivileged_uninstall_refused"])
+}
+
 func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
 	privileged, agent sandbox.ExecOpts, lay image.Layout, sh shell,
 	art *Artifacts, logf func(string, ...any)) {

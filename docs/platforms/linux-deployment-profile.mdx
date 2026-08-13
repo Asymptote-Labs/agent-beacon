@@ -61,16 +61,17 @@ Measured on Ubuntu 24.04 / amd64 after a live Claude Code session.
 
 | | Measured | Notes |
 |---|---|---|
-| Resident memory | ~57 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
-| CPU, idle | 0.1–0.3% of one core | Two timers: 1s memory check, 5s batch flush |
+| Resident memory | 28–58 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
+| CPU, idle | 0.03–0.3% of one core | Two timers: 1s memory check, 5s batch flush |
 | Threads | 15 | Go runtime, scales with available cores |
 | Disk | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
 | Per agent event | one `fork`/`exec`, one `flock`, one append | Process exits immediately |
 
 ### Caveats
 
-- The CPU figure is a range, not an average. Repeated 30-second samples came out between 0.1% and
-  0.3% of one core.
+- Both figures are ranges, not averages. They come from a supervised collector and a
+  systemd-managed one, which is most of the spread — memory in particular depends on how much the
+  Go runtime has been asked to do before it settles.
 - These numbers come from a virtualized sandbox, where syscalls are slower than on bare metal.
   Expect equal or better on your own hardware.
 
