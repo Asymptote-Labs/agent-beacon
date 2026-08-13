@@ -125,11 +125,29 @@ type fileSnapshot struct {
 	Mode    os.FileMode
 }
 
+// serviceController is the part of service.Manager that rollback uses.
+//
+// Narrow on purpose: rollback's decision about a running service is the branch worth testing, and
+// without a seam here it can only be reached by driving a real install to fail against a real
+// service manager. service.Manager satisfies this as-is.
+type serviceController interface {
+	Unload() error
+	Restart() error
+}
+
 type installRollback struct {
-	Manager       service.Manager
+	Manager       serviceController
 	ServiceLoaded bool
-	files         []string
-	snapshots     map[string]fileSnapshot
+	// ServiceWasRunning records whether a collector was already up when this install began.
+	//
+	// It decides what rollback owes the machine. Unloading is right for a service this transaction
+	// created -- leaving a half-installed endpoint registered would be worse. It is wrong for one
+	// that was already running: a failed upgrade of a healthy endpoint would then stop and disable
+	// it, and on systemd the disable survives reboot, so a machine that was collecting fine before
+	// the attempt is left collecting nothing afterwards.
+	ServiceWasRunning bool
+	files             []string
+	snapshots         map[string]fileSnapshot
 }
 
 func newInstallRollback(manager service.Manager) *installRollback {
@@ -155,13 +173,25 @@ func (r *installRollback) Rollback(manifest Manifest) {
 		rollback(manifest)
 		return
 	}
-	if r.ServiceLoaded {
+	// Only tear down a service this install brought up. One that was already running belongs to the
+	// previous, working install, and taking it down is not this transaction's to do.
+	if r.ServiceLoaded && !r.ServiceWasRunning {
 		_ = r.Manager.Unload()
 	}
 	restoreBackups(manifest.Backups)
 	for i := len(r.files) - 1; i >= 0; i-- {
 		path := r.files[i]
 		restoreFile(path, r.snapshots[path])
+	}
+	// Restart after the files are back, so the collector comes up on the restored configuration
+	// rather than the one this failed attempt wrote. Ordering matters: the collector reads its
+	// config at startup, so restarting before the restore would leave it running the very config
+	// that failed.
+	//
+	// Best-effort. If the restart does not take, the endpoint is no worse off than the failure that
+	// brought us here, and the install error the caller receives is the more useful signal.
+	if r.ServiceLoaded && r.ServiceWasRunning {
+		_ = r.Manager.Restart()
 	}
 }
 
@@ -251,7 +281,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		// install reported success and the ports answered. The endpoint looked healthy and was a
 		// version behind until the machine rebooted. The same path made `endpoint install
 		// --splunk-hec-endpoint ...` write a destination that never took effect.
-		if manager.Status().Running {
+		// Read once and remember it. The same answer decides two things: whether to restart rather
+		// than load now, and whether rollback is allowed to unload later. Asking twice would risk
+		// the two decisions disagreeing about the state they are reasoning about.
+		wasRunning := manager.Status().Running
+		tx.ServiceWasRunning = wasRunning
+		if wasRunning {
 			if err := manager.Restart(); err != nil {
 				tx.Rollback(manifest)
 				return InstallResult{}, err
