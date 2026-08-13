@@ -1,0 +1,159 @@
+---
+title: "Linux Deployment Profile"
+description: "What the Beacon endpoint agent depends on, what it costs to run, and how to verify both yourself"
+---
+
+A reference for reviewing Beacon before deploying it. Every claim names the command that checks it,
+so nothing here has to be taken on trust.
+
+## Kernel surface
+
+**Beacon loads nothing into the kernel and requires no kernel feature beyond a standard POSIX
+system.**
+
+| | |
+|---|---|
+| Kernel modules | None loaded, none required |
+| eBPF / netlink / audit subsystem | Not used |
+| ptrace, process injection | Not used |
+| cgroups, `/sys`, udev | Not read |
+| Capabilities, setuid, setcap | None |
+| `/proc` | One file: `/proc/1/comm`, to detect whether systemd is PID 1 |
+
+Everything it uses from the kernel:
+
+| Facility | Used for | If unavailable |
+|---|---|---|
+| TCP loopback | Three listeners on `127.0.0.1` | Collector cannot start |
+| `flock(2)` | Serializing writes to the runtime log | Degrades on some network filesystems; fine on local disk |
+| `fork`/`exec` | One short-lived hook process per agent event | Hook capture stops; OpenTelemetry capture continues |
+| Ordinary file I/O | Config and log | — |
+| `/proc/1/comm` | systemd detection | Falls back to a supervised collector, which does not restart on exit or start at boot |
+
+Verify the syscall surface on your own hardware rather than taking ours:
+
+```bash
+sudo strace -f -c -p "$(pgrep -n beacon-otelcol)"   # collector, steady state
+sudo strace -f -c -o /tmp/install.trace beacon endpoint install --system --dry-run
+```
+
+## Binaries
+
+Three static executables, no shared libraries, no glibc version floor. An older or stripped
+userland cannot produce a missing-library or wrong-symbol-version failure.
+
+| Binary | Role | Resident? |
+|---|---|---|
+| `beacon-otelcol` | Collector | Yes — the only long-running process |
+| `beacon-hooks` | Records one agent event | No — forks and exits |
+| `beacon` | CLI | No |
+
+```bash
+file /opt/beacon/bin/beacon-otelcol     # ... statically linked
+ldd  /opt/beacon/bin/beacon-otelcol     # not a dynamic executable
+readelf -l /opt/beacon/bin/beacon-otelcol | grep INTERP   # no output = static
+```
+
+CI fails the build if any Linux binary gains a dynamic loader, so this cannot regress quietly.
+
+## Footprint
+
+Measured on Ubuntu 24.04 / amd64 after a live Claude Code session, not estimated.
+
+| | Measured | Notes |
+|---|---|---|
+| Resident memory | ~57 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
+| CPU, idle | 0.1–0.3% of one core | Two timers: 1s memory check, 5s batch flush |
+| Threads | 15 | Go runtime, scales with available cores |
+| Disk | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
+| Per agent event | one `fork`/`exec`, one `flock`, one append | Process exits immediately |
+
+Two caveats worth stating rather than hiding, since you will measure this yourself:
+
+- The CPU figure is a **range across runs**, not a single number. Repeated 30-second samples landed
+  between 0.1% and 0.3% of one core; publishing the midpoint would imply a precision the
+  measurement does not have.
+- It was measured inside a virtualized sandbox, where syscalls cost more than on bare metal. Treat
+  it as an **upper bound** for your hardware, not a prediction.
+
+Reproduce:
+
+```bash
+pid=$(pgrep -n beacon-otelcol)
+grep -E 'VmRSS|Threads' /proc/$pid/status
+awk '{print $14+$15}' /proc/$pid/stat    # sample twice, 30s apart; (delta/100)/30 = fraction of a core
+```
+
+## Network
+
+Loopback only. Nothing is sent off the machine by normal collection.
+
+| Listener | Port | Bind |
+|---|---|---|
+| OTLP gRPC | 4317 | `127.0.0.1` |
+| OTLP HTTP | 4318 | `127.0.0.1` |
+| Health check | 13133 | `127.0.0.1` |
+
+Outbound, for an egress allowlist. None occurs during collection:
+
+| Host | When | Suppress with |
+|---|---|---|
+| `auth.asymptotelabs.ai` | Once per machine, interactive install only | `BEACON_ONBOARDING=0` (already skipped for `--system` and package installs) |
+| `api.github.com`, `github.com` | Version check and self-update | Off by default; leave it off and deploy through your config management |
+
+```bash
+ss -ltnp | grep beacon-otelcol
+```
+
+## Privileges and data
+
+- System mode runs the collector as **root**, because hooks running as the logged-in user append to
+  the same log. `/var/log/beacon-agent/runtime.jsonl` is mode `0666` for that reason.
+- User mode runs entirely as you, under `~/.beacon`, and needs no privileges.
+- The log holds **prompt text, command lines, file paths, and tool inputs**, subject to redaction and
+  a 64 KiB per-event cap. Treat it as sensitive.
+- Account lookup uses `getent`, so directory-backed accounts (OpenLDAP, SSSD, AD) resolve.
+
+## Confining it to housekeeping cores
+
+If you isolate cores for latency-sensitive work, pin Beacon away from them. Beacon's timers are few
+and slow, but a timer landing on an `isolcpus`/`nohz_full` core defeats the point of isolating it.
+
+```ini
+# /etc/systemd/system/beacon-collector.service.d/10-resources.conf
+[Service]
+CPUAffinity=0-3          # your housekeeping cores, NOT the isolated set
+CPUQuota=5%
+MemoryMax=192M
+Nice=19
+IOSchedulingClass=idle
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart beacon-collector
+systemctl show beacon-collector -p CPUAffinity -p CPUQuota -p MemoryMax
+```
+
+Use a drop-in, not an edit to the unit file: `beacon endpoint doctor --fix` rewrites the unit and
+would discard changes made there. Drop-ins survive.
+
+## Uninstall
+
+```bash
+sudo apt remove beacon     # keeps config and collected logs
+sudo apt purge beacon      # removes them
+```
+
+On RPM systems, `dnf remove` keeps `/etc/beacon/endpoint` and `/var/log/beacon-agent`. Remove them
+with `sudo beacon endpoint uninstall --system` if you want the data gone.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Linux install" icon="download" href="/platforms/linux">
+    Packages, user-mode installs, and service management.
+  </Card>
+  <Card title="Data inventory" icon="database" href="/security/data-inventory">
+    Exactly which fields are recorded and retained.
+  </Card>
+</Columns>

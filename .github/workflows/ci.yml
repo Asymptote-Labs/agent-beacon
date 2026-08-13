@@ -147,6 +147,28 @@ jobs:
         working-directory: cli/beacon
         run: make ${{ matrix.make_target }}
 
+      # Linux binaries must be statically linked, and this runner is where that can regress: a
+      # linux target here is a native build with a C toolchain present, so cgo defaults on and the
+      # net package selects the libc resolver. The result carries a glibc version floor that works
+      # on this runner and fails on an older or stripped host -- exactly the customers who cannot
+      # easily diagnose it. Checked on the ELF header rather than by running ldd, which reports
+      # "not a dynamic executable" to stdout or stderr depending on version.
+      - name: Linux binaries must be statically linked
+        if: matrix.goos == 'linux'
+        working-directory: cli/beacon
+        run: |
+          set -eu
+          for bin in "beacon-linux-${{ matrix.goarch }}" \
+                     "../beacon-hooks/beacon-hooks-linux-${{ matrix.goarch }}"; do
+            if readelf -l "$bin" | grep -q INTERP; then
+              echo "$bin is dynamically linked: it has a PT_INTERP segment naming a dynamic loader." >&2
+              echo "A release built this way fails on hosts whose glibc predates the build host's." >&2
+              readelf -l "$bin" | grep -A1 INTERP >&2
+              exit 1
+            fi
+            echo "ok: $bin is statically linked"
+          done
+
   linux-test:
     runs-on: ubuntu-latest
     steps:

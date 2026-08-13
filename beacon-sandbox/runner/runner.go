@@ -449,6 +449,18 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	art.Meta["quiescence_seconds"] = fmt.Sprintf("%.0f", waited.Seconds())
 	art.Meta["quiescent"] = fmt.Sprintf("%v", stable)
 
+	// Measured after quiescence, so the collector is resident and idle rather than mid-batch.
+	// Only for install scenarios: a `ci exec` collector is torn down with the command and has no
+	// steady state to describe. Recorded rather than asserted -- these are the numbers a customer
+	// evaluating footprint asks for, and publishing an estimate instead of a measurement is how a
+	// resource claim quietly stops being true.
+	if sc.Install != nil {
+		if snap := collectorFootprint(ctx, g, agent); snap != "" {
+			art.Meta["collector_footprint"] = snap
+			logf("collector footprint: %s", snap)
+		}
+	}
+
 	localLog := filepath.Join(runDir, "runtime.jsonl")
 	if err := g.Get(ctx, logPath, localLog); err != nil {
 		return art, fmt.Errorf("collect runtime log: %w", err)
@@ -586,6 +598,45 @@ func imageSpecFor(p sandbox.Platform, sc scenario.Scenario, opts Options,
 		WithDocker:    sc.NeedsRealSystemd(),
 		NSSOnlyUser:   sc.NeedsNSSOnlyUser(),
 	}, logf)
+}
+
+// collectorFootprint measures the resident collector: memory, threads, descriptors, and the CPU it
+// consumes while idle.
+//
+// Read from /proc rather than from ps output formats that differ between distributions, and
+// sampled over a fixed interval because idle CPU is a rate, not a value -- the total ticks a
+// process has ever used says nothing about what it costs to leave running.
+//
+// Best-effort by design: this describes a run, it does not gate one. A shell that cannot produce
+// the numbers returns an empty string and the scenario proceeds, because a footprint measurement
+// failing is not a reason to fail a capture test.
+func collectorFootprint(ctx context.Context, g guest, opts sandbox.ExecOpts) string {
+	// Sampled over 30s rather than 10s: at 100 ticks/second an idle collector accumulates about
+	// one tick per 10s, so a 10s window reports 0 or 1 and cannot distinguish "almost nothing"
+	// from "nothing". 30s buys a figure with more than one significant digit.
+	//
+	// The descriptor count needs sudo. In system mode the collector runs as root while this shell
+	// runs as the agent user, so /proc/<pid>/fd is not readable and a plain `ls` yields zero --
+	// a number that is not merely imprecise but impossible, since every process holds at least
+	// stdin, stdout, and stderr. "unreadable" is reported instead, because publishing a resource
+	// figure that is obviously false costs more credibility than omitting one.
+	const script = `
+pid=$(pgrep -n beacon-otelcol 2>/dev/null) || exit 0
+[ -n "$pid" ] || exit 0
+read_ticks() { awk '{print $14+$15}' /proc/$1/stat 2>/dev/null; }
+t0=$(read_ticks "$pid"); sleep 30; t1=$(read_ticks "$pid")
+hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+rss=$(awk '/^VmRSS:/{print $2}' /proc/$pid/status 2>/dev/null)
+thr=$(awk '/^Threads:/{print $2}' /proc/$pid/status 2>/dev/null)
+fds=$(sudo ls /proc/$pid/fd 2>/dev/null | wc -l | tr -d ' ')
+[ "${fds:-0}" -gt 0 ] 2>/dev/null || fds=unreadable
+echo "rss_kb=${rss:-?} threads=${thr:-?} fds=${fds} cpu_ticks_per_30s=$((t1-t0)) clk_tck=$hz"
+`
+	res, err := g.Exec(ctx, script, opts)
+	if err != nil || res.ExitCode != 0 {
+		return ""
+	}
+	return oneLine(res.Stdout)
 }
 
 func randomToken() string {

@@ -54,7 +54,12 @@ builds:
         # --parallelism 1 so target builds cannot race here. The -a flag above
         # forces a full rebuild for each target so Go re-reads the freshly-built
         # hooks.bin instead of serving a stale copy from cache.
-        - cmd: bash -c 'cd ../beacon-hooks && GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
+        # CGO_ENABLED=0 matters here as much as it does in the builds above. Releases are built on
+        # Linux, so a linux/amd64 target is a native build with a C toolchain present, and cgo
+        # would default on. beacon-hooks pulls in net, which selects the cgo resolver and links
+        # libc -- producing a dynamically linked hooks binary embedded inside a statically linked
+        # CLI, with a glibc version floor that only shows up on an older or stripped host.
+        - cmd: bash -c 'cd ../beacon-hooks && CGO_ENABLED=0 GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
           output: true
   - id: beacon-hooks
     dir: ../beacon-hooks
