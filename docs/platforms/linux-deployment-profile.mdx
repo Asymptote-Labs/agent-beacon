@@ -1,0 +1,158 @@
+---
+title: "Linux Deployment Profile"
+description: "What the Beacon endpoint agent depends on, what it costs to run, and how to verify both yourself"
+---
+
+A reference for reviewing Beacon before deploying it. Each claim comes with the command that checks
+it, so you can confirm any of this yourself.
+
+## Kernel surface
+
+Beacon loads nothing into the kernel and needs nothing beyond a standard POSIX system.
+
+| | |
+|---|---|
+| Kernel modules | None loaded, none required |
+| eBPF / netlink / audit subsystem | Not used |
+| ptrace, process injection | Not used |
+| cgroups, `/sys`, udev | Not read |
+| Capabilities, setuid, setcap | None |
+| `/proc` | One file: `/proc/1/comm`, to detect whether systemd is PID 1 |
+
+Everything it uses from the kernel:
+
+| Facility | Used for | If unavailable |
+|---|---|---|
+| TCP loopback | Three listeners on `127.0.0.1` | Collector cannot start |
+| `flock(2)` | Serializing writes to the runtime log | Degrades on some network filesystems; fine on local disk |
+| `fork`/`exec` | One short-lived hook process per agent event | Hook capture stops; OpenTelemetry capture continues |
+| Ordinary file I/O | Config and log | — |
+| `/proc/1/comm` | systemd detection | Falls back to a supervised collector, which does not restart on exit or start at boot |
+
+To see the syscalls for yourself:
+
+```bash
+sudo strace -f -c -p "$(pgrep -n beacon-otelcol)"   # collector, steady state
+sudo strace -f -c -o /tmp/install.trace beacon endpoint install --system --dry-run
+```
+
+## Binaries
+
+Three static executables, no shared libraries, no minimum glibc version. They run the same on a
+minimal or older userland as on a full one.
+
+| Binary | Role | Resident? |
+|---|---|---|
+| `beacon-otelcol` | Collector | Yes — the only long-running process |
+| `beacon-hooks` | Records one agent event | No — forks and exits |
+| `beacon` | CLI | No |
+
+```bash
+file /opt/beacon/bin/beacon-otelcol     # ... statically linked
+ldd  /opt/beacon/bin/beacon-otelcol     # not a dynamic executable
+readelf -l /opt/beacon/bin/beacon-otelcol | grep INTERP   # no output = static
+```
+
+CI fails the build if a Linux binary is ever dynamically linked.
+
+## Footprint
+
+Measured on Ubuntu 24.04 / amd64 after a live Claude Code session.
+
+| | Measured | Notes |
+|---|---|---|
+| Resident memory | ~57 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
+| CPU, idle | 0.1–0.3% of one core | Two timers: 1s memory check, 5s batch flush |
+| Threads | 15 | Go runtime, scales with available cores |
+| Disk | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
+| Per agent event | one `fork`/`exec`, one `flock`, one append | Process exits immediately |
+
+### Caveats
+
+- The CPU figure is a range, not an average. Repeated 30-second samples came out between 0.1% and
+  0.3% of one core.
+- These numbers come from a virtualized sandbox, where syscalls are slower than on bare metal.
+  Expect equal or better on your own hardware.
+
+### Measuring it yourself
+
+```bash
+pid=$(pgrep -n beacon-otelcol)
+grep -E 'VmRSS|Threads' /proc/$pid/status
+awk '{print $14+$15}' /proc/$pid/stat    # sample twice, 30s apart; (delta/100)/30 = fraction of a core
+```
+
+## Network
+
+Beacon listens on loopback only, and collection never sends anything off the machine.
+
+| Listener | Port | Bind |
+|---|---|---|
+| OTLP gRPC | 4317 | `127.0.0.1` |
+| OTLP HTTP | 4318 | `127.0.0.1` |
+| Health check | 13133 | `127.0.0.1` |
+
+The only outbound connections Beacon ever makes, for an egress allowlist:
+
+| Host | When | Suppress with |
+|---|---|---|
+| `auth.asymptotelabs.ai` | Once per machine, interactive install only | `BEACON_ONBOARDING=0` (already skipped for `--system` and package installs) |
+| `api.github.com`, `github.com` | Version check and self-update | Off by default; leave it off and deploy through your config management |
+
+```bash
+ss -ltnp | grep beacon-otelcol
+```
+
+## Privileges and data
+
+- In system mode the collector runs as root. Hooks run as the logged-in user and append to the same
+  log, which is why `/var/log/beacon-agent/runtime.jsonl` is mode `0666`.
+- In user mode everything runs as you under `~/.beacon`, with no privileges required.
+- The log contains prompt text, command lines, file paths, and tool inputs, after redaction and a
+  64 KiB per-event limit. Treat it as sensitive data.
+- Account lookup goes through `getent`, so accounts from OpenLDAP, SSSD, or AD resolve normally.
+
+## Pinning it to housekeeping cores
+
+If you isolate cores for latency-sensitive work, keep Beacon off them. It only has two slow timers,
+but a timer firing on an `isolcpus` or `nohz_full` core is exactly what isolating that core was
+meant to prevent.
+
+```ini
+# /etc/systemd/system/beacon-collector.service.d/10-resources.conf
+[Service]
+CPUAffinity=0-3          # your housekeeping cores, NOT the isolated set
+CPUQuota=5%
+MemoryMax=192M
+Nice=19
+IOSchedulingClass=idle
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart beacon-collector
+systemctl show beacon-collector -p CPUAffinity -p CPUQuota -p MemoryMax
+```
+
+Put this in a drop-in rather than editing the unit file directly. `beacon endpoint doctor --fix`
+rewrites the unit, which would wipe out your changes; drop-ins are left alone.
+
+## Uninstall
+
+```bash
+sudo apt remove beacon     # keeps config and collected logs
+sudo apt purge beacon      # removes them
+```
+
+On RPM systems, `dnf remove` keeps `/etc/beacon/endpoint` and `/var/log/beacon-agent`. Remove them
+with `sudo beacon endpoint uninstall --system` if you want the data gone.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Linux install" icon="download" href="/platforms/linux">
+    Packages, user-mode installs, and service management.
+  </Card>
+  <Card title="Data inventory" icon="database" href="/security/data-inventory">
+    Exactly which fields are recorded and retained.
+  </Card>
+</Columns>

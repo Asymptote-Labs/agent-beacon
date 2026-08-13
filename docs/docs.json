@@ -292,6 +292,7 @@
                 "pages": [
                   "platforms/macos",
                   "platforms/linux",
+                  "platforms/linux-deployment-profile",
                   "platforms/windows"
                 ]
               },

@@ -147,6 +147,42 @@ jobs:
         working-directory: cli/beacon
         run: make ${{ matrix.make_target }}
 
+      # Linux binaries must be statically linked, and this runner is where that can regress: a
+      # linux target here is a native build with a C toolchain present, so cgo defaults on and the
+      # net package selects the libc resolver. The result carries a glibc version floor that works
+      # on this runner and fails on an older or stripped host -- exactly the customers who cannot
+      # easily diagnose it. Checked on the ELF header rather than by running ldd, which reports
+      # "not a dynamic executable" to stdout or stderr depending on version.
+      - name: Linux binaries must be statically linked
+        if: matrix.goos == 'linux'
+        working-directory: cli/beacon
+        run: |
+          set -euo pipefail
+          for bin in "beacon-linux-${{ matrix.goarch }}" \
+                     "../beacon-hooks/beacon-hooks-linux-${{ matrix.goarch }}"; do
+            # Each step below fails closed. Piping readelf straight into `grep -q INTERP` would
+            # not: a missing binary or a runner without readelf produces empty input, grep matches
+            # nothing, and the check reports success for a binary it never looked at.
+            [ -f "$bin" ] || { echo "no binary at $bin -- the build step did not produce what this checks" >&2; exit 1; }
+
+            headers="$(readelf -l "$bin")" || { echo "readelf failed on $bin, so its linkage is unknown" >&2; exit 1; }
+
+            case "$headers" in
+              *"Program Headers"*) ;;
+              *) echo "readelf produced no program headers for $bin, so its linkage is unknown" >&2; exit 1 ;;
+            esac
+
+            case "$headers" in
+              *INTERP*)
+                echo "$bin is dynamically linked: it carries a PT_INTERP segment naming a loader." >&2
+                echo "Built this way, it fails on any host whose glibc predates the build host's." >&2
+                printf '%s\n' "$headers" | grep -A1 INTERP >&2
+                exit 1 ;;
+            esac
+
+            echo "ok: $bin is statically linked"
+          done
+
   linux-test:
     runs-on: ubuntu-latest
     steps:
