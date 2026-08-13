@@ -3,13 +3,12 @@ title: "Linux Deployment Profile"
 description: "What the Beacon endpoint agent depends on, what it costs to run, and how to verify both yourself"
 ---
 
-A reference for reviewing Beacon before deploying it. Every claim names the command that checks it,
-so nothing here has to be taken on trust.
+A reference for reviewing Beacon before deploying it. Each claim comes with the command that checks
+it, so you can confirm any of this yourself.
 
 ## Kernel surface
 
-**Beacon loads nothing into the kernel and requires no kernel feature beyond a standard POSIX
-system.**
+Beacon loads nothing into the kernel and needs nothing beyond a standard POSIX system.
 
 | | |
 |---|---|
@@ -30,7 +29,7 @@ Everything it uses from the kernel:
 | Ordinary file I/O | Config and log | — |
 | `/proc/1/comm` | systemd detection | Falls back to a supervised collector, which does not restart on exit or start at boot |
 
-Verify the syscall surface on your own hardware rather than taking ours:
+To see the syscalls for yourself:
 
 ```bash
 sudo strace -f -c -p "$(pgrep -n beacon-otelcol)"   # collector, steady state
@@ -39,8 +38,8 @@ sudo strace -f -c -o /tmp/install.trace beacon endpoint install --system --dry-r
 
 ## Binaries
 
-Three static executables, no shared libraries, no glibc version floor. An older or stripped
-userland cannot produce a missing-library or wrong-symbol-version failure.
+Three static executables, no shared libraries, no minimum glibc version. They run the same on a
+minimal or older userland as on a full one.
 
 | Binary | Role | Resident? |
 |---|---|---|
@@ -54,11 +53,11 @@ ldd  /opt/beacon/bin/beacon-otelcol     # not a dynamic executable
 readelf -l /opt/beacon/bin/beacon-otelcol | grep INTERP   # no output = static
 ```
 
-CI fails the build if any Linux binary gains a dynamic loader, so this cannot regress quietly.
+CI fails the build if a Linux binary is ever dynamically linked.
 
 ## Footprint
 
-Measured on Ubuntu 24.04 / amd64 after a live Claude Code session, not estimated.
+Measured on Ubuntu 24.04 / amd64 after a live Claude Code session.
 
 | | Measured | Notes |
 |---|---|---|
@@ -68,15 +67,14 @@ Measured on Ubuntu 24.04 / amd64 after a live Claude Code session, not estimated
 | Disk | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
 | Per agent event | one `fork`/`exec`, one `flock`, one append | Process exits immediately |
 
-Two caveats worth stating rather than hiding, since you will measure this yourself:
+### Caveats
 
-- The CPU figure is a **range across runs**, not a single number. Repeated 30-second samples landed
-  between 0.1% and 0.3% of one core; publishing the midpoint would imply a precision the
-  measurement does not have.
-- It was measured inside a virtualized sandbox, where syscalls cost more than on bare metal. Treat
-  it as an **upper bound** for your hardware, not a prediction.
+- The CPU figure is a range, not an average. Repeated 30-second samples came out between 0.1% and
+  0.3% of one core.
+- These numbers come from a virtualized sandbox, where syscalls are slower than on bare metal.
+  Expect equal or better on your own hardware.
 
-Reproduce:
+### Measuring it yourself
 
 ```bash
 pid=$(pgrep -n beacon-otelcol)
@@ -86,7 +84,7 @@ awk '{print $14+$15}' /proc/$pid/stat    # sample twice, 30s apart; (delta/100)/
 
 ## Network
 
-Loopback only. Nothing is sent off the machine by normal collection.
+Beacon listens on loopback only, and collection never sends anything off the machine.
 
 | Listener | Port | Bind |
 |---|---|---|
@@ -94,7 +92,7 @@ Loopback only. Nothing is sent off the machine by normal collection.
 | OTLP HTTP | 4318 | `127.0.0.1` |
 | Health check | 13133 | `127.0.0.1` |
 
-Outbound, for an egress allowlist. None occurs during collection:
+The only outbound connections Beacon ever makes, for an egress allowlist:
 
 | Host | When | Suppress with |
 |---|---|---|
@@ -107,17 +105,18 @@ ss -ltnp | grep beacon-otelcol
 
 ## Privileges and data
 
-- System mode runs the collector as **root**, because hooks running as the logged-in user append to
-  the same log. `/var/log/beacon-agent/runtime.jsonl` is mode `0666` for that reason.
-- User mode runs entirely as you, under `~/.beacon`, and needs no privileges.
-- The log holds **prompt text, command lines, file paths, and tool inputs**, subject to redaction and
-  a 64 KiB per-event cap. Treat it as sensitive.
-- Account lookup uses `getent`, so directory-backed accounts (OpenLDAP, SSSD, AD) resolve.
+- In system mode the collector runs as root. Hooks run as the logged-in user and append to the same
+  log, which is why `/var/log/beacon-agent/runtime.jsonl` is mode `0666`.
+- In user mode everything runs as you under `~/.beacon`, with no privileges required.
+- The log contains prompt text, command lines, file paths, and tool inputs, after redaction and a
+  64 KiB per-event limit. Treat it as sensitive data.
+- Account lookup goes through `getent`, so accounts from OpenLDAP, SSSD, or AD resolve normally.
 
-## Confining it to housekeeping cores
+## Pinning it to housekeeping cores
 
-If you isolate cores for latency-sensitive work, pin Beacon away from them. Beacon's timers are few
-and slow, but a timer landing on an `isolcpus`/`nohz_full` core defeats the point of isolating it.
+If you isolate cores for latency-sensitive work, keep Beacon off them. It only has two slow timers,
+but a timer firing on an `isolcpus` or `nohz_full` core is exactly what isolating that core was
+meant to prevent.
 
 ```ini
 # /etc/systemd/system/beacon-collector.service.d/10-resources.conf
@@ -134,8 +133,8 @@ sudo systemctl daemon-reload && sudo systemctl restart beacon-collector
 systemctl show beacon-collector -p CPUAffinity -p CPUQuota -p MemoryMax
 ```
 
-Use a drop-in, not an edit to the unit file: `beacon endpoint doctor --fix` rewrites the unit and
-would discard changes made there. Drop-ins survive.
+Put this in a drop-in rather than editing the unit file directly. `beacon endpoint doctor --fix`
+rewrites the unit, which would wipe out your changes; drop-ins are left alone.
 
 ## Uninstall
 
