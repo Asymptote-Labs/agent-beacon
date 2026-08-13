@@ -11,6 +11,68 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### v1.2.1 · August 12, 2026
+
+- **Beacon configures the right person on directory-backed hosts** · On a machine
+  whose developer accounts come from OpenLDAP, SSSD, or Active Directory rather
+  than `/etc/passwd`, a system-mode install reported success, started a healthy
+  collector, and captured nothing — for every user, on every machine. Beacon is
+  built without cgo, which is what makes its binaries statically linked with no
+  glibc version floor, and the same setting made Go's account lookup read
+  `/etc/passwd` directly without consulting NSS. Account resolution now falls back
+  to `getent`, so both the `SUDO_USER` and logind paths resolve a directory user.
+  Only system-mode installs were affected; a user-mode install configures your own
+  home directory and never looked anyone up by name.
+- **`beacon` is on `PATH` after a package install** · The `.deb` and `.rpm`
+  installed to `/opt/beacon/bin` and linked nothing, so every documented command —
+  including the one the package's own postinstall prints — failed with
+  `command not found`. Both packages now provide `/usr/bin/beacon` and
+  `/usr/bin/beacon-hooks`.
+- **One session, one harness name** · Hook events recorded the raw runtime name
+  while OpenTelemetry events recorded the canonical one, so a single Claude Code
+  session appeared as both `claude` and `claude_code` — splitting it for any query,
+  dashboard, or SIEM detection grouping by `harness.name`. Hook events now carry the
+  canonical name. If you have saved queries matching `claude`, `codex`, `vscode`, or
+  `antigravity` on hook-sourced events, update them to `claude_code`, `codex_cli`,
+  `vscode_copilot`, and `antigravity_cli`.
+- **VS Code Copilot Chat is no longer attributed to the Copilot CLI** ·
+  `vscode_copilot` normalized to `copilot_cli`, two different products, and the
+  canonical name was not stable when normalized a second time.
+- **`endpoint doctor` can see an endpoint that captures nobody** · A system install
+  runs as root, so every harness check inspected root's configuration — which the
+  install had just written correctly — while the actual operator had none. The new
+  `console_user_configured` check asks whether a real user's agent runtime points at
+  this collector, and fails loudly when it does not. Previously the only symptom was
+  a warning the documentation told you to ignore.
+- **Regression coverage for directory-backed hosts** · The sandbox suite gained a
+  lane whose account resolves through NSS but is absent from `/etc/passwd`, which is
+  the property every existing lane lacked; and the Linux package smoke test now
+  asserts `beacon` is reachable by name, which every check in it had assumed by
+  using an absolute path.
+
+---
+
+### v1.2.0 · August 11, 2026
+
+- **Beacon runs on Windows** · Endpoint parity with macOS and Linux: the collector
+  runs as a Windows service through the Service Control Manager, system- and
+  user-mode installs write per-platform paths, hooks capture through installed
+  runtime configuration, and uninstall removes the service while keeping the data it
+  promises to keep.
+- **Windows packaging and release artifacts** · Releases now publish a
+  `BeaconEndpointAgent-<version>-x64.msi` with its SHA-256, plus a
+  `beacon_<version>_windows_amd64.zip` archive. The MSI is unsigned, so its checksum
+  is its integrity check; the release job proves it works by installing it on a
+  runner before attaching it.
+- **Windows install documentation** · How to install the endpoint on Windows and how
+  to verify it afterwards.
+- **Verification that can actually fail** · The sandbox harness gained a Windows
+  guest lane, uninstall assertions that ask the operating system rather than Beacon
+  whether a service is gone, and fixes to several checks that could not fail and so
+  read as coverage without providing any.
+
+---
+
 ### v1.1.0 · August 7, 2026
 
 - **Beacon runs on Linux** · Full endpoint parity with macOS: systemd service
