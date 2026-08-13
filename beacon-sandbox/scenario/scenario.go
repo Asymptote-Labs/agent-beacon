@@ -84,6 +84,20 @@ type Install struct {
 	// the endpoint is a version behind until reboot. Nothing short of a real service manager and a
 	// real second install exercises that.
 	VerifyRestartOnReinstall bool `yaml:"verify_restart_on_reinstall,omitempty"`
+	// VerifyRollbackOnFailedReinstall makes a reinstall fail on purpose and checks what the machine
+	// is left with.
+	//
+	// Rollback is the least exercised path in install and the easiest to get wrong, because it runs
+	// only when something else has already gone wrong. Two defects lived here: it disabled a
+	// collector that was healthy before the attempt, and -- since the supervised backend's unit
+	// file is its pidfile, which rollback restores -- it stopped a pid that was already dead while
+	// the collector the failed install started kept running, with a second one started beside it.
+	//
+	// Neither is visible from a successful install, and both leave a machine that looks installed.
+	// The failure is induced by pointing the reinstall at a program that starts and never listens,
+	// so the service loads and readiness is what fails, which is the ordering that reaches rollback
+	// with a service to undo.
+	VerifyRollbackOnFailedReinstall bool `yaml:"verify_rollback_on_failed_reinstall,omitempty"`
 	// VerifyUnprivilegedUninstallFails checks that a system uninstall run without privileges
 	// reports failure instead of pretending it removed anything.
 	//
@@ -426,6 +440,12 @@ func isFilenameByte(b byte) bool {
 // VerifiesRestartOnReinstall reports whether a second install must replace the collector process.
 func (s Scenario) VerifiesRestartOnReinstall() bool {
 	return s.Install != nil && s.Install.VerifyRestartOnReinstall
+}
+
+// VerifiesRollbackOnFailedReinstall reports whether a deliberately failed reinstall must leave the
+// machine with exactly the endpoint it had beforehand.
+func (s Scenario) VerifiesRollbackOnFailedReinstall() bool {
+	return s.Install != nil && s.Install.VerifyRollbackOnFailedReinstall
 }
 
 // VerifiesUnprivilegedUninstallFails reports whether an unprivileged removal must be refused.

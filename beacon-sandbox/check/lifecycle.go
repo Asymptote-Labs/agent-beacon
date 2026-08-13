@@ -15,6 +15,12 @@ type Lifecycle struct {
 	// UnprivilegedRefused is "true"/"false" when an unprivileged removal was attempted.
 	UnprivilegedRefused string
 	UnprivilegedOutput  string
+
+	// RollbackInstallRC, RollbackCollectorCount and RollbackStatus describe a reinstall that was
+	// made to fail on purpose. Empty when the scenario did not ask.
+	RollbackInstallRC      string
+	RollbackCollectorCount string
+	RollbackStatus         string
 }
 
 // Reinstall judges whether installing over a running endpoint replaced the collector.
@@ -57,6 +63,63 @@ func Reinstall(v *Verdict, l Lifecycle) {
 			"answer, status reports running -- while exporting through a version the package manager " +
 			"has already deleted. Install must restart a service it finds already running.",
 	})
+}
+
+// FailedReinstallRollback judges what a deliberately failed reinstall left behind.
+//
+// The contract is that a failed install returns the machine to the endpoint it had: one collector,
+// running, on the configuration from before the attempt. Two ways of breaking it have shipped.
+//
+// Too few collectors means rollback took a healthy endpoint down -- and on systemd it also disables
+// the unit, so the machine stays down across a reboot. Too many means rollback stopped the wrong
+// process: the collector the failed install started keeps running on the new config, holding the
+// ports, while another is started beside it. Asking whether a collector is running cannot tell any
+// of these apart, because the answer is yes in every one.
+func FailedReinstallRollback(v *Verdict, l Lifecycle) {
+	if l.RollbackInstallRC == "" {
+		return // the scenario did not ask
+	}
+
+	// A reinstall pointed at a program that never listens has to fail. If it reported success,
+	// readiness is not being checked and the rest of this proves nothing.
+	if l.RollbackInstallRC == "0" {
+		v.Add(Finding{
+			Check:    "rollback.install_failed",
+			Severity: SevFail,
+			Summary:  "a reinstall pointed at a collector that never listens reported success",
+			Why: "Install is supposed to wait for the collector to become ready and roll back when " +
+				"it does not. Reporting success here means an endpoint that cannot collect is " +
+				"indistinguishable from one that can.",
+		})
+		return
+	}
+
+	switch l.RollbackCollectorCount {
+	case "1":
+		v.Add(Finding{
+			Check:    "rollback.left_one_collector",
+			Severity: SevInfo,
+			Summary:  "a failed reinstall left exactly one collector running",
+		})
+	case "", "0":
+		v.Add(Finding{
+			Check:    "rollback.left_one_collector",
+			Severity: SevFail,
+			Summary:  "a failed reinstall left no collector running, so it took a working endpoint down with it",
+			Why: "Rollback may undo what the failed install did; it may not remove what was working " +
+				"beforehand. On systemd it also disables the unit, so the machine stays down across " +
+				"a reboot -- an upgrade that fails and ends collection is worse than one that fails.",
+		})
+	default:
+		v.Add(Finding{
+			Check:    "rollback.left_one_collector",
+			Severity: SevFail,
+			Summary:  "a failed reinstall left " + l.RollbackCollectorCount + " collectors running",
+			Why: "Rollback stopped the wrong process. The collector the failed install started is " +
+				"still running on the configuration that failed, holding the OTLP ports, while " +
+				"another was started beside it -- and the pidfile tracks only one of them.",
+		})
+	}
 }
 
 // UnprivilegedUninstall judges whether a system removal without privileges was refused.

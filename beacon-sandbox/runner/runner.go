@@ -474,6 +474,12 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		probeReinstall(ctx, g, sc, privileged, agent, &art, logf)
 	}
 
+	// After the reinstall probe, so a successful restart is established before a failing one is
+	// induced, and before uninstall takes the endpoint away entirely.
+	if sc.VerifiesRollbackOnFailedReinstall() {
+		probeFailedReinstallRollback(ctx, g, sc, privileged, agent, &art, logf)
+	}
+
 	// Unprivileged first, while there is still something installed for it to fail to remove.
 	if sc.VerifiesUnprivilegedUninstallFails() {
 		probeUnprivilegedUninstall(ctx, g, agent, &art, logf)
@@ -1013,6 +1019,64 @@ func probeReinstall(ctx context.Context, g guest, sc scenario.Scenario,
 	art.Meta["reinstall_pid_after"] = pidAfter
 	art.Meta["reinstall_restarted"] = fmt.Sprintf("%v", pidAfter != "" && pidAfter != pidBefore)
 	logf("reinstall: collector pid %s -> %s (restarted=%s)", pidBefore, pidAfter, art.Meta["reinstall_restarted"])
+}
+
+// probeFailedReinstallRollback makes a reinstall fail and records what survived it.
+//
+// The failure is induced with a collector that starts and then exits without listening, so the
+// service loads successfully and readiness is what fails. That ordering matters: it is the only way
+// to reach rollback with a service it has to decide about, and every defect found here lived in
+// that decision.
+//
+// Three things are recorded, and the count is the one that matters. A rollback that stops the wrong
+// process leaves the collector the failed install started still running, and then starts another
+// beside it -- so the machine ends with two collectors, the newer config live, and ports held by a
+// process nothing is tracking. "Is a collector running?" is true in that state, which is why it is
+// not the question asked.
+func probeFailedReinstallRollback(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) {
+
+	scope := "--user"
+	opts := agent
+	if sc.Install.Mode == "system" {
+		scope = "--system"
+		opts = privileged
+	}
+
+	// A stand-in collector that ignores its arguments and stays alive without listening.
+	//
+	// It has to keep running, which rules out the obvious `/bin/sleep`: given `--config <path>` that
+	// exits immediately, and a process that exits on its own cannot be orphaned -- so the probe
+	// would report a clean rollback whether or not rollback stopped anything. Staying alive is what
+	// makes the collector count able to distinguish the two.
+	fake := "/tmp/beacon-fake-collector"
+	if _, err := g.Exec(ctx, "printf '#!/bin/sh\\nexec sleep 600\\n' > "+fake+" && chmod 0755 "+fake, opts); err != nil {
+		art.Meta["rollback_error"] = "could not stage a stand-in collector: " + err.Error()
+		return
+	}
+
+	args := "beacon endpoint install " + scope + " --harness claude --collector " + fake
+	if svc := sc.Install.Service; svc != "" {
+		args += " --service=" + svc
+	}
+	r, _ := g.Exec(ctx, args+" 2>&1", opts)
+	art.Meta["rollback_install_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	art.Meta["rollback_install_output"] = oneLine(r.Stdout + r.Stderr)
+
+	// Counted after the install has returned, so rollback has finished running. Both names are
+	// counted: the stand-in is what a mishandled rollback leaves behind, and counting only the real
+	// collector would miss exactly the process that should not still be there.
+	c, _ := g.Exec(ctx, "pgrep -c 'beacon-otelcol|beacon-fake-collector' || true", opts)
+	art.Meta["rollback_collector_count"] = strings.TrimSpace(c.Stdout)
+	if leftovers, _ := g.Exec(ctx, "pgrep -a 'beacon-otelcol|beacon-fake-collector' || true", opts); leftovers.Stdout != "" {
+		art.Meta["rollback_processes"] = oneLine(leftovers.Stdout)
+	}
+
+	s, _ := g.Exec(ctx, "beacon endpoint status "+scope+" --json 2>&1", opts)
+	art.Meta["rollback_status"] = oneLine(s.Stdout)
+
+	logf("failed-reinstall rollback: install rc=%d, collectors now=%s",
+		r.ExitCode, art.Meta["rollback_collector_count"])
 }
 
 // probeUnprivilegedUninstall checks that a system removal without privileges reports failure.

@@ -418,9 +418,14 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 		ReinstallErr:        art.Meta["reinstall_error"],
 		UnprivilegedRefused: art.Meta["unprivileged_uninstall_refused"],
 		UnprivilegedOutput:  art.Meta["unprivileged_uninstall_output"],
+
+		RollbackInstallRC:      art.Meta["rollback_install_rc"],
+		RollbackCollectorCount: art.Meta["rollback_collector_count"],
+		RollbackStatus:         art.Meta["rollback_status"],
 	}
 	check.Reinstall(&v, lifecycle)
 	check.UnprivilegedUninstall(&v, lifecycle)
+	check.FailedReinstallRollback(&v, lifecycle)
 	v.Resolve()
 	return v, log
 }
