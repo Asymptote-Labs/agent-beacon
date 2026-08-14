@@ -21,6 +21,11 @@ type Lifecycle struct {
 	RollbackInstallRC      string
 	RollbackCollectorCount string
 	RollbackStatus         string
+	RollbackProcesses      string
+	// RollbackErr is set when the probe could not set itself up. Judged rather than ignored: its
+	// failure mode is indistinguishable from success, because an install that fails early leaves
+	// one collector running, which is what a correct rollback also leaves.
+	RollbackErr string
 }
 
 // Reinstall judges whether installing over a running endpoint replaced the collector.
@@ -76,6 +81,20 @@ func Reinstall(v *Verdict, l Lifecycle) {
 // ports, while another is started beside it. Asking whether a collector is running cannot tell any
 // of these apart, because the answer is yes in every one.
 func FailedReinstallRollback(v *Verdict, l Lifecycle) {
+	// A probe that could not set itself up has to say so. Silence would be read as a pass, and the
+	// reading it would pass on is worthless: when staging fails, install stops while resolving the
+	// collector, never touches the service, and leaves one collector running -- the same evidence a
+	// correct rollback produces.
+	if l.RollbackErr != "" {
+		v.Add(Finding{
+			Check:    "rollback.probe_ran",
+			Severity: SevWarn,
+			Summary:  "the rollback probe could not run: " + l.RollbackErr,
+			Why: "Reported as unproven rather than passed. Rollback behavior is unverified for this " +
+				"run, which is not the same as verified correct.",
+		})
+		return
+	}
 	if l.RollbackInstallRC == "" {
 		return // the scenario did not ask
 	}

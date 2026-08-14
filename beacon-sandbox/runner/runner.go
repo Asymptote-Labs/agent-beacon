@@ -1043,15 +1043,31 @@ func probeFailedReinstallRollback(ctx context.Context, g guest, sc scenario.Scen
 		opts = privileged
 	}
 
-	// A stand-in collector that ignores its arguments and stays alive without listening.
+	// A stand-in collector that ignores its arguments, stays alive, and stays findable.
 	//
-	// It has to keep running, which rules out the obvious `/bin/sleep`: given `--config <path>` that
-	// exits immediately, and a process that exits on its own cannot be orphaned -- so the probe
-	// would report a clean rollback whether or not rollback stopped anything. Staying alive is what
-	// makes the collector count able to distinguish the two.
+	// Three properties, each learned by getting it wrong. It must keep running: `/bin/sleep` given
+	// `--config <path>` exits immediately, and a process that exits on its own cannot be orphaned,
+	// so the count reads 1 whether or not rollback stopped anything.
+	//
+	// It must not `exec`: that replaces the shell and the surviving process is named `sleep`, which
+	// no search for the stand-in will find. It loops instead, so the script path stays in the
+	// process's command line.
+	//
+	// And it must be searched for by command line, not by process name. `pgrep` without `-f`
+	// compares against `comm`, which is truncated to 15 characters and cannot hold this name at
+	// all -- so the orphan the probe exists to detect would never have been counted.
 	fake := "/tmp/beacon-fake-collector"
-	if _, err := g.Exec(ctx, "printf '#!/bin/sh\\nexec sleep 600\\n' > "+fake+" && chmod 0755 "+fake, opts); err != nil {
-		art.Meta["rollback_error"] = "could not stage a stand-in collector: " + err.Error()
+	stage := "printf '#!/bin/sh\\nwhile :; do sleep 5; done\\n' > " + fake +
+		" && chmod 0755 " + fake + " && test -x " + fake
+	if res, err := g.Exec(ctx, stage, opts); err != nil || res.ExitCode != 0 {
+		// Exec reports err == nil for a non-zero exit, so the exit code has to be read separately.
+		// Without this, a failed staging left `--collector` pointing at a file that does not exist,
+		// install failed early while resolving it, the collector was never touched -- and a failing
+		// install with one collector still running is exactly what a *successful* rollback looks
+		// like. The probe would have passed having tested nothing.
+		art.Meta["rollback_error"] = fmt.Sprintf("could not stage a stand-in collector (rc=%d): %v %s",
+			res.ExitCode, err, oneLine(res.Stdout+res.Stderr))
+		logf("failed-reinstall rollback: %s", art.Meta["rollback_error"])
 		return
 	}
 
@@ -1063,12 +1079,20 @@ func probeFailedReinstallRollback(ctx context.Context, g guest, sc scenario.Scen
 	art.Meta["rollback_install_rc"] = fmt.Sprintf("%d", r.ExitCode)
 	art.Meta["rollback_install_output"] = oneLine(r.Stdout + r.Stderr)
 
-	// Counted after the install has returned, so rollback has finished running. Both names are
-	// counted: the stand-in is what a mishandled rollback leaves behind, and counting only the real
-	// collector would miss exactly the process that should not still be there.
-	c, _ := g.Exec(ctx, "pgrep -c 'beacon-otelcol|beacon-fake-collector' || true", opts)
+	// Counted after the install has returned, so rollback has finished running.
+	//
+	// Matched on the full command line (-f), because the stand-in's name exceeds the 15 characters
+	// `comm` holds. Both names count: the stand-in is precisely what a mishandled rollback leaves
+	// behind, so counting only the real collector would miss the process this exists to find.
+	//
+	// The bracket around the first letter keeps the search from matching itself. `pgrep -f` sees
+	// every command line including this one, and the pattern text would otherwise contain the
+	// strings it is looking for -- inflating the count by one or two and turning a correct rollback
+	// into a reported failure.
+	const pat = "'[b]eacon-otelcol|[b]eacon-fake-collector'"
+	c, _ := g.Exec(ctx, "pgrep -fc "+pat+" || true", opts)
 	art.Meta["rollback_collector_count"] = strings.TrimSpace(c.Stdout)
-	if leftovers, _ := g.Exec(ctx, "pgrep -a 'beacon-otelcol|beacon-fake-collector' || true", opts); leftovers.Stdout != "" {
+	if leftovers, _ := g.Exec(ctx, "pgrep -fa "+pat+" || true", opts); leftovers.Stdout != "" {
 		art.Meta["rollback_processes"] = oneLine(leftovers.Stdout)
 	}
 

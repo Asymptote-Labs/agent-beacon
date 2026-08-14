@@ -422,6 +422,8 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 		RollbackInstallRC:      art.Meta["rollback_install_rc"],
 		RollbackCollectorCount: art.Meta["rollback_collector_count"],
 		RollbackStatus:         art.Meta["rollback_status"],
+		RollbackProcesses:      art.Meta["rollback_processes"],
+		RollbackErr:            art.Meta["rollback_error"],
 	}
 	check.Reinstall(&v, lifecycle)
 	check.UnprivilegedUninstall(&v, lifecycle)
