@@ -75,6 +75,36 @@ type Install struct {
 	// refuses. Rather than make a scenario describe VM lanes and Docker, it states the
 	// requirement and the runner arranges it.
 	NeedsRealSystemd bool `yaml:"needs_real_systemd,omitempty"`
+	// VerifyRestartOnReinstall installs a second time over the running endpoint and checks that the
+	// collector process was actually replaced.
+	//
+	// Load is a no-op on a live service in every backend, so an install that only ever calls Load
+	// leaves the previous collector running -- serving the old config, and during a package upgrade
+	// a binary the package manager has already deleted. Ports answer, status reports healthy, and
+	// the endpoint is a version behind until reboot. Nothing short of a real service manager and a
+	// real second install exercises that.
+	VerifyRestartOnReinstall bool `yaml:"verify_restart_on_reinstall,omitempty"`
+	// VerifyRollbackOnFailedReinstall makes a reinstall fail on purpose and checks what the machine
+	// is left with.
+	//
+	// Rollback is the least exercised path in install and the easiest to get wrong, because it runs
+	// only when something else has already gone wrong. Two defects lived here: it disabled a
+	// collector that was healthy before the attempt, and -- since the supervised backend's unit
+	// file is its pidfile, which rollback restores -- it stopped a pid that was already dead while
+	// the collector the failed install started kept running, with a second one started beside it.
+	//
+	// Neither is visible from a successful install, and both leave a machine that looks installed.
+	// The failure is induced by pointing the reinstall at a program that starts and never listens,
+	// so the service loads and readiness is what fails, which is the ordering that reaches rollback
+	// with a service to undo.
+	VerifyRollbackOnFailedReinstall bool `yaml:"verify_rollback_on_failed_reinstall,omitempty"`
+	// VerifyUnprivilegedUninstallFails checks that a system uninstall run without privileges
+	// reports failure instead of pretending it removed anything.
+	//
+	// verify_uninstall alone cannot catch this: it runs the removal elevated, which is the path
+	// that works. The failure worth catching is the unprivileged one, which returned success while
+	// leaving the service registered.
+	VerifyUnprivilegedUninstallFails bool `yaml:"verify_unprivileged_uninstall_fails,omitempty"`
 	// NSSOnlyUser makes the session account resolvable through NSS but absent from /etc/passwd.
 	//
 	// This reproduces a directory-backed fleet -- OpenLDAP, SSSD, AD -- where `getent passwd alice`
@@ -226,6 +256,12 @@ func (s Scenario) Validate() error {
 			if s.Install.NSSOnlyUser && s.Install.Mode != "system" {
 				return fmt.Errorf("%s: nss_only_user requires mode=system; a user-mode install "+
 					"resolves $HOME and never looks the account up by name", s.ID)
+			}
+			// A user-mode uninstall needs no privileges, so there is no privilege failure to catch
+			// and the probe would assert something that cannot happen.
+			if s.Install.VerifyUnprivilegedUninstallFails && s.Install.Mode != "system" {
+				return fmt.Errorf("%s: verify_unprivileged_uninstall_fails requires mode=system; "+
+					"a user-mode uninstall is supposed to succeed unprivileged", s.ID)
 			}
 			switch s.Install.ExpectServiceKind {
 			case "", "systemd", "launchd", "windows-service", "none":
@@ -399,6 +435,22 @@ func isFilenameByte(b byte) bool {
 		return true
 	}
 	return false
+}
+
+// VerifiesRestartOnReinstall reports whether a second install must replace the collector process.
+func (s Scenario) VerifiesRestartOnReinstall() bool {
+	return s.Install != nil && s.Install.VerifyRestartOnReinstall
+}
+
+// VerifiesRollbackOnFailedReinstall reports whether a deliberately failed reinstall must leave the
+// machine with exactly the endpoint it had beforehand.
+func (s Scenario) VerifiesRollbackOnFailedReinstall() bool {
+	return s.Install != nil && s.Install.VerifyRollbackOnFailedReinstall
+}
+
+// VerifiesUnprivilegedUninstallFails reports whether an unprivileged removal must be refused.
+func (s Scenario) VerifiesUnprivilegedUninstallFails() bool {
+	return s.Install != nil && s.Install.VerifyUnprivilegedUninstallFails
 }
 
 // NeedsNSSOnlyUser reports whether the session account must be resolvable only through NSS.

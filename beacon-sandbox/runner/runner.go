@@ -468,6 +468,23 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	art.RuntimeLog = localLog
 	logf("collected %s", localLog)
 
+	// Reinstall before uninstall, for the same reason uninstall runs here at all: the log is already
+	// on the host, so restarting the collector cannot disturb a capture assertion.
+	if sc.VerifiesRestartOnReinstall() {
+		probeReinstall(ctx, g, sc, privileged, agent, &art, logf)
+	}
+
+	// After the reinstall probe, so a successful restart is established before a failing one is
+	// induced, and before uninstall takes the endpoint away entirely.
+	if sc.VerifiesRollbackOnFailedReinstall() {
+		probeFailedReinstallRollback(ctx, g, sc, privileged, agent, &art, logf)
+	}
+
+	// Unprivileged first, while there is still something installed for it to fail to remove.
+	if sc.VerifiesUnprivilegedUninstallFails() {
+		probeUnprivilegedUninstall(ctx, g, agent, &art, logf)
+	}
+
 	// Uninstall last, and only when the scenario asked. The runtime log is already on the host, so
 	// removing the endpoint cannot affect any capture assertion -- which is what makes it safe to do
 	// inside the same run rather than needing a scenario of its own.
@@ -956,6 +973,151 @@ func teardownInstall(ctx context.Context, g guest, sc scenario.Scenario,
 // status` reporting "not installed" is Beacon's opinion of its own state; whether the service is
 // still registered is a fact about the machine, and those are exactly the two that came apart in the
 // bug this exists to catch.
+// probeReinstall installs a second time and checks the collector process was replaced.
+//
+// Runs after the runtime log has been collected, so restarting the collector cannot affect any
+// capture assertion -- the same reason probeUninstall runs where it does.
+//
+// The pid is the evidence. Asking the service whether it is "running" proves nothing here: the
+// stale collector is running, which is precisely the bug. Only a changed pid distinguishes "the
+// install restarted it" from "the install found it alive and left it there".
+func probeReinstall(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) {
+
+	scope := "--user"
+	opts := agent
+	if sc.Install.Mode == "system" {
+		scope = "--system"
+		opts = privileged
+	}
+
+	before, _ := g.Exec(ctx, "pgrep -n beacon-otelcol", opts)
+	pidBefore := strings.TrimSpace(before.Stdout)
+	if pidBefore == "" {
+		art.Meta["reinstall_error"] = "no collector was running before the reinstall, so a restart cannot be observed"
+		logf("reinstall probe: %s", art.Meta["reinstall_error"])
+		return
+	}
+
+	args := "beacon endpoint install " + scope + " --harness claude"
+	if svc := sc.Install.Service; svc != "" {
+		args += " --service=" + svc
+	}
+	r, err := g.Exec(ctx, args+" 2>&1", opts)
+	art.Meta["reinstall_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	art.Meta["reinstall_output"] = oneLine(r.Stdout + r.Stderr)
+	if err != nil || r.ExitCode != 0 {
+		art.Meta["reinstall_error"] = "the second install failed: " + art.Meta["reinstall_output"]
+		logf("reinstall probe: %s", art.Meta["reinstall_error"])
+		return
+	}
+
+	after, _ := g.Exec(ctx, "pgrep -n beacon-otelcol", opts)
+	pidAfter := strings.TrimSpace(after.Stdout)
+
+	art.Meta["reinstall_pid_before"] = pidBefore
+	art.Meta["reinstall_pid_after"] = pidAfter
+	art.Meta["reinstall_restarted"] = fmt.Sprintf("%v", pidAfter != "" && pidAfter != pidBefore)
+	logf("reinstall: collector pid %s -> %s (restarted=%s)", pidBefore, pidAfter, art.Meta["reinstall_restarted"])
+}
+
+// probeFailedReinstallRollback makes a reinstall fail and records what survived it.
+//
+// The failure is induced with a collector that starts and then exits without listening, so the
+// service loads successfully and readiness is what fails. That ordering matters: it is the only way
+// to reach rollback with a service it has to decide about, and every defect found here lived in
+// that decision.
+//
+// Three things are recorded, and the count is the one that matters. A rollback that stops the wrong
+// process leaves the collector the failed install started still running, and then starts another
+// beside it -- so the machine ends with two collectors, the newer config live, and ports held by a
+// process nothing is tracking. "Is a collector running?" is true in that state, which is why it is
+// not the question asked.
+func probeFailedReinstallRollback(ctx context.Context, g guest, sc scenario.Scenario,
+	privileged, agent sandbox.ExecOpts, art *Artifacts, logf func(string, ...any)) {
+
+	scope := "--user"
+	opts := agent
+	if sc.Install.Mode == "system" {
+		scope = "--system"
+		opts = privileged
+	}
+
+	// A stand-in collector that ignores its arguments, stays alive, and stays findable.
+	//
+	// Three properties, each learned by getting it wrong. It must keep running: `/bin/sleep` given
+	// `--config <path>` exits immediately, and a process that exits on its own cannot be orphaned,
+	// so the count reads 1 whether or not rollback stopped anything.
+	//
+	// It must not `exec`: that replaces the shell and the surviving process is named `sleep`, which
+	// no search for the stand-in will find. It loops instead, so the script path stays in the
+	// process's command line.
+	//
+	// And it must be searched for by command line, not by process name. `pgrep` without `-f`
+	// compares against `comm`, which is truncated to 15 characters and cannot hold this name at
+	// all -- so the orphan the probe exists to detect would never have been counted.
+	fake := "/tmp/beacon-fake-collector"
+	stage := "printf '#!/bin/sh\\nwhile :; do sleep 5; done\\n' > " + fake +
+		" && chmod 0755 " + fake + " && test -x " + fake
+	if res, err := g.Exec(ctx, stage, opts); err != nil || res.ExitCode != 0 {
+		// Exec reports err == nil for a non-zero exit, so the exit code has to be read separately.
+		// Without this, a failed staging left `--collector` pointing at a file that does not exist,
+		// install failed early while resolving it, the collector was never touched -- and a failing
+		// install with one collector still running is exactly what a *successful* rollback looks
+		// like. The probe would have passed having tested nothing.
+		art.Meta["rollback_error"] = fmt.Sprintf("could not stage a stand-in collector (rc=%d): %v %s",
+			res.ExitCode, err, oneLine(res.Stdout+res.Stderr))
+		logf("failed-reinstall rollback: %s", art.Meta["rollback_error"])
+		return
+	}
+
+	args := "beacon endpoint install " + scope + " --harness claude --collector " + fake
+	if svc := sc.Install.Service; svc != "" {
+		args += " --service=" + svc
+	}
+	r, _ := g.Exec(ctx, args+" 2>&1", opts)
+	art.Meta["rollback_install_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	art.Meta["rollback_install_output"] = oneLine(r.Stdout + r.Stderr)
+
+	// Counted after the install has returned, so rollback has finished running.
+	//
+	// Matched on the full command line (-f), because the stand-in's name exceeds the 15 characters
+	// `comm` holds. Both names count: the stand-in is precisely what a mishandled rollback leaves
+	// behind, so counting only the real collector would miss the process this exists to find.
+	//
+	// The bracket around the first letter keeps the search from matching itself. `pgrep -f` sees
+	// every command line including this one, and the pattern text would otherwise contain the
+	// strings it is looking for -- inflating the count by one or two and turning a correct rollback
+	// into a reported failure.
+	const pat = "'[b]eacon-otelcol|[b]eacon-fake-collector'"
+	c, _ := g.Exec(ctx, "pgrep -fc "+pat+" || true", opts)
+	art.Meta["rollback_collector_count"] = strings.TrimSpace(c.Stdout)
+	if leftovers, _ := g.Exec(ctx, "pgrep -fa "+pat+" || true", opts); leftovers.Stdout != "" {
+		art.Meta["rollback_processes"] = oneLine(leftovers.Stdout)
+	}
+
+	s, _ := g.Exec(ctx, "beacon endpoint status "+scope+" --json 2>&1", opts)
+	art.Meta["rollback_status"] = oneLine(s.Stdout)
+
+	logf("failed-reinstall rollback: install rc=%d, collectors now=%s",
+		r.ExitCode, art.Meta["rollback_collector_count"])
+}
+
+// probeUnprivilegedUninstall checks that a system removal without privileges reports failure.
+//
+// Run before the real uninstall, and deliberately as the unprivileged agent user. What makes this
+// worth its own probe is that the bug it catches is invisible from the elevated path: the removal
+// reported success, exited 0, and left the service registered.
+func probeUnprivilegedUninstall(ctx context.Context, g guest, agent sandbox.ExecOpts,
+	art *Artifacts, logf func(string, ...any)) {
+
+	r, _ := g.Exec(ctx, "beacon endpoint uninstall --system --keep-logs 2>&1", agent)
+	art.Meta["unprivileged_uninstall_rc"] = fmt.Sprintf("%d", r.ExitCode)
+	art.Meta["unprivileged_uninstall_output"] = oneLine(r.Stdout + r.Stderr)
+	art.Meta["unprivileged_uninstall_refused"] = fmt.Sprintf("%v", r.ExitCode != 0)
+	logf("unprivileged uninstall: rc=%d refused=%s", r.ExitCode, art.Meta["unprivileged_uninstall_refused"])
+}
+
 func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
 	privileged, agent sandbox.ExecOpts, lay image.Layout, sh shell,
 	art *Artifacts, logf func(string, ...any)) {

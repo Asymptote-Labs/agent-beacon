@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	beaconauth "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
@@ -124,11 +125,29 @@ type fileSnapshot struct {
 	Mode    os.FileMode
 }
 
+// serviceController is the part of service.Manager that rollback uses.
+//
+// Narrow on purpose: rollback's decision about a running service is the branch worth testing, and
+// without a seam here it can only be reached by driving a real install to fail against a real
+// service manager. service.Manager satisfies this as-is.
+type serviceController interface {
+	Unload() error
+	Load() error
+}
+
 type installRollback struct {
-	Manager       service.Manager
+	Manager       serviceController
 	ServiceLoaded bool
-	files         []string
-	snapshots     map[string]fileSnapshot
+	// ServiceWasRunning records whether a collector was already up when this install began.
+	//
+	// It decides what rollback owes the machine. Unloading is right for a service this transaction
+	// created -- leaving a half-installed endpoint registered would be worse. It is wrong for one
+	// that was already running: a failed upgrade of a healthy endpoint would then stop and disable
+	// it, and on systemd the disable survives reboot, so a machine that was collecting fine before
+	// the attempt is left collecting nothing afterwards.
+	ServiceWasRunning bool
+	files             []string
+	snapshots         map[string]fileSnapshot
 }
 
 func newInstallRollback(manager service.Manager) *installRollback {
@@ -154,13 +173,38 @@ func (r *installRollback) Rollback(manifest Manifest) {
 		rollback(manifest)
 		return
 	}
+	// Stop first, always, and while the service state on disk still describes the process this
+	// install started.
+	//
+	// Ordering is the whole of it. The supervised backend's "unit file" *is* its pidfile, and that
+	// file is one of the tracked files below -- so restoring it puts back the pid from before the
+	// install, which by then names a process that has already been terminated. Unloading after the
+	// restore would therefore look up a dead pid, stop nothing, and leave the collector this failed
+	// install started running on the new config, holding the ports, with a second one spawned
+	// beside it.
 	if r.ServiceLoaded {
 		_ = r.Manager.Unload()
 	}
+
 	restoreBackups(manifest.Backups)
 	for i := len(r.files) - 1; i >= 0; i-- {
 		path := r.files[i]
 		restoreFile(path, r.snapshots[path])
+	}
+
+	// Bring back a service that was running before this install, now that the configuration it was
+	// running is back on disk. A collector reads its config at startup, so this has to come after
+	// the restore to be worth doing at all.
+	//
+	// Without it a failed reinstall of a healthy endpoint would leave the machine with the service
+	// stopped and, on systemd, disabled -- surviving reboot. The upgrade would not merely fail, it
+	// would end collection. A service this install created has no such claim: nothing was running
+	// before, and leaving a half-installed endpoint registered is worse than leaving it absent.
+	//
+	// Best-effort. If it does not come back, the endpoint is no worse off than the failure that
+	// brought us here, and the install error the caller receives is the more useful signal.
+	if r.ServiceLoaded && r.ServiceWasRunning {
+		_ = r.Manager.Load()
 	}
 }
 
@@ -236,7 +280,31 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	if opts.StartService {
-		if err := manager.Load(); err != nil {
+		// Restart when something is already running, rather than Load.
+		//
+		// Load is a no-op on a live service in every backend: `systemctl enable --now` does not
+		// restart an active unit, launchd's bootstrap refuses an already-bootstrapped label, and the
+		// supervised backend returns early on a live pid. That is correct for a first install and
+		// wrong for every subsequent one, because by this point the install has already rewritten
+		// the collector config and, during a package upgrade, the package manager has already
+		// replaced the collector binary underneath the running process.
+		//
+		// Without this, `apt install ./beacon.deb` over an older version left the previous
+		// collector serving OTLP -- holding a deleted inode, ignoring the new config -- while the
+		// install reported success and the ports answered. The endpoint looked healthy and was a
+		// version behind until the machine rebooted. The same path made `endpoint install
+		// --splunk-hec-endpoint ...` write a destination that never took effect.
+		// Read once and remember it. The same answer decides two things: whether to restart rather
+		// than load now, and whether rollback is allowed to unload later. Asking twice would risk
+		// the two decisions disagreeing about the state they are reasoning about.
+		wasRunning := manager.Status().Running
+		tx.ServiceWasRunning = wasRunning
+		if wasRunning {
+			if err := manager.Restart(); err != nil {
+				tx.Rollback(manifest)
+				return InstallResult{}, err
+			}
+		} else if err := manager.Load(); err != nil {
 			tx.Rollback(manifest)
 			return InstallResult{}, err
 		}
@@ -287,15 +355,40 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	}, nil
 }
 
+// Uninstall removes the endpoint and reports what it could not remove.
+//
+// Every step used to discard its error and the function could only return nil, so
+// `beacon endpoint uninstall --system` without privileges printed "Endpoint service, config, and
+// managed files removed." and exited 0 while the systemd unit stayed enabled -- the collector came
+// back at the next reboot, after the operator had been told it was gone.
+//
+// Removal still continues past a failure rather than stopping at the first one: a partial uninstall
+// that removes what it can is more useful than one that abandons the job halfway, and the caller
+// needs to hear about every leftover, not just the first. The failures are collected and returned
+// together.
 func Uninstall(opts UninstallOptions) error {
 	cfg := loadOrDefault(opts.UserMode, opts.LogPath)
+	// Refuse a system uninstall we cannot carry out, instead of half-doing it and reporting
+	// success. Install has always had this gate; uninstall never did, which is the asymmetry that
+	// let an unprivileged removal look like it worked.
+	if !cfg.UserMode && !HasSystemPrivileges() {
+		return fmt.Errorf("removing a system endpoint needs root: rerun with sudo, or pass --user to remove a user-mode install")
+	}
+
+	var problems []string
+	fail := func(what string, err error) {
+		if err != nil && !os.IsNotExist(err) {
+			problems = append(problems, fmt.Sprintf("%s: %v", what, err))
+		}
+	}
+
 	// Unload every backend that could plausibly hold this service, not just the one
 	// detection picks now. An install performed under systemd and uninstalled from a
 	// container would otherwise leave the unit enabled, and "uninstall" has to mean nothing
 	// is left behind. Unload already tolerates a backend that is unusable here.
 	manager := service.Manager{UserMode: cfg.UserMode}
 	for _, kind := range service.ManagedKinds() {
-		_ = (service.Manager{UserMode: cfg.UserMode, Kind: kind}).Unload()
+		fail(fmt.Sprintf("unload %s service", kind), (service.Manager{UserMode: cfg.UserMode, Kind: kind}).Unload())
 	}
 	if !cfg.UserMode && !opts.KeepUpdater {
 		removeUpdaterJob()
@@ -305,20 +398,47 @@ func Uninstall(opts UninstallOptions) error {
 		restoreBackups(manifest.Backups)
 	}
 	for _, path := range manifest.Files {
-		_ = os.Remove(path)
+		fail("remove "+path, os.Remove(path))
 	}
 	if len(manifest.Files) == 0 {
 		if path, err := manager.UnitPath(); err == nil {
-			_ = os.Remove(path)
+			fail("remove "+path, os.Remove(path))
 		}
-		_ = os.Remove(cfg.Collector.ConfigPath)
-		_ = os.Remove(endpointconfig.ConfigPath(cfg.UserMode))
+		fail("remove "+cfg.Collector.ConfigPath, os.Remove(cfg.Collector.ConfigPath))
+		fail("remove endpoint config", os.Remove(endpointconfig.ConfigPath(cfg.UserMode)))
 	}
 	if !opts.KeepLogs {
-		_ = os.Remove(cfg.LogPath)
+		for _, path := range runtimeLogFiles(cfg.LogPath) {
+			fail("remove "+path, os.Remove(path))
+		}
 	}
-	_ = os.Remove(manifestPath(cfg.UserMode))
+	fail("remove install manifest", os.Remove(manifestPath(cfg.UserMode)))
+
+	if len(problems) > 0 {
+		return fmt.Errorf("endpoint uninstall left %d item(s) behind:\n  %s",
+			len(problems), strings.Join(problems, "\n  "))
+	}
 	return nil
+}
+
+// runtimeLogFiles lists the runtime log and everything rotation has produced from it.
+//
+// Removing only runtime.jsonl left up to five rotated archives holding retained prompt text and
+// command lines on disk after an uninstall that was not asked to keep logs -- the opposite of what
+// the operator requested, and invisible because the file they would check was gone.
+func runtimeLogFiles(logPath string) []string {
+	if logPath == "" {
+		return nil
+	}
+	paths := []string{logPath, logPath + ".lock"}
+	if rotated, err := filepath.Glob(logPath + ".*"); err == nil {
+		for _, p := range rotated {
+			if p != logPath+".lock" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
 }
 
 func Repair(opts InstallOptions) (InstallResult, error) {

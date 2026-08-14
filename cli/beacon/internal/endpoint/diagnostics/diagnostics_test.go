@@ -44,13 +44,19 @@ func TestCheckLogPermissions(t *testing.T) {
 		t.Fatalf("missing log permissions check = %#v", check)
 	}
 
+	// 0644 is owner-write only. In system mode the owner is root and the hooks are not, so this is
+	// a log no hook can append to -- their events are lost silently. This case asserted "ok" until
+	// the check learned to ask whether a *non-root* process can write, rather than whether anyone
+	// can.
 	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	if check := checkLogPermissions(logPath, false); check.Status != "ok" {
+	if check := checkLogPermissions(logPath, false); check.Status != "fail" || check.Evidence != "not_writable_by_hooks" {
 		t.Fatalf("0644 log permissions check = %#v", check)
 	}
 
+	// 0666 is what install actually creates, and the only mode that lets the root collector and
+	// the user's hooks share one file.
 	if err := os.Chmod(logPath, 0666); err != nil {
 		t.Fatalf("chmod writable log: %v", err)
 	}
@@ -58,10 +64,12 @@ func TestCheckLogPermissions(t *testing.T) {
 		t.Fatalf("0666 log permissions check = %#v", check)
 	}
 
+	// 0200 is owner-write, no read for anyone. Previously reported as a low-severity readability
+	// warning; the more serious half is that hooks cannot write it either.
 	if err := os.Chmod(logPath, 0200); err != nil {
 		t.Fatalf("chmod unreadable log: %v", err)
 	}
-	if check := checkLogPermissions(logPath, false); check.Status != "warn" || check.Severity != "low" {
+	if check := checkLogPermissions(logPath, false); check.Status != "fail" || check.Evidence != "not_writable_by_hooks" {
 		t.Fatalf("0200 log permissions check = %#v", check)
 	}
 

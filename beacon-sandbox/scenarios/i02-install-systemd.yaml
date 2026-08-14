@@ -23,6 +23,13 @@ install:
   # Not redundant with the above. The supervised backend also reports running, so without this a
   # host where systemd detection failed would pass this scenario while testing the fallback.
   expect_service_kind: systemd
+  # Both of these need a real service manager, which is why they live here rather than on i01.
+  # `systemctl enable --now` does not restart an active unit, so an install that only calls Load
+  # leaves the previous collector serving -- the failure a package upgrade produces.
+  verify_restart_on_reinstall: true
+  # And an unprivileged removal has to be refused rather than reported as done, which the elevated
+  # uninstall below cannot show.
+  verify_unprivileged_uninstall_fails: true
   verify_uninstall: true
 
 prompt: >-
