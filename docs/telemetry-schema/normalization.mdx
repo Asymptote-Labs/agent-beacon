@@ -18,6 +18,7 @@ Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/co
 | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` |
 | `mcp.tool`, `beacon.mcp.tool`, `mcp.tool.name` | `mcp.tool` |
 | `mcp.server`, `beacon.mcp.server`, `mcp.server.name` | `mcp.server` |
+| `mcp__<server>__<tool>` or `MCP:<tool>` tool name, when structured `mcp.*` attributes are absent (e.g. Claude Code's OTel logs) | `mcp.server`, `mcp.tool` |
 | `jsonrpc.*`, `rpc.response.status_code`, `network.*`, `server.*`, `error.type` | `jsonrpc`, `rpc`, `network`, `server`, and `error` |
 | `process.command_line` | `command.command` |
 | `file.path` | `file.path` |

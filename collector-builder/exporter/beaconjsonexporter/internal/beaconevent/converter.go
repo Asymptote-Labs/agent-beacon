@@ -1086,6 +1086,22 @@ func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 	protocol := FirstString(attrs, "mcp.protocol.version")
 	resource := FirstString(attrs, "mcp.resource.uri")
 	session := FirstString(attrs, "mcp.session.id")
+
+	// Derive server/tool from the tool-name convention when the runtime does not emit structured
+	// mcp.* attributes. Claude Code (and any harness that reports MCP tools the same way) names an
+	// MCP tool call "mcp__<server>__<tool>" and carries none of the mcp.* attributes read above, so
+	// without this the event is still actioned mcp.tool_invoked -- InferAction keys on the name
+	// containing "mcp" -- but mcp.server and mcp.tool stay empty. Every shipped rule that gates on
+	// e.mcp.server (external-mcp-tool-call, secret-read-then-external-mcp) therefore never fires on
+	// those runtimes: MCP detection is silently dead on the OTel path even though the identity is
+	// right there in the name. The endpoint hook path already splits this exact name in
+	// beacon-hooks (deriveMCPServerTool); this mirrors it so the collector path agrees.
+	if server == "" && tool == "" {
+		if derivedServer, derivedTool := deriveMCPServerToolFromName(FirstString(attrs, "tool.name", "gen_ai.tool.name", "beacon.tool.name", "beacon.gen_ai.tool.name", "function_name", "tool_name")); derivedServer != "" || derivedTool != "" {
+			server, tool = derivedServer, derivedTool
+		}
+	}
+
 	if server == "" && tool == "" && method == "" && protocol == "" && resource == "" && session == "" && FirstString(attrs, "tool_type") != "mcp" {
 		return nil
 	}
@@ -1106,6 +1122,28 @@ func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 		out.Session = &MCPSessionInfo{ID: session}
 	}
 	return out
+}
+
+// deriveMCPServerToolFromName splits a runtime's flattened MCP tool name into its server and tool
+// parts. It is the collector-side twin of deriveMCPServerTool in cli/beacon-hooks: Claude Code names
+// an MCP tool "mcp__<server>__<tool>" (the tool leaf may itself contain "__"), and Cursor uses the
+// "MCP:<tool>" form which carries no server. Anything else yields no MCP identity. Kept as a small
+// duplicate rather than a shared import because the hook adapter and the collector are separate Go
+// modules; the two must stay in agreement, so any change here should change that one too.
+func deriveMCPServerToolFromName(name string) (server, tool string) {
+	trimmed := strings.TrimSpace(name)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "mcp__") {
+		parts := strings.Split(trimmed, "__")
+		if len(parts) >= 3 {
+			return parts[1], strings.Join(parts[2:], "__")
+		}
+		return "", ""
+	}
+	if strings.HasPrefix(lower, "mcp:") {
+		return "", strings.TrimSpace(trimmed[len("mcp:"):])
+	}
+	return "", ""
 }
 
 type standardContext struct {

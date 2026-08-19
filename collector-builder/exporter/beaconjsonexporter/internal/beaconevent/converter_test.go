@@ -1024,6 +1024,78 @@ func TestClaudeToolResultToleratesMalformedJSON(t *testing.T) {
 	}
 }
 
+func TestClaudeMCPToolResultDerivesServerAndTool(t *testing.T) {
+	// Claude Code reports an MCP tool call as a tool_result LOG record whose tool_name is
+	// "mcp__<server>__<tool>" and carries no structured mcp.* attributes. Before the collector
+	// learned this convention, event.action became mcp.tool_invoked (InferAction sees "mcp" in the
+	// name) but mcp.server/mcp.tool were empty, so every shipped rule gated on e.mcp.server was
+	// silently dead on this runtime. This is the regression guard: the identity in the name must
+	// reach the structured fields, exactly as the beacon-hooks path already does.
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.tool_result")
+	attrs := record.Attributes()
+	attrs.PutStr("service.name", "claude-code")
+	attrs.PutStr("event.name", "tool_result")
+	attrs.PutStr("tool_name", "mcp__notion__create_page")
+	attrs.PutStr("tool_input", `{"title":"notes"}`)
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "mcp.tool_invoked" || event.Event.Category != "mcp" {
+		t.Fatalf("event = %#v, want mcp.tool_invoked/mcp", event.Event)
+	}
+	if event.MCP == nil || event.MCP.Server != "notion" || event.MCP.Tool != "create_page" {
+		t.Fatalf("mcp = %#v, want server=notion tool=create_page", event.MCP)
+	}
+	if event.Tool == nil || event.Tool.Name != "mcp__notion__create_page" {
+		t.Fatalf("tool = %#v, want raw name preserved", event.Tool)
+	}
+}
+
+func TestDeriveMCPServerToolFromName(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		wantServer string
+		wantTool   string
+	}{
+		{name: "mcp__notion__create_page", wantServer: "notion", wantTool: "create_page"},
+		// The tool leaf may itself contain the "__" separator; only the first split is the server.
+		{name: "mcp__github__issues__create", wantServer: "github", wantTool: "issues__create"},
+		// Cursor's flattened form carries a tool but no server.
+		{name: "MCP:search", wantServer: "", wantTool: "search"},
+		// A built-in tool is not MCP and must not be promoted (guards the external-tool contract).
+		{name: "Bash", wantServer: "", wantTool: ""},
+		{name: "mcp__onlyserver", wantServer: "", wantTool: ""},
+		{name: "", wantServer: "", wantTool: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, tool := deriveMCPServerToolFromName(tc.name)
+			if server != tc.wantServer || tool != tc.wantTool {
+				t.Fatalf("derive(%q) = (%q, %q), want (%q, %q)", tc.name, server, tool, tc.wantServer, tc.wantTool)
+			}
+		})
+	}
+}
+
+func TestClaudeBuiltinToolResultDoesNotPopulateMCP(t *testing.T) {
+	// The name-convention derivation must not leak into built-in tools: a Bash tool_result is a
+	// command, never an MCP call, so event.MCP stays nil.
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.tool_result")
+	attrs := record.Attributes()
+	attrs.PutStr("service.name", "claude-code")
+	attrs.PutStr("event.name", "tool_result")
+	attrs.PutStr("tool_name", "Bash")
+	attrs.PutStr("tool_input", `{"command":"echo hi"}`)
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.MCP != nil {
+		t.Fatalf("mcp = %#v, want nil for a built-in tool", event.MCP)
+	}
+	if event.Event.Action != "command.executed" {
+		t.Fatalf("event = %#v, want command.executed", event.Event)
+	}
+}
+
 func TestCapturedCodexLogNormalizationIsUnchanged(t *testing.T) {
 	fixture, events := capturedLogEvents(t, "codex-0.142.4.json")
 	if len(events) != len(fixture.Records) {
