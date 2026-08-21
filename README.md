@@ -80,6 +80,7 @@ CI, and cloud surfaces.
 | --- | --- | --- |
 | [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
 | [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, approval, API/model lifecycle, MCP connection, subagent, and session telemetry where emitted through OTLP or hooks |
+| [Cline](https://docs.asymptotelabs.ai/runtimes/cline) | Managed plugin hooks | Prompts, task lifecycle/errors, tool lifecycle/results, commands with exit codes, file reads/edits with diffs, MCP activity, and task token usage/cost |
 | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OTLP logs | Session, prompt, approval, and tool-result activity from Codex semantic logs |
 | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
 | [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
@@ -89,7 +90,7 @@ CI, and cloud surfaces.
 | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output/reasoning, model usage/cost, tool lifecycle/results, commands, file/web/MCP activity, approvals, and session errors |
-| [Cline](https://docs.asymptotelabs.ai/runtimes/cline) | Managed plugin hooks | Prompts, task lifecycle/errors, tool lifecycle/results, commands with exit codes, file reads/edits with diffs, MCP activity, and task token usage/cost |
+| [Pi](https://docs.asymptotelabs.ai/cli/supported-runtimes-pi) | Managed extension hooks | Session, prompt, agent and turn lifecycle, tool call and result, command, and approval-decision telemetry where Pi's extension API exposes it |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
 ##### Knowledge Worker Agent Harnesses
