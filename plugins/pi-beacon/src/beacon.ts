@@ -322,21 +322,26 @@ export default function beaconEndpointExtension(pi: {
     const response: Record<string, unknown> = {}
     const output = contentText(event?.content)
     if (output) response.output = output
+    let durationMs: number | undefined
     if (details) {
       response.details = details
       // Hoisted to the top level because that is where Beacon reads a command's exit code from; a
       // nested one would leave every shell result reporting no status at all.
       const exitCode = details.exitCode ?? details.exit_code ?? details.exit ?? details.status
       if (typeof exitCode === "number") response.exit_code = exitCode
+      const dur = details.durationMs ?? details.duration_ms
+      if (typeof dur === "number") durationMs = dur
     }
-    void send({
+    const payload: Record<string, unknown> = {
       ...base("tool_result", event, ctx),
       tool_name: firstString(event?.toolName, event?.tool_name, event?.name),
       tool_call_id: firstString(event?.toolCallId, event?.toolCallID, event?.tool_call_id),
       tool_input: { ...(toRecord(event?.input) ?? {}) },
       tool_response: response,
       is_error: event?.isError === true,
-    })
+    }
+    if (durationMs !== undefined) payload.duration_ms = durationMs
+    void send(payload)
   })
 
   pi.on("message_end", (event, ctx) => {
