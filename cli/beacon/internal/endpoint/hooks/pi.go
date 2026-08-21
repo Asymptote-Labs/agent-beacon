@@ -27,11 +27,36 @@ const (
 	// instead; a marker that drifts between writer and reader turns install into a no-op that
 	// reports success, so this one has a single definition.
 	//
-	// The version suffix is part of the contract with the extension source, not decoration. Bump it
-	// when the extension's behavior changes in a way that makes an older installed copy wrong,
-	// which is what lets a repair recognize a stale file rather than leave it in place.
-	PiManagedExtensionMarker = "beacon-managed-pi-extension:v1"
+	// PiManagedExtensionPrefix answers "did Beacon write this file", independent of version.
+	//
+	// Ownership and currency are separate questions and conflating them breaks upgrades in both
+	// directions. Matching only the current version means install refuses to overwrite Beacon's own
+	// older extension as though it belonged to somebody else, and uninstall walks past it and leaves
+	// it running. Matching only the prefix means a superseded extension reports as current and is
+	// never replaced. Every decision below picks one deliberately.
+	PiManagedExtensionPrefix = "beacon-managed-pi-extension:"
+
+	// PiManagedExtensionMarker is the version this build installs.
+	//
+	// The suffix is part of the contract with the extension source, not decoration. Bump it when the
+	// extension's behavior changes in a way that makes an older installed copy wrong.
+	//
+	// v2 added the policy-seam decision path. A v1 extension is not merely older: it forwards a
+	// tool_call without reading the reply, so with BEACON_POLICY_PROVIDER configured the provider's
+	// deny is recorded in the log and the tool runs anyway. An operator who configured a provider
+	// would believe calls are being enforced while they are not.
+	PiManagedExtensionMarker = PiManagedExtensionPrefix + "v2"
 )
+
+// isPiManagedExtension reports whether Beacon wrote this file, at any version.
+func isPiManagedExtension(source string) bool {
+	return strings.Contains(source, PiManagedExtensionPrefix)
+}
+
+// isPiCurrentExtension reports whether the file is the version this build installs.
+func isPiCurrentExtension(source string) bool {
+	return strings.Contains(source, PiManagedExtensionMarker)
+}
 
 // PiExtensionPath returns the extension file Beacon manages for a given install level.
 //
@@ -120,6 +145,15 @@ func piStatusFromRuntime(status runtimeStatus) PiStatus {
 	if err != nil || !piExtensionReferencesBinary(string(data), out.BinaryPath) {
 		out.Installed = false
 		out.Message = fmt.Sprintf("Pi extension at %s does not reference the active Beacon hook binary", out.ExtensionPath)
+		return out
+	}
+	// A superseded extension stays reported as installed on purpose. Repair only reinstalls targets
+	// it sees as installed, so calling this one uninstalled would leave it in place permanently --
+	// the opposite of what bumping the version is for. The message is what tells an operator, and it
+	// names the consequence rather than the version number.
+	if !isPiCurrentExtension(string(data)) {
+		out.Message = fmt.Sprintf("Pi extension at %s was written by an earlier Beacon version and cannot honor policy decisions; "+
+			"run `beacon endpoint hooks install --harness pi` to update it", out.ExtensionPath)
 	}
 	return out
 }
@@ -144,7 +178,9 @@ func piExtensionReferencesBinary(source, binaryPath string) bool {
 
 func installPiExtension(path, binaryPath, logPath, configPath string) error {
 	if existing, err := os.ReadFile(path); err == nil {
-		if !strings.Contains(string(existing), PiManagedExtensionMarker) {
+		// Ownership, not currency: replacing Beacon's own older extension is exactly what an
+		// upgrade and a repair do.
+		if !isPiManagedExtension(string(existing)) {
 			return fmt.Errorf("refusing to overwrite unmanaged Pi extension at %s", path)
 		}
 	} else if !os.IsNotExist(err) {
@@ -165,18 +201,24 @@ func removePiExtension(path string) (bool, error) {
 		}
 		return false, err
 	}
-	if !strings.Contains(string(data), PiManagedExtensionMarker) {
+	// Ownership, not currency. An uninstall that only removed the current version would strand
+	// every extension written by an earlier build -- still loaded by Pi, still reporting.
+	if !isPiManagedExtension(string(data)) {
 		return false, nil
 	}
 	return true, os.Remove(path)
 }
 
+// isPiInstalledAt reports ownership rather than currency, and that choice is what makes an upgrade
+// automatic: repair reinstalls the targets it finds installed, so a superseded extension has to be
+// visible as installed for repair to replace it. Currency is reported separately, in the status
+// message.
 func isPiInstalledAt(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), PiManagedExtensionMarker)
+	return isPiManagedExtension(string(data))
 }
 
 func renderPiExtension(binaryPath, logPath, configPath string) (string, error) {

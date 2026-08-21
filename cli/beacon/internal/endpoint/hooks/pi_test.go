@@ -58,7 +58,7 @@ func TestPiExtensionPathRejectsUnknownLevel(t *testing.T) {
 // not, and it is read by two other packages. Pinning the literal here means a change to it is a
 // deliberate edit to a test rather than a silent break of install/uninstall/status agreement.
 func TestPiManagedExtensionMarkerIsStable(t *testing.T) {
-	if PiManagedExtensionMarker != "beacon-managed-pi-extension:v1" {
+	if PiManagedExtensionMarker != "beacon-managed-pi-extension:v2" {
 		t.Fatalf("PiManagedExtensionMarker = %q; changing it strands extensions installed by "+
 			"earlier builds, which uninstall then refuses to remove", PiManagedExtensionMarker)
 	}
@@ -321,5 +321,93 @@ func TestInstallAndUninstallPiRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(want); !os.IsNotExist(err) {
 		t.Fatal("the extension file survived uninstall")
+	}
+}
+
+// writeVersionedPiExtension installs the current extension and then rewrites its marker to an
+// earlier version, which is what an extension written by an older Beacon build looks like: correct
+// argv, superseded behavior.
+func writeVersionedPiExtension(t *testing.T, path, binaryPath, version string) {
+	t.Helper()
+	if err := installPiExtension(path, binaryPath, "/tmp/r.jsonl", "/tmp/c.json"); err != nil {
+		t.Fatalf("install extension: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staled := strings.ReplaceAll(string(data), PiManagedExtensionMarker, PiManagedExtensionPrefix+version)
+	if staled == string(data) {
+		t.Fatal("marker substitution did not change the extension; the prefix no longer matches")
+	}
+	if err := os.WriteFile(path, []byte(staled), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Ownership and currency are separate questions. Matching only the current version would make
+// install refuse Beacon's own older extension as though it belonged to somebody else, which is
+// exactly the file an upgrade has to replace.
+func TestInstallPiExtensionUpgradesAnEarlierVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beacon.ts")
+	writeVersionedPiExtension(t, path, "/tmp/beacon-hooks", "v1")
+
+	if err := installPiExtension(path, "/tmp/beacon-hooks", "/tmp/r.jsonl", "/tmp/c.json"); err != nil {
+		t.Fatalf("install over an earlier version returned error: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), PiManagedExtensionMarker) {
+		t.Fatal("install did not upgrade the extension to the current version")
+	}
+}
+
+// An uninstall that only removed the current version would strand every extension written by an
+// earlier build -- still on disk, still loaded by Pi, still reporting.
+func TestRemovePiExtensionRemovesAnEarlierVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beacon.ts")
+	writeVersionedPiExtension(t, path, "/tmp/beacon-hooks", "v1")
+
+	removed, err := removePiExtension(path)
+	if err != nil || !removed {
+		t.Fatalf("removePiExtension(v1) = %t, %v; want true, nil", removed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("an extension written by an earlier Beacon version was left on disk")
+	}
+}
+
+// Repair reinstalls the targets it finds installed, so a superseded extension has to read as
+// installed for the upgrade to happen at all. Reporting it uninstalled would leave it in place
+// permanently -- the opposite of what bumping the version is for.
+func TestPiStatusKeepsAnEarlierVersionInstalledButSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "beacon.ts")
+	binary := filepath.Join(dir, "beacon-hooks")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeVersionedPiExtension(t, path, binary, "v1")
+
+	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: binary, ConfigPath: path})
+	if !status.Installed {
+		t.Fatalf("a superseded extension reported uninstalled, so repair would skip it: %+v", status)
+	}
+	if !strings.Contains(status.Message, "earlier Beacon version") {
+		t.Fatalf("message = %q, want it to name the superseded version", status.Message)
+	}
+	if !strings.Contains(status.Message, "policy") {
+		t.Fatalf("message = %q, want it to name the consequence rather than a version number", status.Message)
+	}
+}
+
+// A file with no Beacon marker at all is still refused, whatever it is called. The ownership check
+// is a prefix match, not an "anything vaguely Beacon-shaped" match.
+func TestInstallPiExtensionStillRefusesForeignFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beacon.ts")
+	if err := os.WriteFile(path, []byte("// beacon-managed-something-else:v9\nexport default () => {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := installPiExtension(path, "/tmp/beacon-hooks", "/tmp/r.jsonl", "/tmp/c.json"); err == nil {
+		t.Fatal("install overwrote a file carrying a different product's marker")
 	}
 }

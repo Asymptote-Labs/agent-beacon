@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	hookdiff "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 	"github.com/spf13/cobra"
 )
 
@@ -43,8 +44,11 @@ import (
 // in the shim -- more code in the layer that is hardest to test and hardest to update once
 // installed.
 //
-// The response is a JSON object on stdout. Today it is always empty: this command observes and does
-// not decide anything, which is what keeps the open build free of enforcement of its own.
+// The response is a JSON object on stdout. It is empty except on one path: when BEACON_POLICY_PROVIDER
+// names an executable and that provider denies a tool_call, the response is Pi's native deny shape,
+// {"block":true,"reason":"..."}, which the extension returns to Pi unchanged. With no provider
+// configured -- the open build's default -- the seam is inert and the response is always empty, so
+// this binary ships no enforcement decisions of its own.
 var piEventCmd = &cobra.Command{
 	Use:   "pi-event",
 	Short: "Record Pi extension telemetry",
@@ -76,6 +80,22 @@ func runPiEvent(cmd *cobra.Command, args []string) {
 	}
 	sessionID := resolveSessionID(input, "pi")
 	logger := newHookLogger("pi-event", "pi", sessionID)
+
+	// The policy seam runs on tool_call and only on tool_call: that is the one Pi event that fires
+	// before the tool runs and whose handler Pi lets an extension block. Consulting it on a
+	// tool_result would ask about work already done.
+	//
+	// A deny returns immediately without writing tool.invoked. The tool does not run, so recording
+	// it as invoked would put an event in the log for something that never happened -- the same
+	// reason the pre-tool hook returns early here. enforcePolicy has already written the
+	// approval.denied event that does describe what happened.
+	if getFirstStr(input, "type", "event", "event_type") == "tool_call" {
+		if deny, denied := enforcePolicy(logger, input, sessionID, policycontract.PhasePreTool); denied {
+			outputJSON(deny)
+			return
+		}
+	}
+
 	for _, event := range piEndpointEvents(input, sessionID) {
 		if event.action == "" {
 			continue

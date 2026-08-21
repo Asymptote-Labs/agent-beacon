@@ -148,3 +148,124 @@ func TestPermissionRequestPolicyDenyDevin(t *testing.T) {
 	}
 	assertDenialEvent(t, logPath)
 }
+
+// Pi's tool_call is its only blockable pre-execution event, so the seam can be honored there with
+// full fidelity: the response is Pi's native {block, reason} shape, which the extension returns to
+// Pi unchanged rather than translating.
+func TestPiEventPolicyDeny(t *testing.T) {
+	logPath := setupPolicyTest(t, "pi", denyResponse)
+	out := runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type":       "tool_call",
+		"session_id": "pi-deny-1",
+		"cwd":        "/repo",
+		"tool_name":  "bash",
+		"tool_input": map[string]interface{}{"command": "claude --dangerously-skip-permissions -p go"},
+	})
+	if out["block"] != true {
+		t.Fatalf("pi deny response = %#v, want block=true", out)
+	}
+	if out["reason"] != "blocked by test" {
+		t.Fatalf("pi deny reason = %#v, want the provider's reason", out["reason"])
+	}
+	assertDenialEvent(t, logPath)
+}
+
+// A denied call never ran, so tool.invoked must not be written for it. The log would otherwise carry
+// an event for something that did not happen, next to the denial that says it did not.
+func TestPiEventPolicyDenyDoesNotRecordToolInvoked(t *testing.T) {
+	logPath := setupPolicyTest(t, "pi", denyResponse)
+	runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type":       "tool_call",
+		"session_id": "pi-deny-2",
+		"tool_name":  "bash",
+		"tool_input": map[string]interface{}{"command": "codex --full-auto"},
+	})
+
+	for _, event := range endpointEvents(t, logPath) {
+		if action := eventAction(t, event); action == "tool.invoked" {
+			t.Fatal("a denied tool call was also recorded as invoked")
+		}
+	}
+}
+
+func TestPiEventPolicyAllowProceedsNormally(t *testing.T) {
+	logPath := setupPolicyTest(t, "pi", `{"decision":"allow"}`)
+	out := runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type":       "tool_call",
+		"session_id": "pi-allow-1",
+		"cwd":        "/repo",
+		"tool_name":  "bash",
+		"tool_input": map[string]interface{}{"command": "ls -la"},
+	})
+	if len(out) != 0 {
+		t.Fatalf("pi allow response = %#v, want an empty object", out)
+	}
+	if got := eventAction(t, lastEndpointEvent(t, logPath)); got != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked on an allow", got)
+	}
+}
+
+// The seam runs on the pre-execution event only. Asking about a tool_result would be asking about
+// work already done, and a deny there could not stop anything while still blocking the telemetry
+// for it.
+func TestPiEventPolicyIgnoresToolResult(t *testing.T) {
+	logPath := setupPolicyTest(t, "pi", denyResponse)
+	out := runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type":       "tool_result",
+		"session_id": "pi-result-1",
+		"tool_name":  "bash",
+		"tool_input": map[string]interface{}{"command": "ls -la"},
+	})
+	if len(out) != 0 {
+		t.Fatalf("tool_result response = %#v, want an empty object even with a denying provider", out)
+	}
+	if got := eventAction(t, lastEndpointEvent(t, logPath)); got != "command.executed" {
+		t.Fatalf("event.action = %q, want the result recorded normally", got)
+	}
+}
+
+// With no provider configured -- the open build's default -- the seam is inert and a tool_call is
+// pure observation. This is the property that keeps enforcement out of the shipped build.
+func TestPiEventWithoutProviderNeverBlocks(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "pi"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv(policy.ProviderEnv, "")
+
+	out := runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type":       "tool_call",
+		"session_id": "pi-noprovider",
+		"tool_name":  "bash",
+		"tool_input": map[string]interface{}{"command": "rm -rf /"},
+	})
+	if len(out) != 0 {
+		t.Fatalf("response = %#v, want an empty object with no provider configured", out)
+	}
+	if got := eventAction(t, lastEndpointEvent(t, logPath)); got != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", got)
+	}
+}
+
+// Fail-open on a broken provider. A provider that cannot run must not stop the agent, so a
+// non-executable path is an allow -- the same direction every other error path in the seam takes.
+func TestPiEventPolicyFailsOpenOnBrokenProvider(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "pi"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv(policy.ProviderEnv, filepath.Join(t.TempDir(), "does-not-exist"))
+
+	out := runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type":       "tool_call",
+		"session_id": "pi-broken",
+		"tool_name":  "bash",
+		"tool_input": map[string]interface{}{"command": "ls"},
+	})
+	if len(out) != 0 {
+		t.Fatalf("response = %#v, want an empty object when the provider cannot run", out)
+	}
+	if got := eventAction(t, lastEndpointEvent(t, logPath)); got != "tool.invoked" {
+		t.Fatalf("event.action = %q, want the call allowed and recorded", got)
+	}
+}
