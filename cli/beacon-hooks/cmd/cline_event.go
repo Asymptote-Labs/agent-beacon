@@ -165,9 +165,16 @@ func supportedClineEventTypes() []string {
 	}
 }
 
+// clineBaseFields builds the fields every Cline event carries.
+//
+// The workspace is resolved for "cline" by name rather than through platformFlag. The shared
+// helpers default to the flag, which made this depend on how the binary was invoked: without
+// --platform cline the default reader found none of Cline's keys and the event carried no working
+// directory, repository or branch, while the file path beside it resolved correctly because that
+// path already named the runtime.
 func clineBaseFields(input map[string]interface{}, sessionID string) map[string]interface{} {
-	fields := sessionFields(sessionID, input)
-	applyWorkspaceFields(fields, input, "")
+	fields := sessionFieldsForPlatform(sessionID, input, "cline")
+	applyWorkspaceFieldsForPlatform(fields, input, "", "cline")
 	fields["raw"] = map[string]interface{}{"cline": input}
 	if model := clineModel(input); model != "" {
 		fields["model"] = model
@@ -299,11 +306,13 @@ func clineToolError(input map[string]interface{}) string {
 	if text := getFirstStr(input, "error", "errorMessage", "error_message"); text != "" {
 		return text
 	}
-	for _, source := range []map[string]interface{}{firstMap(input, "error"), clineToolResponse(input)} {
-		if source == nil {
-			continue
+	if errMap := firstMap(input, "error"); errMap != nil {
+		if text := getFirstStr(errMap, "message", "error", "errorMessage", "error_message"); text != "" {
+			return text
 		}
-		if text := getFirstStr(source, "message", "error", "errorMessage", "error_message"); text != "" {
+	}
+	if response := clineToolResponse(input); response != nil {
+		if text := getFirstStr(response, "error", "errorMessage", "error_message"); text != "" {
 			return text
 		}
 	}
