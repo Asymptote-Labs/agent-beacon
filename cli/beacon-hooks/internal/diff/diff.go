@@ -43,7 +43,7 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 		content := GetStringFromMaps("code", toolInput, toolResponse)
 		return fromWriteTool(filePath, content, "")
 
-	case "Write", "Create", "write", "write_file":
+	case "Write", "Create", "write", "write_file", "write_to_file":
 		content := GetStringFromMaps("content", toolInput, toolResponse)
 		originalFile := GetStringFromMaps("originalFile", toolInput, toolResponse)
 		return fromWriteTool(filePath, content, originalFile)

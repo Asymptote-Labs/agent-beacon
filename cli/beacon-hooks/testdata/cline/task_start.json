@@ -1,0 +1,14 @@
+{
+  "type": "beforeRun",
+  "clineVersion": "3.36.0",
+  "hookName": "beforeRun",
+  "timestamp": "2026-08-21T10:15:00Z",
+  "taskId": "task-3f9c1d",
+  "userId": "user-local",
+  "workspaceRoots": ["/Users/example/projects/beacon-demo"],
+  "apiProvider": "anthropic",
+  "modelId": "claude-sonnet-4",
+  "input": {
+    "text": "Add a health endpoint, then run the tests"
+  }
+}

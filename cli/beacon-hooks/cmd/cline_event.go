@@ -1,0 +1,592 @@
+package cmd
+
+import (
+	"encoding/json"
+	"path/filepath"
+	"strings"
+
+	hookdiff "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
+	"github.com/spf13/cobra"
+)
+
+// cline-event is the single entry point for every Cline lifecycle payload.
+//
+// Cline delivers its hooks through an in-process plugin whose handlers all fire in the same
+// process, so one command that receives a typed envelope is a better fit than the
+// command-per-hook shape used for runtimes that exec a separate hook per event. This mirrors how
+// opencode is integrated.
+var clineEventCmd = &cobra.Command{
+	Use:   "cline-event",
+	Short: "Record Cline hook telemetry",
+	Long:  `cline-event receives raw Beacon Cline plugin payloads and writes local endpoint telemetry.`,
+	Run:   runClineEvent,
+}
+
+func init() {
+	rootCmd.AddCommand(clineEventCmd)
+}
+
+func runClineEvent(cmd *cobra.Command, args []string) {
+	input, err := readStdinJSON()
+	if err != nil {
+		outputJSON(emptyResponse)
+		return
+	}
+	sessionID := resolveSessionID(input, "cline")
+	logger := newHookLogger("cline-event", "cline", sessionID)
+	for _, event := range clineEndpointEvents(input, sessionID) {
+		if event.action == "" {
+			continue
+		}
+		_ = logger.EndpointEvent(event.action, event.category, event.severity, event.message, event.fields)
+	}
+	outputJSON(emptyResponse)
+}
+
+// The lifecycle points Beacon records, independent of which name Cline used to announce them.
+const (
+	clineStageTaskStart  = "task_start"
+	clineStagePrompt     = "prompt"
+	clineStageToolBefore = "tool_before"
+	clineStageToolAfter  = "tool_after"
+	clineStageTaskEnd    = "task_end"
+	clineStageTaskError  = "task_error"
+)
+
+// clineStage decides which lifecycle point a payload describes.
+//
+// Cline names the same points more than one way, and Beacon has to accept all of them because two
+// different surfaces produce these payloads. The plugin SDK exposes handlers (beforeRun,
+// beforeTool, afterTool, afterRun) over a documented stage list that spells them differently
+// (run_start, tool_call_before, tool_call_after, run_end), and Cline's file-based hooks name the
+// script after the hook itself (PreToolUse, PostToolUse, TaskStart) and pass the same name back in
+// the payload's `hookName` base field. Recognizing every spelling is what lets one mapper serve
+// both surfaces instead of two mappers disagreeing about the same task.
+//
+// Matching is done on letters and digits only, lowercased, so PreToolUse, pre_tool_use and
+// tool_call_before all reduce to a single comparison instead of a case list per spelling.
+func clineStage(input map[string]interface{}) string {
+	var normalized strings.Builder
+	for _, r := range strings.ToLower(getFirstStr(input, "type", "hookName", "hook_name", "stage", "event")) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			normalized.WriteRune(r)
+		}
+	}
+	switch normalized.String() {
+	case "beforerun", "runstart", "sessionstart", "taskstart", "taskresume":
+		return clineStageTaskStart
+	case "userpromptsubmit", "promptsubmit", "input":
+		return clineStagePrompt
+	case "beforetool", "toolcallbefore", "pretooluse":
+		return clineStageToolBefore
+	case "aftertool", "toolcallafter", "posttooluse":
+		return clineStageToolAfter
+	case "afterrun", "runend", "sessionshutdown", "taskcomplete":
+		return clineStageTaskEnd
+	case "stoperror", "error", "taskcancel":
+		return clineStageTaskError
+	default:
+		return ""
+	}
+}
+
+// clineEndpointEvents maps one Cline payload onto the endpoint events it justifies.
+//
+// An unrecognized stage returns nothing rather than a generic event. Cline streams runtime events
+// well beyond the lifecycle points above, and turning each into an undifferentiated
+// "something happened" record would fill the runtime log with rows no query asks for.
+func clineEndpointEvents(input map[string]interface{}, sessionID string) []normalizedEvent {
+	fields := clineBaseFields(input, sessionID)
+	one := func(action, category, severity, message string, values map[string]interface{}) []normalizedEvent {
+		return []normalizedEvent{{action: action, category: category, severity: severity, message: message, fields: values}}
+	}
+
+	switch clineStage(input) {
+	case clineStageTaskStart:
+		events := one("session.started", "session", "info", "Cline task started", fields)
+		// Cline's run-start context carries the message that started the task, so the prompt is
+		// recorded from the same payload rather than waiting for a prompt hook that only the
+		// file-based surface has.
+		if prompt := clinePromptText(input); prompt != "" {
+			events = append(events, clinePromptEvent(cloneFields(fields), prompt))
+		}
+		return events
+	case clineStagePrompt:
+		prompt := clinePromptText(input)
+		if prompt == "" {
+			return nil
+		}
+		return []normalizedEvent{clinePromptEvent(fields, prompt)}
+	case clineStageToolBefore:
+		mergeMap(fields, clineToolFields(input, false))
+		return one("tool.invoked", "tool", "info", "Cline tool invoked", fields)
+	case clineStageToolAfter:
+		return clineToolAfterEvents(input, fields)
+	case clineStageTaskEnd:
+		if usage := clineUsage(input); len(usage) > 0 {
+			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+		}
+		return one("session.ended", "session", "info", "Cline task completed", fields)
+	case clineStageTaskError:
+		fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
+		return one("session.error", "session", "high", "Cline task ended with an error", fields)
+	default:
+		return nil
+	}
+}
+
+// supportedClineEventTypes lists every spelling clineStage recognizes.
+//
+// Exists so a test can assert that each one still maps to an event: these strings are the contract
+// between this mapper and the managed plugin, and a silent typo on either side produces no
+// telemetry rather than an error.
+func supportedClineEventTypes() []string {
+	return []string{
+		"PostToolUse",
+		"PreToolUse",
+		"TaskCancel",
+		"TaskComplete",
+		"TaskResume",
+		"TaskStart",
+		"UserPromptSubmit",
+		"afterRun",
+		"afterTool",
+		"beforeRun",
+		"beforeTool",
+		"error",
+		"input",
+		"run_end",
+		"run_start",
+		"session_shutdown",
+		"session_start",
+		"stop_error",
+		"tool_call_after",
+		"tool_call_before",
+	}
+}
+
+func clineBaseFields(input map[string]interface{}, sessionID string) map[string]interface{} {
+	fields := sessionFields(sessionID, input)
+	applyWorkspaceFields(fields, input, "")
+	fields["raw"] = map[string]interface{}{"cline": input}
+	if model := clineModel(input); model != "" {
+		fields["model"] = model
+	}
+	return fields
+}
+
+func clinePromptEvent(fields map[string]interface{}, prompt string) normalizedEvent {
+	fields["prompt"] = map[string]interface{}{"text": prompt}
+	fields["gen_ai"] = map[string]interface{}{
+		"input": map[string]interface{}{
+			"messages": []interface{}{map[string]interface{}{
+				"role":  "user",
+				"parts": []interface{}{map[string]interface{}{"type": "text", "content": prompt}},
+			}},
+		},
+	}
+	fields["content"] = retainedContentFields(prompt)
+	return normalizedEvent{
+		action: "prompt.submitted", category: "prompt", severity: "info",
+		message: "Prompt submitted to Cline", fields: fields,
+	}
+}
+
+// clinePromptText finds the user's message in a run-start or prompt payload.
+//
+// Reads a nested "input" key, which on a tool payload would be the tool's arguments instead. That
+// is safe because only the two prompt-bearing stages reach here, and stated because the collision
+// is not obvious to the next reader.
+func clinePromptText(input map[string]interface{}) string {
+	if text := getFirstStr(input, "prompt", "userMessage", "user_message", "message", "text"); text != "" {
+		return text
+	}
+	for _, key := range []string{"input", "message", "prompt", "run", "context"} {
+		nested := firstMap(input, key)
+		if nested == nil {
+			continue
+		}
+		if text := getFirstStr(nested, "text", "content", "message", "prompt"); text != "" {
+			return text
+		}
+		if text := clineTextParts(nested["content"]); text != "" {
+			return text
+		}
+	}
+	return clineTextParts(input["content"])
+}
+
+// clineTextParts joins the text of a structured message body, skipping non-text parts.
+func clineTextParts(value interface{}) string {
+	parts, ok := value.([]interface{})
+	if !ok {
+		return ""
+	}
+	var texts []string
+	for _, part := range parts {
+		partMap, ok := part.(map[string]interface{})
+		if !ok {
+			if text, ok := part.(string); ok && text != "" {
+				texts = append(texts, text)
+			}
+			continue
+		}
+		if partType := getFirstStr(partMap, "type"); partType != "" && partType != "text" {
+			continue
+		}
+		if text := getFirstStr(partMap, "text", "content"); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+// clineModel reports the model behind a payload, qualified by its provider when both are present.
+//
+// Provider-qualified because a bare model id is ambiguous once a runtime can reach the same model
+// through more than one provider, and because opencode already writes provider/model -- one shape
+// for this field across runtimes is worth more than matching each runtime's own spelling.
+func clineModel(input map[string]interface{}) string {
+	model := getFirstStr(input, "model", "modelId", "model_id")
+	provider := getFirstStr(input, "apiProvider", "api_provider", "provider", "providerId", "provider_id")
+	if model == "" {
+		info := firstMap(input, "modelInfo", "model_info", "model", "api", "apiConfiguration")
+		model = getFirstStr(info, "modelId", "model_id", "model", "id", "name")
+		provider = firstNonEmpty(provider, getFirstStr(info, "apiProvider", "api_provider", "provider", "providerId", "provider_id"))
+	}
+	if model == "" {
+		return ""
+	}
+	if provider != "" && !strings.Contains(model, "/") {
+		return provider + "/" + model
+	}
+	return model
+}
+
+func clineToolName(input map[string]interface{}) string {
+	if tool := getFirstStr(input, "toolName", "tool_name", "tool"); tool != "" {
+		return tool
+	}
+	call := firstMap(input, "toolCall", "tool_call")
+	if tool := getFirstStr(call, "name", "toolName", "tool_name", "tool"); tool != "" {
+		return tool
+	}
+	return getFirstStr(input, "name")
+}
+
+func clineToolInput(input map[string]interface{}) map[string]interface{} {
+	if args := firstMap(input, "input", "toolInput", "tool_input", "arguments", "args", "params"); args != nil {
+		return args
+	}
+	call := firstMap(input, "toolCall", "tool_call")
+	return firstMap(call, "input", "arguments", "args", "params")
+}
+
+func clineToolResponse(input map[string]interface{}) map[string]interface{} {
+	if response := firstMap(input, "result", "toolResult", "tool_result", "output", "response"); response != nil {
+		return response
+	}
+	// A tool that returns a bare string still has a result worth recording, so it is wrapped in the
+	// same shape the map case produces rather than being dropped.
+	if text := getFirstStr(input, "result", "output", "response"); text != "" {
+		return map[string]interface{}{"output": text}
+	}
+	return nil
+}
+
+// clineToolError reports the failure text on a completed tool call, or "" when it succeeded.
+func clineToolError(input map[string]interface{}) string {
+	if text := getFirstStr(input, "error", "errorMessage", "error_message"); text != "" {
+		return text
+	}
+	for _, source := range []map[string]interface{}{firstMap(input, "error"), clineToolResponse(input)} {
+		if source == nil {
+			continue
+		}
+		if text := getFirstStr(source, "message", "error", "errorMessage", "error_message"); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func clineErrorType(input map[string]interface{}) string {
+	if errorInfo := firstMap(input, "error"); errorInfo != nil {
+		if name := getFirstStr(errorInfo, "name", "type", "code"); name != "" {
+			return name
+		}
+	}
+	return firstNonEmpty(getFirstStr(input, "errorType", "error_type", "reason"), "task_error")
+}
+
+// clineToolAction classifies a Cline tool call into an endpoint action and category.
+//
+// Cline's built-in tool names are snake_case verbs -- read_file, write_to_file, execute_command,
+// use_mcp_tool -- so the token rules at the bottom classify almost all of them correctly, and they
+// also cover tools a plugin registers, whose names Beacon cannot know in advance. The explicit
+// cases above exist only for the built-ins those rules would get wrong: three read tools whose
+// names contain no reading verb at all.
+func clineToolAction(name string) (string, string) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "list_files", "search_files", "list_code_definition_names":
+		return "file.read", "file"
+	}
+	switch {
+	case toolNameHasToken(name, "mcp"):
+		return "mcp.tool_invoked", "mcp"
+	case toolNameHasToken(name, "command") || toolNameHasToken(name, "commands") ||
+		toolNameHasToken(name, "bash") || toolNameHasToken(name, "shell") || toolNameHasToken(name, "terminal"):
+		return "command.executed", "command"
+	case toolNameHasToken(name, "read"):
+		return "file.read", "file"
+	case toolNameHasToken(name, "write") || toolNameHasToken(name, "edit") ||
+		toolNameHasToken(name, "replace") || toolNameHasToken(name, "patch") || toolNameHasToken(name, "create"):
+		return "file.modified", "file"
+	default:
+		return "tool.completed", "tool"
+	}
+}
+
+// clineFileOperation reports what a tool did to a file, for the file.operation field.
+func clineFileOperation(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "list_files", "search_files", "list_code_definition_names":
+		return "read"
+	}
+	switch {
+	case toolNameHasToken(name, "read") || toolNameHasToken(name, "view") || toolNameHasToken(name, "list"):
+		return "read"
+	case toolNameHasToken(name, "write") || toolNameHasToken(name, "create"):
+		return "create"
+	case toolNameHasToken(name, "edit") || toolNameHasToken(name, "replace") || toolNameHasToken(name, "patch"):
+		return "modify"
+	default:
+		return ""
+	}
+}
+
+func clineToolMessage(action string) string {
+	switch action {
+	case "command.executed":
+		return "Cline shell command executed"
+	case "file.read":
+		return "Cline file read"
+	case "file.modified":
+		return "Cline file modified"
+	case "mcp.tool_invoked":
+		return "Cline MCP tool executed"
+	default:
+		return "Cline tool completed"
+	}
+}
+
+// clineWorkspacePath resolves a Cline tool path against the workspace root.
+//
+// Cline addresses files relative to the workspace -- read_file receives "src/app.ts", not an
+// absolute path -- while every other runtime Beacon supports reports absolute paths. Left relative,
+// a Cline file path is not comparable with the same file seen through Cursor or Claude Code, and
+// threat rules that match on absolute paths never fire on Cline activity.
+//
+// Joining is skipped when the path is already absolute, and when no workspace root was resolved:
+// a wrong root would be worse than a relative path, because it names a file that was never touched.
+func clineWorkspacePath(path, root string) string {
+	path = hookdiff.NormalizePath(path)
+	if path == "" || root == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
+func clineToolPath(toolInput map[string]interface{}, root string) string {
+	return clineWorkspacePath(
+		firstToolString(toolInput, "path", "file_path", "filePath", "target_file", "targetFile"),
+		root,
+	)
+}
+
+func clineToolFields(input map[string]interface{}, completed bool) map[string]interface{} {
+	toolName := clineToolName(input)
+	toolInput := clineToolInput(input)
+	toolResponse := clineToolResponse(input)
+	fields := toolFieldsWithResponse(toolName, toolInput, toolResponse)
+
+	call := map[string]interface{}{}
+	if len(toolInput) > 0 {
+		call["arguments"] = toolInput
+	}
+	if completed && len(toolResponse) > 0 {
+		if output, ok := toolResponse["output"]; ok {
+			call["result"] = output
+		} else {
+			call["result"] = toolResponse
+		}
+	}
+	if callID := getFirstStr(input, "callId", "call_id", "toolCallId", "tool_call_id"); callID != "" {
+		call["id"] = callID
+	}
+	fields["gen_ai"] = map[string]interface{}{
+		"operation": map[string]interface{}{"name": "execute_tool"},
+		"tool": map[string]interface{}{
+			"name": toolName,
+			"call": call,
+		},
+	}
+	if duration, ok := firstToolIntAcross([]map[string]interface{}{input, toolResponse}, "durationMs", "duration_ms"); ok {
+		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"duration_ms": duration})
+	}
+
+	// resolveCwd is asked for the cline shape explicitly rather than through platformFlag: this
+	// function only ever runs on Cline payloads, and reading the flag would make the resolved path
+	// depend on how the binary happened to be invoked.
+	root := resolveCwd(input, "cline")
+	path := clineToolPath(toolInput, root)
+	if path != "" {
+		operation := clineFileOperation(toolName)
+		if operation == "" {
+			// A path on a tool that does nothing to files -- a search root, a project directory --
+			// is not file activity, and recording it as such would put unread files in the log.
+			delete(fields, "file")
+			if tool, ok := fields["tool"].(map[string]interface{}); ok {
+				delete(tool, "path")
+			}
+		} else {
+			fields["file"] = map[string]interface{}{
+				"path":      path,
+				"operation": operation,
+				"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+			}
+			fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "path": path})
+		}
+	}
+
+	if completed {
+		action, _ := clineToolAction(toolName)
+		if action == "file.modified" && path != "" {
+			mergeMap(fields, clineDiffFields(toolName, toolInput, toolResponse, path))
+			if file, ok := fields["file"].(map[string]interface{}); ok {
+				// diffFields records every diff as a modification; a create stays a create.
+				file["operation"] = clineFileOperation(toolName)
+			}
+		}
+		if action == "command.executed" {
+			fields["command"] = clineCommandFields(input, toolInput, toolResponse)
+		}
+	}
+
+	if encoded, err := json.Marshal(map[string]interface{}{"input": toolInput, "response": toolResponse}); err == nil && len(encoded) > 0 {
+		fields["content"] = retainedContentFields(string(encoded))
+	}
+	return fields
+}
+
+// clineDiffFields builds the file diff for a mutation.
+//
+// write_to_file goes through the shared builder, which turns its `content` argument into an
+// added-lines diff. replace_in_file deliberately does not: its `diff` argument is already a diff,
+// so passing it through records what Cline actually applied instead of an approximation
+// reconstructed from the pieces.
+//
+// The path is only used for the event field. The shared builder names files by base name in diff
+// headers, the same for every runtime, so it needs nothing resolved.
+func clineDiffFields(toolName string, toolInput, toolResponse map[string]interface{}, path string) map[string]interface{} {
+	diffText := hookdiff.FromToolResponse(toolName, toolInput, toolResponse)
+	if diffText == "" {
+		diffText = firstToolString(toolInput, "diff", "content", "new_string", "newString")
+	}
+	return diffFields(path, diffText)
+}
+
+func clineCommandFields(input, toolInput, toolResponse map[string]interface{}) map[string]interface{} {
+	fields := map[string]interface{}{"command": firstToolString(toolInput, "command", "cmd")}
+	if output := firstToolString(toolResponse, "output", "stdout", "text", "result"); output != "" {
+		fields["output"] = output
+	}
+	if exitCode, ok := firstToolIntAcross([]map[string]interface{}{toolResponse, input}, "exit_code", "exitCode"); ok {
+		fields["exit_code"] = exitCode
+	}
+	if duration, ok := firstToolIntAcross([]map[string]interface{}{input, toolResponse}, "durationMs", "duration_ms"); ok {
+		fields["duration_ms"] = duration
+	}
+	return fields
+}
+
+func clineToolAfterEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
+	mergeMap(fields, clineToolFields(input, true))
+	if errText := clineToolError(input); errText != "" {
+		fields["error"] = map[string]interface{}{"type": "tool_error"}
+		fields["content"] = retainedContentFields(errText)
+		return []normalizedEvent{{
+			action: "tool.failed", category: "tool", severity: "high",
+			message: "Cline tool failed", fields: fields,
+		}}
+	}
+	action, category := clineToolAction(clineToolName(input))
+	// A file action with no file is not a file action. Cline's read tools accept a directory or a
+	// pattern instead of a path, and reporting those as file.read with no file field produces a row
+	// that every file-scoped query matches and none can explain.
+	if strings.HasPrefix(action, "file.") {
+		if _, ok := fields["file"]; !ok {
+			action, category = "tool.completed", "tool"
+		}
+	}
+	return []normalizedEvent{{
+		action: action, category: category, severity: "info",
+		message: clineToolMessage(action), fields: fields,
+	}}
+}
+
+// clineUsage normalizes Cline's reported token counts into gen_ai.usage.
+//
+// Read from the task-end payload only, and deliberately not from any per-model-call stage. Beacon's
+// token rollups sum gen_ai.usage across events, so emitting usage at both granularities would count
+// every token twice. Cline's documented usage lives on the run result, which makes task-end the one
+// place it can be read without guessing at a field path.
+//
+// Cost is taken only as Cline reports it. Beacon never derives cost from a local price table.
+func clineUsage(input map[string]interface{}) map[string]interface{} {
+	usage := firstMap(input, "usage", "tokens")
+	if usage == nil {
+		for _, key := range []string{"result", "run", "output", "metrics"} {
+			if nested := firstMap(input, key); nested != nil {
+				if usage = firstMap(nested, "usage", "tokens"); usage != nil {
+					break
+				}
+			}
+		}
+	}
+	if usage == nil {
+		return nil
+	}
+	sources := []map[string]interface{}{usage}
+	out := map[string]interface{}{}
+	if value, ok := firstToolIntAcross(sources, "inputTokens", "input_tokens", "tokensIn", "tokens_in", "promptTokens", "prompt_tokens"); ok {
+		out["input_tokens"] = value
+	}
+	if value, ok := firstToolIntAcross(sources, "outputTokens", "output_tokens", "tokensOut", "tokens_out", "completionTokens", "completion_tokens"); ok {
+		out["output_tokens"] = value
+	}
+	if value, ok := firstToolIntAcross(sources, "cacheReadTokens", "cache_read_tokens", "cachedTokens", "cached_tokens"); ok {
+		out["cache_read"] = map[string]interface{}{"input_tokens": value}
+	}
+	if value, ok := firstToolIntAcross(sources, "cacheWriteTokens", "cache_write_tokens", "cacheCreationTokens", "cache_creation_tokens"); ok {
+		out["cache_creation"] = map[string]interface{}{"input_tokens": value}
+	}
+	if value, ok := clineCost(usage, input); ok {
+		out["cost_usd"] = value
+	}
+	return out
+}
+
+func clineCost(sources ...map[string]interface{}) (float64, bool) {
+	for _, source := range sources {
+		if source == nil {
+			continue
+		}
+		for _, key := range []string{"totalCost", "total_cost", "costUsd", "cost_usd", "cost"} {
+			if value, ok := jsonFloat(source[key]); ok {
+				return value, true
+			}
+		}
+	}
+	return 0, false
+}
