@@ -127,10 +127,25 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 	case clineStageToolAfter:
 		return clineToolAfterEvents(input, fields)
 	case clineStageTaskEnd:
-		if usage := clineUsage(input); len(usage) > 0 {
-			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+		switch clineRunStatus(input) {
+		case "aborted":
+			if usage := clineUsage(input); len(usage) > 0 {
+				fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+			}
+			fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": clineCancelReason(input)})
+			return one("session.ended", "session", "info", "Cline task cancelled", fields)
+		case "failed":
+			if usage := clineUsage(input); len(usage) > 0 {
+				fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+			}
+			fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
+			return one("session.error", "session", "high", "Cline task ended with an error", fields)
+		default:
+			if usage := clineUsage(input); len(usage) > 0 {
+				fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+			}
+			return one("session.ended", "session", "info", "Cline task completed", fields)
 		}
-		return one("session.ended", "session", "info", "Cline task completed", fields)
 	case clineStageTaskCancel:
 		if usage := clineUsage(input); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
@@ -684,6 +699,25 @@ func clineToolAfterEvents(input map[string]interface{}, fields map[string]interf
 		action: action, category: category, severity: "info",
 		message: clineToolMessage(action), fields: fields,
 	}}
+}
+
+// clineRunStatus reads the outcome status from an afterRun payload.
+//
+// Cline's AgentRunResult carries status: "completed" | "aborted" | "failed". The value may sit at
+// the top level (plugin SDK shape) or nested under result/run (file-based hook shape). An empty
+// return means a normal completion or an unrecognized shape, both of which are treated identically.
+func clineRunStatus(input map[string]interface{}) string {
+	if s := getFirstStr(input, "status"); s != "" {
+		return strings.ToLower(s)
+	}
+	for _, key := range []string{"result", "run"} {
+		if nested := firstMap(input, key); nested != nil {
+			if s := getFirstStr(nested, "status"); s != "" {
+				return strings.ToLower(s)
+			}
+		}
+	}
+	return ""
 }
 
 // clineCancelReason reports why a task ended without completing: cancelled, abandoned, or whatever
