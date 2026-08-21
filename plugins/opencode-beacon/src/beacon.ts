@@ -126,7 +126,7 @@ function shellMutationPaths(tool, args) {
   const command = String(args?.command || args?.cmd || "")
   const paths = []
   const pattern =
-    /(?:^|(?:&&|\|\||;|\n)\s*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
+    /(?:(?:^|&&|\|\||;|\n)[ \t]*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
   for (const match of command.matchAll(pattern)) {
     const path = match[1] || match[2] || match[3]
     if (path) paths.push(path)
