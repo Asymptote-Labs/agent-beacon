@@ -27,9 +27,13 @@ which the handler returns unchanged — no translation in this layer. The denial
 `approval.denied` with `policy.enforcement=enforce`, and no `tool.invoked` event is written, because
 the tool never ran.
 
-With no provider configured — the default for the open build — the reply is empty, the handler
-returns `undefined`, and `tool_call` behaves exactly like every observation handler. Every failure
-path (timeout, non-zero exit, unparseable output, a reply that is not `block: true`) is an allow.
+With no provider configured — the default for the open build — the extension does not even ask: the
+`tool_call` handler is fire-and-forget like every other handler and returns `undefined`, so the
+default build pays nothing for a feature it is not using. Enforcement is opt-in in behavior, not only
+in outcome.
+
+When a provider *is* configured, every failure path (timeout, non-zero exit, unparseable output, a
+reply that is not `block: true`) is an allow.
 
 ## Properties worth preserving
 
@@ -44,10 +48,12 @@ path (timeout, non-zero exit, unparseable output, a reply that is not `block: tr
   containing spaces or backslashes work on Windows as well as POSIX.
 - **`session_shutdown` is awaited.** It is the last event of the session and Pi may exit as soon as
   the handler resolves.
-- **`tool_call` is the only handler that may return a value**, and only a policy deny. Its response
-  timeout is deliberately longer than the observation timeout: the hooks binary gives the provider
-  2s of its own, so reusing that budget here would make this side give up first and allow calls the
-  provider denied.
+- **`tool_call` is the only handler that may return a value**, and only a policy deny, and only when
+  `BEACON_POLICY_PROVIDER` is set. That gate is load-bearing: without it, every tool call in a
+  default install waited on a subprocess round-trip for a reply that could not contain a deny.
+- **The decision timeout is longer than the observation timeout.** The hooks binary gives the
+  provider 2s of its own, so reusing that budget here would make this side give up first and allow
+  calls the provider denied.
 
 ## Known gap
 

@@ -39,6 +39,28 @@ const decisionTimeoutMs = 6000
 
 const debugEnabled = process.env.BEACON_PI_DEBUG === "1"
 
+// policyProviderConfigured decides whether this event is worth waiting for an answer to.
+//
+// Without it, tool_call awaited a subprocess round-trip on every call in a build with no provider
+// configured -- the default -- to receive a reply that could not contain a deny. That is latency on
+// every tool call in service of a feature nobody turned on, and it is a cost the other runtimes
+// Beacon enforces on do not pay: their hook protocols are synchronous already, so the runtime is
+// waiting regardless. Pi's extension is not, so asking has to be opt-in exactly as the enforcement
+// itself is.
+//
+// This reads the same variable the hooks binary reads, and the binary remains the authority: if the
+// two ever disagree -- an environment the extension cannot see but the child can -- the effect is
+// that nothing is awaited and the call proceeds, which is the fail-open direction the seam already
+// specifies for every other error path.
+function policyProviderConfigured(): boolean {
+  try {
+    return (process.env.BEACON_POLICY_PROVIDER ?? "").trim() !== ""
+  } catch {
+    // A host that denies environment access is not a host with a policy provider configured.
+    return false
+  }
+}
+
 function debugLog(message: string, extra?: unknown): void {
   if (!debugEnabled) return
   // stderr, never stdout: Pi's print and JSON modes put machine-readable output on stdout, and a
@@ -287,30 +309,36 @@ export default function beaconEndpointExtension(pi: {
     void send({ ...base("input", event, ctx), prompt })
   })
 
-  // tool_call is the one handler that awaits its send and the one that can return a value.
+  // tool_call is the one handler that can wait for an answer, and the one that can return a value.
+  // It does neither unless a policy provider is configured.
   //
   // It is Pi's only blockable pre-execution event, so it is where Beacon's policy seam can be
-  // honored with full fidelity: the hooks binary consults the configured provider and answers with
-  // Pi's own {block, reason} shape, which is returned here unchanged. With no provider configured --
-  // the default for the open build -- the reply is empty, this returns undefined, and the behavior
-  // is identical to every other handler.
+  // honored with full fidelity: the hooks binary consults the provider and answers with Pi's own
+  // {block, reason} shape, which is returned here unchanged.
   //
-  // Awaiting adds the provider's latency to the tool call, which is inherent to asking a question
-  // before an action rather than reporting it afterwards. Every failure path resolves to no
-  // decision, so a slow or broken provider costs latency and never blocks a call.
+  // With no provider configured -- the default for the open build -- this is fire-and-forget and
+  // returns nothing, exactly like every observation handler. That gate is the point: the open build
+  // pays nothing for a feature it is not using, and enforcement is opt-in in behavior and not only
+  // in outcome.
+  //
+  // When a provider *is* configured, awaiting adds its latency to the tool call. That is inherent to
+  // asking a question before an action rather than reporting it afterwards, and it is a cost the
+  // operator opted into. Every failure path resolves to no decision, so a slow or broken provider
+  // costs latency and never blocks a call.
   pi.on("tool_call", async (event, ctx) => {
-    const decision = await send(
-      {
-        ...base("tool_call", event, ctx),
-        tool_name: firstString(event?.toolName, event?.tool_name, event?.name),
-        tool_call_id: firstString(event?.toolCallId, event?.toolCallID, event?.tool_call_id),
-        // event.input is mutable and Pi may hand the same object to other extensions after this
-        // one. A shallow copy keeps the payload describing the arguments as they were at this
-        // moment.
-        tool_input: { ...(toRecord(event?.input) ?? {}) },
-      },
-      true,
-    )
+    const payload = {
+      ...base("tool_call", event, ctx),
+      tool_name: firstString(event?.toolName, event?.tool_name, event?.name),
+      tool_call_id: firstString(event?.toolCallId, event?.toolCallID, event?.tool_call_id),
+      // event.input is mutable and Pi may hand the same object to other extensions after this one.
+      // A shallow copy keeps the payload describing the arguments as they were at this moment.
+      tool_input: { ...(toRecord(event?.input) ?? {}) },
+    }
+    if (!policyProviderConfigured()) {
+      void send(payload)
+      return undefined
+    }
+    const decision = await send(payload, true)
     if (decision?.block === true) {
       return { block: true, reason: decision.reason }
     }
