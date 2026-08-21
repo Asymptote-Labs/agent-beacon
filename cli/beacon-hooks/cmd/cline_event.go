@@ -488,6 +488,21 @@ func joinWorkspacePath(root, rel string) string {
 	// "..\..\..\x.ts" into the bare relative "x.ts", an absolute Windows path with no drive left
 	// on it.
 	volume, rootRest := splitPathVolume(root)
+	// A root of "C:" carries no separator for the rule above to read, but a drive letter is
+	// unambiguously Windows, so the recorded path should be Windows-shaped rather than defaulting to
+	// slashes. Only a bare drive reaches this: a UNC root always contains separators.
+	if separator == "/" && volume != "" && !strings.ContainsAny(root, "/\\") {
+		separator = "\\"
+	}
+	// A bare volume -- "\\\\server\\share" or "C:" with nothing after it -- leaves an empty remainder,
+	// and path.Join drops empty elements, so the separator between root and relative path
+	// disappeared: the share and the path ran together as "\\\\server\\sharesrc\\app.ts", naming a
+	// file nothing touched. Substituting the root directory is also the right reading of the value:
+	// a workspace root of "C:" means that drive's root, not a path relative to its working
+	// directory.
+	if volume != "" && rootRest == "" {
+		rootRest = "/"
+	}
 	joined := path.Join(toSlashPath(rootRest), toSlashPath(rel))
 	if separator != "/" {
 		joined = strings.ReplaceAll(joined, "/", separator)
