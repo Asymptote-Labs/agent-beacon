@@ -71,6 +71,20 @@ func NormalizeHarnessName(name string) string {
 	case lower == "pi" || lower == "pi.dev" || lower == "pi_cli" || lower == "pi-cli" ||
 		lower == "pi_agent" || lower == "pi-agent" || lower == "pi agent":
 		return "pi_cli"
+	// Cline reaches Beacon from more than one host -- a VS Code extension, a JetBrains plugin and a
+	// CLI, all over the same agent core -- so the spelling that arrives depends on which host
+	// reported it. Pinning the canonical name here is what keeps one Cline session from being
+	// recorded under two names when the hook path (`--platform cline`) and an OTLP resource
+	// attribute disagree about capitalization or suffix.
+	//
+	// Equality against a closed set, like Pi above and unlike the Contains rules further up.
+	// "cline" is a substring of Cline's own configuration names -- `.clinerules` is a directory
+	// every Cline user has -- so a Contains rule here would claim any harness whose name merely
+	// mentioned one of those paths. The set is closed rather than a prefix rule for the same
+	// reason.
+	case lower == "cline" || lower == "cline_cli" || lower == "cline-cli" || lower == "cline cli" ||
+		lower == "cline.bot":
+		return "cline"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
