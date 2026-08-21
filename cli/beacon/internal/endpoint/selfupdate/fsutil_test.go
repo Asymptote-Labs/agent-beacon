@@ -21,6 +21,7 @@ func TestSafeJoinRejectsTraversal(t *testing.T) {
 		"a/..",
 		"a\\..\\..\\escape",
 		"..\\escape",
+		"a..b",
 		"/etc/passwd",
 		"\\windows\\system32",
 	}
