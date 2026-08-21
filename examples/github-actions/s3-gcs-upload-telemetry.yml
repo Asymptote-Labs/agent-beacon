@@ -1,0 +1,55 @@
+# Reference workflow for testing Agent Beacon CI telemetry with dual
+# object-storage upload (S3 and GCS). Copy this file to .github/workflows/
+# in a test repository and update the buckets, AWS role, GCP workload
+# identity, and action ref.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a
+# reference only and does not run in this repository.
+# Replace <tag> with the Beacon release tag you want to run (v0.0.44 or newer).
+
+name: Test Agent Beacon S3 and GCS upload
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  beacon-s3-gcs-upload:
+    runs-on: ubuntu-latest
+    env:
+      BEACON_CI_S3_BUCKET: ${{ vars.BEACON_CI_S3_BUCKET }}
+      BEACON_CI_S3_PREFIX: github-actions/test
+      BEACON_CI_GCS_BUCKET: ${{ vars.BEACON_CI_GCS_BUCKET }}
+      BEACON_CI_GCS_PREFIX: github-actions/test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Agent Beacon with S3 and GCS upload
+        uses: asymptote-labs/agent-beacon@<tag>
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          command: claude --print "Say hello from Agent Beacon CI telemetry"
+          upload: s3,gcs
+          upload-artifact: "true"
