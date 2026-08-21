@@ -32,6 +32,9 @@ var runLoginctlCommand = func(args ...string) (string, error) {
 	return string(out), err
 }
 
+// Stubbed by linger tests so they never depend on, or alter, the host's real logind state.
+var lingerSystemdIsInit = systemdIsInit
+
 // systemdIsInit reports whether systemd is PID 1.
 //
 // Checked by reading /proc/1/comm rather than by probing for the systemctl binary: many
@@ -202,21 +205,17 @@ func systemctlError(out string, err error, what string) error {
 // Without it a user-mode install silently stops collecting the moment the user logs out.
 // Best-effort, since it needs privileges that a plain user may not have.
 func EnableLinger(username string) (bool, string) {
-	if !systemdIsInit() {
+	if !lingerSystemdIsInit() {
 		return false, "systemd is not PID 1; linger does not apply"
 	}
 	if username == "" {
 		return false, "no username provided"
 	}
-	out, err := runLoginctlCommand("enable-linger", username)
+	_, err := runLoginctlCommand("--no-ask-password", "enable-linger", username)
 	if err != nil {
-		// loginctl does not always print anything on failure, and an empty detail here is
-		// indistinguishable from "linger does not apply" -- which is what the caller uses an empty
-		// detail to mean. The error is folded in so the outcome is always attributable.
-		if detail := strings.TrimSpace(out); detail != "" {
-			return false, detail
-		}
-		return false, "loginctl enable-linger " + username + " failed: " + err.Error()
+		// Do not relay authentication-agent chatter. Older setups can mention a missing
+		// pkttyagent even though linger is optional and the endpoint installed successfully.
+		return false, "linger is disabled for " + username + "; administrator approval is required to keep collection running after logout"
 	}
 	// The success path must say so. It previously returned an empty detail, which the install path
 	// reads as "not applicable" -- so the one outcome worth recording, linger actually being
@@ -226,7 +225,7 @@ func EnableLinger(username string) (bool, string) {
 
 // LingerEnabled reports whether linger is on for a user, so doctor can flag the gap.
 func LingerEnabled(username string) bool {
-	if !systemdIsInit() || username == "" {
+	if !lingerSystemdIsInit() || username == "" {
 		return false
 	}
 	out, err := runLoginctlCommand("show-user", username, "--property=Linger", "--value")

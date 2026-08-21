@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -572,19 +571,10 @@ func TestEnableLingerIfNeededOnlyAppliesToSystemdUserUnits(t *testing.T) {
 		{UserMode: true, Kind: KindSupervised},
 		{UserMode: false, Kind: KindLaunchd},
 	} {
-		ok, detail := m.EnableLingerIfNeeded()
-		if ok || detail != "" {
-			t.Errorf("%+v should not attempt linger, got ok=%v detail=%q", m, ok, detail)
+		outcome := m.EnableLingerIfNeeded()
+		if outcome.Applicable || outcome.Enabled || outcome.Detail != "" {
+			t.Errorf("%+v should not attempt linger, got %#v", m, outcome)
 		}
-	}
-}
-
-// The applicable case must actually report something, or the manifest and doctor would have
-// nothing to show and the gap would stay invisible.
-func TestEnableLingerIfNeededReportsForSystemdUserUnits(t *testing.T) {
-	_, detail := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
-	if detail == "" {
-		t.Error("a systemd user unit must report a linger outcome, whether or not it succeeded")
 	}
 }
 
@@ -610,35 +600,98 @@ func TestServiceNounNamesEachBackend(t *testing.T) {
 // The success path is the one that used to report nothing. EnableLinger returned an empty detail on
 // success, and the install path reads an empty detail as "linger does not apply" -- so linger
 // actually being enabled was the single outcome the manifest dropped.
-func TestEnableLingerReportsSuccessAndFailureDistinctly(t *testing.T) {
-	if !systemdIsInit() {
-		t.Skip("needs systemd as PID 1; linger does not apply otherwise")
+func TestEnableLingerUsesNoAskPasswordAndReportsSuccess(t *testing.T) {
+	stubLingerSystemd(t)
+	var got []string
+	runLoginctlCommand = func(args ...string) (string, error) {
+		got = append([]string(nil), args...)
+		return "", nil
 	}
-	u, err := user.Current()
-	if err != nil || u.Username == "" {
-		t.Skip("needs a resolvable current user")
+	ok, detail := EnableLinger("beacon-user")
+	if !ok || detail != "linger enabled for beacon-user" {
+		t.Fatalf("EnableLinger = %v, %q", ok, detail)
 	}
-	ok, detail := EnableLinger(u.Username)
-	if detail == "" {
-		t.Fatalf("EnableLinger(%q) = %v with no detail; an empty detail means "+
-			"\"does not apply\" to the caller, so every applicable outcome must say something",
-			u.Username, ok)
+	want := []string{"--no-ask-password", "enable-linger", "beacon-user"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("loginctl args = %#v, want %#v", got, want)
 	}
 }
 
-// The contract the install path depends on: an empty detail means "not applicable", never
-// "succeeded" and never "failed quietly".
-func TestEnableLingerNeverReportsAnEmptyDetailWhenItApplies(t *testing.T) {
-	// The non-applicable cases, which are the only ones allowed to be silent.
-	if _, detail := EnableLinger(""); detail == "" {
-		t.Error("an empty username is a reportable problem, not a silent skip")
+func TestEnableLingerAuthorizationFailureIsCleanAndNonfatal(t *testing.T) {
+	stubLingerSystemd(t)
+	runLoginctlCommand = func(args ...string) (string, error) {
+		return "Error executing command as another user: No such file or directory: pkttyagent", errors.New("exit status 1")
 	}
-	if systemdIsInit() {
-		return
+	ok, detail := EnableLinger("beacon-user")
+	if ok {
+		t.Fatal("authorization denial must not claim linger is enabled")
 	}
-	if _, detail := EnableLinger("anyone"); detail == "" {
-		t.Error("without systemd as PID 1, EnableLinger should still say why it did nothing")
+	if !strings.Contains(detail, "administrator approval") || strings.Contains(strings.ToLower(detail), "pkttyagent") {
+		t.Fatalf("failure detail is not clean and actionable: %q", detail)
 	}
+}
+
+func TestEnableLingerIfNeededAlreadyEnabledDoesNotEnableAgain(t *testing.T) {
+	stubLingerSystemd(t)
+	var calls [][]string
+	runLoginctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, append([]string(nil), args...))
+		return "yes\n", nil
+	}
+	outcome := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
+	if !outcome.Applicable || !outcome.Enabled || outcome.Detail == "" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+	if len(calls) != 1 || calls[0][0] != "show-user" {
+		t.Fatalf("already-enabled linger should only be queried, calls=%#v", calls)
+	}
+}
+
+func TestEnableLingerIfNeededReportsNewlyEnabledWithoutRemediation(t *testing.T) {
+	stubLingerSystemd(t)
+	var calls [][]string
+	runLoginctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, append([]string(nil), args...))
+		if args[0] == "show-user" {
+			return "no\n", nil
+		}
+		return "", nil
+	}
+	outcome := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
+	if !outcome.Applicable || !outcome.Enabled || outcome.Remediation != "" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+	if len(calls) != 2 || calls[1][0] != "--no-ask-password" {
+		t.Fatalf("newly-enabled calls = %#v", calls)
+	}
+}
+
+func TestEnableLingerIfNeededReturnsSudoRemediationOnDenial(t *testing.T) {
+	stubLingerSystemd(t)
+	runLoginctlCommand = func(args ...string) (string, error) {
+		if args[0] == "show-user" {
+			return "no\n", nil
+		}
+		return "pkttyagent: command not found", errors.New("authorization denied")
+	}
+	outcome := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
+	if !outcome.Applicable || outcome.Enabled || !strings.HasPrefix(outcome.Remediation, "sudo loginctl enable-linger ") {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+	if strings.Contains(strings.ToLower(outcome.Detail), "pkttyagent") {
+		t.Fatalf("pkttyagent noise leaked: %q", outcome.Detail)
+	}
+}
+
+func stubLingerSystemd(t *testing.T) {
+	t.Helper()
+	originalInit := lingerSystemdIsInit
+	originalRun := runLoginctlCommand
+	lingerSystemdIsInit = func() bool { return true }
+	t.Cleanup(func() {
+		lingerSystemdIsInit = originalInit
+		runLoginctlCommand = originalRun
+	})
 }
 
 // systemd splits ExecStart on whitespace, so a path containing a space silently becomes two

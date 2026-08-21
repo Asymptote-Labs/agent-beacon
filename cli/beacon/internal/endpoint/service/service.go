@@ -88,25 +88,36 @@ func ParseKind(s string) (Kind, error) {
 	}
 }
 
+// LingerOutcome describes the optional logout-persistence step for a service install.
+type LingerOutcome struct {
+	Applicable  bool
+	Enabled     bool
+	Detail      string
+	Remediation string
+}
+
 // EnableLingerIfNeeded makes a systemd --user unit survive logout, where that applies.
 //
-// The empty detail means exactly one thing: linger does not apply here -- system mode, or any
-// backend but systemd. Every applicable case reports a detail, success included, so a caller can
-// use an empty detail to mean "we did not try" without that also swallowing "we tried and it
-// worked". launchd needs no equivalent: its gui/<uid> domain persists for the login session by
-// itself.
-func (m Manager) EnableLingerIfNeeded() (bool, string) {
+// The outcome says explicitly whether linger applies, so callers do not have to infer that from
+// command output. launchd needs no equivalent: its gui/<uid> domain persists for the login session
+// by itself.
+func (m Manager) EnableLingerIfNeeded() LingerOutcome {
 	if !m.UserMode || m.resolvedKind() != KindSystemd {
-		return false, ""
+		return LingerOutcome{}
 	}
 	u, err := user.Current()
 	if err != nil || u.Username == "" {
-		return false, "could not determine the current user, so logout persistence is unverified"
+		return LingerOutcome{Applicable: true, Detail: "could not determine the current user, so logout persistence is unverified"}
 	}
 	if LingerEnabled(u.Username) {
-		return true, "linger already enabled for " + u.Username
+		return LingerOutcome{Applicable: true, Enabled: true, Detail: "linger already enabled for " + u.Username}
 	}
-	return EnableLinger(u.Username)
+	enabled, detail := EnableLinger(u.Username)
+	outcome := LingerOutcome{Applicable: true, Enabled: enabled, Detail: detail}
+	if !enabled {
+		outcome.Remediation = "sudo loginctl enable-linger " + u.Username
+	}
+	return outcome
 }
 
 // ServiceNoun names what this backend installs, for user-facing messages.
