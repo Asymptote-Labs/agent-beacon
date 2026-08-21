@@ -487,6 +487,7 @@ func TestClineStageRecognizesSpellingVariants(t *testing.T) {
 		"tool_call_after":  clineStageToolAfter,
 		"afterRun":         clineStageTaskEnd,
 		"session_shutdown": clineStageTaskEnd,
+		"TaskCancel":       clineStageTaskCancel,
 		"stop_error":       clineStageTaskError,
 		"iteration_start":  "",
 		"":                 "",

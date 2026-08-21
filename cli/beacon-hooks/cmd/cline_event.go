@@ -50,6 +50,7 @@ const (
 	clineStageToolBefore = "tool_before"
 	clineStageToolAfter  = "tool_after"
 	clineStageTaskEnd    = "task_end"
+	clineStageTaskCancel = "task_cancel"
 	clineStageTaskError  = "task_error"
 )
 
@@ -83,7 +84,9 @@ func clineStage(input map[string]interface{}) string {
 		return clineStageToolAfter
 	case "afterrun", "runend", "sessionshutdown", "taskcomplete":
 		return clineStageTaskEnd
-	case "stoperror", "error", "taskcancel":
+	case "taskcancel":
+		return clineStageTaskCancel
+	case "stoperror", "error":
 		return clineStageTaskError
 	default:
 		return ""
@@ -127,6 +130,16 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
 		}
 		return one("session.ended", "session", "info", "Cline task completed", fields)
+	case clineStageTaskCancel:
+		if usage := clineUsage(input); len(usage) > 0 {
+			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+		}
+		reason := getFirstStr(input, "completionStatus", "completion_status", "reason")
+		if reason == "" {
+			reason = "cancelled"
+		}
+		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": reason})
+		return one("session.ended", "session", "info", "Cline task cancelled", fields)
 	case clineStageTaskError:
 		fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
 		return one("session.error", "session", "high", "Cline task ended with an error", fields)
@@ -309,6 +322,9 @@ func clineToolError(input map[string]interface{}) string {
 	if errMap := firstMap(input, "error"); errMap != nil {
 		if text := getFirstStr(errMap, "message", "error", "errorMessage", "error_message"); text != "" {
 			return text
+		}
+		if name := getFirstStr(errMap, "name", "type", "code"); name != "" {
+			return name
 		}
 	}
 	if response := clineToolResponse(input); response != nil {
