@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows counterpart of the signed macOS .pkg and the Linux .deb/.rpm.
+
+  The point of a package is that installing it is the whole user-facing action. It must produce a
+  running system-mode endpoint that is capturing the interactive user's agent activity, not a
+  directory of binaries plus two commands to discover. Everything below exists to make that true.
+
+  The payload deliberately mirrors /opt/beacon: bin beside scripts, so the collector sits next to the
+  CLI where DiscoverBinary looks for it first, and so the layout is one thing to reason about across
+  three platforms.
+
+  Unsigned for now, by decision. An unsigned MSI shows a SmartScreen warning, which is acceptable for
+  early adopters and not for GA; Authenticode is a later change that adds signing to the release job
+  without altering anything here.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Beacon Endpoint Agent"
+      Manufacturer="Asymptote Labs"
+      Version="$(var.Version)"
+      Language="1033"
+      Scope="perMachine"
+      Compressed="yes"
+      InstallerVersion="500"
+      UpgradeCode="6D3B2A94-5E1C-4C8A-9F2D-7B4E1A6C3D50">
+
+    <SummaryInformation Description="Endpoint telemetry agent for AI coding agents" />
+
+    <!--
+      Left on the default schedule (afterInstallValidate), which removes the older product early in
+      the sequence. That means an upgrade runs the old package's uninstall action, then lays down the
+      new files, then runs the install action below — ending in an install, which is the state we
+      want.
+
+      This is the same hazard the RPM packaging documents, where the outgoing package's %preun runs
+      after the incoming package's %post and stops the service the new one just started. The ordering
+      here avoids it rather than needing a %posttrans equivalent, but it is the reason the schedule is
+      stated explicitly instead of inherited silently.
+    -->
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Beacon">
+        <Directory Id="BinFolder" Name="bin" />
+        <Directory Id="ScriptsFolder" Name="scripts" />
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="BeaconPayload">
+      <Component Id="BeaconCli" Directory="BinFolder">
+        <File Id="BeaconExeFile" Source="$(var.StageDir)\bin\beacon.exe" KeyPath="yes" />
+      </Component>
+      <!--
+        The hook adapter ships as its own file even though the CLI also embeds a copy. The embedded
+        one is what `endpoint hooks install` writes into a user profile; this one is what a fleet
+        tool or a support engineer can invoke directly, and having it on disk makes an install
+        inspectable.
+      -->
+      <Component Id="BeaconHooks" Directory="BinFolder">
+        <File Id="BeaconHooksExeFile" Source="$(var.StageDir)\bin\beacon-hooks.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="BeaconCollector" Directory="BinFolder">
+        <File Id="BeaconOtelcolExeFile" Source="$(var.StageDir)\bin\beacon-otelcol.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="InstallScript" Directory="ScriptsFolder">
+        <File Id="InstallEndpointScriptFile" Source="$(var.StageDir)\scripts\install-endpoint.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="UninstallScript" Directory="ScriptsFolder">
+        <File Id="UninstallEndpointScriptFile" Source="$(var.StageDir)\scripts\uninstall-endpoint.ps1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Beacon Endpoint Agent" Level="1">
+      <ComponentGroupRef Id="BeaconPayload" />
+    </Feature>
+
+    <!--
+      Both actions run the shipped PowerShell scripts rather than invoking beacon.exe with their own
+      flag lists, exactly as the .deb and .rpm postinstall scripts call install-endpoint.sh. Two lists
+      of flags that have to agree is a thing that stops agreeing.
+
+      deferred with Impersonate="no" so they run as LocalSystem: the install writes under
+      %ProgramData% and registers a service, neither of which an unelevated token can do. It also
+      means `user-config repair-installed` takes its LocalSystem path and resolves the console user
+      through WTS, rather than configuring whichever account happened to launch the installer.
+
+      -NonInteractive and -NoProfile because there is no console here and a machine's PowerShell
+      profile must not be able to change what an installer does.
+    -->
+    <CustomAction Id="BeaconInstallEndpoint"
+                  Directory="ScriptsFolder"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;install-endpoint.ps1&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <!--
+      Before="RemoveFiles" because the script needs beacon.exe to still exist.
+
+      Return="check", not "ignore", now that an upgrade depends on this action having stopped the
+      collector: ignoring its result would let MSI proceed to replace binaries the old service still
+      holds open, which is the failure this action exists to prevent.
+
+      That is not a reversal of "a failed uninstall must not wedge a removal" — it moves that judgment
+      into the script, which is the only place that can tell an ordinary problem from a real one. It
+      exits zero when there is nothing to remove, and warns rather than throwing when `endpoint
+      uninstall` reports a problem, because the service and its registration are what matter. What
+      does fail is the script being unable to run at all, and an upgrade should stop for that.
+    -->
+    <CustomAction Id="BeaconUninstallEndpoint"
+                  Directory="ScriptsFolder"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;uninstall-endpoint.ps1&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <InstallExecuteSequence>
+      <!-- NOT REMOVE, so this runs on a first install and on an upgrade, but not during removal. -->
+      <Custom Action="BeaconInstallEndpoint" After="InstallFiles" Condition="NOT REMOVE" />
+      <!--
+        Runs during an upgrade too, which is the opposite of what the Linux packaging does — and the
+        difference is the platform, not an inconsistency.
+        
+        preremove.sh skips itself during a dpkg or rpm upgrade because replacing a running binary is
+        fine there: the new file gets a new inode and the running process keeps the old one until it
+        restarts. Windows does not allow that. A running service holds beacon-otelcol.exe open, and
+        MSI cannot replace a locked file — it fails, or schedules the replacement for the next reboot,
+        or leaves the old binary in place. All three produce an "upgraded" install still running the
+        previous collector.
+        
+        So the endpoint is torn down before the files are replaced and brought back by the install
+        action afterwards. The brief gap with no collector is inherent to replacing an in-use binary
+        on this platform; it is the same constraint self-update has to obey, for the same reason.
+        Configuration survives because the uninstall script sets it aside and puts it back.
+      -->
+      <Custom Action="BeaconUninstallEndpoint" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

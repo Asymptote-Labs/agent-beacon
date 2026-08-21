@@ -92,7 +92,7 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 func init() {
 	rootCmd.AddCommand(tokenUsageCmd)
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.userMode, "user", true, "Use per-user endpoint paths")
-	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.logPath, "log-path", "", "Runtime JSONL log path (defaults to the local runtime log; in CI point at the session log)")
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.jsonOutput, "json", false, "Print the token usage report as JSON")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.since, "since", "", "Only include events at or after this RFC3339 timestamp")

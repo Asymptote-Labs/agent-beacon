@@ -1,0 +1,45 @@
+id: w01-install-service
+platform: windows
+# Exercises `beacon endpoint install --system` on Windows: does it register a service with the
+# Service Control Manager, does that service reach running, and does the endpoint report the
+# backend it actually selected?
+#
+# The service question is settled before the agent is involved. expect_service_kind is what makes
+# this scenario mean what it claims: "running" alone is satisfied by the supervised fallback too,
+# so without it a host where SCM registration failed would pass while testing the wrong backend
+# entirely -- the same trap the Linux systemd scenario documents.
+#
+# Capture is now required. It was optional while hook installation was believed to be broken on
+# Windows -- a belief a probe later disproved: Claude Code runs hook commands through Git Bash there,
+# which accepts the form Beacon was emitting. Once the command became one argv, a dispatched run of
+# this scenario captured 38 events, so there is no longer a known reason for these to fail and every
+# reason to gate on them.
+prompt: >-
+  Run exactly this PowerShell command and then report its output verbatim:
+  Write-Output '{{canary}}' | Tee-Object -FilePath '{{sentinel}}'
+sentinel: '{{workdir}}\w01.sentinel'
+budget_usd: 1.0
+timeout_seconds: 420
+
+install:
+  mode: system
+  service: windows-service
+  expect_status_running: true
+  expect_service_kind: windows-service
+  verify_uninstall: true
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: >-
+      Capture through an installed Windows endpoint, which together with the service assertions
+      above is the whole claim: the collector is registered with the SCM, it is running, and events
+      written by hooks actually reach it.
+
+  - action: command.executed
+    fields: ["command.command"]
+    why: >-
+      e.command.command is the detection surface for the whole rules/risky-command/ category, and
+      threat rules match scalar leaves, so an empty value disables every one of those rules with
+      nothing reporting it. This is the assertion that proves the exporter reads Claude Code's
+      PowerShell tool and not only bash.

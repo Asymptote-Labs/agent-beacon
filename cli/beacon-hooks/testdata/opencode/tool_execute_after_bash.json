@@ -1,0 +1,18 @@
+{
+  "type": "tool.execute.after",
+  "session_id": "ses_fixture",
+  "directory": "/repo",
+  "tool_name": "bash",
+  "call_id": "call_bash",
+  "duration_ms": 15,
+  "tool_input": {
+    "command": "git status --short"
+  },
+  "tool_response": {
+    "title": "git status",
+    "output": " M README.md",
+    "metadata": {
+      "exitCode": 0
+    }
+  }
+}

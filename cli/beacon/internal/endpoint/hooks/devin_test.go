@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,9 +26,8 @@ func TestInstallDevinProjectHooksPreservesNonBeaconHooks(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"echo keep",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform devin",
 		"PermissionRequest",
 		"permission-request",
@@ -260,7 +260,7 @@ func TestDevinConfigPathProjectLevel(t *testing.T) {
 
 func TestDevinHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".config", "devin", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
@@ -280,7 +280,7 @@ func TestDevinHookStatusDetectsInstalled(t *testing.T) {
 
 func TestDevinDesktopHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".codeium", "windsurf", "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)

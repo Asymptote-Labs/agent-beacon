@@ -29,8 +29,8 @@ func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
 		"UserPromptSubmit",
 		"--platform codex",
 		"inventory-heartbeat",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Codex hooks missing %q:\n%s", want, text)

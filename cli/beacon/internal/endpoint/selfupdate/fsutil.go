@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 // maxTarEntryBytes bounds a single file extracted from a test artifact.
@@ -22,29 +23,30 @@ func acquireLock(path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	held, err := filelock.TryExclusive(f)
+	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = held.Release()
 		_ = f.Close()
 	}, nil
 }
 
 // safeJoin resolves an archive entry name against dest and rejects anything that
 // would escape dest (path traversal / "zip slip"). It rejects absolute paths,
-// any ".." path segment (including backslash-separated ones), and any entry
-// whose cleaned, joined path is not contained within dest.
+// any name containing a ".." sequence (stricter than rejecting only ".."
+// segments, which is fine because release archives never carry ".." in entry
+// names, and a direct check on the raw name is what taint analyzers recognize
+// as a sanitizer), and any entry whose cleaned, joined path is not contained
+// within dest.
 func safeJoin(dest, name string) (string, error) {
 	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") {
 		return "", fmt.Errorf("absolute path in archive entry: %q", name)
 	}
-	normalized := strings.ReplaceAll(name, "\\", "/")
-	for _, seg := range strings.Split(normalized, "/") {
-		if seg == ".." {
-			return "", fmt.Errorf("path traversal in archive entry: %q", name)
-		}
+	if strings.Contains(name, "..") {
+		return "", fmt.Errorf("path traversal in archive entry: %q", name)
 	}
 	cleanDest := filepath.Clean(dest)
 	target := filepath.Clean(filepath.Join(cleanDest, name))

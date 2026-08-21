@@ -1,0 +1,29 @@
+{
+  "type": "message.updated",
+  "session_id": "ses_fixture",
+  "properties": {
+    "sessionID": "ses_fixture",
+    "info": {
+      "id": "msg_assistant",
+      "parentID": "msg_user",
+      "role": "assistant",
+      "providerID": "moonshotai",
+      "modelID": "kimi-k3",
+      "finish": "stop",
+      "cost": 0.0123,
+      "tokens": {
+        "input": 100,
+        "output": 20,
+        "reasoning": 5,
+        "cache": {
+          "read": 40,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 100,
+        "completed": 200
+      }
+    }
+  }
+}

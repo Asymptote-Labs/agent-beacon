@@ -66,10 +66,20 @@ func DiscoverBinary(configured string) string {
 	return ""
 }
 
+// defaultBinaryCandidates lists where to look for the collector when it is not on PATH.
+//
+// A sibling of the running CLI comes first, because that is what an extracted release archive looks
+// like: beacon and beacon-otelcol next to each other in whatever directory the user unpacked them
+// into. The machine-wide install location follows, for a package install.
+//
+// Both are asked for by their on-disk name rather than by BinaryName. Those differ on Windows -- the
+// file is beacon-otelcol.exe, while BinaryName is what exec.LookPath is given so PATHEXT can resolve
+// it -- and using the PATH spelling for a direct stat meant an extracted archive reported no
+// collector at all.
 func defaultBinaryCandidates() []string {
-	paths := []string{PackagedBinaryPath}
+	paths := packagedBinaryPaths()
 	if executable, err := currentExecutable(); err == nil {
-		paths = append([]string{filepath.Join(filepath.Dir(executable), BinaryName)}, paths...)
+		paths = append([]string{filepath.Join(filepath.Dir(executable), binaryFileName())}, paths...)
 	}
 	return paths
 }
@@ -82,7 +92,7 @@ func validateExecutable(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("is a directory")
 	}
-	if info.Mode().Perm()&0111 == 0 {
+	if !isExecutableMode(info) {
 		return fmt.Errorf("is not executable")
 	}
 	return nil
@@ -330,51 +340,4 @@ func healthReady() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
-}
-
-func LaunchAgentPlist(cfg endpointconfig.Config) string {
-	binary := DiscoverBinary(cfg.Collector.BinaryPath)
-	if binary == "" {
-		binary = BinaryName
-	}
-	label := "com.beacon.endpoint.collector"
-	if cfg.UserMode {
-		label = "com.beacon.endpoint.collector.user"
-	}
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>%s</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>%s</string>
-    <string>--config</string>
-    <string>%s</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-</dict>
-</plist>
-`, label, binary, cfg.Collector.ConfigPath)
-}
-
-func WriteLaunchPlist(cfg endpointconfig.Config) (string, error) {
-	var path string
-	if cfg.UserMode {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = filepath.Join(home, "Library", "LaunchAgents", "com.beacon.endpoint.collector.plist")
-	} else {
-		path = "/Library/LaunchDaemons/com.beacon.endpoint.collector.plist"
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return "", err
-	}
-	return path, os.WriteFile(path, []byte(LaunchAgentPlist(cfg)), 0644)
 }

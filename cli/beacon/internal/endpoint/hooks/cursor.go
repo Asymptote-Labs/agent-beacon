@@ -130,6 +130,7 @@ func CursorCloudHookRefs(opts CursorCloudOptions) map[string][]HookRef {
 	}
 	prefix := cursorCloudCommandPrefix(opts.BinaryPath, opts.LogPath)
 	refs := map[string][]HookRef{
+		"beforeSubmitPrompt": {{Command: prefix + " prompt-submit", Timeout: 30}},
 		"postToolUse":        {{Command: prefix + " post-tool"}},
 		"postToolUseFailure": {{Command: prefix + " post-tool"}},
 		"beforeReadFile": {

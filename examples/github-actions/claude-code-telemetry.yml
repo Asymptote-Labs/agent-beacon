@@ -43,11 +43,18 @@ jobs:
           command: claude --print "Summarize the changes in this pull request"
           # Optional: forward to a customer-managed SIEM before teardown.
           # Requires a Beacon release that includes ci exec --forward.
-          # See examples/github-actions/splunk-forward-telemetry.yml.
+          # See examples/github-actions/splunk-forward-telemetry.yml or
+          # examples/github-actions/falcon-forward-telemetry.yml.
           # forward: splunk
           # forward-endpoint: https://splunk.example:8088/services/collector
+          # forward: falcon
+          # forward-endpoint: https://cloud.us-1.humio.com/api/v1/ingest/hec
           # Optional: upload the completed runtime JSONL to object storage.
           # Supported values: s3, gcs, or s3,gcs.
+          # See examples/github-actions/s3-upload-telemetry.yml,
+          # examples/github-actions/gcs-upload-telemetry.yml, or
+          # examples/github-actions/s3-gcs-upload-telemetry.yml.
           # upload: s3
+          # upload: s3,gcs
           # The runtime log is uploaded as an artifact by default.
           upload-artifact: "true"

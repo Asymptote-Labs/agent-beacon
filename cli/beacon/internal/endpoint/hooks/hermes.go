@@ -78,7 +78,7 @@ func installHermesConfig(path, binaryPath, logPath, configPath string) error {
 	if err != nil {
 		return err
 	}
-	prefix := hermesEndpointCommandPrefix(binaryPath, logPath, configPath)
+	prefix := endpointCommandPrefix("hermes", binaryPath, logPath, configPath)
 	endpointHooks := map[string]hermesHookRef{
 		"on_session_start":       {Command: prefix + " session-start"},
 		"pre_llm_call":           {Command: prefix + " prompt-submit", Timeout: 30},
@@ -96,9 +96,17 @@ func installHermesConfig(path, binaryPath, logPath, configPath string) error {
 	return writeHermesConfig(path, config)
 }
 
-func hermesEndpointCommandPrefix(binaryPath, logPath, configPath string) string {
-	return fmt.Sprintf("env BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s %s --platform hermes", shellQuote(logPath), shellQuote(configPath), shellQuote(binaryPath))
-}
+// Hermes used to need its own builder, and now it does not.
+//
+// It prefixed the command with `env`, which is what an inline `VAR=value cmd` prefix requires when the
+// command is executed without a shell to interpret it. Passing the settings as flags removes the need
+// for a prefix at all, so there is nothing left for `env` to set and the special case collapses into
+// the shared builder.
+//
+// One pre-existing question this does not answer: if Hermes really does invoke without a shell, the
+// quoting around each path is literal there rather than syntax. That was equally true of the old form,
+// and Hermes is not a runtime this repository can exercise, so it stays as it was rather than being
+// changed on a guess.
 
 func readHermesConfig(path string) (hermesConfig, error) {
 	config := hermesConfig{

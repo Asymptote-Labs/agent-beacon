@@ -1,0 +1,50 @@
+id: s05-repo-task
+# The only scenario with realistic mixed activity rather than one isolated action: read,
+# then edit, then a git command, inside the seeded fixture repo. Two things are under test
+# that the single-action scenarios cannot reach -- repository/branch enrichment, and whether
+# a multi-step session produces a coherent event stream rather than a partial one.
+cwd: repo
+prompt: >-
+  In the current git repository: read README.md, append a new line containing exactly
+  {{canary}} to it, then run `git status --short` and tell me what changed.
+sentinel: /home/agent/work/repo/README.md
+budget_usd: 1.5
+timeout_seconds: 420
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: Baseline.
+
+  - action: token.usage
+    fields: ["gen_ai.usage.input_tokens"]
+    why: >-
+      A multi-turn session should produce several usage datapoints; this confirms attribution
+      survives more than one turn.
+
+  - action: file.read
+    fields: ["file.path"]
+    why: >-
+      Reading README.md must surface as file.read with a path. rules/credential-access/ matches
+      purely on e.file.path, so an empty path makes that category unreachable.
+
+  - action: file.modified
+    fields: ["file.path"]
+    why: Appending to README.md must surface as a file modification with a path.
+
+  - action: command.executed
+    fields: ["command.command"]
+    why: >-
+      The `git status` call must surface as a command with its text. Together with the two
+      above this proves a mixed multi-tool session is classified per tool rather than collapsed
+      into one generic action, which is what happened before v1.0.6.
+
+  - action: tool.invoked
+    fields: ["repository"]
+    optional: true
+    why: >-
+      Beacon enriches events with git repository and branch when it can detect them
+      (PopulateCommon reads vcs.repository.url / git.branch). Claude Code is not known to send
+      those attributes, so this is recorded rather than required -- it tells us whether repo
+      attribution is reachable on the OTel path at all, which matters for the dashboard's
+      by-repository rollup and token-usage's by_repository.

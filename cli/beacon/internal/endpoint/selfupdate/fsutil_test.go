@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -20,6 +21,7 @@ func TestSafeJoinRejectsTraversal(t *testing.T) {
 		"a/..",
 		"a\\..\\..\\escape",
 		"..\\escape",
+		"a..b",
 		"/etc/passwd",
 		"\\windows\\system32",
 	}
@@ -29,6 +31,12 @@ func TestSafeJoinRejectsTraversal(t *testing.T) {
 		}
 	}
 
+	// The rejection cases above are the security contract and hold everywhere. These are about the
+	// resolved string, which filepath renders with the host separator -- on Windows they would be
+	// asserting path rendering rather than that a safe entry resolves inside dest.
+	if runtime.GOOS == "windows" {
+		t.Skip("the accepted-path assertions below are POSIX-rendered; traversal rejection is checked above")
+	}
 	ok := map[string]string{
 		"opt/beacon/bin/beacon": "/tmp/dest/opt/beacon/bin/beacon",
 		"a/b/c":                 "/tmp/dest/a/b/c",

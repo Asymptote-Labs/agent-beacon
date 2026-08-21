@@ -12,9 +12,16 @@ Required behavior:
 - Write one complete JSON object per line.
 - Use the canonical `vendor=beacon`, `product=endpoint-agent`,
   `schema_version=1.0` event contract.
-- Identify Claude Cowork OTLP resources and map prompts, tool/MCP calls, file
-  access, approval decisions, API usage, token counts, costs, and errors into
-  Beacon endpoint events.
+- Identify Claude Code and Claude Cowork OTLP resources and map prompts,
+  tool/MCP calls, file access, approval decisions, API usage, token counts,
+  costs, and errors into Beacon endpoint events.
+- For Claude Code logs, decode JSON-string `tool_input` and `tool_parameters`
+  attributes into canonical `command.*` and `file.*` fields. Only actual tool
+  results may become tool, command, or file actions; API, assistant, plugin,
+  hook, skill, and other lifecycle logs use session actions, while MCP
+  connection lifecycle uses `mcp.connection`.
+- Preserve explicitly supplied Beacon action/category attributes and retain the
+  original OTLP attributes under `raw.attributes`.
 - Include configured content fields by default, with `metadata` and `redacted`
   modes available for stricter deployments.
 - Redact common secrets and cap event size before writing.

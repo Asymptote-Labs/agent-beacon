@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
 
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -77,8 +80,8 @@ type plannedAction struct {
 }
 
 type repairServiceManager interface {
-	PlistPath() (string, error)
-	WritePlist(program, configPath string) (string, error)
+	UnitPath() (string, error)
+	WriteUnit(program, configPath string) (string, error)
 	Load() error
 	Unload() error
 }
@@ -147,6 +150,9 @@ func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorRes
 	}
 	checks = append(checks, actionableChecks(status.Diagnostics, status.RuntimeLog)...)
 	checks = append(checks, collectorCheck(status), serviceCheck(status), lastEventCheck(status))
+	if !status.RuntimeLog.EffectiveUserMode {
+		checks = append(checks, consoleUserConfigCheck())
+	}
 	for _, h := range status.Harnesses {
 		checks = append(checks, harnessCheck(h, status.LogPath, status.RuntimeLog.EffectiveUserMode))
 	}
@@ -778,7 +784,7 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func plannedInstallActions(repair bool) []plannedAction {
+func plannedInstallActions(repair bool, kind service.Kind) []plannedAction {
 	cfg := endpointconfig.Default(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
@@ -788,9 +794,18 @@ func plannedInstallActions(repair bool) []plannedAction {
 	if repair {
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "repair unloads existing endpoint service if present"})
 	}
+
+	// The plan has to reflect the service manager that will actually be used. It previously
+	// announced a launchd plist on every platform without consulting GOOS, so a Linux
+	// --dry-run advertised steps that could not execute.
+	mgr := service.Manager{UserMode: cfg.UserMode, Kind: kind}
+	serviceAction := plannedAction{Action: "write_unit", Message: mgr.ResolvedKind().ServiceNoun()}
+	if unitPath, err := mgr.UnitPath(); err == nil {
+		serviceAction.Target = unitPath
+	}
 	actions = append(actions,
 		plannedAction{Action: "write_file", Target: cfg.Collector.ConfigPath, Message: "collector configuration"},
-		plannedAction{Action: "write_plist", Message: "launchd service definition"},
+		serviceAction,
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
 	)
 	for _, h := range otlpTargets {
@@ -971,8 +986,24 @@ func actionForCheck(check diagnostics.Check, runtimeLog lifecycle.RuntimeLogSour
 	case "runtime_log":
 		return "beacon endpoint doctor --fix"
 	case "runtime_log_permissions":
-		if check.Evidence == "runtime_log_missing" || check.Evidence == "missing_optional_file" {
+		// Branch on evidence rather than falling through to chmod. Windows reaches this check too
+		// now, and chmod neither exists there nor would restore an ACL if it did -- so the single
+		// most consequential remediation string on that platform, the one printed for a system-mode
+		// log that hooks cannot write, was advice that could not work.
+		switch check.Evidence {
+		case "runtime_log_missing", "missing_optional_file":
 			return "beacon endpoint doctor --fix"
+		case "acl_missing_interactive_write":
+			// Printed rather than only offered through --fix: this one needs an elevated shell, and
+			// an operator who cannot elevate right now still deserves to know the exact command.
+			if hint := writer.GrantCommandHint(check.Target); hint != "" {
+				return hint
+			}
+			return "beacon endpoint doctor --fix"
+		case "acl_not_writable_by_user":
+			return "grant your account write access to " + check.Target
+		case "acl_unreadable":
+			return "inspect the access control list on " + check.Target
 		}
 		return "chmod 666 " + check.Target
 	case "runtime_log_source":
@@ -1025,6 +1056,166 @@ func lastEventCheck(status lifecycle.Status) diagnostics.Check {
 		return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: "runtime log has events", Evidence: "last_event_present"}
 	}
 	return diagnostics.Check{Name: "last_event", Target: status.LogPath, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityLow, Message: "runtime log has no events yet", Evidence: "last_event_missing", Action: "beacon endpoint test-event"}
+}
+
+// consoleUserConfigCheck asks the one question a system-mode doctor never asked: is there a human
+// whose agent runtime actually points at this collector?
+//
+// Every other check runs as root and resolves $HOME to /root, so it inspects the settings that
+// `endpoint install --system` wrote for root -- which are always correct, because the install just
+// wrote them. A system endpoint exists to capture the *operator's* sessions, and when the operator
+// could not be resolved the install skipped them, said so only under --json, and doctor reported a
+// green harness for root. The whole chain looked healthy while collecting nothing.
+//
+// That is not hypothetical: on a fleet whose accounts come from a directory service, it was the
+// steady state for every machine, and the only visible symptom was the harness_observed warning
+// that the documentation tells people to ignore on a fresh install.
+//
+// System mode only. In user mode the person running the command is the person being configured,
+// so the question answers itself.
+func consoleUserConfigCheck() diagnostics.Check {
+	const name = "console_user_configured"
+	info, ok, err := activeConsoleUser()
+	if err != nil || !ok {
+		return diagnostics.Check{
+			Name:     name,
+			Status:   diagnostics.StatusWarn,
+			Severity: diagnostics.SeverityMedium,
+			Message: "no logged-in user could be identified, so this endpoint may be collecting " +
+				"for nobody; the collector is healthy either way",
+			Evidence: "no_console_user",
+			Action:   "run 'beacon endpoint user-config repair-installed --system' as the user whose sessions should be captured",
+		}
+	}
+	configured, detail := consoleUserHarnessConfigured(info, loadConfigForMode(false, endpointOpts.logPath))
+	if !configured {
+		return diagnostics.Check{
+			Name:     name,
+			Target:   info.Username,
+			Status:   diagnostics.StatusFail,
+			Severity: diagnostics.SeverityHigh,
+			Message: fmt.Sprintf("%s has no agent runtime pointed at this collector, so their "+
+				"sessions are not being captured (%s)", info.Username, detail),
+			Evidence: "console_user_not_configured",
+			Action:   "sudo beacon endpoint user-config repair-installed --system",
+		}
+	}
+	return diagnostics.Check{
+		Name:     name,
+		Target:   info.Username,
+		Status:   diagnostics.StatusOK,
+		Severity: diagnostics.SeverityInfo,
+		Message:  fmt.Sprintf("%s's agent runtime is configured", info.Username),
+		Evidence: "console_user_configured",
+	}
+}
+
+// consoleUserHarnessConfigured reports whether the console user has at least one runtime pointed
+// at the local collector.
+//
+// At least one rather than all of them: a developer who uses only Claude Code is fully configured,
+// and demanding every detected runtime would produce a failure nobody should act on.
+//
+// The markers come from the endpoint's own configuration rather than from constants. An install
+// with --otlp-grpc-port writes that port into the user's settings, and a check that only knew the
+// defaults would call a correctly configured user unconfigured -- a false failure in the one check
+// whose entire value is being trusted when it says something is wrong.
+func consoleUserHarnessConfigured(info consoleUserInfo, cfg endpointconfig.Config) (bool, string) {
+	paths, err := consoleUserConfigPaths(info)
+	if err != nil {
+		return false, err.Error()
+	}
+	if len(paths) == 0 {
+		return false, "no agent runtime configuration found in " + info.HomeDir
+	}
+	grpc, http := collectorPorts(cfg)
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		// Matching on the collector address, or on the hook binary for hook-only runtimes, rather
+		// than on the file existing: that is the difference between "configured for this endpoint"
+		// and "the user happens to have used this agent before".
+		text := string(data)
+		if strings.Contains(text, embedded.BinaryStem) {
+			return true, p
+		}
+		if targetsCollectorPort(text, grpc, http) {
+			return true, p
+		}
+	}
+	return false, "found " + strconv.Itoa(len(paths)) + " runtime config file(s), none pointed at this collector"
+}
+
+// loopbackEndpointPattern finds loopback addresses and captures the port as a whole number.
+//
+// All three spellings, because Beacon writes 127.0.0.1 but a user or an MDM profile may have
+// written localhost or ::1 against the same collector, and reporting that as unconfigured would be
+// wrong.
+var loopbackEndpointPattern = regexp.MustCompile(`(?:127\.0\.0\.1|\[::1\]|localhost):(\d+)`)
+
+// targetsCollectorPort reports whether the text points at this endpoint's collector.
+//
+// The port is captured and compared as a number rather than matched as a substring. A substring
+// has no right-hand boundary, so an endpoint configured on port 431 would match a file pointing at
+// 4317 -- a false OK on the one check that is being trusted when it says the user *is* captured,
+// which is the direction that matters most here: a false failure sends someone to run a repair,
+// while a false pass tells them a silent capture gap is fine.
+func targetsCollectorPort(text string, grpc, http int) bool {
+	for _, match := range loopbackEndpointPattern.FindAllStringSubmatch(text, -1) {
+		port, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		if port == grpc || port == http {
+			return true
+		}
+	}
+	return false
+}
+
+// collectorPorts resolves the ports this endpoint actually listens on, falling back to the
+// defaults for a configuration that predates them being recorded.
+func collectorPorts(cfg endpointconfig.Config) (int, int) {
+	grpc := cfg.Collector.GRPCPort
+	if grpc == 0 {
+		grpc = endpointconfig.DefaultGRPCPort
+	}
+	http := cfg.Collector.HTTPPort
+	if http == 0 {
+		http = endpointconfig.DefaultHTTPPort
+	}
+	return grpc, http
+}
+
+// consoleUserConfigPaths lists the runtime configuration files that exist in a specific user's
+// home directory.
+//
+// Resolved from their home directory rather than from harness discovery, which reads $HOME and
+// would answer for root -- the process running doctor -- instead of for them. That substitution is
+// the reason this check is needed at all, so it must not be repeated here.
+func consoleUserConfigPaths(info consoleUserInfo) ([]string, error) {
+	if info.HomeDir == "" {
+		return nil, fmt.Errorf("no home directory for %s", info.Username)
+	}
+	// The runtimes a system install configures natively. Hook-only runtimes are covered too,
+	// because an installed hook command names the hook binary and that is one of the markers.
+	candidates := []string{
+		filepath.Join(".claude", "settings.json"),
+		filepath.Join(".codex", "config.toml"),
+		filepath.Join(".gemini", "settings.json"),
+		filepath.Join(".cursor", "hooks.json"),
+		filepath.Join(".config", "Code", "User", "settings.json"),
+	}
+	var found []string
+	for _, rel := range candidates {
+		p := filepath.Join(info.HomeDir, rel)
+		if _, err := os.Stat(p); err == nil {
+			found = append(found, p)
+		}
+	}
+	return found, nil
 }
 
 func harnessCheck(h harness.Harness, logPath string, effectiveUserMode bool) diagnostics.Check {
@@ -1122,17 +1313,46 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 		}
 		switch check.Name {
 		case "runtime_log", "runtime_log_permissions", "last_event":
-			if check.Evidence == "missing_optional_file" || check.Evidence == "runtime_log_missing" {
+			switch check.Evidence {
+			case "missing_optional_file", "runtime_log_missing":
 				addFix(plannedAction{Action: "create_runtime_log", Target: status.LogPath, Message: "create runtime log file and parent directory"})
-			} else if check.Evidence == "last_event_missing" {
+			case "last_event_missing":
 				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "run beacon endpoint test-event or generate a runtime event"})
+			// The one permission failure that is repairable in place, and the one that matters
+			// most: without this grant a system-mode Windows endpoint runs a healthy collector
+			// that records nothing an agent did, because hooks cannot write to its log.
+			case "acl_missing_interactive_write":
+				addFix(plannedAction{Action: "grant_log_access", Target: check.Target, Message: "grant interactive users write access to the log directory"})
+			default:
+				// Anything else here is a permission problem doctor cannot repair. Reported as a
+				// skip rather than dropped: falling out of this switch is how a broken systemd unit
+				// once produced neither a fix nor a skip, and a check that silently repairs nothing
+				// reads exactly like a check that found nothing.
+				if check.Name == "runtime_log_permissions" {
+					message := "review the log permissions manually"
+					if check.Action != "" {
+						message = "run " + check.Action
+					}
+					addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: message})
+				}
 			}
-		case "collector_config", "launchd_plist", "collector_health", "collector_reachability", "service":
-			if runtime.GOOS != "darwin" {
-				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "launchd service repair is only available on macOS"})
-			} else if configUsable {
-				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and launchd service"})
-			} else {
+		// systemd_unit belongs here alongside launchd_plist: diagnostics emits whichever the
+		// resolved backend uses, and omitting it meant a broken systemd unit produced neither a
+		// fix nor a skip -- it fell through the switch and was silently unreported.
+		//
+		// The repair itself is platform-neutral (repairCollectorServiceFromStatus goes through
+		// UnitPath/WriteUnit), so the check is whether a service manager is usable here rather
+		// than what the OS is called. The old GOOS gate additionally printed "launchd service
+		// repair is only available on macOS", which stopped being true when systemd support
+		// landed.
+		case "collector_config", "launchd_plist", "systemd_unit", "collector_health", "collector_reachability", "service":
+			mgr := service.Manager{UserMode: status.RuntimeLog.EffectiveUserMode}
+			switch {
+			case !mgr.Available():
+				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: mgr.UnsupportedReason()})
+			case configUsable:
+				addFix(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "recreate managed collector config and " + mgr.ResolvedKind().ServiceNoun()})
+			default:
 				addSkip(plannedAction{Action: "repair_collector_service", Target: endpointconfig.ConfigPath(status.RuntimeLog.EffectiveUserMode), Message: "skipped because endpoint config is invalid"})
 			}
 		case "config", "config_valid":
@@ -1164,6 +1384,12 @@ func applyDoctorFixes(plan doctorFixPlan, status lifecycle.Status) error {
 			if err := repairCollectorServiceFromStatus(status); err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", action.Action, action.Target, err))
 			}
+		case "grant_log_access":
+			// The same call install makes, so a repaired endpoint and a fresh one end up with the
+			// same ACL rather than two grants that drift.
+			if err := writer.EnsureSystemLogWritable(action.Target); err != nil {
+				errs = append(errs, fmt.Errorf("%s %s: %w", action.Action, action.Target, err))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -1176,7 +1402,7 @@ func repairCollectorServiceFromStatus(status lifecycle.Status) error {
 		return err
 	}
 	manager := newRepairServiceManager(userMode)
-	plistPath, err := manager.PlistPath()
+	plistPath, err := manager.UnitPath()
 	if err != nil {
 		return err
 	}
@@ -1198,7 +1424,7 @@ func repairCollectorServiceFromStatus(status lifecycle.Status) error {
 	if err := repairWriteCollectorConfig(cfg); err != nil {
 		return rollbackRepairError(err, rollback)
 	}
-	if _, err := manager.WritePlist(binary, cfg.Collector.ConfigPath); err != nil {
+	if _, err := manager.WriteUnit(binary, cfg.Collector.ConfigPath); err != nil {
 		return rollbackRepairError(err, rollback)
 	}
 	if err := manager.Load(); err != nil {

@@ -39,9 +39,7 @@ bucket = "${BEACON_GCS_BUCKET}"
 key_prefix = "${BEACON_GCS_PREFIX:-beacon}/runtime/date=%F/"
 filename_time_format = "%s"
 filename_append_uuid = true
-filename_extension = "jsonl.gz"
-compression = "gzip"
-content_encoding = "gzip"
+filename_extension = "jsonl"
 content_type = "application/x-ndjson"
 storage_class = "${BEACON_GCS_STORAGE_CLASS:-STANDARD}"
 
@@ -70,9 +68,7 @@ bucket = "${BEACON_GCS_BUCKET}"
 key_prefix = "${BEACON_GCS_PREFIX:-beacon}/inventory/date=%F/"
 filename_time_format = "%s"
 filename_append_uuid = true
-filename_extension = "jsonl.gz"
-compression = "gzip"
-content_encoding = "gzip"
+filename_extension = "jsonl"
 content_type = "application/x-ndjson"
 storage_class = "${BEACON_GCS_STORAGE_CLASS:-STANDARD}"
 

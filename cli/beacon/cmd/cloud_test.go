@@ -42,6 +42,8 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 		`"postToolUseFailure"`,
 		`"beforeShellExecution"`,
 		`"afterShellExecution"`,
+		`"beforeSubmitPrompt"`,
+		`prompt-submit`,
 		`"beforeReadFile"`,
 		`"afterFileEdit"`,
 		`"subagentStart"`,
@@ -55,7 +57,7 @@ func TestRenderCursorCloudHooks(t *testing.T) {
 			t.Fatalf("rendered hooks missing %q:\n%s", want, got)
 		}
 	}
-	for _, unsupported := range []string{`"preToolUse"`, `"sessionStart"`, `"sessionEnd"`, `"beforeSubmitPrompt"`, `"stop"`} {
+	for _, unsupported := range []string{`"preToolUse"`, `"sessionStart"`, `"sessionEnd"`, `"stop"`} {
 		if strings.Contains(got, unsupported) {
 			t.Fatalf("rendered cursor cloud hooks should not contain %q:\n%s", unsupported, got)
 		}
@@ -72,6 +74,7 @@ func TestRenderCursorCloudSafeHooks(t *testing.T) {
 		t.Fatalf("render cursor cloud hooks: %v", err)
 	}
 	for _, want := range []string{
+		`"beforeSubmitPrompt"`,
 		`"beforeReadFile"`,
 		`"postToolUse"`,
 		`"subagentStart"`,

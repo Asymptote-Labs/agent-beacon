@@ -9,6 +9,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/spf13/cobra"
@@ -93,8 +94,17 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
+	if err != nil {
+		return err
+	}
 	if endpointOpts.dryRun {
-		return printPlannedActions(plannedInstallActions(false))
+		return printPlannedActions(plannedInstallActions(false, serviceKind))
+	}
+	// Asked once, on an interactive install, before anything is written to disk. Every
+	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
+	if err := maybeRunOnboarding(cmd); err != nil {
+		return err
 	}
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
@@ -108,13 +118,14 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
 		SplunkHEC:             splunkHECOptions(),
 		FalconHEC:             falconHECOptions(),
+		ServiceKind:           serviceKind,
 	})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Endpoint config written to %s\n", result.ConfigPath)
 	fmt.Printf("Collector config written to %s\n", result.CollectorConfigPath)
-	fmt.Printf("Launch plist written to %s\n", result.PlistPath)
+	fmt.Printf("Service definition written to %s\n", result.PlistPath)
 	fmt.Printf("Install manifest written to %s\n", result.ManifestPath)
 	fmt.Printf("Runtime log: %s\n", result.LogPath)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
@@ -231,9 +242,16 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if endpointOpts.dryRun {
-		return printPlannedActions(plannedInstallActions(true))
+	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
+	if err != nil {
+		return err
 	}
+	if endpointOpts.dryRun {
+		return printPlannedActions(plannedInstallActions(true, serviceKind))
+	}
+	// Resend only. Repair is a maintenance command and never asks a question, but a
+	// signup that failed on a flaky network deserves the retry the docs promise.
+	retryPendingOnboarding()
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -246,6 +264,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
 		SplunkHEC:             splunkHECOptions(),
 		FalconHEC:             falconHECOptions(),
+		ServiceKind:           serviceKind,
 	})
 	if err != nil {
 		return err

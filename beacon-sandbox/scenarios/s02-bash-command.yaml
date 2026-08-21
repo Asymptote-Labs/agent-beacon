@@ -1,0 +1,43 @@
+id: s02-bash-command
+# Exercises the command-capture path. The sentinel makes the verdict unambiguous: if the file
+# exists, the agent definitely ran the command, so an absent command event is a genuine Beacon
+# gap rather than an inactive model.
+#
+# History: this failed until Beacon v1.0.6. Claude Code reports the command inside a JSON
+# string attribute (tool_input) and the exporter only read flat attributes, so no
+# command.executed event was produced and e.command.command was always empty -- which silently
+# disabled every rules/risky-command/ rule for Claude Code. v1.0.6 added a Claude normalizer
+# and these expectations now hold.
+prompt: >-
+  Run exactly this shell command and then report its output verbatim:
+  echo {{canary}} | tee {{sentinel}}
+sentinel: /home/agent/work/s02.sentinel
+budget_usd: 1.0
+timeout_seconds: 300
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    why: Baseline, so a failure below is specific to command capture rather than everything.
+
+  - action: command.executed
+    contains: ["{{canary}}"]
+    fields: ["command.command", "tool.name"]
+    why: >-
+      Threat rules can only match scalar leaves, so e.command.command IS the detection surface
+      for the entire rules/risky-command/ category. If this is empty those rules cannot fire
+      for Claude Code no matter how correct their CEL is.
+
+  - action: command.executed
+    fields: ["command.duration_ms"]
+    why: >-
+      Claude Code sends duration_ms as a string, so this asserts it is coerced rather than
+      dropped. It was previously unreachable regardless, being read only inside the block that
+      never entered.
+
+  - action: approval.allowed
+    fields: ["approval.decision", "command.command"]
+    why: >-
+      Claude Code's tool_decision carries decision=accept. Before v1.0.6 the decision field was
+      populated but the action stayed tool.invoked, so anything filtering on an approval.*
+      action or category=approval missed Claude approvals entirely.

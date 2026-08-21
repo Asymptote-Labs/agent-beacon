@@ -1,0 +1,140 @@
+---
+title: "macOS"
+description: "Install the Beacon endpoint on macOS with Homebrew or the signed package, and understand how the launchd service is managed"
+---
+
+Beacon runs a local collector on your machine, points your agent runtimes at it, and writes
+normalized events to a JSONL log you own. On macOS the collector runs as a launchd job.
+
+There are two ways in, and which one you want depends on whether you are setting up your own machine
+or a fleet.
+
+## Your own machine
+
+```bash title="Install the CLI, then the endpoint"
+brew tap asymptote-labs/tap
+brew install beacon
+beacon endpoint install
+```
+
+`beacon endpoint install` with no flags is a **user-mode** install: everything lives under
+`~/.beacon/endpoint`, the launchd job is a LaunchAgent in your own domain, and nothing needs root.
+That is the right choice for a single developer.
+
+Then confirm it:
+
+```bash title="Verify"
+beacon endpoint status
+beacon endpoint doctor
+```
+
+On a fresh install `doctor` reports one warning — `harness_observed`, saying telemetry is configured
+but no matching event has been seen yet. That is not a problem; it clears the first time you run your
+agent. What matters is `0 failure(s)`.
+
+## A managed fleet
+
+For deployment across machines, use the signed, notarized, and stapled `.pkg` attached to each
+release. Installing it performs a **system-mode** install: configuration under
+`/Library/Application Support/Beacon/Endpoint`, a LaunchDaemon, and the runtime log at
+`/var/log/beacon-agent/runtime.jsonl`.
+
+The package also configures the console user's agent runtime, because a system endpoint runs as root
+and the collector is useless if nothing is exporting to it.
+
+<Columns cols={2}>
+  <Card title="Jamf Pro" icon="screwdriver-wrench" href="/mdm/jamf">
+    Package deployment, policy scripts, validation, and Extension Attributes.
+  </Card>
+  <Card title="Fleet" icon="screwdriver-wrench" href="/mdm/fleet">
+    Package and user-context deployment helpers.
+  </Card>
+  <Card title="Rippling" icon="screwdriver-wrench" href="/mdm/rippling">
+    Package deployment through Rippling MDM.
+  </Card>
+  <Card title="All MDM options" icon="list" href="/mdm">
+    Compare the supported management paths.
+  </Card>
+</Columns>
+
+## Managing the service
+
+The collector is an ordinary launchd job:
+
+```bash title="User mode"
+launchctl print "gui/$(id -u)/com.beacon.endpoint.collector.user"
+```
+
+```bash title="System mode"
+sudo launchctl print system/com.beacon.endpoint.collector
+```
+
+`KeepAlive` restarts the collector if it exits and `RunAtLoad` starts it at login or boot. Both are
+set by the install; you do not configure them.
+
+If the job or its plist is missing or broken, repair it without reinstalling:
+
+```bash title="Repair"
+beacon endpoint doctor --fix
+```
+
+## What is macOS-specific
+
+Most of Beacon behaves identically everywhere — the event schema, the collector, hooks, the
+dashboard, threat detection. These are the parts that do not:
+
+| Area | On macOS |
+|---|---|
+| Service manager | launchd — a LaunchAgent in user mode, a LaunchDaemon in system mode |
+| System config | `/Library/Application Support/Beacon/Endpoint` |
+| Service definition | `~/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist`, or `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist` |
+| Package | Signed, notarized, and stapled `.pkg`, Apple Silicon |
+| Update verification | SHA-256 **plus** Apple notarization |
+| Fleet management | Jamf, Fleet, and Rippling assets ship in the package |
+| Log forwarding helpers | Bundled Vector helpers for Falcon, S3, and GCS |
+
+Two of those have no Linux equivalent and are worth knowing if you run a mixed fleet: notarization
+gives macOS an OS-level authenticity check that Linux has no counterpart for, and the MDM assets are
+macOS-only. See [Linux](/platforms/linux) for how that platform differs.
+
+## Updates
+
+Upgrade the CLI with Homebrew, or let Beacon update a package install in place:
+
+```bash title="Update in place"
+sudo beacon endpoint update --check
+sudo beacon endpoint update --apply
+```
+
+`--apply` downloads the release package, verifies its SHA-256 **and** its Apple notarization,
+installs it, restarts the collector, and rolls back if the new version fails its health check. The
+command reports which verification it performed, so a mixed fleet can tell the two platforms apart:
+macOS gets `sha256+notarization`, Linux gets `sha256` because there is no OS-level equivalent.
+
+`--apply` requires a package install. A Homebrew install is upgraded with `brew upgrade beacon`.
+
+## Uninstall
+
+```bash title="Remove the endpoint"
+beacon endpoint uninstall            # user mode
+sudo beacon endpoint uninstall --system
+```
+
+`--keep-logs` and `--keep-config` are available if you want to keep either.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    All install flags, harness selection, and hook installation.
+  </Card>
+  <Card title="Endpoint paths and ports" icon="folder-tree" href="/cli/endpoint-paths">
+    Where Beacon writes config, logs, and service definitions on each platform.
+  </Card>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Inspect collector health, runtime log state, harnesses, and diagnostics.
+  </Card>
+  <Card title="Local dashboard" icon="chart-line" href="/cli/dashboard">
+    Browse captured sessions, timelines, and event detail locally.
+  </Card>
+</Columns>

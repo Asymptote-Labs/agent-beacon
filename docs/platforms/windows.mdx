@@ -1,0 +1,310 @@
+---
+title: "Windows Install"
+description: "Install the Beacon endpoint on Windows with the MSI, and understand how the Windows service is managed"
+---
+
+Beacon runs a local collector on your machine, points your agent runtimes at it, and writes
+normalized events to a JSONL log you own. On Windows the collector runs as a Windows service,
+managed by the Service Control Manager.
+
+Installing the package is the whole setup. It unpacks the binaries, performs the system-mode
+install, registers and starts the `BeaconCollector` service, and configures the runtime of the
+interactive user. There is no second command to run.
+
+## Install
+
+Download `BeaconEndpointAgent-<version>-x64.msi` from the
+[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) and install it:
+
+<CodeGroup>
+```powershell title="Interactive"
+msiexec /i BeaconEndpointAgent-<version>-x64.msi
+```
+
+```powershell title="Silent, for fleet deployment"
+msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
+```
+</CodeGroup>
+
+The install needs administrator rights, because it writes under `%ProgramData%` and registers a
+service. Elevation is requested for you when you double-click the package; a silent install must
+already be running elevated, which is the normal case for Intune, SCCM, or a management agent.
+
+<Warning>
+  **The installer is not code-signed yet.** Windows SmartScreen will warn that the publisher is
+  unknown, and you will need to choose "More info" then "Run anyway". Verify what you downloaded
+  against the published `.sha256` before you do:
+
+  ```powershell
+  (Get-FileHash BeaconEndpointAgent-<version>-x64.msi -Algorithm SHA256).Hash
+  ```
+
+  Authenticode signing is planned; until then the checksum is the integrity check the package has.
+</Warning>
+
+<Note>
+  x64 only. There is no Windows ARM package, because there is no Windows ARM build of the collector
+  the package would need to contain — an installer that put the CLI on disk without it would report
+  no collector found on a machine where you had just installed Beacon.
+</Note>
+
+## Confirm it worked
+
+```powershell title="Verify the install"
+& "$env:ProgramFiles\Beacon\bin\beacon.exe" endpoint status --system
+```
+
+```
+Beacon Endpoint Agent 1.0.6
+Config: C:\ProgramData\Beacon\Endpoint\config.json
+Runtime log: C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl
+Collector: grpc=true http=true
+Service: loaded=true running=true
+Harness: Claude Code  telemetry=enabled
+Last event: present
+```
+
+`running=true` alone does not tell you which backend you got. Beacon falls back to a supervised
+background collector when it cannot register a service, and the fallback reports `running=true` too.
+The JSON output names it:
+
+```powershell title="Confirm you have a real service, not the fallback"
+beacon endpoint status --system --json | Select-String '"kind"'
+```
+
+```
+"service":{"label":"BeaconCollector","loaded":true,"running":true,"kind":"windows-service"}
+```
+
+`"kind":"windows-service"` is what you want. `"kind":"none"` means the supervised fallback — see
+[user-mode install](#user-mode-install) for what that costs you.
+
+`beacon endpoint doctor --system` goes further, checking the whole chain — service, collector,
+config, log permissions, and each harness's settings — and printing the command to fix anything it
+finds.
+
+On a fresh install it reports one warning, and it is not a problem:
+
+```
+Beacon endpoint doctor: warn
+harness_observed: warn target=claude_code (telemetry is configured but no matching event has
+  been observed yet) action="run Claude Code or beacon endpoint test-event"
+Summary: 0 failure(s), 1 warning(s)
+```
+
+That says "configured correctly, but you have not used it yet." It clears the first time you run
+your agent. What matters is `0 failure(s)`.
+
+To confirm the pipeline before running a real session, write a synthetic event from an elevated
+prompt:
+
+```powershell title="Prove the collector is receiving and writing events"
+beacon endpoint test-event --system
+```
+
+<Note>
+  Pass `--system` here. Without it the command targets the *user-mode* log under your profile, which
+  is not the log a system install writes to — so it would report success against the wrong file.
+</Note>
+
+## Using it
+
+Nothing to remember. Run your agent the way you normally do:
+
+```powershell
+claude
+```
+
+Prompts, the commands the agent runs, files it reads and writes, token counts and cost, approvals
+and denials all land in `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl` — one JSON object per
+line. Two independent paths feed it, which is why a gap in one still leaves you with data:
+
+| Path | Carries |
+|---|---|
+| OpenTelemetry | Prompts, tool calls, token usage, cost — via `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317` in your agent settings |
+| Hooks | Session start and end, tool use, permission requests, subagent activity, reasoning |
+
+Both are loopback-only. Nothing leaves the machine.
+
+From there:
+
+```powershell title="Look at what was captured"
+beacon endpoint dashboard    # local web view of sessions, timelines, and event detail
+beacon scan                  # run threat detection rules over the log
+beacon token-usage           # token and cost rollups
+```
+
+See the [event schema](/telemetry-schema/event-schema) for the full field reference.
+
+## What the install does
+
+| Step | Result |
+|---|---|
+| Unpack | `beacon.exe`, `beacon-hooks.exe` and `beacon-otelcol.exe` under `%ProgramFiles%\Beacon\bin` |
+| System install | Config and collector config under `%ProgramData%\Beacon\Endpoint` |
+| Service | `BeaconCollector`, registered with the SCM, automatic start, restart on failure |
+| Runtime log | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl` |
+| Log permissions | Write access granted to `INTERACTIVE`, so hooks running as you can append |
+| Agent runtime | Claude Code and Codex CLI settings for the interactive user, pointed at `127.0.0.1:4317` |
+
+Two of those rows deserve explanation.
+
+**The log permission grant.** A system-mode collector runs as `LocalSystem` and creates the log;
+hooks run as *you* and append to it. `%ProgramData%` subdirectories inherit an ACL where only
+administrators and SYSTEM may write, so without an explicit grant every hook write fails with access
+denied — and nothing reports it, because `status` and `doctor` describe the collector rather than the
+hooks exporting to it. The install grants `INTERACTIVE` write access on the log directory, and
+`doctor` checks the grant is still there.
+
+**The agent runtime row.** A system-mode endpoint is installed by an administrator or by a management
+agent running as `LocalSystem`, neither of which is necessarily the person at the keyboard — and the
+collector is useless if nothing is exporting to it. Beacon works out who is signed in at the console
+and configures their runtime. If it cannot identify anyone, it says so instead of failing, and you can
+configure yourself later:
+
+```powershell title="Configure your own agent runtime against an already-installed endpoint"
+beacon endpoint user-config repair-installed --system
+```
+
+Other users on the same machine run the same command for themselves. They all export to the same
+collector and the same log.
+
+## Managing the service
+
+`BeaconCollector` is an ordinary Windows service, so the usual tools work:
+
+```powershell title="Service management"
+sc.exe query BeaconCollector
+Restart-Service BeaconCollector
+Get-Service BeaconCollector
+```
+
+The install sets automatic start with a delayed start, so the collector comes back after a reboot
+without anyone signing in, and does not compete with the rest of boot. It also sets recovery actions:
+three restarts at 5, 15 and 60 seconds, with the failure count resetting after a day of health. Three
+escalating restarts rather than unlimited immediate ones — a collector that cannot start at all should
+leave a visible stopped service rather than thrash.
+
+The SCM captures no stdout, so there is no journal equivalent. The collector's own log is the place to
+look, and `doctor` reads it for you.
+
+If the service is missing or broken, repair it without reinstalling the package:
+
+```powershell title="Repair the service"
+beacon endpoint doctor --system --fix
+```
+
+## User-mode install
+
+If you do not want a system service — a machine where you are not an administrator, or where you only
+want your own sessions captured — install in user mode:
+
+```powershell title="User-mode install"
+beacon endpoint install
+```
+
+This writes everything under `%USERPROFILE%\.beacon\endpoint`.
+
+One limitation has no macOS or Linux equivalent and is worth stating plainly: **Windows has no
+per-user service manager.** There is no counterpart to `systemctl --user` or launchd's per-user
+domain, so a user-mode install runs a supervised background collector tracked by a pidfile. Two
+consequences, both of which `beacon endpoint status` states in-band rather than leaving you to
+discover:
+
+- **Nothing restarts it.** If the collector exits, it stays down until you start it again.
+- **It does not survive sign-out.** Windows ends the session's processes at logoff.
+
+On Linux the equivalent gap is fixable with `loginctl enable-linger`. Windows has no equivalent, which
+is why the system-mode install is the recommended path here even for a single-user machine.
+
+## Which shell your agent uses
+
+Worth knowing if you are debugging a hook that is not firing: Claude Code on Windows executes hook
+commands through **Git Bash**, not `cmd.exe` or PowerShell. Beacon's installed hook commands are
+written for that, and Git Bash ships with Git for Windows, which Claude Code already requires.
+
+This was measured rather than assumed — a probe installed several candidate command forms and
+reported which ones ran. If you write your own hook commands alongside Beacon's, they are parsed by
+bash too.
+
+## Updates
+
+Download the newer MSI and install it over the top:
+
+```powershell title="Upgrade in place"
+msiexec /i BeaconEndpointAgent-<newer>-x64.msi /qn
+```
+
+The upgrade stops the endpoint, replaces the binaries, and brings it back. That ordering is required
+rather than tidy: Windows cannot replace a file that a running process holds open, so an upgrade that
+left the collector running would either fail, defer the replacement to your next reboot, or silently
+keep the old binary. Your configuration and collected log survive the upgrade.
+
+<Note>
+  `beacon endpoint update --apply` does not work on Windows yet. It reports that automatic apply is
+  only supported for a package install it recognises, rather than pretending to update. Self-update
+  is waiting on code signing — downloading and running an unsigned installer automatically would be a
+  worse trade than doing it by hand.
+</Note>
+
+## Uninstall
+
+Remove it from **Settings → Installed apps**, or from a command line:
+
+```powershell title="Remove, keeping config and logs"
+msiexec /x BeaconEndpointAgent-<version>-x64.msi /qn
+```
+
+Removal stops and deletes the service and takes the binaries away, but leaves
+`%ProgramData%\Beacon\Endpoint` alone — collected telemetry is not something a package removal should
+destroy, and an uninstall is often the first half of a reinstall. To remove that too:
+
+```powershell title="Remove everything, including configuration and logs"
+$env:BEACON_PURGE = '1'
+& "$env:ProgramFiles\Beacon\scripts\uninstall-endpoint.ps1"
+msiexec /x BeaconEndpointAgent-<version>-x64.msi /qn
+```
+
+To remove a non-package install, use Beacon directly:
+
+```powershell title="Full uninstall"
+beacon endpoint uninstall --system
+```
+
+`--keep-logs` and `--keep-config` are available if you want to keep either.
+
+## Known gaps
+
+Stated here rather than left to be discovered:
+
+| Gap | Status |
+|---|---|
+| The installer is unsigned | SmartScreen warns; verify the published `.sha256`. Authenticode signing is planned |
+| `beacon endpoint update --apply` | Not supported on Windows; refuses rather than pretending. Waiting on signing |
+| `beacon ci exec` | Captures intermittently on Windows ([#320](https://github.com/asymptote-labs/agent-beacon/issues/320)). The installed-hook path described on this page is unaffected |
+| User-mode collectors | Do not restart and do not survive sign-out — no per-user service manager exists |
+| Windows ARM | No package, because there is no ARM collector build |
+| WSL | A Claude Code running inside WSL writes to the Linux filesystem and needs the Linux build, not this one |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
+    Inspect collector health, runtime log state, harnesses, and diagnostics.
+  </Card>
+  <Card title="Endpoint paths and ports" icon="folder-tree" href="/cli/endpoint-paths">
+    Where Beacon writes config, logs, and service definitions on each platform.
+  </Card>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    All install flags, harness selection, and hook installation.
+  </Card>
+  <Card title="Endpoint doctor" icon="stethoscope" href="/cli/endpoint-doctor">
+    Diagnose and repair an existing install.
+  </Card>
+  <Card title="Local dashboard" icon="chart-line" href="/cli/dashboard">
+    Browse captured sessions, timelines, and event detail locally.
+  </Card>
+  <Card title="Threat detection" icon="shield-halved" href="/cli/scan">
+    Run the open threat rules over your runtime log, offline.
+  </Card>
+</Columns>

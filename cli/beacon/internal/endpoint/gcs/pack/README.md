@@ -96,8 +96,8 @@ gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/smoke
 For production, use the generated Vector config as a customer-managed host-agent
 forwarding template. Beacon remains the local JSONL producer; Vector tails
 `runtime.jsonl` and `inventory_state.jsonl`, checkpoints file offsets in its
-`data_dir`, batches Beacon events, and writes gzip-compressed newline-delimited
-JSON objects into Google Cloud Storage.
+`data_dir`, batches Beacon events, and writes newline-delimited JSON objects
+into Google Cloud Storage.
 
 Install Vector using your normal endpoint management tooling, then copy the
 generated config into Vector's config directory. On a macOS system-mode Beacon
@@ -140,8 +140,10 @@ parallel usage fields.
 
 The template uses date-partitioned `key_prefix`, `filename_time_format = "%s"`,
 and `filename_append_uuid = true` so production forwarding does not overwrite
-previous GCS objects. It also sets `compression = "gzip"`,
-`content_encoding = "gzip"`, and `content_type = "application/x-ndjson"`.
+previous GCS objects. It writes uncompressed `.jsonl` with
+`content_type = "application/x-ndjson"`. This avoids ambiguous GCS
+`Content-Encoding` and filename-extension behavior that causes HTTP readers
+such as ClickHouse to decompress an object twice.
 Runtime log forwarding starts at the end of the active log to avoid backfilling
 historical session activity when Vector is first installed. Inventory forwarding
 starts at the beginning of `inventory_state.jsonl` so the first snapshot is not
@@ -170,7 +172,7 @@ be confirmed with Google Cloud tooling:
 
 ```bash
 gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**"
-gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"
+gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl" | grep "Beacon endpoint GCS validation event"
 ```
 
 Expected validation fields:

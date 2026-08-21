@@ -14,8 +14,9 @@ beacon cloud s3 setup
 
 The helper creates or validates a bucket, blocks public access, creates a
 dedicated IAM user, grants prefix-scoped `s3:PutObject`, creates one access key,
-and prints the `BEACON_CLOUD_S3_*` plus AWS credential environment variables for
-cloud agents.
+and prints `BEACON_CLOUD_UPLOAD=s3`, `BEACON_CLOUD_S3_BUCKET`,
+`BEACON_CLOUD_S3_PREFIX`, `BEACON_CLOUD_S3_REGION`, `AWS_ACCESS_KEY_ID`, and
+`AWS_SECRET_ACCESS_KEY` for cloud agents.
 
 <Warning>
   This self-serve flow passes scoped AWS access keys into the provider-managed
@@ -66,6 +67,9 @@ complete.
   </Card>
   <Card title="Claude Code Cloud Agents" icon="cloud" href="/runtimes/claude-code-cloud-agents">
     Configure Claude Code cloud agent telemetry and S3 upload end to end.
+  </Card>
+  <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
+    Configure Cursor cloud agent telemetry and S3 upload end to end.
   </Card>
   <Card title="Log forwarding" icon="database" href="/log-forwarding">
     Review local endpoint S3 forwarding for persistent endpoint deployments.

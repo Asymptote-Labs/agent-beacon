@@ -18,6 +18,7 @@ Do not recreate or depend on removed `asymptote` mirror trees. Keep new work foc
 
 - Beacon is visibility-first endpoint telemetry for local AI agent runtimes, not a hosted policy service or general endpoint protection product.
 - Preserve the local-only product posture. The public Beacon build should not require a hosted account, remote policy fetch, hosted dashboard, or external network dependency during normal hook execution.
+- One narrow, deliberate exception to the no-network posture: `beacon endpoint install` asks for an email and work/personal intent once per machine and POSTs that plus install context (OS, arch, version, install method, detected runtime names, a random install ID) to an Asymptote-run signup endpoint. This is intentional product behavior for open-source attribution, not an oversight — do not remove it. It is strictly bounded: interactive TTY only, once per machine, never during hook execution, never on `--system`/root/CI/piped-stdin/`--dry-run` installs, and always skippable with `--no-onboarding` or `BEACON_ONBOARDING=0`. A failed submission never fails an install. No prompt text, telemetry event, file content, or command ever leaves the machine through it. Implementation lives in `cli/beacon/internal/onboarding` and `cli/beacon/cmd/endpoint_onboarding.go`; the README documents the payload field-by-field, so changing the fields means changing that table too.
 - Do not add dependency vulnerability scanning, OSV/GHSA lookups, package remediation, or other vulnerability-enforcement flows to the public hook path.
 - Do not add broad runtime enforcement unless explicitly requested. Current control behavior is limited to hook-native approvals/denials exposed by supported agent runtimes.
 - Keep direct destination support scoped to local JSONL/Wazuh unless explicitly requested. Elastic support is a file-tailing pack over local JSONL; Beacon itself must not store Elastic credentials or require a hosted Elastic dependency.
@@ -222,9 +223,16 @@ gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.conte
 gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
 ```
 
-The release should include the four GoReleaser CLI archives, `checksums.txt`,
-`threat-rules.tar.gz`, `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`,
-and `update-manifest.json`. Verify the package before announcing the release:
+The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
+`beacon_<version>_windows_amd64.zip`), `checksums.txt`, `threat-rules.tar.gz`,
+`BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
+and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`.
+
+The MSI is unsigned, so `pkgutil`/`stapler`/`spctl` have no Windows counterpart to
+run. Its `.sha256` is therefore the only integrity check it has, and the release
+job proves the package works by installing it on a runner before attaching it —
+verification by execution rather than by signature. Both change when Authenticode
+signing is added. Verify the package before announcing the release:
 
 ```bash
 tmpdir="$(mktemp -d)"

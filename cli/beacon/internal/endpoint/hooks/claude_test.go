@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,9 +28,8 @@ func TestInstallClaudeSettingsPreservesExistingSettingsAndHooks(t *testing.T) {
 		"defaultMode",
 		"echo keep",
 		"--platform factory",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform claude",
 		"SessionStart",
 		"UserPromptSubmit",
@@ -130,7 +130,7 @@ func TestClaudeSettingsPathProjectLevel(t *testing.T) {
 
 func TestClaudeHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)

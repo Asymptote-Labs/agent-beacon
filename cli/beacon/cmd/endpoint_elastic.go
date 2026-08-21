@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/elastic"
@@ -14,9 +13,6 @@ import (
 )
 
 func runEndpointElasticUp(ctx context.Context) error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("beacon endpoint elastic up is currently macOS-only")
-	}
 	cfg := loadOrDefaultConfig()
 	logPath, err := filepath.Abs(cfg.LogPath)
 	if err != nil {
@@ -44,9 +40,6 @@ func runEndpointElasticUp(ctx context.Context) error {
 }
 
 func runEndpointElasticDown(ctx context.Context) error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("beacon endpoint elastic down is currently macOS-only")
-	}
 	packDir := endpointOpts.elasticPackDir
 	if packDir == "" {
 		packDir = elastic.DefaultOutputDir

@@ -50,8 +50,8 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 
 | Cloud surface | Collection path | Telemetry coverage |
 |---------------|-----------------|--------------------|
-| [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
-| [Cursor Cloud Agents](/runtimes/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
+| [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| [Cursor Cloud Agents](/runtimes/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction telemetry after project hooks become active |
 | [Anthropic](/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
 | [OpenAI](/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
@@ -59,13 +59,30 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 
 ## Deployment notes
 
-For MDM deployments, use the signed and notarized macOS `.pkg`.
+Local agent harnesses need the endpoint agent installed on the machine they run on. Use the native
+package for that platform, which installs and starts everything in one step:
 
-- Writes [endpoint events](/concepts/core-concepts#endpoint-event) to `/var/log/beacon-agent/runtime.jsonl`
+<Columns cols={2}>
+  <Card title="macOS" icon="apple" href="/platforms/macos">
+    Signed, notarized `.pkg` — Jamf Pro, Fleet, Rippling, or manual.
+  </Card>
+  <Card title="Linux" icon="linux" href="/platforms/linux">
+    `.deb` and `.rpm` for amd64 and arm64.
+  </Card>
+</Columns>
+
+Either package:
+
 - Installs the endpoint agent under `/opt/beacon`
-- Creates system endpoint configuration
-- Loads the [local collector](/concepts/core-concepts#local-collector) LaunchDaemon
-- Supports Jamf Pro, Fleet, or another macOS MDM
+- Creates system endpoint configuration — `/Library/Application Support/Beacon/Endpoint` on macOS,
+  `/etc/beacon/endpoint` on Linux
+- Starts the [local collector](/concepts/core-concepts#local-collector) as a service — a LaunchDaemon
+  on macOS, a systemd unit on Linux
+- Writes [endpoint events](/concepts/core-concepts#endpoint-event) to `/var/log/beacon-agent/runtime.jsonl`
+- Configures the installing user's supported agent runtimes to export to the local collector
+
+MDM assets — Jamf Pro Extension Attributes, Fleet osquery queries, Rippling deployment — are macOS
+only. On Linux, deploy the `.deb` or `.rpm` with whatever configuration management you already run.
 
 | Runtime | Enterprise configuration |
 |---------|--------------------------|

@@ -29,7 +29,9 @@ const AutoUpdateEnv = "BEACON_AUTO_UPDATE"
 
 // ManagedConfigPath is where an MDM/enterprise profile can drop settings that
 // override the local config (but not an explicit env override).
-var ManagedConfigPath = filepath.Join(SystemSupportDir, "managed.json")
+// ManagedConfigPath is the MDM-dropped override. A var so tests can redirect it, but computed
+// through SystemSupportDir() so it is correct per platform rather than fixed at macOS.
+var ManagedConfigPath = filepath.Join(SystemSupportDir(), "managed.json")
 
 // ParseMode normalizes a mode string. It accepts the canonical values plus the
 // legacy boolean forms (1/true/on => auto, 0/false/off/no => off).

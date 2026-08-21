@@ -11,6 +11,17 @@ import (
 //go:embed hooks.bin
 var HooksBinary []byte
 
+// BinaryStem is the hook binary's name without any platform extension.
+//
+// Detection matches on this rather than on GetBinaryName. A command containing
+// "beacon-hooks.exe" also contains "beacon-hooks", so the stem recognizes both spellings, while
+// the platform-specific name recognizes only one -- which meant a Windows Beacon could not see a
+// hook command written without the extension, and would neither repair nor remove it. Settings
+// files are synced between machines and written by older builds, so both spellings genuinely occur.
+//
+// Writing still uses GetBinaryName: what we install must be the name this platform can execute.
+const BinaryStem = "beacon-hooks"
+
 // GetBinaryName returns the appropriate binary name for the current platform
 func GetBinaryName() string {
 	if runtime.GOOS == "windows" {

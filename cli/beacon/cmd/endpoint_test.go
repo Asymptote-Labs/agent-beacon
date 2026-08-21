@@ -81,7 +81,7 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.noStart = true
 
-	actions := plannedInstallActions(false)
+	actions := plannedInstallActions(false, service.KindAuto)
 	counts := map[string]int{}
 	for _, action := range actions {
 		if action.Action == "configure_harness" {
@@ -159,6 +159,7 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	for _, want := range []string{
 		`"CLAUDE_CODE_ENABLE_TELEMETRY": "1"`,
 		`"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4317"`,
+		`"OTEL_LOG_TOOL_DETAILS": "1"`,
 	} {
 		if !strings.Contains(string(claudeSettings), want) {
 			t.Fatalf("Claude settings missing %q:\n%s", want, claudeSettings)
@@ -418,11 +419,11 @@ type fakeRepairServiceManager struct {
 	unloads   int
 }
 
-func (m *fakeRepairServiceManager) PlistPath() (string, error) {
+func (m *fakeRepairServiceManager) UnitPath() (string, error) {
 	return m.plistPath, nil
 }
 
-func (m *fakeRepairServiceManager) WritePlist(program, configPath string) (string, error) {
+func (m *fakeRepairServiceManager) WriteUnit(program, configPath string) (string, error) {
 	return m.plistPath, os.WriteFile(m.plistPath, []byte("new plist"), 0644)
 }
 
@@ -1554,15 +1555,30 @@ func TestEndpointUpdateApplyFlagRegistered(t *testing.T) {
 	}
 }
 
-func TestApplyUpdateRequiresRoot(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can apply updates")
+// TestApplyUpdateRequiresElevation asks the same question the code now asks.
+//
+// It used to check for the literal words "requires root", which is the POSIX spelling. That phrasing
+// was wrong on Windows in both directions: os.Geteuid returns -1 there so the guard could never pass,
+// and the advice it printed -- rerun with sudo -- names a command the platform does not have. The
+// requirement is elevation; what elevation is called is the platform's business.
+func TestApplyUpdateRequiresElevation(t *testing.T) {
+	if lifecycle.HasSystemPrivileges() {
+		t.Skip("an elevated process can apply updates")
 	}
 	oldAllow := endpointUpdateOpts.allowInsecure
 	t.Cleanup(func() { endpointUpdateOpts.allowInsecure = oldAllow })
 	endpointUpdateOpts.allowInsecure = false
-	if err := applyUpdate(context.Background(), "0.0.1"); err == nil || !strings.Contains(err.Error(), "requires root") {
-		t.Fatalf("applyUpdate error = %v, want root requirement", err)
+	err := applyUpdate(context.Background(), "0.0.1")
+	if err == nil {
+		t.Fatal("applyUpdate succeeded without elevation")
+	}
+	if !strings.Contains(err.Error(), "elevated privileges") {
+		t.Fatalf("applyUpdate error = %v, want it to name the elevation requirement", err)
+	}
+	// The advice has to be runnable on the platform that printed it.
+	if !strings.Contains(err.Error(), lifecycle.SystemPrivilegeHint()) {
+		t.Fatalf("applyUpdate error = %v, want it to carry this platform's hint (%q)",
+			err, lifecycle.SystemPrivilegeHint())
 	}
 }
 

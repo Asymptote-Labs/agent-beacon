@@ -13,9 +13,10 @@ For [ephemeral CI jobs](/concepts/core-concepts#ci-telemetry), see [CI Telemetry
 
 For [provider-managed cloud agents](/concepts/core-concepts#cloud-agent-telemetry), see
 [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) or
-[Cursor Cloud Agents](/runtimes/cursor-cloud-agents). Cloud agents currently support
-Google Cloud Storage as the self-serve artifact destination; AWS S3 and SIEM
-destinations are planned.
+[Cursor Cloud Agents](/runtimes/cursor-cloud-agents). Supported cloud-agent
+hooks can upload compressed per-run JSONL snapshots directly to
+customer-managed Google Cloud Storage or Amazon S3. This direct sandbox upload
+does not use the persistent endpoint's Vector forwarder.
 
 ## Runtime log paths
 
@@ -225,7 +226,7 @@ for bucket creation, IAM, credentials, Vector setup, and validation.
 
 ### Google Cloud Storage
 
-For Google Cloud Storage, generate Beacon's GCS content pack and configure a customer-managed Vector host agent to write gzip-compressed NDJSON objects into a bucket.
+For Google Cloud Storage, generate Beacon's GCS content pack and configure a customer-managed Vector host agent to write NDJSON objects into a bucket.
 
 ```bash title="Generate the integration pack"
 beacon endpoint gcs install-pack --system --output ./beacon-gcs-pack

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -40,6 +41,10 @@ type ApplyResult struct {
 	Applied     bool
 	RolledBack  bool
 	Message     string
+	// Verification names the checks the artifact actually passed. Recorded rather than implied,
+	// because it differs by platform: macOS adds notarization on top of the checksum, Linux has
+	// no OS-level equivalent, and "verified" must not paper over which of the two happened.
+	Verification string
 }
 
 // Applier performs the full download → verify → install → health-check →
@@ -136,10 +141,10 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 	}
 	result.ToVersion = manifest.Version
 
-	artifact, ok := manifest.ArtifactFor(updatecheck.RuntimeArchKey())
+	artifact, key, ok := selectArtifact(manifest, a.AllowInsecureTest)
 	if !ok {
-		a.emit(false, result, fmt.Sprintf("no update artifact for %s", updatecheck.RuntimeArchKey()))
-		return result, fmt.Errorf("no update artifact for %s", updatecheck.RuntimeArchKey())
+		a.emit(false, result, fmt.Sprintf("no update artifact this host can install (looked for %s)", key))
+		return result, fmt.Errorf("no update artifact this host can install (looked for %s)", key)
 	}
 
 	// Serialize concurrent updaters.
@@ -166,7 +171,26 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 		a.emit(false, result, err.Error())
 		return result, fmt.Errorf("verify checksum: %w", err)
 	}
-	if !a.SkipGatekeeper {
+	// Gatekeeper is macOS-only: pkgutil, stapler and spctl do not exist elsewhere, and there is
+	// no OS-level equivalent on Linux. Skipped explicitly and logged rather than silently, so
+	// the weaker verification is visible in the system log rather than assumed.
+	//
+	// SHA-256 verification above still applies on every platform and is not optional. The trust
+	// root that leaves is HTTPS plus the release checksum -- which is the same trust root the
+	// user relied on to obtain the package they are updating, so this is parity with the install
+	// path rather than a downgrade. Notarization gives macOS assurance above that; adding a
+	// comparable Linux story means a signing scheme (GPG-signed metadata or Sigstore) with real
+	// key management, and that is a deliberate decision rather than something to bolt on here.
+	switch {
+	case runtime.GOOS != "darwin":
+		result.Verification = "sha256"
+	case a.SkipGatekeeper:
+		// Explicitly named rather than left empty. An empty value is indistinguishable from "we
+		// did not record it", and this is the one case where a macOS update carries less assurance
+		// than a macOS update normally does -- exactly the thing a reader needs told.
+		result.Verification = "sha256 (notarization check skipped)"
+	default:
+		result.Verification = "sha256+notarization"
 		if err := a.verifyGatekeeper(ctx, pkgPath, manifest.TeamID); err != nil {
 			a.emit(false, result, err.Error())
 			return result, fmt.Errorf("verify signature/notarization: %w", err)
@@ -390,11 +414,58 @@ func (a *Applier) install(ctx context.Context, pkgPath string) error {
 	if a.AllowInsecureTest {
 		return extractTarballInto(pkgPath, a.prefix())
 	}
-	out, err := a.runner()(ctx, "installer", "-pkg", pkgPath, "-target", a.prefix())
+	name, args := installerCommand(pkgPath, a.prefix())
+	out, err := a.runner()(ctx, name, args...)
 	if err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(out), err)
 	}
 	return nil
+}
+
+// installerCommand picks the tool that installs a staged package.
+//
+// dpkg and rpm are used directly rather than apt or dnf: the artifact is a local file already
+// downloaded and checksum-verified, so there is no repository to consult, and the higher-level
+// tools would only add a dependency-resolution step that can prompt or reach the network. An
+// update must not become interactive halfway through.
+//
+// Both are asked to upgrade in place rather than install fresh, so the running version is
+// replaced rather than conflicting with itself.
+func installerCommand(pkgPath, prefix string) (string, []string) {
+	switch {
+	case strings.HasSuffix(pkgPath, ".deb"):
+		return "dpkg", []string{"--install", pkgPath}
+	case strings.HasSuffix(pkgPath, ".rpm"):
+		return "rpm", []string{"--upgrade", "--replacepkgs", pkgPath}
+	default:
+		// Everything else keeps the path it took before Linux support existed, so macOS
+		// behaviour is unchanged. Note filepath.Ext is unusable here: it reports ".gz" for a
+		// .tar.gz, which is why this matches suffixes the way packageExt does.
+		return "installer", []string{"-pkg", pkgPath, "-target", prefix}
+	}
+}
+
+// linuxPackageExt reports which native package format this host can install.
+func linuxPackageExt() string {
+	if _, err := exec.LookPath("dpkg"); err == nil {
+		return ".deb"
+	}
+	if _, err := exec.LookPath("rpm"); err == nil {
+		return ".rpm"
+	}
+	// Neither is present, so no native install is possible. Assume deb so the resulting failure
+	// names dpkg, which is actionable, rather than the absence of the macOS installer. Callers that
+	// need to know whether an install is possible at all must ask hasPackageManager, not this.
+	return ".deb"
+}
+
+// hasPackageManager reports whether this host has any native package tool.
+func hasPackageManager() bool {
+	if _, err := exec.LookPath("dpkg"); err == nil {
+		return true
+	}
+	_, err := exec.LookPath("rpm")
+	return err == nil
 }
 
 // installDir is the root of the installed tree under the active prefix.
@@ -524,12 +595,75 @@ func versionLineMatches(out, want string) bool {
 	return false
 }
 
+// selectArtifact picks the release artifact this host can actually install.
+//
+// One key per architecture is not enough on Linux, because two incompatible package formats share
+// an architecture. A manifest that published only the .deb for linux_arm64 would hand a Fedora host
+// a .deb, and installerCommand would dutifully run dpkg -- which is not installed there. The update
+// would fail at the last step, after downloading and verifying, with an error about a missing
+// program rather than about the wrong format.
+//
+// So a format-qualified key is preferred (linux_arm64_rpm), and the bare architecture key is
+// accepted only when what it points at is installable here. That keeps a single-format manifest
+// working on the platform it was built for while refusing, clearly, on the platform it was not.
+// extractsTarballs is the applier's AllowInsecureTest seam: with it on, `install` expands a tarball
+// into a temp prefix, so a tarball artifact is genuinely installable. It is threaded through rather
+// than assumed, because the answer to "can this host install this" differs between the two modes and
+// guessing either way breaks something real.
+func selectArtifact(m updatecheck.UpdateManifest, extractsTarballs bool) (updatecheck.Artifact, string, bool) {
+	arch := updatecheck.RuntimeArchKey()
+	if runtime.GOOS != "linux" {
+		a, ok := m.ArtifactFor(arch)
+		return a, arch, ok
+	}
+	format := strings.TrimPrefix(linuxPackageExt(), ".")
+	qualified := arch + "_" + format
+	if a, ok := m.ArtifactFor(qualified); ok {
+		return a, qualified, true
+	}
+	if a, ok := m.ArtifactFor(arch); ok && installableHere(a.URL, extractsTarballs) {
+		return a, arch, true
+	}
+	return updatecheck.Artifact{}, qualified, false
+}
+
+// installableHere reports whether a URL names something this host can install.
+//
+// A native package qualifies only in the format this host has a tool for. A tarball qualifies only
+// when the caller extracts tarballs: in production `install` does not, so a .tar.gz reaches
+// installerCommand's default branch and is handed to the macOS `installer`, which cannot open it and
+// does not exist on Linux at all. Accepting one unconditionally would mean downloading and
+// checksum-verifying an artifact and only then discovering it is uninstallable.
+func installableHere(url string, extractsTarballs bool) bool {
+	if strings.HasSuffix(url, ".tar.gz") || strings.HasSuffix(url, ".tgz") {
+		return extractsTarballs
+	}
+	if !strings.HasSuffix(url, ".deb") && !strings.HasSuffix(url, ".rpm") {
+		return false
+	}
+	// linuxPackageExt falls back to .deb when neither tool exists, so the absence of a package
+	// manager has to be checked separately or a .deb would look installable on a host with no dpkg
+	// at all.
+	return hasPackageManager() && strings.HasSuffix(url, linuxPackageExt())
+}
+
+// packageExt names the staged artifact so the installer that runs on it can dispatch correctly.
+//
+// The URL wins when it already carries a recognised extension, because the manifest is the
+// authority on what was published. Otherwise fall back to the platform's native format: .pkg on
+// macOS, and on Linux whichever of dpkg or rpm this host actually has.
 func packageExt(url string) string {
 	switch {
 	case strings.HasSuffix(url, ".tar.gz"):
 		return ".tar.gz"
 	case strings.HasSuffix(url, ".tgz"):
 		return ".tgz"
+	case strings.HasSuffix(url, ".deb"):
+		return ".deb"
+	case strings.HasSuffix(url, ".rpm"):
+		return ".rpm"
+	case runtime.GOOS == "linux":
+		return linuxPackageExt()
 	default:
 		return ".pkg"
 	}

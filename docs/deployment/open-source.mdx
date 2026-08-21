@@ -31,7 +31,19 @@ beacon version 0.0.48
 
 ## Configure endpoint telemetry
 
-For most individual developer setups, continue with the default per-user endpoint install:
+Setting up the endpoint differs by operating system. Start with your platform if you want the
+packages, service management, and fleet deployment for it:
+
+<Columns cols={2}>
+  <Card title="macOS" icon="apple" href="/platforms/macos">
+    Homebrew, or the signed `.pkg` for MDM. launchd.
+  </Card>
+  <Card title="Linux" icon="linux" href="/platforms/linux">
+    `.deb` and `.rpm` packages. systemd.
+  </Card>
+</Columns>
+
+The per-user install below works the same on both, and is the quickest way to try it on one machine:
 
 ```bash title="Configure endpoint telemetry"
 beacon endpoint install
@@ -45,7 +57,7 @@ beacon endpoint install --harness claude,codex,gemini
 ```
 
 <Note>
-  Production endpoint install is currently supported on macOS. The default mode uses per-user paths; use `--system` as root for package or MDM deployments.
+  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. The default mode uses per-user paths; use `--system` as root for package or MDM deployments. On Linux, installing the `.deb` or `.rpm` does the system install for you — see [Linux](/platforms/linux).
 </Note>
 
 Beacon records supported prompt, tool, command, file, approval, policy, and runtime context when the source runtime emits it. Before events are written to `runtime.jsonl` or sent through configured destinations, Beacon applies redaction, sanitization, truncation, and event-size limits.

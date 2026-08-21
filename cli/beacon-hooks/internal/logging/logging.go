@@ -8,11 +8,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const (
@@ -142,7 +142,12 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 		},
 		"user": user,
 		"harness": map[string]interface{}{
-			"name": l.platform,
+			// Normalized rather than written raw. The OTLP path already reports the canonical name
+			// for the same session, so emitting the raw --platform value here recorded one session
+			// under two names -- splitting it for any query or SIEM detection that groups by
+			// harness.name. The flag itself is unchanged, so existing installs are fixed without
+			// having their settings.json rewritten.
+			"name": asymptoteobserve.NormalizeHarnessName(l.platform),
 		},
 		"message": asymptoteobserve.CleanString(message, asymptoteobserve.DefaultStringLimit, true),
 	}
@@ -230,7 +235,82 @@ func writeEndpointJSON(path string, event map[string]interface{}) error {
 			return err
 		}
 	}
+	if len(data) > 64*1024 {
+		compactEndpointContent(event)
+		data, err = json.Marshal(sanitizeEndpointMap(event))
+		if err != nil {
+			return err
+		}
+	}
+	if len(data) > 64*1024 {
+		event = minimalEndpointEvent(event)
+		data, err = json.Marshal(sanitizeEndpointMap(event))
+		if err != nil {
+			return err
+		}
+	}
+	if len(data) > 64*1024 {
+		return fmt.Errorf("endpoint event exceeds 64 KiB after metadata fallback")
+	}
 	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+}
+
+func compactEndpointContent(event map[string]interface{}) {
+	if file, ok := event["file"].(map[string]interface{}); ok {
+		delete(file, "diff")
+	}
+	if command, ok := event["command"].(map[string]interface{}); ok {
+		delete(command, "output")
+	}
+	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
+		delete(genAI, "input")
+		delete(genAI, "output")
+		if tool, ok := genAI["tool"].(map[string]interface{}); ok {
+			if call, ok := tool["call"].(map[string]interface{}); ok {
+				delete(call, "arguments")
+				delete(call, "result")
+			}
+		}
+	}
+	if content, ok := event["content"].(map[string]interface{}); ok {
+		content["included"] = false
+		content["truncated"] = true
+	}
+}
+
+func minimalEndpointEvent(event map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{"field_truncated": true}
+	for _, key := range []string{
+		"timestamp", "vendor", "product", "schema_version", "event", "severity",
+		"endpoint", "user", "harness", "origin", "run", "session", "trace",
+		"error", "tool", "file", "command", "mcp", "approval", "policy",
+		"content", "destination", "health", "model", "repository",
+		"branch", "message",
+	} {
+		if value, ok := event[key]; ok && value != nil {
+			out[key] = value
+		}
+	}
+	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
+		summary := map[string]interface{}{}
+		for _, key := range []string{"operation", "usage", "response", "provider"} {
+			if value := genAI[key]; value != nil {
+				summary[key] = value
+			}
+		}
+		if tool, ok := genAI["tool"].(map[string]interface{}); ok {
+			toolSummary := map[string]interface{}{"name": tool["name"], "type": tool["type"]}
+			if call, ok := tool["call"].(map[string]interface{}); ok {
+				toolSummary["call"] = map[string]interface{}{"id": call["id"]}
+			}
+			summary["tool"] = toolSummary
+		}
+		if len(summary) > 0 {
+			out["gen_ai"] = summary
+		}
+	}
+	out["message"] = truncateEndpoint(fmt.Sprint(out["message"]), 1024)
+	return out
 }
 
 func endpointLogPath() string {
@@ -278,12 +358,14 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if err != nil {
 		return err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	held, err := filelock.Exclusive(lock)
+	if err != nil {
 		_ = lock.Close()
 		return err
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// Unlock before closing: LIFO defer ordering means the close listed first runs last.
 	defer lock.Close()
+	defer held.Release()
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}

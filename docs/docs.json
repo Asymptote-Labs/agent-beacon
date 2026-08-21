@@ -216,6 +216,13 @@
                       "guides/jamf-falcon-mdm"
                     ]
                   },
+                  {
+                    "group": "Rippling",
+                    "root": "mdm/rippling",
+                    "pages": [
+                      "guides/rippling-gcs-mdm"
+                    ]
+                  },
                   "mdm/fleet"
                 ]
               },
@@ -259,6 +266,14 @@
                 ]
               }
             ]
+          },
+          {
+            "group": "Contributing",
+            "icon": "code-branch",
+            "pages": [
+              "contributing/beacon-sandbox",
+              "contributing/development"
+            ]
           }
         ]
       },
@@ -271,6 +286,16 @@
             "icon": "download",
             "pages": [
               "cli/install",
+              {
+                "group": "Platforms",
+                "icon": "laptop",
+                "pages": [
+                  "platforms/macos",
+                  "platforms/linux",
+                  "platforms/linux-deployment-profile",
+                  "platforms/windows"
+                ]
+              },
               "cli/upgrade",
               "cli/manual-install"
             ]
@@ -323,6 +348,7 @@
                   "cli/endpoint-repair",
                   "cli/endpoint-uninstall",
                   "cli/endpoint-config",
+                  "cli/endpoint-onboarding",
                   "cli/dashboard",
                   "cli/wazuh",
                   "cli/elastic",
@@ -459,6 +485,13 @@
                   "guides/jamf-gcs-mdm",
                   "guides/jamf-s3-mdm",
                   "guides/jamf-falcon-mdm"
+                ]
+              },
+              {
+                "group": "Rippling",
+                "root": "mdm/rippling",
+                "pages": [
+                  "guides/rippling-gcs-mdm"
                 ]
               }
             ]
@@ -1294,6 +1327,14 @@
     {
       "source": "/use-cases",
       "destination": "/guides/use-cases"
+    },
+    {
+      "source": "/beacon-sandbox",
+      "destination": "/contributing/beacon-sandbox"
+    },
+    {
+      "source": "/cli/endpoint-linux",
+      "destination": "/platforms/linux"
     }
   ],
   "footer": {

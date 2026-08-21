@@ -7,12 +7,18 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 )
 
 func TestClassifyInstall(t *testing.T) {
+	// The prefixes this classifies -- /opt/beacon and the Homebrew roots -- are POSIX install
+	// locations that do not exist on Windows, so there is no classification to assert there.
+	if runtime.GOOS == "windows" {
+		t.Skip("install-kind prefixes are POSIX-only")
+	}
 	cases := []struct {
 		path string
 		want InstallKind

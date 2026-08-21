@@ -48,11 +48,15 @@ echo "Building temporary beacon..."
   go build -o "$BEACON_BIN" .
 )
 
+# stdin comes from /dev/null so this behaves the same whether a developer runs it from
+# a terminal or CI runs it headless. `endpoint install --user` is the one command here
+# that would otherwise prompt for onboarding on a tty and hang the smoke test.
 run_beacon() {
-  HOME="$HOME_DIR" "$BEACON_BIN" "$@"
+  HOME="$HOME_DIR" "$BEACON_BIN" "$@" </dev/null
 }
 
 echo "Installing endpoint config in temporary HOME..."
+INSTALL_OUTPUT="$TMP_DIR/install-output.txt"
 run_beacon endpoint install \
   --user \
   --no-start \
@@ -60,12 +64,28 @@ run_beacon endpoint install \
   --log-path "$LOG_PATH" \
   --harness claude,codex \
   --otlp-grpc-port 55317 \
-  --otlp-http-port 55318
+  --otlp-http-port 55318 >"$INSTALL_OUTPUT" 2>&1
+cat "$INSTALL_OUTPUT"
 
 test -f "$HOME_DIR/.beacon/endpoint/config.json"
 test -f "$HOME_DIR/.beacon/endpoint/otelcol.yaml"
 test -f "$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist"
 test -f "$LOG_PATH"
+
+# A non-interactive install must never ask for an email or record an onboarding
+# answer. Package postinstall scripts, MDM deployments, and CI all reach `endpoint
+# install` without a terminal, so a prompt here is a broken fleet rollout.
+# -E because the prompt strings are matched as alternates, and the second branch is
+# the current email prompt ("Email › "), not the old "Email:".
+if grep -qiE 'How are you using Beacon|Email .|free and open source' "$INSTALL_OUTPUT"; then
+  echo "non-interactive endpoint install must not prompt for onboarding" >&2
+  cat "$INSTALL_OUTPUT" >&2
+  exit 1
+fi
+if [ -e "$HOME_DIR/.beacon/profile.json" ]; then
+  echo "non-interactive endpoint install must not write an onboarding profile" >&2
+  exit 1
+fi
 
 echo "Checking endpoint status..."
 run_beacon endpoint status --user --log-path "$LOG_PATH" >/dev/null
@@ -91,18 +111,88 @@ run_beacon endpoint hooks install --harness cursor --user --log-path "$LOG_PATH"
 run_beacon endpoint hooks status --harness cursor --user --log-path "$LOG_PATH" >/dev/null
 test -f "$HOME_DIR/.cursor/hooks.json"
 
-if ! grep -q 'BEACON_ENDPOINT_MODE=1' "$HOME_DIR/.cursor/hooks.json"; then
-  echo "expected Beacon hook command in Cursor hooks.json" >&2
+# The installed command passes its settings as flags rather than as an inline BEACON_ENDPOINT_MODE=1
+# prefix, so that prefix is no longer what identifies a Beacon hook. Asserting the log flag and the
+# platform instead: the flag is what makes it an endpoint hook, and the platform is what scopes it to
+# this runtime.
+if ! grep -q -- "--log " "$HOME_DIR/.cursor/hooks.json"; then
+  echo "expected Beacon hook command with --log in Cursor hooks.json" >&2
   exit 1
 fi
 
+if ! grep -q -- "--platform cursor" "$HOME_DIR/.cursor/hooks.json"; then
+  echo "expected Beacon hook command scoped to cursor in Cursor hooks.json" >&2
+  exit 1
+fi
+
+echo "Installing and exercising OpenCode plugin in temporary HOME..."
+run_beacon endpoint hooks install --harness opencode --user --log-path "$LOG_PATH" >/dev/null
+run_beacon endpoint hooks status --harness opencode --user --log-path "$LOG_PATH" >/dev/null
+OPENCODE_PLUGIN="$HOME_DIR/.config/opencode/plugins/beacon.ts"
+OPENCODE_HOOK="$HOME_DIR/.beacon/endpoint/hooks/beacon-hooks"
+test -f "$OPENCODE_PLUGIN"
+test -x "$OPENCODE_HOOK"
+
+if grep -q '__BEACON_' "$OPENCODE_PLUGIN"; then
+  echo "OpenCode plugin contains unresolved Beacon placeholders" >&2
+  exit 1
+fi
+
+emit_opencode() {
+  printf '%s\n' "$1" | \
+    HOME="$HOME_DIR" BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG="$LOG_PATH" \
+    "$OPENCODE_HOOK" --platform opencode opencode-event >/dev/null
+}
+
+emit_opencode '{"type":"chat.message","session_id":"ses_smoke","directory":"/tmp/project","model":"test/model","output":{"parts":[{"type":"text","text":"summarize"}]}}'
+emit_opencode '{"type":"tool.execute.after","session_id":"ses_smoke","directory":"/tmp/project","tool_name":"bash","call_id":"call_bash","duration_ms":5,"tool_input":{"command":"git status --short"},"tool_response":{"output":"","metadata":{"exitCode":0}}}'
+emit_opencode '{"type":"tool.execute.after","session_id":"ses_smoke","directory":"/tmp/project","tool_name":"write","call_id":"call_write","tool_input":{"filePath":"/tmp/project/smoke.txt","content":"value"},"tool_response":{"output":"ok","metadata":{}}}'
+emit_opencode '{"type":"permission.replied","session_id":"ses_smoke","properties":{"sessionID":"ses_smoke","requestID":"per_smoke","reply":"reject"}}'
+emit_opencode '{"type":"session.diff","session_id":"ses_smoke","properties":{"sessionID":"ses_smoke","diff":[]}}'
+
+for action in prompt.submitted command.executed file.modified approval.denied; do
+  if ! grep -q "\"action\":\"$action\"" "$LOG_PATH"; then
+    echo "expected OpenCode $action event in runtime log" >&2
+    exit 1
+  fi
+done
+
+if grep '"session":{"id":"ses_smoke"' "$LOG_PATH" | grep -q 'opencode session diff observed'; then
+  echo "empty OpenCode session diff produced a file event" >&2
+  exit 1
+fi
+
+run_beacon endpoint hooks uninstall --harness opencode --user --log-path "$LOG_PATH" >/dev/null
+test ! -f "$OPENCODE_PLUGIN"
+
 echo "Uninstalling endpoint config..."
+PLIST="$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist"
+
 run_beacon endpoint uninstall --user --log-path "$LOG_PATH" --keep-logs >/dev/null
 
 if [ -f "$HOME_DIR/.beacon/endpoint/config.json" ]; then
   echo "endpoint config was not removed by uninstall" >&2
   exit 1
 fi
+
+# The macOS counterpart of the Linux test's "unit file survived uninstall". A service definition left
+# behind is how a collector comes back at the next login after the operator was told it was removed --
+# the failure this whole assertion exists for, and the one that shipped once on Windows.
+if [ -f "$PLIST" ]; then
+  echo "launchd plist survived uninstall: $PLIST" >&2
+  exit 1
+fi
+echo "ok: the launchd plist was removed"
+
+# Deliberately not asked of launchd. This install passes --no-start into a temporary HOME, so no job is
+# ever bootstrapped -- which means any answer launchctl gave would be about some *other* install of the
+# same label: a real one on the machine running this script. Asserting on that would fail for a
+# developer who has Beacon installed and pass for one who does not, neither for a reason this test
+# caused.
+#
+# So the file is the honest subject. This install wrote that exact plist and the uninstall must take it
+# away. Whether launchd deregisters a job it had actually loaded is a real question that this test does
+# not answer; it needs a genuine login session, which no CI runner provides.
 
 test -f "$LOG_PATH"
 

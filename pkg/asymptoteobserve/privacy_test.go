@@ -22,6 +22,17 @@ func TestRedactStringRedactsKnownSecretForms(t *testing.T) {
 	}
 }
 
+func TestRedactStringRedactsRepeatedBareAssignedValue(t *testing.T) {
+	value := "Use token=beacon-opencode-e2e-secret, then replace beacon-opencode-e2e-secret in the file."
+	got := RedactString(value)
+	if strings.Contains(got, "beacon-opencode-e2e-secret") {
+		t.Fatalf("repeated assigned value leaked: %q", got)
+	}
+	if strings.Count(got, "[REDACTED]") != 2 {
+		t.Fatalf("redactions = %q, want both occurrences redacted", got)
+	}
+}
+
 func TestSanitizeMapDoesNotMutateInput(t *testing.T) {
 	input := map[string]interface{}{
 		"token": "token=super-secret",

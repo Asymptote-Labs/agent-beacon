@@ -427,7 +427,7 @@ func buildDestinationGroup(d siemDestination) *cobra.Command {
 // shared by every destination subcommand.
 func addEndpointPathFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
-	cmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and launch daemon")
+	cmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	cmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 }
 

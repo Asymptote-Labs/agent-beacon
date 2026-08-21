@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,13 +27,15 @@ func TestInstallCursorHooksJSONPreservesNonBeaconHooks(t *testing.T) {
 	if !strings.Contains(text, "echo keep") {
 		t.Fatalf("non-Beacon hook was not preserved: %s", text)
 	}
-	if !strings.Contains(text, "BEACON_ENDPOINT_MODE=1") {
-		t.Fatalf("endpoint env was not added: %s", text)
+	// The endpoint marker used to be an env prefix. It is now the settings flags themselves, which
+	// the two checks below assert, plus the platform this hook was installed for.
+	if !strings.Contains(text, "--platform cursor") {
+		t.Fatalf("endpoint hook was not installed for cursor: %s", text)
 	}
-	if !strings.Contains(text, "BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'") {
+	if !strings.Contains(text, "--log '/tmp/runtime.jsonl'") {
 		t.Fatalf("endpoint log env was not added: %s", text)
 	}
-	if !strings.Contains(text, "BEACON_ENDPOINT_CONFIG='/tmp/config.json'") {
+	if !strings.Contains(text, "--config '/tmp/config.json'") {
 		t.Fatalf("endpoint config env was not added: %s", text)
 	}
 	if !strings.Contains(text, `"afterAgentThought"`) || !strings.Contains(text, "agent-thought") {
@@ -129,10 +132,10 @@ func TestInstallCursorHooksJSONReplacesExistingBeaconHook(t *testing.T) {
 	if !strings.Contains(string(data), "echo keep") {
 		t.Fatalf("non-endpoint hook was not preserved: %s", string(data))
 	}
-	if !strings.Contains(string(data), "'/tmp/new beacon-hooks'") || !strings.Contains(string(data), "BEACON_ENDPOINT_LOG=") || !strings.Contains(string(data), "runtime") {
+	if !strings.Contains(string(data), "'/tmp/new beacon-hooks'") || !strings.Contains(string(data), "--log ") || !strings.Contains(string(data), "runtime") {
 		t.Fatalf("command values were not shell-quoted: %s", string(data))
 	}
-	if !strings.Contains(string(data), "BEACON_ENDPOINT_CONFIG='/tmp/config path.json'") {
+	if !strings.Contains(string(data), "--config '/tmp/config path.json'") {
 		t.Fatalf("endpoint config path was not shell-quoted: %s", string(data))
 	}
 }
@@ -158,7 +161,7 @@ func TestInstallCursorHooksJSONDoesNotReplaceUserCommandWithBeaconEnvOnly(t *tes
 
 func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	status, err := InstallCursor(CursorOptions{Level: Level("workspace"), UserMode: true})
 	if err == nil {
 		t.Fatal("expected unknown hook level error")
@@ -169,7 +172,7 @@ func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 }
 
 func TestEndpointConfigPathForHookUsesSystemConfigForSystemLog(t *testing.T) {
-	if got := endpointConfigPathForHook("/var/log/beacon-agent/runtime.jsonl", true); got != endpointconfig.ConfigPath(false) {
+	if got := endpointConfigPathForHook(endpointconfig.SystemLogPath(), true); got != endpointconfig.ConfigPath(false) {
 		t.Fatalf("system log config path = %q, want system endpoint config", got)
 	}
 	if got := endpointConfigPathForHook("/tmp/runtime.jsonl", true); got != endpointconfig.ConfigPath(true) {
