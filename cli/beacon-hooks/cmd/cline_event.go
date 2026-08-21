@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -134,27 +135,7 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 		if usage := clineUsage(input); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
 		}
-		reason := getFirstStr(input, "completionStatus", "completion_status", "reason")
-		if reason == "" {
-			for _, key := range []string{"taskCancel", "task_cancel", "taskMetadata", "task_metadata", "result", "metadata"} {
-				if nested := firstMap(input, key); nested != nil {
-					reason = getFirstStr(nested, "completionStatus", "completion_status", "reason")
-					if reason != "" {
-						break
-					}
-					if inner := firstMap(nested, "taskMetadata", "task_metadata", "metadata"); inner != nil {
-						reason = getFirstStr(inner, "completionStatus", "completion_status", "reason")
-						if reason != "" {
-							break
-						}
-					}
-				}
-			}
-		}
-		if reason == "" {
-			reason = "cancelled"
-		}
-		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": reason})
+		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": clineCancelReason(input)})
 		return one("session.ended", "session", "info", "Cline task cancelled", fields)
 	case clineStageTaskError:
 		fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
@@ -501,30 +482,53 @@ func joinWorkspacePath(root, rel string) string {
 	if strings.Contains(root, "\\") && !strings.Contains(root, "/") {
 		separator = "\\"
 	}
-	rel = strings.TrimPrefix(strings.TrimPrefix(rel, "./"), ".\\")
-	rel = strings.ReplaceAll(strings.ReplaceAll(rel, "\\", separator), "/", separator)
-	joined := strings.TrimRight(root, "/\\") + separator + strings.TrimLeft(rel, "/\\")
-	return cleanPathSegments(joined, separator)
+	// Cleaning happens in slash space with the volume held aside, then reattached. A volume prefix
+	// cannot go through path.Clean: a leading "//" collapses, turning a UNC share into a directory,
+	// and "C:" is an ordinary segment that ".." can walk past -- which turned "C:\repo" plus
+	// "..\..\..\x.ts" into the bare relative "x.ts", an absolute Windows path with no drive left
+	// on it.
+	volume, rootRest := splitPathVolume(root)
+	joined := path.Join(toSlashPath(rootRest), toSlashPath(rel))
+	if separator != "/" {
+		joined = strings.ReplaceAll(joined, "/", separator)
+	}
+	return volume + joined
 }
 
-// cleanPathSegments collapses . and .. segments in a path without using filepath.Clean (which
-// would impose the host's separator). The separator must be "/" or "\\".
-func cleanPathSegments(path, separator string) string {
-	parts := strings.Split(path, separator)
-	var cleaned []string
-	for _, part := range parts {
-		switch part {
-		case ".":
-			continue
-		case "..":
-			if len(cleaned) > 0 && cleaned[len(cleaned)-1] != "" && cleaned[len(cleaned)-1] != ".." {
-				cleaned = cleaned[:len(cleaned)-1]
-			}
-		default:
-			cleaned = append(cleaned, part)
+// splitPathVolume separates a Windows volume prefix -- a drive letter or a UNC share -- from the
+// rest of a path. Returns an empty volume for anything else, including every POSIX path.
+func splitPathVolume(p string) (string, string) {
+	if len(p) >= 2 && p[1] == ':' {
+		if letter := p[0] | 0x20; letter >= 'a' && letter <= 'z' {
+			return p[:2], p[2:]
 		}
 	}
-	return strings.Join(cleaned, separator)
+	if len(p) >= 2 && isPathSeparator(p[0]) && isPathSeparator(p[1]) {
+		rest := p[2:]
+		server := indexPathSeparator(rest)
+		if server < 0 {
+			return p, ""
+		}
+		share := indexPathSeparator(rest[server+1:])
+		if share < 0 {
+			return p, ""
+		}
+		end := 2 + server + 1 + share
+		return p[:end], p[end:]
+	}
+	return "", p
+}
+
+func toSlashPath(p string) string {
+	return strings.ReplaceAll(p, "\\", "/")
+}
+
+func isPathSeparator(c byte) bool {
+	return c == '/' || c == '\\'
+}
+
+func indexPathSeparator(p string) int {
+	return strings.IndexAny(p, "/\\")
 }
 
 func clineToolPath(toolInput map[string]interface{}, root string) string {
@@ -665,6 +669,39 @@ func clineToolAfterEvents(input map[string]interface{}, fields map[string]interf
 		action: action, category: category, severity: "info",
 		message: clineToolMessage(action), fields: fields,
 	}}
+}
+
+// clineCancelReason reports why a task ended without completing: cancelled, abandoned, or whatever
+// else the payload says.
+//
+// Searched across the nestings Cline's file-based hook payload is reported to use -- notably
+// taskCancel.taskMetadata.completionStatus -- as well as the top level, because the two hook
+// surfaces do not agree on shape. Those paths come from a review of this change rather than from a
+// payload captured from a running Cline, so the search is additive: a miss costs the
+// cancelled-versus-abandoned distinction and falls back to "cancelled", never to a wrong reason.
+//
+// A named function rather than a loop inside the event switch so it can be tested directly, which
+// is what a set of guessed field paths most needs.
+func clineCancelReason(input map[string]interface{}) string {
+	if reason := getFirstStr(input, "completionStatus", "completion_status", "reason"); reason != "" {
+		return reason
+	}
+	outers := []map[string]interface{}{input}
+	for _, key := range []string{"taskCancel", "task_cancel", "taskMetadata", "task_metadata", "result", "metadata"} {
+		if nested := firstMap(input, key); nested != nil {
+			outers = append(outers, nested)
+		}
+	}
+	for _, outer := range outers {
+		if reason := getFirstStr(outer, "completionStatus", "completion_status", "reason"); reason != "" {
+			return reason
+		}
+		inner := firstMap(outer, "taskMetadata", "task_metadata", "metadata")
+		if reason := getFirstStr(inner, "completionStatus", "completion_status", "reason"); reason != "" {
+			return reason
+		}
+	}
+	return "cancelled"
 }
 
 // clineUsage normalizes Cline's reported token counts into gen_ai.usage.

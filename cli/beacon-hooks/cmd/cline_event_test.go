@@ -565,6 +565,18 @@ func TestClineWorkspacePathIsHostIndependent(t *testing.T) {
 		{name: "no root leaves the path relative", path: "src/app.ts", root: "", want: "src/app.ts"},
 		{name: "empty path stays empty", path: "", root: "/repo", want: ""},
 		{name: "quoted path is unquoted first", path: `"src/app.ts"`, root: "/repo", want: "/repo/src/app.ts"},
+		// Traversal is the case detection cares about most: stored uncollapsed, "/repo/../../.ssh/id_rsa"
+		// names the same file as "/home/u/.ssh/id_rsa" and matches no rule written against either.
+		{name: "traversal is collapsed", path: "../sibling/a.ts", root: "/repo/pkg", want: "/repo/sibling/a.ts"},
+		{name: "traversal above the root resolves lexically", path: "../../.ssh/id_rsa", root: "/repo", want: "/.ssh/id_rsa"},
+		{name: "dot segments in the middle are collapsed", path: "src/./util/../app.ts", root: "/repo", want: "/repo/src/app.ts"},
+		// A drive prefix cannot go through path.Clean: it treats "C:" as an ordinary segment that
+		// ".." can walk past, which would turn a drive path into a relative one.
+		{name: "traversal under a drive root keeps the drive", path: `..\other\a.ts`, root: `C:\repo\pkg`, want: `C:\repo\other\a.ts`},
+		{name: "traversal above a drive root keeps the drive", path: `..\..\..\x.ts`, root: `C:\repo`, want: `C:\x.ts`},
+		// A leading "//" is a share, not a doubled separator, and path.Clean would collapse it.
+		{name: "unc share survives cleaning", path: `..\b.ts`, root: `\\server\share\repo\pkg`, want: `\\server\share\repo\b.ts`},
+
 		{name: "dotdot segments are collapsed", path: "../../.ssh/id_rsa", root: "/home/u/proj", want: "/home/.ssh/id_rsa"},
 		{name: "single dot segments are collapsed", path: "./src/./app.ts", root: "/repo", want: "/repo/src/app.ts"},
 		{name: "mixed traversal is collapsed", path: "src/../lib/app.ts", root: "/repo", want: "/repo/lib/app.ts"},
@@ -678,5 +690,52 @@ func TestClineEventTaskErrorStaysAnError(t *testing.T) {
 	}
 	if got := nested(t, event, "error")["type"]; got != "provider_timeout" {
 		t.Errorf("error.type = %q, want provider_timeout", got)
+	}
+}
+
+// Cline's two hook surfaces disagree about where the cancel status lives. Missing the nested one
+// labels an abandoned task as cancelled -- a wrong distinction rather than a missing one, which is
+// why it is read from both.
+func TestClineCancelReasonReadsBothShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input map[string]interface{}
+		want  string
+	}{
+		{
+			name:  "top level status",
+			input: map[string]interface{}{"completionStatus": "abandoned"},
+			want:  "abandoned",
+		},
+		{
+			name: "nested under taskCancel.taskMetadata",
+			input: map[string]interface{}{
+				"taskCancel": map[string]interface{}{
+					"taskMetadata": map[string]interface{}{"completionStatus": "abandoned"},
+				},
+			},
+			want: "abandoned",
+		},
+		{
+			name:  "nested under taskMetadata",
+			input: map[string]interface{}{"taskMetadata": map[string]interface{}{"completionStatus": "abandoned"}},
+			want:  "abandoned",
+		},
+		{
+			name:  "top level wins over nested",
+			input: map[string]interface{}{"reason": "cancelled", "taskMetadata": map[string]interface{}{"completionStatus": "abandoned"}},
+			want:  "cancelled",
+		},
+		{
+			name:  "falls back to cancelled",
+			input: map[string]interface{}{},
+			want:  "cancelled",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clineCancelReason(tc.input); got != tc.want {
+				t.Errorf("clineCancelReason() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
