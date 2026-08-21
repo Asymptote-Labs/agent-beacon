@@ -262,3 +262,43 @@ func TestIsClineInstalledAtRequiresTheManagedMarker(t *testing.T) {
 		t.Error("a missing plugin was reported as installed")
 	}
 }
+
+// The plugin holds its argv JSON-encoded, so a backslash appears doubled in the file. Comparing
+// against the raw path therefore matched nothing on Windows, and every correctly installed plugin
+// there was reported as not referencing its own binary. Asserted on the rendered source so the
+// check is exercised on every platform, not only the one that exposed the bug.
+func TestClinePluginReferencesBinaryHandlesWindowsPaths(t *testing.T) {
+	binary := `C:\Program Files\Beacon\hooks\beacon-hooks.exe`
+	source, err := renderClinePlugin(binary, `C:\ProgramData\Beacon\runtime.jsonl`, `C:\ProgramData\Beacon\config.json`)
+	if err != nil {
+		t.Fatalf("renderClinePlugin returned error: %v", err)
+	}
+
+	if !clinePluginReferencesBinary(source, binary) {
+		t.Error("a plugin rendered for this binary was not recognized as referencing it")
+	}
+	// The shape of the original bug, stated so the escaping is not "simplified" back out.
+	if strings.Contains(source, binary) {
+		t.Error("rendered plugin contains the unescaped path; the escaping this guards has changed")
+	}
+	if clinePluginReferencesBinary(source, `C:\Program Files\Beacon\hooks\other-hooks.exe`) {
+		t.Error("a plugin was reported as referencing a binary it does not spawn")
+	}
+	if clinePluginReferencesBinary(source, "") {
+		t.Error("an empty binary path was treated as a match")
+	}
+}
+
+func TestClinePluginReferencesBinaryOnPOSIXPaths(t *testing.T) {
+	binary := "/opt/beacon/hooks/beacon-hooks"
+	source, err := renderClinePlugin(binary, "/var/log/beacon/runtime.jsonl", "/etc/beacon/config.json")
+	if err != nil {
+		t.Fatalf("renderClinePlugin returned error: %v", err)
+	}
+	if !clinePluginReferencesBinary(source, binary) {
+		t.Error("a plugin rendered for this binary was not recognized as referencing it")
+	}
+	if clinePluginReferencesBinary(source, "/opt/beacon/hooks/beacon-hooks-old") {
+		t.Error("a plugin was reported as referencing a binary it does not spawn")
+	}
+}
