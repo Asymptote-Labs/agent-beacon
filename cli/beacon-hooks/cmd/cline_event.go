@@ -470,27 +470,23 @@ func isRootedPath(path string) bool {
 	}
 }
 
-// joinWorkspacePath joins a relative path under a root, using the root's own separator, and
-// collapses "." and ".." lexically.
+// joinWorkspacePath joins a relative path under a root using the root's own separator, then
+// collapses . and .. segments so the result is canonical.
 //
-// The separator comes from the root because filepath.Join would use the host's, which mangles the
-// result whenever the two disagree: a POSIX workspace root on a Windows host produced
-// "\\tmp\\project\\src\\app.ts", a path matching nothing and belonging to no filesystem.
-//
-// The collapsing matters more than it looks, and dropping filepath.Join is what nearly lost it.
-// Traversal is precisely the case detection cares about: a tool path of "../../.ssh/id_rsa" stored
-// as "/repo/../../.ssh/id_rsa" names the same file as "/home/u/.ssh/id_rsa" and matches no threat
-// rule written against either. Collapsing is lexical -- path.Clean semantics, no filesystem access
-// and no symlink resolution -- so it stays a pure function of the payload, and a path that walks
-// above the root resolves to the root's own root, which is what those semantics say it means.
+// filepath.Join would use the host's separator, which mangles the result whenever the two disagree:
+// a POSIX workspace root on a Windows host produced "\\tmp\\project\\src\\app.ts", a path that
+// matches nothing and belongs to no filesystem. Taking the separator from the root keeps the
+// recorded path in the same shape as the workspace it came from.
 func joinWorkspacePath(root, rel string) string {
 	separator := "/"
 	if strings.Contains(root, "\\") && !strings.Contains(root, "/") {
 		separator = "\\"
 	}
-	// Cleaning happens in slash space, then the volume goes back on. A drive or UNC prefix cannot be
-	// passed through path.Clean: it collapses a leading "//" and would turn a share into a
-	// directory, and it treats "C:" as an ordinary segment that ".." can walk past.
+	// Cleaning happens in slash space with the volume held aside, then reattached. A volume prefix
+	// cannot go through path.Clean: a leading "//" collapses, turning a UNC share into a directory,
+	// and "C:" is an ordinary segment that ".." can walk past -- which turned "C:\repo" plus
+	// "..\..\..\x.ts" into the bare relative "x.ts", an absolute Windows path with no drive left
+	// on it.
 	volume, rootRest := splitPathVolume(root)
 	joined := path.Join(toSlashPath(rootRest), toSlashPath(rel))
 	if separator != "/" {
@@ -678,18 +674,30 @@ func clineToolAfterEvents(input map[string]interface{}, fields map[string]interf
 // clineCancelReason reports why a task ended without completing: cancelled, abandoned, or whatever
 // else the payload says.
 //
-// Read from the nesting Cline's file-based hook payload is reported to use
-// (taskCancel.taskMetadata.completionStatus) as well as from the top level, because the two hook
-// surfaces do not agree on shape. The nested path comes from a review of this change rather than
-// from a payload I captured, so it is additive: a miss costs the distinction between cancelled and
-// abandoned and falls back to "cancelled", never to a wrong reason.
+// Searched across the nestings Cline's file-based hook payload is reported to use -- notably
+// taskCancel.taskMetadata.completionStatus -- as well as the top level, because the two hook
+// surfaces do not agree on shape. Those paths come from a review of this change rather than from a
+// payload captured from a running Cline, so the search is additive: a miss costs the
+// cancelled-versus-abandoned distinction and falls back to "cancelled", never to a wrong reason.
+//
+// A named function rather than a loop inside the event switch so it can be tested directly, which
+// is what a set of guessed field paths most needs.
 func clineCancelReason(input map[string]interface{}) string {
 	if reason := getFirstStr(input, "completionStatus", "completion_status", "reason"); reason != "" {
 		return reason
 	}
-	for _, outer := range []map[string]interface{}{input, firstMap(input, "taskCancel", "task_cancel")} {
-		nested := firstMap(outer, "taskMetadata", "task_metadata", "metadata", "task")
-		if reason := getFirstStr(nested, "completionStatus", "completion_status", "reason"); reason != "" {
+	outers := []map[string]interface{}{input}
+	for _, key := range []string{"taskCancel", "task_cancel", "taskMetadata", "task_metadata", "result", "metadata"} {
+		if nested := firstMap(input, key); nested != nil {
+			outers = append(outers, nested)
+		}
+	}
+	for _, outer := range outers {
+		if reason := getFirstStr(outer, "completionStatus", "completion_status", "reason"); reason != "" {
+			return reason
+		}
+		inner := firstMap(outer, "taskMetadata", "task_metadata", "metadata")
+		if reason := getFirstStr(inner, "completionStatus", "completion_status", "reason"); reason != "" {
 			return reason
 		}
 	}
