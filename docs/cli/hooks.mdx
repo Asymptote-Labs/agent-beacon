@@ -39,6 +39,7 @@ beacon endpoint hooks [command]
 | Grok Build | `~/.grok/hooks/beacon-endpoint.json` | `./.grok/hooks/beacon-endpoint.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Hermes Agent | `~/.hermes/config.yaml` | Not supported | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | OpenCode | `~/.config/opencode/plugins/beacon.ts` | `./.opencode/plugins/beacon.ts` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Cline | `~/.cline/plugins/beacon.ts` | `./.cline/plugins/beacon.ts` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 
 In system mode, the hook binary is written under `/Library/Application Support/Beacon/Endpoint/hooks/` and the default runtime log is `/var/log/beacon-agent/runtime.jsonl`.
 
@@ -46,7 +47,7 @@ In system mode, the hook binary is written under `/Library/Application Support/B
 
 | Flag | Description |
 |------|-------------|
-| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `codex`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, or `antigravity,claude,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`. Defaults to `cursor` |
+| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `cline`, `codex`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, or `antigravity,claude,cline,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`. Defaults to `cursor` |
 | `--level <level>` | Hook install level: `user` or `project` |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
@@ -56,7 +57,7 @@ In system mode, the hook binary is written under `/Library/Application Support/B
 | `--dry-run` | Print planned install or uninstall actions without changing hook files. Install and uninstall only |
 
 <Note>
-  Restart Antigravity CLI, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, or OpenCode after installing or removing hooks so the updated hook configuration is picked up by new sessions.
+  Restart Antigravity CLI, Claude Code, Cline, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, or OpenCode after installing or removing hooks so the updated hook configuration is picked up by new sessions.
 </Note>
 
 Beacon validates the embedded `beacon-hooks` binary before writing hook configuration. If install fails with an architecture validation error, upgrade Beacon or reinstall the platform-specific release archive for the host, then run the hook install command again.
@@ -69,7 +70,7 @@ Beacon validates the embedded `beacon-hooks` binary before writing hook configur
 beacon endpoint hooks install --harness cursor
 ```
 
-The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Codex CLI hooks cover `SessionStart` and `UserPromptSubmit` for inventory heartbeats; Codex prompt, tool, and token telemetry still comes from its local OpenTelemetry export path. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events.
+The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Codex CLI hooks cover `SessionStart` and `UserPromptSubmit` for inventory heartbeats; Codex prompt, tool, and token telemetry still comes from its local OpenTelemetry export path. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events. Cline hooks use Beacon's managed local plugin to forward `beforeRun`, `beforeTool`, `afterTool`, and `afterRun`, and also accept Cline's file-based hook names (`TaskStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`) so one adapter serves both of Cline's hook surfaces.
 
 ### Examples
 

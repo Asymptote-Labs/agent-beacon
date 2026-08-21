@@ -1,0 +1,96 @@
+---
+title: "Cline"
+description: "Asymptote support details for Cline endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports [Cline](https://cline.bot/) through a managed local plugin that invokes `beacon-hooks`.
+
+Cline is not a single runtime. The same agent core runs as a VS Code extension, a JetBrains plugin, and a CLI, and Asymptote's plugin covers all of them: it is loaded by whichever host is running, so one install collects telemetry from every surface on that machine.
+
+## Prerequisites
+
+Before enabling Cline telemetry, make sure:
+
+- Cline is installed in at least one host, or has a local config directory at `~/.cline`.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote's Cline plugin is installed with `beacon endpoint hooks install --harness cline`.
+- Cline is restarted after plugin install or removal so new sessions load the updated plugin. In the IDE hosts this means reloading the window.
+
+## Collection path
+
+Asymptote installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required — which is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
+
+The plugin forwards `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` hook payloads to Asymptote's hook adapter. It spawns the adapter directly with an argument vector rather than through a shell, so the same plugin works unchanged on macOS, Linux, and Windows.
+
+The integration is plugin-based. Cline's own OpenTelemetry export is neither configured nor required by Beacon, and Cline's hosted prompt-storage feature is not used.
+
+## Discovery and status
+
+Asymptote detects Cline through the `~/.cline` directory, treating a `cline` executable on `PATH` as an additional signal rather than the deciding one. A binary check alone would report "not detected" for the IDE hosts, which are the majority of installs.
+
+Use `beacon endpoint hooks status --harness cline` to inspect Cline plugin status. Status reports installed only when the plugin references the hook binary that is actually present, so a plugin left behind by a removed or relocated install is reported as not installed rather than as working telemetry.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Cline hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness cline
+```
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported from the run-start payload, and from `UserPromptSubmit` on Cline's file-based hook surface |
+| Session telemetry | Task start and end, plus task-level errors |
+| Tool lifecycle | Invocation, completion, result, duration, and failure using `beforeTool` and `afterTool` |
+| Command telemetry | `execute_command` with command text, output, exit code, and duration |
+| File telemetry | `read_file`, `list_files`, `search_files`, and `list_code_definition_names` reads; `write_to_file` and `replace_in_file` modifications with diff hash and byte count |
+| MCP telemetry | `use_mcp_tool` and `access_mcp_resource` normalized as MCP tool activity |
+| Model and usage | Provider-qualified model, token counts, cache reads, and runtime-reported cost, recorded once per task |
+| Approval telemetry | Not supported — see Known gaps |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Cline plugins are installed separately in the logged-in user's context |
+
+Cline addresses files relative to the workspace root. Beacon resolves those paths against the workspace before writing them, so a Cline file event is comparable with the same file seen through another runtime and matches threat rules written against absolute paths. A path that is already absolute is left alone, and a relative path with no resolvable workspace root stays relative rather than being joined to a guessed root.
+
+Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary as well would double every Cline task's totals. Cost is recorded only as Cline reports it; Beacon never derives cost from a local price table.
+
+## Data handling
+
+Cline prompts, tool arguments and results, commands, command output, paths, and diffs are retained in local or customer-controlled logs. Beacon applies local secret redaction and per-string limits before writing. Each content-bearing event includes a hash and byte count for the original value. Events that exceed the 64 KiB limit drop raw and retained content while preserving stable metadata and set `field_truncated`.
+
+The plugin flattens Cline's live hook context before sending it, dropping functions and cyclic references, and forwards the remaining fields under `raw.cline`. It uses Cline's task identifier for correlation and does not create file events without an agent-derived path.
+
+## Known gaps
+
+- **Approval decisions are not recorded.** Cline requires approval for actions by default, but the documented hook context does not carry the approval state, so Beacon does not synthesize an approval decision from a tool call. The forwarded payload is preserved, so approval telemetry can be added without changing what is already collected.
+- **No enforcement.** Cline's `beforeTool` hook can cancel a tool call, and Beacon's plugin never does. Enforcement remains behind the optional, off-by-default policy-provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Cline.
+
+## Deployment notes
+
+Restart Cline, or reload the IDE window, after installing or removing hooks so new sessions pick up the updated plugin configuration.
+
+For local troubleshooting, set `BEACON_CLINE_DEBUG=1` in the environment that launches Cline to emit best-effort plugin debug logs. The plugin has a bounded local subprocess timeout and remains fail-open, so telemetry failures do not interrupt Cline execution.
+
+Validate a system-mode installation after restarting Cline:
+
+```bash
+/opt/beacon/bin/beacon endpoint hooks status --harness cline --level user
+/opt/beacon/bin/beacon endpoint doctor --system
+/opt/beacon/bin/beacon endpoint dashboard --system --open
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

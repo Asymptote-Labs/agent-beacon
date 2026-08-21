@@ -146,6 +146,7 @@
                       "runtimes/gemini-cli",
                       "runtimes/github-copilot-cli",
                       "runtimes/grok-build",
+                      "runtimes/cline",
                       "runtimes/opencode",
                       "runtimes/vscode"
                     ]

@@ -54,6 +54,33 @@ Structured `session.diff` arrays emit file events only for entries containing a
 real path and change. Empty/cumulative duplicate diffs do not create pathless
 `file.modified` records.
 
+### Cline plugin mapping
+
+Cline's managed plugin maps run start to `session.started`, and to
+`prompt.submitted` when the payload carries the message that started the task;
+`beforeTool` to `tool.invoked`; `afterTool` to `command.executed`, `file.read`,
+`file.modified`, `mcp.tool_invoked`, or `tool.completed` according to tool
+semantics, and to `tool.failed` when the payload reports an error; run end to
+`session.ended`; and task errors to `session.error`.
+
+The same mapping accepts Cline's file-based hook names (`TaskStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `TaskComplete`, `TaskCancel`)
+alongside its plugin handler names, so both of Cline's hook surfaces normalize
+identically. Stage names are matched on letters and digits only, so
+`tool_call_before`, `beforeTool`, and `PreToolUse` all resolve to the same
+lifecycle point. Lifecycle points Beacon does not map emit no event rather than a
+generic record.
+
+A file action whose payload carries no agent-derived path is recorded as
+`tool.completed` rather than a pathless `file.read` or `file.modified`. Cline
+addresses files relative to the workspace root, so paths are resolved against
+that root before being written; an already-absolute path is untouched, and a
+relative path with no resolvable root stays relative.
+
+Canonical `gen_ai.usage` comes from the run-end payload only, including cache
+reads and runtime-reported cost. Recording usage at a per-model-call boundary as
+well would double-count every task's tokens in usage rollups.
+
 ## OpenTelemetry GenAI fields
 
 Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested `gen_ai` object and also projects selected fields into Beacon's common investigation fields. This keeps the raw GenAI context available without forcing downstream rules to parse runtime-specific attribute names.

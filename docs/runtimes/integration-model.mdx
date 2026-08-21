@@ -20,6 +20,7 @@ Beacon supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surf
 | [VS Code](/runtimes/vscode) | Looks for the `code` executable or VS Code user settings, then validates Copilot Chat OTel settings |
 | [Grok Build](/runtimes/grok-build) | Checks for Beacon's managed Grok hook file at `~/.grok/hooks/beacon-endpoint.json` or `./.grok/hooks/beacon-endpoint.json` |
 | [OpenCode](/runtimes/opencode) | Looks for the `opencode` executable or `~/.config/opencode`, then checks the managed Beacon plugin |
+| [Cline](/runtimes/cline) | Looks for `~/.cline`, treating a `cline` executable as an extra signal because the VS Code and JetBrains hosts ship none, then checks the managed Beacon plugin |
 | [Devin CLI](/runtimes/devin) | Looks for the `devin` executable, `~/.config/devin`, or `./.devin`, then checks Beacon hook configuration |
 | [Devin Desktop](/runtimes/devin-desktop) | Checks Cascade/Windsurf hook configuration at `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json` |
 | [Factory Droid](/runtimes/factory-droid) | Looks for the `droid` executable and validates `OTEL_TELEMETRY_ENDPOINT` in the effective launch environment |
@@ -40,7 +41,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | Copilot's OTLP HTTP endpoint remains under MDM or customer-owned launch-environment policy. Beacon validates `COPILOT_OTEL_ENABLED=true` and a localhost OTLP endpoint but does not write Copilot configuration. |
 | [Factory Droid](/runtimes/factory-droid) | Droid's OTLP endpoint remains under its launch environment, commonly managed through MDM or another customer-owned policy. |
 | [OpenClaw Gateway](/runtimes/openclaw-gateway) | Configure OpenClaw with the `diagnostics-otel` plugin. Beacon prints local OTLP/HTTP setup guidance and validates observed events. |
-| Hook-based runtimes | [Antigravity CLI](/runtimes/antigravity-cli), [Claude Code](/runtimes/claude-code), [Cursor](/runtimes/cursor), [Devin CLI](/runtimes/devin), [Devin Desktop](/runtimes/devin-desktop), [Factory](/runtimes/factory-droid), [Grok Build](/runtimes/grok-build), [Hermes Agent](/runtimes/hermes-agent), and [OpenCode](/runtimes/opencode) hooks are installed separately with [`beacon endpoint hooks`](/cli/hooks), because hooks are per-user or per-project runtime configuration rather than base collector service configuration. |
+| Hook-based runtimes | [Antigravity CLI](/runtimes/antigravity-cli), [Claude Code](/runtimes/claude-code), [Cline](/runtimes/cline), [Cursor](/runtimes/cursor), [Devin CLI](/runtimes/devin), [Devin Desktop](/runtimes/devin-desktop), [Factory](/runtimes/factory-droid), [Grok Build](/runtimes/grok-build), [Hermes Agent](/runtimes/hermes-agent), and [OpenCode](/runtimes/opencode) hooks are installed separately with [`beacon endpoint hooks`](/cli/hooks), because hooks are per-user or per-project runtime configuration rather than base collector service configuration. |
 
 ## Integration paths
 
@@ -55,6 +56,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | [Grok Build](/runtimes/grok-build) | Native hook payloads through `beacon-hooks` | Beacon writes an owned Grok hook file and maps session, prompt, tool, command, file, and failed-tool events into endpoint events. |
 | [Hermes Agent](/runtimes/hermes-agent) | Shell hook payloads through `beacon-hooks` | Beacon merges user-level Hermes shell hooks and maps prompts, tools, commands, approvals, session lifecycle, and subagent stop metadata into endpoint events. |
 | [OpenCode](/runtimes/opencode) | Managed local plugin through `beacon-hooks` | Plugin invokes Beacon for chat, session, command, permission, diff, and error events where payloads are available. |
+| [Cline](/runtimes/cline) | Managed local plugin through `beacon-hooks` | One plugin covers the VS Code, JetBrains, and CLI hosts; it forwards run and tool hooks for prompt, task lifecycle, tool, command, file, MCP, and token telemetry. |
 | [Devin CLI](/runtimes/devin) | Native hook payloads through `beacon-hooks` | Hooks emit session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry where Devin CLI exposes payloads. |
 | [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hook payloads through `beacon-hooks` | Hooks emit prompt, command, MCP tool, file read, and file write telemetry where Devin Desktop exposes Cascade/Windsurf payloads. |
 | [Factory Droid](/runtimes/factory-droid) | OTLP HTTP launch environment plus optional hooks | Beacon validates Factory OTLP state but does not mutate shell profiles for Droid. |
@@ -64,7 +66,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 
 ## Hook telemetry
 
-Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks cover activity that is better represented as runtime events than generic OTLP spans.
+Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks cover activity that is better represented as runtime events than generic OTLP spans.
 
 | Runtime | Hook telemetry |
 |---------|----------------|
@@ -78,6 +80,7 @@ Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Bu
 | [Grok Build](/runtimes/grok-build) | Session lifecycle, prompt submission, pre-tool and post-tool activity, post-tool failures, stop events, session-end events, command execution, and file activity where payloads are available. Project-level hooks require `/hooks-trust` in Grok before they execute. |
 | [Hermes Agent](/runtimes/hermes-agent) | Session lifecycle, prompt submission, observed tool calls, post-tool command and file activity, approval request and response events, and subagent stop metadata where Hermes exposes payloads. Hermes hooks are user-level only. |
 | [OpenCode](/runtimes/opencode) | Chat messages, session events, command execution, permission activity, diffs, and errors where payloads are available. |
+| [Cline](/runtimes/cline) | Prompt submission, task start and end, task errors, tool invocation and completion, command execution with exit code, file reads and edits with diffs, MCP tool activity, and task token usage. Approval decisions are not exposed by Cline's hook payloads. |
 
 Hook events include metadata such as file path, operation, language, diff hash, and diff byte count. Raw diffs are subject to Beacon's redaction, sanitization, truncation, and event-size limits before writing.
 
