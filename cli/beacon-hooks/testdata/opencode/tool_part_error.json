@@ -1,0 +1,23 @@
+{
+  "type": "message.part.updated",
+  "session_id": "ses_fixture",
+  "part": {
+    "id": "prt_tool_error",
+    "messageID": "msg_fixture",
+    "sessionID": "ses_fixture",
+    "callID": "call_read",
+    "type": "tool",
+    "tool": "read",
+    "state": {
+      "status": "error",
+      "input": {
+        "filePath": "/repo/missing.txt"
+      },
+      "error": "file not found",
+      "time": {
+        "start": 100,
+        "end": 125
+      }
+    }
+  }
+}

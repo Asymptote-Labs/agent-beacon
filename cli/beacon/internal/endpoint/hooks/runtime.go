@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
@@ -110,39 +111,175 @@ func isRuntimeInstalled(runtime hookRuntime, opts RuntimeOptions) bool {
 	return runtime.isInstalled(configPath)
 }
 
+// endpointCommandPrefix builds the command a runtime will execute for each hook.
+//
+// The three endpoint settings are passed as flags rather than as an inline `VAR=value cmd` prefix.
+// That prefix is a POSIX shell construct: valid in sh, bash and zsh, and not valid in cmd.exe or
+// PowerShell, so it cannot deliver anything on a Windows runtime that uses either. Flags carry the
+// same values with no shell semantics involved beyond quoting the paths.
+//
+// What a runtime actually does with this string was measured rather than assumed, because it decides
+// the quoting and there is no form that works everywhere. Claude Code on Windows runs hook commands
+// through Git Bash -- $BASH_VERSION expands, %COMSPEC% does not -- so the string is parsed by a POSIX
+// shell on all three platforms for that runtime. Two results from the same measurement shape the code
+// below: a quoted executable path followed by flags runs correctly, and an *unquoted* Windows path
+// does not run at all, because bash consumes the backslashes as escapes.
 func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) string {
-	cliEnv := ""
-	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
-		cliEnv = " BEACON_ENDPOINT_CLI=" + shellQuote(cliPath)
+	args := []string{hookCommandQuote(binaryPath), "--platform", platform}
+	if logPath != "" {
+		args = append(args, "--log", hookCommandQuote(logPath))
 	}
-	return fmt.Sprintf("BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=%s BEACON_ENDPOINT_CONFIG=%s%s %s --platform %s", shellQuote(logPath), shellQuote(configPath), cliEnv, shellQuote(binaryPath), platform)
+	if configPath != "" {
+		args = append(args, "--config", hookCommandQuote(configPath))
+	}
+	// Best-effort: the CLI path only enables the inventory heartbeat, and a hook with no --cli
+	// still captures everything else.
+	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
+		args = append(args, "--cli", hookCommandQuote(cliPath))
+	}
+	return strings.Join(args, " ")
 }
 
+// hookCommandQuote quotes one value for the shell that will parse this command.
+//
+// Single quotes, on every platform. In a POSIX shell they are fully literal, which is what a Windows
+// path needs: inside double quotes bash still processes `$`, a backtick, and a doubled backslash, so
+// a profile directory containing a `$` would be expanded away and a UNC path would lose a separator.
+// Single quotes have no such cases, and the measurement that showed Claude Code uses bash on Windows
+// is what makes them the right choice there too.
+//
+// The cost is stated rather than hidden: this is not valid quoting in cmd.exe, and in PowerShell a
+// quoted string in command position is an expression rather than a command. A Windows runtime that
+// invokes hooks through either would need a different form -- so if one turns up, this is the function
+// that grows a per-runtime branch, and the detection side already accepts both spellings.
+func hookCommandQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// isEndpointHookCommand decides whether a command already in a runtime's config is one Beacon wrote.
+//
+// This is the detection surface for status, repair and uninstall across every runtime, so both
+// directions are costly. A false negative makes repair add a second hook beside the first and leaves
+// uninstall's behind; a false positive rewrites or deletes a hook somebody else installed.
 func isEndpointHookCommand(command, platform string) bool {
 	hasPlatform := platform == "" || commandHasPlatform(command, platform)
-	hasBeaconBinary := strings.Contains(command, embedded.GetBinaryName())
+	namesPlatform := commandNamesPlatform(command)
+	hasBeaconBinary := strings.Contains(command, embedded.BinaryStem)
 	hasLegacyBinary := strings.Contains(command, "asym-hooks")
 
-	if strings.Contains(command, "BEACON_ENDPOINT_MODE=1") && hasBeaconBinary {
-		return hasPlatform || !strings.Contains(command, "--platform ")
+	if commandCarriesEndpointSettings(command) && hasBeaconBinary {
+		return hasPlatform || !namesPlatform
 	}
-	if hasBeaconBinary && !strings.Contains(command, "--platform ") {
+	if hasBeaconBinary && !namesPlatform {
 		return true
 	}
 	return hasLegacyBinary && hasPlatform
 }
 
-func commandHasPlatform(command, platform string) bool {
-	fields := strings.Fields(command)
-	for i, field := range fields {
-		if field == "--platform" && i+1 < len(fields) {
-			return strings.Trim(fields[i+1], `"'`) == platform
+// commandCarriesEndpointSettings reports whether a command was written by an endpoint install, as
+// opposed to being some other invocation of the same binary.
+//
+// Two spellings, because the values moved from the environment to flags. An inline
+// `BEACON_ENDPOINT_MODE=1 ...` prefix is a POSIX shell construct that neither Windows shell accepts,
+// so a Windows hook carries `--log`/`--config`/`--cli` instead. Both must be recognized: already
+// installed POSIX hooks use the prefix, and until a repair rewrites them one machine has both.
+//
+// Recognizing only the prefix is what made this worth extracting. A flags-form command matched
+// nothing -- it has no prefix, and it does name a platform, so it fell past both branches above and
+// reported false. Every runtime's repair would have added a duplicate hook next to the one Beacon
+// had just written, and uninstall would have left it in place.
+func commandCarriesEndpointSettings(command string) bool {
+	for _, field := range commandFields(command) {
+		if field == "BEACON_ENDPOINT_MODE=1" {
+			return true
 		}
-		if strings.HasPrefix(field, "--platform=") {
-			return strings.Trim(strings.TrimPrefix(field, "--platform="), `"'`) == platform
+		for _, name := range []string{"--log", "--config", "--cli"} {
+			if field == name || strings.HasPrefix(field, name+"=") {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// commandNamesPlatform reports whether a command specifies a platform at all.
+//
+// A command that names none is treated as an any-platform install, which is how hooks written before
+// the flag existed are still recognized. Asked as a token rather than by searching for the substring
+// "--platform " with a trailing space: that spelling missed `--platform=cursor`, so such a hook was
+// treated as platform-less and matched when asked about *any* runtime -- the false-positive direction,
+// where repair rewrites somebody else's hook.
+func commandNamesPlatform(command string) bool {
+	for _, field := range commandFields(command) {
+		if field == "--platform" || strings.HasPrefix(field, "--platform=") {
+			return true
+		}
+	}
+	return false
+}
+
+func commandHasPlatform(command, platform string) bool {
+	fields := commandFields(command)
+	for i, field := range fields {
+		if field == "--platform" {
+			return i+1 < len(fields) && fields[i+1] == platform
+		}
+		if value, found := strings.CutPrefix(field, "--platform="); found {
+			return value == platform
+		}
+	}
+	return false
+}
+
+// commandFields splits a hook command into argv-like tokens, keeping quoted runs together.
+//
+// strings.Fields is not enough once paths are Windows paths. The default install location is under
+// %ProgramFiles% or a user profile, both of which routinely contain a space, so a quoted path splits
+// into fragments and any token comparison after it is being made against half a path. Quoting is
+// stripped rather than preserved because callers compare against bare values like "cursor".
+//
+// Both quote characters, because the command may have been written for either shell -- POSIX hooks
+// are single-quoted and Windows ones double-quoted -- and this function only has to recover tokens,
+// not to reproduce a particular shell's semantics. It deliberately does not handle backslash escapes:
+// on Windows a backslash is a path separator, and treating it as an escape would corrupt every path
+// this parses.
+func commandFields(command string) []string {
+	var (
+		fields  []string
+		current strings.Builder
+		quote   rune
+		started bool
+	)
+	flush := func() {
+		if started {
+			fields = append(fields, current.String())
+			current.Reset()
+			started = false
+		}
+	}
+	for _, r := range command {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+				break
+			}
+			current.WriteRune(r)
+		case r == '"' || r == '\'':
+			// Marks the token as started even if the quotes turn out to be empty, so `--platform ""`
+			// yields an empty value rather than dropping the argument and shifting every token after
+			// it left by one.
+			quote = r
+			started = true
+		case r == ' ' || r == '\t':
+			flush()
+		default:
+			current.WriteRune(r)
+			started = true
+		}
+	}
+	flush()
+	return fields
 }
 
 func writeEndpointHookBinary(userMode bool) (string, error) {
@@ -169,14 +306,49 @@ func defaultLogPath(userMode bool) string {
 			return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 		}
 	}
-	return "/var/log/beacon-agent/runtime.jsonl"
+	return endpointconfig.SystemLogPath()
 }
 
+// endpointConfigPathForHook picks which config a hook should read, from where its log lives.
+//
+// A log under a machine-wide location means the hook is feeding a system-mode endpoint, whatever
+// scope the caller asked for, so it must read the system config. That was decided by matching the
+// POSIX prefixes "/var/log/" and "/Library/" -- which named two of the three platforms' locations
+// and no Windows one, so a Windows system install would have sent its hooks to the *user* config
+// and pointed them at a log the collector never reads.
+//
+// Comparing against the resolved directories instead makes the question platform-independent, and
+// keeps working if either location ever moves.
 func endpointConfigPathForHook(logPath string, userMode bool) string {
-	if strings.HasPrefix(logPath, "/var/log/") || strings.HasPrefix(logPath, "/Library/") {
+	if underSystemLocation(logPath) {
 		return endpointconfig.ConfigPath(false)
 	}
 	return endpointconfig.ConfigPath(userMode)
+}
+
+// underSystemLocation reports whether a path sits beneath a machine-wide Beacon directory.
+//
+// Case-insensitive on Windows, where paths are, and separator-normalized so a value built with
+// either separator compares the same. A false negative here is the dangerous direction: it routes
+// a system-mode hook to the user config, which fails silently rather than loudly.
+func underSystemLocation(path string) bool {
+	norm := func(p string) string {
+		p = filepath.ToSlash(filepath.Clean(p))
+		if runtime.GOOS == "windows" {
+			p = strings.ToLower(p)
+		}
+		return strings.TrimSuffix(p, "/") + "/"
+	}
+	target := norm(path)
+	for _, root := range []string{endpointconfig.SystemLogDir(), endpointconfig.SystemBaseDir()} {
+		if root == "" {
+			continue
+		}
+		if strings.HasPrefix(target, norm(root)) {
+			return true
+		}
+	}
+	return false
 }
 
 func shellQuote(value string) string {

@@ -22,7 +22,42 @@ const (
 	CodexUserPrompt         = "codex.user_prompt"
 	CodexToolDecision       = "codex.tool_decision"
 	CodexToolResult         = "codex.tool_result"
+	ClaudeAPIRequest        = "claude_code.api_request"
+	ClaudeToolDecision      = "claude_code.tool_decision"
+	ClaudeToolResult        = "claude_code.tool_result"
 )
+
+type eventClassification struct {
+	action   string
+	category string
+}
+
+var claudeLogEventClassifications = map[string]eventClassification{
+	"claude_code.user_prompt":             {action: "prompt.submitted", category: "prompt"},
+	"claude_code.assistant_response":      {action: "session.activity", category: "session"},
+	ClaudeToolResult:                      {},
+	ClaudeAPIRequest:                      {action: "session.activity", category: "session"},
+	"claude_code.api_error":               {action: "session.error", category: "session"},
+	"claude_code.api_refusal":             {action: "session.status", category: "session"},
+	"claude_code.api_request_body":        {action: "session.activity", category: "session"},
+	"claude_code.api_response_body":       {action: "session.activity", category: "session"},
+	ClaudeToolDecision:                    {},
+	"claude_code.permission_mode_changed": {action: "session.status", category: "session"},
+	"claude_code.auth":                    {action: "session.activity", category: "session"},
+	"claude_code.mcp_server_connection":   {action: "mcp.connection", category: "mcp"},
+	"claude_code.internal_error":          {action: "session.error", category: "session"},
+	"claude_code.plugin_installed":        {action: "session.activity", category: "session"},
+	"claude_code.plugin_loaded":           {action: "session.activity", category: "session"},
+	"claude_code.skill_activated":         {action: "session.activity", category: "session"},
+	"claude_code.at_mention":              {action: "session.activity", category: "session"},
+	"claude_code.api_retries_exhausted":   {action: "session.error", category: "session"},
+	"claude_code.hook_registered":         {action: "session.activity", category: "session"},
+	"claude_code.hook_execution_start":    {action: "session.activity", category: "session"},
+	"claude_code.hook_execution_complete": {action: "session.activity", category: "session"},
+	"claude_code.hook_plugin_metrics":     {action: "session.activity", category: "session"},
+	"claude_code.compaction":              {action: "session.activity", category: "session"},
+	"claude_code.feedback_survey":         {action: "session.activity", category: "session"},
+}
 
 var allowedCodexLogEvents = map[string]struct{}{
 	CodexConversationStarts: {},
@@ -259,12 +294,13 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 
 func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) Event {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	body := record.Body().AsString()
 	ts := Timestamp(record.Timestamp().AsTime())
 	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	if action == "" {
-		action = InferAction(attrs, record.Body().AsString())
+		action = InferAction(attrs, body)
 	}
-	message := FirstNonEmpty(record.Body().AsString(), FirstString(attrs, "message", "log.message", "event.name"))
+	message := FirstNonEmpty(body, FirstString(attrs, "message", "log.message", "event.name"))
 	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "category")), Severity(record.SeverityText(), record.SeverityNumber().String()), HarnessName(attrs, message), ts)
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
@@ -279,6 +315,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 		"severity":    record.SeverityText(),
 	})
 	c.NormalizeCodexLogEvent(&event, attrs)
+	c.NormalizeClaudeLogEvent(&event, attrs, body)
 	return event
 }
 
@@ -395,6 +432,171 @@ func codexArgumentCommand(args string) string {
 		return ""
 	}
 	return strings.TrimSpace(payload.Cmd)
+}
+
+func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interface{}, body string) {
+	if event == nil || event.Harness.Name != "claude_code" {
+		return
+	}
+	originalAction := event.Event.Action
+	originalCategory := event.Event.Category
+	preserveAction := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
+	preserveCategory := preserveAction || FirstString(attrs, "beacon.event.category", "event.category", "category") != ""
+
+	eventName := ClaudeLogEventName(attrs, body)
+	switch eventName {
+	case ClaudeToolDecision:
+		NormalizeClaudeToolDecision(event, attrs)
+	case ClaudeToolResult:
+		NormalizeClaudeToolResult(event, attrs)
+	case "":
+		return
+	default:
+		classification, ok := claudeLogEventClassifications[eventName]
+		if !ok {
+			classification = eventClassification{action: "session.activity", category: "session"}
+		}
+		event.Event.Action = classification.action
+		event.Event.Category = classification.category
+	}
+	if preserveAction {
+		event.Event.Action = originalAction
+	}
+	if preserveCategory {
+		event.Event.Category = originalCategory
+	}
+}
+
+func ClaudeLogEventName(attrs map[string]interface{}, body string) string {
+	if normalized := strings.ToLower(strings.TrimSpace(body)); strings.HasPrefix(normalized, "claude_code.") {
+		return normalized
+	}
+	normalized := strings.ToLower(strings.TrimSpace(FirstString(attrs, "event.name")))
+	if strings.HasPrefix(normalized, "claude_code.") {
+		return normalized
+	}
+	if normalized != "" {
+		candidate := "claude_code." + normalized
+		if _, ok := claudeLogEventClassifications[candidate]; ok {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func NormalizeClaudeToolDecision(event *Event, attrs map[string]interface{}) {
+	toolName := FirstString(attrs, "tool_name", "tool.name")
+	decision := FirstString(attrs, "decision")
+	switch strings.ToLower(decision) {
+	case "accept", "approve", "approved", "allow", "allowed":
+		event.Event.Action = "approval.allowed"
+	case "reject", "rejected", "deny", "denied":
+		event.Event.Action = "approval.denied"
+	default:
+		event.Event.Action = "approval.requested"
+	}
+	event.Event.Category = "approval"
+	event.Approval = &ApprovalInfo{
+		Required: true,
+		Decision: decision,
+		Reason:   FirstString(attrs, "source"),
+	}
+	ensureClaudeTool(event, toolName)
+
+	params := JSONMapAttr(attrs, "tool_parameters")
+	if command := claudeCommand(nil, params); command != "" {
+		event.Command = &CommandInfo{Command: command}
+		event.Tool.Command = command
+	}
+	if path := FirstString(params, "file_path", "notebook_path"); path != "" {
+		event.File = &FileInfo{Path: path, Operation: claudeFileOperation(toolName)}
+		event.Tool.Path = path
+	}
+}
+
+func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
+	toolName := FirstString(attrs, "tool_name", "tool.name")
+	ensureClaudeTool(event, toolName)
+	input := JSONMapAttr(attrs, "tool_input")
+	params := JSONMapAttr(attrs, "tool_parameters")
+
+	switch strings.ToLower(toolName) {
+	// PowerShell alongside Bash, because they are the same signal under different names.
+	//
+	// Claude Code ships a native PowerShell tool that replaces Bash as the default shell on
+	// Windows, and it reports the command in the same tool_input.command field. With only "bash"
+	// here the event was still classified as command.executed -- but with an empty
+	// e.command.command, which is the leaf every rules/risky-command/ rule matches on. Command
+	// threat detection was therefore silently disabled on Windows while the telemetry carried the
+	// command all along.
+	//
+	// This is the same failure Bash had before v1.0.6, recurring under a new tool name, which is
+	// why the match is a set rather than one more literal: a shell tool is whatever the runtime
+	// calls the thing that runs commands.
+	case "bash", "powershell", "pwsh":
+		command := claudeCommand(input, params)
+		event.Event.Action = "command.executed"
+		event.Event.Category = "command"
+		event.Command = &CommandInfo{Command: command}
+		if duration, ok := Int64Attr(attrs, "duration_ms"); ok {
+			event.Command.DurationMS = duration
+		}
+		event.Tool.Command = command
+	case "read":
+		normalizeClaudeFileResult(event, toolName, input, "file.read")
+	case "write", "edit", "notebookedit":
+		normalizeClaudeFileResult(event, toolName, input, "file.modified")
+	}
+}
+
+func ensureClaudeTool(event *Event, toolName string) {
+	if event.Tool == nil {
+		event.Tool = &ToolInfo{}
+	}
+	if toolName != "" {
+		event.Tool.Name = toolName
+	}
+}
+
+func normalizeClaudeFileResult(event *Event, toolName string, input map[string]interface{}, action string) {
+	path := FirstString(input, "file_path", "notebook_path")
+	event.Event.Action = action
+	event.Event.Category = "file"
+	event.File = &FileInfo{
+		Path:      path,
+		Operation: claudeFileOperation(toolName),
+	}
+	event.Tool.Path = path
+}
+
+func claudeFileOperation(toolName string) string {
+	switch strings.ToLower(toolName) {
+	case "read":
+		return "read"
+	case "write":
+		return "create"
+	case "edit", "notebookedit":
+		return "modify"
+	default:
+		return ""
+	}
+}
+
+func claudeCommand(input, params map[string]interface{}) string {
+	return FirstNonEmpty(
+		FirstString(input, "command"),
+		FirstString(params, "full_command"),
+		FirstString(params, "bash_command"),
+	)
+}
+
+func JSONMapAttr(attrs map[string]interface{}, key string) map[string]interface{} {
+	value, ok := AnyAttr(attrs, key)
+	if !ok {
+		return nil
+	}
+	decoded, _ := value.(map[string]interface{})
+	return decoded
 }
 
 func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) Event {
@@ -884,6 +1086,22 @@ func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 	protocol := FirstString(attrs, "mcp.protocol.version")
 	resource := FirstString(attrs, "mcp.resource.uri")
 	session := FirstString(attrs, "mcp.session.id")
+
+	// Derive server/tool from the tool-name convention when the runtime does not emit structured
+	// mcp.* attributes. Claude Code (and any harness that reports MCP tools the same way) names an
+	// MCP tool call "mcp__<server>__<tool>" and carries none of the mcp.* attributes read above, so
+	// without this the event is still actioned mcp.tool_invoked -- InferAction keys on the name
+	// containing "mcp" -- but mcp.server and mcp.tool stay empty. Every shipped rule that gates on
+	// e.mcp.server (external-mcp-tool-call, secret-read-then-external-mcp) therefore never fires on
+	// those runtimes: MCP detection is silently dead on the OTel path even though the identity is
+	// right there in the name. The endpoint hook path already splits this exact name in
+	// beacon-hooks (deriveMCPServerTool); this mirrors it so the collector path agrees.
+	if server == "" && tool == "" {
+		if derivedServer, derivedTool := deriveMCPServerToolFromName(FirstString(attrs, "tool.name", "gen_ai.tool.name", "beacon.tool.name", "beacon.gen_ai.tool.name", "function_name", "tool_name")); derivedServer != "" || derivedTool != "" {
+			server, tool = derivedServer, derivedTool
+		}
+	}
+
 	if server == "" && tool == "" && method == "" && protocol == "" && resource == "" && session == "" && FirstString(attrs, "tool_type") != "mcp" {
 		return nil
 	}
@@ -904,6 +1122,28 @@ func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {
 		out.Session = &MCPSessionInfo{ID: session}
 	}
 	return out
+}
+
+// deriveMCPServerToolFromName splits a runtime's flattened MCP tool name into its server and tool
+// parts. It is the collector-side twin of deriveMCPServerTool in cli/beacon-hooks: Claude Code names
+// an MCP tool "mcp__<server>__<tool>" (the tool leaf may itself contain "__"), and Cursor uses the
+// "MCP:<tool>" form which carries no server. Anything else yields no MCP identity. Kept as a small
+// duplicate rather than a shared import because the hook adapter and the collector are separate Go
+// modules; the two must stay in agreement, so any change here should change that one too.
+func deriveMCPServerToolFromName(name string) (server, tool string) {
+	trimmed := strings.TrimSpace(name)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "mcp__") {
+		parts := strings.Split(trimmed, "__")
+		if len(parts) >= 3 {
+			return parts[1], strings.Join(parts[2:], "__")
+		}
+		return "", ""
+	}
+	if strings.HasPrefix(lower, "mcp:") {
+		return "", strings.TrimSpace(trimmed[len("mcp:"):])
+	}
+	return "", ""
 }
 
 type standardContext struct {
@@ -1382,36 +1622,13 @@ func HarnessName(attrs map[string]interface{}, hints ...string) string {
 	return "otel"
 }
 
+// NormalizeHarnessName maps a runtime's self-reported name onto Beacon's canonical harness name.
+//
+// Delegates to the shared module rather than keeping its own copy: the hook path writes the same
+// field from a different process, and when the two mappings drifted a single session was recorded
+// under two names. Keeping one implementation is what stops that recurring.
 func NormalizeHarnessName(name string) string {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case lower == "":
-		return ""
-	case strings.Contains(lower, "cowork") || strings.Contains(lower, "co-work"):
-		return "claude_cowork"
-	case strings.Contains(lower, "claude_agent_sdk") || strings.Contains(lower, "claude-agent-sdk") || strings.Contains(lower, "claude agent sdk"):
-		return "claude_agent_sdk"
-	case strings.Contains(lower, "claude_code") || strings.Contains(lower, "claude-code") || strings.Contains(lower, "claude code") || strings.HasPrefix(lower, "claude_code."):
-		return "claude_code"
-	case lower == "claude" || strings.Contains(lower, "claude"):
-		return "claude_code"
-	case strings.Contains(lower, "openclaw") || strings.Contains(lower, "open-claw"):
-		return "openclaw_gateway"
-	case strings.Contains(lower, "antigravity") || strings.Contains(lower, "anti-gravity"):
-		return "antigravity_cli"
-	case strings.Contains(lower, "codex"):
-		return "codex_cli"
-	case strings.Contains(lower, "gemini"):
-		return "gemini_cli"
-	case strings.Contains(lower, "copilot-chat"):
-		return "vscode_copilot"
-	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
-		return "copilot_cli"
-	case name != "":
-		return name
-	default:
-		return ""
-	}
+	return asymptoteobserve.NormalizeHarnessName(name)
 }
 
 func InferAction(attrs map[string]interface{}, fallback string) string {

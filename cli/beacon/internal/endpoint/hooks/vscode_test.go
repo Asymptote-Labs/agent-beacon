@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,9 +25,8 @@ func TestInstallVSCodeHooksPreservesNonBeaconHooks(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"echo keep",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform vscode",
 		"SessionStart",
 		"UserPromptSubmit",
@@ -71,7 +71,7 @@ func TestRemoveVSCodeEndpointHooksPreservesOtherHooks(t *testing.T) {
 
 func TestVSCodeHooksPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	userPath, err := vscodeHooksPath(LevelUser)
 	if err != nil {
 		t.Fatalf("user path error: %v", err)

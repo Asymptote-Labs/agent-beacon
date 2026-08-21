@@ -27,7 +27,12 @@ The endpoint architecture is local-first: local endpoint telemetry can be inspec
 4. Beacon writes the event to the active `runtime.jsonl` file.
 5. Operators inspect local activity in the dashboard or forward the JSONL stream to their security stack.
 
-For CI and cloud-agent setup paths, see the [runtime surface overview](/runtimes), [`beacon ci`](/cli/ci), [`beacon cloud`](/cli/cloud), and [Asymptote Observe SDK](/sdk).
+For CI and cloud-agent setup paths, see the [runtime surface overview](/runtimes),
+[`beacon ci`](/cli/ci), [`beacon cloud`](/cli/cloud), and
+[Asymptote Observe SDK](/sdk). Provider-managed cloud agents run
+`beacon-hooks` inside the sandbox, write `/tmp/beacon/runtime.jsonl`, and can
+upload compressed per-run snapshots directly to customer-managed GCS or S3
+without the persistent endpoint collector or Vector.
 
 ## Architecture Details
 

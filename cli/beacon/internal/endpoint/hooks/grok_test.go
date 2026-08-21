@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,10 +41,9 @@ func TestInstallGrokHooksWritesManagedHookFile(t *testing.T) {
 		}
 		command := groups[0].Hooks[0].Command
 		for _, want := range []string{
-			"BEACON_ENDPOINT_MODE=1",
 			"--platform grok",
-			"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-			"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+			"--log '/tmp/runtime.jsonl'",
+			"--config '/tmp/config.json'",
 			commandName,
 		} {
 			if !strings.Contains(command, want) {
@@ -88,7 +88,7 @@ func TestRemoveGrokHooksOnlyRemovesManagedHookFile(t *testing.T) {
 
 func TestGrokHookPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if got, want := mustGrokHooksPath(t, LevelUser), filepath.Join(home, ".grok", "hooks", "beacon-endpoint.json"); got != want {
 		t.Fatalf("user Grok hook path = %q, want %q", got, want)
 	}

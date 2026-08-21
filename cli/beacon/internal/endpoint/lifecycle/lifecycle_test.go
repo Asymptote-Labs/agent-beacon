@@ -438,7 +438,7 @@ func TestPreflightRejectsPortInUse(t *testing.T) {
 	cfg.Collector.GRPCPort = port
 	cfg.Collector.HTTPPort = freePort(t)
 
-	err = preflight(cfg, true)
+	err = preflight(cfg, true, service.KindAuto)
 	if err == nil || !strings.Contains(err.Error(), "OTLP gRPC port") {
 		t.Fatalf("preflight error = %v, want gRPC port in use", err)
 	}
@@ -459,7 +459,7 @@ func TestPreflightAllowsPortInUseWhenServiceWillNotStart(t *testing.T) {
 	cfg.Collector.GRPCPort = port
 	cfg.Collector.HTTPPort = freePort(t)
 
-	if err := preflight(cfg, false); err != nil {
+	if err := preflight(cfg, false, service.KindAuto); err != nil {
 		t.Fatalf("preflight returned error for no-start install: %v", err)
 	}
 }

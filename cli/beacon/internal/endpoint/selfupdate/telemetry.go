@@ -36,6 +36,11 @@ func (a *Applier) emit(success bool, r ApplyResult, message string) {
 		"to_version":   r.ToVersion,
 		"rolled_back":  r.RolledBack,
 		"reason":       message,
+		// Which checks the artifact actually passed. Recorded in the event, not only in the return
+		// value: the point of the field is that an operator reading the system log can tell a
+		// notarization-verified macOS update from a checksum-only Linux one, and it was being
+		// computed and then dropped, so both looked identical in telemetry.
+		"verification": r.Verification,
 	}
 	path := a.LogPath
 	if path == "" {

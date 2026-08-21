@@ -18,6 +18,7 @@ Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/co
 | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` |
 | `mcp.tool`, `beacon.mcp.tool`, `mcp.tool.name` | `mcp.tool` |
 | `mcp.server`, `beacon.mcp.server`, `mcp.server.name` | `mcp.server` |
+| `mcp__<server>__<tool>` or `MCP:<tool>` tool name, when structured `mcp.*` attributes are absent (e.g. Claude Code's OTel logs) | `mcp.server`, `mcp.tool` |
 | `jsonrpc.*`, `rpc.response.status_code`, `network.*`, `server.*`, `error.type` | `jsonrpc`, `rpc`, `network`, `server`, and `error` |
 | `process.command_line` | `command.command` |
 | `file.path` | `file.path` |
@@ -33,6 +34,25 @@ Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/co
 | File, write, or edit events | `file.modified` |
 | Approval events | `approval.requested` |
 | Other tool activity | `tool.invoked` |
+
+### OpenCode plugin mapping
+
+OpenCode's managed plugin maps `chat.message` to `prompt.submitted`;
+`tool.execute.before` to `tool.invoked`; and successful terminal tool events to
+`command.executed`, `file.read`, `file.modified`, `mcp.tool_invoked`, or
+`tool.completed` according to tool semantics. Terminal tool errors become
+`tool.failed`.
+
+Completed assistant message metadata supplies model, finish reason,
+runtime-reported cost, and canonical `gen_ai.usage`. Completed text and reasoning
+parts use `gen_ai.output.messages`; reasoning additionally uses
+`agent.reasoning`. Permission replies map `once` and `always` to
+`approval.allowed`, `reject` to `approval.denied`, and unknown states to
+`approval.requested`.
+
+Structured `session.diff` arrays emit file events only for entries containing a
+real path and change. Empty/cumulative duplicate diffs do not create pathless
+`file.modified` records.
 
 ## OpenTelemetry GenAI fields
 

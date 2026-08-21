@@ -72,6 +72,12 @@ func opencodeStatusFromRuntime(status runtimeStatus) OpenCodeStatus {
 		if _, err := os.Stat(out.BinaryPath); err != nil {
 			out.Installed = false
 			out.Message = fmt.Sprintf("opencode plugin is installed, but Beacon hook binary is missing at %s", out.BinaryPath)
+			return out
+		}
+		data, err := os.ReadFile(out.PluginPath)
+		if err != nil || !strings.Contains(string(data), out.BinaryPath) || strings.Contains(string(data), "__BEACON_") {
+			out.Installed = false
+			out.Message = fmt.Sprintf("opencode plugin at %s does not reference the active Beacon hook binary", out.PluginPath)
 		}
 	}
 	return out
@@ -86,6 +92,13 @@ func opencodeRootPluginSourcePath() string {
 }
 
 func installOpenCodePlugin(path, binaryPath, logPath, configPath string) error {
+	if existing, err := os.ReadFile(path); err == nil {
+		if !strings.Contains(string(existing), opencodeManagedPluginMarker) {
+			return fmt.Errorf("refusing to overwrite unmanaged opencode plugin at %s", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	plugin, err := renderOpenCodePlugin(binaryPath, logPath, configPath)
 	if err != nil {
 		return err

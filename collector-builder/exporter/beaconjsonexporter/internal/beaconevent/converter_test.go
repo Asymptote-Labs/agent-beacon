@@ -2,6 +2,8 @@ package beaconevent
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -716,6 +718,458 @@ func TestEventsFromTracesDoesNotPromotePlainGenAIToolToMCP(t *testing.T) {
 	}
 }
 
+func TestCapturedClaudeCodeLogNormalization(t *testing.T) {
+	fixture, events := capturedLogEvents(t, "claude-code-2.1.220.json")
+	if len(events) != len(fixture.Records) {
+		t.Fatalf("events = %d, want %d", len(events), len(fixture.Records))
+	}
+	byName := map[string]Event{}
+	for i, record := range fixture.Records {
+		byName[record.Name] = events[i]
+	}
+
+	apiRequest := byName["api_request"]
+	if apiRequest.Event.Action != "session.activity" || apiRequest.Event.Category != "session" {
+		t.Fatalf("api request event = %#v, want session.activity/session", apiRequest.Event)
+	}
+	if apiRequest.GenAI == nil || apiRequest.GenAI.Usage == nil || apiRequest.GenAI.Usage.InputTokens == nil || *apiRequest.GenAI.Usage.InputTokens != 2 {
+		t.Fatalf("api request usage = %#v, want captured input tokens", apiRequest.GenAI)
+	}
+
+	decision := byName["bash_decision"]
+	if decision.Event.Action != "approval.allowed" || decision.Event.Category != "approval" {
+		t.Fatalf("decision event = %#v, want approval.allowed/approval", decision.Event)
+	}
+	if decision.Approval == nil || !decision.Approval.Required || decision.Approval.Decision != "accept" || decision.Approval.Reason != "config" {
+		t.Fatalf("approval = %#v, want captured accept/config decision", decision.Approval)
+	}
+	if decision.Command == nil || decision.Command.Command != "echo CLAUDE_MARKER" {
+		t.Fatalf("decision command = %#v, want full command", decision.Command)
+	}
+
+	bash := byName["bash_result"]
+	if bash.Event.Action != "command.executed" || bash.Event.Category != "command" {
+		t.Fatalf("bash event = %#v, want command.executed/command", bash.Event)
+	}
+	if bash.Command == nil || bash.Command.Command != "echo CLAUDE_MARKER" || bash.Command.DurationMS != 94 {
+		t.Fatalf("bash command = %#v, want command and string duration", bash.Command)
+	}
+	if bash.Command.ExitCode != nil {
+		t.Fatalf("bash exit code = %#v, want nil without an exact process status", bash.Command.ExitCode)
+	}
+	if bash.Tool == nil || bash.Tool.Name != "Bash" || bash.Tool.Command != "echo CLAUDE_MARKER" {
+		t.Fatalf("bash tool = %#v, want normalized command", bash.Tool)
+	}
+	rawAttrs, ok := bash.Raw["attributes"].(map[string]interface{})
+	if !ok || rawAttrs["tool_input"] != fixture.Records[2].Attributes["tool_input"] {
+		t.Fatalf("raw attributes changed: %#v", bash.Raw)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		action    string
+		operation string
+	}{
+		{name: "write_result", action: "file.modified", operation: "create"},
+		{name: "read_result", action: "file.read", operation: "read"},
+	} {
+		event := byName[tc.name]
+		if event.Event.Action != tc.action || event.Event.Category != "file" {
+			t.Fatalf("%s event = %#v, want %s/file", tc.name, event.Event, tc.action)
+		}
+		if event.File == nil || event.File.Path != "/tmp/beacon-otel-fixture/CLAUDE_FILE_MARKER.txt" || event.File.Operation != tc.operation {
+			t.Fatalf("%s file = %#v, want captured path/%s", tc.name, event.File, tc.operation)
+		}
+		if event.Tool == nil || event.Tool.Path != event.File.Path {
+			t.Fatalf("%s tool = %#v, want mirrored path", tc.name, event.Tool)
+		}
+	}
+}
+
+func TestCapturedClaudeCodeLifecycleTaxonomy(t *testing.T) {
+	fixture, events := capturedLogEvents(t, "claude-code-lifecycle-2.1.220.json")
+	if len(events) != len(fixture.Records) {
+		t.Fatalf("events = %d, want %d", len(events), len(fixture.Records))
+	}
+	expected := map[string]eventClassification{
+		"user_prompt":             {action: "prompt.submitted", category: "prompt"},
+		"assistant_response":      {action: "session.activity", category: "session"},
+		"api_request":             {action: "session.activity", category: "session"},
+		"api_error":               {action: "session.error", category: "session"},
+		"api_refusal":             {action: "session.status", category: "session"},
+		"api_request_body":        {action: "session.activity", category: "session"},
+		"api_response_body":       {action: "session.activity", category: "session"},
+		"permission_mode_changed": {action: "session.status", category: "session"},
+		"auth":                    {action: "session.activity", category: "session"},
+		"mcp_server_connection":   {action: "mcp.connection", category: "mcp"},
+		"internal_error":          {action: "session.error", category: "session"},
+		"plugin_installed":        {action: "session.activity", category: "session"},
+		"plugin_loaded":           {action: "session.activity", category: "session"},
+		"skill_activated":         {action: "session.activity", category: "session"},
+		"at_mention":              {action: "session.activity", category: "session"},
+		"api_retries_exhausted":   {action: "session.error", category: "session"},
+		"hook_registered":         {action: "session.activity", category: "session"},
+		"hook_execution_start":    {action: "session.activity", category: "session"},
+		"hook_execution_complete": {action: "session.activity", category: "session"},
+		"hook_plugin_metrics":     {action: "session.activity", category: "session"},
+		"compaction":              {action: "session.activity", category: "session"},
+		"feedback_survey":         {action: "session.activity", category: "session"},
+	}
+	if len(claudeLogEventClassifications) != len(expected)+2 {
+		t.Fatalf("documented Claude taxonomy has %d events, want %d", len(claudeLogEventClassifications), len(expected)+2)
+	}
+	for i, captured := range fixture.Records {
+		want, ok := expected[captured.Name]
+		if !ok {
+			t.Fatalf("fixture %q has no expected classification", captured.Name)
+		}
+		event := events[i]
+		if event.Event.Action != want.action || event.Event.Category != want.category {
+			t.Errorf("%s event = %#v, want %s/%s", captured.Name, event.Event, want.action, want.category)
+		}
+		switch event.Event.Action {
+		case "tool.invoked", "command.executed", "mcp.tool_invoked":
+			t.Errorf("%s lifecycle event incorrectly classified as %s", captured.Name, event.Event.Action)
+		}
+	}
+	if prompt := events[0].Prompt; prompt == nil || prompt.Text != "CLAUDE_LIFECYCLE_MARKER" {
+		t.Fatalf("user prompt = %#v, want captured prompt", prompt)
+	}
+}
+
+func TestClaudeLogEventNameRecognizesKnownShortNames(t *testing.T) {
+	for eventName := range claudeLogEventClassifications {
+		shortName := strings.TrimPrefix(eventName, "claude_code.")
+		if got := ClaudeLogEventName(map[string]interface{}{"event.name": shortName}, "unstructured body"); got != eventName {
+			t.Errorf("short event %q normalized to %q, want %q", shortName, got, eventName)
+		}
+	}
+}
+
+func TestClaudeLifecycleUsesResourceHarnessIdentity(t *testing.T) {
+	logs := plog.NewLogs()
+	resourceLogs := logs.ResourceLogs().AppendEmpty()
+	resourceLogs.Resource().Attributes().PutStr("service.name", "claude-code")
+	resourceLogs.Resource().Attributes().PutStr("service.version", "2.1.220")
+	record := resourceLogs.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	record.Body().SetStr("claude_code.assistant_response")
+	record.Attributes().PutStr("event.name", "assistant_response")
+
+	events := NewConverter(Options{}).EventsFromLogs(logs)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].Harness.Name != "claude_code" || events[0].Event.Action != "session.activity" || events[0].Event.Category != "session" {
+		t.Fatalf("event = %#v, want resource-scoped Claude session activity", events[0])
+	}
+}
+
+func TestClaudeUnknownFullBodyDefaultsToSessionActivity(t *testing.T) {
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.future_lifecycle_event")
+	record.Attributes().PutStr("service.name", "claude-code")
+	record.Attributes().PutStr("event.name", "future_lifecycle_event")
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "session.activity" || event.Event.Category != "session" {
+		t.Fatalf("event = %#v, want safe session.activity fallback", event.Event)
+	}
+	if got := ClaudeLogEventName(map[string]interface{}{"event.name": "future_lifecycle_event"}, "unstructured body"); got != "" {
+		t.Fatalf("unknown short event normalized to %q, want no match", got)
+	}
+	if got := ClaudeLogEventName(map[string]interface{}{"event.name": "claude_code.future_lifecycle_event"}, "unstructured body"); got != "claude_code.future_lifecycle_event" {
+		t.Fatalf("unknown namespaced event normalized to %q, want safe full-name match", got)
+	}
+
+	namespaced := plog.NewLogRecord()
+	namespaced.Body().SetStr("unstructured body")
+	namespaced.Attributes().PutStr("service.name", "claude-code")
+	namespaced.Attributes().PutStr("event.name", "claude_code.future_lifecycle_event")
+	namespacedEvent := NewConverter(Options{}).EventFromLog(nil, namespaced)
+	if namespacedEvent.Event.Action != "session.activity" || namespacedEvent.Event.Category != "session" {
+		t.Fatalf("namespaced event = %#v, want safe session.activity fallback", namespacedEvent.Event)
+	}
+}
+
+func TestClaudeNormalizationPreservesExplicitClassification(t *testing.T) {
+	t.Run("explicit action keeps inferred category", func(t *testing.T) {
+		record := plog.NewLogRecord()
+		record.Body().SetStr("claude_code.assistant_response")
+		record.Attributes().PutStr("service.name", "claude-code")
+		record.Attributes().PutStr("event.name", "assistant_response")
+		record.Attributes().PutStr("beacon.event.action", "prompt.submitted")
+
+		event := NewConverter(Options{}).EventFromLog(nil, record)
+		if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
+			t.Fatalf("event = %#v, want explicit prompt classification", event.Event)
+		}
+	})
+
+	t.Run("explicit category overrides taxonomy category", func(t *testing.T) {
+		record := plog.NewLogRecord()
+		record.Body().SetStr("claude_code.assistant_response")
+		record.Attributes().PutStr("service.name", "claude-code")
+		record.Attributes().PutStr("event.name", "assistant_response")
+		record.Attributes().PutStr("beacon.event.category", "custom")
+
+		event := NewConverter(Options{}).EventFromLog(nil, record)
+		if event.Event.Action != "session.activity" || event.Event.Category != "custom" {
+			t.Fatalf("event = %#v, want taxonomy action with explicit category", event.Event)
+		}
+	})
+
+	t.Run("tool operands still normalize", func(t *testing.T) {
+		record := plog.NewLogRecord()
+		record.Body().SetStr("claude_code.tool_result")
+		record.Attributes().PutStr("service.name", "claude-code")
+		record.Attributes().PutStr("event.name", "tool_result")
+		record.Attributes().PutStr("event.action", "custom.tool_result")
+		record.Attributes().PutStr("event.category", "custom")
+		record.Attributes().PutStr("tool_name", "Bash")
+		record.Attributes().PutStr("tool_input", `{"command":"echo explicit"}`)
+		record.Attributes().PutStr("duration_ms", "12")
+
+		event := NewConverter(Options{}).EventFromLog(nil, record)
+		if event.Event.Action != "custom.tool_result" || event.Event.Category != "custom" {
+			t.Fatalf("event = %#v, want explicit tool classification", event.Event)
+		}
+		if event.Command == nil || event.Command.Command != "echo explicit" || event.Command.DurationMS != 12 {
+			t.Fatalf("command = %#v, want normalized tool operands", event.Command)
+		}
+	})
+}
+
+func TestClaudeToolDecisionMapsRejectAndCommand(t *testing.T) {
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.tool_decision")
+	attrs := record.Attributes()
+	attrs.PutStr("service.name", "claude-code")
+	attrs.PutStr("event.name", "tool_decision")
+	attrs.PutStr("tool_name", "Bash")
+	attrs.PutStr("decision", "reject")
+	attrs.PutStr("source", "user_reject")
+	attrs.PutStr("tool_parameters", `{"bash_command":"rm","full_command":"rm -rf /tmp/example"}`)
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "approval.denied" || event.Event.Category != "approval" {
+		t.Fatalf("event = %#v, want approval.denied/approval", event.Event)
+	}
+	if event.Approval == nil || event.Approval.Decision != "reject" || event.Approval.Reason != "user_reject" {
+		t.Fatalf("approval = %#v, want reject/user_reject", event.Approval)
+	}
+	if event.Command == nil || event.Command.Command != "rm -rf /tmp/example" {
+		t.Fatalf("command = %#v, want denied full command", event.Command)
+	}
+}
+
+func TestClaudeToolResultOperandPrecedenceAndCoercion(t *testing.T) {
+	event := NewEvent("tool.invoked", "tool", "info", "claude_code", time.Now())
+	NormalizeClaudeToolResult(&event, map[string]interface{}{
+		"tool_name":       "Bash",
+		"duration_ms":     int64(71),
+		"tool_input":      `{"command":"echo input"}`,
+		"tool_parameters": `{"full_command":"echo parameters","bash_command":"echo"}`,
+		"success":         "true",
+	})
+	if event.Command == nil || event.Command.Command != "echo input" || event.Command.DurationMS != 71 {
+		t.Fatalf("command = %#v, want tool_input command and numeric duration", event.Command)
+	}
+	if event.Command.ExitCode != nil {
+		t.Fatalf("exit code = %#v, want nil", event.Command.ExitCode)
+	}
+}
+
+func TestClaudeEditToolResultsMapFileOperations(t *testing.T) {
+	for _, tc := range []struct {
+		toolName  string
+		inputKey  string
+		operation string
+	}{
+		{toolName: "Edit", inputKey: "file_path", operation: "modify"},
+		{toolName: "NotebookEdit", inputKey: "notebook_path", operation: "modify"},
+	} {
+		t.Run(tc.toolName, func(t *testing.T) {
+			event := NewEvent("tool.invoked", "tool", "info", "claude_code", time.Now())
+			NormalizeClaudeToolResult(&event, map[string]interface{}{
+				"tool_name":  tc.toolName,
+				"tool_input": `{"` + tc.inputKey + `":"/tmp/example.ipynb"}`,
+			})
+			if event.Event.Action != "file.modified" || event.Event.Category != "file" {
+				t.Fatalf("event = %#v, want file.modified/file", event.Event)
+			}
+			if event.File == nil || event.File.Path != "/tmp/example.ipynb" || event.File.Operation != tc.operation {
+				t.Fatalf("file = %#v, want path/%s", event.File, tc.operation)
+			}
+		})
+	}
+}
+
+func TestClaudeToolResultToleratesMalformedJSON(t *testing.T) {
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.tool_result")
+	attrs := record.Attributes()
+	attrs.PutStr("service.name", "claude-code")
+	attrs.PutStr("event.name", "tool_result")
+	attrs.PutStr("tool_name", "Bash")
+	attrs.PutStr("tool_input", "{")
+	attrs.PutStr("tool_parameters", "[")
+	attrs.PutStr("duration_ms", "not-a-number")
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "command.executed" || event.Command == nil {
+		t.Fatalf("event = %#v command = %#v, want classified empty command", event.Event, event.Command)
+	}
+	if event.Command.Command != "" || event.Command.DurationMS != 0 {
+		t.Fatalf("command = %#v, want empty values for malformed attributes", event.Command)
+	}
+}
+
+func TestClaudeMCPToolResultDerivesServerAndTool(t *testing.T) {
+	// Claude Code reports an MCP tool call as a tool_result LOG record whose tool_name is
+	// "mcp__<server>__<tool>" and carries no structured mcp.* attributes. Before the collector
+	// learned this convention, event.action became mcp.tool_invoked (InferAction sees "mcp" in the
+	// name) but mcp.server/mcp.tool were empty, so every shipped rule gated on e.mcp.server was
+	// silently dead on this runtime. This is the regression guard: the identity in the name must
+	// reach the structured fields, exactly as the beacon-hooks path already does.
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.tool_result")
+	attrs := record.Attributes()
+	attrs.PutStr("service.name", "claude-code")
+	attrs.PutStr("event.name", "tool_result")
+	attrs.PutStr("tool_name", "mcp__notion__create_page")
+	attrs.PutStr("tool_input", `{"title":"notes"}`)
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "mcp.tool_invoked" || event.Event.Category != "mcp" {
+		t.Fatalf("event = %#v, want mcp.tool_invoked/mcp", event.Event)
+	}
+	if event.MCP == nil || event.MCP.Server != "notion" || event.MCP.Tool != "create_page" {
+		t.Fatalf("mcp = %#v, want server=notion tool=create_page", event.MCP)
+	}
+	if event.Tool == nil || event.Tool.Name != "mcp__notion__create_page" {
+		t.Fatalf("tool = %#v, want raw name preserved", event.Tool)
+	}
+}
+
+func TestDeriveMCPServerToolFromName(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		wantServer string
+		wantTool   string
+	}{
+		{name: "mcp__notion__create_page", wantServer: "notion", wantTool: "create_page"},
+		// The tool leaf may itself contain the "__" separator; only the first split is the server.
+		{name: "mcp__github__issues__create", wantServer: "github", wantTool: "issues__create"},
+		// Cursor's flattened form carries a tool but no server.
+		{name: "MCP:search", wantServer: "", wantTool: "search"},
+		// A built-in tool is not MCP and must not be promoted (guards the external-tool contract).
+		{name: "Bash", wantServer: "", wantTool: ""},
+		{name: "mcp__onlyserver", wantServer: "", wantTool: ""},
+		{name: "", wantServer: "", wantTool: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, tool := deriveMCPServerToolFromName(tc.name)
+			if server != tc.wantServer || tool != tc.wantTool {
+				t.Fatalf("derive(%q) = (%q, %q), want (%q, %q)", tc.name, server, tool, tc.wantServer, tc.wantTool)
+			}
+		})
+	}
+}
+
+func TestClaudeBuiltinToolResultDoesNotPopulateMCP(t *testing.T) {
+	// The name-convention derivation must not leak into built-in tools: a Bash tool_result is a
+	// command, never an MCP call, so event.MCP stays nil.
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.tool_result")
+	attrs := record.Attributes()
+	attrs.PutStr("service.name", "claude-code")
+	attrs.PutStr("event.name", "tool_result")
+	attrs.PutStr("tool_name", "Bash")
+	attrs.PutStr("tool_input", `{"command":"echo hi"}`)
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.MCP != nil {
+		t.Fatalf("mcp = %#v, want nil for a built-in tool", event.MCP)
+	}
+	if event.Event.Action != "command.executed" {
+		t.Fatalf("event = %#v, want command.executed", event.Event)
+	}
+}
+
+func TestCapturedCodexLogNormalizationIsUnchanged(t *testing.T) {
+	fixture, events := capturedLogEvents(t, "codex-0.142.4.json")
+	if len(events) != len(fixture.Records) {
+		t.Fatalf("events = %d, want %d", len(events), len(fixture.Records))
+	}
+	if events[0].Event.Action != "approval.requested" || events[0].Approval == nil || events[0].Approval.Decision != "approved" {
+		t.Fatalf("Codex decision changed: %#v", events[0])
+	}
+	if events[1].Event.Action != "command.executed" || events[1].Command == nil || events[1].Command.Command != "echo CODEX_MARKER" {
+		t.Fatalf("Codex result changed: %#v", events[1])
+	}
+}
+
+func TestClaudeNormalizerDoesNotAffectOtherHarnesses(t *testing.T) {
+	for _, serviceName := range []string{
+		"generic-runtime",
+		"codex_cli_rs",
+		"gemini-cli",
+		"github-copilot",
+		"copilot-chat",
+		"cursor",
+		"claude-cowork",
+		"claude_agent_sdk",
+		"claude_web",
+	} {
+		t.Run(serviceName, func(t *testing.T) {
+			record := plog.NewLogRecord()
+			record.Body().SetStr("claude_code.assistant_response")
+			attrs := record.Attributes()
+			attrs.PutStr("service.name", serviceName)
+			attrs.PutStr("event.name", "assistant_response")
+
+			event := NewConverter(Options{}).EventFromLog(nil, record)
+			if event.Event.Action != "tool.invoked" || event.Event.Category != "tool" {
+				t.Fatalf("%s event changed by Claude normalizer: %#v", serviceName, event)
+			}
+		})
+	}
+}
+
+type capturedLogFixture struct {
+	Runtime string              `json:"runtime"`
+	Version string              `json:"version"`
+	Records []capturedLogRecord `json:"records"`
+}
+
+type capturedLogRecord struct {
+	Name       string                 `json:"name"`
+	Body       string                 `json:"body"`
+	Attributes map[string]interface{} `json:"attributes"`
+}
+
+func capturedLogEvents(t *testing.T, name string) (capturedLogFixture, []Event) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatalf("read captured fixture: %v", err)
+	}
+	var fixture capturedLogFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode captured fixture: %v", err)
+	}
+	logs := plog.NewLogs()
+	scopeLogs := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty()
+	for _, captured := range fixture.Records {
+		record := scopeLogs.LogRecords().AppendEmpty()
+		record.Body().SetStr(captured.Body)
+		if err := record.Attributes().FromRaw(captured.Attributes); err != nil {
+			t.Fatalf("load %s attributes: %v", captured.Name, err)
+		}
+	}
+	return fixture, NewConverter(Options{}).EventsFromLogs(logs)
+}
+
 func newObserveSDKTraceSpan(name string) (ptrace.Span, ptrace.Traces) {
 	traces := ptrace.NewTraces()
 	resourceSpans := traces.ResourceSpans().AppendEmpty()
@@ -731,4 +1185,77 @@ func newObserveSDKTraceSpan(name string) (ptrace.Span, ptrace.Traces) {
 	span.SetKind(ptrace.SpanKindClient)
 	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
 	return span, traces
+}
+
+// Browser-based collectors (agent-beacon-browser-extension) must keep their own
+// harness identity and not be coerced into claude_code by the generic "claude"
+// rule.
+func TestNormalizeHarnessNameBrowserSources(t *testing.T) {
+	cases := map[string]string{
+		"claude_web":  "claude_web",
+		"claude-web":  "claude_web",
+		"claude.ai":   "claude_web",
+		"chatgpt_web": "chatgpt_web",
+		"chatgpt.com": "chatgpt_web",
+		// Regression: existing harnesses must be unchanged.
+		"claude_code": "claude_code",
+		"claude":      "claude_code",
+		"codex":       "codex_cli",
+		"gemini":      "gemini_cli",
+	}
+	for in, want := range cases {
+		if got := NormalizeHarnessName(in); got != want {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHarnessNameHonorsBrowserExtensionAttr(t *testing.T) {
+	attrs := map[string]interface{}{
+		"beacon.harness.name": "claude_web",
+		"beacon.origin":       "browser-extension",
+		"service.name":        "agent-beacon-browser-collector",
+	}
+	if got := HarnessName(attrs); got != "claude_web" {
+		t.Errorf("HarnessName = %q, want claude_web", got)
+	}
+}
+
+// Claude Code ships a native PowerShell tool that replaces Bash as the default shell on Windows,
+// and it reports the command in the same tool_input.command field. Handling only "bash" left the
+// event classified as command.executed with an empty e.command.command -- the leaf every
+// rules/risky-command/ rule matches on -- so command threat detection was silently disabled on
+// Windows while the telemetry carried the command all along.
+//
+// The attributes below are copied from a real Windows session captured by the w00-probe scenario,
+// rather than invented, so this fails if the runtime's shape changes rather than only if the
+// mapping does.
+func TestClaudeShellToolsPopulateTheCommandDetectionSurface(t *testing.T) {
+	const want = `Write-Output 'BEACON_SANDBOX_2922d672fb2f' | Tee-Object -FilePath 'C:\beacon-sandbox\work\w00.sentinel'`
+
+	for _, toolName := range []string{"PowerShell", "pwsh", "Bash", "bash"} {
+		t.Run(toolName, func(t *testing.T) {
+			event := &Event{}
+			NormalizeClaudeToolResult(event, map[string]interface{}{
+				"tool_name":   toolName,
+				"tool_input":  `{"command":"` + strings.ReplaceAll(want, `\`, `\\`) + `","description":"write the sentinel"}`,
+				"duration_ms": int64(386),
+			})
+
+			if event.Event.Action != "command.executed" {
+				t.Fatalf("action = %q, want command.executed", event.Event.Action)
+			}
+			if event.Command == nil || event.Command.Command != want {
+				t.Fatalf("command.command = %#v, want %q -- this is the field every "+
+					"rules/risky-command/ rule matches on, so an empty value disables them all",
+					event.Command, want)
+			}
+			if event.Tool == nil || event.Tool.Command != want {
+				t.Errorf("tool.command = %#v, want the command mirrored", event.Tool)
+			}
+			if event.Command.DurationMS != 386 {
+				t.Errorf("duration_ms = %d, want 386", event.Command.DurationMS)
+			}
+		})
+	}
 }

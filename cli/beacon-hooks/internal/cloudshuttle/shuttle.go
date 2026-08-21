@@ -24,8 +24,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const (
@@ -212,16 +213,20 @@ func snapshotLog(logPath string) (string, func(), error) {
 	if err != nil {
 		return "", func() {}, err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH); err != nil {
+	held, err := filelock.Shared(lock)
+	if err != nil {
 		_ = lock.Close()
 		return "", func() {}, err
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// Registered close-first so LIFO runs it last: the lock is released, then the handle closed.
+	// The previous order relied on closing the descriptor to drop the lock implicitly, which left
+	// the explicit unlock failing on a closed handle with its error discarded.
 	defer func() {
 		if err := lock.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "cloudshuttle: failed to close lock file %s.lock: %v\n", logPath, err)
 		}
 	}()
+	defer held.Release()
 
 	source, err := os.Open(logPath)
 	if err != nil {

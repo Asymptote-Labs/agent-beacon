@@ -1,0 +1,515 @@
+# Runs a beacon-sandbox scenario against a real Claude Code session on Windows.
+#
+# Why a workflow rather than a rented instance: Modal offers Linux only, and a GitHub-hosted
+# Windows runner is already a disposable machine with a real Service Control Manager,
+# administrator rights and UAC disabled -- everything an endpoint install needs. So the runner
+# *is* the sandbox, and `beacon-sandbox run --provider local` drives it from the inside. The
+# collected artifacts are uploaded and judged on the maintainer's machine by the same pure
+# `check` package that judges a Modal run, so a Windows verdict is produced by the same rules.
+#
+# workflow_dispatch only, and deliberately. The job needs ANTHROPIC_API_KEY to run a real agent
+# session with --dangerously-skip-permissions; on a public repository that secret must never be
+# reachable from untrusted code, so there is no pull_request trigger here and there must never be
+# a pull_request_target one.
+name: Windows sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario id to run (empty runs every windows scenario)"
+        required: false
+        type: string
+      claude_version:
+        description: "Claude Code version to pin"
+        required: false
+        default: "2.1.220"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time: concurrent runs would race on the runner-wide agent install and on the
+  # system-mode endpoint state, and a scenario that failed for that reason looks like a Beacon bug.
+  group: windows-sandbox
+  cancel-in-progress: false
+
+jobs:
+  sandbox:
+    runs-on: windows-2025
+    # The credential lives in an environment rather than at the repository level, matching how the
+    # release secrets are scoped.
+    environment: windows-sandbox
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      # Runs the generated-PowerShell parse test, which is skipped on a maintainer's machine
+      # without pwsh. The generated scripts are assembled in Go, so a syntax error in one is
+      # invisible to the compiler and would surface as "the check did not run" -- which a verdict
+      # reports as unverified rather than failing loudly. This is the gate that stops that.
+      - name: Test the harness itself
+        working-directory: beacon-sandbox
+        run: go test ./...
+
+      # The Makefile's build-windows-amd64 target is not used: GNU make is not guaranteed on the
+      # Windows image, and the two steps it performs are clearer spelled out than shimmed. The
+      # ordering is the part that matters -- the hooks binary is embedded into the CLI, so it has
+      # to exist before the CLI is built or the CLI embeds the placeholder.
+      #
+      # Not continue-on-error: Beacon compiles for Windows now, so a build failure is a real
+      # regression and a silently missing binary must not read as a passing run.
+      - name: Build beacon and beacon-hooks for Windows
+        id: build
+        run: |
+          Set-Location cli\beacon-hooks
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon-hooks does not build for windows/amd64 yet" }
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+          Set-Location ..\beacon
+          go build -o beacon-windows-amd64.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon does not build for windows/amd64 yet" }
+
+      - name: Build the collector for Windows
+        id: collector
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          Set-Location collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist. A fresh
+          # checkout has no dist/ at all, which is why this only ever failed in CI.
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $env:CGO_ENABLED = '0'
+          & "$(go env GOPATH)\bin\builder.exe" --config builder.yaml
+          if ($LASTEXITCODE -ne 0) { throw "collector build failed" }
+          # Detected, not assumed: the builder names its output from dist.name verbatim and does
+          # not append .exe for windows, even though it emits a PE binary. Both spellings are
+          # accepted so a future builder version that does append it keeps working.
+          $produced = 'dist\beacon-otelcol\beacon-otelcol'
+          if (-not (Test-Path -LiteralPath $produced) -and (Test-Path -LiteralPath "$produced.exe")) {
+            $produced = "$produced.exe"
+          }
+          if (-not (Test-Path -LiteralPath $produced)) {
+            Get-ChildItem dist\beacon-otelcol | Out-String | Write-Output
+            throw "the collector build produced no binary under dist\beacon-otelcol"
+          }
+          New-Item -ItemType Directory -Force -Path dist\beacon-otelcol\windows_amd64 | Out-Null
+          # Staged with .exe because that is what Windows needs to execute it, whatever it arrived as.
+          Copy-Item $produced dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe
+
+      # The layout beacon-sandbox's WindowsLayout() describes. Created here rather than by the
+      # harness because on this platform the CI job is what provisions the guest.
+      - name: Stage the guest layout
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\beacon-sandbox\bin, C:\beacon-sandbox\work | Out-Null
+          # Both binaries must be present. A missing one would surface much later as a confusing
+          # capture gap, and the run would look like a Beacon bug rather than a staging failure.
+          Copy-Item cli\beacon\beacon-windows-amd64.exe C:\beacon-sandbox\bin\beacon.exe
+          Copy-Item collector-builder\dist\beacon-otelcol\windows_amd64\beacon-otelcol.exe C:\beacon-sandbox\bin\beacon-otelcol.exe
+          "C:\beacon-sandbox\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # A seeded git repo gives scenarios somewhere realistic to work and exercises Beacon's
+          # repository/branch enrichment, mirroring the Linux image's fixture.
+          Set-Location C:\beacon-sandbox\work
+          New-Item -ItemType Directory -Force -Path repo | Out-Null
+          Set-Location repo
+          git init -q
+          git config user.email a@b.c
+          git config user.name beacon-sandbox
+          "# fixture" | Out-File -FilePath README.md -Encoding utf8
+          git add -A
+          git commit -qm initial
+
+      # The native installer, which is the only Windows install path that self-updates. Pinned so
+      # a verdict is attributable to a specific agent build.
+      - name: Install Claude Code
+        env:
+          # Through the environment for the same reason as SCENARIO below. The whitelist that
+          # follows guards what the value is *used for*; it cannot guard the interpolation itself,
+          # because `${{ }}` expands before PowerShell parses the line -- so a value containing a
+          # quote would already have closed the literal and started executing by the time the regex
+          # ran. Reading from $env: means no expansion happens at all.
+          CLAUDE_VERSION: ${{ inputs.claude_version }}
+        run: |
+          $version = $env:CLAUDE_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) { $version = '2.1.220' }
+          # Whitelist rather than escape: the value reaches an installer, and Claude Code versions
+          # are dotted numerals, so anything else is a mistake worth rejecting outright.
+          if ($version -notmatch '^[0-9]+(\.[0-9]+)*$') {
+            throw "invalid claude_version '$version': expected a dotted numeric version"
+          }
+          $installer = Join-Path $env:TEMP 'install-claude.ps1'
+          Invoke-WebRequest -Uri 'https://claude.ai/install.ps1' -OutFile $installer
+          & $installer $version
+          if ($LASTEXITCODE -ne 0) { throw "the Claude Code installer exited $LASTEXITCODE" }
+
+          # install.ps1 puts the agent in %USERPROFILE%\.local\bin -- the same ~/.local/bin
+          # convention the Linux image uses, not a Windows-specific Programs directory.
+          $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+          $claudeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # Verified here rather than left for a later step to discover. Assuming the install
+          # location cost a probe run: the install succeeded, `claude` was simply not on PATH, and
+          # the failure two steps later read as the agent being missing rather than as a wrong PATH
+          # entry. Failing at the point the assumption is made is the difference.
+          $claudeExe = Join-Path $claudeBin 'claude.exe'
+          if (-not (Test-Path -LiteralPath $claudeExe)) {
+            Write-Output "installer output above reports where it landed; searching the profile:"
+            Get-ChildItem -Path $env:USERPROFILE -Filter claude.exe -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 5 -ExpandProperty FullName
+            throw "claude.exe is not at $claudeExe; the install location has moved"
+          }
+          Write-Output "claude installed at $claudeExe"
+
+      # The question the hook work is gated on, and the one that cannot be answered from docs:
+      # what does a runtime actually do with a hook `command` string on Windows?
+      #
+      # It matters because the obvious answer is wrong in a way that produces silence. Beacon emits
+      # a quoted executable path followed by flags, which is correct in cmd.exe and in bash -- and a
+      # parse error in PowerShell, where a quoted string in command position is an expression that
+      # evaluates to itself and the arguments after it are a syntax error. The install would look
+      # perfect, the settings file would be valid, and no hook would ever run.
+      #
+      # Asked by testing the candidate forms rather than by identifying the shell, because the form
+      # is what has to work. Each form writes its own marker; whichever markers exist is the answer.
+      # Two forms also identify the shell outright, which turns "form A failed" into a reason.
+      - name: Which command forms does a Windows hook accept
+        id: hookshell
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $probe = 'C:\beacon-sandbox\hookprobe'
+          # A path with a space in it, because that is the case that makes quoting necessary at all:
+          # the real install path is under %ProgramData% or a user profile, and "C:\Users\Jane Doe"
+          # is ordinary.
+          $spaced = 'C:\beacon-sandbox\hook probe'
+          New-Item -ItemType Directory -Force -Path $probe, $spaced | Out-Null
+
+          # A batch file rather than an exe: it needs no build step, and the question is about how
+          # the command line is parsed, not about what runs at the end of it. cmd's own redirect
+          # writes ANSI, avoiding the UTF-16 that PowerShell 5.1's `>` would produce.
+          $body = @('@echo off', ('echo %1 1>"' + $probe + '\out-%1.txt"'))
+          $markSpaced = Join-Path $spaced 'mark.cmd'
+          $markPlain = Join-Path $probe 'mark.cmd'
+          Set-Content -LiteralPath $markSpaced -Value $body -Encoding ascii
+          Set-Content -LiteralPath $markPlain -Value $body -Encoding ascii
+
+          $forms = [ordered]@{
+            # What Beacon emits today, modulo the env prefix: quoted path, then flags.
+            A = '"' + $markSpaced + '" A'
+            # The PowerShell call operator, which is how that form is written there.
+            B = '& "' + $markSpaced + '" B'
+            # Explicitly through cmd, which would work from either shell at the cost of a
+            # process and of nested quoting.
+            C = 'cmd /c ""' + $markSpaced + '" C"'
+            # Unquoted and space-free: works everywhere, and is what Beacon would be relying on
+            # if it simply never quoted. Included to show that the harness itself works even when
+            # every quoted form fails.
+            E = $markPlain + ' E'
+            # Shell tells. cmd expands %COMSPEC%; PowerShell and bash write it literally. bash
+            # expands $BASH_VERSION; the other two do not.
+            D = 'echo %COMSPEC% 1>"' + $probe + '\out-D.txt"'
+            H = 'echo "$BASH_VERSION" > "' + $probe + '\out-H.txt"'
+          }
+
+          $entries = @()
+          foreach ($key in $forms.Keys) {
+            Write-Output ("form {0}: {1}" -f $key, $forms[$key])
+            $entries += @{ type = 'command'; command = $forms[$key] }
+          }
+
+          $claudeDir = Join-Path $env:USERPROFILE '.claude'
+          New-Item -ItemType Directory -Force -Path $claudeDir | Out-Null
+          $settingsPath = Join-Path $claudeDir 'settings.json'
+          # Preserved and put back, because the scenario that runs after this one reads the same
+          # file. A probe that leaves the machine different from how it found it turns the next
+          # failure into an investigation of the wrong thing.
+          $backup = $null
+          if (Test-Path -LiteralPath $settingsPath) {
+            $backup = Get-Content -Raw -LiteralPath $settingsPath
+          }
+          # Built as an object and serialized, rather than written as literal JSON: these commands
+          # are full of backslashes and quotes, and hand-escaping them is how a probe ends up
+          # testing its own escaping instead of the thing it was written to ask.
+          $settings = @{ hooks = @{ UserPromptSubmit = @(@{ hooks = $entries }) } }
+          $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+          Get-Content -LiteralPath $settingsPath | Write-Output
+
+          # A trivial prompt: the session only has to reach prompt submission, which is when
+          # UserPromptSubmit fires. No tools, so no permission decisions are involved.
+          & claude -p 'reply with the single word ok' --dangerously-skip-permissions 2>&1 |
+            Out-String | Write-Output
+          if ($LASTEXITCODE -ne 0) {
+            # Question 1 of the original probe: the runner is an administrator with UAC disabled,
+            # and Claude Code refuses to run as root on POSIX. If that is what happened, say so
+            # rather than reporting the forms as failed.
+            Write-Output "claude exited $LASTEXITCODE with the skip-permissions flag; retrying without it"
+            & claude -p 'reply with the single word ok' 2>&1 | Out-String | Write-Output
+            Write-Output "second attempt exited $LASTEXITCODE"
+          }
+
+          $found = @{}
+          Get-ChildItem -LiteralPath $probe -Filter 'out-*.txt' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              $name = $_.BaseName -replace '^out-', ''
+              $text = (Get-Content -Raw -LiteralPath $_.FullName -ErrorAction SilentlyContinue)
+              if ($null -eq $text) { $text = '' }
+              $found[$name] = $text.Trim()
+              Write-Output ("MARKER {0} = {1}" -f $name, $found[$name])
+            }
+
+          foreach ($key in $forms.Keys) {
+            if (-not $found.ContainsKey($key)) { Write-Output ("MISSING {0}" -f $key) }
+          }
+
+          $shell = 'unknown'
+          if ($found.ContainsKey('D') -and $found['D'] -match 'cmd\.exe') { $shell = 'cmd.exe' }
+          elseif ($found.ContainsKey('H') -and $found['H'] -match '^\d+\.') { $shell = 'bash' }
+          elseif ($found.ContainsKey('D') -or $found.ContainsKey('H')) { $shell = 'powershell' }
+          Write-Output ("HOOK_SHELL={0}" -f $shell)
+          Write-Output ("QUOTED_EXE_WITH_ARGS={0}" -f $found.ContainsKey('A'))
+
+          # Restored before the scenario runs. Beacon's own install merges into this file, and hooks
+          # left behind here would fire during the scenario and be indistinguishable from Beacon's.
+          if ($null -ne $backup) {
+            Set-Content -LiteralPath $settingsPath -Value $backup -NoNewline -Encoding utf8
+          } else {
+            Remove-Item -LiteralPath $settingsPath -Force -ErrorAction SilentlyContinue
+          }
+          if ($found.Count -eq 0) {
+            throw 'no hook ran at all: this says nothing about command forms, only that UserPromptSubmit did not fire'
+          }
+
+      # Splits #320 in half instead of guessing at it.
+      #
+      # `beacon ci exec` on Windows captures sometimes and not others, with the agent doing identical
+      # work either way. Two very different things could produce that, and no amount of reading tells
+      # them apart: either the collector never receives what the agent sends, or the agent never sends
+      # it. Fixing the wrong half is free to do and expensive to discover.
+      #
+      # So this asks the first half on its own, with no agent involved: start the collector, send it
+      # one OTLP request by hand, and see whether a line appears in the log. A pass here says the
+      # receiver and the Beacon exporter work on Windows and moves the whole question onto the agent's
+      # exporter. A failure says the opposite, and would explain the intermittency directly.
+      - name: Does the collector record an OTLP request at all
+        id: otlp
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $dir = 'C:\beacon-sandbox\otlp'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $logPath = Join-Path $dir 'runtime.jsonl'
+          $cfgPath = Join-Path $dir 'otelcol.yaml'
+
+          # HTTP rather than gRPC, deliberately: it can be driven with Invoke-WebRequest and no client
+          # library, so this step tests Beacon's receiving side without importing whatever the agent's
+          # gRPC stack might be doing wrong. If HTTP lands and the agent's gRPC does not, that
+          # difference is itself the finding.
+          $cfg = @(
+            'receivers:'
+            '  otlp:'
+            '    protocols:'
+            '      http:'
+            '        endpoint: 127.0.0.1:14318'
+            'exporters:'
+            '  beaconjson:'
+            ('    path: ' + (ConvertTo-Json $logPath))
+            'service:'
+            '  pipelines:'
+            '    logs:'
+            '      receivers: [otlp]'
+            '      exporters: [beaconjson]'
+          )
+          Set-Content -LiteralPath $cfgPath -Value $cfg -Encoding utf8
+
+          $proc = Start-Process -FilePath 'C:\beacon-sandbox\bin\beacon-otelcol.exe' `
+            -ArgumentList @('--config', $cfgPath) -PassThru -WindowStyle Hidden
+          try {
+            # Polled rather than slept: a fixed sleep is how a slow start becomes a mystery failure.
+            $ready = $false
+            foreach ($i in 1..30) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $c = New-Object System.Net.Sockets.TcpClient
+                $c.Connect('127.0.0.1', 14318)
+                $c.Close()
+                $ready = $true
+                break
+              } catch { }
+            }
+            if (-not $ready) { throw 'the collector never listened on 127.0.0.1:14318' }
+
+            $body = @{
+              resourceLogs = @(@{
+                resource = @{ attributes = @(@{ key = 'service.name'; value = @{ stringValue = 'otlp-probe' } }) }
+                scopeLogs = @(@{ logRecords = @(@{
+                  timeUnixNano = '1700000000000000000'
+                  body = @{ stringValue = 'BEACON_OTLP_PROBE' }
+                  attributes = @(@{ key = 'event.name'; value = @{ stringValue = 'probe' } })
+                }) })
+              })
+            } | ConvertTo-Json -Depth 12
+
+            $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:14318/v1/logs' -Method Post `
+              -ContentType 'application/json' -Body $body -UseBasicParsing
+            Write-Output "OTLP_POST_STATUS=$($resp.StatusCode)"
+
+            # The exporter writes on its own schedule, so the log is polled rather than read once.
+            $landed = $false
+            foreach ($i in 1..20) {
+              Start-Sleep -Seconds 1
+              if ((Test-Path -LiteralPath $logPath) -and
+                  (Select-String -LiteralPath $logPath -Pattern 'BEACON_OTLP_PROBE' -Quiet)) {
+                $landed = $true
+                break
+              }
+            }
+            Write-Output "OTLP_LANDED=$landed"
+            if (Test-Path -LiteralPath $logPath) {
+              Write-Output "log bytes: $((Get-Item -LiteralPath $logPath).Length)"
+              Get-Content -LiteralPath $logPath -TotalCount 2 | Write-Output
+            } else {
+              Write-Output 'the exporter never created the log file'
+            }
+            if (-not $landed) {
+              throw 'the collector accepted an OTLP request and no event reached the log: the receiving half is broken, not the agent'
+            }
+            Write-Output 'the collector receives OTLP and writes Beacon JSONL on Windows'
+          } finally {
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
+      # Phase 3 registers beacon-otelcol.exe with the Service Control Manager directly, on the
+      # strength of the builder-generated main_windows.go calling svc.Run(otelcol.NewSvcHandler).
+      # That is an assumption about a code path nothing has exercised: running the binary as an
+      # ordinary child process proves it starts, not that it speaks the SCM control protocol. A
+      # service that never reaches the dispatcher is killed after about 30 seconds, so getting this
+      # wrong means the backend needs a service host rather than a direct registration -- a
+      # different design, and much cheaper to learn now than after it is written.
+      - name: Can the collector run as a Windows service
+        id: scm
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $svc = 'BeaconCollectorScmProbe'
+          $dir = 'C:\beacon-sandbox\scm'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $logPath = Join-Path $dir 'runtime.jsonl'
+          $cfgPath = Join-Path $dir 'otelcol.yaml'
+
+          # Built line by line rather than with a here-string: a here-string's body has to start at
+          # column zero, which is outside a YAML block scalar.
+          $cfg = @(
+            'receivers:'
+            '  otlp:'
+            '    protocols:'
+            '      grpc:'
+            '        endpoint: 127.0.0.1:14317'
+            'exporters:'
+            '  beaconjson:'
+            ('    path: ' + (ConvertTo-Json $logPath))
+            'service:'
+            '  pipelines:'
+            '    logs:'
+            '      receivers: [otlp]'
+            '      exporters: [beaconjson]'
+          )
+          Set-Content -LiteralPath $cfgPath -Value $cfg -Encoding utf8
+
+          # binPath is a single string with the arguments inside it, and the exe quoted, or the SCM
+          # splits it on the first space in the path.
+          $bin = 'C:\beacon-sandbox\bin\beacon-otelcol.exe'
+          & sc.exe create $svc binPath= "`"$bin`" --config `"$cfgPath`"" start= demand | Out-Null
+          & sc.exe start $svc | Out-Null
+
+          # Polled rather than read from the start command's status: a service that fails to reach
+          # the dispatcher is killed by the SCM, which start does not report.
+          $state = ''
+          foreach ($i in 1..15) {
+            Start-Sleep -Seconds 2
+            $q = & sc.exe query $svc 2>&1 | Out-String
+            if ($q -match 'STATE\s+:\s+\d+\s+(\w+)') { $state = $Matches[1] }
+            if ($state -eq 'RUNNING' -or $state -eq 'STOPPED') { break }
+          }
+          Write-Output "SCM_STATE=$state"
+          & sc.exe query $svc 2>&1 | Out-String | Write-Output
+
+          & sc.exe stop $svc 2>&1 | Out-Null
+          & sc.exe delete $svc 2>&1 | Out-Null
+
+          if ($state -ne 'RUNNING') {
+            throw "beacon-otelcol.exe did not reach RUNNING under the SCM (state=$state): Phase 3 would need a service host rather than direct registration"
+          }
+          Write-Output 'the collector runs as a Windows service with no wrapper'
+
+      - name: Report the environment the probe ran in
+        run: |
+          Write-Output "pwsh: $($PSVersionTable.PSVersion)"
+          Write-Output "identity: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+          $principal = New-Object Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+          Write-Output "elevated: $($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          & claude --version
+          & C:\beacon-sandbox\bin\beacon.exe version
+
+      - name: Run the scenario
+        id: run
+        continue-on-error: true
+        working-directory: beacon-sandbox
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Passed through the environment, never interpolated into the script. `${{ }}` expansion
+          # happens before PowerShell parses anything, so a value containing a quote would close the
+          # literal and the rest would execute as code -- in this step, with the API key in scope.
+          # claude_version is whitelisted above for the same reason; this makes the two consistent.
+          # Reported by Cursor Bugbot.
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          # Not $args: that name is a PowerShell automatic variable holding the script's own
+          # arguments, and appending to it does not behave the way it reads.
+          $sandboxArgs = @('run', '--provider', 'local')
+          if (-not [string]::IsNullOrWhiteSpace($env:SCENARIO)) {
+            # Validated as well as passed safely. A scenario id is a lowercase slug, so anything
+            # else is a mistake worth rejecting outright rather than forwarding to a flag.
+            if ($env:SCENARIO -notmatch '^[a-z0-9][a-z0-9-]*$') {
+              throw "invalid scenario id '$env:SCENARIO': expected a lowercase slug such as w00-probe"
+            }
+            $sandboxArgs += @('--scenario', $env:SCENARIO)
+          }
+          go run ./cmd/beacon-sandbox @sandboxArgs
+
+      # Always uploaded. A failed run's artifacts are exactly what a maintainer needs, and the
+      # host-state and argv metadata are recorded even when collection itself failed.
+      - name: Upload collected artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beacon-sandbox-runs
+          path: beacon-sandbox/runs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The scenario's own exit status decides the job, after the artifacts are safely uploaded.
+      # Without this the job would go green on a failing scenario because of continue-on-error.
+      - name: Reflect the scenario outcome
+        if: always()
+        env:
+          # A step outcome is a GitHub-controlled enum rather than user input, so interpolating it
+          # would be safe. It goes through the environment anyway so that "no ${{ }} inside a run
+          # block" holds without exception -- a rule with one blessed exception is a rule nobody can
+          # check mechanically.
+          RUN_OUTCOME: ${{ steps.run.outcome }}
+        run: |
+          Write-Output "scenario outcome: $env:RUN_OUTCOME"
+          if ($env:RUN_OUTCOME -ne 'success') {
+            throw "the scenario did not pass; read the uploaded runs/ artifacts and the verdict.json inside them"
+          }

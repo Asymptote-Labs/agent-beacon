@@ -41,7 +41,12 @@ An **agent harness** is the runtime or integration that produced an event. It ca
 
 ## Cloud-Agent Telemetry
 
-**Cloud-agent telemetry** is activity captured from provider-managed cloud agent sandboxes. Beacon cloud helpers print hook and storage setup so cloud sessions can produce Beacon-compatible `runtime.jsonl` artifacts, currently with self-serve Google Cloud Storage upload paths for supported cloud agents.
+**Cloud-agent telemetry** is activity captured from provider-managed cloud agent
+sandboxes. Beacon cloud helpers print hook and storage setup so cloud sessions
+can produce Beacon-compatible `runtime.jsonl` artifacts and upload compressed
+per-run snapshots directly to customer-managed Google Cloud Storage or Amazon
+S3. Cursor Cloud project hooks capture supported events after the writable
+environment becomes available, so early bootstrap turns may precede telemetry.
 
 ## Observe SDK
 

@@ -218,6 +218,7 @@ func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
 		"OTEL_METRICS_EXPORTER=otlp",
 		"OTEL_EXPORTER_OTLP_PROTOCOL=grpc",
 		"OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317",
+		"OTEL_LOG_TOOL_DETAILS=1",
 		"OTEL_LOG_USER_PROMPTS=1",
 		"BEACON_CI_LOG_PATH=" + session.LogPath,
 	} {

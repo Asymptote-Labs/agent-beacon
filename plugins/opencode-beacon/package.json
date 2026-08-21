@@ -5,7 +5,9 @@
   "description": "Beacon endpoint telemetry adapter for opencode",
   "type": "module",
   "scripts": {
-    "check": "bun --check src/beacon.ts"
+    "check": "bun --check src/beacon.ts && cmp src/beacon.ts ../../cli/beacon/internal/endpoint/hooks/assets/opencode/beacon.ts",
+    "sync": "cp src/beacon.ts ../../cli/beacon/internal/endpoint/hooks/assets/opencode/beacon.ts",
+    "test": "bun test src/beacon.test.ts"
   },
   "exports": {
     ".": "./src/beacon.ts"

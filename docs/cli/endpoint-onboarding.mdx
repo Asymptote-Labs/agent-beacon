@@ -1,0 +1,107 @@
+---
+title: "beacon endpoint onboarding"
+description: "Show, reset, or resend the one-time Beacon onboarding record"
+---
+
+## Command Overview
+
+`beacon endpoint onboarding` inspects the one-time onboarding record written the first
+time `beacon endpoint install` runs in a terminal.
+
+```bash title="Command syntax"
+beacon endpoint onboarding [flags]
+```
+
+The record lives in `~/.beacon/profile.json`. It survives uninstall, so reinstalling
+Beacon does not ask again.
+
+## First-run onboarding
+
+The first interactive `beacon endpoint install` asks two questions — how you are using
+Beacon, and your email — and sends the answers to Asymptote once. This is how we decide
+which agent runtimes and integrations to build next.
+
+What is sent, and nothing else:
+
+| Field | Example |
+|-------|---------|
+| Email you enter | `you@company.com` |
+| Work, personal, or evaluating | `work` |
+| OS, architecture, OS version | `darwin`, `arm64`, `15.5` |
+| Beacon version and install method | `v0.0.31`, `homebrew` |
+| Names of agent runtimes on this machine | `claude_code`, `cursor` |
+| A random install ID | `64871b2b…` |
+
+Prompts, file contents, commands, telemetry events, and repository names are never
+sent. The endpoint agent itself stays local-only; this is one request at install time,
+not an ongoing channel.
+
+The prompt never appears non-interactively. Package postinstall scripts, MDM
+deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
+skip it silently.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--reset` | Clear the onboarding record so the question is asked again |
+| `--resend` | Retry a signup that could not be delivered |
+| `--json` | Print the onboarding record as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+## Unattended installs
+
+Set `BEACON_ONBOARDING=0` to suppress the prompt on an install that would otherwise be
+interactive. There is no CLI flag for this: it exists for unattended CI and MDM
+workflows.
+
+```bash title="Suppress the prompt"
+BEACON_ONBOARDING=0 beacon endpoint install
+```
+
+For a fleet rollout where you do want attribution but have no terminal, supply both
+answers up front and Beacon records them without prompting:
+
+```bash title="Headless attribution for MDM"
+BEACON_ONBOARDING_EMAIL=it@company.com BEACON_ONBOARDING_USAGE=work \
+  beacon endpoint install
+```
+
+`BEACON_ONBOARDING_USAGE` accepts `work`, `personal`, or `evaluating`. An invalid value
+is reported on stderr and ignored rather than failing the install.
+
+## Examples
+
+Show what was recorded:
+
+```bash title="Show the onboarding record"
+beacon endpoint onboarding
+```
+
+Clear it so the next install asks again:
+
+```bash title="Reset the onboarding record"
+beacon endpoint onboarding --reset
+```
+
+Retry a submission that could not reach Asymptote. A failed submission never fails an
+install; the payload is kept and retried automatically on the next install or repair.
+
+```bash title="Resend a queued signup"
+beacon endpoint onboarding --resend
+```
+
+To have your record deleted, email the install ID shown by this command to
+[support@asymptotelabs.ai](mailto:support@asymptotelabs.ai).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Endpoint install" icon="download" href="/cli/endpoint-install">
+    Configure endpoint telemetry and collector service files.
+  </Card>
+  <Card title="Endpoint config" icon="gear" href="/cli/endpoint-config">
+    Inspect, validate, and update endpoint configuration.
+  </Card>
+</Columns>

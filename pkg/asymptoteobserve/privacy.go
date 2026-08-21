@@ -18,12 +18,24 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`),
 }
 
+var assignedSecretPattern = regexp.MustCompile("(?i)(?:api[_-]?key|token|secret|password|authorization)\\s*[:=]\\s*[\"'`]?([^\"'`,\\s]+)")
+
 type PrivacyOptions struct {
 	RedactSecrets bool
 	StringLimit   int
 }
 
 func RedactString(value string) string {
+	// Remember assignment values before replacing their labeled occurrence so
+	// repeated bare copies in the same retained prompt/output are also removed.
+	// This is common in model reasoning that quotes `token=value` and later
+	// refers to `value` by itself.
+	var assigned []string
+	for _, match := range assignedSecretPattern.FindAllStringSubmatch(value, -1) {
+		if len(match) > 1 && len(match[1]) >= 8 {
+			assigned = append(assigned, match[1])
+		}
+	}
 	for _, pattern := range secretPatterns {
 		value = pattern.ReplaceAllStringFunc(value, func(match string) string {
 			if strings.Contains(match, "=") {
@@ -34,6 +46,9 @@ func RedactString(value string) string {
 			}
 			return "[REDACTED]"
 		})
+	}
+	for _, secret := range assigned {
+		value = strings.ReplaceAll(value, secret, "[REDACTED]")
 	}
 	return value
 }

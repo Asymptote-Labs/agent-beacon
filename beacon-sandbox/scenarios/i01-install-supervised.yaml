@@ -1,0 +1,58 @@
+id: i01-install-supervised
+# Does `beacon endpoint install` actually work, and does an installed collector receive telemetry?
+#
+# Every s0* scenario collects through `beacon ci exec`, an ephemeral collector that needs no
+# service manager. That is a real shipping path, but it cannot tell you whether a persistent
+# install works -- and until recently on Linux it did not: preflight refused before writing
+# anything, and Load/Restart silently returned nil so an install could report success while
+# starting nothing.
+#
+# This installs for real, then runs a plain `claude` session against the installed collector with
+# no wrapper anywhere. In a gVisor sandbox PID 1 is not systemd, so this exercises the supervised
+# backend -- the fallback for containers. The systemd path is covered separately, because systemd
+# cannot be PID 1 here.
+#
+# What this proves that s01-s07 cannot: config written where Beacon says it did, a service that
+# reports itself running, and a persistent collector receiving OTLP on loopback.
+install:
+  mode: user
+  service: none
+  expect_status_running: true
+  # Asserted rather than assumed: if systemd detection ever started returning true in a container,
+  # this scenario would silently stop covering the fallback backend it exists to cover.
+  expect_service_kind: none
+  # This backend is where rollback is hardest to get right, because its unit file is its pidfile --
+  # a file rollback restores. Restoring it puts back a pid that has already been terminated, so a
+  # rollback that stops the service afterwards stops nothing and leaves the failed install's
+  # collector running with another started beside it. Cheap to check here: no root, no systemd.
+  verify_restart_on_reinstall: true
+  verify_rollback_on_failed_reinstall: true
+  verify_uninstall: true
+
+prompt: >-
+  Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}
+sentinel: /home/agent/work/i01.sentinel
+budget_usd: 1.0
+timeout_seconds: 420
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    fields: ["prompt.text", "session.id", "harness.name"]
+    why: >-
+      Telemetry reaching a persistently installed collector is the whole point of this scenario.
+      If this fails, install wrote files but the collector is not receiving OTLP.
+
+  - action: token.usage
+    fields: ["gen_ai.usage.input_tokens", "model"]
+    why: >-
+      Confirms the metrics pipeline works through an installed collector and not only through the
+      CI one, which is a separate code path.
+
+  - action: command.executed
+    contains: ["{{canary}}"]
+    fields: ["command.command"]
+    why: >-
+      The same detection surface s02 protects, checked through the install path. Keeping it
+      non-optional means the installed collector is never allowed to look healthier than the CI
+      one for the same telemetry.

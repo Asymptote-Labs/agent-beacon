@@ -1,5 +1,10 @@
 # Beacon Hooks Makefile
 
+# Static binaries, always. See cli/beacon/Makefile for why; this binary is the one that matters
+# most, because it is embedded in the CLI and extracted at install time, so a dynamic build here
+# fails on the target host rather than on the build host.
+export CGO_ENABLED = 0
+
 # Build variables
 BINARY := beacon-hooks
 LDFLAGS := -s -w

@@ -46,9 +46,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - uses: actions/setup-go@v5
         with:
           go-version-file: cli/beacon/go.mod
+      - name: Check OpenCode plugin
+        working-directory: plugins/opencode-beacon
+        run: bun run check && bun test
       - name: Build embedded hooks binary
         working-directory: cli/beacon
         # hooks.bin is gitignored (build-time artifact). The CLI embeds it via
@@ -77,6 +83,7 @@ jobs:
           ./beacon --help > /tmp/beacon-help.txt
           ./beacon endpoint --help > /tmp/beacon-endpoint-help.txt
           ./beacon endpoint hooks --help > /tmp/beacon-hooks-help.txt
+          ./beacon endpoint onboarding --help > /tmp/beacon-onboarding-help.txt
           ./beacon endpoint integrations claude-cowork --help > /tmp/beacon-cowork-help.txt
           ./beacon endpoint wazuh --help > /tmp/beacon-wazuh-help.txt
           ./beacon endpoint rapid7 --help > /tmp/beacon-rapid7-help.txt
@@ -89,6 +96,26 @@ jobs:
               exit 1
             fi
           done
+
+  beacon-sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: beacon-sandbox/go.mod
+      # These tests are hermetic: no Modal account, no Anthropic key, no sandbox, and no
+      # paid resources. (Go module downloads still happen, as in every other job here.)
+      # They gate because they are what makes a green verification run mean
+      # something -- the adversarial cases assert a damaged log still fails, so
+      # if they rot, the sandbox can pass without having checked anything.
+      # The end-to-end sandbox run itself costs real money and is not run in CI.
+      - name: Test beacon-sandbox
+        working-directory: beacon-sandbox
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
 
   cross-build:
     runs-on: ubuntu-latest
@@ -108,6 +135,9 @@ jobs:
           - goos: linux
             goarch: arm64
             make_target: build-linux-arm64
+          - goos: windows
+            goarch: amd64
+            make_target: build-windows-amd64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -116,6 +146,231 @@ jobs:
       - name: Build Beacon for ${{ matrix.goos }}/${{ matrix.goarch }}
         working-directory: cli/beacon
         run: make ${{ matrix.make_target }}
+
+      # Linux binaries must be statically linked, and this runner is where that can regress: a
+      # linux target here is a native build with a C toolchain present, so cgo defaults on and the
+      # net package selects the libc resolver. The result carries a glibc version floor that works
+      # on this runner and fails on an older or stripped host -- exactly the customers who cannot
+      # easily diagnose it. Checked on the ELF header rather than by running ldd, which reports
+      # "not a dynamic executable" to stdout or stderr depending on version.
+      - name: Linux binaries must be statically linked
+        if: matrix.goos == 'linux'
+        working-directory: cli/beacon
+        run: |
+          set -euo pipefail
+          for bin in "beacon-linux-${{ matrix.goarch }}" \
+                     "../beacon-hooks/beacon-hooks-linux-${{ matrix.goarch }}"; do
+            # Each step below fails closed. Piping readelf straight into `grep -q INTERP` would
+            # not: a missing binary or a runner without readelf produces empty input, grep matches
+            # nothing, and the check reports success for a binary it never looked at.
+            [ -f "$bin" ] || { echo "no binary at $bin -- the build step did not produce what this checks" >&2; exit 1; }
+
+            headers="$(readelf -l "$bin")" || { echo "readelf failed on $bin, so its linkage is unknown" >&2; exit 1; }
+
+            case "$headers" in
+              *"Program Headers"*) ;;
+              *) echo "readelf produced no program headers for $bin, so its linkage is unknown" >&2; exit 1 ;;
+            esac
+
+            case "$headers" in
+              *INTERP*)
+                echo "$bin is dynamically linked: it carries a PT_INTERP segment naming a loader." >&2
+                echo "Built this way, it fails on any host whose glibc predates the build host's." >&2
+                printf '%s\n' "$headers" | grep -A1 INTERP >&2
+                exit 1 ;;
+            esac
+
+            echo "ok: $bin is statically linked"
+          done
+
+  linux-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      # The embedded hooks binary must match the platform under test: the CLI validates its
+      # architecture at runtime, so a macOS placeholder fails hook installation on Linux.
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon
+        run: make build-hooks-current
+      - name: Test beacon CLI on Linux
+        working-directory: cli/beacon
+        run: go test ./...
+      - name: Test endpoint packages with the race detector
+        working-directory: cli/beacon
+        run: go test -race ./internal/endpoint/...
+      - name: Test hook adapter on Linux
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Test collector exporter on Linux
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
+      - name: Test observe SDK and threat rules on Linux
+        working-directory: pkg/asymptoteobserve
+        run: go test ./...
+
+  # Runs the unit suites on a real Windows runner. The cross-build matrix proves the code compiles
+  # for windows/amd64; this proves the per-OS implementations behave -- file locking through
+  # LockFileEx, file identity through GetFileInformationByHandle, and process liveness through
+  # OpenProcess, none of which a cross-compile exercises at all.
+  windows-test:
+    runs-on: windows-2025
+    # Bounded because a hang here is a plausible failure mode rather than a hypothetical: a pipe
+    # deadlock in a test helper held this job for the full 10-minute Go test timeout, and without a
+    # job bound the GitHub default of 6 hours would apply on top of it. Generous enough for a slow
+    # Windows runner, short enough that a hang reports as a failure the same morning.
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      # The embedded hooks binary must match the platform under test: the CLI validates its
+      # architecture at runtime, so a placeholder fails hook installation on Windows.
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon-hooks
+        run: |
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+      # Scoped rather than `./...`, and the list is measured rather than assumed.
+      #
+      # A survey run on this runner tested every package and reported 25 passing and 16 failing, so
+      # every one of these is here because it was observed to pass on Windows -- not because it looked
+      # portable. That distinction matters: internal/endpoint/hooks shows the most POSIX-looking
+      # assertions in the repository and passes, because most of those hits are literal path strings
+      # inside assertions rather than paths the test uses. Guessing from grep would have scoped in the
+      # wrong set in both directions.
+      #
+      # Widening has repeatedly paid for itself by surfacing production bugs rather than test noise:
+      # validateExecutable tested the POSIX executable bit, which is never set on Windows, so
+      # DiscoverBinary rejected every collector binary there.
+      #
+      # The 16 that still fail are listed in #318 with the reason each one fails. They are excluded
+      # rather than tolerated: a permanently red gate is one nobody reads. The scope widens as they are
+      # fixed, and must not widen by adding `./...` back while the assumptions remain.
+      - name: Test the ported packages on Windows
+        working-directory: cli/beacon
+        run: |
+          go test `
+            ./internal/devincloud/... `
+            ./internal/embedded/... `
+            ./internal/endpoint/activity/... `
+            ./internal/endpoint/collector/... `
+            ./internal/endpoint/config/... `
+            ./internal/endpoint/detect/... `
+            ./internal/endpoint/harness/... `
+            ./internal/endpoint/hooks/... `
+            ./internal/endpoint/integrations/... `
+            ./internal/endpoint/inventory/... `
+            ./internal/endpoint/schema/... `
+            ./internal/endpoint/selfupdate/... `
+            ./internal/endpoint/sentinel/... `
+            ./internal/endpoint/service/... `
+            ./internal/endpoint/wazuh/... `
+            ./internal/endpoint/writer/... `
+            ./internal/ingest/... `
+            ./internal/mcpserver/... `
+            ./internal/tokens/... `
+            ./internal/updatecheck/... `
+            ./internal/version/...
+      - name: Test the ported packages with the race detector
+        working-directory: cli/beacon
+        run: |
+          go test -race `
+            ./internal/endpoint/writer/... `
+            ./internal/endpoint/inventory/... `
+            ./internal/endpoint/service/...
+      - name: Test hook adapter on Windows
+        working-directory: cli/beacon-hooks
+        run: go test ./...
+      - name: Test collector exporter on Windows
+        working-directory: collector-builder/exporter/beaconjsonexporter
+        run: go test ./...
+      - name: Test observe SDK and threat rules on Windows
+        working-directory: pkg/asymptoteobserve
+        run: go test ./...
+      # Runs the generated-PowerShell parse test, which skips on a machine without pwsh.
+      - name: Test the sandbox harness on Windows
+        working-directory: beacon-sandbox
+        run: go test ./...
+
+  # Exercises the real systemd install path: unit generation, systemctl enable/active,
+  # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
+  # PID 1, which only a privileged container provides -- the GitHub runner's own systemd is not
+  # ours to install units into.
+  linux-systemd-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Build Linux beacon binary
+        working-directory: cli/beacon
+        run: make build-linux-amd64
+      - name: Build collector for Linux
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          cd collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist. A fresh checkout
+          # has no dist/ at all, which is why this only failed in CI.
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+          mkdir -p dist/beacon-otelcol/linux_amd64
+          cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol
+      - name: systemd endpoint smoke test
+        env:
+          BEACON_SMOKE_ARCH: amd64
+        run: sh packaging/linux/smoke-systemd.sh
+
+  # Installs the built .deb in a container where systemd is PID 1 and asserts that installing the
+  # package alone yields a running system-mode endpoint. smoke-systemd covers the service backend;
+  # this covers the package postinstall doing it for the user, which is what they actually do.
+  linux-package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+      - name: Build collector for Linux
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          cd collector-builder
+          # builder mkdirs its output path without -p, so the parent has to exist.
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+            mkdir -p dist/beacon-otelcol/linux_$arch
+            cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_$arch/beacon-otelcol
+          done
+          # The goreleaser before-hook stages every target, so each one must exist here. These are
+          # stand-ins: this job checks that packaging works, not that the binaries run, so a Linux
+          # build stood in a darwin directory is enough to exercise the archive and package steps.
+          for arch in amd64 arm64; do
+            mkdir -p dist/beacon-otelcol/darwin_$arch
+            cp dist/beacon-otelcol/linux_$arch/beacon-otelcol dist/beacon-otelcol/darwin_$arch/beacon-otelcol
+          done
+          # Windows is amd64 only, and carries the .exe the release archive ships -- the same name
+          # build-release-collectors.sh stages, so the before-hook finds it under either script.
+          mkdir -p dist/beacon-otelcol/windows_amd64
+          cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          install-only: true
+      - name: Build packages
+        working-directory: cli/beacon
+        run: goreleaser release --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+      - name: Install the .deb and verify the endpoint
+        env:
+          BEACON_SMOKE_ARCH: amd64
+        run: sh packaging/linux/smoke-package.sh
 
   package-smoke:
     runs-on: macos-latest
@@ -143,3 +398,254 @@ jobs:
       - name: Endpoint install smoke test
         run: sh packaging/macos/smoke-endpoint.sh
 
+
+  # Builds the MSI and installs it, because the only claim worth making about an installer is that
+  # installing it works. Everything else -- that the files are in the package, that the custom action
+  # is sequenced correctly -- is inference from a manifest.
+  #
+  # The mirror of linux-package-smoke, which installs the .deb and checks the endpoint came up.
+  windows-package-smoke:
+    runs-on: windows-2025
+    # Bounded for the same reason windows-test is: a wedged msiexec would otherwise hold a runner for
+    # the GitHub default of six hours.
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/beacon/go.mod
+
+      # Cheap, and it runs before anything is built: a syntax error in a packaging script would
+      # otherwise surface inside an MSI custom action, where what the user sees is a rollback.
+      - name: Validate the packaging scripts
+        run: pwsh -NoProfile -File packaging/windows/test-endpoint-scripts.ps1
+
+      - name: Build the binaries
+        run: |
+          Set-Location cli\beacon-hooks
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon-hooks build failed" }
+          # Embedded before the CLI is built, or the CLI carries the placeholder and hook
+          # installation fails at runtime with an architecture mismatch.
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+          Set-Location ..\beacon
+          go build -o beacon.exe .
+          if ($LASTEXITCODE -ne 0) { throw "beacon build failed" }
+
+      - name: Build the collector
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          Set-Location collector-builder
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
+          & "$(go env GOPATH)\bin\builder.exe" --config builder.yaml
+          if ($LASTEXITCODE -ne 0) { throw "collector build failed" }
+          # The builder names its output from dist.name verbatim and does not append .exe, even
+          # though what it emits is a PE binary. Both spellings are accepted so a future builder
+          # version that does append it keeps working.
+          $produced = 'dist\beacon-otelcol\beacon-otelcol'
+          if (-not (Test-Path -LiteralPath $produced) -and (Test-Path -LiteralPath "$produced.exe")) {
+            $produced = "$produced.exe"
+          }
+          if (-not (Test-Path -LiteralPath $produced)) { throw "collector build produced no binary" }
+          Copy-Item $produced beacon-otelcol.exe
+
+      - name: Build two MSIs, so the upgrade path can be exercised
+        run: |
+          # Two versions rather than one. Installing over an existing install is a different code path
+          # from a first install, and on Windows it is the harder one: MSI cannot replace a file that a
+          # running service holds open, so an upgrade that does not stop the endpoint first either
+          # fails, defers to a reboot, or silently keeps the old collector.
+          foreach ($version in @('0.0.1', '0.0.2')) {
+            pwsh -NoProfile -File packaging\windows\build-msi.ps1 `
+              -Version $version `
+              -BeaconExe cli\beacon\beacon.exe `
+              -HooksExe cli\beacon-hooks\beacon-hooks.exe `
+              -CollectorExe collector-builder\beacon-otelcol.exe `
+              -OutFile "$env:GITHUB_WORKSPACE\Beacon-$version.msi"
+            if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\Beacon-$version.msi")) {
+              throw "no MSI was produced for $version"
+            }
+            if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\Beacon-$version.msi.sha256")) {
+              throw "no checksum was produced for $version"
+            }
+          }
+
+      - name: Install it
+        run: |
+          # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
+          # without it msiexec reports only an exit code.
+          $log = "$env:GITHUB_WORKSPACE\install.log"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
+          )
+          if ($p.ExitCode -ne 0) {
+            Write-Output "--- install log (tail) ---"
+            Get-Content -LiteralPath $log -Tail 120 | Write-Output
+            throw "msiexec /i exited $($p.ExitCode)"
+          }
+
+      - name: The endpoint must be installed and running
+        run: |
+          $beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
+          if (-not (Test-Path -LiteralPath $beacon)) { throw "beacon.exe is not at $beacon" }
+          foreach ($name in @('beacon-hooks.exe', 'beacon-otelcol.exe')) {
+            $path = Join-Path $env:ProgramFiles "Beacon\bin\$name"
+            if (-not (Test-Path -LiteralPath $path)) { throw "$name is missing from the payload" }
+          }
+
+          # The claim a package makes is a *running* endpoint, so the service is asserted rather than
+          # the files. Installing three binaries and registering nothing would pass a file check.
+          $state = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          Write-Output $state
+          if ($state -notmatch 'RUNNING') {
+            & $beacon endpoint status --system | Out-String | Write-Output
+            throw "the BeaconCollector service is not running after install"
+          }
+
+          $status = & $beacon endpoint status --system --json | Out-String
+          if ($status -notmatch '"kind"\s*:\s*"windows-service"') {
+            Write-Output $status
+            throw "status does not report the windows-service backend; the install picked a different one"
+          }
+          Write-Output "installed, running, backend=windows-service"
+          exit 0
+
+      - name: Upgrading must replace the payload and leave it running
+        run: |
+          $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
+          if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
+
+          $log = "$env:GITHUB_WORKSPACE\upgrade.log"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
+          )
+          if ($p.ExitCode -ne 0) {
+            Write-Output "--- upgrade log (tail) ---"
+            Get-Content -LiteralPath $log -Tail 150 | Write-Output
+            throw "msiexec upgrade exited $($p.ExitCode)"
+          }
+
+          # 3010 is "reboot required", which msiexec returns when it could not replace a file in use
+          # and deferred it. It is not an error code, which is exactly why it has to be checked for:
+          # the install would report success while still running the old collector.
+          if (Select-String -LiteralPath $log -Pattern 'Reboot' -Quiet) {
+            Write-Output "--- reboot mentions in the upgrade log ---"
+            Select-String -LiteralPath $log -Pattern 'Reboot' | Select-Object -First 10 | Write-Output
+          }
+
+          $state = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          Write-Output $state
+          if ($state -notmatch 'RUNNING') {
+            throw "the BeaconCollector service is not running after the upgrade"
+          }
+
+          # Existence, not byte-identity, and the distinction is the contract rather than a weaker
+          # test. The install action runs on an upgrade and `endpoint install` rewrites its own config
+          # with the settings it was given -- that is what makes it idempotent. So a preserved-verbatim
+          # config is not something an upgrade promises, and asserting it would be asserting a property
+          # the design does not have.
+          #
+          # An earlier version of this step hashed the file before and after and compared them. It
+          # passed, and proved nothing: a first install and a post-upgrade install both write the same
+          # defaults, so the hashes matched whether or not the file had been recreated. Retention is a
+          # real contract for *uninstall*, where nothing reinstalls afterwards, and that is where the
+          # step below tests it with a marker.
+          if (-not (Test-Path -LiteralPath $configPath)) {
+            throw "the upgrade removed the endpoint configuration"
+          }
+
+          # Exactly one product, asserted in both directions. A MajorUpgrade that fails to match its
+          # predecessor leaves both registered, which a user sees as two entries in Installed Apps.
+          #
+          # Read from the uninstall registry keys rather than Win32_Product: that class enumerates by
+          # reconfiguring every installed MSI, which is slow and has side effects, and a failed query
+          # returns nothing -- so counting its results would have passed on zero, meaning a completely
+          # broken upgrade would satisfy a check written to catch a duplicated one.
+          #
+          # Both registry views are searched because a 32-bit installer writes under Wow6432Node.
+          $keys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          )
+          $entries = @(
+            Get-ItemProperty -Path $keys -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -eq 'Beacon Endpoint Agent' }
+          )
+          Write-Output "registered product entries: $($entries.Count)"
+          foreach ($entry in $entries) { Write-Output "  $($entry.DisplayName) $($entry.DisplayVersion)" }
+          if ($entries.Count -ne 1) {
+            throw "expected exactly one registered product after the upgrade, found $($entries.Count)"
+          }
+          if ($entries[0].DisplayVersion -ne '0.0.2') {
+            throw "the registered product reports version $($entries[0].DisplayVersion), not the 0.0.2 that was just installed"
+          }
+          exit 0
+
+      - name: Uninstall must remove the service and keep the data
+        run: |
+          $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'
+          $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
+          if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration to retain before uninstall" }
+
+          # A marker planted in the operator's config, so retention means *this* file came back rather
+          # than a fresh default one appearing where it used to be. Nothing in the uninstall path
+          # rewrites this file, so the marker survives exactly when the file does -- which is what
+          # makes it a test of the stash-and-restore rather than of the filesystem.
+          #
+          # An unknown JSON field is ignored by Beacon when it reads the config, so planting one cannot
+          # change behavior; it is also the first thing a rewrite would drop.
+          $marker = [Guid]::NewGuid().ToString('N')
+          $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+          $config | Add-Member -NotePropertyName 'beacon_smoke_marker' -NotePropertyValue $marker -Force
+          $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $configPath -Encoding utf8
+          Write-Output "planted marker $marker in $configPath"
+
+          # The upgraded product is what is installed, so that is what gets removed. Each build gets a
+          # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
+            '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
+          )
+          if ($p.ExitCode -ne 0) {
+            Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
+            throw "msiexec /x exited $($p.ExitCode)"
+          }
+
+          # The failure this guards against is the one review caught in the service backend: an
+          # uninstall that reports success while the service stays registered and starts at boot.
+          #
+          # sc.exe exits 1060 for a service that does not exist, which is the outcome being asserted --
+          # so $LASTEXITCODE is deliberately cleared afterwards. Leaving it set fails the step for the
+          # assertion passing, which is how the first version of this job reported a red build over a
+          # correct uninstall.
+          $query = (& sc.exe query BeaconCollector 2>&1 | Out-String)
+          $global:LASTEXITCODE = 0
+          if ($query -notmatch '1060') {
+            Write-Output $query
+            throw "the BeaconCollector service still exists after uninstall"
+          }
+
+          if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe')) {
+            throw "the payload was not removed"
+          }
+
+          # Retention, which is a contract rather than an accident: an uninstall is often the first
+          # half of an upgrade, and destroying an operator's configuration and collected telemetry is
+          # not something a package removal should do without being asked. --keep-config alone does not
+          # achieve this -- it covers harness settings, not Beacon's own config -- which is why the
+          # uninstall script sets these files aside and puts them back.
+          if (-not (Test-Path -LiteralPath $configPath)) {
+            throw "uninstall removed the endpoint configuration; only a purge should do that"
+          }
+          $restored = Get-Content -Raw -LiteralPath $configPath
+          if ($restored -notmatch [regex]::Escape($marker)) {
+            Write-Output $restored
+            throw "the configuration file exists but is not the one that was there before: the marker is gone, so it was recreated rather than preserved"
+          }
+          Write-Output "marker survived: the operator's own configuration came back"
+          Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
+          exit 0

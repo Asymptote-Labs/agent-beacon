@@ -1,15 +1,17 @@
 package harness
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestVSCodeUserSettingsPathByOS(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	isolateUserConfig(t, home)
 	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 
@@ -36,8 +38,10 @@ func TestVSCodeUserSettingsPathByOS(t *testing.T) {
 
 func TestConfigureVSCodePreservesSettingsAndDisablesContentCaptureByDefault(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+	isolateUserConfig(t, home)
+	// VS Code stores user settings per platform; assert the platform-correct location rather
+	// than the macOS one, which silently passed only because tests never ran on Linux.
+	path := vscodeSettingsPathForTest(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -94,5 +98,30 @@ func TestVSCodeOTelStatus(t *testing.T) {
 	status, _ = VSCodeOTelStatus(path, "http://127.0.0.1:4318")
 	if status != TelemetryMisconfigured {
 		t.Fatalf("remote endpoint status = %s, want misconfigured", status)
+	}
+}
+
+// vscodeSettingsPathForTest mirrors vscodeUserDataDirsForOS so these tests exercise the real
+// per-platform layout.
+// isolateUserConfig points every user-config lookup at a temporary home.
+//
+// HOME alone is not enough on Linux: VS Code settings live under XDG_CONFIG_HOME when it is set, and
+// GitHub runners set it. A test that only overrode HOME therefore read and wrote the *real* user's
+// settings path, which passed locally and failed in CI -- and would have been a test quietly editing
+// a developer's own VS Code configuration.
+func isolateUserConfig(t *testing.T, home string) {
+	t.Helper()
+	testenv.SetHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+}
+
+func vscodeSettingsPathForTest(home string) string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+	case "windows":
+		return filepath.Join(home, "AppData", "Roaming", "Code", "User", "settings.json")
+	default:
+		return filepath.Join(home, ".config", "Code", "User", "settings.json")
 	}
 }

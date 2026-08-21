@@ -1,10 +1,14 @@
 package hooks
 
 import (
+	"encoding/json"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
 func TestInstallFactorySettingsPreservesNonBeaconHooks(t *testing.T) {
@@ -26,9 +30,8 @@ func TestInstallFactorySettingsPreservesNonBeaconHooks(t *testing.T) {
 		"enabledPlugins",
 		"logoAnimation",
 		"echo keep",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform factory",
 		"SessionStart",
 		"UserPromptSubmit",
@@ -210,7 +213,7 @@ func TestFactorySettingsPathProjectLevel(t *testing.T) {
 
 func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".factory", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
@@ -228,13 +231,26 @@ func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	}
 }
 
+// jsonFragment renders a value as it appears inside a JSON document, minus the surrounding quotes.
+//
+// Assertions against marshaled settings must search for the encoded form: a Windows path is full
+// of backslashes, and JSON escapes every one of them.
+func jsonFragment(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode %q: %v", value, err)
+	}
+	return strings.Trim(string(encoded), `"`)
+}
+
 func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	status, err := InstallFactory(FactoryOptions{
 		Level:    LevelUser,
-		LogPath:  "/var/log/beacon-agent/runtime.jsonl",
+		LogPath:  endpointconfig.SystemLogPath(),
 		UserMode: true,
 	})
 	if err != nil {
@@ -244,7 +260,21 @@ func TestInstallFactoryUsesSystemConfigForSystemLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Factory settings: %v", err)
 	}
-	if !strings.Contains(string(data), "BEACON_ENDPOINT_CONFIG='/Library/Application Support/Beacon/Endpoint/config.json'") {
-		t.Fatalf("Factory hook did not use system config for system log:\n%s", string(data))
+	// A system log path must select the *system* config, not the user one. Both halves are
+	// compared against the JSON-encoded form, because that is what lands in the file: Factory
+	// settings are marshaled, so a Windows path's backslashes are escaped on the way in and a
+	// search for the raw string finds nothing. That breaks the assertion in both directions --
+	// the positive check reports the system config as not chosen when it was, and the negative
+	// check cannot see the user config being chosen wrongly. On POSIX the two forms are
+	// identical, which is why the raw comparison held until Windows joined the gate.
+	//
+	// The resolved values are used rather than hardcoded strings, since both are per-OS.
+	wantConfig := jsonFragment(t, "--config '"+endpointconfig.SystemConfigPath()+"'")
+	if !strings.Contains(string(data), wantConfig) {
+		t.Fatalf("Factory hook did not use system config for system log; want %s in:\n%s",
+			wantConfig, string(data))
+	}
+	if unwanted := jsonFragment(t, endpointconfig.ConfigPath(true)); strings.Contains(string(data), unwanted) {
+		t.Fatalf("Factory hook used the user config for a system log path:\n%s", string(data))
 	}
 }

@@ -53,9 +53,9 @@ IAM user, grants prefix-scoped `s3:PutObject`, creates one access key, and
 prints the `BEACON_CLOUD_S3_*` and AWS credential variables.
 
 <Warning>
-  This self-serve flow passes a scoped Google service-account key into the
-  provider-managed cloud agent environment. Use it for proof-of-concept testing
-  and prototyping. For production enterprise deployments, use
+  These self-serve flows pass a scoped Google service-account key or AWS access
+  key into the provider-managed cloud agent environment. Use them for
+  proof-of-concept testing and prototyping. For production enterprise deployments, use
   [Asymptote Managed](/deployment/managed) or contact Asymptote about secure
   forwarding in customer-managed infrastructure.
 </Warning>
@@ -73,9 +73,9 @@ prints the `BEACON_CLOUD_S3_*` and AWS credential variables.
     Configure Claude Code cloud agent telemetry and object-storage upload end to end.
   </Card>
   <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
-    Configure Cursor cloud agent telemetry and GCS upload end to end.
+    Configure Cursor cloud agent telemetry and GCS or S3 upload end to end.
   </Card>
   <Card title="Log forwarding" icon="database" href="/log-forwarding">
-    Review local endpoint GCS forwarding for persistent endpoint deployments.
+    Compare direct cloud-agent uploads with local endpoint object-storage forwarding.
   </Card>
 </Columns>

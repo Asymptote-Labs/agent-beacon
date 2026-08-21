@@ -79,7 +79,7 @@ CI, and cloud surfaces.
 | Agent harness | Collection path | Telemetry coverage |
 | --- | --- | --- |
 | [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
-| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, lifecycle, subagent, and permission telemetry where emitted through OTLP or hooks |
+| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, approval, API/model lifecycle, MCP connection, subagent, and session telemetry where emitted through OTLP or hooks |
 | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OTLP logs | Session, prompt, approval, and tool-result activity from Codex semantic logs |
 | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
 | [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
@@ -88,7 +88,7 @@ CI, and cloud surfaces.
 | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
-| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
+| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output/reasoning, model usage/cost, tool lifecycle/results, commands, file/web/MCP activity, approvals, and session errors |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
 ##### Knowledge Worker Agent Harnesses
@@ -111,8 +111,8 @@ CI, and cloud surfaces.
 | --- | --- | --- |
 | [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
-| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with GCS upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
-| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with GCS upload | Tool, shell command, file, subagent, and compaction telemetry where Cursor cloud hook payloads expose it |
+| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
+| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction telemetry after project hooks become active |
 | [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | Org-wide API poll via `beacon cloud devin pull`, with GCS upload | Session, prompt, agent message, status, pull request, and ACU usage telemetry the Devin sessions API exposes (message-level; the autonomous agent runs no in-sandbox hooks) |
 | [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
 | [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
@@ -147,8 +147,8 @@ management (SIEM), log aggregation, and object storage destinations.
 
 | Destination | Support path |
 | --- | --- |
-| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector content pack over local runtime and inventory JSONL using customer-managed AWS credentials |
-| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector content pack and packaged macOS helpers over runtime and inventory JSONL using customer-managed Google credentials |
+| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector over endpoint JSONL, CI upload, or direct compressed snapshots from supported cloud agents |
+| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector and packaged macOS helpers over endpoint JSONL, CI upload, or direct compressed snapshots from supported cloud agents |
 
 #### Local
 
@@ -162,8 +162,22 @@ Agent Beacon is designed for Security and IT teams to deploy and validate
 through standard MDM workflows.
 
 Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
-`.pkg` to GitHub Releases for MDM/manual download. Homebrew and release archives
-remain available for CLI installs across supported macOS/Linux architectures.
+`.pkg` to GitHub Releases for MDM/manual download, `.deb` and `.rpm` packages for
+Linux on amd64 and arm64, and an x64 `.msi` for Windows. Homebrew and release
+archives remain available for CLI installs across supported macOS, Linux, and
+Windows architectures.
+
+Installing a native package performs the system-mode install itself: it registers
+and starts the service, writes configuration to the platform's machine-wide
+location, and points the interactive user's agent runtimes at the local
+collector. See the [Linux install guide](https://docs.asymptotelabs.ai/platforms/linux)
+or the [Windows install guide](https://docs.asymptotelabs.ai/platforms/windows).
+
+| Platform | Package | Service manager | Notes |
+| --- | --- | --- | --- |
+| macOS | Signed, notarized `.pkg` (Apple Silicon) | launchd | Homebrew for single machines |
+| Linux | `.deb` / `.rpm` (amd64, arm64) | systemd | Supervised fallback without systemd |
+| Windows | `.msi` (x64) | Service Control Manager | Unsigned for now; verify the published `.sha256` |
 
 | MDM platform | Support path |
 | --- | --- |
@@ -210,6 +224,57 @@ matching, fixtures, and supported event fields.
 See the [Quickstart](https://docs.asymptotelabs.ai/cli/quickstart) docs for the
 full setup paths.
 
+### First-run onboarding
+
+The first time you run `beacon endpoint install` in a terminal, Beacon asks two
+questions — your email and whether this is work or personal use — and sends the
+answers to Asymptote once. Knowing who runs Beacon is how we decide which runtimes
+and integrations to build next.
+
+Exactly what is sent, and nothing else:
+
+| Field | Example |
+| --- | --- |
+| Email you enter | `you@company.com` |
+| Work, personal, or evaluating | `work` |
+| OS, architecture, OS version | `darwin`, `arm64`, `15.5` |
+| Beacon version and install method | `v0.0.31`, `homebrew` |
+| Names of agent runtimes on this machine | `claude_code`, `cursor` |
+| A random install ID | `64871b2b…` |
+
+**Never sent:** prompts, file contents, commands, telemetry events, repository names,
+or anything else Beacon captures. The endpoint agent itself stays local-only — this is
+one HTTP request at install time, not an ongoing channel.
+
+It happens once per machine. The answer is recorded in `~/.beacon/profile.json`, which
+survives uninstall so a reinstall does not ask again.
+
+**It never runs non-interactively.** Package postinstall scripts, MDM deployments,
+`--system` installs, CI, `--dry-run`, and any piped or redirected stdin skip it
+silently. Unattended installs that still need it suppressed can set:
+
+```bash
+BEACON_ONBOARDING=0 beacon endpoint install
+```
+
+For a fleet rollout where you *do* want attribution but have no terminal, supply the
+answers up front:
+
+```bash
+BEACON_ONBOARDING_EMAIL=it@company.com BEACON_ONBOARDING_USAGE=work \
+  beacon endpoint install
+```
+
+Inspect or clear the record at any time:
+
+```bash
+beacon endpoint onboarding          # show what was recorded
+beacon endpoint onboarding --reset  # clear it
+```
+
+To have your record deleted, email the install ID shown by
+`beacon endpoint onboarding` to <support@asymptotelabs.ai>.
+
 ### For Security & IT Teams
 
 Start with the
@@ -235,14 +300,27 @@ cd cli/beacon
 make build
 ```
 
+To verify a change against a **real** Claude Code session rather than only
+synthetic payloads, `beacon-sandbox` runs one in a disposable Linux sandbox and
+checks what Beacon actually captured:
+
+```bash
+cd beacon-sandbox
+go run ./cmd/beacon-sandbox doctor
+go run ./cmd/beacon-sandbox run --scenario s02-bash-command
+```
+
+See [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox)
+for setup, what it can verify, and its limitations.
+
 For setup, deployment, integrations, and command details, see the
 [Beacon CLI docs](https://docs.asymptotelabs.ai).
 
 ## Star Growth
 
 <p align="center">
-  <a href="https://www.star-history.com/#asymptote-labs/agent-beacon&Date">
-    <img src="https://api.star-history.com/svg?repos=asymptote-labs/agent-beacon&type=Date" alt="Beacon GitHub star growth" width="860">
+  <a href="https://star-history.dera.page/#asymptote-labs/agent-beacon&Date">
+    <img src="https://star-history.dera.page/svg?repos=asymptote-labs/agent-beacon&type=Date" alt="Beacon GitHub star growth" width="860">
   </a>
 </p>
 

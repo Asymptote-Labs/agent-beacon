@@ -23,7 +23,7 @@ Asymptote merges shell-hook entries into `~/.hermes/config.yaml`. Hermes invokes
 
 ## Discovery and status
 
-Asymptote detects Hermes through the `hermes` executable or a local `~/.hermes` directory, then checks `~/.hermes/config.yaml` for Asymptote-managed commands with `BEACON_ENDPOINT_MODE=1` and `--platform hermes`.
+Asymptote detects Hermes through the `hermes` executable or a local `~/.hermes` directory, then checks `~/.hermes/config.yaml` for Asymptote-managed commands, identified by the endpoint settings flags (`--log`, `--config`, `--cli`) or a legacy `BEACON_ENDPOINT_MODE=1` prefix, together with `--platform hermes`.
 
 Use `beacon endpoint hooks status --harness hermes` to inspect Hermes Agent hook status.
 

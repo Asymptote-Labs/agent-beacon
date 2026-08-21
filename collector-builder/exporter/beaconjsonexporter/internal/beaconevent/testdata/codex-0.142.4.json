@@ -1,0 +1,35 @@
+{
+  "runtime": "Codex CLI",
+  "version": "0.142.4",
+  "records": [
+    {
+      "name": "tool_decision",
+      "body": "codex.tool_decision",
+      "attributes": {
+        "service.name": "codex_exec",
+        "service.version": "0.142.4",
+        "event.name": "codex.tool_decision",
+        "conversation.id": "codex-session",
+        "tool_name": "exec_command",
+        "call_id": "call_fixture",
+        "decision": "approved",
+        "source": "Config"
+      }
+    },
+    {
+      "name": "tool_result",
+      "body": "codex.tool_result",
+      "attributes": {
+        "service.name": "codex_exec",
+        "service.version": "0.142.4",
+        "event.name": "codex.tool_result",
+        "conversation.id": "codex-session",
+        "tool_name": "exec_command",
+        "call_id": "call_fixture",
+        "success": "true",
+        "duration_ms": "60",
+        "arguments": "{\"cmd\":\"echo CODEX_MARKER\",\"workdir\":\"/tmp/beacon-otel-fixture\",\"yield_time_ms\":10000,\"max_output_tokens\":2000}"
+      }
+    }
+  ]
+}

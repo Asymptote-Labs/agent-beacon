@@ -264,14 +264,27 @@ func TestEndpointSourceFollowsSavedOffsetAcrossArchiveRenumbering(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	info, err := os.Stat(renumberedPath)
+	// Identity is read from an open handle, not from a path: on Windows the file index is only
+	// reachable that way, and a FileInfo carries no equivalent.
+	handle, err := os.Open(renumberedPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	info, err := handle.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := fileIdentity(handle, info)
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if identity == "" {
+		t.Fatal("file identity is empty, so this test cannot check that an offset follows a rotated file")
 	}
 	source := NewSource(endpointconfig.Config{UserMode: true, LogPath: logPath}, logPath, true)
 	batches, err := source.Batches(ingest.State{
 		FileOffsets: map[string]int64{savedPath: int64(len(first))},
-		FileIDs:     map[string]string{savedPath: fileIdentity(info)},
+		FileIDs:     map[string]string{savedPath: identity},
 	}, 500, 1024)
 	if err != nil {
 		t.Fatal(err)

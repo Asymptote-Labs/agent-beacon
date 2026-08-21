@@ -47,7 +47,7 @@ beacon endpoint hooks install --harness cursor --level project
 
 | Area | Support |
 |------|---------|
-| Prompt telemetry | Supported for local Cursor through `beforeSubmitPrompt` hooks; not available in Cursor Cloud Agents because Cursor submits the prompt before the cloud VM exists. See [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support). |
+| Prompt telemetry | Supported for local and cloud Cursor through `beforeSubmitPrompt` hooks. Cursor Cloud requires the project hook to be committed before the run starts and uploads observed prompts immediately; the initial launch prompt can precede hook activation during bootstrap. See [Cursor's Cloud Agent hook support matrix](https://cursor.com/docs/hooks#cloud-agent-support). |
 | Command, tool, and file telemetry | Supported for tool, shell command, MCP-like, approval, and file edit payloads where Cursor exposes them; Cursor Cloud support is limited to Cursor's [cloud-supported command hooks](https://cursor.com/docs/hooks#cloud-agent-support). |
 | Agent reasoning telemetry | Supported for local Cursor through `afterAgentThought` hooks. Each completed thinking block is recorded as an `agent.reasoning` event carrying the reasoning text in the OpenTelemetry GenAI output-messages shape (`gen_ai.output.messages` with a `reasoning` part), plus a `content` marker with the original text's hash and byte count. Reasoning is only available for models/modes where Cursor exposes visible thinking text. |
 | Repository and branch context | Events include the workspace path as `repository`, and `branch` is resolved from the workspace's local git checkout (`.git/HEAD`) when Cursor does not supply one; disable local git resolution with `BEACON_DISABLE_GIT_METADATA=1`. |
@@ -70,6 +70,6 @@ Hook events include metadata such as file path, operation, language, diff hash, 
     Install, inspect, and uninstall runtime hook integrations.
   </Card>
   <Card title="Cursor Cloud Agents" icon="cloud" href="/runtimes/cursor-cloud-agents">
-    Capture Cursor cloud agent telemetry with sandbox-local hooks and GCS upload.
+    Capture Cursor cloud agent telemetry with sandbox-local hooks and direct GCS or S3 upload.
   </Card>
 </Columns>

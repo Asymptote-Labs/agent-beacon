@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,9 +27,8 @@ func TestInstallAntigravityHooksPreservesNonBeaconBlocks(t *testing.T) {
 		"my-linter-hook",
 		"echo keep",
 		"beacon-endpoint",
-		"BEACON_ENDPOINT_MODE=1",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform antigravity",
 		"PreInvocation",
 		"UserPromptSubmit",
@@ -106,7 +106,7 @@ func TestReadAntigravityConfigReturnsCorruptJSONError(t *testing.T) {
 
 func TestAntigravityConfigPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	dir := t.TempDir()
 	t.Chdir(dir)
 
@@ -128,7 +128,7 @@ func TestAntigravityConfigPathLevels(t *testing.T) {
 
 func TestAntigravityHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ".gemini", "config", "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)

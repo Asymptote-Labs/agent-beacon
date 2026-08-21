@@ -1,0 +1,299 @@
+{
+  "runtime": "Claude Code",
+  "version": "2.1.220",
+  "records": [
+    {
+      "name": "user_prompt",
+      "body": "claude_code.user_prompt",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "user_prompt",
+        "session.id": "claude-lifecycle-session",
+        "prompt": "CLAUDE_LIFECYCLE_MARKER",
+        "prompt_length": 23
+      }
+    },
+    {
+      "name": "assistant_response",
+      "body": "claude_code.assistant_response",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "assistant_response",
+        "session.id": "claude-lifecycle-session",
+        "model": "claude-opus-5",
+        "response": "CLAUDE_RESPONSE_MARKER",
+        "response_length": 22
+      }
+    },
+    {
+      "name": "api_request",
+      "body": "claude_code.api_request",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_request",
+        "session.id": "claude-lifecycle-session",
+        "model": "claude-opus-5",
+        "duration_ms": 321,
+        "input_tokens": 10,
+        "output_tokens": 4
+      }
+    },
+    {
+      "name": "api_error",
+      "body": "claude_code.api_error",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_error",
+        "session.id": "claude-lifecycle-session",
+        "model": "claude-opus-5",
+        "error": "request failed",
+        "status_code": 500,
+        "duration_ms": 2000
+      }
+    },
+    {
+      "name": "api_refusal",
+      "body": "claude_code.api_refusal",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_refusal",
+        "session.id": "claude-lifecycle-session",
+        "model": "claude-opus-5",
+        "attempt": 1,
+        "server_fallback_hop": false
+      }
+    },
+    {
+      "name": "api_request_body",
+      "body": "claude_code.api_request_body",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_request_body",
+        "session.id": "claude-lifecycle-session",
+        "body": "{\"model\":\"claude-opus-5\"}",
+        "body_length": 25
+      }
+    },
+    {
+      "name": "api_response_body",
+      "body": "claude_code.api_response_body",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_response_body",
+        "session.id": "claude-lifecycle-session",
+        "body": "{\"stop_reason\":\"end_turn\"}",
+        "body_length": 26
+      }
+    },
+    {
+      "name": "permission_mode_changed",
+      "body": "claude_code.permission_mode_changed",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "permission_mode_changed",
+        "session.id": "claude-lifecycle-session",
+        "from_mode": "default",
+        "to_mode": "plan",
+        "trigger": "shift_tab"
+      }
+    },
+    {
+      "name": "auth",
+      "body": "claude_code.auth",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "auth",
+        "session.id": "claude-lifecycle-session",
+        "action": "login",
+        "success": "true",
+        "auth_method": "oauth"
+      }
+    },
+    {
+      "name": "mcp_server_connection",
+      "body": "claude_code.mcp_server_connection",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "mcp_server_connection",
+        "session.id": "claude-lifecycle-session",
+        "status": "connected",
+        "transport_type": "stdio",
+        "server_scope": "project",
+        "duration_ms": 42,
+        "server_name": "fixture-server"
+      }
+    },
+    {
+      "name": "internal_error",
+      "body": "claude_code.internal_error",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "internal_error",
+        "session.id": "claude-lifecycle-session",
+        "error_name": "TypeError",
+        "error_code": "ERR_FIXTURE"
+      }
+    },
+    {
+      "name": "plugin_installed",
+      "body": "claude_code.plugin_installed",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "plugin_installed",
+        "session.id": "claude-lifecycle-session",
+        "marketplace.is_official": "true",
+        "install.trigger": "cli",
+        "plugin.name": "fixture-plugin"
+      }
+    },
+    {
+      "name": "plugin_loaded",
+      "body": "claude_code.plugin_loaded",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "plugin_loaded",
+        "session.id": "claude-lifecycle-session",
+        "plugin.name": "fixture-plugin",
+        "plugin.scope": "official",
+        "has_hooks": true,
+        "has_mcp": false
+      }
+    },
+    {
+      "name": "skill_activated",
+      "body": "claude_code.skill_activated",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "skill_activated",
+        "session.id": "claude-lifecycle-session",
+        "skill.name": "fixture-skill",
+        "invocation_trigger": "claude-proactive",
+        "skill.source": "bundled"
+      }
+    },
+    {
+      "name": "at_mention",
+      "body": "claude_code.at_mention",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "at_mention",
+        "session.id": "claude-lifecycle-session",
+        "mention_type": "file",
+        "success": "true"
+      }
+    },
+    {
+      "name": "api_retries_exhausted",
+      "body": "claude_code.api_retries_exhausted",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "api_retries_exhausted",
+        "session.id": "claude-lifecycle-session",
+        "model": "claude-opus-5",
+        "status_code": 503,
+        "total_attempts": 3,
+        "total_retry_duration_ms": 5000
+      }
+    },
+    {
+      "name": "hook_registered",
+      "body": "claude_code.hook_registered",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "hook_registered",
+        "session.id": "claude-lifecycle-session",
+        "hook_event": "PreToolUse",
+        "hook_type": "command",
+        "hook_source": "projectSettings"
+      }
+    },
+    {
+      "name": "hook_execution_start",
+      "body": "claude_code.hook_execution_start",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "hook_execution_start",
+        "session.id": "claude-lifecycle-session",
+        "hook_event": "PreToolUse",
+        "hook_name": "PreToolUse:Bash",
+        "num_hooks": 1
+      }
+    },
+    {
+      "name": "hook_execution_complete",
+      "body": "claude_code.hook_execution_complete",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "hook_execution_complete",
+        "session.id": "claude-lifecycle-session",
+        "hook_event": "PreToolUse",
+        "hook_name": "PreToolUse:Bash",
+        "num_hooks": 1,
+        "num_success": 1,
+        "total_duration_ms": 25
+      }
+    },
+    {
+      "name": "hook_plugin_metrics",
+      "body": "claude_code.hook_plugin_metrics",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "hook_plugin_metrics",
+        "session.id": "claude-lifecycle-session",
+        "plugin_id": "fixture@official",
+        "hook_event": "PostToolUse",
+        "finding_count": 1
+      }
+    },
+    {
+      "name": "compaction",
+      "body": "claude_code.compaction",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "compaction",
+        "session.id": "claude-lifecycle-session",
+        "trigger": "auto",
+        "success": "true",
+        "duration_ms": 750,
+        "pre_tokens": 150000,
+        "post_tokens": 25000
+      }
+    },
+    {
+      "name": "feedback_survey",
+      "body": "claude_code.feedback_survey",
+      "attributes": {
+        "service.name": "claude-code",
+        "service.version": "2.1.220",
+        "event.name": "feedback_survey",
+        "session.id": "claude-lifecycle-session",
+        "event_type": "responded",
+        "appearance_id": "survey-fixture",
+        "survey_type": "session",
+        "response": "positive",
+        "enabled_via_override": false
+      }
+    }
+  ]
+}

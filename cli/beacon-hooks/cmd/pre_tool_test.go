@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,8 +175,8 @@ func TestVSCodeHooksEmitLowNoiseTelemetry(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
 		t.Fatalf("event.action = %q, want tool.invoked", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode" {
-		t.Fatalf("harness = %q, want vscode", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode_copilot" {
+		t.Fatalf("harness = %q, want vscode_copilot", harness)
 	}
 	if _, ok := event["raw"].(map[string]interface{})["vscode"]; !ok {
 		t.Fatalf("raw.vscode missing: %#v", event["raw"])
@@ -202,8 +204,8 @@ func TestRunSubagentLifecycleEmitsVSCodeEvents(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "subagent.started" {
 		t.Fatalf("event.action = %q, want subagent.started", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode" {
-		t.Fatalf("harness = %q, want vscode", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode_copilot" {
+		t.Fatalf("harness = %q, want vscode_copilot", harness)
 	}
 	if _, ok := event["tool"]; ok {
 		t.Fatalf("subagent event should not be encoded as tool: %#v", event["tool"])
@@ -323,8 +325,8 @@ func TestRunPromptSubmitEmitsAntigravityPromptEvent(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
 		t.Fatalf("event.action = %q, want prompt.submitted", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity" {
-		t.Fatalf("harness = %q, want antigravity", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
+		t.Fatalf("harness = %q, want antigravity_cli", harness)
 	}
 	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
 		t.Fatalf("prompt.text = %q, want redacted prompt", got)
@@ -576,8 +578,8 @@ func TestRunPreToolEmitsClaudeTelemetryWithoutDecision(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
 		t.Fatalf("event.action = %q, want tool.invoked", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "claude" {
-		t.Fatalf("harness = %q, want claude", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "claude_code" {
+		t.Fatalf("harness = %q, want claude_code", harness)
 	}
 	if _, ok := event["approval"]; ok {
 		t.Fatalf("Claude PreToolUse should not emit approval telemetry: %#v", event["approval"])
@@ -616,8 +618,8 @@ func TestRunPreToolEmitsAntigravityCommandTelemetry(t *testing.T) {
 	}
 
 	event := lastEndpointEvent(t, logPath)
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity" {
-		t.Fatalf("harness = %q, want antigravity", harness)
+	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
+		t.Fatalf("harness = %q, want antigravity_cli", harness)
 	}
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
 		t.Fatalf("event.action = %q, want tool.invoked", action)
@@ -951,22 +953,60 @@ func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string),
 		_ = stdoutR.Close()
 	}()
 
-	if err := json.NewEncoder(stdinW).Encode(input); err != nil {
-		t.Fatalf("encode input: %v", err)
+	// Both pipes are serviced concurrently with the hook, and both halves are load-bearing.
+	//
+	// A pipe holds a bounded amount of unread data. Writing the whole payload before starting the
+	// hook works only while the payload fits in that buffer: past it, the write blocks until
+	// something drains the other end, and the only thing that would is the hook that has not been
+	// started yet. POSIX pipes buffer 64 KiB, which hid this for every input the suite had; Windows
+	// anonymous pipes default far smaller, and the deliberately long agent-thought payload
+	// deadlocked for the full 10-minute test timeout there.
+	//
+	// The stdout side is the same trap mirrored: the hook writes its result while nothing reads it,
+	// so a large enough response would block inside run(). It is drained concurrently for that
+	// reason rather than for symmetry. This is the same failure the sandbox's drainStreams already
+	// documents, in the opposite direction.
+	encodeErr := make(chan error, 1)
+	go func() {
+		err := json.NewEncoder(stdinW).Encode(input)
+		// Closed here, not deferred by the caller: the hook reads stdin to EOF, so it only returns
+		// once this end is closed.
+		if cerr := stdinW.Close(); err == nil {
+			err = cerr
+		}
+		encodeErr <- err
+	}()
+
+	type readResult struct {
+		data []byte
+		err  error
 	}
-	if err := stdinW.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
+	stdoutDone := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(stdoutR)
+		stdoutDone <- readResult{data, err}
+	}()
 
 	run(nil, nil)
 
+	// Closing the write end is what gives the reader EOF; without it ReadAll never returns.
 	if err := stdoutW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
 	}
 	os.Stdin = origStdin
 	os.Stdout = origStdout
+
+	if err := <-encodeErr; err != nil {
+		t.Fatalf("encode input: %v", err)
+	}
+	captured := <-stdoutDone
+	if captured.err != nil {
+		t.Fatalf("read hook output: %v", captured.err)
+	}
 	var out map[string]interface{}
-	if err := json.NewDecoder(stdoutR).Decode(&out); err != nil {
+	// Decoder rather than Unmarshal, so trailing output after the JSON value is tolerated exactly
+	// as it was before.
+	if err := json.NewDecoder(bytes.NewReader(captured.data)).Decode(&out); err != nil {
 		t.Fatalf("decode hook output: %v", err)
 	}
 	return out

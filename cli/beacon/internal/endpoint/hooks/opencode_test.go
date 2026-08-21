@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,20 +22,36 @@ func TestInstallOpenCodePluginWritesManagedPlugin(t *testing.T) {
 		opencodeManagedPluginMarker,
 		"BeaconEndpointPlugin",
 		"BEACON_OPENCODE_DEBUG",
-		"BEACON_ENDPOINT_MODE=1",
 		"--platform opencode",
 		"opencode-event",
-		"BEACON_ENDPOINT_LOG='/tmp/runtime.jsonl'",
-		"BEACON_ENDPOINT_CONFIG='/tmp/config.json'",
+		"--log '/tmp/runtime.jsonl'",
+		"--config '/tmp/config.json'",
 		"forwardedEvents",
+		"tool.execute.before",
+		"tool.execute.after",
+		"message.updated",
+		"message.part.updated",
 		"session.created",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("plugin missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "message.updated") || strings.Contains(text, "message.part.updated") {
-		t.Fatalf("high-volume message update events should not be forwarded:\n%s", text)
+}
+
+func TestInstallOpenCodePluginRefusesToOverwriteUnmanagedPlugin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beacon.ts")
+	original := "export const UserPlugin = async () => ({})"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := installOpenCodePlugin(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json")
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite unmanaged") {
+		t.Fatalf("install error = %v", err)
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != original {
+		t.Fatalf("unmanaged plugin changed: err=%v body=%q", readErr, data)
 	}
 }
 
@@ -115,6 +132,9 @@ func TestOpenCodeInstalledUsesManagedMarker(t *testing.T) {
 	if isOpenCodeInstalledAt(path) {
 		t.Fatal("unmarked plugin should not be detected as installed")
 	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove unmarked plugin: %v", err)
+	}
 	if err := installOpenCodePlugin(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installOpenCodePlugin returned error: %v", err)
 	}
@@ -125,7 +145,7 @@ func TestOpenCodeInstalledUsesManagedMarker(t *testing.T) {
 
 func TestOpenCodePluginPathLevels(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if got, want := mustOpenCodePluginPath(t, LevelUser), filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"); got != want {
 		t.Fatalf("user plugin path = %q, want %q", got, want)
 	}

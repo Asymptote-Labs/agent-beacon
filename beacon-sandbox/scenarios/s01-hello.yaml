@@ -1,0 +1,31 @@
+id: s01-hello
+# Smallest possible session: no tools at all. Isolates the session/prompt/usage path so a
+# failure here means telemetry is fundamentally not flowing, rather than a specific tool
+# signal being unmapped.
+prompt: >-
+  Reply with exactly this word and nothing else: {{canary}}
+tools: []
+budget_usd: 0.5
+timeout_seconds: 240
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    fields: ["prompt.text", "session.id", "harness.name"]
+    why: >-
+      Prompt capture is the baseline signal. OTEL_LOG_USER_PROMPTS=1 is set by Beacon's
+      Claude configuration, so the full text should be retained subject to redaction.
+
+  - action: token.usage
+    fields: ["gen_ai.usage.input_tokens", "model", "session.id"]
+    why: >-
+      Token attribution is a headline feature. Beacon sets delta temporality but no explicit
+      OTEL_METRIC_EXPORT_INTERVAL, so this also tells us whether metrics flush before a short
+      session exits.
+
+  - action: cost.usage
+    fields: ["gen_ai.usage.cost_usd"]
+    optional: true
+    why: >-
+      Runtime-reported cost only. Optional because a subscription-token session may report
+      no cost, which is not a Beacon defect.

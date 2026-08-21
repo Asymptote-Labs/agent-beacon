@@ -5,7 +5,7 @@ description: "Generate Google Cloud Storage forwarding content and validation ev
 
 ## Forwarding Command
 
-Use `beacon endpoint gcs` to generate Google Cloud Storage forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload runtime and inventory JSONL to a GCS bucket as gzip-compressed NDJSON.
+Use `beacon endpoint gcs` to generate Google Cloud Storage forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps your customer-managed Vector agent upload runtime and inventory JSONL to a GCS bucket as NDJSON.
 
 Beacon does not store Google Cloud credentials, service accounts, workload identity settings, bucket IAM, lifecycle rules, retention policies, or encryption settings. Keep those values in Google Cloud, Vector, endpoint-management policy, or deployment tooling.
 
@@ -36,7 +36,7 @@ beacon endpoint gcs [command]
 
 ## beacon endpoint gcs print-config
 
-`beacon endpoint gcs print-config` prints a Vector configuration that tails the selected Beacon runtime JSONL log and writes gzip-compressed NDJSON objects to Google Cloud Storage.
+`beacon endpoint gcs print-config` prints a Vector configuration that tails the selected Beacon runtime JSONL log and writes NDJSON objects to Google Cloud Storage.
 
 ```bash title="Print the configuration"
 beacon endpoint gcs print-config
@@ -150,7 +150,7 @@ The validation command writes the local event only. Confirm remote delivery with
 
 ```text
 gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/**"
-gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"
+gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl" | grep "Beacon endpoint GCS validation event"
 ```
 
 Expected validation fields:

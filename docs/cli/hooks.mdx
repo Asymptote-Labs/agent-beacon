@@ -393,7 +393,7 @@ If Grok telemetry is missing, check the selected level, confirm the hook file co
 
 ## Hermes Agent troubleshooting
 
-Beacon merges Hermes Agent hooks into `~/.hermes/config.yaml`. Hermes hooks are user-level only; project-level install, status, or uninstall requests return a clear error. Beacon preserves existing Hermes settings and non-Beacon hooks, and replaces only Beacon-managed commands with `BEACON_ENDPOINT_MODE=1` and `--platform hermes`.
+Beacon merges Hermes Agent hooks into `~/.hermes/config.yaml`. Hermes hooks are user-level only; project-level install, status, or uninstall requests return a clear error. Beacon preserves existing Hermes settings and non-Beacon hooks, and replaces only Beacon-managed commands, identified by the endpoint settings flags (`--log`, `--config`, `--cli`) or a legacy `BEACON_ENDPOINT_MODE=1` prefix, together with `--platform hermes`.
 
 If Hermes telemetry is missing, confirm `~/.hermes/config.yaml` contains commands with `--platform hermes`, restart Hermes, and verify hook consent. Hermes prompts for first-use consent for each `(event, command)` pair; for non-interactive gateway, cron, or CI runs, set `HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure `hooks_auto_accept: true`.
 

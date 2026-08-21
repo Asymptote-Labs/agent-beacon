@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const (
-	SystemLogPath         = "/var/log/beacon-agent/runtime.jsonl"
 	UserLogPath           = ".beacon/endpoint/logs/runtime.jsonl"
 	MaxEventBytes         = 64 * 1024
 	DefaultRotateBytes    = 10 * 1024 * 1024
@@ -32,6 +32,12 @@ type Options struct {
 	RotateArchives int
 }
 
+// SystemLogPath is the system-mode runtime log, resolved per platform.
+//
+// Delegated rather than duplicated: this was one of fourteen copies of the same literal, and the
+// copies could not be given a Windows value independently without disagreeing.
+func SystemLogPath() string { return endpointconfig.SystemLogPath() }
+
 func DefaultPath(userMode bool) string {
 	if userMode {
 		home, err := os.UserHomeDir()
@@ -40,7 +46,7 @@ func DefaultPath(userMode bool) string {
 		}
 		return filepath.Join(home, UserLogPath)
 	}
-	return SystemLogPath
+	return SystemLogPath()
 }
 
 func AppendEvent(event schema.Event, opts Options) (string, error) {
@@ -80,6 +86,46 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 		return "", err
 	}
 	return opts.Path, nil
+}
+
+// EnsureSystemLogWritable makes a machine-wide log directory writable by the people whose agent
+// sessions this endpoint captures.
+//
+// A no-op on POSIX, where the file mode carries the same guarantee. On Windows it is the step
+// without which a system-mode install produces a healthy collector that records nothing the agent
+// did: %ProgramData% denies ordinary users write access, hooks run as the console user, and
+// nothing reports an error because status and doctor both describe the collector rather than the
+// hooks exporting to it.
+//
+// Creates the directory first. Install calls this before anything has written a log there, so on a
+// fresh system-mode install the directory does not exist yet -- and granting access to a path that
+// is not there fails, taking the whole install down before the service is ever registered. Ensure
+// means ensure.
+func EnsureSystemLogWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create the log directory %s: %w", dir, err)
+	}
+	// Chmod after MkdirAll, and for an existing directory too.
+	//
+	// MkdirAll's mode is masked by the process umask, so on a host with umask 027 or 077 -- any
+	// CIS-hardened build -- this directory came out 0750 or 0700 owned by root. The runtime log
+	// inside it is deliberately 0666 so hooks running as the logged-in user can append, but a
+	// non-root process cannot open a file it cannot traverse to. Every hook write then failed with
+	// EACCES while the root-owned collector stayed perfectly healthy, so the endpoint looked fine
+	// and silently lost every hook-sourced event.
+	//
+	// 0755 rather than something narrower: hooks need traverse, and the sticky-bit dance that would
+	// let them create files here is not needed because the collector owns rotation. The file mode
+	// is what grants write, and openRuntimeFile sets that explicitly for the same umask reason.
+	if err := os.Chmod(dir, 0755); err != nil {
+		return fmt.Errorf("make the log directory %s traversable: %w", dir, err)
+	}
+	return grantInteractiveUsersWrite(dir)
+}
+
+// SystemLogWritableByUsers reports whether that grant is in place, for doctor.
+func SystemLogWritableByUsers(dir string) (bool, error) {
+	return interactiveUsersCanWrite(dir)
 }
 
 // EnsureRuntimeFile creates the shared runtime log with the shared writable
@@ -126,12 +172,17 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if err != nil {
 		return err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	held, err := filelock.Exclusive(lock)
+	if err != nil {
 		_ = lock.Close()
 		return err
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// Unlock before closing. The previous form deferred the unlock first and the close second,
+	// which LIFO ordering ran in the opposite order -- it worked only because closing a descriptor
+	// releases the lock implicitly, leaving the explicit unlock to fail on a closed handle and have
+	// its error discarded.
 	defer lock.Close()
+	defer held.Release()
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}
