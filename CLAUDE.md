@@ -31,6 +31,7 @@ Supported runtime surfaces today:
 
 - Claude Code and Codex CLI telemetry configuration through local OpenTelemetry settings.
 - Cursor hook telemetry for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, file edits, and agent reasoning (`afterAgentThought` thinking text recorded as `agent.reasoning` events in the OTel GenAI `gen_ai.output.messages` reasoning-part shape) where hook payloads expose those fields.
+- Cline hook telemetry through a Beacon-managed local plugin (`~/.cline/plugins/beacon.ts`) covering prompts, task lifecycle, tool lifecycle, commands, file reads/edits with diffs, MCP activity, and task token usage. One plugin serves Cline's VS Code, JetBrains, and CLI hosts; Cline's own OTel export and hosted prompt storage are not used. Approval decisions are not exposed by Cline's hook payloads and are not synthesized.
 - Claude Cowork admin-configured OpenTelemetry setup guidance and local validation.
 - `beaconjson` OpenTelemetry Collector exporter that converts OTLP logs, traces, metrics, and resource attributes into Beacon endpoint JSONL.
 - Asymptote Observe TypeScript SDK instrumentation for cloud applications, starting from OpenTelemetry/OpenLLMetry patterns and `observe()` wrappers.

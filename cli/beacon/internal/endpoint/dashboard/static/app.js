@@ -963,6 +963,7 @@ function renderDatalist(id, values) {
 
 function harnessLabel(value) {
   const labels = {
+    cline: "Cline",
     cursor: "Cursor",
     claude_code: "Claude Code",
     codex_cli: "Codex CLI",
