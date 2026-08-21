@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -134,11 +135,7 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 		if usage := clineUsage(input); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
 		}
-		reason := getFirstStr(input, "completionStatus", "completion_status", "reason")
-		if reason == "" {
-			reason = "cancelled"
-		}
-		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": reason})
+		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": clineCancelReason(input)})
 		return one("session.ended", "session", "info", "Cline task cancelled", fields)
 	case clineStageTaskError:
 		fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
@@ -473,20 +470,69 @@ func isRootedPath(path string) bool {
 	}
 }
 
-// joinWorkspacePath joins a relative path under a root using the root's own separator.
+// joinWorkspacePath joins a relative path under a root, using the root's own separator, and
+// collapses "." and ".." lexically.
 //
-// filepath.Join would use the host's, which mangles the result whenever the two disagree: a POSIX
-// workspace root on a Windows host produced "\\tmp\\project\\src\\app.ts", a path that
-// matches nothing and belongs to no filesystem. Taking the separator from the root keeps the
-// recorded path in the same shape as the workspace it came from.
+// The separator comes from the root because filepath.Join would use the host's, which mangles the
+// result whenever the two disagree: a POSIX workspace root on a Windows host produced
+// "\\tmp\\project\\src\\app.ts", a path matching nothing and belonging to no filesystem.
+//
+// The collapsing matters more than it looks, and dropping filepath.Join is what nearly lost it.
+// Traversal is precisely the case detection cares about: a tool path of "../../.ssh/id_rsa" stored
+// as "/repo/../../.ssh/id_rsa" names the same file as "/home/u/.ssh/id_rsa" and matches no threat
+// rule written against either. Collapsing is lexical -- path.Clean semantics, no filesystem access
+// and no symlink resolution -- so it stays a pure function of the payload, and a path that walks
+// above the root resolves to the root's own root, which is what those semantics say it means.
 func joinWorkspacePath(root, rel string) string {
 	separator := "/"
 	if strings.Contains(root, "\\") && !strings.Contains(root, "/") {
 		separator = "\\"
 	}
-	rel = strings.TrimPrefix(strings.TrimPrefix(rel, "./"), ".\\")
-	rel = strings.ReplaceAll(strings.ReplaceAll(rel, "\\", separator), "/", separator)
-	return strings.TrimRight(root, "/\\") + separator + strings.TrimLeft(rel, "/\\")
+	// Cleaning happens in slash space, then the volume goes back on. A drive or UNC prefix cannot be
+	// passed through path.Clean: it collapses a leading "//" and would turn a share into a
+	// directory, and it treats "C:" as an ordinary segment that ".." can walk past.
+	volume, rootRest := splitPathVolume(root)
+	joined := path.Join(toSlashPath(rootRest), toSlashPath(rel))
+	if separator != "/" {
+		joined = strings.ReplaceAll(joined, "/", separator)
+	}
+	return volume + joined
+}
+
+// splitPathVolume separates a Windows volume prefix -- a drive letter or a UNC share -- from the
+// rest of a path. Returns an empty volume for anything else, including every POSIX path.
+func splitPathVolume(p string) (string, string) {
+	if len(p) >= 2 && p[1] == ':' {
+		if letter := p[0] | 0x20; letter >= 'a' && letter <= 'z' {
+			return p[:2], p[2:]
+		}
+	}
+	if len(p) >= 2 && isPathSeparator(p[0]) && isPathSeparator(p[1]) {
+		rest := p[2:]
+		server := indexPathSeparator(rest)
+		if server < 0 {
+			return p, ""
+		}
+		share := indexPathSeparator(rest[server+1:])
+		if share < 0 {
+			return p, ""
+		}
+		end := 2 + server + 1 + share
+		return p[:end], p[end:]
+	}
+	return "", p
+}
+
+func toSlashPath(p string) string {
+	return strings.ReplaceAll(p, "\\", "/")
+}
+
+func isPathSeparator(c byte) bool {
+	return c == '/' || c == '\\'
+}
+
+func indexPathSeparator(p string) int {
+	return strings.IndexAny(p, "/\\")
 }
 
 func clineToolPath(toolInput map[string]interface{}, root string) string {
@@ -627,6 +673,27 @@ func clineToolAfterEvents(input map[string]interface{}, fields map[string]interf
 		action: action, category: category, severity: "info",
 		message: clineToolMessage(action), fields: fields,
 	}}
+}
+
+// clineCancelReason reports why a task ended without completing: cancelled, abandoned, or whatever
+// else the payload says.
+//
+// Read from the nesting Cline's file-based hook payload is reported to use
+// (taskCancel.taskMetadata.completionStatus) as well as from the top level, because the two hook
+// surfaces do not agree on shape. The nested path comes from a review of this change rather than
+// from a payload I captured, so it is additive: a miss costs the distinction between cancelled and
+// abandoned and falls back to "cancelled", never to a wrong reason.
+func clineCancelReason(input map[string]interface{}) string {
+	if reason := getFirstStr(input, "completionStatus", "completion_status", "reason"); reason != "" {
+		return reason
+	}
+	for _, outer := range []map[string]interface{}{input, firstMap(input, "taskCancel", "task_cancel")} {
+		nested := firstMap(outer, "taskMetadata", "task_metadata", "metadata", "task")
+		if reason := getFirstStr(nested, "completionStatus", "completion_status", "reason"); reason != "" {
+			return reason
+		}
+	}
+	return "cancelled"
 }
 
 // clineUsage normalizes Cline's reported token counts into gen_ai.usage.
