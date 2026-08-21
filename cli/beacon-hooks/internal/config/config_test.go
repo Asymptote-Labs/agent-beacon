@@ -15,6 +15,10 @@ func TestGetStateDir(t *testing.T) {
 		{"copilot", CopilotDir},
 		{"cursor", CursorDir},
 		{"vscode", VSCodeDir},
+		// An unregistered platform falls back to ClaudeDir, so this row is what proves cline is
+		// registered at all: without the case, cline's hook log and per-session state would be
+		// written into Claude Code's state directory and the two runtimes would share files.
+		{"cline", ClineDir},
 		{"unknown", ClaudeDir}, // defaults to claude
 	}
 
