@@ -118,6 +118,12 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		return hermesFirstString(input, "session_id", "sessionId", "session_key", "task_id")
 	case "opencode":
 		return getFirstStr(input, "session_id", "sessionID")
+	// Cline calls this a task, not a session: `taskId` is one of the base fields present on every
+	// hook payload it sends. The session_id spellings are kept as a fallback because the same
+	// binary receives payloads from Cline's plugin host and its CLI, and only the base fields are
+	// documented as common to both.
+	case "cline":
+		return getFirstStr(input, "taskId", "task_id", "sessionId", "session_id")
 	default:
 		id, _ := input["session_id"].(string)
 		return id
@@ -164,6 +170,13 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		return
 	case "opencode":
 		sessionID = getFirstStr(input, "session_id", "sessionID")
+		return
+	// No transcript path: Cline keeps conversation state under its own data directory and does not
+	// hand hooks a path to it, so there is nothing to return here. Left explicit rather than
+	// falling through to the default, which would look for `transcript_path` keys that never
+	// arrive and read as an oversight.
+	case "cline":
+		sessionID = getFirstStr(input, "taskId", "task_id", "sessionId", "session_id")
 		return
 	default:
 		sessionID, _ = input["session_id"].(string)
@@ -234,6 +247,12 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 			return cwd
 		}
 	}
+	if platform == "cline" {
+		if cwd := getFirstStr(input, "cwd", "workingDirectory", "working_directory"); cwd != "" {
+			return cwd
+		}
+		return firstWorkspaceRoot(input, "workspaceRoots", "workspace_roots")
+	}
 	if isDevinLikePlatform(platform) {
 		if cwd := getFirstStr(input, "cwd", "project_dir", "projectDir"); cwd != "" {
 			return cwd
@@ -270,6 +289,37 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 	}
 	cwd, _ := input["cwd"].(string)
 	return cwd
+}
+
+// firstWorkspaceRoot reads the first workspace root out of a payload that carries a list of them.
+//
+// Cline's documented base fields name `workspaceRoots` but not the type of its elements, and Cline
+// supports multi-root workspaces, so both shapes are read: a plain path string, and an object whose
+// path lives under a "path" or "root" key.
+//
+// A "uri" key is deliberately not read. A file:// URI is not a filesystem path, and returning one
+// would be worse than returning nothing: this value is what the git helpers resolve a repository
+// and branch from, and it is written into events, so a URI would produce a path that looks real,
+// fails every lookup, and reaches customer logs. An empty result degrades to "no repository
+// context" instead, which is the honest answer until a fixture shows what Cline actually sends.
+func firstWorkspaceRoot(input map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		roots, ok := input[key].([]interface{})
+		if !ok || len(roots) == 0 {
+			continue
+		}
+		switch root := roots[0].(type) {
+		case string:
+			if root != "" {
+				return root
+			}
+		case map[string]interface{}:
+			if path := firstToolString(root, "path", "root"); path != "" {
+				return path
+			}
+		}
+	}
+	return ""
 }
 
 func hermesExtra(input map[string]interface{}) map[string]interface{} {
