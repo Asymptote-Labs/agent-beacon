@@ -336,7 +336,7 @@ func TestClineEventSuccessfulToolWithMessageIsNotFailure(t *testing.T) {
 			"name":  "write_to_file",
 			"input": map[string]interface{}{"path": "out.ts", "content": "done"},
 		},
-		"result": map[string]interface{}{"output": "File written", "message": "File written successfully"},
+		"result":         map[string]interface{}{"output": "File written", "message": "File written successfully"},
 		"workspaceRoots": []interface{}{"/tmp/project"},
 	})
 

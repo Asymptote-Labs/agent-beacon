@@ -165,23 +165,16 @@ func supportedClineEventTypes() []string {
 	}
 }
 
+// clineBaseFields builds the fields every Cline event carries.
+//
+// The workspace is resolved for "cline" by name rather than through platformFlag. The shared
+// helpers default to the flag, which made this depend on how the binary was invoked: without
+// --platform cline the default reader found none of Cline's keys and the event carried no working
+// directory, repository or branch, while the file path beside it resolved correctly because that
+// path already named the runtime.
 func clineBaseFields(input map[string]interface{}, sessionID string) map[string]interface{} {
-	fields := map[string]interface{}{}
-	session := map[string]interface{}{}
-	if sessionID != "" {
-		session["id"] = sessionID
-	}
-	cwd := resolveCwd(input, "cline")
-	if cwd != "" {
-		session["working_directory"] = cwd
-		fields["repository"] = cwd
-	}
-	if len(session) > 0 {
-		fields["session"] = session
-	}
-	if branch := resolveBranch(input, cwd); branch != "" {
-		fields["branch"] = branch
-	}
+	fields := sessionFieldsForPlatform(sessionID, input, "cline")
+	applyWorkspaceFieldsForPlatform(fields, input, "", "cline")
 	fields["raw"] = map[string]interface{}{"cline": input}
 	if model := clineModel(input); model != "" {
 		fields["model"] = model
