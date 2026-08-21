@@ -85,11 +85,32 @@ func clineStatusFromRuntime(status runtimeStatus) ClineStatus {
 		return out
 	}
 	data, err := os.ReadFile(out.PluginPath)
-	if err != nil || !strings.Contains(string(data), out.BinaryPath) || strings.Contains(string(data), "__BEACON_") {
+	if err != nil || !clinePluginReferencesBinary(string(data), out.BinaryPath) || strings.Contains(string(data), "__BEACON_") {
 		out.Installed = false
 		out.Message = fmt.Sprintf("Cline plugin at %s does not reference the active Beacon hook binary", out.PluginPath)
 	}
 	return out
+}
+
+// clinePluginReferencesBinary reports whether a rendered plugin spawns the given hook binary.
+//
+// The path has to be compared in the form the file actually holds it. The installer writes argv
+// through json.Marshal, which escapes a backslash as two, so searching for the raw path found
+// nothing on Windows: `C:\Program Files\...` is what is in the file and `C:\Program Files\...`
+// -- one backslash each -- is what was being looked for. Every correctly installed Windows plugin
+// was reported as not referencing its own binary.
+//
+// Marshalling the path and stripping the surrounding quotes produces exactly the substring the file
+// contains, on every platform, rather than a second escaping rule maintained by hand.
+func clinePluginReferencesBinary(source, binaryPath string) bool {
+	if binaryPath == "" {
+		return false
+	}
+	encoded, err := json.Marshal(binaryPath)
+	if err != nil || len(encoded) < 2 {
+		return false
+	}
+	return strings.Contains(source, string(encoded[1:len(encoded)-1]))
 }
 
 func clineEmbeddedPluginSourcePath() string {
