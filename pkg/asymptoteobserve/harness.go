@@ -58,6 +58,19 @@ func NormalizeHarnessName(name string) string {
 		return "vscode_copilot"
 	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
 		return "copilot_cli"
+	// Pi is matched by equality against a fixed set of spellings, not by substring, because "pi" is
+	// two characters and appears inside names that belong to other runtimes: "copilot" contains it,
+	// so a Contains rule here would report every GitHub Copilot and VS Code Copilot session as Pi.
+	// The set is closed for the same reason -- a prefix rule would claim any future runtime whose
+	// name happens to start with those two letters.
+	//
+	// Its position after the Copilot rules is also deliberate. Equality makes this case
+	// order-independent today, but if it is ever loosened to a substring match, sitting below the
+	// broader rules means Copilot still resolves correctly and only genuine Pi names reach here.
+	// The reverse ordering would turn that same edit into silent misattribution.
+	case lower == "pi" || lower == "pi.dev" || lower == "pi_cli" || lower == "pi-cli" ||
+		lower == "pi_agent" || lower == "pi-agent" || lower == "pi agent":
+		return "pi_cli"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
