@@ -12,6 +12,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
@@ -583,5 +584,37 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 				t.Fatalf("body did not contain %q", tc.want)
 			}
 		})
+	}
+}
+
+// The dashboard's hook rows are assembled by hand, one call per runtime, so a new runtime is
+// invisible here until it is added -- and invisible means an operator reading the dashboard
+// concludes Pi is not instrumented while events are arriving in the log.
+func TestHookStatusesIncludesPi(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+
+	rows := hookStatuses(filepath.Join(home, "runtime.jsonl"), true)
+
+	var found *HookStatus
+	for i := range rows {
+		if rows[i].Target == "pi" {
+			found = &rows[i]
+			break
+		}
+	}
+	if found == nil {
+		targets := make([]string, 0, len(rows))
+		for _, row := range rows {
+			targets = append(targets, row.Target)
+		}
+		t.Fatalf("hookStatuses has no pi row; targets=%v", targets)
+	}
+	if found.Status != "not_installed" {
+		t.Fatalf("pi status = %q, want not_installed with nothing installed", found.Status)
+	}
+	want := filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts")
+	if found.Path != want {
+		t.Fatalf("pi path = %q, want %q", found.Path, want)
 	}
 }

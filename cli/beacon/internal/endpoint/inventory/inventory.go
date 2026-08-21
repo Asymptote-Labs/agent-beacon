@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 )
@@ -201,6 +202,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, factoryCandidates(home, wd)...)
 	items = append(items, copilotCandidates(home)...)
 	items = append(items, opencodeCandidates(home, wd)...)
+	items = append(items, piCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -280,6 +282,16 @@ func opencodeCandidates(home, wd string) []candidate {
 	return []candidate{
 		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	}
+}
+
+// piCandidates covers both locations Pi loads extensions from. The project path omits the "agent"
+// segment that the user path has -- that segment exists only under the home directory -- so the two
+// cannot be derived from one another.
+func piCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "pi_cli", path: filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "pi_cli", path: filepath.Join(wd, ".pi", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 	}
 }
 
@@ -612,6 +624,11 @@ func beaconManaged(item candidate, data []byte) bool {
 		}
 	case "opencode":
 		return strings.Contains(text, "beacon-managed-opencode-plugin:v1")
+	case "pi_cli":
+		// The marker constant rather than a literal, unlike the two cases above. The writer and the
+		// reader disagreeing means inventory reports Beacon's own extension as unmanaged, which is
+		// what an audit of "what is instrumented on this machine" is for.
+		return strings.Contains(text, endpointhooks.PiManagedExtensionMarker)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	}

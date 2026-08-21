@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
 
 func TestScanCurrentUserMCPInventory(t *testing.T) {
@@ -338,6 +340,8 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		{runtime: "copilot_cli", path: filepath.Join(home, ".bash_profile"), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile},
 		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "opencode", path: filepath.Join(work, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "pi_cli", path: filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "pi_cli", path: filepath.Join(work, ".pi", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
@@ -360,6 +364,41 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		if config.ParserMode != item.format || config.ConfigKind != item.kind {
 			t.Fatalf("%s %s mode/kind = %s/%s, want %s/%s", item.runtime, item.path, config.ParserMode, config.ConfigKind, item.format, item.kind)
 		}
+	}
+}
+
+// Inventory answers "what on this machine is instrumented, and by whom". A Beacon-written Pi
+// extension has to come back BeaconManaged, and one somebody else wrote must not -- the marker is
+// the only thing that separates them, which is why the check uses the exported constant rather than
+// a second copy of the string.
+func TestScanReportsPiExtensionManagementFromTheMarker(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("SHELL", "/bin/bash")
+	writeFile(t, filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"),
+		"// "+endpointhooks.PiManagedExtensionMarker+"\nexport default () => {}\n")
+	writeFile(t, filepath.Join(work, ".pi", "extensions", "beacon.ts"),
+		"export default function (pi) { /* not Beacon's */ }\n")
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	managed := findConfig(result.Configs, "pi_cli", filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"))
+	if managed == nil {
+		t.Fatal("user-level Pi extension was not scanned")
+	}
+	if !managed.BeaconManaged {
+		t.Fatalf("Beacon's own Pi extension reported unmanaged: %+v", managed)
+	}
+	if managed.ParserMode != formatMetadataOnly || managed.ConfigKind != KindPlugin {
+		t.Fatalf("mode/kind = %s/%s, want %s/%s", managed.ParserMode, managed.ConfigKind, formatMetadataOnly, KindPlugin)
+	}
+
+	foreign := findConfig(result.Configs, "pi_cli", filepath.Join(work, ".pi", "extensions", "beacon.ts"))
+	if foreign == nil {
+		t.Fatal("project-level Pi extension was not scanned")
+	}
+	if foreign.BeaconManaged {
+		t.Fatal("an extension Beacon did not write was reported as Beacon-managed")
 	}
 }
 

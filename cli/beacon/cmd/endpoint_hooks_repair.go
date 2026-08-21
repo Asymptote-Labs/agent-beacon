@@ -148,7 +148,7 @@ func installedHookTargetsForUser(homeDir, logPath string) ([]string, error) {
 }
 
 func repairTargetOrder() []string {
-	return []string{"claude", "codex", "cursor", "vscode", "factory", "opencode", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	return []string{"claude", "codex", "cursor", "vscode", "factory", "opencode", "pi", "grok", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 }
 
 // withUserHome runs fn as if it were executing inside another user's profile.
