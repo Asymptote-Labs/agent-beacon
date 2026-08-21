@@ -185,7 +185,12 @@ func DiscoverOpenCode() Harness {
 func DiscoverCline() Harness {
 	h := Harness{Name: "cline", DisplayName: "Cline", Capability: "plugin"}
 	detectExecutable(&h, "cline")
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Cline plugin directory could not be resolved: " + err.Error()
+		return h
+	}
 	pluginPath := filepath.Join(home, ".cline", "plugins", "beacon.ts")
 	h.ConfigPath = pluginPath
 	if !h.Detected && dirExists(filepath.Join(home, ".cline")) {
