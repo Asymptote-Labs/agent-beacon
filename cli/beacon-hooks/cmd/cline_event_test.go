@@ -487,9 +487,13 @@ func TestClineStageRecognizesSpellingVariants(t *testing.T) {
 		"tool_call_after":  clineStageToolAfter,
 		"afterRun":         clineStageTaskEnd,
 		"session_shutdown": clineStageTaskEnd,
-		"stop_error":       clineStageTaskError,
-		"iteration_start":  "",
-		"":                 "",
+		// A cancel and a failure are different outcomes and must not share a stage.
+		"TaskCancel":      clineStageTaskCancel,
+		"task_cancel":     clineStageTaskCancel,
+		"stop_error":      clineStageTaskError,
+		"error":           clineStageTaskError,
+		"iteration_start": "",
+		"":                "",
 	} {
 		t.Run(input, func(t *testing.T) {
 			if got := clineStage(map[string]interface{}{"type": input}); got != want {
@@ -567,5 +571,87 @@ func TestClineWorkspacePathIsHostIndependent(t *testing.T) {
 				t.Errorf("clineWorkspacePath(%q, %q) = %q, want %q", tc.path, tc.root, got, tc.want)
 			}
 		})
+	}
+}
+
+// An error object with no message-like field is still a failure. Treating its empty text as "no
+// error" recorded a failed tool call as a successful one -- the quietest way to be wrong, because
+// the event still writes and reads as ordinary activity.
+func TestClineEventToolFailureWithoutAMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		errValue interface{}
+		wantType string
+	}{
+		{name: "name only", errValue: map[string]interface{}{"name": "ENOENT"}, wantType: "ENOENT"},
+		{name: "type and code", errValue: map[string]interface{}{"type": "spawn_failed", "code": float64(2)}, wantType: "spawn_failed"},
+		{name: "numeric code only", errValue: map[string]interface{}{"code": float64(2)}, wantType: "tool_error"},
+		{name: "empty object", errValue: map[string]interface{}{}, wantType: "tool_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := clineTestLog(t)
+			runHookWithInput(t, runClineEvent, map[string]interface{}{
+				"type":     "afterTool",
+				"taskId":   "task-1",
+				"toolCall": map[string]interface{}{"name": "read_file", "input": map[string]interface{}{"path": "missing.ts"}},
+				"error":    tc.errValue,
+			})
+
+			event := clineEventWithAction(t, logPath, "tool.failed")
+			if got := event["severity"]; got != "high" {
+				t.Errorf("severity = %q, want high", got)
+			}
+			if got := nested(t, event, "error")["type"]; got != tc.wantType {
+				t.Errorf("error.type = %q, want %q", got, tc.wantType)
+			}
+		})
+	}
+}
+
+// A cancel is a person stopping their own task, not an incident. Recorded as session.error at high
+// severity it counted every deliberate stop as a failure, inflating error rollups and tripping
+// alerts on the most ordinary thing anyone does with an agent.
+func TestClineEventTaskCancelIsAnEndNotAnError(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"hookName": "TaskCancel",
+		"taskId":   "task-cancelled",
+		"usage":    map[string]interface{}{"inputTokens": 40, "outputTokens": 5},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.ended")
+	if got := event["severity"]; got != "info" {
+		t.Errorf("severity = %q, want info", got)
+	}
+	if _, ok := event["error"]; ok {
+		t.Errorf("cancel carried an error field: %v", event["error"])
+	}
+	// The reason field is what lets a rollup separate cancels from completions without parsing the
+	// message text.
+	if got := nested(t, event, "session")["cancel_reason"]; got != "cancelled" {
+		t.Errorf("session.cancel_reason = %v, want cancelled", got)
+	}
+	// A cancelled task still reports what it spent.
+	if got := nested(t, event, "gen_ai", "usage")["input_tokens"]; got != float64(40) {
+		t.Errorf("gen_ai.usage.input_tokens = %v, want 40", got)
+	}
+}
+
+func TestClineEventTaskErrorStaysAnError(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"hookName": "stop_error",
+		"taskId":   "task-failed",
+		"error":    map[string]interface{}{"name": "provider_timeout"},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.error")
+	if got := event["severity"]; got != "high" {
+		t.Errorf("severity = %q, want high", got)
+	}
+	if got := nested(t, event, "error")["type"]; got != "provider_timeout" {
+		t.Errorf("error.type = %q, want provider_timeout", got)
 	}
 }
