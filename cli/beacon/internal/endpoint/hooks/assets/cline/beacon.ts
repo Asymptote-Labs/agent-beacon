@@ -154,15 +154,39 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
 // handler's context puts them, so several shapes are tried and a miss costs the field rather than
 // the event. The hook adapter reads the same names, so anything missed here is still recoverable
 // from the forwarded context.
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
 function identity(context: Record<string, unknown> | undefined): Record<string, unknown> {
   if (!context) return {}
-  const task = (context.task ?? context.run ?? {}) as Record<string, unknown>
+  const task = asRecord(context.task ?? context.run)
+  // The setup context is reported to carry the workspace under an object of its own rather than at
+  // the top level. Read in addition to the top level, not instead of it: the two hook surfaces do
+  // not agree on shape, and this is the only place the workspace is guaranteed to appear at all --
+  // a miss here costs the working directory, the repository and the branch on every event of the
+  // task, which is what makes it worth reading more than one spelling.
+  const workspace = asRecord(context.workspaceInfo ?? context.workspace_info ?? context.workspace)
   const fields: Record<string, unknown> = {}
   const taskId = context.taskId ?? context.taskID ?? context.task_id ?? task.id ?? task.taskId
   if (taskId) fields.taskId = taskId
-  const roots = context.workspaceRoots ?? context.workspace_roots ?? context.workspaceFolders
+  const roots =
+    context.workspaceRoots ??
+    context.workspace_roots ??
+    context.workspaceFolders ??
+    workspace.workspaceRoots ??
+    workspace.roots
   if (roots) fields.workspaceRoots = roots
-  const cwd = context.cwd ?? context.workingDirectory ?? context.working_directory
+  const cwd =
+    context.cwd ??
+    context.workingDirectory ??
+    context.working_directory ??
+    workspace.rootPath ??
+    workspace.root_path ??
+    workspace.cwd ??
+    workspace.path
   if (cwd) fields.cwd = cwd
   const version = context.clineVersion ?? context.cline_version ?? context.version
   if (version) fields.clineVersion = version
