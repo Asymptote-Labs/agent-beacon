@@ -45,7 +45,7 @@ beacon endpoint hooks install --harness cline
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported from the run-start payload, and from `UserPromptSubmit` on Cline's file-based hook surface |
-| Session telemetry | Task start and end, plus task-level errors |
+| Session telemetry | Task start and end, cancels, and task-level errors |
 | Tool lifecycle | Invocation, completion, result, duration, and failure using `beforeTool` and `afterTool` |
 | Command telemetry | `execute_command` with command text, output, exit code, and duration |
 | File telemetry | `read_file`, `list_files`, `search_files`, and `list_code_definition_names` reads; `write_to_file` and `replace_in_file` modifications with diff hash and byte count |
@@ -56,6 +56,8 @@ beacon endpoint hooks install --harness cline
 | MDM deployment | Supported for the endpoint agent; Cline plugins are installed separately in the logged-in user's context |
 
 Cline addresses files relative to the workspace root. Beacon resolves those paths against the workspace before writing them, so a Cline file event is comparable with the same file seen through another runtime and matches threat rules written against absolute paths. A path that is already absolute is left alone, and a relative path with no resolvable workspace root stays relative rather than being joined to a guessed root.
+
+A cancelled task ends rather than fails. Cline fires its cancel hook for the cleanup that follows someone stopping or abandoning a task, so Beacon records `session.ended` at info severity with `session.cancel_reason` set, not `session.error` — otherwise every deliberate stop would count as an incident in error rollups and alerting. A cancelled task still reports the tokens it spent.
 
 Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary as well would double every Cline task's totals. Cost is recorded only as Cline reports it; Beacon never derives cost from a local price table.
 

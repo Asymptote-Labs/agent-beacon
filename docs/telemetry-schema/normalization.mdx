@@ -61,7 +61,9 @@ Cline's managed plugin maps run start to `session.started`, and to
 `beforeTool` to `tool.invoked`; `afterTool` to `command.executed`, `file.read`,
 `file.modified`, `mcp.tool_invoked`, or `tool.completed` according to tool
 semantics, and to `tool.failed` when the payload reports an error; run end to
-`session.ended`; and task errors to `session.error`.
+`session.ended`; task cancels to `session.ended` at info severity with
+`session.cancel_reason` set, since a cancel is an end rather than a failure; and
+task errors to `session.error`.
 
 The same mapping accepts Cline's file-based hook names (`TaskStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `TaskComplete`, `TaskCancel`)
