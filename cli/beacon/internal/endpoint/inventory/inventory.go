@@ -201,6 +201,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, factoryCandidates(home, wd)...)
 	items = append(items, copilotCandidates(home)...)
 	items = append(items, opencodeCandidates(home, wd)...)
+	items = append(items, clineCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -280,6 +281,13 @@ func opencodeCandidates(home, wd string) []candidate {
 	return []candidate{
 		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	}
+}
+
+func clineCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "cline", path: filepath.Join(home, ".cline", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "cline", path: filepath.Join(wd, ".cline", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 	}
 }
 
@@ -612,6 +620,8 @@ func beaconManaged(item candidate, data []byte) bool {
 		}
 	case "opencode":
 		return strings.Contains(text, "beacon-managed-opencode-plugin:v1")
+	case "cline":
+		return strings.Contains(text, "beacon-managed-cline-plugin:v1")
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	}

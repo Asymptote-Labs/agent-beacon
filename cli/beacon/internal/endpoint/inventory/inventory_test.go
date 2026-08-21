@@ -338,6 +338,8 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		{runtime: "copilot_cli", path: filepath.Join(home, ".bash_profile"), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile},
 		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "opencode", path: filepath.Join(work, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "cline", path: filepath.Join(home, ".cline", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "cline", path: filepath.Join(work, ".cline", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
@@ -375,6 +377,7 @@ mcpServers:
       - mcp-server-memory
 `)
 	writeFile(t, filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), `// beacon-managed-opencode-plugin:v1`)
+	writeFile(t, filepath.Join(home, ".cline", "plugins", "beacon.ts"), `// beacon-managed-cline-plugin:v1`)
 	writeFile(t, filepath.Join(home, ".zshrc"), `export OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`)
 
 	result := Scan(Options{
@@ -393,6 +396,19 @@ mcpServers:
 	}
 	if opencode.ParserMode != formatMetadataOnly || opencode.ConfigKind != KindPlugin {
 		t.Fatalf("opencode mode/kind = %s/%s, want %s/%s", opencode.ParserMode, opencode.ConfigKind, formatMetadataOnly, KindPlugin)
+	}
+	// Each plugin runtime needs its own marker case in beaconManaged; a missing one reports an
+	// installed plugin as unmanaged, which is how an inventory comes to show telemetry as absent on
+	// a machine that has it.
+	cline := findConfig(result.Configs, "cline", filepath.Join(home, ".cline", "plugins", "beacon.ts"))
+	if cline == nil {
+		t.Fatal("cline metadata-only config not found")
+	}
+	if cline.ParserStatus != StatusOK || !cline.BeaconManaged {
+		t.Fatalf("cline status = %s managed=%t, want ok/managed", cline.ParserStatus, cline.BeaconManaged)
+	}
+	if cline.ParserMode != formatMetadataOnly || cline.ConfigKind != KindPlugin {
+		t.Fatalf("cline mode/kind = %s/%s, want %s/%s", cline.ParserMode, cline.ConfigKind, formatMetadataOnly, KindPlugin)
 	}
 	factoryProfile := findConfig(result.Configs, "factory", filepath.Join(home, ".zshrc"))
 	if factoryProfile == nil {
