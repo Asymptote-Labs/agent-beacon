@@ -314,25 +314,45 @@ func clineToolResponse(input map[string]interface{}) map[string]interface{} {
 	return nil
 }
 
-// clineToolError reports the failure text on a completed tool call, or "" when it succeeded.
-func clineToolError(input map[string]interface{}) string {
+// clineToolFailure reports whether a completed tool call failed, and the text describing it.
+//
+// Failure and its description are separate answers because a payload can carry one without the
+// other. Reading the text and treating "" as success left the reported bug half-open: an error
+// object of {"code": 2} has no string field at all, and an empty {} has no field, so both were
+// still recorded as successful tool calls -- the quietest way to be wrong, since the event writes
+// and reads as ordinary activity. The presence of the error object is the failure signal; its
+// contents only describe it.
+//
+// The response is read only for keys that name an error explicitly. It deliberately does not read
+// `message`: Cline results carry status text there on success ("File written successfully"), and
+// reading it turned every such completion into a high-severity failure.
+func clineToolFailure(input map[string]interface{}) (string, bool) {
 	if text := getFirstStr(input, "error", "errorMessage", "error_message"); text != "" {
-		return text
+		return text, true
 	}
 	if errMap := firstMap(input, "error"); errMap != nil {
-		if text := getFirstStr(errMap, "message", "error", "errorMessage", "error_message"); text != "" {
-			return text
+		return getFirstStr(errMap, "message", "error", "errorMessage", "error_message", "name", "type", "code"), true
+	}
+	if response := clineToolResponse(input); response != nil {
+		if text := getFirstStr(response, "error", "errorMessage", "error_message"); text != "" {
+			return text, true
 		}
+	}
+	return "", false
+}
+
+// clineToolErrorType names a failed tool call's error for the error.type field.
+//
+// Reads the same keys clineErrorType reads for session errors, which were inconsistent: a session
+// error reported its name while a tool error was always "tool_error", discarding the one detail an
+// investigator would filter on.
+func clineToolErrorType(input map[string]interface{}) string {
+	if errMap := firstMap(input, "error"); errMap != nil {
 		if name := getFirstStr(errMap, "name", "type", "code"); name != "" {
 			return name
 		}
 	}
-	if response := clineToolResponse(input); response != nil {
-		if text := getFirstStr(response, "error", "errorMessage", "error_message"); text != "" {
-			return text
-		}
-	}
-	return ""
+	return "tool_error"
 }
 
 func clineErrorType(input map[string]interface{}) string {
@@ -584,9 +604,11 @@ func clineCommandFields(input, toolInput, toolResponse map[string]interface{}) m
 
 func clineToolAfterEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
 	mergeMap(fields, clineToolFields(input, true))
-	if errText := clineToolError(input); errText != "" {
-		fields["error"] = map[string]interface{}{"type": "tool_error"}
-		fields["content"] = retainedContentFields(errText)
+	if errText, failed := clineToolFailure(input); failed {
+		fields["error"] = map[string]interface{}{"type": clineToolErrorType(input)}
+		if errText != "" {
+			fields["content"] = retainedContentFields(errText)
+		}
 		return []normalizedEvent{{
 			action: "tool.failed", category: "tool", severity: "high",
 			message: "Cline tool failed", fields: fields,
