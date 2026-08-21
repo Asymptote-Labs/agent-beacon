@@ -576,6 +576,15 @@ func TestClineWorkspacePathIsHostIndependent(t *testing.T) {
 		{name: "traversal above a drive root keeps the drive", path: `..\..\..\x.ts`, root: `C:\repo`, want: `C:\x.ts`},
 		// A leading "//" is a share, not a doubled separator, and path.Clean would collapse it.
 		{name: "unc share survives cleaning", path: `..\b.ts`, root: `\\server\share\repo\pkg`, want: `\\server\share\repo\b.ts`},
+		// A bare volume leaves nothing after the prefix, and path.Join drops empty elements -- which
+		// ran the share and the path together as "\\server\sharesrc\app.ts".
+		{name: "bare unc share keeps its separator", path: "src/app.ts", root: `\\server\share`, want: `\\server\share\src\app.ts`},
+		{name: "unc share with trailing separator", path: "src/app.ts", root: `\\server\share\`, want: `\\server\share\src\app.ts`},
+		{name: "bare server keeps its separator", path: "src/app.ts", root: `\\server`, want: `\\server\src\app.ts`},
+		// A workspace root of "C:" means that drive's root, not a path relative to its working
+		// directory, so the result is rooted rather than the drive-relative "C:src\app.ts".
+		{name: "bare drive root is rooted", path: "src/app.ts", root: "C:", want: `C:\src\app.ts`},
+		{name: "forward slash unc share keeps its separator", path: "src/app.ts", root: "//server/share", want: "//server/share/src/app.ts"},
 
 		{name: "dotdot segments are collapsed", path: "../../.ssh/id_rsa", root: "/home/u/proj", want: "/home/.ssh/id_rsa"},
 		{name: "single dot segments are collapsed", path: "./src/./app.ts", root: "/repo", want: "/repo/src/app.ts"},
