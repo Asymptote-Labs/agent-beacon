@@ -21,6 +21,7 @@ var (
 	GrokDir        = filepath.Join(BeaconDir, "grok")
 	HermesDir      = filepath.Join(BeaconDir, "hermes")
 	OpenCodeDir    = filepath.Join(BeaconDir, "opencode")
+	PiDir          = filepath.Join(BeaconDir, "pi")
 )
 
 // Log rotation
@@ -99,6 +100,8 @@ func GetStateDir(platform string) string {
 		return HermesDir
 	case "opencode":
 		return OpenCodeDir
+	case "pi":
+		return PiDir
 	default:
 		return ClaudeDir
 	}

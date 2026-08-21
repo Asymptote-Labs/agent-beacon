@@ -29,8 +29,8 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "beacon-hooks",
-	Short: "Beacon hooks for Claude Code, Codex, GitHub Copilot, Cursor, VS Code, Devin, Factory, Grok, Hermes, Antigravity, and opencode",
-	Long: `Beacon hooks binary for Claude Code, Codex, GitHub Copilot, Cursor, VS Code, Devin, Factory, Grok, Hermes, Antigravity, and opencode integration.
+	Short: "Beacon hooks for Claude Code, Codex, GitHub Copilot, Cursor, VS Code, Devin, Factory, Grok, Hermes, Antigravity, opencode, and Pi",
+	Long: `Beacon hooks binary for Claude Code, Codex, GitHub Copilot, Cursor, VS Code, Devin, Factory, Grok, Hermes, Antigravity, opencode, and Pi integration.
 
 This binary provides hook commands that are called by IDE plugin systems
 to evaluate code changes for security violations.
@@ -39,7 +39,7 @@ Use --platform to specify the calling platform (default: claude).`,
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "claude", "Platform context: claude, codex, antigravity, copilot, cursor, vscode, devin, devin-cli, devin-desktop, factory, grok, hermes, or opencode")
+	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "claude", "Platform context: claude, codex, antigravity, copilot, cursor, vscode, devin, devin-cli, devin-desktop, factory, grok, hermes, opencode, or pi")
 	rootCmd.PersistentFlags().StringVar(&logFlag, "log", "", "Endpoint runtime log to append to (same value as BEACON_ENDPOINT_LOG)")
 	rootCmd.PersistentFlags().StringVar(&configFlag, "config", "", "Endpoint config to read (same value as BEACON_ENDPOINT_CONFIG)")
 	rootCmd.PersistentFlags().StringVar(&cliFlag, "cli", "", "Path to the beacon CLI for inventory heartbeats (same value as BEACON_ENDPOINT_CLI)")

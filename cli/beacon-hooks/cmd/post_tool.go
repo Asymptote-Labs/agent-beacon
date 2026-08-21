@@ -405,6 +405,20 @@ func isFileEditTool(platform, toolName string) bool {
 			strings.Contains(lower, "create") ||
 			strings.Contains(lower, "patch")
 	}
+	if platform == "pi" {
+		// Pi's built-in tools are lowercase, so the default branch below -- which matches Claude's
+		// exact capitalized names -- recognizes none of them, and every file edit would have been
+		// recorded as a generic tool completion with no file.path to match a rule against.
+		//
+		// Substring rather than an exact list because Pi has no fixed tool vocabulary: extensions
+		// register their own tools, and a name like "write_file" or "apply_patch" from one of them
+		// is as much a file edit as the built-in.
+		lower := strings.ToLower(toolName)
+		return strings.Contains(lower, "edit") ||
+			strings.Contains(lower, "write") ||
+			strings.Contains(lower, "create") ||
+			strings.Contains(lower, "patch")
+	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
 }
 
