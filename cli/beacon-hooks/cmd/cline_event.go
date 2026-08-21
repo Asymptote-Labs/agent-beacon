@@ -166,8 +166,22 @@ func supportedClineEventTypes() []string {
 }
 
 func clineBaseFields(input map[string]interface{}, sessionID string) map[string]interface{} {
-	fields := sessionFields(sessionID, input)
-	applyWorkspaceFields(fields, input, "")
+	fields := map[string]interface{}{}
+	session := map[string]interface{}{}
+	if sessionID != "" {
+		session["id"] = sessionID
+	}
+	cwd := resolveCwd(input, "cline")
+	if cwd != "" {
+		session["working_directory"] = cwd
+		fields["repository"] = cwd
+	}
+	if len(session) > 0 {
+		fields["session"] = session
+	}
+	if branch := resolveBranch(input, cwd); branch != "" {
+		fields["branch"] = branch
+	}
 	fields["raw"] = map[string]interface{}{"cline": input}
 	if model := clineModel(input); model != "" {
 		fields["model"] = model
@@ -299,11 +313,13 @@ func clineToolError(input map[string]interface{}) string {
 	if text := getFirstStr(input, "error", "errorMessage", "error_message"); text != "" {
 		return text
 	}
-	for _, source := range []map[string]interface{}{firstMap(input, "error"), clineToolResponse(input)} {
-		if source == nil {
-			continue
+	if errMap := firstMap(input, "error"); errMap != nil {
+		if text := getFirstStr(errMap, "message", "error", "errorMessage", "error_message"); text != "" {
+			return text
 		}
-		if text := getFirstStr(source, "message", "error", "errorMessage", "error_message"); text != "" {
+	}
+	if response := clineToolResponse(input); response != nil {
+		if text := getFirstStr(response, "error", "errorMessage", "error_message"); text != "" {
 			return text
 		}
 	}

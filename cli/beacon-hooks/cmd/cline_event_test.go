@@ -106,6 +106,26 @@ func TestClineEventTaskStartRecordsSessionAndPrompt(t *testing.T) {
 	}
 }
 
+// Base fields resolve the workspace through the Cline-specific path (workspaceRoots) regardless of
+// what platformFlag is set to. Without this, the session.working_directory stays empty when the
+// binary is invoked without --platform cline.
+func TestClineEventBaseFieldsResolveWorkspaceWithoutPlatformFlag(t *testing.T) {
+	logPath := clineTestLog(t)
+	platformFlag = "claude" // simulate missing --platform cline
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"type":           "beforeRun",
+		"taskId":         "task-platform",
+		"workspaceRoots": []interface{}{"/tmp/project"},
+		"input":          map[string]interface{}{"text": "hello"},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.started")
+	if got := nested(t, event, "session")["working_directory"]; got != "/tmp/project" {
+		t.Errorf("session.working_directory = %q, want /tmp/project (resolved from workspaceRoots regardless of platformFlag)", got)
+	}
+}
+
 // The file-based hook surface names the hook in `hookName` and sends prompts on their own, so a
 // prompt payload with no run-start context still has to produce a prompt event.
 func TestClineEventPromptOnlyPayload(t *testing.T) {
@@ -301,6 +321,33 @@ func TestClineEventToolFailureIsHighSeverity(t *testing.T) {
 	}
 	if got := nested(t, event, "error")["type"]; got != "tool_error" {
 		t.Errorf("error.type = %q, want tool_error", got)
+	}
+}
+
+// A successful tool result that carries a "message" field (common in Cline for status feedback)
+// must not be treated as a failure. Only explicit error keys indicate a failure.
+func TestClineEventSuccessfulToolWithMessageIsNotFailure(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"type":   "afterTool",
+		"taskId": "task-msg",
+		"toolCall": map[string]interface{}{
+			"name":  "write_to_file",
+			"input": map[string]interface{}{"path": "out.ts", "content": "done"},
+		},
+		"result": map[string]interface{}{"output": "File written", "message": "File written successfully"},
+		"workspaceRoots": []interface{}{"/tmp/project"},
+	})
+
+	actions := clineEventActions(t, logPath)
+	for _, a := range actions {
+		if a == "tool.failed" {
+			t.Fatalf("actions = %v, want no tool.failed for a successful result with a message field", actions)
+		}
+	}
+	if len(actions) == 0 {
+		t.Fatalf("expected at least one event")
 	}
 }
 
