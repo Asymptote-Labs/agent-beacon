@@ -55,6 +55,7 @@ func DiscoverAll() []Harness {
 		DiscoverAntigravity(),
 		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
+		DiscoverPi(),
 		DiscoverHermes(),
 		DiscoverFactory(),
 		DiscoverVSCode(),

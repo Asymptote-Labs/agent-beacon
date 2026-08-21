@@ -16,6 +16,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"gemini":      "gemini_cli",
 		"antigravity": "antigravity_cli",
 		"vscode":      "vscode_copilot",
+		"pi":          "pi_cli",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -34,7 +35,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway",
+		"openclaw_gateway", "pi_cli",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -62,6 +63,51 @@ func TestNarrowerRuntimesWinOverBroaderRules(t *testing.T) {
 				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", input, got, want)
 			}
 		})
+	}
+}
+
+// Pi's canonical name is reachable from the spellings the two write paths actually produce: the
+// hook path installs with --platform pi, and the OTLP path would read a service.name.
+func TestPiSpellingsConvergeOnPiCLI(t *testing.T) {
+	for _, in := range []string{
+		"pi", "PI", " pi ", "pi.dev", "pi_cli", "pi-cli", "pi_agent", "pi-agent", "pi agent",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "pi_cli" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "pi_cli")
+			}
+		})
+	}
+}
+
+// "pi" is a two-character name that appears inside other runtimes' names, so matching it by
+// substring would attribute their sessions to Pi. "copilot" contains "pi" -- every Copilot and VS
+// Code Copilot session is the concrete blast radius of getting this wrong, and both are runtimes
+// Beacon already supports. This test is what keeps the Pi case an equality match.
+func TestPiDoesNotSwallowNamesContainingPi(t *testing.T) {
+	for input, want := range map[string]string{
+		"copilot":        "copilot_cli",
+		"github-copilot": "copilot_cli",
+		"copilot_cli":    "copilot_cli",
+		"copilot-chat":   "vscode_copilot",
+		"vscode_copilot": "vscode_copilot",
+	} {
+		t.Run(input, func(t *testing.T) {
+			if got := NormalizeHarnessName(input); got != want {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- a substring rule for Pi would "+
+					"reassign this runtime's sessions to pi_cli", input, got, want)
+			}
+		})
+	}
+}
+
+// The Pi spelling set is closed, not a prefix rule. A future runtime whose name merely starts with
+// "pi" must keep its own name rather than being recorded as Pi activity.
+func TestNamesMerelyStartingWithPiAreNotPi(t *testing.T) {
+	for _, name := range []string{"pip-agent", "pipeline", "pixel-cli", "pied-piper"} {
+		if got := NormalizeHarnessName(name); got != name {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
+		}
 	}
 }
 
