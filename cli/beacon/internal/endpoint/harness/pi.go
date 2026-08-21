@@ -47,10 +47,15 @@ func DiscoverPi() Harness {
 
 // piStatus classifies the extension file at path.
 //
-// The middle case is the one worth spelling out: a beacon.ts that exists without Beacon's marker is
-// somebody else's extension sharing the filename, so it is reported as disabled rather than
-// enabled. Reporting it as enabled would claim telemetry Beacon is not collecting, and install
-// refuses to overwrite the same file for the same reason.
+// Two of the four cases are worth spelling out. A beacon.ts without Beacon's marker prefix is
+// somebody else's extension sharing the filename, so it reports disabled rather than enabled:
+// claiming it would show the runtime as covered while no events arrive, and install refuses to
+// overwrite the same file for the same reason.
+//
+// A Beacon extension from an earlier version reports *enabled*, because it is: it collects the same
+// telemetry. What an older one may not do is honor a policy decision, and that is a different
+// question from whether telemetry is flowing -- so it is said in the message rather than by
+// reporting a runtime as uninstrumented when it is instrumented.
 func piStatus(path string) (TelemetryStatus, string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -59,8 +64,13 @@ func piStatus(path string) (TelemetryStatus, string) {
 		}
 		return TelemetryMissing, err.Error()
 	}
-	if !strings.Contains(string(data), hooks.PiManagedExtensionMarker) {
+	source := string(data)
+	if !strings.Contains(source, hooks.PiManagedExtensionPrefix) {
 		return TelemetryDisabled, "Pi extension file exists but Beacon endpoint extension was not found"
+	}
+	if !strings.Contains(source, hooks.PiManagedExtensionMarker) {
+		return TelemetryEnabled, "Beacon Pi extension is configured but was written by an earlier version; " +
+			"reinstall it to pick up current behavior"
 	}
 	return TelemetryEnabled, "Beacon Pi extension is configured"
 }

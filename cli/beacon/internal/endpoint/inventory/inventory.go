@@ -625,10 +625,11 @@ func beaconManaged(item candidate, data []byte) bool {
 	case "opencode":
 		return strings.Contains(text, "beacon-managed-opencode-plugin:v1")
 	case "pi_cli":
-		// The marker constant rather than a literal, unlike the two cases above. The writer and the
-		// reader disagreeing means inventory reports Beacon's own extension as unmanaged, which is
-		// what an audit of "what is instrumented on this machine" is for.
-		return strings.Contains(text, endpointhooks.PiManagedExtensionMarker)
+		// The marker prefix, and shared constants rather than the literals the two cases above use.
+		// Inventory asks who wrote a file, so any Beacon version counts: matching only the current
+		// version would report an extension written by an earlier build as somebody else's, in the
+		// one report whose whole purpose is attributing what is installed on a machine.
+		return strings.Contains(text, endpointhooks.PiManagedExtensionPrefix)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	}

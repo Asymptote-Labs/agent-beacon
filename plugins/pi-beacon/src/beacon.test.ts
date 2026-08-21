@@ -53,8 +53,11 @@ describe("beacon Pi extension", () => {
   // Pi reads a handler's return value as a directive: truthy from tool_call blocks the call, and
   // truthy from input or tool_result rewrites what the agent sees. An observation-only extension
   // that returned its send() result would silently change the agent's behavior.
-  test("no handler returns a value that Pi would act on", async () => {
+  test("no observation handler returns a value that Pi would act on", async () => {
     const handlers = register()
+    // tool_call is the one handler allowed to return a directive, and only on a provider deny. Its
+    // two outcomes are covered by the policy tests below.
+    handlers.delete("tool_call")
     const events: Record<string, unknown> = {
       session_start: { reason: "startup" },
       input: { text: "hello" },
@@ -67,6 +70,93 @@ describe("beacon Pi extension", () => {
     for (const [name, handler] of handlers) {
       const returned = await handler(events[name], context())
       expect(returned, `${name} returned a value Pi would treat as a directive`).toBeUndefined()
+    }
+  })
+
+  // With no policy provider configured -- the default for the open build -- the hooks binary answers
+  // with an empty object and tool_call must behave exactly like every observation handler.
+  test("tool_call returns nothing when no decision comes back", async () => {
+    ;(globalThis as any)[senderKey] = async (payload: any) => {
+      payloads.push(structuredClone(payload))
+      return {}
+    }
+
+    const handlers = register()
+    const returned = await handlers.get("tool_call")!(
+      { toolName: "bash", toolCallId: "c1", input: { command: "ls" } },
+      context(),
+    )
+
+    expect(returned).toBeUndefined()
+    expect(payloads).toHaveLength(1)
+  })
+
+  // Pi's tool_call is its only blockable pre-execution event, which is what lets the policy seam be
+  // honored with full fidelity: the binary returns Pi's own {block, reason} shape and it is passed
+  // back unchanged, with no translation in this layer.
+  test("tool_call returns the deny verbatim when the binary blocks", async () => {
+    ;(globalThis as any)[senderKey] = async () => ({
+      block: true,
+      reason: "rm -rf denied by policy provider",
+    })
+
+    const handlers = register()
+    const returned = await handlers.get("tool_call")!(
+      { toolName: "bash", toolCallId: "c1", input: { command: "rm -rf /" } },
+      context(),
+    )
+
+    expect(returned).toEqual({ block: true, reason: "rm -rf denied by policy provider" })
+  })
+
+  test("tool_call asks for a decision, and no other handler does", async () => {
+    const asked: Array<[string, boolean]> = []
+    ;(globalThis as any)[senderKey] = async (payload: any, wantDecision: boolean) => {
+      asked.push([payload.type, wantDecision])
+      return {}
+    }
+
+    const handlers = register()
+    const events: Record<string, unknown> = {
+      session_start: {},
+      session_shutdown: {},
+      input: { text: "hi" },
+      tool_call: { toolName: "bash", input: {} },
+      tool_result: { toolName: "bash", content: "ok" },
+      message_end: { message: { role: "assistant", content: [] } },
+      agent_end: {},
+    }
+    for (const [name, handler] of handlers) {
+      await handler(events[name], context())
+    }
+
+    expect(asked.filter(([, want]) => want).map(([type]) => type)).toEqual(["tool_call"])
+  })
+
+  // Every failure path is an allow. A deny that only happens when Beacon is healthy is a weaker
+  // guarantee than no deny at all, but the reverse -- blocking because Beacon broke -- turns an
+  // observability tool into an outage, so fail-open is the specified direction for the whole seam.
+  test("tool_call allows the call on every failure shape", async () => {
+    for (const outcome of [
+      undefined,
+      null,
+      {},
+      { block: false },
+      { block: "true" },
+      "not an object",
+      new Error("provider exploded"),
+    ]) {
+      ;(globalThis as any)[senderKey] = async () => {
+        if (outcome instanceof Error) throw outcome
+        return outcome
+      }
+
+      const handlers = register()
+      const returned = await handlers.get("tool_call")!(
+        { toolName: "bash", input: { command: "ls" } },
+        context(),
+      )
+      expect(returned, `outcome ${JSON.stringify(outcome)} did not allow the call`).toBeUndefined()
     }
   })
 

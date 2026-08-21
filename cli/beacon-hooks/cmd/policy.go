@@ -163,6 +163,13 @@ func policyDenyResponse(reason string) map[string]interface{} {
 		return map[string]interface{}{"decision": "reject"}
 	case platformFlag == "antigravity" || platformFlag == "grok":
 		return map[string]interface{}{"decision": "deny"}
+	case platformFlag == "pi":
+		// Pi's native deny is a tool_call handler returning {block, reason}, so that is emitted
+		// verbatim and the extension returns this object to Pi unchanged. Every other runtime here
+		// is a shape somebody else defined and Beacon matches; this one is a contract between two
+		// pieces of Beacon, and keeping the translation out of the extension is the point -- the
+		// extension is the layer that cannot be corrected without a reinstall.
+		return map[string]interface{}{"block": true, "reason": reason}
 	case platformFlag == "claude":
 		return map[string]interface{}{
 			"hookSpecificOutput": map[string]interface{}{

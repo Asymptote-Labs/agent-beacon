@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
@@ -123,16 +124,32 @@ func TestDiscoverPiReportsDisabledForUnmanagedExtension(t *testing.T) {
 	}
 }
 
-// The marker is a version contract with the extension source. A file carrying an older marker must
-// not read as enabled, or a repair would leave a stale extension in place believing it current.
-func TestDiscoverPiReportsDisabledForStaleMarkerVersion(t *testing.T) {
+// An extension from an earlier Beacon version is still collecting telemetry, so it reports enabled
+// -- reporting a runtime as uninstrumented when events are arriving from it would be worse than
+// saying nothing. What an older one may not do is honor a policy decision, which is a different
+// question and belongs in the message.
+func TestDiscoverPiReportsEnabledWithAWarningForAnEarlierVersion(t *testing.T) {
 	home := setupPiDiscovery(t)
-	writePiExtension(t, home, "// beacon-managed-pi-extension:v0\nexport default () => {}\n")
+	writePiExtension(t, home, "// beacon-managed-pi-extension:v1\nexport default () => {}\n")
+
+	h := DiscoverPi()
+	if h.TelemetryStatus != TelemetryEnabled {
+		t.Fatalf("TelemetryStatus = %q, want %q; an older extension still reports telemetry",
+			h.TelemetryStatus, TelemetryEnabled)
+	}
+	if !strings.Contains(h.Message, "earlier version") {
+		t.Fatalf("message = %q, want it to name the superseded version", h.Message)
+	}
+}
+
+// A file that carries no Beacon marker at all is somebody else's, whatever it is named.
+func TestDiscoverPiReportsDisabledForAForeignExtension(t *testing.T) {
+	home := setupPiDiscovery(t)
+	writePiExtension(t, home, "// managed-by-someone-else\nexport default () => {}\n")
 
 	h := DiscoverPi()
 	if h.TelemetryStatus != TelemetryDisabled {
-		t.Fatalf("TelemetryStatus = %q, want %q for a superseded marker version; message=%q",
-			h.TelemetryStatus, TelemetryDisabled, h.Message)
+		t.Fatalf("TelemetryStatus = %q, want %q", h.TelemetryStatus, TelemetryDisabled)
 	}
 }
 
