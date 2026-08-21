@@ -246,8 +246,10 @@ export default function beaconEndpointExtension(pi: {
       const exitCode = details.exitCode ?? details.exit_code ?? details.exit ?? details.status
       if (typeof exitCode === "number") response.exit_code = exitCode
     }
+    const durationMs = details?.durationMs ?? details?.duration_ms
     void send({
       ...base("tool_result", event, ctx),
+      ...(typeof durationMs === "number" ? { duration_ms: durationMs } : {}),
       tool_name: firstString(event?.toolName, event?.tool_name, event?.name),
       tool_call_id: firstString(event?.toolCallId, event?.toolCallID, event?.tool_call_id),
       tool_input: { ...(toRecord(event?.input) ?? {}) },
