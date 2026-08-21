@@ -5,6 +5,8 @@ const payloads: any[] = []
 const senderKey = Symbol.for("beacon.pi.testSender")
 
 beforeEach(() => {
+  // A stray value in the environment running the suite would change which branch tool_call takes.
+  delete process.env.BEACON_POLICY_PROVIDER
   payloads.length = 0
   ;(globalThis as any)[senderKey] = async (payload: any) => {
     payloads.push(structuredClone(payload))
@@ -27,6 +29,17 @@ function register(): Map<string, Handler> {
   return handlers
 }
 
+// withPolicyProvider configures the seam for one test and restores the environment afterwards.
+function withPolicyProvider(value: string | undefined) {
+  const previous = process.env.BEACON_POLICY_PROVIDER
+  if (value === undefined) delete process.env.BEACON_POLICY_PROVIDER
+  else process.env.BEACON_POLICY_PROVIDER = value
+  return () => {
+    if (previous === undefined) delete process.env.BEACON_POLICY_PROVIDER
+    else process.env.BEACON_POLICY_PROVIDER = previous
+  }
+}
+
 function context(overrides: Record<string, unknown> = {}) {
   return {
     cwd: "/repo",
@@ -34,6 +47,17 @@ function context(overrides: Record<string, unknown> = {}) {
     sessionManager: { sessionId: "pi-session-1", path: "/home/u/.pi/agent/sessions/x.jsonl" },
     ...overrides,
   }
+}
+
+// One event per handler, for the tests that drive all of them.
+const allEvents: Record<string, unknown> = {
+  session_start: { reason: "startup" },
+  session_shutdown: { reason: "exit" },
+  input: { text: "hi" },
+  tool_call: { toolName: "bash", toolCallId: "c1", input: { command: "ls" } },
+  tool_result: { toolName: "bash", toolCallId: "c1", content: "ok" },
+  message_end: { message: { role: "assistant", content: [], usage: { input: 1, output: 1 } } },
+  agent_end: {},
 }
 
 describe("beacon Pi extension", () => {
@@ -76,40 +100,68 @@ describe("beacon Pi extension", () => {
   // With no policy provider configured -- the default for the open build -- the hooks binary answers
   // with an empty object and tool_call must behave exactly like every observation handler.
   test("tool_call returns nothing when no decision comes back", async () => {
-    ;(globalThis as any)[senderKey] = async (payload: any) => {
-      payloads.push(structuredClone(payload))
-      return {}
+    const restore = withPolicyProvider("/usr/local/bin/beacon-policy")
+    try {
+      ;(globalThis as any)[senderKey] = async (payload: any) => {
+        payloads.push(structuredClone(payload))
+        return {}
+      }
+
+      const handlers = register()
+      const returned = await handlers.get("tool_call")!(
+        { toolName: "bash", toolCallId: "c1", input: { command: "ls" } },
+        context(),
+      )
+
+      expect(returned).toBeUndefined()
+      expect(payloads).toHaveLength(1)
+    } finally {
+      restore()
     }
+  })
+
+  // The gate is a fast path, not a second opinion: with no provider configured the handler cannot
+  // return a directive even if something on the other end produced one.
+  test("tool_call cannot block when no provider is configured", async () => {
+    ;(globalThis as any)[senderKey] = async () => ({ block: true, reason: "should not reach Pi" })
 
     const handlers = register()
     const returned = await handlers.get("tool_call")!(
-      { toolName: "bash", toolCallId: "c1", input: { command: "ls" } },
+      { toolName: "bash", input: { command: "rm -rf /" } },
       context(),
     )
 
     expect(returned).toBeUndefined()
-    expect(payloads).toHaveLength(1)
   })
 
   // Pi's tool_call is its only blockable pre-execution event, which is what lets the policy seam be
   // honored with full fidelity: the binary returns Pi's own {block, reason} shape and it is passed
   // back unchanged, with no translation in this layer.
   test("tool_call returns the deny verbatim when the binary blocks", async () => {
-    ;(globalThis as any)[senderKey] = async () => ({
-      block: true,
-      reason: "rm -rf denied by policy provider",
-    })
+    const restore = withPolicyProvider("/usr/local/bin/beacon-policy")
+    try {
+      ;(globalThis as any)[senderKey] = async () => ({
+        block: true,
+        reason: "rm -rf denied by policy provider",
+      })
 
-    const handlers = register()
-    const returned = await handlers.get("tool_call")!(
-      { toolName: "bash", toolCallId: "c1", input: { command: "rm -rf /" } },
-      context(),
-    )
+      const handlers = register()
+      const returned = await handlers.get("tool_call")!(
+        { toolName: "bash", toolCallId: "c1", input: { command: "rm -rf /" } },
+        context(),
+      )
 
-    expect(returned).toEqual({ block: true, reason: "rm -rf denied by policy provider" })
+      expect(returned).toEqual({ block: true, reason: "rm -rf denied by policy provider" })
+    } finally {
+      restore()
+    }
   })
 
-  test("tool_call asks for a decision, and no other handler does", async () => {
+  // The gate that keeps the default build's cost at zero. With no provider configured, tool_call is
+  // fire-and-forget like everything else: it must not wait for a reply that cannot contain a deny.
+  // Before this, every tool call in a default install paid a subprocess round-trip for a feature
+  // nobody had turned on.
+  test("no handler waits for a decision when no provider is configured", async () => {
     const asked: Array<[string, boolean]> = []
     ;(globalThis as any)[senderKey] = async (payload: any, wantDecision: boolean) => {
       asked.push([payload.type, wantDecision])
@@ -117,26 +169,60 @@ describe("beacon Pi extension", () => {
     }
 
     const handlers = register()
-    const events: Record<string, unknown> = {
-      session_start: {},
-      session_shutdown: {},
-      input: { text: "hi" },
-      tool_call: { toolName: "bash", input: {} },
-      tool_result: { toolName: "bash", content: "ok" },
-      message_end: { message: { role: "assistant", content: [] } },
-      agent_end: {},
-    }
     for (const [name, handler] of handlers) {
-      await handler(events[name], context())
+      await handler(allEvents[name], context())
     }
 
-    expect(asked.filter(([, want]) => want).map(([type]) => type)).toEqual(["tool_call"])
+    expect(asked.filter(([, want]) => want)).toEqual([])
+    // Still reported -- the gate removes the wait, not the telemetry.
+    expect(asked.map(([type]) => type)).toContain("tool_call")
+  })
+
+  test("tool_call asks for a decision when a provider is configured, and no other handler does", async () => {
+    const restore = withPolicyProvider("/usr/local/bin/beacon-policy")
+    try {
+      const asked: Array<[string, boolean]> = []
+      ;(globalThis as any)[senderKey] = async (payload: any, wantDecision: boolean) => {
+        asked.push([payload.type, wantDecision])
+        return {}
+      }
+
+      const handlers = register()
+      for (const [name, handler] of handlers) {
+        await handler(allEvents[name], context())
+      }
+
+      expect(asked.filter(([, want]) => want).map(([type]) => type)).toEqual(["tool_call"])
+    } finally {
+      restore()
+    }
+  })
+
+  // A variable set to whitespace is not a configured provider. Treating it as one would reintroduce
+  // the wait for anyone who exported the name and left it empty.
+  test("a blank provider value does not enable the decision path", async () => {
+    const restore = withPolicyProvider("   ")
+    try {
+      const asked: boolean[] = []
+      ;(globalThis as any)[senderKey] = async (_payload: any, wantDecision: boolean) => {
+        asked.push(wantDecision)
+        return {}
+      }
+
+      const handlers = register()
+      await handlers.get("tool_call")!({ toolName: "bash", input: {} }, context())
+
+      expect(asked).toEqual([false])
+    } finally {
+      restore()
+    }
   })
 
   // Every failure path is an allow. A deny that only happens when Beacon is healthy is a weaker
   // guarantee than no deny at all, but the reverse -- blocking because Beacon broke -- turns an
   // observability tool into an outage, so fail-open is the specified direction for the whole seam.
   test("tool_call allows the call on every failure shape", async () => {
+    const restore = withPolicyProvider("/usr/local/bin/beacon-policy")
     for (const outcome of [
       undefined,
       null,
@@ -158,6 +244,7 @@ describe("beacon Pi extension", () => {
       )
       expect(returned, `outcome ${JSON.stringify(outcome)} did not allow the call`).toBeUndefined()
     }
+    restore()
   })
 
   test("session_start carries session, workspace and model context", async () => {
