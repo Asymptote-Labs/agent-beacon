@@ -319,8 +319,8 @@ For setup, deployment, integrations, and command details, see the
 ## Star Growth
 
 <p align="center">
-  <a href="https://www.star-history.com/#asymptote-labs/agent-beacon&Date">
-    <img src="https://api.star-history.com/svg?repos=asymptote-labs/agent-beacon&type=Date" alt="Beacon GitHub star growth" width="860">
+  <a href="https://star-history.dera.page/#asymptote-labs/agent-beacon&Date">
+    <img src="https://star-history.dera.page/svg?repos=asymptote-labs/agent-beacon&type=Date" alt="Beacon GitHub star growth" width="860">
   </a>
 </p>
 
