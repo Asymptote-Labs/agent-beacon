@@ -266,6 +266,47 @@ describe("beacon Pi extension", () => {
     })
   })
 
+  // Beacon reads a tool's duration from the payload root, not from inside tool_response. Pi reports
+  // it in details, so leaving it there meant every Pi tool result carried no duration at all --
+  // present in the payload, nested one level below where anything reads it.
+  test("tool_result hoists the duration to where Beacon reads it", async () => {
+    const handlers = register()
+    await handlers.get("tool_result")!(
+      {
+        toolName: "bash",
+        input: { command: "go test ./..." },
+        content: "ok",
+        details: { exitCode: 0, durationMs: 1500 },
+      },
+      context(),
+    )
+
+    expect(payloads[0].duration_ms).toBe(1500)
+    // Still reported inside details as well: that is the runtime's own shape, kept for the raw echo.
+    expect(payloads[0].tool_response.details.durationMs).toBe(1500)
+  })
+
+  test("tool_result accepts either duration spelling", async () => {
+    for (const details of [{ durationMs: 42 }, { duration_ms: 42 }]) {
+      payloads.length = 0
+      const handlers = register()
+      await handlers.get("tool_result")!({ toolName: "bash", content: "ok", details }, context())
+      expect(payloads[0].duration_ms, JSON.stringify(details)).toBe(42)
+    }
+  })
+
+  // Absent timing must not become a zero: a tool that reported no duration is not a tool that took
+  // no time, and a 0 would show up in latency views as a real measurement.
+  test("tool_result omits the duration when Pi reported none", async () => {
+    const handlers = register()
+    await handlers.get("tool_result")!(
+      { toolName: "bash", content: "ok", details: { exitCode: 0 } },
+      context(),
+    )
+
+    expect(payloads[0].duration_ms).toBeUndefined()
+  })
+
   // A plain String() of Pi's content array yields "[object Object]", which would be recorded as the
   // tool's output and hashed as retained content while describing nothing.
   test("content blocks never serialize as object placeholders", async () => {
