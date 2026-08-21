@@ -147,6 +147,7 @@
                       "runtimes/github-copilot-cli",
                       "runtimes/grok-build",
                       "runtimes/opencode",
+                      "runtimes/pi",
                       "runtimes/vscode"
                     ]
                   },
@@ -897,6 +898,10 @@
       "destination": "/runtimes/opencode"
     },
     {
+      "source": "/cli/supported-runtimes-pi",
+      "destination": "/runtimes/pi"
+    },
+    {
       "source": "/cli/supported-runtimes-vscode",
       "destination": "/runtimes/vscode"
     },
@@ -1311,6 +1316,10 @@
     {
       "source": "/supported-runtimes-opencode",
       "destination": "/runtimes/opencode"
+    },
+    {
+      "source": "/supported-runtimes-pi",
+      "destination": "/runtimes/pi"
     },
     {
       "source": "/supported-runtimes-vscode",

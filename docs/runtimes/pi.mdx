@@ -1,0 +1,140 @@
+---
+title: "Pi"
+description: "Asymptote support details for Pi endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports [Pi](https://pi.dev) through a managed local extension that invokes `beacon-hooks`.
+
+Pi has no hooks configuration file and no OpenTelemetry support, so neither of Beacon's other two
+integration shapes applies to it. Its documented observation surface is the TypeScript extension
+API, which makes this integration extension-based — the same shape as the OpenCode plugin.
+
+## Prerequisites
+
+Before enabling Pi telemetry, make sure:
+
+- Pi is installed and available as the `pi` executable or has a local state directory at `~/.pi/agent`.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote's Pi extension is installed with `beacon endpoint hooks install --harness pi`.
+- Pi is restarted after extension install or removal so new sessions load the updated extension.
+
+## Collection path
+
+Asymptote installs an owned Pi extension at `~/.pi/agent/extensions/beacon.ts` for user-level hooks
+or `./.pi/extensions/beacon.ts` for project-level hooks. The extension forwards Pi extension events
+to Asymptote's hook adapter.
+
+Prefer the user-level install. Pi gates project-local extensions behind its project-trust prompt, so
+a user-level extension is the one that loads without further interaction.
+
+The integration is extension-based. Pi has no native OTLP support to configure, and Beacon does not
+require one.
+
+## Discovery and status
+
+Asymptote detects Pi through the `pi` executable or `~/.pi/agent`, then checks for Asymptote
+extension configuration. The state directory counts as evidence on its own because an npm, pnpm, bun
+or version-manager install is frequently absent from the PATH the endpoint agent inherited.
+
+Use `beacon endpoint hooks status --harness pi` to inspect Pi extension status.
+
+Two states report as not installed even though the extension file is present, both meaning telemetry
+is not reaching the log: the hook binary the extension names has been removed, or the extension
+points at a binary from an install at a different scope. The status message names which.
+
+An extension written by an earlier Beacon version reports as installed with a message saying so — it
+collects the same telemetry, but may not honor a policy decision. Reinstall to update it:
+
+```bash title="Update a superseded extension"
+beacon endpoint hooks install --harness pi
+```
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Pi hooks
+separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness pi
+```
+
+Install refuses to overwrite a `beacon.ts` that Asymptote did not write, so an existing extension of
+your own with that filename is never replaced. Uninstall removes only Asymptote's own extension.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through the `input` event, before skill and template expansion |
+| Agent reasoning | Thinking blocks from assistant messages, recorded as `agent.reasoning` in the OTel GenAI reasoning-part shape |
+| Tool lifecycle | Invocation through `tool_call` and completion, result, duration, and failure through `tool_result` |
+| Command telemetry | Model-invoked shell tools with command, output, exit code, and duration |
+| File telemetry | Read and write/edit/patch activity with agent-derived paths and unified diffs |
+| MCP telemetry | Normalized MCP server/tool context derived from the tool name |
+| Approval telemetry | Policy-provider denials recorded as `approval.denied` with `policy.enforcement=enforce` |
+| Model and usage | Provider/model, finish reason, token usage, cache read/write usage, and runtime-reported cost, per assistant message |
+| Session telemetry | Start with reason (`startup`, `new`, `resume`, `fork`), agent turn end, and shutdown |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Pi extensions are installed separately in the logged-in user's context |
+
+Pi switches models mid-session, so the model is recorded per event rather than once per session.
+
+## Policy enforcement
+
+Pi's `tool_call` is a blockable pre-execution event, so Beacon's optional policy seam is honored on
+Pi with full fidelity. When `BEACON_POLICY_PROVIDER` names an executable and it denies a call, the
+tool is blocked in Pi and the denial is recorded as `approval.denied` with
+`policy.enforcement=enforce`. No `tool.invoked` event is written for a denied call, because the tool
+never ran.
+
+With no provider configured — the default for the open build — the seam is inert and every event is
+pure observation. All error paths allow the call: a provider timeout, a non-zero exit, or
+unparseable output never blocks a tool.
+
+## Data handling
+
+Pi prompts, assistant reasoning, tool arguments and results, commands, command output, paths, and
+diffs are retained in local or customer-controlled logs. Beacon applies local secret redaction and
+per-string limits before writing. Each content-bearing event includes a hash and byte count for the
+original value. Events that exceed the 64 KiB limit drop raw and retained content while preserving
+stable metadata and set `field_truncated`.
+
+The extension uses Pi session and tool-call identifiers for correlation, and reports the path of
+Pi's own session JSONL so an event can be matched to the runtime's record. Beacon never reads or
+uploads that file.
+
+A tool that reports no path produces a generic tool completion rather than a file event, so no file
+event is written without an agent-derived path.
+
+## Deployment notes
+
+Restart Pi after installing or removing the extension so new sessions pick up the updated
+configuration.
+
+For local troubleshooting, set `BEACON_PI_DEBUG=1` in the environment that launches Pi to emit
+best-effort extension debug logs on stderr. The adapter has a bounded local subprocess timeout and
+remains fail-open, so telemetry failures do not interrupt Pi execution.
+
+A stale embedded hook binary presents as silence rather than an error: the extension logs a non-zero
+exit under `BEACON_PI_DEBUG=1` and Pi keeps running. Reinstall the extension if no events appear.
+
+Validate a system-mode installation after restarting Pi:
+
+```bash
+/opt/beacon/bin/beacon endpoint hooks status --harness pi --level user
+/opt/beacon/bin/beacon endpoint doctor --system
+/opt/beacon/bin/beacon endpoint dashboard --system --open
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

@@ -30,6 +30,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
+| [Pi](/runtimes/pi) | Managed extension | Session lifecycle, prompts, tool calls and results, commands, file reads/edits with diffs, MCP activity, agent reasoning, and per-message token usage and cost |
 | [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
 ### Local Knowledge Worker Agent Harnesses
@@ -91,7 +92,7 @@ only. On Linux, deploy the `.deb` or `.rpm` with whatever configuration manageme
 | Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
 | OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
 
-Install Antigravity CLI, Claude Code, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers.
+Install Antigravity CLI, Claude Code, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, Pi, and optional VS Code hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers.
 
 If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
 
