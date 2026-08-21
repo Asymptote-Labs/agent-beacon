@@ -14,21 +14,41 @@ All three matter. `beacon-hooks` is what supported runtimes invoke to record pro
 and approvals, so an install that keeps only the CLI and the collector captures OpenTelemetry data
 and nothing from the hook path.
 
-```bash title="Download, verify, and extract (Linux amd64)"
-VERSION=1.2.0   # or whichever release you are installing
-BASE=https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}
-curl -fsSLO ${BASE}/beacon_${VERSION}_linux_amd64.tar.gz
-curl -fsSLO ${BASE}/checksums.txt
-sha256sum --check --ignore-missing checksums.txt
+```bash title="Install the latest stable Linux release"
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"
+VERSION="${LATEST_URL##*/v}"
 
-tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+ARCHIVE="beacon_${VERSION}_linux_${ARCH}.tar.gz"
+BASE=https://github.com/asymptote-labs/agent-beacon/releases/latest/download
+curl -fsSLO "${BASE}/${ARCHIVE}"
+curl -fsSLO "${BASE}/checksums.txt"
+grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
+
+tar -xzf "${ARCHIVE}"
 mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
 beacon version
+beacon endpoint install
 ```
 
-Swap `linux_amd64` for `linux_arm64`, `darwin_arm64`, or `darwin_amd64` as needed; on macOS use
-`shasum -a 256 -c` in place of `sha256sum --check`. The archive layout is identical across
-platforms.
+The commands resolve the latest stable release, map `x86_64` to the published `amd64` archive and
+`aarch64` or `arm64` to `arm64`, and verify the exact downloaded archive using the release's
+`checksums.txt` before extraction. Unsupported architectures stop before downloading.
+
+On an interactive terminal, endpoint installation offers to run the guided setup. It is also
+available directly:
+
+```bash
+beacon getting-started
+```
+
+For macOS archives, use the same latest-release resolution with `darwin_amd64` or
+`darwin_arm64`, and verify with `shasum -a 256 -c`.
 
 For managed endpoint rollouts on Apple Silicon Macs, GitHub Releases also attach
 a signed, notarized, and stapled `BeaconEndpointAgent-<version>-arm64.pkg`. The

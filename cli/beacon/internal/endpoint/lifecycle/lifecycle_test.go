@@ -88,6 +88,21 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	}
 }
 
+func TestApplyLingerOutcomeCarriesInstallWarningState(t *testing.T) {
+	result := InstallResult{}
+	applyLingerOutcome(&result, service.LingerOutcome{
+		Applicable:  true,
+		Detail:      "administrator approval is required",
+		Remediation: "sudo loginctl enable-linger beacon-user",
+	})
+	if !result.LingerApplicable || result.LingerEnabled {
+		t.Fatalf("linger state = %#v", result)
+	}
+	if result.LingerDetail == "" || result.LingerRemediation != "sudo loginctl enable-linger beacon-user" {
+		t.Fatalf("linger guidance = %#v", result)
+	}
+}
+
 func TestBuildConfigPreservesAutoUpdateMode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
