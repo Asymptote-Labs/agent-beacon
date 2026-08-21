@@ -702,6 +702,70 @@ func TestClineEventTaskErrorStaysAnError(t *testing.T) {
 	}
 }
 
+// afterRun with status "aborted" must produce a cancel event, not a normal completion.
+func TestClineEventAfterRunAbortedIsCancelNotCompletion(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"type":   "afterRun",
+		"taskId": "task-aborted",
+		"status": "aborted",
+		"reason": "user_stopped",
+		"result": map[string]interface{}{"usage": map[string]interface{}{"inputTokens": 50, "outputTokens": 8}},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.ended")
+	if got := event["severity"]; got != "info" {
+		t.Errorf("severity = %q, want info", got)
+	}
+	if got := nested(t, event, "session")["cancel_reason"]; got != "user_stopped" {
+		t.Errorf("session.cancel_reason = %v, want user_stopped", got)
+	}
+	if got := nested(t, event, "gen_ai", "usage")["input_tokens"]; got != float64(50) {
+		t.Errorf("gen_ai.usage.input_tokens = %v, want 50", got)
+	}
+}
+
+// afterRun with status "failed" must produce a session.error event, not a normal completion.
+func TestClineEventAfterRunFailedIsErrorNotCompletion(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"type":   "afterRun",
+		"taskId": "task-failed-run",
+		"status": "failed",
+		"error":  map[string]interface{}{"name": "api_error"},
+		"result": map[string]interface{}{"usage": map[string]interface{}{"inputTokens": 30, "outputTokens": 3}},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.error")
+	if got := event["severity"]; got != "high" {
+		t.Errorf("severity = %q, want high", got)
+	}
+	if got := nested(t, event, "error")["type"]; got != "api_error" {
+		t.Errorf("error.type = %q, want api_error", got)
+	}
+	if got := nested(t, event, "gen_ai", "usage")["input_tokens"]; got != float64(30) {
+		t.Errorf("gen_ai.usage.input_tokens = %v, want 30", got)
+	}
+}
+
+// afterRun with status nested under result still routes correctly.
+func TestClineEventAfterRunNestedStatusIsRecognized(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"type":   "afterRun",
+		"taskId": "task-nested-abort",
+		"result": map[string]interface{}{"status": "aborted"},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.ended")
+	if got := nested(t, event, "session")["cancel_reason"]; got == nil {
+		t.Errorf("session.cancel_reason is missing, want a cancel reason for an aborted run")
+	}
+}
+
 // Cline's two hook surfaces disagree about where the cancel status lives. Missing the nested one
 // labels an abandoned task as cancelled -- a wrong distinction rather than a missing one, which is
 // why it is read from both.

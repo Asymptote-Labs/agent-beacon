@@ -705,10 +705,15 @@ const (
 // read, an aborted or failed task reaches the log as a clean session.ended, and the cancel and
 // error paths below would be unreachable through Beacon's own plugin.
 //
+// The documented values are Cline's own: AgentRunResult.status is completed | aborted | failed.
+// Those three are what the plugin surface sends. The extra spellings accepted below are tolerance
+// for the file-based surface, whose status-like fields are free-form -- its stage is literally
+// named TaskCancel -- and they cost nothing to accept.
+//
 // Returns "" when nothing says otherwise, so a payload that reports no outcome stays a success --
-// the same behavior as before this read existed. Cline is not documented down to the field level
-// here, so several spellings are accepted and an unrecognized value is treated as success rather
-// than guessed at: mislabelling a completed task as failed is worse than missing a label.
+// the same behavior as before this read existed. An unrecognized value is also a success rather
+// than a guess: mislabelling a completed task as failed is worse than missing a label, and a
+// status Cline adds later must not turn every finished task into an incident.
 func clineTaskOutcome(input map[string]interface{}) string {
 	status := getFirstStr(input, "status", "outcome", "runStatus", "run_status", "completionStatus", "completion_status")
 	if status == "" {
@@ -722,9 +727,10 @@ func clineTaskOutcome(input map[string]interface{}) string {
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "aborted", "abort", "cancelled", "canceled", "cancel", "user_cancelled", "user_canceled", "interrupted":
+	// "aborted" and "failed" are the documented enum; the rest are file-hook tolerance.
+	case "aborted", "cancelled", "canceled":
 		return clineOutcomeCancelled
-	case "failed", "failure", "error", "errored":
+	case "failed", "failure", "error":
 		return clineOutcomeFailed
 	}
 	// Deliberately no fallback to "there is an error object on the payload". clineToolFailure
