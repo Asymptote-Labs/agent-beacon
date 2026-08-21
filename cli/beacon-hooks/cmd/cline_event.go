@@ -398,12 +398,59 @@ func clineToolMessage(action string) string {
 //
 // Joining is skipped when the path is already absolute, and when no workspace root was resolved:
 // a wrong root would be worse than a relative path, because it names a file that was never touched.
+//
+// Deliberately not implemented with filepath.IsAbs and filepath.Join, which answer for the host
+// Beacon is running on rather than for the path in the payload. Those are different questions here:
+// the hook binary runs on the host while Cline may be addressing a workspace somewhere else, which
+// is the ordinary case for VS Code Remote and WSL. On Windows, filepath.IsAbs("/home/u/repo/a.ts")
+// is false, so an absolute POSIX path was joined onto the workspace root and recorded as
+// "\\tmp\\project\\home\\u\\repo\\a.ts" -- a file nothing touched. Answering for the
+// path itself also makes the result identical on every host, which is what lets one test pin it.
 func clineWorkspacePath(path, root string) string {
 	path = hookdiff.NormalizePath(path)
-	if path == "" || root == "" || filepath.IsAbs(path) {
+	if path == "" || root == "" || isRootedPath(path) {
 		return path
 	}
-	return filepath.Join(root, path)
+	return joinWorkspacePath(root, path)
+}
+
+// isRootedPath reports whether a path names a location without needing a base, under either
+// platform's convention.
+//
+// Both conventions, always, because the payload decides the spelling and the host does not. A
+// Windows path treated as relative and a POSIX path treated as relative fail the same way: the
+// workspace root is prepended and the event names a file that was never touched.
+func isRootedPath(path string) bool {
+	switch {
+	case path == "":
+		return false
+	// POSIX absolute, a UNC share, and a Windows path rooted on the current volume.
+	case path[0] == '/' || path[0] == '\\':
+		return true
+	// A drive-qualified Windows path: C:\repo or C:/repo. "C:repo" is deliberately excluded --
+	// it is relative to that drive's working directory, not rooted.
+	case len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/'):
+		letter := path[0] | 0x20
+		return letter >= 'a' && letter <= 'z'
+	default:
+		return false
+	}
+}
+
+// joinWorkspacePath joins a relative path under a root using the root's own separator.
+//
+// filepath.Join would use the host's, which mangles the result whenever the two disagree: a POSIX
+// workspace root on a Windows host produced "\\tmp\\project\\src\\app.ts", a path that
+// matches nothing and belongs to no filesystem. Taking the separator from the root keeps the
+// recorded path in the same shape as the workspace it came from.
+func joinWorkspacePath(root, rel string) string {
+	separator := "/"
+	if strings.Contains(root, "\\") && !strings.Contains(root, "/") {
+		separator = "\\"
+	}
+	rel = strings.TrimPrefix(strings.TrimPrefix(rel, "./"), ".\\")
+	rel = strings.ReplaceAll(strings.ReplaceAll(rel, "\\", separator), "/", separator)
+	return strings.TrimRight(root, "/\\") + separator + strings.TrimLeft(rel, "/\\")
 }
 
 func clineToolPath(toolInput map[string]interface{}, root string) string {
