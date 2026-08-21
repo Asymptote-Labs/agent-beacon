@@ -13,9 +13,14 @@ import (
 //
 // Parsed back out of the source rather than compared as a string: argv is the whole point of this
 // install shape, so the test asserts on the decoded array a host would spawn.
+//
+// The optional carriage return is load-bearing. The plugin source is a checked-in file, and a
+// Windows checkout converts its line endings, so a bare `$` anchor matched on POSIX and failed on
+// Windows -- for a file whose content was byte-for-byte correct. Line endings are not what this
+// test is about.
 func clineRenderedArgv(t *testing.T, source string) []string {
 	t.Helper()
-	match := regexp.MustCompile(`(?m)^const beaconArgv: string\[\] = (\[.*\])$`).FindStringSubmatch(source)
+	match := regexp.MustCompile(`(?m)^const beaconArgv: string\[\] = (\[.*?\])\r?$`).FindStringSubmatch(source)
 	if len(match) != 2 {
 		t.Fatalf("no beaconArgv assignment in rendered plugin:\n%s", source)
 	}
