@@ -1318,6 +1318,14 @@
       "destination": "/runtimes/vscode"
     },
     {
+      "source": "/cli/supported-runtimes-cline",
+      "destination": "/runtimes/cline"
+    },
+    {
+      "source": "/supported-runtimes-cline",
+      "destination": "/runtimes/cline"
+    },
+    {
       "source": "/system-architecture",
       "destination": "/architecture/system-architecture"
     },
