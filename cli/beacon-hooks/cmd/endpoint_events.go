@@ -52,6 +52,22 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	}
 }
 
+// normalizedEvent is one endpoint event a mapper has decided to write, before it reaches the
+// logger.
+//
+// Mappers that receive a whole runtime's event stream through a single command return a slice of
+// these rather than writing as they go, because one payload routinely becomes several events -- a
+// tool result plus the file mutations it caused -- and because returning them makes the mapping
+// itself testable without a log file. Shared rather than per-runtime: the five parts are the
+// logger's own arguments, so a per-runtime copy would be the same struct under another name.
+type normalizedEvent struct {
+	action   string
+	category string
+	severity string
+	message  string
+	fields   map[string]interface{}
+}
+
 // resolveBranch prefers a runtime-provided branch and otherwise derives the
 // checked-out branch from the event's working directory. Runtime-provided
 // values pass through even when local git metadata enrichment is disabled.

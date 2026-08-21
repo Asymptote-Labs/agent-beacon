@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
@@ -337,4 +338,129 @@ func hermesFirstString(input map[string]interface{}, keys ...string) string {
 		return firstToolString(extra, keys...)
 	}
 	return ""
+}
+
+// Runtime-agnostic readers for decoded JSON payloads.
+//
+// These carried an `opencode` prefix while opencode was the only mapper that needed them. They
+// are not opencode-specific -- any runtime whose payloads arrive as decoded JSON needs the same
+// four questions answered -- so they live here with the rest of the shared payload helpers, and
+// a second mapper can use them without reading as though it were borrowing opencode's code.
+
+// firstMap returns the first of the named keys whose value is a JSON object.
+//
+// Runtime payloads disagree about where they nest things and about which spelling they use, so
+// every mapper needs to ask "whichever of these keys is present". Returns nil rather than an empty
+// map so callers can distinguish absent from empty.
+func firstMap(input map[string]interface{}, keys ...string) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+	for _, key := range keys {
+		if value, ok := input[key].(map[string]interface{}); ok {
+			return value
+		}
+	}
+	return nil
+}
+
+// jsonInt reads an integer out of a decoded JSON value.
+//
+// Tolerant of the four shapes a number arrives in after encoding/json: float64 for any plain
+// number, json.Number under a decoder with UseNumber, and a string for runtimes that quote their
+// numerics. The bool result distinguishes "absent or unparseable" from a real zero -- an exit code
+// of 0 means success, so conflating the two would report every failed command as a clean one.
+func jsonInt(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case json.Number:
+		result, err := typed.Int64()
+		return int(result), err == nil
+	case string:
+		result, err := strconv.Atoi(strings.TrimSpace(typed))
+		return result, err == nil
+	default:
+		return 0, false
+	}
+}
+
+// jsonFloat reads a float out of a decoded JSON value, with the same shape tolerance as jsonInt.
+func jsonFloat(value interface{}) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case json.Number:
+		result, err := typed.Float64()
+		return result, err == nil
+	case string:
+		result, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return result, err == nil
+	default:
+		return 0, false
+	}
+}
+
+// cloneFields deep-copies an event field map so sibling events built from the same base cannot
+// alias each other's nested maps.
+//
+// One payload can expand into several events -- a tool result plus the file mutations it caused --
+// and each needs its own copy: mutating a shared nested map would retroactively edit an event that
+// was already assembled. Round-trips through JSON because the values are decoded JSON to begin
+// with, and falls back to a shallow copy if that fails, which is strictly better than returning
+// the original.
+func cloneFields(input map[string]interface{}) map[string]interface{} {
+	if data, err := json.Marshal(input); err == nil {
+		var out map[string]interface{}
+		if err := json.Unmarshal(data, &out); err == nil {
+			return out
+		}
+	}
+	out := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+// mergeMap copies src's top-level keys over dst, replacing rather than merging nested values. Use
+// mergeNested when a nested map has to survive.
+func mergeMap(dst, src map[string]interface{}) {
+	for key, value := range src {
+		dst[key] = value
+	}
+}
+
+// firstNonEmpty returns the first value that is not empty or whitespace.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// toolNameHasToken reports whether a tool name contains the given word as a whole token.
+//
+// Tool names are compound and inconsistently punctuated across runtimes -- write_to_file,
+// applyPatch, run-terminal-command -- so this splits on every non-alphanumeric boundary and on
+// nothing else, then compares whole tokens. Substring matching is what it exists to avoid: "read"
+// is inside "spreadsheet" and "thread", so a Contains rule classifies unrelated tools as file
+// reads.
+func toolNameHasToken(name, token string) bool {
+	for _, part := range strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	}) {
+		if part == token {
+			return true
+		}
+	}
+	return false
 }
