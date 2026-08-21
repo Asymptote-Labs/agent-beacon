@@ -565,6 +565,10 @@ func TestClineWorkspacePathIsHostIndependent(t *testing.T) {
 		{name: "no root leaves the path relative", path: "src/app.ts", root: "", want: "src/app.ts"},
 		{name: "empty path stays empty", path: "", root: "/repo", want: ""},
 		{name: "quoted path is unquoted first", path: `"src/app.ts"`, root: "/repo", want: "/repo/src/app.ts"},
+		{name: "dotdot segments are collapsed", path: "../../.ssh/id_rsa", root: "/home/u/proj", want: "/home/.ssh/id_rsa"},
+		{name: "single dot segments are collapsed", path: "./src/./app.ts", root: "/repo", want: "/repo/src/app.ts"},
+		{name: "mixed traversal is collapsed", path: "src/../lib/app.ts", root: "/repo", want: "/repo/lib/app.ts"},
+		{name: "windows dotdot is collapsed", path: `..\..\secret.txt`, root: `C:\Users\dev\project`, want: `C:\Users\secret.txt`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := clineWorkspacePath(tc.path, tc.root); got != tc.want {
@@ -635,6 +639,27 @@ func TestClineEventTaskCancelIsAnEndNotAnError(t *testing.T) {
 	// A cancelled task still reports what it spent.
 	if got := nested(t, event, "gen_ai", "usage")["input_tokens"]; got != float64(40) {
 		t.Errorf("gen_ai.usage.input_tokens = %v, want 40", got)
+	}
+}
+
+// Cline's file-based hook puts completionStatus inside taskCancel.taskMetadata. When only
+// that nested field says "abandoned", the cancel reason must reflect it rather than defaulting.
+func TestClineEventTaskCancelReadsNestedCompletionStatus(t *testing.T) {
+	logPath := clineTestLog(t)
+
+	runHookWithInput(t, runClineEvent, map[string]interface{}{
+		"hookName": "TaskCancel",
+		"taskId":   "task-abandoned",
+		"taskCancel": map[string]interface{}{
+			"taskMetadata": map[string]interface{}{
+				"completionStatus": "abandoned",
+			},
+		},
+	})
+
+	event := clineEventWithAction(t, logPath, "session.ended")
+	if got := nested(t, event, "session")["cancel_reason"]; got != "abandoned" {
+		t.Errorf("session.cancel_reason = %v, want abandoned", got)
 	}
 }
 

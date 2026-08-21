@@ -136,6 +136,22 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 		}
 		reason := getFirstStr(input, "completionStatus", "completion_status", "reason")
 		if reason == "" {
+			for _, key := range []string{"taskCancel", "task_cancel", "taskMetadata", "task_metadata", "result", "metadata"} {
+				if nested := firstMap(input, key); nested != nil {
+					reason = getFirstStr(nested, "completionStatus", "completion_status", "reason")
+					if reason != "" {
+						break
+					}
+					if inner := firstMap(nested, "taskMetadata", "task_metadata", "metadata"); inner != nil {
+						reason = getFirstStr(inner, "completionStatus", "completion_status", "reason")
+						if reason != "" {
+							break
+						}
+					}
+				}
+			}
+		}
+		if reason == "" {
 			reason = "cancelled"
 		}
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": reason})
@@ -473,10 +489,11 @@ func isRootedPath(path string) bool {
 	}
 }
 
-// joinWorkspacePath joins a relative path under a root using the root's own separator.
+// joinWorkspacePath joins a relative path under a root using the root's own separator, then
+// collapses . and .. segments so the result is canonical.
 //
-// filepath.Join would use the host's, which mangles the result whenever the two disagree: a POSIX
-// workspace root on a Windows host produced "\\tmp\\project\\src\\app.ts", a path that
+// filepath.Join would use the host's separator, which mangles the result whenever the two disagree:
+// a POSIX workspace root on a Windows host produced "\\tmp\\project\\src\\app.ts", a path that
 // matches nothing and belongs to no filesystem. Taking the separator from the root keeps the
 // recorded path in the same shape as the workspace it came from.
 func joinWorkspacePath(root, rel string) string {
@@ -486,7 +503,28 @@ func joinWorkspacePath(root, rel string) string {
 	}
 	rel = strings.TrimPrefix(strings.TrimPrefix(rel, "./"), ".\\")
 	rel = strings.ReplaceAll(strings.ReplaceAll(rel, "\\", separator), "/", separator)
-	return strings.TrimRight(root, "/\\") + separator + strings.TrimLeft(rel, "/\\")
+	joined := strings.TrimRight(root, "/\\") + separator + strings.TrimLeft(rel, "/\\")
+	return cleanPathSegments(joined, separator)
+}
+
+// cleanPathSegments collapses . and .. segments in a path without using filepath.Clean (which
+// would impose the host's separator). The separator must be "/" or "\\".
+func cleanPathSegments(path, separator string) string {
+	parts := strings.Split(path, separator)
+	var cleaned []string
+	for _, part := range parts {
+		switch part {
+		case ".":
+			continue
+		case "..":
+			if len(cleaned) > 0 && cleaned[len(cleaned)-1] != "" && cleaned[len(cleaned)-1] != ".." {
+				cleaned = cleaned[:len(cleaned)-1]
+			}
+		default:
+			cleaned = append(cleaned, part)
+		}
+	}
+	return strings.Join(cleaned, separator)
 }
 
 func clineToolPath(toolInput map[string]interface{}, root string) string {
