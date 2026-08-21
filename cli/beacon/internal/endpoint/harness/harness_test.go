@@ -851,6 +851,9 @@ func TestDiscoverAllIncludesCline(t *testing.T) {
 // path therefore lands exactly where a project install lives, so discovery would read a
 // repository's own plugin and report Cline detected with telemetry enabled for the machine -- on
 // the strength of a file in whatever directory the command happened to run from.
+//
+// An empty HOME is not hypothetical for this binary: system-mode Beacon runs under launchd, and
+// some CI runners leave it unset.
 func TestDiscoverClineDoesNotFallBackToAProjectPluginWhenHomeIsUnresolvable(t *testing.T) {
 	work := t.TempDir()
 	t.Chdir(work)

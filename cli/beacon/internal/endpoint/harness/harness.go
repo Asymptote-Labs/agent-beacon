@@ -186,16 +186,16 @@ func DiscoverOpenCode() Harness {
 func DiscoverCline() Harness {
 	h := Harness{Name: "cline", DisplayName: "Cline", Capability: "plugin"}
 	detectExecutable(&h, "cline")
-
-	// The path comes from the installer rather than being rebuilt here, and an unresolvable home
-	// directory stops discovery rather than producing a relative path.
+	// The guard below is the point: Cline's project install is ".cline/plugins/beacon.ts", the user
+	// layout with the home prefix removed, so an unresolved home directory does not merely produce a
+	// useless path -- it produces exactly the path a project install occupies. Discovery would read
+	// a repository's own plugin and report Cline detected with telemetry enabled for the machine, on
+	// the strength of a file in whatever directory the command ran from. DiscoverPi guards the same
+	// way.
 	//
-	// That guard matters more for Cline than for any other runtime. Cline's project install is
-	// `.cline/plugins/beacon.ts` -- the user layout with the home prefix removed -- so a failed home
-	// lookup does not merely produce a useless path, it produces exactly the path a project install
-	// occupies. Discovery would then read a repository's own plugin, mark Cline detected and report
-	// telemetry enabled for the machine, on the strength of a file in whatever directory the command
-	// happened to run from. DiscoverPi guards the same way.
+	// The path comes from the installer rather than being rebuilt here so there is one definition of
+	// where the plugin lives; two copies is how discovery comes to report on a file the installer
+	// does not write.
 	pluginPath, err := hooks.ClinePluginPath(hooks.LevelUser)
 	if err != nil {
 		h.TelemetryStatus = TelemetryMissing
