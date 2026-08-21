@@ -3,7 +3,7 @@ module github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve
 go 1.24.0
 
 require (
-	github.com/google/cel-go v0.28.1
+	github.com/google/cel-go v0.30.0
 	golang.org/x/sys v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )
