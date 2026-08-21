@@ -495,6 +495,9 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint hooks install --harness opencode
 ./beacon endpoint hooks status --harness opencode
 
+./beacon endpoint hooks install --harness pi
+./beacon endpoint hooks status --harness pi
+
 ./beacon endpoint hooks install --harness grok
 ./beacon endpoint hooks status --harness grok
 
@@ -529,6 +532,23 @@ web/MCP, approval, and lifecycle events through OpenCode's plugin hooks. Beacon
 handles normalization, retention, redaction, event-size controls, and JSONL
 output locally. For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the
 environment that launches opencode to emit best-effort plugin debug logs.
+
+The Pi integration installs Beacon's owned local extension at
+`~/.pi/agent/extensions/beacon.ts`. Pi has no hooks configuration file and no
+OpenTelemetry support, so the extension is the whole integration: it forwards Pi
+extension events to `beacon-hooks`, which captures session lifecycle, prompts,
+tool calls and results, commands with exit codes, file reads and edits with
+diffs, MCP activity, agent reasoning, and per-message token usage including
+runtime-reported cost. Beacon handles normalization, retention, redaction,
+event-size controls, and JSONL output locally. For local troubleshooting, set
+`BEACON_PI_DEBUG=1` in the environment that launches Pi to emit best-effort
+extension debug logs on stderr.
+
+Pi's pre-tool event is blockable, so the optional policy seam is honored on Pi
+with full fidelity: when `BEACON_POLICY_PROVIDER` names an executable and it
+denies a call, the tool is blocked in Pi and the denial is recorded with
+`policy.enforcement=enforce`. With no provider configured the seam is inert, and
+every error path allows the call.
 
 Claude Code supports two Beacon setup paths. `beacon endpoint install --harness claude`
 configures Claude Code's local OpenTelemetry export to Beacon's collector.
