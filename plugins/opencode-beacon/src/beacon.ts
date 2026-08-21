@@ -125,9 +125,14 @@ function shellMutationPaths(tool, args) {
   if (name !== "bash" && !name.includes("shell")) return []
   const command = String(args?.command || args?.cmd || "")
   const paths = []
+  // Split on command separators first so the delete-command pattern below stays
+  // anchored and linear; a single regex spanning separators is open to
+  // polynomial backtracking on adversarial tool input.
   const pattern =
-    /(?:^|(?:&&|\|\||;|\n)\s*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
-  for (const match of command.matchAll(pattern)) {
+    /^(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/
+  for (const segment of command.split(/&&|\|\||;|\n/)) {
+    const match = pattern.exec(segment.trimStart())
+    if (!match) continue
     const path = match[1] || match[2] || match[3]
     if (path) paths.push(path)
   }
