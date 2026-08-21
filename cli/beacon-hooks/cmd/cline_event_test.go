@@ -748,3 +748,105 @@ func TestClineCancelReasonReadsBothShapes(t *testing.T) {
 		})
 	}
 }
+
+// The plugin surface -- the one Beacon installs -- has a single run-completion handler for every
+// outcome, so an aborted or failed task arrives as afterRun and says so in a field. Before this was
+// read, both reached the log as a clean session.ended, which made the cancel and error paths
+// unreachable through Beacon's own plugin no matter what the file-hook tests proved.
+func TestClineEventAfterRunHonorsTheRunOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		payload      map[string]interface{}
+		wantAction   string
+		wantSeverity string
+		wantCancel   string
+		wantErrType  string
+	}{
+		{
+			name:         "no status is still a success",
+			payload:      map[string]interface{}{},
+			wantAction:   "session.ended",
+			wantSeverity: "info",
+		},
+		{
+			name:         "explicit success",
+			payload:      map[string]interface{}{"status": "completed"},
+			wantAction:   "session.ended",
+			wantSeverity: "info",
+		},
+		{
+			name:         "aborted is a cancel",
+			payload:      map[string]interface{}{"status": "aborted"},
+			wantAction:   "session.ended",
+			wantSeverity: "info",
+			wantCancel:   "aborted",
+		},
+		{
+			name:         "failed is an error",
+			payload:      map[string]interface{}{"status": "failed"},
+			wantAction:   "session.error",
+			wantSeverity: "high",
+			wantErrType:  "task_error",
+		},
+		{
+			name:         "status on the nested result",
+			payload:      map[string]interface{}{"result": map[string]interface{}{"status": "cancelled"}},
+			wantAction:   "session.ended",
+			wantSeverity: "info",
+			wantCancel:   "cancelled",
+		},
+		{
+			name:         "a failure names its error type when it has one",
+			payload:      map[string]interface{}{"status": "failed", "error": map[string]interface{}{"name": "ProviderTimeout"}},
+			wantAction:   "session.error",
+			wantSeverity: "high",
+			wantErrType:  "ProviderTimeout",
+		},
+		{
+			// An unrecognized value must not be guessed at: a false session.error is worse than a
+			// missing one in a log people alert on.
+			name:         "an unknown status stays a success",
+			payload:      map[string]interface{}{"status": "whatever-cline-adds-next"},
+			wantAction:   "session.ended",
+			wantSeverity: "info",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := clineTestLog(t)
+			payload := map[string]interface{}{
+				"type":   "afterRun",
+				"taskId": "task-outcome",
+				"usage":  map[string]interface{}{"inputTokens": 70, "outputTokens": 9},
+			}
+			for k, v := range tc.payload {
+				payload[k] = v
+			}
+			runHookWithInput(t, runClineEvent, payload)
+
+			event := clineEventWithAction(t, logPath, tc.wantAction)
+			if got := event["severity"]; got != tc.wantSeverity {
+				t.Errorf("severity = %q, want %q", got, tc.wantSeverity)
+			}
+			if tc.wantCancel == "" {
+				if session, ok := event["session"].(map[string]interface{}); ok {
+					if reason, ok := session["cancel_reason"]; ok {
+						t.Errorf("cancel_reason = %v, want none", reason)
+					}
+				}
+			} else if got := nested(t, event, "session")["cancel_reason"]; got != tc.wantCancel {
+				t.Errorf("session.cancel_reason = %v, want %q", got, tc.wantCancel)
+			}
+			if tc.wantErrType == "" {
+				if _, ok := event["error"]; ok {
+					t.Errorf("carried an error field: %v", event["error"])
+				}
+			} else if got := nested(t, event, "error")["type"]; got != tc.wantErrType {
+				t.Errorf("error.type = %v, want %q", got, tc.wantErrType)
+			}
+			// Whatever the outcome, the tokens were spent and must be reported.
+			if got := nested(t, event, "gen_ai", "usage")["input_tokens"]; got != float64(70) {
+				t.Errorf("gen_ai.usage.input_tokens = %v, want 70", got)
+			}
+		})
+	}
+}

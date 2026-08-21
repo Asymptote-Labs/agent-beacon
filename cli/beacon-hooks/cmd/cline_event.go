@@ -127,19 +127,23 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 	case clineStageToolAfter:
 		return clineToolAfterEvents(input, fields)
 	case clineStageTaskEnd:
+		// A task end does not imply a task success. The plugin surface has one run-completion
+		// handler for all three outcomes, so a cancel or a failure arrives here rather than at
+		// the cancel and error stages, which only the file-based surface names separately.
+		switch clineTaskOutcome(input) {
+		case clineOutcomeCancelled:
+			return clineCancelEvents(input, fields, one)
+		case clineOutcomeFailed:
+			return clineErrorEvents(input, fields, one)
+		}
 		if usage := clineUsage(input); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
 		}
 		return one("session.ended", "session", "info", "Cline task completed", fields)
 	case clineStageTaskCancel:
-		if usage := clineUsage(input); len(usage) > 0 {
-			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
-		}
-		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": clineCancelReason(input)})
-		return one("session.ended", "session", "info", "Cline task cancelled", fields)
+		return clineCancelEvents(input, fields, one)
 	case clineStageTaskError:
-		fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
-		return one("session.error", "session", "high", "Cline task ended with an error", fields)
+		return clineErrorEvents(input, fields, one)
 	default:
 		return nil
 	}
@@ -686,6 +690,71 @@ func clineToolAfterEvents(input map[string]interface{}, fields map[string]interf
 	}}
 }
 
+// Outcomes a run-completion payload can report, beyond plain success.
+const (
+	clineOutcomeCancelled = "cancelled"
+	clineOutcomeFailed    = "failed"
+)
+
+// clineTaskOutcome reads how a Cline task actually finished.
+//
+// This exists because the two Cline surfaces disagree about where the outcome lives. The
+// file-based hooks name it in the stage itself -- TaskCancel, error -- so the stage alone is
+// enough. The plugin SDK, which is the surface Beacon installs, has a single run-completion
+// handler for every outcome and reports the difference as a field on the context. Without this
+// read, an aborted or failed task reaches the log as a clean session.ended, and the cancel and
+// error paths below would be unreachable through Beacon's own plugin.
+//
+// Returns "" when nothing says otherwise, so a payload that reports no outcome stays a success --
+// the same behavior as before this read existed. Cline is not documented down to the field level
+// here, so several spellings are accepted and an unrecognized value is treated as success rather
+// than guessed at: mislabelling a completed task as failed is worse than missing a label.
+func clineTaskOutcome(input map[string]interface{}) string {
+	status := getFirstStr(input, "status", "outcome", "runStatus", "run_status", "completionStatus", "completion_status")
+	if status == "" {
+		for _, key := range []string{"result", "run", "task", "taskMetadata", "task_metadata", "metadata"} {
+			if nested := firstMap(input, key); nested != nil {
+				status = getFirstStr(nested, "status", "outcome", "runStatus", "run_status", "completionStatus", "completion_status")
+				if status != "" {
+					break
+				}
+			}
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "aborted", "abort", "cancelled", "canceled", "cancel", "user_cancelled", "user_canceled", "interrupted":
+		return clineOutcomeCancelled
+	case "failed", "failure", "error", "errored":
+		return clineOutcomeFailed
+	}
+	// Deliberately no fallback to "there is an error object on the payload". clineToolFailure
+	// answers that question for a tool call, where the error belongs to the call itself; a run
+	// context is not the same thing, and a run that carried an error field for any other reason
+	// would be reported as a failed task. A false session.error is worse than a missed one in a
+	// log people alert on, so the status field is the only signal until a capture shows another.
+	return ""
+}
+
+// clineCancelEvents and clineErrorEvents keep the cancel and failure shapes in one place, since
+// both the stage-named surface and the outcome-carrying one have to produce them identically.
+func clineCancelEvents(input, fields map[string]interface{}, one func(action, category, severity, message string, values map[string]interface{}) []normalizedEvent) []normalizedEvent {
+	if usage := clineUsage(input); len(usage) > 0 {
+		fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+	}
+	fields["session"] = mergeNested(fields["session"], map[string]interface{}{"cancel_reason": clineCancelReason(input)})
+	return one("session.ended", "session", "info", "Cline task cancelled", fields)
+}
+
+func clineErrorEvents(input, fields map[string]interface{}, one func(action, category, severity, message string, values map[string]interface{}) []normalizedEvent) []normalizedEvent {
+	// Usage is recorded on a failed task too: the tokens were spent whether or not the task
+	// finished, and dropping them would understate the task's cost.
+	if usage := clineUsage(input); len(usage) > 0 {
+		fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
+	}
+	fields["error"] = map[string]interface{}{"type": clineErrorType(input)}
+	return one("session.error", "session", "high", "Cline task ended with an error", fields)
+}
+
 // clineCancelReason reports why a task ended without completing: cancelled, abandoned, or whatever
 // else the payload says.
 //
@@ -714,6 +783,13 @@ func clineCancelReason(input map[string]interface{}) string {
 		inner := firstMap(outer, "taskMetadata", "task_metadata", "metadata")
 		if reason := getFirstStr(inner, "completionStatus", "completion_status", "reason"); reason != "" {
 			return reason
+		}
+	}
+	// A cancel recognized from the run status rather than the stage name has that status as its
+	// only stated reason, and "aborted" says more than the generic default does.
+	for _, outer := range outers {
+		if status := getFirstStr(outer, "status", "outcome", "runStatus", "run_status"); status != "" {
+			return status
 		}
 	}
 	return "cancelled"

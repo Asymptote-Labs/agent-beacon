@@ -65,6 +65,14 @@ semantics, and to `tool.failed` when the payload reports an error; run end to
 `session.cancel_reason` set, since a cancel is an end rather than a failure; and
 task errors to `session.error`.
 
+Run end is read for its outcome rather than assumed to be a success. The plugin
+surface has a single run-completion handler for every outcome and reports the
+difference as a status on the context, so an aborted run normalizes to the cancel
+shape and a failed one to `session.error`, exactly as the separately named
+file-based hooks do. A run that states no outcome, or states one Beacon does not
+recognize, stays a completion: mislabelling a finished task as failed is worse
+than missing a label.
+
 The same mapping accepts Cline's file-based hook names (`TaskStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `TaskComplete`, `TaskCancel`)
 alongside its plugin handler names, so both of Cline's hook surfaces normalize
