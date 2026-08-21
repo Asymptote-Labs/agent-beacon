@@ -408,7 +408,7 @@ Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where
 Extension Attributes report a stale or unhealthy install. Use
 `/opt/beacon/jamf/scripts/install-cursor-hooks.sh` as a separate user-context
 policy for hook telemetry. Set
-`BEACON_HOOK_HARNESSES=cursor,devin-cli,devin-desktop,factory,opencode` to install supported hook
+`BEACON_HOOK_HARNESSES=cline,cursor,devin-cli,devin-desktop,factory,opencode` to install supported hook
 integrations; the helper writes hook events to
 `/var/log/beacon-agent/runtime.jsonl` by default.
 

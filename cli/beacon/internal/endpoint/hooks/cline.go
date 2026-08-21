@@ -164,6 +164,15 @@ func isClineInstalledAt(path string) bool {
 // project-scoped ones, and discovers a bare .ts file dropped into either. That is why Beacon writes
 // a file rather than running `cline plugin install`: no CLI has to be present, and an install works
 // the same for the VS Code and JetBrains hosts, which ship no `cline` binary at all.
+// ClinePluginPath is where Beacon installs its managed Cline plugin for the given level.
+//
+// Exported so discovery asks the installer where the plugin lives instead of rebuilding the path
+// itself. Two copies of that path is how discovery comes to report on a file the installer does not
+// write.
+func ClinePluginPath(level Level) (string, error) {
+	return clinePluginPath(level)
+}
+
 func clinePluginPath(level Level) (string, error) {
 	dir, err := clinePluginDir(level)
 	if err != nil {

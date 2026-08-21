@@ -45,7 +45,7 @@ A supervised collector is a plain background process tracked by a pidfile. It wo
 restarts it if it exits or when the machine reboots — `beacon endpoint status` says so explicitly
 rather than reporting the same health as a real service.
 
-Antigravity CLI, Claude Code, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks install an embedded `beacon-hooks` adapter under the Beacon endpoint base directory.
+Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks install an embedded `beacon-hooks` adapter under the Beacon endpoint base directory.
 
 Hook and plugin configuration is written to:
 
@@ -60,6 +60,7 @@ Hook and plugin configuration is written to:
 | Grok Build | `~/.grok/hooks/beacon-endpoint.json` | `./.grok/hooks/beacon-endpoint.json` |
 | Hermes Agent | `~/.hermes/config.yaml` | — |
 | OpenCode | `~/.config/opencode/plugins/beacon.ts` | `./.opencode/plugins/beacon.ts` |
+| Cline | `~/.cline/plugins/beacon.ts` | `./.cline/plugins/beacon.ts` |
 
 ## Related
 
