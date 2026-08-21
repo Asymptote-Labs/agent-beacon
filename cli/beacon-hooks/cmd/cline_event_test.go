@@ -172,13 +172,17 @@ func TestClineEventResolvesWorkspaceRelativePaths(t *testing.T) {
 		want  string
 	}{
 		{
+			// A literal expectation, not filepath.Join: the result must be the same on every host,
+			// because the workspace the path belongs to is not necessarily the host's.
 			name:  "relative path is joined to the workspace root",
 			roots: []interface{}{"/tmp/project"},
 			path:  "src/app.ts",
-			want:  filepath.Join("/tmp/project", "src/app.ts"),
+			want:  "/tmp/project/src/app.ts",
 		},
 		{
-			name:  "absolute path is left alone",
+			// filepath.IsAbs says false for this on Windows, so the old implementation joined it and
+			// recorded \tmp\project\etc\hosts -- a file nothing touched.
+			name:  "absolute POSIX path is left alone",
 			roots: []interface{}{"/tmp/project"},
 			path:  "/etc/hosts",
 			want:  "/etc/hosts",
@@ -216,7 +220,9 @@ func TestClineEventWriteToFileRecordsDiff(t *testing.T) {
 
 	event := clineEventWithAction(t, logPath, "file.modified")
 	file := nested(t, event, "file")
-	if got := file["path"]; got != filepath.Join("/Users/example/projects/beacon-demo", "src/health.ts") {
+	// Literal, not filepath.Join: the fixture's workspace is a POSIX one, and the recorded path must
+	// keep that shape whichever host the hook binary runs on.
+	if got := file["path"]; got != "/Users/example/projects/beacon-demo/src/health.ts" {
 		t.Errorf("file.path = %q, want the resolved workspace path", got)
 	}
 	// write_to_file creates a file. diffFields records every diff as a modification, so a create
@@ -523,5 +529,43 @@ func TestClineToolActionDoesNotMatchSubstrings(t *testing.T) {
 		if got, _ := clineToolAction(tool); got != "tool.completed" {
 			t.Errorf("clineToolAction(%q) = %q, want tool.completed", tool, got)
 		}
+	}
+}
+
+// The workspace a Cline path belongs to is not necessarily the host Beacon runs on -- VS Code Remote
+// and WSL are the ordinary cases -- so this resolution answers for the path, not for the host, and
+// every row below holds identically on Linux, macOS, and Windows.
+func TestClineWorkspacePathIsHostIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		root string
+		want string
+	}{
+		{name: "posix relative under posix root", path: "src/app.ts", root: "/repo", want: "/repo/src/app.ts"},
+		{name: "windows relative under windows root", path: `src\app.ts`, root: `C:\repo`, want: `C:\repo\src\app.ts`},
+		// Mixed spellings happen: the payload and the workspace root do not have to agree, and the
+		// recorded path should match the root's shape rather than becoming a mixture.
+		{name: "posix relative under windows root", path: "src/app.ts", root: `C:\repo`, want: `C:\repo\src\app.ts`},
+		{name: "windows relative under posix root", path: `src\app.ts`, root: "/repo", want: "/repo/src/app.ts"},
+		{name: "dot prefix is dropped", path: "./src/app.ts", root: "/repo", want: "/repo/src/app.ts"},
+		{name: "trailing root separator is not doubled", path: "src/app.ts", root: "/repo/", want: "/repo/src/app.ts"},
+		{name: "posix absolute is left alone", path: "/etc/hosts", root: `C:\repo`, want: "/etc/hosts"},
+		{name: "drive absolute is left alone", path: `C:\Windows\hosts`, root: "/repo", want: `C:\Windows\hosts`},
+		{name: "drive absolute with forward slashes is left alone", path: "D:/data/a.ts", root: "/repo", want: "D:/data/a.ts"},
+		{name: "unc path is left alone", path: `\\server\share\a.ts`, root: "/repo", want: `\\server\share\a.ts`},
+		{name: "volume-rooted path is left alone", path: `\Users\x\a.ts`, root: "/repo", want: `\Users\x\a.ts`},
+		// Drive-relative, which names a location only in the context of that drive's working
+		// directory. Not rooted, so it is resolved like any other relative path.
+		{name: "drive relative is treated as relative", path: "C:src/app.ts", root: "/repo", want: "/repo/C:src/app.ts"},
+		{name: "no root leaves the path relative", path: "src/app.ts", root: "", want: "src/app.ts"},
+		{name: "empty path stays empty", path: "", root: "/repo", want: ""},
+		{name: "quoted path is unquoted first", path: `"src/app.ts"`, root: "/repo", want: "/repo/src/app.ts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clineWorkspacePath(tc.path, tc.root); got != tc.want {
+				t.Errorf("clineWorkspacePath(%q, %q) = %q, want %q", tc.path, tc.root, got, tc.want)
+			}
+		})
 	}
 }
