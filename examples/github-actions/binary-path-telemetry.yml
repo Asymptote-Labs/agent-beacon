@@ -1,0 +1,69 @@
+# Reference workflow for running Agent Beacon CI telemetry with a
+# pre-provisioned beacon binary via binary-path. Use this when runners are
+# air-gapped or self-hosted and should not download a Beacon release from
+# GitHub during the action step.
+#
+# This file lives under examples/ (not .github/workflows/) so it is a
+# reference only and does not run in this repository.
+# Replace <tag> with the Beacon release tag you want to run. The beacon
+# and beacon-otelcol binaries must live side by side in BEACON_BIN_DIR.
+
+name: Test Agent Beacon binary-path
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pin the Beacon release whose binaries you vendor or download once.
+  BEACON_VERSION: v0.0.49
+
+jobs:
+  beacon-binary-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provision Beacon binaries
+        env:
+          BEACON_BIN_DIR: ${{ runner.temp }}/beacon-bin
+        run: |
+          set -euo pipefail
+          mkdir -p "${BEACON_BIN_DIR}"
+          # Air-gapped runners: replace this download with a copy from an
+          # internal mirror or pre-baked image path that already contains
+          # beacon and beacon-otelcol next to each other.
+          os=linux
+          arch="$(uname -m)"
+          case "${arch}" in
+            x86_64|amd64) arch=amd64 ;;
+            aarch64|arm64) arch=arm64 ;;
+            *) echo "unsupported arch ${arch}"; exit 1 ;;
+          esac
+          ver_no_v="${BEACON_VERSION#v}"
+          archive="beacon_${ver_no_v}_${os}_${arch}.tar.gz"
+          base="https://github.com/asymptote-labs/agent-beacon/releases/download/${BEACON_VERSION}"
+          curl -fsSL "${base}/${archive}" -o "${BEACON_BIN_DIR}/${archive}"
+          curl -fsSL "${base}/checksums.txt" -o "${BEACON_BIN_DIR}/checksums.txt"
+          expected="$(grep " ${archive}\$" "${BEACON_BIN_DIR}/checksums.txt" | awk '{print $1}')"
+          actual="$(sha256sum "${BEACON_BIN_DIR}/${archive}" | awk '{print $1}')"
+          test "${expected}" = "${actual}"
+          tar -xzf "${BEACON_BIN_DIR}/${archive}" -C "${BEACON_BIN_DIR}"
+          chmod +x "${BEACON_BIN_DIR}/beacon" "${BEACON_BIN_DIR}/beacon-otelcol"
+          test -x "${BEACON_BIN_DIR}/beacon"
+          test -x "${BEACON_BIN_DIR}/beacon-otelcol"
+          echo "BEACON_BIN_DIR=${BEACON_BIN_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Agent Beacon with binary-path
+        uses: asymptote-labs/agent-beacon@<tag>
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          binary-path: ${{ env.BEACON_BIN_DIR }}/beacon
+          command: claude --print "Say hello from Agent Beacon CI telemetry"
+          upload-artifact: "true"
