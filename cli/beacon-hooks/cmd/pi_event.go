@@ -217,6 +217,9 @@ func piToolFields(input map[string]interface{}, completed bool) map[string]inter
 				diffText = firstToolString(toolInput, "content", "new_string", "newString")
 			}
 			mergeMap(fields, diffFields(path, diffText))
+			if file, ok := fields["file"].(map[string]interface{}); ok {
+				file["operation"] = fileOperation(toolName)
+			}
 		}
 	case "command.executed":
 		fields["command"] = piCommandFields(input, toolInput, toolResponse)

@@ -329,7 +329,7 @@ func TestPiEventToolFailureIsRecordedAsFailed(t *testing.T) {
 	if got := nestedMap(t, event, "error")["type"]; got != "tool_error" {
 		t.Fatalf("error.type = %q, want tool_error", got)
 	}
-	if got := nestedMap(t, event, "event")["severity"]; got != nil && got != "high" {
+	if got := event["severity"]; got != "high" {
 		t.Fatalf("severity = %#v, want high", got)
 	}
 }
