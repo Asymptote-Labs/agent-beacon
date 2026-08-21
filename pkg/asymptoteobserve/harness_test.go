@@ -17,6 +17,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"antigravity": "antigravity_cli",
 		"vscode":      "vscode_copilot",
 		"pi":          "pi_cli",
+		"cline":       "cline",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -35,7 +36,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway", "pi_cli",
+		"openclaw_gateway", "pi_cli", "cline",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -107,6 +108,47 @@ func TestNamesMerelyStartingWithPiAreNotPi(t *testing.T) {
 	for _, name := range []string{"pip-agent", "pipeline", "pixel-cli", "pied-piper"} {
 		if got := NormalizeHarnessName(name); got != name {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
+		}
+	}
+}
+
+// Cline's canonical name has to be reachable from every spelling its hosts produce. It runs as a
+// VS Code extension, a JetBrains plugin and a CLI over one agent core, so the hook path
+// (--platform cline) and an OTLP service.name can each report a different capitalization or
+// suffix for the same session.
+func TestClineSpellingsConvergeOnCline(t *testing.T) {
+	for _, in := range []string{
+		"cline", "Cline", "CLINE", " cline ", "cline_cli", "cline-cli", "cline cli", "cline.bot",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "cline" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "cline")
+			}
+		})
+	}
+}
+
+// "cline" appears inside names Cline itself puts on disk: every Cline user has a `.clinerules`
+// directory, and a harness reporting a name derived from one of those paths must keep it rather
+// than being recorded as Cline activity. This is what keeps the Cline case an equality match
+// rather than a Contains rule.
+func TestClineDoesNotSwallowNamesMentioningCline(t *testing.T) {
+	for _, name := range []string{".clinerules", "clinerules", "clinerules-sync", "decline-bot"} {
+		if got := NormalizeHarnessName(name); got != name {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
+		}
+	}
+}
+
+// Cline is not a Claude surface. The generic `Contains(lower, "claude")` rule above returns
+// claude_code for anything it can see the word "claude" in, and the two product names are close
+// enough in writing that a future edit could plausibly route one through the other -- which would
+// file Cline sessions as Claude Code sessions in every dashboard and detection that groups by
+// harness.name.
+func TestClineIsNotAttributedToClaudeCode(t *testing.T) {
+	for _, in := range []string{"cline", "Cline", "cline_cli", "cline.bot"} {
+		if got := NormalizeHarnessName(in); got == "claude_code" {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want Cline to keep its own harness", in, got)
 		}
 	}
 }
