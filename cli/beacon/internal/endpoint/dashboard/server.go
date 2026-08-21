@@ -343,6 +343,8 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	add("hermes", hermes.Installed, hermes.ConfigPath, hermes.BinaryPath, hermes.Message)
 	opencode := endpointhooks.OpenCodeHookStatus(endpointhooks.OpenCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("opencode", opencode.Installed, opencode.PluginPath, opencode.BinaryPath, opencode.Message)
+	pi := endpointhooks.PiHookStatus(endpointhooks.PiOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("pi", pi.Installed, pi.ExtensionPath, pi.BinaryPath, pi.Message)
 	vscode := endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("vscode", vscode.Installed, vscode.HooksPath, vscode.BinaryPath, vscode.Message)
 	return out
