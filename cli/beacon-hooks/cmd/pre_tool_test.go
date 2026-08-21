@@ -904,6 +904,7 @@ func setupHookConfigDirs(t *testing.T) {
 	origGrokDir := hookconfig.GrokDir
 	origHermesDir := hookconfig.HermesDir
 	origOpenCodeDir := hookconfig.OpenCodeDir
+	origPiDir := hookconfig.PiDir
 	origPlatform := platformFlag
 	hookconfig.BeaconDir = tmp
 	hookconfig.ClaudeDir = filepath.Join(tmp, "claude")
@@ -916,6 +917,7 @@ func setupHookConfigDirs(t *testing.T) {
 	hookconfig.GrokDir = filepath.Join(tmp, "grok")
 	hookconfig.HermesDir = filepath.Join(tmp, "hermes")
 	hookconfig.OpenCodeDir = filepath.Join(tmp, "opencode")
+	hookconfig.PiDir = filepath.Join(tmp, "pi")
 	t.Cleanup(func() {
 		hookconfig.BeaconDir = origBeaconDir
 		hookconfig.ClaudeDir = origClaudeDir
@@ -928,11 +930,25 @@ func setupHookConfigDirs(t *testing.T) {
 		hookconfig.GrokDir = origGrokDir
 		hookconfig.HermesDir = origHermesDir
 		hookconfig.OpenCodeDir = origOpenCodeDir
+		hookconfig.PiDir = origPiDir
 		platformFlag = origPlatform
 	})
 }
 
 func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string), input map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	return runHookWithRawInput(t, run, string(raw))
+}
+
+// runHookWithRawInput drives a hook with the exact bytes given, rather than with a payload this
+// helper encodes. It exists for the malformed-stdin cases: a hook that answers an interactive
+// runtime must still produce a valid reply when handed something that is not JSON at all, and that
+// property cannot be exercised through a map.
+func runHookWithRawInput(t *testing.T, run func(cmd *cobra.Command, args []string), raw string) map[string]interface{} {
 	t.Helper()
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
@@ -966,15 +982,15 @@ func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string),
 	// so a large enough response would block inside run(). It is drained concurrently for that
 	// reason rather than for symmetry. This is the same failure the sandbox's drainStreams already
 	// documents, in the opposite direction.
-	encodeErr := make(chan error, 1)
+	writeErr := make(chan error, 1)
 	go func() {
-		err := json.NewEncoder(stdinW).Encode(input)
+		_, err := io.WriteString(stdinW, raw)
 		// Closed here, not deferred by the caller: the hook reads stdin to EOF, so it only returns
 		// once this end is closed.
 		if cerr := stdinW.Close(); err == nil {
 			err = cerr
 		}
-		encodeErr <- err
+		writeErr <- err
 	}()
 
 	type readResult struct {
@@ -996,8 +1012,8 @@ func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string),
 	os.Stdin = origStdin
 	os.Stdout = origStdout
 
-	if err := <-encodeErr; err != nil {
-		t.Fatalf("encode input: %v", err)
+	if err := <-writeErr; err != nil {
+		t.Fatalf("write hook input: %v", err)
 	}
 	captured := <-stdoutDone
 	if captured.err != nil {

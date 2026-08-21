@@ -118,6 +118,8 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 		return hermesFirstString(input, "session_id", "sessionId", "session_key", "task_id")
 	case "opencode":
 		return getFirstStr(input, "session_id", "sessionID")
+	case "pi":
+		return getFirstStr(input, "session_id", "sessionId", "sessionID")
 	default:
 		id, _ := input["session_id"].(string)
 		return id
@@ -164,6 +166,13 @@ func resolveSessionIDWithTranscript(input map[string]interface{}, platform strin
 		return
 	case "opencode":
 		sessionID = getFirstStr(input, "session_id", "sessionID")
+		return
+	case "pi":
+		// Pi writes a session JSONL of its own under ~/.pi/agent/sessions, and the extension
+		// reports that path. It is carried so an operator can correlate a Beacon event with the
+		// runtime's own record; Beacon does not read or upload the file.
+		sessionID = getFirstStr(input, "session_id", "sessionId", "sessionID")
+		transcriptPath = getFirstStr(input, "session_file", "sessionFile", "transcript_path", "transcriptPath")
 		return
 	default:
 		sessionID, _ = input["session_id"].(string)
@@ -233,6 +242,13 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 		if cwd := getFirstStr(input, "cwd", "directory", "worktree"); cwd != "" {
 			return cwd
 		}
+	}
+	if platform == "pi" {
+		// The extension reads ctx.cwd, which Pi guarantees for every event, so this is a single
+		// key rather than a chain of fallbacks. "directory" is accepted because Pi's own session
+		// header spells the same value that way, and an extension reporting the header verbatim is
+		// the obvious thing for someone to write.
+		return getFirstStr(input, "cwd", "directory")
 	}
 	if isDevinLikePlatform(platform) {
 		if cwd := getFirstStr(input, "cwd", "project_dir", "projectDir"); cwd != "" {

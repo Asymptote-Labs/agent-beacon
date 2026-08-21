@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,23 @@ import (
 )
 
 var runInventoryHeartbeatCommand = exec.CommandContext
+
+// normalizedEvent is one endpoint event a runtime payload translated into, before it is written.
+//
+// It exists for the plugin- and extension-driven runtimes, whose payloads are not one-hook-one-event
+// the way a Claude or Cursor hook invocation is: a single opencode `session.diff` or Pi assistant
+// message can carry several distinct things worth recording, and returning a slice keeps that fan-out
+// in the mapping function where it can be tested, rather than in the command that writes the log.
+//
+// Shared rather than per-runtime because the alternative was a second identical struct: the type
+// says "an event to emit", which has nothing runtime-specific in it.
+type normalizedEvent struct {
+	action   string
+	category string
+	severity string
+	message  string
+	fields   map[string]interface{}
+}
 
 func emitHookEvent(logger *logging.Logger, action, category, severity, message string, input map[string]interface{}, fields map[string]interface{}) {
 	if fields == nil {
@@ -478,6 +496,72 @@ func firstToolIntAcross(inputs []map[string]interface{}, keys ...string) (int, b
 		}
 	}
 	return 0, false
+}
+
+// jsonMap returns the first key that holds a nested object, or nil.
+//
+// Runtime payloads spell the same nested object several ways -- tool_input and toolInput, result and
+// details -- so callers pass every accepted key and take the first that is present. Returning nil
+// rather than an empty map matters: the callers distinguish "absent" from "present but empty", and
+// an empty map would make a tool that reported no arguments look like one that reported none needed.
+func jsonMap(input map[string]interface{}, keys ...string) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+	for _, key := range keys {
+		if value, ok := input[key].(map[string]interface{}); ok {
+			return value
+		}
+	}
+	return nil
+}
+
+// cloneEventFields deep-copies a field map so two events built from one payload cannot alias each
+// other's nested maps.
+//
+// The aliasing is the whole point. Runtimes whose payloads fan out into several events build them
+// from one shared base, and a shallow copy shares every nested map in it: setting gen_ai on the
+// second event also sets it on the first, so the log ends up with two events describing the same
+// content. Marshalling through JSON is the copy that matters here because these maps only ever hold
+// JSON-decoded values, and the shallow fallback keeps a marshal failure from dropping the event
+// entirely.
+func cloneEventFields(input map[string]interface{}) map[string]interface{} {
+	if data, err := json.Marshal(input); err == nil {
+		var out map[string]interface{}
+		if err := json.Unmarshal(data, &out); err == nil {
+			return out
+		}
+	}
+	out := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+// jsonFloat reads a JSON value that should be a number.
+//
+// Every spelling a decoded payload can present the same number as: float64 from encoding/json,
+// json.Number when a decoder used UseNumber, int from a hand-built map in a test, and a quoted
+// string from a runtime that serializes numbers as text. Runtime-reported cost is the value this
+// exists for, and rejecting the string form would drop it for any runtime that quotes it.
+func jsonFloat(value interface{}) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		result, err := typed.Float64()
+		return result, err == nil
+	case string:
+		result, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return result, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func firstNestedString(input map[string]interface{}, key string) string {
