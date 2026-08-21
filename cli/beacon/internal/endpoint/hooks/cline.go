@@ -85,7 +85,9 @@ func clineStatusFromRuntime(status runtimeStatus) ClineStatus {
 		return out
 	}
 	data, err := os.ReadFile(out.PluginPath)
-	if err != nil || !strings.Contains(string(data), out.BinaryPath) || strings.Contains(string(data), "__BEACON_") {
+	jsonBinaryPath, _ := json.Marshal(out.BinaryPath)
+	escapedPath := string(jsonBinaryPath[1 : len(jsonBinaryPath)-1])
+	if err != nil || !strings.Contains(string(data), escapedPath) || strings.Contains(string(data), "__BEACON_") {
 		out.Installed = false
 		out.Message = fmt.Sprintf("Cline plugin at %s does not reference the active Beacon hook binary", out.PluginPath)
 	}
