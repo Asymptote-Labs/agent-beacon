@@ -11,6 +11,23 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### Unreleased
+
+- **Pi is a supported runtime** · Beacon now collects endpoint telemetry from
+  [Pi](https://pi.dev). Pi has no hooks configuration file and no OpenTelemetry
+  support, so the integration is a managed TypeScript extension at
+  `~/.pi/agent/extensions/beacon.ts` that forwards runtime events to
+  `beacon-hooks` — the same shape as the OpenCode plugin. Install it with
+  `beacon endpoint hooks install --harness pi`. Coverage includes session
+  lifecycle, prompts, tool calls and results, commands with exit codes, file
+  reads and edits with diffs, MCP activity, agent reasoning, and per-message
+  token usage including runtime-reported cost.
+- **Policy denials are enforced on Pi** · Pi's pre-tool event is blockable, so
+  when `BEACON_POLICY_PROVIDER` names an executable and it denies a call, the
+  tool is blocked in Pi and the denial is recorded with
+  `policy.enforcement=enforce`. With no provider configured the seam stays inert,
+  and every error path allows the call.
+
 ### v1.2.1 · August 12, 2026
 
 - **Beacon configures the right person on directory-backed hosts** · On a machine
