@@ -89,9 +89,13 @@ tool is blocked in Pi and the denial is recorded as `approval.denied` with
 `policy.enforcement=enforce`. No `tool.invoked` event is written for a denied call, because the tool
 never ran.
 
-With no provider configured — the default for the open build — the seam is inert and every event is
-pure observation. All error paths allow the call: a provider timeout, a non-zero exit, or
-unparseable output never blocks a tool.
+With no provider configured — the default for the open build — the extension does not ask for a
+decision at all. The pre-tool event is reported and forgotten, like every other event, so a default
+install pays no latency for a feature it is not using. Enforcement is opt-in in behavior, not only in
+outcome.
+
+When a provider is configured, all error paths allow the call: a provider timeout, a non-zero exit,
+or unparseable output never blocks a tool.
 
 ## Data handling
 
