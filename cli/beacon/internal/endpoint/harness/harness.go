@@ -55,6 +55,7 @@ func DiscoverAll() []Harness {
 		DiscoverAntigravity(),
 		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
+		DiscoverCline(),
 		DiscoverPi(),
 		DiscoverHermes(),
 		DiscoverFactory(),
@@ -170,6 +171,38 @@ func DiscoverOpenCode() Harness {
 	} else {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Beacon opencode plugin was not found"
+	}
+	return h
+}
+
+// DiscoverCline reports whether Cline is present and whether Beacon's plugin is installed for it.
+//
+// Unlike every other hook runtime, Cline cannot be found by looking for an executable. It runs as a
+// VS Code extension, a JetBrains plugin, and a CLI over one agent core, and the two IDE hosts ship
+// no `cline` binary at all -- so a binary probe reports "not detected" on the majority of real
+// installs. The ~/.cline directory is what every host shares, and the CLI binary is treated as an
+// extra signal rather than the deciding one.
+func DiscoverCline() Harness {
+	h := Harness{Name: "cline", DisplayName: "Cline", Capability: "plugin"}
+	detectExecutable(&h, "cline")
+	home, _ := os.UserHomeDir()
+	pluginPath := filepath.Join(home, ".cline", "plugins", "beacon.ts")
+	h.ConfigPath = pluginPath
+	if !h.Detected && dirExists(filepath.Join(home, ".cline")) {
+		h.Detected = true
+	}
+	if fileExists(pluginPath) {
+		data, _ := os.ReadFile(pluginPath)
+		if strings.Contains(string(data), "beacon-managed-cline-plugin:v1") {
+			h.TelemetryStatus = TelemetryEnabled
+			h.Message = "Beacon Cline plugin is configured"
+		} else {
+			h.TelemetryStatus = TelemetryDisabled
+			h.Message = "Cline plugin file exists but Beacon endpoint plugin was not found"
+		}
+	} else {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Beacon Cline plugin was not found"
 	}
 	return h
 }

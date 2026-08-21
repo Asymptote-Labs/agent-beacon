@@ -765,3 +765,81 @@ func clearCopilotEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 }
+
+// Cline is the one hook runtime that cannot be found by looking for an executable: it runs as a VS
+// Code extension, a JetBrains plugin and a CLI over one agent core, and the two IDE hosts ship no
+// `cline` binary. Detecting on the directory alone is deliberate here, and the opposite of what
+// DiscoverCodex and DiscoverGemini do -- a binary probe would report "not detected" on the majority
+// of real Cline installs.
+func TestDiscoverClineDetectsConfigDirectoryWithoutAnExecutable(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("PATH", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(home, ".cline"), 0755); err != nil {
+		t.Fatalf("mkdir cline config dir: %v", err)
+	}
+
+	h := DiscoverCline()
+	if !h.Detected {
+		t.Fatalf("DiscoverCline did not detect Cline from its config directory: %#v", h)
+	}
+	if h.ExecutablePath != "" {
+		t.Fatalf("ExecutablePath = %q, want empty with no binary on PATH", h.ExecutablePath)
+	}
+	if h.TelemetryStatus != TelemetryMissing {
+		t.Fatalf("TelemetryStatus = %q, want %q", h.TelemetryStatus, TelemetryMissing)
+	}
+	if h.ConfigPath != filepath.Join(home, ".cline", "plugins", "beacon.ts") {
+		t.Fatalf("ConfigPath = %q, want the managed plugin path", h.ConfigPath)
+	}
+}
+
+func TestDiscoverClineTelemetryStatusVariants(t *testing.T) {
+	cases := []struct {
+		name    string
+		plugin  string
+		want    TelemetryStatus
+		message string
+	}{
+		{name: "managed plugin", plugin: "// beacon-managed-cline-plugin:v1\nexport default {}", want: TelemetryEnabled, message: "configured"},
+		// Someone else's plugin at Beacon's path. Reporting that as enabled would claim telemetry
+		// Beacon is not collecting.
+		{name: "unmanaged plugin", plugin: "export default { name: \"someone-else\" }", want: TelemetryDisabled, message: "was not found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			testenv.SetHome(t, home)
+			t.Setenv("PATH", t.TempDir())
+			pluginPath := filepath.Join(home, ".cline", "plugins", "beacon.ts")
+			if err := os.MkdirAll(filepath.Dir(pluginPath), 0755); err != nil {
+				t.Fatalf("mkdir cline plugin dir: %v", err)
+			}
+			if err := os.WriteFile(pluginPath, []byte(tc.plugin), 0644); err != nil {
+				t.Fatalf("write cline plugin: %v", err)
+			}
+
+			h := DiscoverCline()
+			if h.TelemetryStatus != tc.want {
+				t.Fatalf("TelemetryStatus = %q, want %q", h.TelemetryStatus, tc.want)
+			}
+			if !strings.Contains(h.Message, tc.message) {
+				t.Fatalf("Message = %q, want it to mention %q", h.Message, tc.message)
+			}
+		})
+	}
+}
+
+// A runtime missing from DiscoverAll is invisible to `beacon endpoint discover`, which is where an
+// operator looks to find out whether Beacon can see their agent at all.
+func TestDiscoverAllIncludesCline(t *testing.T) {
+	for _, h := range DiscoverAll() {
+		if h.Name == "cline" {
+			if h.DisplayName != "Cline" || h.Capability != "plugin" {
+				t.Fatalf("cline harness = %#v, want display name Cline and capability plugin", h)
+			}
+			return
+		}
+	}
+	t.Fatal("DiscoverAll does not include cline")
+}
