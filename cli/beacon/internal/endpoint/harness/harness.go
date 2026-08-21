@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"gopkg.in/yaml.v3"
 )
@@ -185,15 +186,24 @@ func DiscoverOpenCode() Harness {
 func DiscoverCline() Harness {
 	h := Harness{Name: "cline", DisplayName: "Cline", Capability: "plugin"}
 	detectExecutable(&h, "cline")
-	home, err := os.UserHomeDir()
+	// The guard below is the point: Cline's project install is ".cline/plugins/beacon.ts", the user
+	// layout with the home prefix removed, so an unresolved home directory does not merely produce a
+	// useless path -- it produces exactly the path a project install occupies. Discovery would read
+	// a repository's own plugin and report Cline detected with telemetry enabled for the machine, on
+	// the strength of a file in whatever directory the command ran from. DiscoverPi guards the same
+	// way.
+	//
+	// The path comes from the installer rather than being rebuilt here so there is one definition of
+	// where the plugin lives; two copies is how discovery comes to report on a file the installer
+	// does not write.
+	pluginPath, err := hooks.ClinePluginPath(hooks.LevelUser)
 	if err != nil {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Cline plugin directory could not be resolved: " + err.Error()
 		return h
 	}
-	pluginPath := filepath.Join(home, ".cline", "plugins", "beacon.ts")
 	h.ConfigPath = pluginPath
-	if !h.Detected && dirExists(filepath.Join(home, ".cline")) {
+	if !h.Detected && dirExists(filepath.Dir(filepath.Dir(pluginPath))) {
 		h.Detected = true
 	}
 	if fileExists(pluginPath) {

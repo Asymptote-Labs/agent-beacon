@@ -843,3 +843,45 @@ func TestDiscoverAllIncludesCline(t *testing.T) {
 	}
 	t.Fatal("DiscoverAll does not include cline")
 }
+
+// An unresolvable home directory must stop Cline discovery rather than produce a relative path.
+//
+// Cline is the sharpest case for this in the whole harness set: its project install is
+// ".cline/plugins/beacon.ts", which is the user layout with the home prefix removed. A relative
+// path therefore lands exactly where a project install lives, so discovery would read a
+// repository's own plugin and report Cline detected with telemetry enabled for the machine -- on
+// the strength of a file in whatever directory the command happened to run from.
+//
+// An empty HOME is not hypothetical for this binary: system-mode Beacon runs under launchd, and
+// some CI runners leave it unset.
+func TestDiscoverClineDoesNotFallBackToAProjectPluginWhenHomeIsUnresolvable(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	t.Setenv("PATH", t.TempDir())
+	// An empty HOME is what makes os.UserHomeDir fail; USERPROFILE is cleared for the same reason on
+	// Windows.
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+
+	pluginPath := filepath.Join(work, ".cline", "plugins", "beacon.ts")
+	if err := os.MkdirAll(filepath.Dir(pluginPath), 0755); err != nil {
+		t.Fatalf("mkdir project plugin dir: %v", err)
+	}
+	if err := os.WriteFile(pluginPath, []byte("// beacon-managed-cline-plugin:v1"), 0644); err != nil {
+		t.Fatalf("write project plugin: %v", err)
+	}
+
+	h := DiscoverCline()
+	if h.TelemetryStatus == TelemetryEnabled {
+		t.Errorf("TelemetryStatus = %q; a project plugin was reported as the user install", h.TelemetryStatus)
+	}
+	if h.ConfigPath != "" {
+		t.Errorf("ConfigPath = %q, want empty when the home directory cannot be resolved", h.ConfigPath)
+	}
+	if h.Detected {
+		t.Errorf("Detected = true from a project directory with no resolvable home")
+	}
+	if !strings.Contains(h.Message, "could not be resolved") {
+		t.Errorf("Message = %q, want it to name the unresolved directory", h.Message)
+	}
+}
