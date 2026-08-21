@@ -32,6 +32,9 @@ func TestNormalizeEndpointTargetCharacterization(t *testing.T) {
 		"factory":         {"factory", endpointTargetHook, true},
 		"droid":           {"factory", endpointTargetHook, true},
 		"opencode":        {"opencode", endpointTargetHook, true},
+		"pi":              {"pi", endpointTargetHook, true},
+		"pi-cli":          {"pi", endpointTargetHook, true},
+		"pi_cli":          {"pi", endpointTargetHook, true},
 		"grok":            {"grok", endpointTargetHook, true},
 		"hermes":          {"hermes", endpointTargetHook, true},
 		"hermes-agent":    {"hermes", endpointTargetHook, true},
@@ -44,9 +47,11 @@ func TestNormalizeEndpointTargetCharacterization(t *testing.T) {
 		"  Claude_Code  ": {"claude", endpointTargetOTLP, true},
 		"DEVIN_DESKTOP":   {"devin-desktop", endpointTargetHook, true},
 		// Unsupported
-		"":              {"", "", false},
-		"unknown":       {"", "", false},
-		"vscode-hooks":  {"", "", false},
+		"":             {"", "", false},
+		"unknown":      {"", "", false},
+		"vscode-hooks": {"", "", false},
+		// "copilot" contains "pi"; neither may collapse into the other's target.
+		"copilot":       {"", "", false},
 		"claude-cowork": {"", "", false},
 	}
 	for in, w := range cases {
@@ -82,6 +87,9 @@ func TestNormalizeHookTargetCharacterization(t *testing.T) {
 		"factory":       {"factory", true},
 		"droid":         {"factory", true},
 		"opencode":      {"opencode", true},
+		"pi":            {"pi", true},
+		"pi-cli":        {"pi", true},
+		"pi_cli":        {"pi", true},
 		"grok":          {"grok", true},
 		"hermes":        {"hermes", true},
 		"hermes-agent":  {"hermes", true},

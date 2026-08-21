@@ -140,6 +140,37 @@ func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) str
 	return strings.Join(args, " ")
 }
 
+// endpointCommandArgv builds the same command as endpointCommandPrefix, as argv rather than as a
+// string for a shell to parse.
+//
+// For a runtime that spawns a process itself, this is the better form and the reason is the whole
+// comment above: there is no quoting that works in a POSIX shell and in both Windows shells, so
+// endpointCommandPrefix has to pick one and accept that a runtime using the other cannot run it.
+// argv sidesteps the question -- a path containing a space, a `$`, or a backslash is one element of
+// an array, and nothing re-splits it.
+//
+// Kept beside its string counterpart rather than in the one runtime that uses it, because the two
+// must stay in step: the flags a hook needs are decided here, and a value added to one and not the
+// other is a runtime silently missing an endpoint setting.
+func endpointCommandArgv(platform, binaryPath, logPath, configPath, subcommand string) []string {
+	argv := []string{binaryPath, "--platform", platform}
+	if logPath != "" {
+		argv = append(argv, "--log", logPath)
+	}
+	if configPath != "" {
+		argv = append(argv, "--config", configPath)
+	}
+	// Best-effort, as in the string form: the CLI path only enables the inventory heartbeat, and a
+	// hook with no --cli still captures everything else.
+	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
+		argv = append(argv, "--cli", cliPath)
+	}
+	if subcommand != "" {
+		argv = append(argv, subcommand)
+	}
+	return argv
+}
+
 // hookCommandQuote quotes one value for the shell that will parse this command.
 //
 // Single quotes, on every platform. In a POSIX shell they are fully literal, which is what a Windows
