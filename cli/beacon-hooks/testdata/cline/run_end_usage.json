@@ -1,0 +1,16 @@
+{
+  "type": "afterRun",
+  "clineVersion": "3.36.0",
+  "hookName": "afterRun",
+  "timestamp": "2026-08-21T10:16:30Z",
+  "taskId": "task-3f9c1d",
+  "workspaceRoots": ["/Users/example/projects/beacon-demo"],
+  "result": {
+    "usage": {
+      "inputTokens": 1841,
+      "outputTokens": 412,
+      "cacheReadTokens": 1024,
+      "totalCost": 0.0231
+    }
+  }
+}

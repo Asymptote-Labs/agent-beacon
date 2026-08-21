@@ -126,3 +126,22 @@ func TestFromCursorEdits_MultilineEdit(t *testing.T) {
 		t.Error("Missing file header")
 	}
 }
+
+// Cline's write tool is spelled write_to_file. Without it in the Write case, FromToolResponse
+// returns nothing and a created file reaches the log as raw content with no diff metadata.
+func TestFromToolResponse_ClineWriteToFile(t *testing.T) {
+	got := FromToolResponse(
+		"write_to_file",
+		map[string]interface{}{"path": "src/health.ts", "content": "export const health = () => true\n"},
+		nil,
+	)
+	if !strings.Contains(got, "--- a/health.ts") || !strings.Contains(got, "+++ b/health.ts") {
+		t.Fatalf("diff header = %q, want the file named in both halves", got)
+	}
+	if !strings.Contains(got, "@@ -0,0 +1,") {
+		t.Errorf("diff = %q, want a new-file hunk header", got)
+	}
+	if !strings.Contains(got, "+export const health") {
+		t.Errorf("diff = %q, want the written content as added lines", got)
+	}
+}
