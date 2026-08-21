@@ -62,6 +62,41 @@ describe("beacon cline plugin", () => {
     expect(sent[0].clineVersion).toBe("3.36.0")
   })
 
+  // The shape above is a top-level one. The setup context is reported to nest the workspace under
+  // an object of its own, and reading only the top level extracted nothing to carry -- costing the
+  // working directory, repository and branch on every event of the task.
+  test("carries a nested setup workspace onto later hooks", async () => {
+    const sent = captureSends()
+    const plugin = createBeaconPlugin()
+
+    plugin.setup(undefined, { workspaceInfo: { rootPath: "/repo" }, clineVersion: "3.36.0" })
+    await plugin.hooks.afterTool({ toolCall: { name: "read_file" } })
+
+    expect(sent[0].cwd).toBe("/repo")
+    expect(sent[0].clineVersion).toBe("3.36.0")
+  })
+
+  test("reads a nested roots array", async () => {
+    const sent = captureSends()
+    const plugin = createBeaconPlugin()
+
+    plugin.setup(undefined, { workspace: { roots: ["/repo", "/other"] } })
+    await plugin.hooks.beforeRun({ taskId: "task-1" })
+
+    expect(sent[0].workspaceRoots).toEqual(["/repo", "/other"])
+  })
+
+  // A non-object under a workspace key must not throw: the plugin runs inside the host, and an
+  // exception here reaches the user as a broken plugin.
+  test("survives a non-object workspace value", async () => {
+    const sent = captureSends()
+    const plugin = createBeaconPlugin()
+
+    plugin.setup(undefined, { workspaceInfo: "/repo" })
+    await expect(plugin.hooks.beforeRun({ taskId: "task-1" })).resolves.toBeUndefined()
+    expect(sent[0].taskId).toBe("task-1")
+  })
+
   test("context fields win over the captured setup context", async () => {
     const sent = captureSends()
     const plugin = createBeaconPlugin()
