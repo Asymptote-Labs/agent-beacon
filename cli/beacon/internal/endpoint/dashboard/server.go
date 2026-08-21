@@ -329,6 +329,8 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	level := endpointhooks.LevelUser
 	antigravity := endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("antigravity", antigravity.Installed, antigravity.ConfigPath, antigravity.BinaryPath, antigravity.Message)
+	cline := endpointhooks.ClineHookStatus(endpointhooks.ClineOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("cline", cline.Installed, cline.PluginPath, cline.BinaryPath, cline.Message)
 	cursor := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("cursor", cursor.Installed, cursor.HooksJSONPath, cursor.BinaryPath, cursor.Message)
 	devin := endpointhooks.DevinHookStatus(endpointhooks.DevinOptions{Level: level, LogPath: logPath, UserMode: userMode})

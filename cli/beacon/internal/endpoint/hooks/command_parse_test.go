@@ -196,3 +196,39 @@ func TestCommandCarriesEndpointSettingsRecognizesBothSpellings(t *testing.T) {
 		}
 	}
 }
+
+// The two builders of a hook invocation must stay in step.
+//
+// endpointCommandPrefix writes a command line for runtimes that hand a string to a shell;
+// endpointCommandArgs builds argv for runtimes that spawn the binary themselves. A flag added to
+// one and not the other means one runtime's hooks quietly stop reading the endpoint config, or stop
+// reporting inventory, with nothing failing anywhere. Comparing the prefix's own tokens against
+// argv is what keeps that from happening.
+func TestEndpointCommandArgsMatchPrefix(t *testing.T) {
+	cases := []struct {
+		name       string
+		binaryPath string
+		logPath    string
+		configPath string
+	}{
+		{name: "all settings", binaryPath: "/opt/beacon/hooks/beacon-hooks", logPath: "/var/log/beacon/runtime.jsonl", configPath: "/etc/beacon/config.json"},
+		{name: "no log", binaryPath: "/opt/beacon/hooks/beacon-hooks", configPath: "/etc/beacon/config.json"},
+		{name: "no config", binaryPath: "/opt/beacon/hooks/beacon-hooks", logPath: "/var/log/beacon/runtime.jsonl"},
+		{name: "windows paths with spaces", binaryPath: `C:\Program Files\Beacon\beacon-hooks.exe`, logPath: `C:\ProgramData\Beacon\runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := endpointCommandPrefix("cline", tc.binaryPath, tc.logPath, tc.configPath)
+			args := endpointCommandArgs("cline", tc.binaryPath, tc.logPath, tc.configPath)
+			tokens := commandFields(prefix)
+			if len(tokens) != len(args) {
+				t.Fatalf("prefix tokens %v do not match argv %v", tokens, args)
+			}
+			for i := range args {
+				if tokens[i] != args[i] {
+					t.Errorf("token %d = %q, argv = %q", i, tokens[i], args[i])
+				}
+			}
+		})
+	}
+}

@@ -259,6 +259,17 @@ func TestConfigureHarnessesRejectsOpenCodeAsHookManaged(t *testing.T) {
 	}
 }
 
+// Cline telemetry is a plugin, not an OTLP endpoint setting, so `endpoint install --harness cline`
+// has nothing to configure. Saying so names the command that does work; falling through to
+// "unsupported harness" would suggest Cline is not supported at all.
+func TestConfigureHarnessesRejectsClineAsHookManaged(t *testing.T) {
+	cfg := endpointconfig.Config{Harnesses: []string{"cline"}}
+	_, err := configureHarnesses(cfg)
+	if err == nil || !strings.Contains(err.Error(), "endpoint hooks install --harness cline") {
+		t.Fatalf("configureHarnesses error = %v, want the Cline hook-managed error", err)
+	}
+}
+
 func TestConfigureHarnessesAcceptsGemini(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

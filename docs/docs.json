@@ -146,6 +146,7 @@
                       "runtimes/gemini-cli",
                       "runtimes/github-copilot-cli",
                       "runtimes/grok-build",
+                      "runtimes/cline",
                       "runtimes/opencode",
                       "runtimes/vscode"
                     ]
@@ -1315,6 +1316,14 @@
     {
       "source": "/supported-runtimes-vscode",
       "destination": "/runtimes/vscode"
+    },
+    {
+      "source": "/cli/supported-runtimes-cline",
+      "destination": "/runtimes/cline"
+    },
+    {
+      "source": "/supported-runtimes-cline",
+      "destination": "/runtimes/cline"
     },
     {
       "source": "/system-architecture",

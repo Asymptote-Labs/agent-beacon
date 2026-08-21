@@ -52,6 +52,22 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	}
 }
 
+// normalizedEvent is one endpoint event a mapper has decided to write, before it reaches the
+// logger.
+//
+// Mappers that receive a whole runtime's event stream through a single command return a slice of
+// these rather than writing as they go, because one payload routinely becomes several events -- a
+// tool result plus the file mutations it caused -- and because returning them makes the mapping
+// itself testable without a log file. Shared rather than per-runtime: the five parts are the
+// logger's own arguments, so a per-runtime copy would be the same struct under another name.
+type normalizedEvent struct {
+	action   string
+	category string
+	severity string
+	message  string
+	fields   map[string]interface{}
+}
+
 // resolveBranch prefers a runtime-provided branch and otherwise derives the
 // checked-out branch from the event's working directory. Runtime-provided
 // values pass through even when local git metadata enrichment is disabled.
@@ -72,7 +88,13 @@ func resolveBranch(input map[string]interface{}, cwd string) string {
 // such as a file edit identified only by its path; it is never used for
 // repository, which must reflect the actual workspace path.
 func applyWorkspaceFields(fields map[string]interface{}, input map[string]interface{}, fallbackDir string) {
-	cwd := resolveCwd(input, platformFlag)
+	applyWorkspaceFieldsForPlatform(fields, input, fallbackDir, platformFlag)
+}
+
+// applyWorkspaceFieldsForPlatform is applyWorkspaceFields for a named runtime. See
+// sessionFieldsForPlatform for why a single-runtime mapper should name its runtime.
+func applyWorkspaceFieldsForPlatform(fields map[string]interface{}, input map[string]interface{}, fallbackDir, platform string) {
+	cwd := resolveCwd(input, platform)
 	if cwd != "" {
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"working_directory": cwd})
 		if existing, ok := fields["repository"]; !ok || existing == "" {
@@ -179,12 +201,24 @@ func firstHookEnv(keys ...string) string {
 }
 
 func sessionFields(sessionID string, input map[string]interface{}) map[string]interface{} {
+	return sessionFieldsForPlatform(sessionID, input, platformFlag)
+}
+
+// sessionFieldsForPlatform builds the same fields for a named runtime rather than for whichever
+// --platform the binary happened to be invoked with.
+//
+// A mapper that only ever handles one runtime's payloads should say which one. Reading the flag
+// instead made the workspace resolution depend on the invocation: a Cline payload processed without
+// --platform cline fell through to the default reader, found none of Cline's keys, and produced an
+// event with no working directory, no repository and no branch -- while the file path in the same
+// event resolved correctly, because that path already asked for the Cline shape by name.
+func sessionFieldsForPlatform(sessionID string, input map[string]interface{}, platform string) map[string]interface{} {
 	fields := map[string]interface{}{}
 	session := map[string]interface{}{}
 	if sessionID != "" {
 		session["id"] = sessionID
 	}
-	if cwd := resolveCwd(input, platformFlag); cwd != "" {
+	if cwd := resolveCwd(input, platform); cwd != "" {
 		session["working_directory"] = cwd
 		fields["repository"] = cwd
 	}

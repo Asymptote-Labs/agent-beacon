@@ -124,6 +124,33 @@ func isRuntimeInstalled(runtime hookRuntime, opts RuntimeOptions) bool {
 // shell on all three platforms for that runtime. Two results from the same measurement shape the code
 // below: a quoted executable path followed by flags runs correctly, and an *unquoted* Windows path
 // does not run at all, because bash consumes the backslashes as escapes.
+// endpointCommandArgs builds the same invocation as endpointCommandPrefix, as argv rather than as a
+// command line.
+//
+// Exists for runtimes that spawn the hook binary themselves instead of handing a string to a shell.
+// A Cline plugin runs inside the VS Code extension host, a JetBrains host, or the CLI, on any
+// platform, and passes argv straight to the OS -- which is the one form that needs no quoting at
+// all. The comment on endpointCommandPrefix explains why quoting is otherwise unavoidably
+// per-shell.
+//
+// The two functions must agree on which flags a hook receives; TestEndpointCommandArgsMatchPrefix
+// is what keeps them from drifting.
+func endpointCommandArgs(platform, binaryPath, logPath, configPath string) []string {
+	args := []string{binaryPath, "--platform", platform}
+	if logPath != "" {
+		args = append(args, "--log", logPath)
+	}
+	if configPath != "" {
+		args = append(args, "--config", configPath)
+	}
+	// Best-effort, exactly as in endpointCommandPrefix: the CLI path only enables the inventory
+	// heartbeat, and a hook with no --cli still captures everything else.
+	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
+		args = append(args, "--cli", cliPath)
+	}
+	return args
+}
+
 func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) string {
 	args := []string{hookCommandQuote(binaryPath), "--platform", platform}
 	if logPath != "" {

@@ -1,0 +1,20 @@
+{
+  "type": "afterTool",
+  "clineVersion": "3.36.0",
+  "hookName": "afterTool",
+  "timestamp": "2026-08-21T10:16:03Z",
+  "taskId": "task-3f9c1d",
+  "workspaceRoots": ["/Users/example/projects/beacon-demo"],
+  "toolCall": {
+    "name": "execute_command",
+    "input": {
+      "command": "npm test",
+      "requires_approval": false
+    }
+  },
+  "durationMs": 4120,
+  "result": {
+    "output": "2 passing",
+    "exitCode": 0
+  }
+}
