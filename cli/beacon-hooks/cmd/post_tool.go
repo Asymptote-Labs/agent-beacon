@@ -183,6 +183,9 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("absolute_path", toolInput, toolResponse)
 	}
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("notebook_path", toolInput, toolResponse)
+	}
 	filePath = diff.NormalizePath(filePath)
 
 	if (sessionID == "" && !isDevinLikePlatform(platformFlag)) || toolName == "" || filePath == "" {

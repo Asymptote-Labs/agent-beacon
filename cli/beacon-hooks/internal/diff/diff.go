@@ -24,6 +24,9 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 	if filePath == "" {
 		filePath = GetStringFromMaps("absolute_path", toolInput, toolResponse)
 	}
+	if filePath == "" {
+		filePath = GetStringFromMaps("notebook_path", toolInput, toolResponse)
+	}
 	filePath = NormalizePath(filePath)
 	if filePath == "" {
 		return ""
