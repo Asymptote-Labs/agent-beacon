@@ -11,6 +11,132 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### v1.2.3 · August 22, 2026
+
+- **Cline is a supported runtime** · `beacon endpoint hooks install --harness
+  cline` installs a Beacon-managed plugin at `~/.cline/plugins/beacon.ts` that
+  collects prompts, task lifecycle and errors, tool lifecycle and results,
+  commands with exit codes, file reads and edits with diffs, MCP activity, and
+  per-task token usage and cost. Cline is not one runtime — the same agent core
+  runs as a VS Code extension, a JetBrains plugin, and a CLI — and one plugin
+  install covers every host on the machine, because Cline auto-discovers plugin
+  files rather than requiring a registry command. Cline's own OpenTelemetry
+  export and hosted prompt storage are neither configured nor required.
+- **Cline discovery that matches how Cline is installed** · Detection keys on the
+  `~/.cline` directory and treats a `cline` executable on `PATH` as a supporting
+  signal rather than the deciding one; a binary check alone would report "not
+  detected" for the IDE hosts, which are most installs. `beacon endpoint hooks
+  status --harness cline` reports installed only when the plugin references a
+  hook binary that is actually present, so a plugin left behind by a removed or
+  relocated install reads as not installed rather than as working telemetry.
+- **No synthesized approval decisions for Cline** · Cline's hook payloads carry
+  no approval state, so Beacon records none. Approval telemetry comes from the
+  runtime everywhere else; inferring Cline's would make `approval.*` mean
+  something different depending on which harness produced the event.
+- **A Cline task's outcome is read, not assumed** · The end-of-task hook recorded
+  every task as a success, so an aborted or failed task was indistinguishable
+  from a completed one in the runtime log. It now reports the run's actual
+  outcome.
+- **Cline in discovery, inventory, and the dashboard** · `beacon endpoint
+  discover`, agent inventory, and the local dashboard list Cline alongside the
+  other supported runtimes, and the runtime documentation covers its collection
+  path, status values, and telemetry coverage.
+
+---
+
+### v1.2.2 · August 21, 2026
+
+- **A package upgrade no longer leaves the old collector running** · Install
+  loaded the collector service instead of restarting it, which is a no-op on a
+  live service in every backend: `systemctl enable --now` does not restart an
+  active unit, launchd refuses an already-bootstrapped label, and the supervised
+  backend returns early on a live pid. That is correct for a first install and
+  wrong for every one after, because by then the install has rewritten the
+  collector config and a package upgrade has replaced the collector binary
+  underneath the running process. Installing over an older version left the
+  previous collector serving OTLP from a deleted inode, ignoring the new config,
+  with ports answering and status reporting healthy — until reboot. The same path
+  made `endpoint install --splunk-hec-endpoint ...` write a destination that
+  never took effect. Install now restarts a service it finds running. This was
+  not Linux-only; it affected the macOS `.pkg` upgrade path identically.
+- **`endpoint uninstall` can now fail** · Every step discarded its error and the
+  function had no return path but `nil`, so an unprivileged `uninstall --system`
+  reported that the service, config, and managed files were removed and exited 0
+  while the unit stayed enabled and the collector returned at the next reboot.
+  Uninstall now refuses without privileges up front, collects errors from every
+  step rather than stopping at the first, and removes rotated log archives —
+  deleting only `runtime.jsonl` left up to 50 MB of retained prompt text and
+  command lines behind, invisibly, because the file an operator would check was
+  the one that had gone.
+- **Hook writes are no longer lost silently under a restrictive umask** · The log
+  directory's mode is masked by umask, so on a host with umask 027 or 077 it was
+  created `0750` or `0700` owned by root. The log inside is `0666` precisely so
+  hooks can append, but a process that cannot traverse the directory never
+  reaches the file, and every hook event failed with `EACCES` while the
+  root-owned collector stayed healthy. `endpoint doctor` could not see it either:
+  its writability check was satisfied by the owner's write bit, so a root-owned
+  `0600` log passed as OK. The check now asks whether a non-root process can
+  write the log and whether the directory can be entered at all.
+- **MCP detection works on the OpenTelemetry path** · The
+  `external-mcp-tool-call` and `secret-read-then-external-mcp` rules gate on
+  `mcp.server`, and on Claude Code — which reports through the collector rather
+  than through hooks — that field was always empty, so neither rule ever fired. A
+  poisoned MCP tool reading a credential and handing it off scanned as a
+  credential read with no exfiltration. The hook path already split
+  `mcp__<server>__<tool>` into `mcp.server` and `mcp.tool`; the collector path
+  now derives the same fields from the name when a runtime sends no structured
+  `mcp.*` attributes. It triggers only on that exact naming convention, so a
+  built-in tool is never promoted to an MCP call and runtimes that do send
+  structured attributes are unaffected.
+- **Stricter path-traversal rejection during self-update** · Archive extraction
+  rejected `..` path segments on a normalized copy of the entry name. That was
+  behaviorally sound but left the raw name unchecked as far as static analysis
+  was concerned; extraction now refuses any entry name containing `..` at all.
+  The absolute-path rejection and the containment check on the joined result are
+  unchanged.
+- **Linear delete-path matching in the OpenCode plugin** · The plugin's
+  delete-command pattern could backtrack polynomially on a command string
+  containing a separator followed by many newlines — and that string is whatever
+  the agent chose to run. Commands are now split on `&&`, `||`, `;`, and newlines
+  first, then matched once per segment with an anchored pattern. Same extracted
+  paths, plus a delete command with leading whitespace at the start of the string
+  now matches where it previously did not.
+- **Dependency security updates** · `golang.org/x/text` (CVE-2026-56852),
+  `golang.org/x/net` (CVE-2026-46600), and `golang.org/x/sys` (CVE-2026-39824)
+  across all five Go modules; `github.com/google/cel-go` to v0.30.0
+  (GHSA-gcjh-h69q-9w9g) for the threat-rules engine; `go.opentelemetry.io/otel`
+  to v1.44.0 and `google.golang.org/grpc` to v1.82.1 in the collector exporter;
+  and `nanoid` and `postcss` in the TypeScript SDK lockfile.
+- **Pi is discovered** · Beacon recognizes [Pi](https://pi.dev/), normalizes its
+  spellings onto the canonical `pi_cli` harness name, resolves the managed
+  extension path, and reports whether a Beacon-owned extension is in place. Pi
+  has no hooks configuration file and no OpenTelemetry support, so the
+  integration is extension-shaped, like the OpenCode and Cline plugins. This
+  release is discovery only: the managed extension is not shipped yet, so
+  `beacon endpoint hooks install --harness pi` is not available and no Pi hook
+  events are collected.
+- **`cline` pinned as a canonical harness name** · `harness.name` is a release
+  contract that dashboards, `beacon scan` rules, and forwarded SIEM queries group
+  by, and two independent paths write it. Every spelling Cline's three hosts can
+  report now resolves to `cline` before anything started producing those events,
+  so there was never a window where they landed under a name that later had to be
+  migrated.
+- **Linux deployment profile** · A one-page reference for reviewing Beacon before
+  deploying it: what it needs from the kernel, and what it costs to leave
+  running, with the command that verifies each claim. Its lead claim — statically
+  linked, no glibc version floor — is now enforced rather than assumed. A native
+  Linux build defaults cgo on, so the same `make` target produced a static binary
+  when cross-compiled from macOS and a dynamic one when built on Linux, a
+  difference invisible on the build host and fatal on a stripped or older one.
+  Both Makefiles and the release pre-hook are pinned, and CI rejects any Linux
+  binary carrying a `PT_INTERP` segment.
+- **Two more CI reference workflows** · A `binary-path` workflow for air-gapped or
+  self-hosted runners that must not download a Beacon release during the action
+  step, and a workflow that uploads completed runtime JSONL to S3 and GCS in the
+  same run.
+
+---
+
 ### v1.2.1 · August 12, 2026
 
 - **Beacon configures the right person on directory-backed hosts** · On a machine
