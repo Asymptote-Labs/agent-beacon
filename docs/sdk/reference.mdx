@@ -3,7 +3,7 @@ title: "SDK Reference"
 description: "Asymptote Observe TypeScript API, options, and Beacon compatibility attributes"
 ---
 
-## API Surface
+## API surface
 
 The TypeScript SDK exports the `Observe` class, function equivalents, and Beacon compatibility constants from `@asymptote/sdk`.
 
@@ -24,7 +24,7 @@ For guided setup, start with [SDK Quickstart](/sdk/quickstart), [Instrumentation
 
 Function exports are also available for the same operations, including `initialize`, `getTracer`, `observe`, `patch`, `initializeAsymptoteInstrumentations`, `wrapClaudeAgentQuery`, `flush`, `shutdown`, `isInitialized`, and `resolveExporterConfig`.
 
-## Initialize Options
+## Initialize options
 
 | Option | Purpose |
 | --- | --- |
@@ -46,7 +46,7 @@ Function exports are also available for the same operations, including `initiali
 
 `Observe.initialize()` may only be called once per process configuration. Call `Observe.shutdown()` before reinitializing with different options. A later `initialize({ instrumentModules })` call can patch additional modules without replacing the provider.
 
-## Observe Options
+## Observe options
 
 | Option | Purpose |
 | --- | --- |
@@ -56,7 +56,7 @@ Function exports are also available for the same operations, including `initiali
 | `ignoreInput` | Do not record `asymptote.observe.input.count` |
 | `ignoreOutput` | Do not record `asymptote.observe.output.type` |
 
-## Export Modes
+## Export modes
 
 | Mode | How it is selected |
 | --- | --- |
@@ -64,7 +64,7 @@ Function exports are also available for the same operations, including `initiali
 | `otlp` | `otlpEndpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` is present |
 | `custom` | Default exporter is disabled or a custom span exporter is provided |
 
-## Beacon Compatibility Attributes
+## Beacon compatibility attributes
 
 Cloud SDKs should prefer standard OpenTelemetry attributes when they exist, especially `gen_ai.*` attributes for model and prompt metadata. Use Beacon attributes for fields that need to normalize into Beacon endpoint-style events.
 
@@ -98,7 +98,7 @@ Cloud SDKs should prefer standard OpenTelemetry attributes when they exist, espe
 | `beacon.prompt.text` | Prompt text when available |
 | `beacon.content.retention` | Content retention hint |
 
-## SDK Metadata Attributes
+## SDK metadata attributes
 
 | Attribute | Purpose |
 | --- | --- |
@@ -132,7 +132,7 @@ The wire-compatible Beacon event identity remains:
 }
 ```
 
-## Integration Pages
+## Integration pages
 
 <Columns cols={2}>
   <Card title="Anthropic" icon="robot" href="/sdk/integrations-anthropic">

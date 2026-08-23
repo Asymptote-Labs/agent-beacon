@@ -3,7 +3,7 @@ title: "Splunk HEC"
 description: "Send Beacon endpoint telemetry to Splunk HTTP Event Collector."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon writes normalized endpoint events as JSONL and can also send OTLP logs, traces, and metrics to Splunk HTTP Event Collector (HEC) through the bundled collector. The active runtime log remains the stable local handoff path and rotates locally. Use the built-in HEC destination when you want Beacon to forward directly, or configure a customer-managed forwarder to read the runtime log and send each JSON object to HEC.
 

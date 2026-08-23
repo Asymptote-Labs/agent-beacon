@@ -11,7 +11,7 @@ Use it when you need to answer what is installed, what an agent may be able to a
 
 Inventory explains what is present and observable on the host. [Detections](/detections) evaluate the observed event stream and emit findings when local rules match risky behavior.
 
-## Inventory Areas
+## Inventory areas
 
 <Columns cols={3}>
   <Card title="Agent Harnesses" icon="list-check" href="/inventory/agent-harnesses">
@@ -34,7 +34,7 @@ beacon endpoint install
 beacon endpoint status
 ```
 
-## 1. Run A Basic Inventory
+## 1. Run a basic inventory
 
 Start with the default inventory view:
 
@@ -56,7 +56,7 @@ Runtime log      ~/.beacon/endpoint/logs/runtime.jsonl
 ```
 </Accordion>
 
-## 2. Include All Local Signals
+## 2. Include all local signals
 
 Use `--all` when you want local config files, skill manifests, MCP servers, hooks, OTLP settings, and observed runtime coverage in one report:
 
@@ -70,7 +70,7 @@ Use `--system` for packaged or MDM-managed installs:
 sudo beacon endpoint inventory --system --all
 ```
 
-## 3. Export JSON For Review
+## 3. Export JSON for review
 
 Use JSON output for support bundles, scripts, or fleet comparison:
 
@@ -100,7 +100,7 @@ beacon endpoint inventory --json
 ```
 </Accordion>
 
-## Key Questions Answered
+## Key questions answered
 
 - Which supported agent runtimes are installed or configured on this machine?
 - Which local agent skills are present under supported skill roots?
@@ -109,7 +109,7 @@ beacon endpoint inventory --json
 - Which hooks, OTLP settings, or launch environment entries are present?
 - Which detected runtimes have recently produced Beacon events?
 
-## What To Look For
+## What to look for
 
 | Signal | Why it matters |
 |--------|----------------|
@@ -123,13 +123,13 @@ beacon endpoint inventory --json
 
 Inventory reads local endpoint state only. It does not authenticate to remote SaaS accounts, skill marketplaces, or MCP servers.
 
-## View Results
+## View results
 
 <Frame caption="Review runtime configurations, inventory status, and local telemetry coverage from the Inventory view.">
   <img src="/images/agent_runtime_configurations.png" alt="Beacon dashboard Inventory view showing agent runtime configurations and coverage state." />
 </Frame>
 
-### Runtime Coverage States
+### Runtime coverage states
 
 - **Installed:** the runtime or executable appears to be present locally.
 - **Configured:** Beacon can see telemetry settings, hooks, launch environment entries, or other local config for the runtime.
@@ -138,7 +138,7 @@ Inventory reads local endpoint state only. It does not authenticate to remote Sa
 
 A runtime can be installed but not configured, configured but not observed, or observed only in a different user-mode or system-mode log.
 
-### MCP Servers And Configs
+### MCP servers and configs
 
 Use MCP inventory to spot tool exposure from local agent configs:
 
@@ -147,7 +147,7 @@ Use MCP inventory to spot tool exposure from local agent configs:
 - Server references introduced by a specific runtime config
 - User-mode versus system-mode config differences
 
-### Agent Skills
+### Agent skills
 
 Use skill inventory to spot durable local instruction surfaces:
 
@@ -158,7 +158,7 @@ Use skill inventory to spot durable local instruction surfaces:
 
 Beacon reports skill names, paths, hashes, scope, and parser status. It does not retain `SKILL.md` instruction bodies in inventory output or inventory events.
 
-## 4. Open Dashboard Inventory
+## 4. Open dashboard inventory
 
 Open the dashboard for a quick visual check alongside top harnesses, models, repositories, MCP servers, and risk signals:
 
@@ -166,7 +166,7 @@ Open the dashboard for a quick visual check alongside top harnesses, models, rep
 beacon endpoint dashboard --open
 ```
 
-## Key Features Demonstrated
+## Key features demonstrated
 
 - Local runtime discovery without remote SaaS authentication.
 - Skill, MCP server, and config inventory from supported local paths.

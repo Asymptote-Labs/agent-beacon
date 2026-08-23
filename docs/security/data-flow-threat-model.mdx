@@ -3,7 +3,7 @@ title: "Data Flow and Threat Model"
 description: "How Beacon endpoint telemetry flows locally and which risks the design addresses"
 ---
 
-## Data Flow Overview
+## Data flow overview
 
 Beacon collects supported agent harness activity on the endpoint, normalizes it locally, and writes one JSON object per line to a local runtime log. Security teams can inspect that file locally, view it through the loopback dashboard, or forward it through customer-controlled security pipelines.
 
@@ -18,7 +18,7 @@ flowchart LR
   normalize --> optionalFalcon["Optional Falcon LogScale HEC"]
 ```
 
-## Data Flow
+## Data flow
 
 | Step | Behavior | Boundary |
 |------|----------|----------|
@@ -29,7 +29,7 @@ flowchart LR
 | Local inspection | The dashboard reads the runtime log over a loopback-only service | Local browser to local dashboard service |
 | Optional forwarding | Wazuh, Elastic/Filebeat, Datadog Agent, Sumo Logic, Rapid7, Microsoft Sentinel, AWS S3, Google Cloud Storage, Splunk HEC, Falcon LogScale HEC, or customer-managed shippers read or receive events | Customer-managed network and SIEM boundary |
 
-## Threat Model
+## Threat model
 
 | Risk | Design response |
 |------|-----------------|
@@ -40,7 +40,7 @@ flowchart LR
 | Destination credential exposure | Persistent endpoint file-based destinations tail local JSONL, so Beacon endpoint configuration does not store Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, AWS, or Google Cloud credentials. Optional Splunk and Falcon tokens live in collector configuration. Self-serve cloud-agent uploads are a separate proof-of-concept path: scoped GCS or AWS credentials are injected into the provider-managed sandbox as runtime secrets and must be rotated and access-reviewed. |
 | Removal uncertainty | Endpoint uninstall removes managed service and configuration state, with explicit `--keep-logs` and `--keep-config` exceptions |
 
-## Current Boundaries
+## Current boundaries
 
 Beacon focuses on supported agent harness telemetry and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, browser or SaaS telemetry, credential-use attribution, Datadog API export from Beacon, Sumo Logic API export from Beacon, Rapid7 API export from Beacon, or automatic mutation of Factory Droid shell profiles.
 

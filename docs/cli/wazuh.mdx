@@ -3,7 +3,7 @@ title: "beacon endpoint wazuh"
 description: "Configure Wazuh ingestion for Beacon endpoint events"
 ---
 
-## Forwarding Command
+## Forwarding command
 
 Beacon writes Wazuh-compatible JSONL endpoint events to the local runtime log. The `beacon endpoint wazuh` commands help security and IT teams connect that log to Wazuh localfile ingestion, install Beacon-specific Wazuh rules, and write validation events.
 
@@ -174,7 +174,7 @@ data.message: Beacon endpoint Wazuh validation event
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
 
-## Wazuh Dashboard fields
+## Wazuh dashboard fields
 
 In Wazuh Dashboard, Beacon event details appear under `data.*` fields. Useful columns include:
 

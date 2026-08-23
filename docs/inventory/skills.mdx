@@ -9,7 +9,7 @@ Skills are a local agent extension and configuration surface. A skill can add du
 
 Beacon inventory can help identify local skill manifests under supported skill roots. It follows symlinked skill directories, which is common for Claude Code skills linked from a shared `.agents/skills` store. It reports metadata such as names, paths, hashes, scope, modified time, and parser status. It does not retain `SKILL.md` instruction bodies in inventory output, dashboard responses, or inventory events.
 
-## What Inventory Can Infer Today
+## What inventory can infer today
 
 <Frame caption="Use Skills Inventory to review local skill manifests, scopes, hashes, and parser status.">
   <img src="/images/skills_inventory.png" alt="Beacon dashboard Skills Inventory view showing local skill manifests and metadata." />
@@ -35,7 +35,7 @@ Skill inventory is useful for:
 - Detecting manifest changes through hashes and modified-time metadata.
 - Identifying parser failures that may prevent Beacon from understanding a manifest consistently.
 
-## What To Review Manually
+## What to review manually
 
 Inventory is intentionally conservative. It can identify local skill manifests and change indicators, but reviewers should inspect the skill contents, scripts, and repository context when deciding whether a skill is expected.
 
@@ -49,7 +49,7 @@ Manual review should cover:
 
 Beacon does not claim to authenticate to or fully enumerate remote skill registries. Treat inventory as local endpoint visibility into supported paths, not as a registry audit.
 
-## Runtime Telemetry And Detections
+## Runtime telemetry and detections
 
 Skills may influence later runtime behavior. When a supported harness emits telemetry for tool calls, commands, file activity, approvals, or MCP-like tool usage, Beacon normalizes those events into the runtime log.
 

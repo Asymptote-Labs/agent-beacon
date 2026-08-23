@@ -3,11 +3,11 @@ title: "Data Inventory"
 description: "Runtime coverage and endpoint event fields Beacon can write"
 ---
 
-## Data Categories
+## Data categories
 
 Beacon writes normalized endpoint events only when supported runtimes provide telemetry through a configured local surface. Each event includes required event, endpoint, and harness context. Optional entities are present only when the source payload provides that context and the configured retention mode allows it.
 
-## Runtime Inventory
+## Runtime inventory
 
 | Agent harness | Collection path | Commonly available telemetry |
 |---------------|-----------------|------------------------------|
@@ -25,7 +25,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Claude Cowork | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
 | OpenClaw Gateway | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
-## Local Inventory Metadata
+## Local inventory metadata
 
 `beacon endpoint inventory` can also report local agent configuration metadata that is not emitted by a runtime event:
 
@@ -37,7 +37,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 
 By default, inventory is metadata- and hash-only. Beacon hashes config, hook, and `SKILL.md` files for change detection but does not retain file bodies, full MCP server definitions, or skill instruction bodies in inventory JSON, dashboard responses, or inventory snapshot events.
 
-Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction — values under keys matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL` are replaced with `***REDACTED***` — and a per-file size cap (64 KiB by default, configurable via `max_content_bytes`).
+Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction and a per-file size cap (64 KiB by default, configurable with `max_content_bytes`). Redaction replaces values under keys matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL` with `***REDACTED***`.
 
 Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. Normal hook execution can periodically write:
 
@@ -46,7 +46,7 @@ Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state
 
 By default, snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata across supported local runtimes. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content. When `include_contents` is enabled, snapshots additionally carry redacted, size-limited `content` and `definition` blocks as described above.
 
-## Required Fields
+## Required fields
 
 | Field | Meaning |
 |-------|---------|
@@ -61,7 +61,7 @@ By default, snapshots include config-file metadata, MCP server metadata, skill m
 | `endpoint` | Host and operating system context |
 | `harness` | Runtime that produced the signal |
 
-## Optional Entities
+## Optional entities
 
 | Entity | Purpose | Common fields |
 |--------|---------|---------------|
@@ -82,7 +82,7 @@ By default, snapshots include config-file metadata, MCP server metadata, skill m
 
 Top-level `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields can add shared context across entities. Content-bearing fields follow the configured retention mode.
 
-For hook-based runtimes, `branch` is derived locally from the workspace's `.git/HEAD` file when the runtime payload does not provide one. This is a local file read only — no git command runs and nothing leaves the machine — and it can be disabled with `BEACON_DISABLE_GIT_METADATA=1`.
+For hook-based runtimes, `branch` is derived locally from the workspace's `.git/HEAD` file when the runtime payload does not provide one. This is a local file read only: no git command runs and nothing leaves the machine. Disable it with `BEACON_DISABLE_GIT_METADATA=1`.
 
 OpenCode's managed plugin retains full prompt, completed assistant/reasoning,
 tool argument/result, command output, and diff content in local or

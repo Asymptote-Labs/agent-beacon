@@ -7,7 +7,7 @@ Beacon gives Security and IT teams local endpoint visibility into supported [age
 
 Beacon is local-only by default. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection. Use [Asymptote Managed](/deployment/managed) when you need centralized retention, search, governance, investigations, access control, or rollout support.
 
-## Rollout Path
+## Rollout path
 
 <Steps>
   <Step title="Pilot">
@@ -24,7 +24,7 @@ Beacon is local-only by default. The endpoint agent does not require a Beacon-ho
   </Step>
 </Steps>
 
-## Deployment Decisions
+## Deployment decisions
 
 Before broad rollout, document these decisions:
 
@@ -36,7 +36,7 @@ Before broad rollout, document these decisions:
 | Access and retention | Who can read local logs, how long downstream systems retain events, and which teams own review. |
 | Managed handoff | Whether the rollout now needs centralized visibility, policy controls, investigations, SSO/RBAC, or private infrastructure. |
 
-## Validation Signals
+## Validation signals
 
 Track these signals in your device-management platform or operations dashboard:
 
@@ -75,7 +75,7 @@ For command-level checks, see [Endpoint status](/cli/endpoint-status), [Endpoint
 
 Also review [Agent harness integrations](/runtimes) to confirm supported runtimes, deployment modes, storage paths, and forwarding boundaries.
 
-## When to Move to Managed
+## When to move to managed
 
 Open Source works well when your team wants local endpoint telemetry and controls the downstream destination. Consider [Asymptote Managed](/deployment/managed) when you need:
 

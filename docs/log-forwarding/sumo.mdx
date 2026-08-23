@@ -3,7 +3,7 @@ title: "Sumo Logic"
 description: "Forward Beacon endpoint events into Sumo Logic with a Hosted Collector HTTP Logs & Metrics Source."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon `v0.0.20` added Sumo Logic support for teams that want Beacon endpoint events in Sumo Logic search, Live Tail, dashboards, and investigations. Current Beacon releases write one local source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log), and keep that handoff path bounded with local rotation. Your customer-managed shipper or deployment tooling owns Sumo Source URLs, tokens, checkpointing, rotation handling, and retries.
 
@@ -53,7 +53,7 @@ Copy the Source URL from the HTTP Logs & Metrics Source. You can use either:
 
 Keep the Source URL and token in your log shipper, endpoint-management secret store, or deployment tooling. Beacon does not store them.
 
-## Install the Sumo pack
+## Install the sumo pack
 
 Generate the Sumo Logic content pack for a managed system-mode deployment:
 
@@ -175,7 +175,7 @@ _sourceCategory=security/agentbeacon "Beacon endpoint Sumo validation event"
 
 If events do not appear, verify that your forwarder is reading the same runtime log path Beacon writes, that the Source URL or Auth Header token is current, that `X-Sumo-Category` and `X-Sumo-Fields` match your searches, and that message boundary detection treats each JSONL line as a distinct event.
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to `runtime.jsonl` and forwarded to Sumo Logic. Review source access, retention, and downstream consumers so retained telemetry matches your approved collection policy.
 

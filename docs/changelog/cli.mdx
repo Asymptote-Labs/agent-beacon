@@ -11,14 +11,36 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### Documentation · August 23, 2026
+
+- **One house style across the docs** · Rewrote the pages that had drifted into
+  design-note prose so each one leads with what to run and what it does. The
+  Qwen Code, Pi, Cline, OpenCode, and cloud-agent runtime pages, the macOS,
+  Linux, and Windows install pages, and the sandbox contributor guide are
+  shorter and read the same way as the rest.
+- **Consistent headings** · Section headings are sentence case throughout, with
+  product names left alone. Runtime pages now follow one section order, and the
+  cloud-agent pages use `Overview` then `How it works` instead of two sections
+  both called some form of overview.
+- **Simpler punctuation** · Removed em dashes across every page in favor of
+  plain sentences, colons, and lists.
+- **Navigation gaps closed** · The Common Issues page is reachable from the
+  sidebar, the local-scan and scan-gate pages are grouped under `beacon scan`,
+  and the local inventory guide is listed with the other guides. Four broken
+  in-page anchors now resolve.
+- **Corrected runtime facts** · The runtime support matrix reported Pi's managed
+  extension as unshipped; it now lists the telemetry Pi actually collects. The
+  matrix also links the Windows package alongside macOS and Linux, and the
+  endpoint path reference lists Pi's extension paths.
+
 ### v1.2.3 · August 22, 2026
 
 - **Cline is a supported runtime** · `beacon endpoint hooks install --harness
   cline` installs a Beacon-managed plugin at `~/.cline/plugins/beacon.ts` that
   collects prompts, task lifecycle and errors, tool lifecycle and results,
   commands with exit codes, file reads and edits with diffs, MCP activity, and
-  per-task token usage and cost. Cline is not one runtime — the same agent core
-  runs as a VS Code extension, a JetBrains plugin, and a CLI — and one plugin
+  per-task token usage and cost. Cline is not one runtime: the same agent core
+  runs as a VS Code extension, a JetBrains plugin, and a CLI. One plugin
   install covers every host on the machine, because Cline auto-discovers plugin
   files rather than requiring a registry command. Cline's own OpenTelemetry
   export and hosted prompt storage are neither configured nor required.
@@ -55,7 +77,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   collector config and a package upgrade has replaced the collector binary
   underneath the running process. Installing over an older version left the
   previous collector serving OTLP from a deleted inode, ignoring the new config,
-  with ports answering and status reporting healthy — until reboot. The same path
+  with ports answering and status reporting healthy, until reboot. The same path
   made `endpoint install --splunk-hec-endpoint ...` write a destination that
   never took effect. Install now restarts a service it finds running. This was
   not Linux-only; it affected the macOS `.pkg` upgrade path identically.
@@ -64,8 +86,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   reported that the service, config, and managed files were removed and exited 0
   while the unit stayed enabled and the collector returned at the next reboot.
   Uninstall now refuses without privileges up front, collects errors from every
-  step rather than stopping at the first, and removes rotated log archives —
-  deleting only `runtime.jsonl` left up to 50 MB of retained prompt text and
+  step rather than stopping at the first, and removes rotated log archives.
+  Deleting only `runtime.jsonl` left up to 50 MB of retained prompt text and
   command lines behind, invisibly, because the file an operator would check was
   the one that had gone.
 - **Hook writes are no longer lost silently under a restrictive umask** · The log
@@ -79,8 +101,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   write the log and whether the directory can be entered at all.
 - **MCP detection works on the OpenTelemetry path** · The
   `external-mcp-tool-call` and `secret-read-then-external-mcp` rules gate on
-  `mcp.server`, and on Claude Code — which reports through the collector rather
-  than through hooks — that field was always empty, so neither rule ever fired. A
+  `mcp.server`, and on Claude Code, which reports through the collector rather
+  than through hooks, that field was always empty, so neither rule ever fired. A
   poisoned MCP tool reading a credential and handing it off scanned as a
   credential read with no exfiltration. The hook path already split
   `mcp__<server>__<tool>` into `mcp.server` and `mcp.tool`; the collector path
@@ -96,7 +118,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   unchanged.
 - **Linear delete-path matching in the OpenCode plugin** · The plugin's
   delete-command pattern could backtrack polynomially on a command string
-  containing a separator followed by many newlines — and that string is whatever
+  containing a separator followed by many newlines, and that string is whatever
   the agent chose to run. Commands are now split on `&&`, `||`, `;`, and newlines
   first, then matched once per segment with an anchored pattern. Same extracted
   paths, plus a delete command with leading whitespace at the start of the string
@@ -123,8 +145,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   migrated.
 - **Linux deployment profile** · A one-page reference for reviewing Beacon before
   deploying it: what it needs from the kernel, and what it costs to leave
-  running, with the command that verifies each claim. Its lead claim — statically
-  linked, no glibc version floor — is now enforced rather than assumed. A native
+  running, with the command that verifies each claim. Its lead claim, statically
+  linked with no glibc version floor, is now enforced rather than assumed. A native
   Linux build defaults cgo on, so the same `make` target produced a static binary
   when cross-compiled from macOS and a dynamic one when built on Linux, a
   difference invisible on the build host and fatal on a stripped or older one.
@@ -142,7 +164,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Beacon configures the right person on directory-backed hosts** · On a machine
   whose developer accounts come from OpenLDAP, SSSD, or Active Directory rather
   than `/etc/passwd`, a system-mode install reported success, started a healthy
-  collector, and captured nothing — for every user, on every machine. Beacon is
+  collector, and captured nothing, for every user on every machine. Beacon is
   built without cgo, which is what makes its binaries statically linked with no
   glibc version floor, and the same setting made Go's account lookup read
   `/etc/passwd` directly without consulting NSS. Account resolution now falls back
@@ -150,13 +172,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   Only system-mode installs were affected; a user-mode install configures your own
   home directory and never looked anyone up by name.
 - **`beacon` is on `PATH` after a package install** · The `.deb` and `.rpm`
-  installed to `/opt/beacon/bin` and linked nothing, so every documented command —
-  including the one the package's own postinstall prints — failed with
+  installed to `/opt/beacon/bin` and linked nothing, so every documented command,
+  including the one the package's own postinstall prints, failed with
   `command not found`. Both packages now provide `/usr/bin/beacon` and
   `/usr/bin/beacon-hooks`.
 - **One session, one harness name** · Hook events recorded the raw runtime name
   while OpenTelemetry events recorded the canonical one, so a single Claude Code
-  session appeared as both `claude` and `claude_code` — splitting it for any query,
+  session appeared as both `claude` and `claude_code`, splitting it for any query,
   dashboard, or SIEM detection grouping by `harness.name`. Hook events now carry the
   canonical name. If you have saved queries matching `claude`, `codex`, `vscode`, or
   `antigravity` on hook-sourced events, update them to `claude_code`, `codex_cli`,
@@ -165,8 +187,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   `vscode_copilot` normalized to `copilot_cli`, two different products, and the
   canonical name was not stable when normalized a second time.
 - **`endpoint doctor` can see an endpoint that captures nobody** · A system install
-  runs as root, so every harness check inspected root's configuration — which the
-  install had just written correctly — while the actual operator had none. The new
+  runs as root, so every harness check inspected root's configuration, which the
+  install had just written correctly, while the actual operator had none. The new
   `console_user_configured` check asks whether a real user's agent runtime points at
   this collector, and fails loudly when it does not. Previously the only symptom was
   a warning the documentation told you to ignore.
@@ -217,7 +239,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   deployments, `--system` installs, CI, `--dry-run`, and piped input all skip it.
   Unattended installs can set `BEACON_ONBOARDING=0`, and fleet rollouts can supply
   `BEACON_ONBOARDING_EMAIL` and `BEACON_ONBOARDING_USAGE` to record attribution
-  with no terminal. Nothing Beacon captures is ever sent — no prompts, file
+  with no terminal. Nothing Beacon captures is ever sent: no prompts, file
   contents, commands, or telemetry events.
 - **`beacon endpoint onboarding`** · Shows what was recorded, clears it with
   `--reset`, or retries an undelivered signup with `--resend`. A failed submission
@@ -471,13 +493,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 - **Agent skills inventory** · `beacon endpoint inventory` now discovers local agent skill manifests for Claude Code, Cursor, and `.agents/skills`, reporting names, paths, and content hashes for change detection. See the [Skills inventory guide](/inventory/skills).
 - **Skills in the local dashboard** · The Agent Inventory view in the local dashboard shows an Agent Skills table and summary card alongside agent harnesses and MCP servers, so operators can see installed skills at a glance.
-- **Metadata-only by design** · Skill discovery records hashes and file paths only — `SKILL.md` instruction bodies are never read or stored, consistent with Beacon's [data inventory](/security/data-inventory) posture.
+- **Metadata-only by design** · Skill discovery records hashes and file paths only. `SKILL.md` instruction bodies are never read or stored, consistent with Beacon's [data inventory](/security/data-inventory) posture.
 - **Optional inventory snapshot events** · Running inventory with `--write-event` appends metadata-only inventory heartbeat and snapshot events to `inventory_state.jsonl` so installed-skill state can be kept separate from runtime activity telemetry.
 
 ### v0.0.67 · June 15, 2026
 
 - **Devin Cloud agent telemetry** · Added `beacon cloud devin pull` to capture autonomous [Devin Cloud agent](/runtimes/devin-cloud-agents) telemetry org-wide. Using a Devin organization service key, one central run pulls every user's cloud sessions from the Devin API, normalizes them into Beacon endpoint events (`provider=devin_cloud`), writes the runtime JSONL, and optionally uploads a per-session snapshot to a customer-managed GCS bucket. No per-user or per-sandbox setup is required.
-- **Live and scheduled capture** · `--watch` polls continuously for near-real-time capture; a single sweep (the default) suits cron and CI runners. Re-runs are idempotent — events are deduplicated by Devin event id and unchanged sessions are skipped — and `--full-resync` re-fetches and re-uploads every session for backfills.
+- **Live and scheduled capture** · `--watch` polls continuously for near-real-time capture; a single sweep (the default) suits cron and CI runners. Re-runs are idempotent, because events are deduplicated by Devin event id and unchanged sessions are skipped. `--full-resync` re-fetches and re-uploads every session for backfills.
 - **Per-user attribution** · Devin Cloud events carry the Devin session id as `run_id` and the Devin user id as `run.actor`, so org-wide telemetry stays attributable per end-user and forwards to any existing SIEM destination over the normalized runtime log. Telemetry is message-level (session lifecycle, prompts, agent messages, status, pull requests, and ACU usage); the Devin API does not expose per-tool or per-command events for autonomous sessions.
 
 ### v0.0.66 · June 13, 2026
@@ -885,7 +907,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Telemetry defaults** · Beacon now writes structured Codex OTEL exporter configuration for logs, traces, and metrics while setting `log_user_prompt = false`.
 - **Noisy trace filtering** · Beacon filters noisy internal Codex transport traces so endpoint timelines focus on meaningful Codex activity instead of HTTP/2 framing and flow-control churn.
 
-### Beacon Endpoint
+### Beacon endpoint
 
 - **Endpoint telemetry** · Beacon now configures local agent harness telemetry and writes normalized endpoint events to local JSONL logs.
 - **Runtime discovery** · Beacon discovers supported local agent harnesses, including Claude Code, Codex CLI, Cursor, and Claude Cowork.

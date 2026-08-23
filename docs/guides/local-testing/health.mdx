@@ -13,7 +13,7 @@ This guide covers status checks, doctor diagnostics, and harness discovery befor
 
 Run these checks after `beacon endpoint install` has configured the local endpoint agent.
 
-## 1. Run Status
+## 1. Run status
 
 `beacon endpoint status` gives the broadest local view. It reports the Agent Beacon CLI version, config path, runtime log path, collector health, service state, discovered harnesses, diagnostics, destinations, and last observed event.
 
@@ -46,7 +46,7 @@ If you are validating a system-mode install from a managed package, check system
 sudo beacon endpoint status --system
 ```
 
-## 2. Run Doctor
+## 2. Run doctor
 
 `beacon endpoint doctor` runs pass/fail health checks and exits non-zero when a hard check fails. Add `--fix` when you want Beacon to apply supported safe remediations, such as creating a missing runtime log or repairing managed macOS collector service files.
 
@@ -74,7 +74,7 @@ beacon endpoint doctor --fix
 
 Fix mode reports any applied and skipped remediations. Skipped findings need operator review, such as invalid endpoint configuration, missing harness setup, missing observed events, unsafe log permissions, or service repair on non-macOS hosts.
 
-## 3. Discover Harnesses
+## 3. Discover harnesses
 
 Use discovery to compare configured and detected local runtimes before testing real agent activity.
 
@@ -84,7 +84,7 @@ beacon endpoint discover --json
 
 Confirm that discovered harnesses match the local test scope. Hook-based runtimes such as Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and Qwen Code may require user or project scoped hook installation before real activity appears.
 
-## Key Signals
+## Key signals
 
 - Collector is running and bound to local OTLP endpoints.
 - Runtime log path exists and is writable.

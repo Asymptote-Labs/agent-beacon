@@ -11,7 +11,7 @@ Do not make the bucket public. Do not grant write or delete permissions.
 
 At the end of setup, send Asymptote the full IAM role ARN for the role you create.
 
-## Customer Steps
+## Customer steps
 
 1. Send Asymptote the S3 location details.
 
@@ -106,7 +106,7 @@ At the end of setup, send Asymptote the full IAM role ARN for the role you creat
    - KMS key ARN, if applicable
    - A small sample event file or example JSONL row
 
-## Event File Requirements
+## Event file requirements
 
 Use newline-delimited JSON, with one complete JSON object per line. Each event should include a UTC-compatible timestamp and stable fields for user, host, repository, branch, agent runtime, event action, and event category when available.
 

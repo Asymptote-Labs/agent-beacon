@@ -3,7 +3,7 @@ title: "MDM Deployment"
 description: "Plan managed macOS deployment of Beacon with Jamf Pro, Rippling, Fleet, or another MDM."
 ---
 
-## Deployment Overview
+## Deployment overview
 
 Beacon's macOS package is designed for security and IT rollout through MDM. A signed and notarized `.pkg` installs Beacon under `/opt/beacon`, creates system endpoint configuration, loads the local collector LaunchDaemon, and writes endpoint events to `/var/log/beacon-agent/runtime.jsonl`. Optional Splunk HEC or Falcon LogScale HEC settings add collector destinations while preserving the local runtime log.
 

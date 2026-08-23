@@ -3,12 +3,10 @@ title: "Manual CLI Installation"
 description: "Install the Beacon CLI from platform archives or build it from source"
 ---
 
-## Archive Collection
+## Archive collection
 
 Beacon releases publish platform archives for macOS and Linux on `amd64` and `arm64`, plus a
-`.zip` for Windows. Each archive contains three binaries — the `beacon` CLI, the `beacon-hooks`
-adapter that captures tool activity, and the matching `beacon-otelcol` collector — with SHA-256
-checksums published alongside the release in `checksums.txt`.
+`.zip` for Windows. Each archive contains three binaries: the `beacon` CLI, the `beacon-hooks` adapter that captures tool activity, and the matching `beacon-otelcol` collector. SHA-256 checksums are published alongside the release in `checksums.txt`.
 
 All three matter. `beacon-hooks` is what supported runtimes invoke to record prompts, tool calls,
 and approvals, so an install that keeps only the CLI and the collector captures OpenTelemetry data

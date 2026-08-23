@@ -3,7 +3,7 @@ title: "OpenAI"
 description: "Instrument OpenAI SDK calls with Asymptote Observe"
 ---
 
-## Integration Overview
+## Integration overview
 
 Use this integration when your application calls the `openai` JavaScript package directly. Asymptote Observe uses OpenLLMetry's OpenAI instrumentation so OpenAI spans flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
 
@@ -11,7 +11,7 @@ Use this integration when your application calls the `openai` JavaScript package
 
 Initialize Asymptote Observe before creating the OpenAI client when possible. The instrumentation captures supported OpenAI SDK spans without changing the way you call `openai`.
 
-## What Asymptote Captures
+## What Asymptote captures
 
 - OpenAI model calls emitted by the OpenLLMetry OpenAI instrumentation.
 - OpenTelemetry resource attributes such as service name, SDK version, `beacon.origin=cloud`, and export mode.
@@ -36,7 +36,7 @@ export ASYMPTOTE_API_KEY=...
 export OPENAI_API_KEY=...
 ```
 
-## Getting Started
+## Getting started
 
 Initialize `Observe` before creating the OpenAI client when possible.
 
@@ -67,7 +67,7 @@ await Observe.flush();
 
 All supported OpenAI SDK calls are now traced through the configured Asymptote exporter.
 
-## Already-Loaded Clients
+## Already-loaded clients
 
 If your application imports or creates the OpenAI client before initialization, pass the module to `instrumentModules` or patch it after initialization.
 
@@ -99,7 +99,7 @@ const response = await openai.chat.completions.create({
 await Observe.flush();
 ```
 
-## Group Calls With Custom Spans
+## Group calls with custom spans
 
 Wrap application logic with `Observe.observe()` when one route, job, or agent turn makes multiple OpenAI calls and you want them grouped under one parent span.
 
@@ -129,7 +129,7 @@ const reviewPullRequest = Observe.observe(
 );
 ```
 
-## Existing OpenTelemetry Providers
+## Existing OpenTelemetry providers
 
 If your application already owns OpenTelemetry setup, register Asymptote's OpenAI instrumentation with your existing provider instead of calling `Observe.initialize()` twice.
 
@@ -154,7 +154,7 @@ registerInstrumentations({
 - If the OpenAI module is imported before initialization, pass it through `instrumentModules` or `Observe.patch()`.
 - Call `Observe.flush()` before short-lived scripts or jobs exit.
 
-## What's Next
+## What's next
 
 <Columns cols={2}>
   <Card title="Instrumentation" icon="wand-magic-sparkles" href="/sdk/instrumentation">

@@ -3,7 +3,7 @@ title: "Cursor Cloud Agents"
 description: "Capture Cursor cloud agent telemetry and forward cloud-agent runtime logs to customer-managed Google Cloud Storage or Amazon S3"
 ---
 
-## Integration Overview
+## Overview
 
 Use this integration to capture Cursor cloud-agent activity and upload each
 session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant
@@ -20,7 +20,7 @@ binaries in the Cursor cloud sandbox.
   production cloud-agent telemetry ingest at scale.
 </Info>
 
-## Overview
+## How it works
 
 Cursor Cloud Agents run in Cursor's cloud environment, so Beacon cannot use the
 long-running endpoint agent that local installs use. Instead, commit
@@ -93,7 +93,7 @@ gcloud auth login
 gcloud config set project <your-gcp-project>
 ```
 
-## 1. Create the Object Storage Upload Path
+## 1. Create the object storage upload path
 
 Choose GCS or S3 for the cloud-agent session logs.
 
@@ -231,7 +231,7 @@ github.com
 *.githubusercontent.com
 ```
 
-## 3. Commit Cursor Project Hooks
+## 3. Commit Cursor project hooks
 
 Cursor Cloud Agents load project hooks from `.cursor/hooks.json` at repository
 checkout and task start. Generate the hook file locally, commit it, and push it
@@ -254,7 +254,7 @@ git push
   available when the agent starts.
 </Warning>
 
-## 4. Add the Setup Script
+## 4. Add the setup script
 
 Generate the setup script for your Beacon release:
 
@@ -283,7 +283,7 @@ script:
   `print-setup --version`.
 </Tip>
 
-## 5. Run a Cloud Agent Task
+## 5. Run a cloud agent task
 
 Start a Cursor cloud agent task that uses tools so the environment becomes
 writable and project hooks become active. For example:
@@ -317,7 +317,7 @@ Do not inspect files or run tools. Reply exactly: PROMPT CAPTURE TEST COMPLETE
   for the current platform support list.
 </Note>
 
-## 6. Verify Object Storage Upload
+## 6. Verify object storage upload
 
 For GCS, list the uploaded session objects:
 
@@ -383,7 +383,7 @@ harness.name=cursor
 run.provider=cursor_cloud
 ```
 
-## Security Note
+## Security note
 
 The self-serve flows create a dedicated GCS service account or AWS IAM user
 scoped to object uploads, then store its credentials in the Cursor cloud

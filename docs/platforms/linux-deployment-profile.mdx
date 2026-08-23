@@ -3,8 +3,7 @@ title: "Linux Deployment Profile"
 description: "What the Beacon endpoint agent depends on, what it costs to run, and how to verify both yourself"
 ---
 
-A reference for reviewing Beacon before deploying it. Each claim comes with the command that checks
-it, so you can confirm any of this yourself.
+A reference for reviewing Beacon before deploying it. Each claim comes with the command that checks it, so you can confirm any of this yourself.
 
 ## Kernel surface
 
@@ -26,7 +25,7 @@ Everything it uses from the kernel:
 | TCP loopback | Three listeners on `127.0.0.1` | Collector cannot start |
 | `flock(2)` | Serializing writes to the runtime log | Degrades on some network filesystems; fine on local disk |
 | `fork`/`exec` | One short-lived hook process per agent event | Hook capture stops; OpenTelemetry capture continues |
-| Ordinary file I/O | Config and log | — |
+| Ordinary file I/O | Config and log | None |
 | `/proc/1/comm` | systemd detection | Falls back to a supervised collector, which does not restart on exit or start at boot |
 
 To see the syscalls for yourself:
@@ -38,13 +37,12 @@ sudo strace -f -c -o /tmp/install.trace beacon endpoint install --system --dry-r
 
 ## Binaries
 
-Three static executables, no shared libraries, no minimum glibc version. They run the same on a
-minimal or older userland as on a full one.
+Three static executables, no shared libraries, no minimum glibc version. They run the same on a minimal or older userland as on a full one.
 
 | Binary | Role | Resident? |
 |---|---|---|
-| `beacon-otelcol` | Collector | Yes — the only long-running process |
-| `beacon-hooks` | Records one agent event | No — forks and exits |
+| `beacon-otelcol` | Collector | Yes, the only long-running process |
+| `beacon-hooks` | Records one agent event | No, it forks and exits |
 | `beacon` | CLI | No |
 
 ```bash
@@ -61,17 +59,15 @@ Measured on Ubuntu 24.04 / amd64 after a live Claude Code session.
 
 | | Measured | Notes |
 |---|---|---|
-| Resident memory | 28–58 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
-| CPU, idle | 0.03–0.3% of one core | Two timers: 1s memory check, 5s batch flush |
+| Resident memory | 28-58 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
+| CPU, idle | 0.03-0.3% of one core | Two timers: 1s memory check, 5s batch flush |
 | Threads | 15 | Go runtime, scales with available cores |
 | Disk | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
 | Per agent event | one `fork`/`exec`, one `flock`, one append | Process exits immediately |
 
 ### Caveats
 
-- Both figures are ranges, not averages. They come from a supervised collector and a
-  systemd-managed one, which is most of the spread — memory in particular depends on how much the
-  Go runtime has been asked to do before it settles.
+- Both figures are ranges, not averages. They come from a supervised collector and a systemd-managed one, which accounts for most of the spread. Memory in particular depends on how much the Go runtime has been asked to do before it settles.
 - These numbers come from a virtualized sandbox, where syscalls are slower than on bare metal.
   Expect equal or better on your own hardware.
 
@@ -115,9 +111,7 @@ ss -ltnp | grep beacon-otelcol
 
 ## Pinning it to housekeeping cores
 
-If you isolate cores for latency-sensitive work, keep Beacon off them. It only has two slow timers,
-but a timer firing on an `isolcpus` or `nohz_full` core is exactly what isolating that core was
-meant to prevent.
+If you isolate cores for latency-sensitive work, keep Beacon off them. It only has two slow timers, but a timer firing on an `isolcpus` or `nohz_full` core is exactly what isolating that core was meant to prevent.
 
 ```ini
 # /etc/systemd/system/beacon-collector.service.d/10-resources.conf
@@ -134,8 +128,7 @@ sudo systemctl daemon-reload && sudo systemctl restart beacon-collector
 systemctl show beacon-collector -p CPUAffinity -p CPUQuota -p MemoryMax
 ```
 
-Put this in a drop-in rather than editing the unit file directly. `beacon endpoint doctor --fix`
-rewrites the unit, which would wipe out your changes; drop-ins are left alone.
+Put this in a drop-in rather than editing the unit file directly. `beacon endpoint doctor --fix` rewrites the unit, which would wipe out your changes; drop-ins are left alone.
 
 ## Uninstall
 
@@ -144,8 +137,7 @@ sudo apt remove beacon     # keeps config and collected logs
 sudo apt purge beacon      # removes them
 ```
 
-On RPM systems, `dnf remove` keeps `/etc/beacon/endpoint` and `/var/log/beacon-agent`. Remove them
-with `sudo beacon endpoint uninstall --system` if you want the data gone.
+On RPM systems, `dnf remove` keeps `/etc/beacon/endpoint` and `/var/log/beacon-agent`. Remove them with `sudo beacon endpoint uninstall --system` if you want the data gone.
 
 ## Related
 

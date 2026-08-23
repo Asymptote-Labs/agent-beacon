@@ -3,7 +3,7 @@ title: "Agent SDK Integrations"
 description: "Choose an Asymptote Observe integration path for AI SDKs and agent orchestration"
 ---
 
-## Integration Overview
+## Integration overview
 
 Asymptote Observe traces supported LLM providers, agent SDKs, and orchestration code through OpenTelemetry. Initialize `Observe`, configure the integration path for the SDK you use, and your model calls or agent turns can flow to Asymptote Managed hosted Observe or a customer-managed OTLP collector.
 
@@ -30,7 +30,7 @@ Browse the integrations below to see setup instructions, what is captured, and t
   </Card>
 </Columns>
 
-## Shared Setup
+## Shared setup
 
 All integration paths start by installing and initializing the SDK:
 
@@ -50,6 +50,6 @@ Observe.initialize({
 
 See the [SDK quickstart](/sdk/quickstart) for Asymptote Managed hosted Observe, customer-managed OTLP, custom exporter, and shutdown options.
 
-## Not Supported Yet
+## Not supported yet
 
 OpenAI agent-framework tracing is not documented here because the current `agent-beacon` TypeScript SDK does not ship that adapter yet.

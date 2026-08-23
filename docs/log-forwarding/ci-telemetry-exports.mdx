@@ -11,7 +11,7 @@ Beacon CI telemetry is written as normalized JSONL for a single ephemeral CI job
   This page covers export workflows for `beacon ci`. For persistent laptop or workstation forwarding, use [Log Forwarding](/log-forwarding).
 </Note>
 
-## Export Contract
+## Export contract
 
 By default, `beacon ci exec` writes the CI runtime log to `$RUNNER_TEMP/beacon/runtime.jsonl` when `RUNNER_TEMP` is set. Otherwise it uses the system temp directory. Use `--log-path` when your workflow needs a stable artifact path.
 
@@ -23,9 +23,9 @@ By default, `beacon ci exec` writes the CI runtime log to `$RUNNER_TEMP/beacon/r
 
 Each line in `runtime.jsonl` is one complete Beacon event using the [Endpoint Event Schema](/telemetry-schema/event-schema). Beacon applies redaction, sanitization, truncation, and event-size limits before events are written, so downstream artifacts receive the same normalized JSONL contract as local endpoint logs.
 
-## Export Paths
+## Export paths
 
-### Workflow Artifact
+### Workflow artifact
 
 The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a workflow artifact by default:
 
@@ -40,7 +40,7 @@ The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a 
 
 Use the workflow artifact path when a security team or downstream job will retrieve the completed JSONL file after the run. Artifact access, retention, and download permissions stay under GitHub Actions controls.
 
-### Object Storage Upload
+### Object storage upload
 
 For CI runners that should hand off telemetry through object storage, `beacon ci exec` can upload the completed `runtime.jsonl` after telemetry validation.
 
@@ -72,7 +72,7 @@ beacon ci exec --upload s3 --upload gcs -- claude --print "Review this repositor
 
 S3 upload uses `aws s3 cp` and the standard AWS credential provider chain. GCS upload uses `gcloud storage cp` when available, falling back to `gsutil cp`.
 
-### GitHub Actions SIEM Forwarding
+### GitHub Actions SIEM forwarding
 
 Set the Splunk or Falcon ingest token at the job or workflow level from a secret, then pass `forward` and `forward-endpoint` to the Agent Beacon action:
 
@@ -103,7 +103,7 @@ See the sample workflows:
 
 For Falcon LogScale HEC, set `BEACON_CI_FALCON_HEC_TOKEN` and use `forward: falcon`.
 
-### GitHub Actions Object Storage
+### GitHub Actions object storage
 
 Configure cloud credentials at the job level, then pass the upload destination to the Agent Beacon action:
 
@@ -168,7 +168,7 @@ See the sample workflow:
 
 - [S3 and GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
 
-## Object Layout
+## Object layout
 
 In GitHub Actions, object keys use this shape:
 
@@ -184,7 +184,7 @@ Outside GitHub Actions, Beacon falls back to:
 
 Prefixes are optional. Beacon trims empty path parts and normalizes path separators before building the upload key.
 
-## Destination Mapping
+## Destination mapping
 
 The JSONL artifact is the universal CI export contract. Existing destination packs and forwarding patterns can consume the same file after it is downloaded, copied, or routed into the customer-managed handoff path.
 
@@ -202,7 +202,7 @@ The JSONL artifact is the universal CI export contract. Existing destination pac
 | Splunk | Use direct `--forward splunk`, or ingest the JSONL artifact with an existing Splunk pipeline |
 | Falcon LogScale | Use direct `--forward falcon`, or ingest the JSONL artifact with an existing pipeline |
 
-## Security Notes
+## Security notes
 
 Keep cloud credentials in CI secret stores, OIDC roles, workload identity, or job-level credential actions. Do not pass cloud credentials through prompt text, action inputs, or committed workflow files.
 
@@ -210,7 +210,7 @@ When object storage upload is configured, Beacon strips common AWS and Google cr
 
 Review artifact access before rollout. CI runtime JSONL can contain prompt, tool, file, command, and run context where supported runtimes emit it. Beacon applies redaction, sanitization, truncation, and event-size limits before writing the artifact, but artifact retention, access, and downstream routing remain controlled by GitHub Actions, object storage, and your customer-managed pipeline.
 
-## Failure Behavior
+## Failure behavior
 
 By default, `beacon ci exec` fails the step when telemetry validation fails. Set `--require-telemetry=false` or the action input `require-telemetry: "false"` when telemetry health should warn but not gate the build.
 

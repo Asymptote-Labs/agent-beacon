@@ -3,7 +3,7 @@ title: "Runtime Surface Overview"
 description: "Asymptote agent harness support overview and runtime-specific pages"
 ---
 
-## Support Matrix
+## Overview
 
 Asymptote supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surface) because each [agent harness](/concepts/core-concepts#agent-harness) exposes telemetry differently. The runtime support model applies to both Asymptote Open Source and Asymptote Managed: Open Source collects and normalizes supported local, CI, and cloud-agent telemetry, while Managed adds hosted ingest, visibility, and governance on top of the same surfaces.
 
@@ -15,7 +15,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 
 ## Support matrix
 
-### Local Coding Agent Harnesses
+### Local coding agent harnesses
 
 | Agent harness | Collection path | Telemetry coverage |
 |----------------|-----------------|--------------------|
@@ -31,11 +31,11 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
-| [Pi](/runtimes/pi) | Managed extension hooks | Discovery and harness attribution today; the managed extension that collects prompt, tool, command, and file telemetry is not shipped yet |
+| [Pi](/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle, commands including operator `!` commands, file reads and edits with the unified patch, agent reasoning, and token usage |
 | [Qwen Code](/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request, subagent, stop, session-end, command, and file telemetry |
 | [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
-### Local Knowledge Worker Agent Harnesses
+### Local knowledge worker agent harnesses
 
 | Agent harness | Collection path | Telemetry coverage |
 |----------------|-----------------|--------------------|
@@ -43,13 +43,13 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [Hermes Agent](/runtimes/hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
 | [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
-### CI Harnesses
+### CI harnesses
 
 | Harness | Collection path | Telemetry coverage |
 |---------|-----------------|--------------------|
 | [CI agent telemetry](/runtimes/claude-code-ci) | Temporary local collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish` | Supported agent prompt, tool, command, file, and run context where emitted during the job |
 
-### Cloud Agent Harnesses and SDKs
+### Cloud agent harnesses and SDKs
 
 | Cloud surface | Collection path | Telemetry coverage |
 |---------------|-----------------|--------------------|
@@ -62,30 +62,32 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 
 ## Deployment notes
 
-Local agent harnesses need the endpoint agent installed on the machine they run on. Use the native
-package for that platform, which installs and starts everything in one step:
+Local agent harnesses need the endpoint agent installed on the machine they run on. Use the native package for that platform, which installs and starts everything in one step:
 
-<Columns cols={2}>
+<Columns cols={3}>
   <Card title="macOS" icon="apple" href="/platforms/macos">
-    Signed, notarized `.pkg` — Jamf Pro, Fleet, Rippling, or manual.
+    Signed, notarized `.pkg` for Jamf Pro, Fleet, Rippling, or manual install.
   </Card>
   <Card title="Linux" icon="linux" href="/platforms/linux">
     `.deb` and `.rpm` for amd64 and arm64.
   </Card>
+  <Card title="Windows" icon="windows" href="/platforms/windows">
+    `.msi` for x64, installed as a Windows service.
+  </Card>
 </Columns>
 
-Either package:
+Each package installs the endpoint agent, starts the [local collector](/concepts/core-concepts#local-collector) as a service, and configures the installing user's supported agent runtimes to export to it. Paths differ per platform:
 
-- Installs the endpoint agent under `/opt/beacon`
-- Creates system endpoint configuration — `/Library/Application Support/Beacon/Endpoint` on macOS,
-  `/etc/beacon/endpoint` on Linux
-- Starts the [local collector](/concepts/core-concepts#local-collector) as a service — a LaunchDaemon
-  on macOS, a systemd unit on Linux
-- Writes [endpoint events](/concepts/core-concepts#endpoint-event) to `/var/log/beacon-agent/runtime.jsonl`
-- Configures the installing user's supported agent runtimes to export to the local collector
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Binaries | `/opt/beacon` | `/opt/beacon` | `%ProgramFiles%\Beacon\bin` |
+| System config | `/Library/Application Support/Beacon/Endpoint` | `/etc/beacon/endpoint` | `%ProgramData%\Beacon\Endpoint` |
+| Service | LaunchDaemon | systemd unit | `BeaconCollector` Windows service |
+| Runtime log | `/var/log/beacon-agent/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl` |
 
-MDM assets — Jamf Pro Extension Attributes, Fleet osquery queries, Rippling deployment — are macOS
-only. On Linux, deploy the `.deb` or `.rpm` with whatever configuration management you already run.
+MDM assets, meaning Jamf Pro Extension Attributes, Fleet osquery queries, and Rippling deployment, are macOS only. On Linux and Windows, deploy the package with whatever configuration management you already run.
+
+### Enterprise runtime configuration
 
 | Runtime | Enterprise configuration |
 |---------|--------------------------|
@@ -94,15 +96,15 @@ only. On Linux, deploy the `.deb` or `.rpm` with whatever configuration manageme
 | Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
 | OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
 
-Install Antigravity CLI, Claude Code, Cline, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and optional VS Code hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers.
+Install hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, OpenCode, Pi, Qwen Code, and the optional VS Code hooks.
 
 If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
 
 ## Related
 
 <Columns cols={2}>
-  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
-    Return to the support overview.
+  <Card title="Core concepts" icon="book" href="/concepts/core-concepts">
+    Runtime surfaces, agent harnesses, and endpoint events.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
     See how Asymptote discovers and configures each runtime.

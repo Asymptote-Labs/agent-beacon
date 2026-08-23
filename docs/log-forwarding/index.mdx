@@ -3,7 +3,7 @@ title: "Log Forwarding"
 description: "Forward Beacon endpoint events from local JSONL into SIEMs, log aggregators, object storage, or local review workflows."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) as JSONL. The active [runtime log](/concepts/core-concepts#runtime-jsonl-log) is the handoff point for local review, [customer-managed log pipelines](/concepts/core-concepts#customer-managed-forwarding), log aggregators, object storage exporters, and most SIEM content packs. Beacon can also enable optional collector exporters for [Splunk HTTP Event Collector (HEC)](/concepts/core-concepts#splunk-hec) and [CrowdStrike Falcon LogScale HEC](/concepts/core-concepts#falcon-logscale-hec) during endpoint install or repair.
 
@@ -29,7 +29,7 @@ Use system mode for MDM deployments so endpoint events land in the shared system
 
 ## Destination categories
 
-### Security Information and Event Management (SIEM)
+### Security information and event management (SIEM)
 
 Use these paths when the destination is the security investigation or detection system.
 
@@ -54,7 +54,7 @@ Use these paths when the destination is the security investigation or detection 
   </Card>
 </Columns>
 
-### Log Aggregation
+### Log aggregation
 
 Use these paths when Beacon JSONL feeds an observability store or customer-managed forwarding pipeline.
 
@@ -73,7 +73,7 @@ Use these paths when Beacon JSONL feeds an observability store or customer-manag
   </Card>
 </Columns>
 
-### Object Storage
+### Object storage
 
 Use these paths when Beacon JSONL should land in a customer-managed bucket for archive, lake, or downstream detection workflows.
 

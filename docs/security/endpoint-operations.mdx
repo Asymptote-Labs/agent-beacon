@@ -3,11 +3,11 @@ title: "Endpoint Operations"
 description: "Filesystem paths, permissions, daemon behavior, network behavior, and uninstall guarantees"
 ---
 
-## Operational Controls
+## Operational controls
 
 Beacon endpoint operations are local to the managed machine. User-mode installs use per-user paths for local evaluation. System-mode installs use root-managed paths and a LaunchDaemon for MDM or package deployments.
 
-## Filesystem Paths
+## Filesystem paths
 
 | Item | User mode | System mode |
 |------|-----------|-------------|
@@ -42,7 +42,7 @@ System endpoint install creates root-managed runtime state:
 /var/log/beacon-agent/runtime.jsonl.1
 ```
 
-## Hook Configuration Paths
+## Hook configuration paths
 
 | Runtime | User-level config | Project-level config | Hook binary | Runtime log |
 |---------|-------------------|----------------------|-------------|-------------|
@@ -57,7 +57,7 @@ System endpoint install creates root-managed runtime state:
 
 In system mode, the hook binary is written under `/Library/Application Support/Beacon/Endpoint/hooks/` and the default runtime log is `/var/log/beacon-agent/runtime.jsonl`.
 
-## Permissions and Daemon Behavior
+## Permissions and daemon behavior
 
 User mode is the default for local evaluation and writes under the current user's home directory. System mode requires root, writes root-managed configuration and log paths, and loads the local collector as `com.beacon.endpoint.collector` through launchd.
 
@@ -65,7 +65,7 @@ The system package is designed for Jamf Pro, Fleet, or another macOS MDM. It ins
 
 The active runtime log rotates when the next write would exceed 10 MiB. Beacon keeps up to five numbered local archives next to the active file, preserving the active path as the handoff point for local inspection and customer-managed shippers.
 
-## Network Behavior
+## Network behavior
 
 Normal endpoint collection uses localhost OTLP receivers and local hook execution. Beacon does not require a hosted account, remote policy fetch, MDM API credentials, or external network connection for normal collection.
 
@@ -89,7 +89,7 @@ Endpoint package self-updates are off by default. When an admin enables
 release manifest and package asset URLs; normal runtime hook execution remains
 local-only.
 
-## Uninstall Guarantees
+## Uninstall guarantees
 
 `beacon endpoint uninstall` unloads the local Beacon service and removes managed endpoint files. Beacon removes files listed in its install manifest, including managed config, collector config, and service files. Unless `--keep-logs` is set, it also removes the configured runtime JSONL log.
 

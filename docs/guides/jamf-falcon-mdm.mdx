@@ -41,7 +41,7 @@ Before creating the Jamf policy, prepare:
 
 For CrowdStrike data onboarding, parser setup, screenshots, and a direct HEC smoke test, see [CrowdStrike Falcon LogScale](/log-forwarding/falcon).
 
-## Falcon HEC Settings
+## Falcon HEC settings
 
 CrowdStrike HEC values normally look like:
 
@@ -62,7 +62,7 @@ Beacon stores the Falcon token only in the root-owned Vector environment file:
 
 That file is mode `0600` and is sourced by the Vector LaunchDaemon wrapper.
 
-## Jamf Policy Setup
+## Jamf policy setup
 
 Jamf Pro separates package installation from script execution. Use the Packages payload to install the Beacon `.pkg`, then use a Scripts payload to run a wrapper that calls Beacon's packaged Jamf helper.
 
@@ -73,7 +73,7 @@ For the most reliable rollout, use two policies:
 
 You can combine the package and script payloads in one policy if your Jamf workflow guarantees the package is installed before the script runs.
 
-### 1. Upload The Beacon Package
+### 1. Upload the Beacon package
 
 Upload the signed Beacon endpoint package to Jamf Pro and add it to a policy using the Packages payload with the install action.
 
@@ -91,7 +91,7 @@ The package installs:
 
 Current packages use `/opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh`. Older internal smoke-test instructions may refer to a legacy helper path under `/opt/beacon/jamf/scripts`; use the path that exists in the package installed on the target Mac.
 
-### 2. Add A Jamf Script Wrapper
+### 2. Add a Jamf script wrapper
 
 Add a script to Jamf Pro that invokes Beacon's packaged helper. The script must exist in Jamf Pro before it can be added to a policy.
 
@@ -132,7 +132,7 @@ Use Jamf script parameter labels so policy editors know what each value means:
 
 Jamf script parameters are convenient for non-secret values such as endpoint, source, sourcetype, and repository. For the HEC token, prefer your Jamf secret injection mechanism when available. Avoid putting long-lived tokens directly in ordinary policy parameter fields or policy logs.
 
-## What The Helper Does
+## What the helper does
 
 The combined helper performs all endpoint and forwarding setup:
 
@@ -153,7 +153,7 @@ The combined helper performs all endpoint and forwarding setup:
 
 End users do not need to run any Beacon command or edit any local config.
 
-## Optional: Enable Endpoint Self-Updates
+## Optional: enable endpoint self-updates
 
 Beacon package self-updates are off by default. To let Beacon apply future signed package updates after the Jamf install, add a Jamf Files and Processes payload or post-install policy command:
 
@@ -169,7 +169,7 @@ sudo /opt/beacon/bin/beacon endpoint update enable --check-only
 
 Both commands require root. `auto` mode verifies release manifest checksums, Developer ID signature, and Gatekeeper install assessment before applying a signed package. `check-only` mode writes update status events to `/var/log/beacon-agent/system.jsonl` without downloading or applying packages.
 
-## Manual Smoke Test
+## Manual smoke test
 
 To simulate the Jamf policy on one Mac, install the Beacon package, then run the packaged helper manually.
 
@@ -196,11 +196,11 @@ sudo /opt/beacon/jamf/claude/falcon/repair-hooks-and-forwarder.sh \
   "json"
 ```
 
-## Validate A Deployed Mac
+## Validate a deployed Mac
 
 Run these commands on a target Mac after the Jamf policy completes.
 
-### Check Services
+### Check services
 
 ```bash
 sudo launchctl print system/com.beacon.endpoint.collector
@@ -209,7 +209,7 @@ sudo launchctl print system/com.beacon.endpoint.falcon-forwarder
 
 Both services should report `state = running`.
 
-### Check Forwarder Logs
+### Check forwarder logs
 
 ```bash
 sudo tail -n 50 /tmp/com.beacon.endpoint.falcon-forwarder.err
@@ -221,14 +221,14 @@ Expected:
 no repeated auth, TLS, DNS, or HTTP errors in stderr
 ```
 
-### Check Local Files
+### Check local files
 
 ```bash
 ls -l /var/log/beacon-agent/runtime.jsonl
 ls -l /var/log/beacon-agent/inventory_state.jsonl
 ```
 
-### Check Vector Config
+### Check Vector config
 
 ```bash
 sudo grep -E 'runtime.jsonl|read_from|BEACON_FALCON_HEC_ENDPOINT|Authorization' \
@@ -246,7 +246,7 @@ Authorization = "Bearer ${BEACON_FALCON_HEC_TOKEN}"
 
 Runtime forwarding starts at the end of the runtime log so historical session activity is not backfilled when Vector is first installed.
 
-## Generate A Claude Hook Event
+## Generate a Claude hook event
 
 Generate a unique Claude prompt in headless mode or in a normal Claude Code session:
 
@@ -271,7 +271,7 @@ If you use a custom source, repository, or parser, adjust the query to match you
 
 ## Troubleshooting
 
-### Forwarder Is Not Running
+### Forwarder is not running
 
 Check launchd and stderr:
 
@@ -294,7 +294,7 @@ sudo /opt/beacon/jamf/claude/falcon/run-forwarder.sh
 
 Keep that terminal open while generating a Claude hook event.
 
-### Token Or Endpoint Is Wrong
+### Token or endpoint is wrong
 
 Check the env file without exposing secrets:
 
@@ -304,7 +304,7 @@ sudo sh -c 'sed -E "s/(BEACON_FALCON_HEC_ENDPOINT|BEACON_FALCON_HEC_TOKEN|BEACON
 
 If Vector reports `401`, `403`, or repository errors, regenerate the API key in Falcon and verify that the repository/index parameter matches the token scope.
 
-### Claude Hooks Are Missing
+### Claude hooks are missing
 
 Fully restart Claude Code after the Jamf policy runs. Then inspect the user's Claude settings:
 
@@ -314,7 +314,7 @@ grep -n 'BEACON_ENDPOINT_CLI\|beacon-hooks' ~/.claude/settings.json
 
 You should see commands that call the packaged Beacon hook binary.
 
-### Local Event Exists But Falcon Search Is Empty
+### Local event exists but Falcon search is empty
 
 Confirm the event appears in `/var/log/beacon-agent/runtime.jsonl`, then check Vector stderr for batching, TLS, DNS, or HTTP errors. Falcon searches can lag behind ingestion; wait a minute and search for the exact marker string.
 

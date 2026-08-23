@@ -9,7 +9,7 @@ Model Context Protocol (MCP) lets local assistants connect to tools and data sou
 
 This guide shows how to validate Beacon MCP locally, connect Cursor or Claude Code, and test that MCP query results match the same runtime log used by the dashboard.
 
-## What Beacon MCP Exposes
+## What Beacon MCP exposes
 
 `beacon mcp` exposes compact activity tools over MCP so an assistant can search, summarize, and fetch events from the local Beacon runtime log.
 
@@ -31,7 +31,7 @@ beacon endpoint test-event
 beacon endpoint status
 ```
 
-## 1. Run MCP Doctor
+## 1. Run MCP doctor
 
 Validate runtime log access, transport settings, readable event samples, and registered MCP tools:
 
@@ -50,7 +50,7 @@ sample events: found
 ```
 </Accordion>
 
-## 2. Understand Transport Options
+## 2. Understand transport options
 
 Beacon reads the same local `runtime.jsonl` used by the [dashboard](/cli/dashboard). MCP clients can launch Beacon over stdio, or local tools can connect to a running loopback HTTP JSON-RPC server.
 
@@ -64,7 +64,7 @@ Use stdio for desktop MCP clients that launch Beacon as a subprocess. Use HTTP o
   Do not expose `beacon mcp serve --transport http` on a non-loopback interface. Beacon MCP is designed for local activity inspection, not remote administration.
 </Warning>
 
-## Security Use Cases
+## Security use cases
 
 MCP is useful when an analyst wants to ask a local assistant targeted questions about Beacon activity without opening the raw runtime log.
 
@@ -73,7 +73,7 @@ MCP is useful when an analyst wants to ask a local assistant targeted questions 
 - Pull one event by ID and compare it with the same event in the dashboard.
 - List available filters before narrowing an investigation to a specific command, file, session, or repository.
 
-## 3. Test MCP End To End
+## 3. Test MCP end to end
 
 <Steps>
   <Step title="Write a known event">
@@ -91,7 +91,7 @@ MCP is useful when an analyst wants to ask a local assistant targeted questions 
     ```
   </Step>
   <Step title="Connect an MCP client">
-    Follow [Connect Cursor and Claude Code](#connect-cursor-and-claude-code) below, then ask the client to search recent Beacon activity or summarize activity from the last hour.
+    Follow [Connect Cursor and Claude Code](#4-connect-cursor-and-claude-code) below, then ask the client to search recent Beacon activity or summarize activity from the last hour.
   </Step>
   <Step title="Test loopback HTTP if needed">
     If your local tool uses HTTP JSON-RPC, validate the loopback transport before connecting.
@@ -109,7 +109,7 @@ MCP is useful when an analyst wants to ask a local assistant targeted questions 
   </Step>
 </Steps>
 
-## 4. Connect Cursor And Claude Code
+## 4. Connect Cursor and Claude Code
 
 Before connecting a client, confirm Beacon is installed and resolve the absolute CLI path:
 
@@ -193,7 +193,7 @@ Inside a Claude Code session, run `/mcp` and confirm Beacon is connected. Projec
 - Tools connect but return empty results: run `beacon endpoint status`; the runtime log may not have events yet.
 - Claude Code ignores project config: approve the `.mcp.json` server when prompted or check project-scope MCP settings.
 
-## Key Features Demonstrated
+## Key features demonstrated
 
 - Local MCP access to the same runtime log used by the dashboard.
 - Compact activity search, summary, event fetch, and filter discovery tools.

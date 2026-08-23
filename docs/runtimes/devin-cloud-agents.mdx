@@ -3,28 +3,28 @@ title: "Devin Cloud Agents"
 description: "Capture autonomous Devin Cloud agent telemetry org-wide with the Beacon CLI and forward it to customer-managed storage or a SIEM"
 ---
 
-## Integration Overview
+## Overview
 
 Use this integration to capture telemetry from **autonomous Devin Cloud agents**
 (sessions at [app.devin.ai](https://app.devin.ai)) for every user in your
 organization, using the Beacon CLI. Unlike the [Devin CLI](/runtimes/devin) and
-[Devin Desktop](/runtimes/devin-desktop) integrations — which capture telemetry
-through local hooks — the autonomous Devin Cloud agent does not run the Devin
+[Devin Desktop](/runtimes/devin-desktop) integrations, which capture telemetry
+through local hooks, the autonomous Devin Cloud agent does not run the Devin
 hook engine. Beacon instead pulls session activity from the Devin
 **organization API** with a single command you run centrally.
 
 <Info>
   If you're interested in leveraging this telemetry ingest across your
-  enterprise, [Asymptote Managed](/asymptote-managed) is designed for
+  enterprise, [Asymptote Managed](/deployment/managed) is designed for
   production cloud-agent telemetry ingest at scale.
 </Info>
 
-## Overview
+## How it works
 
 `beacon cloud devin pull` authenticates to the Devin v3 organization API with an
 organization **service key** and enumerates every user's cloud sessions. It maps
 each session and its messages into Beacon endpoint events, writes them to the
-local runtime JSONL, and — when GCS is configured — uploads a per-session
+local runtime JSONL, and, when GCS is configured, uploads a per-session
 snapshot to your bucket. Because the service key is organization-scoped, one
 central runner captures all of your users' Devin Cloud sessions; there is
 nothing to install per user, per repository, or per session.
@@ -62,8 +62,8 @@ Beacon uses the Devin session id as the `run_id` and the Devin user id as
 - Beacon CLI `v0.0.67` or later.
 - A Devin **organization service key** (`cog_` prefix) and your **organization
   id** (`org-...`). Create a service user with session-read access under Devin
-  **Settings → Service Users**. A Teams-tier plan is sufficient — an Enterprise
-  plan is not required.
+  **Settings → Service Users**. A Teams-tier plan is enough; an Enterprise plan
+  is not required.
 - A host (workstation, VM, or CI runner) to run the connector centrally, on a
   schedule or continuously.
 - For GCS upload: `gcloud` installed and authenticated, and a Google Cloud
@@ -79,7 +79,7 @@ brew upgrade beacon
 beacon version
 ```
 
-## 1. Create the GCS Upload Path
+## 1. Create the GCS upload path
 
 Skip this step if you only want events in the local runtime log (for example to
 forward to a SIEM from the runner). To archive per-session snapshots to your own
@@ -103,7 +103,7 @@ beacon cloud gcs setup \
 Copy the printed `BEACON_CLOUD_GCS_*` values. Treat
 `BEACON_CLOUD_GCS_CREDENTIALS_B64` as a sensitive credential.
 
-## 2. Provide Devin Credentials
+## 2. Provide Devin credentials
 
 On the central runner, export the organization service key and id:
 
@@ -114,11 +114,11 @@ export DEVIN_ORG_ID="org-…your_organization…"
 
 <Warning>
   The organization service key can read sessions across your whole org. Keep it
-  on one controlled runner — never distribute it to individual user machines or
+  on one controlled runner. Never distribute it to individual user machines or
   agent sandboxes.
 </Warning>
 
-## 3. Pull Devin Cloud Telemetry
+## 3. Pull Devin cloud telemetry
 
 Preview the mapped events without writing or uploading anything:
 
@@ -139,7 +139,7 @@ beacon cloud devin pull --watch --interval 30s
 ```
 
 When the `BEACON_CLOUD_GCS_*` variables from step 1 are exported, each changed
-session's snapshot is also uploaded to your bucket. Re-runs are idempotent —
+session's snapshot is also uploaded to your bucket. Re-runs are idempotent:
 events are deduplicated by their Devin event id, and unchanged sessions are
 skipped. Use `--full-resync` to re-fetch and re-upload every session (for a
 backfill, or after enabling GCS on an existing runner).
@@ -150,7 +150,7 @@ backfill, or after enabling GCS on an existing runner).
   cron job / scheduled CI workflow on the central runner.
 </Tip>
 
-## 4. Verify the Upload
+## 4. Verify the upload
 
 ```bash
 gcloud storage ls --recursive "gs://${BEACON_TEST_BUCKET}/${BEACON_CLOUD_GCS_PREFIX}/provider=devin_cloud/"
@@ -188,7 +188,7 @@ log. Events carry `run.actor=<user_id>` for per-user attribution. See
 [Google Cloud Storage forwarding](/siem-forwarding-gcs) and the other SIEM
 forwarding guides for the available destinations.
 
-## Security Note
+## Security note
 
 This flow keeps your Devin organization service key and (optionally) a
 GCS uploader credential on a single controlled runner. Beacon's use of the Devin
@@ -235,7 +235,7 @@ in-progress session shows `session.started`, `prompt.submitted`, and
   <Card title="Google Cloud Storage forwarding" icon="database" href="/siem-forwarding-gcs">
     Review local endpoint GCS forwarding for persistent deployments.
   </Card>
-  <Card title="Asymptote Managed" icon="cloud" href="/asymptote-managed">
+  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
     Use managed secure ingest for production enterprise cloud-agent telemetry.
   </Card>
 </Columns>

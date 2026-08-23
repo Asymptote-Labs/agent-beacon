@@ -17,7 +17,7 @@ Write a validation event first so the runtime log has a known record:
 beacon endpoint test-event
 ```
 
-## 1. Find The Active Runtime Log
+## 1. Find the active runtime log
 
 Use status to print the configured runtime log path and last observed event:
 
@@ -43,7 +43,7 @@ beacon endpoint status --json
 
 Status also reports runtime-log source warnings when a system collector may be writing OTLP events to a different log than the one you are inspecting.
 
-## 2. Compare User And System Paths
+## 2. Compare user and system paths
 
 Default local evaluation uses per-user endpoint paths:
 
@@ -61,7 +61,7 @@ sudo beacon endpoint test-event --system
 
 Keep user-mode and system-mode checks separate. A dashboard opened against a user log will not show events written only to the system log, and a system-mode status check may report a different collector or launchd service state.
 
-## 3. Understand Log Rotation
+## 3. Understand log rotation
 
 Beacon keeps the active `runtime.jsonl` path stable and rotates it when the next write would exceed 10 MiB. By default, it keeps five numbered local archives next to the active file:
 
@@ -76,7 +76,7 @@ runtime.jsonl.5
 
 External shippers should continue tailing the active `runtime.jsonl` path and use their normal file-rotation handling to checkpoint offsets. The local dashboard can inspect the active log and numbered archives when you need to review recent rotated events.
 
-## 4. Test A Custom Log Path
+## 4. Test a custom log path
 
 Use `--log-path` when testing a temporary runtime log or a support reproduction:
 
@@ -90,7 +90,7 @@ The same path should be used across the write, status, and dashboard checks.
 
 When a custom log rotates, archives use the same path plus a numeric suffix. For example, `/tmp/beacon/runtime.jsonl` rotates to `/tmp/beacon/runtime.jsonl.1`.
 
-## Verify Results
+## Verify results
 
 | Area | Expected result |
 |------|-----------------|

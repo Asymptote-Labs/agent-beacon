@@ -57,7 +57,7 @@ beacon endpoint install --harness claude,codex,gemini
 ```
 
 <Note>
-  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. The default mode uses per-user paths; use `--system` as root for package or MDM deployments. On Linux, installing the `.deb` or `.rpm` does the system install for you — see [Linux](/platforms/linux).
+  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. The default mode uses per-user paths; use `--system` as root for package or MDM deployments. On Linux, installing the `.deb` or `.rpm` does the system install for you. See [Linux](/platforms/linux).
 </Note>
 
 Beacon records supported prompt, tool, command, file, approval, policy, and runtime context when the source runtime emits it. Before events are written to `runtime.jsonl` or sent through configured destinations, Beacon applies redaction, sanitization, truncation, and event-size limits.

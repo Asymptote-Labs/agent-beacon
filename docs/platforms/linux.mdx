@@ -3,17 +3,13 @@ title: "Linux Install"
 description: "Install the Beacon endpoint on Linux with a .deb or .rpm, and understand how the systemd service is managed"
 ---
 
-Beacon runs a local collector on your machine, points your agent runtimes at it, and writes
-normalized events to a JSONL log you own. On Linux the collector runs as a systemd service.
+Beacon runs a local collector on your machine, points your agent runtimes at it, and writes normalized events to a JSONL log you own. On Linux the collector runs as a systemd service.
 
-Installing the package is the whole setup. It unpacks the binaries, performs the system-mode
-install, registers and starts the systemd unit, and configures the runtime of the user who ran the
-install. There is no second command to run.
+Installing the package is the whole setup. It unpacks the binaries, performs the system-mode install, registers and starts the systemd unit, and configures the runtime of the user who ran the install. There is no second command to run.
 
 ## Install
 
-Download the package for your architecture from the
-[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) and install it:
+Download the package for your architecture from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) and install it:
 
 <CodeGroup>
 ```bash title="Debian, Ubuntu"
@@ -25,13 +21,11 @@ sudo dnf install ./beacon_<version>_linux_amd64.rpm
 ```
 </CodeGroup>
 
-`amd64` and `arm64` packages are published for both formats. The package puts `beacon` on your
-`PATH`, so every command below works by name.
+`amd64` and `arm64` packages are published for both formats. The package puts `beacon` on your `PATH`, so every command below works by name.
 
 ### Without root, or without a package manager
 
-If you are not an administrator on the machine, or you would rather not touch system paths, use the
-tarball and install in user mode:
+If you are not an administrator on the machine, or you would rather not touch system paths, use the tarball and install in user mode:
 
 ```bash title="Tarball install, no root required"
 LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"
@@ -60,14 +54,9 @@ beacon version
 beacon endpoint install
 ```
 
-The version comes from the current release rather than a number you have to keep up to date, and
-the architecture comes from `uname -m`: `x86_64` maps to the published `amd64` archive and
-`aarch64` to `arm64`. An architecture Beacon does not publish stops the run before anything is
-downloaded.
+The version comes from the current release rather than a number you have to keep up to date, and the architecture comes from `uname -m`: `x86_64` maps to the published `amd64` archive and `aarch64` to `arm64`. An architecture Beacon does not publish stops the run before anything is downloaded.
 
-The archive contains three binaries — the `beacon` CLI, the `beacon-hooks` adapter that captures
-tool activity, and the `beacon-otelcol` collector. All three are needed, and all three are
-statically linked with no shared-library dependencies.
+The archive contains three binaries: the `beacon` CLI, the `beacon-hooks` adapter that captures tool activity, and the `beacon-otelcol` collector. All three are needed, and all three are statically linked with no shared-library dependencies.
 
 See [User-mode install](#user-mode-install) for what this sets up and its one caveat.
 
@@ -93,10 +82,9 @@ Harness: Claude Code  telemetry=enabled
 Last event: present
 ```
 
-`beacon endpoint doctor --system` goes further, checking the whole chain — unit, collector, config,
-log permissions, and each harness's settings — and printing the command to fix anything it finds.
+`beacon endpoint doctor --system` goes further. It checks the whole chain (unit, collector, config, log permissions, and each harness's settings) and prints the command to fix anything it finds.
 
-On a fresh install it reports one warning, and it is not a problem:
+On a fresh install it reports one warning, which is not a problem:
 
 ```
 Beacon endpoint doctor: warn
@@ -105,8 +93,7 @@ harness_observed: warn target=claude_code (telemetry is configured but no matchi
 Summary: 0 failure(s), 1 warning(s)
 ```
 
-That says "configured correctly, but you have not used it yet." It clears the first time you run
-your agent. What matters is `0 failure(s)`.
+That means "configured correctly, but not used yet". It clears the first time you run your agent. What matters is `0 failure(s)`.
 
 <Warning>
   One failure is worth knowing by name, because a system endpoint can be perfectly healthy and
@@ -118,10 +105,7 @@ your agent. What matters is `0 failure(s)`.
     action="sudo beacon endpoint user-config repair-installed --system"
   ```
 
-  A system-mode endpoint runs as root, so it has to work out *whose* agent settings to configure.
-  If it could not identify you at install time, the collector still starts and reports healthy —
-  it simply has nothing sending to it. Run the action above as the user whose sessions should be
-  captured and it clears.
+  A system-mode endpoint runs as root, so it has to work out whose agent settings to configure. If it could not identify you at install time, the collector still starts and reports healthy, but nothing is sending to it. Run the action above as the user whose sessions should be captured and it clears.
 </Warning>
 
 If you would rather confirm the pipeline before running a real session, write a synthetic event:
@@ -131,8 +115,7 @@ sudo beacon endpoint test-event --system
 ```
 
 <Note>
-  Pass `--system` here. Without it the command targets the *user-mode* log under `~/.beacon`, which
-  is not the log a system install writes to — so it would report success against the wrong file.
+  Pass `--system` here. Without it the command targets the user-mode log under `~/.beacon`, which is not the log a system install writes to, so it would report success against the wrong file.
 </Note>
 
 ## Using it
@@ -143,14 +126,12 @@ Nothing to remember. Run your agent the way you normally do:
 claude
 ```
 
-Prompts, the commands the agent runs, files it reads and writes, token counts and cost, approvals
-and denials all land in `/var/log/beacon-agent/runtime.jsonl` — one JSON object per line. Two
-independent paths feed it, which is why a gap in one still leaves you with data:
+Prompts, the commands the agent runs, files it reads and writes, token counts and cost, and approvals and denials all land in `/var/log/beacon-agent/runtime.jsonl`, one JSON object per line. Two independent paths feed it, so a gap in one still leaves you with data:
 
 | Path | Carries |
 |---|---|
-| OpenTelemetry | Prompts, tool calls, token usage, cost — via `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317` in your agent settings |
-| Hooks | Session start and end, tool use, permission requests, subagent activity, reasoning |
+| OpenTelemetry | Prompts, tool calls, token usage, and cost, through `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317` in your agent settings |
+| Hooks | Session start and end, tool use, permission requests, subagent activity, and reasoning |
 
 Both are loopback-only. Nothing leaves the machine.
 
@@ -174,19 +155,13 @@ See the [event schema](/telemetry-schema/event-schema) for the full field refere
 | Runtime log | `/var/log/beacon-agent/runtime.jsonl` |
 | Agent runtime | Claude Code and Codex CLI settings for the installing user, pointed at `127.0.0.1:4317` |
 
-That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to
-work out *whose* agent settings to configure — the collector is useless if nothing is exporting to
-it. Beacon uses `SUDO_USER`, which is set for every normal install path, and falls back to asking
-logind who has an active session. If it cannot identify anyone, it says so instead of failing, and
-you can configure yourself later:
+That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon uses `SUDO_USER`, which is set for every normal install path, and falls back to asking logind who has an active session. If it cannot identify anyone, it says so instead of failing, and you can configure yourself later:
 
 ```bash title="Configure your own agent runtime against an already-installed endpoint"
 sudo beacon endpoint user-config repair-installed --system
 ```
 
-Other users on the same machine run the same command for themselves. They all export to the same
-collector and the same log, which is why `/var/log/beacon-agent/runtime.jsonl` is group- and
-world-writable — hooks run as the logged-in user and append to it directly.
+Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. That is why `/var/log/beacon-agent/runtime.jsonl` is group- and world-writable: hooks run as the logged-in user and append to it directly.
 
 ## Managing the service
 
@@ -198,8 +173,7 @@ systemctl restart beacon-collector
 journalctl -u beacon-collector -f
 ```
 
-`Restart=always` means systemd brings the collector back if it exits, and `WantedBy=multi-user.target`
-means it starts on boot. Both are set by the install; you do not need to configure them.
+`Restart=always` means systemd brings the collector back if it exits, and `WantedBy=multi-user.target` means it starts on boot. Both are set by the install; you do not need to configure them.
 
 If the unit is missing or broken, repair it without reinstalling the package:
 
@@ -209,9 +183,7 @@ sudo beacon endpoint doctor --system --fix
 
 ## Choosing a service backend
 
-Beacon decides which service manager to use by reading what is actually running as PID 1. It does
-not check whether `systemctl` exists on `PATH` — inside a container that is often true while systemd
-is not running at all, and trusting it would produce a unit nothing ever starts.
+Beacon decides which service manager to use by reading what is actually running as PID 1. It does not check whether `systemctl` exists on `PATH`. Inside a container that is often true while systemd is not running at all, and trusting it would produce a unit nothing ever starts.
 
 You can override the choice:
 
@@ -226,47 +198,35 @@ sudo beacon endpoint install --system --service none
 | `systemd` | Require systemd; fail rather than fall back |
 | `none` | A supervised background collector, tracked by a pidfile |
 
-Use `--service systemd` in automation where a silent fallback would be worse than a failure. Use
-`--service none` in a container or on a distribution without systemd.
+Use `--service systemd` in automation where a silent fallback would be worse than a failure. Use `--service none` in a container or on a distribution without systemd.
 
 ## User-mode install
 
-If you do not want a system service — a shared host where you are not root, or a machine where you
-only want your own sessions captured — install in user mode:
+Install in user mode if you do not want a system service, either because you are not root on a shared host or because you only want your own sessions captured:
 
 ```bash title="User-mode install"
 beacon endpoint install
 ```
 
-This writes everything under `~/.beacon/endpoint` and registers a `systemctl --user` unit. One
-caveat has no macOS equivalent and is worth stating plainly: **a `--user` unit stops when you log
-out**, unless linger is enabled for your account. Beacon enables it during install when it can:
+This writes everything under `~/.beacon/endpoint` and registers a `systemctl --user` unit. One caveat has no macOS equivalent and is worth stating plainly: **a `--user` unit stops when you log out**, unless linger is enabled for your account. Beacon enables it during install when it can:
 
 ```bash title="Keep a user-mode collector running after logout"
 sudo loginctl enable-linger $USER
 ```
 
-When it could not, `beacon endpoint install` and `beacon endpoint repair` say so at the end of the
-run and print that exact command, and `beacon endpoint doctor` keeps reporting it until it is
-fixed. Beacon checks the resulting linger state rather than the exit status of its own attempt, so
-this reflects whether the collector really will survive logout. Without linger, a user-mode
-collector works while you are logged in and stops collecting after you log out.
+When it could not, `beacon endpoint install` and `beacon endpoint repair` say so at the end of the run and print that exact command, and `beacon endpoint doctor` keeps reporting it until it is fixed. Beacon checks the resulting linger state rather than the exit status of its own attempt, so this reflects whether the collector really will survive logout. Without linger, a user-mode collector works while you are logged in and stops collecting after you log out.
 
 ## Without systemd
 
-The supervised backend covers hosts with no init system to talk to — containers, minimal images,
-distributions using OpenRC or SysV:
+The supervised backend covers hosts with no init system to talk to, such as containers, minimal images, and distributions using OpenRC or SysV:
 
 ```bash title="Supervised collector"
 beacon endpoint install --service none
 ```
 
-The collector runs as a background process tracked by a pidfile. It collects normally, but nothing
-restarts it if it exits and nothing starts it at boot. `beacon endpoint status` states this rather
-than reporting the same health as a managed service, so you are never misled about what you have.
+The collector runs as a background process tracked by a pidfile. It collects normally, but nothing restarts it if it exits and nothing starts it at boot. `beacon endpoint status` states this rather than reporting the same health as a managed service, so you are never misled about what you have.
 
-For CI, prefer `beacon ci exec`, which wraps a single command in an ephemeral collector and needs no
-service at all.
+For CI, prefer `beacon ci exec`, which wraps a single command in an ephemeral collector and needs no service at all.
 
 ## Updates
 
@@ -277,12 +237,7 @@ sudo beacon endpoint update --check
 sudo beacon endpoint update --apply
 ```
 
-`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with
-`dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check.
-Verification is checksum-over-HTTPS from GitHub Releases — the same trust root you used to download
-the package in the first place. macOS additionally verifies Apple notarization; Linux has no
-OS-level equivalent, and `beacon endpoint update` reports which verification it performed rather
-than implying both.
+`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization; Linux has no OS-level equivalent, and `beacon endpoint update` reports which verification it performed rather than implying both.
 
 Upgrading the package keeps your configuration and your collected log.
 
@@ -292,9 +247,7 @@ Upgrading the package keeps your configuration and your collected log.
 sudo apt remove beacon      # or: sudo dnf remove beacon
 ```
 
-Removal stops and deletes the service and takes the binaries away, but leaves
-`/etc/beacon/endpoint` and `/var/log/beacon-agent` alone — collected telemetry is not something a
-package removal should destroy. To remove those too:
+Removal stops and deletes the service and takes the binaries away, but leaves `/etc/beacon/endpoint` and `/var/log/beacon-agent` alone. Collected telemetry is not something a package removal should destroy. To remove those too:
 
 ```bash title="Remove everything"
 sudo apt purge beacon
@@ -312,7 +265,7 @@ sudo beacon endpoint uninstall --system
 
 <Columns cols={2}>
   <Card title="Deployment profile" icon="shield-check" href="/platforms/linux-deployment-profile">
-    What it depends on, what it costs to run, and how to verify both — for a security review.
+    What it depends on, what it costs to run, and how to verify both, for a security review.
   </Card>
   <Card title="Endpoint status" icon="circle-info" href="/cli/endpoint-status">
     Inspect collector health, runtime log state, harnesses, and diagnostics.
