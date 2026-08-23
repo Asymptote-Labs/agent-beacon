@@ -117,6 +117,23 @@ func TestSortEventsIgnoresUnsequencedTie(t *testing.T) {
 	}
 }
 
+func TestSortEventsTransitiveWithMixedSequences(t *testing.T) {
+	// Three events at the same timestamp mixing sequenced and unsequenced must yield a
+	// transitive order. Before the fix, seq=10 < unsequenced < seq=5 by pairwise
+	// comparison but seq=5 < seq=10 directly — a cycle that violated sort.Slice's contract.
+	tie := "2026-08-21T10:00:00.000000000Z"
+	events := []asymptoteobserve.Event{
+		corrEvent(tie, "high-seq", "s1", func(e *asymptoteobserve.Event) { e.Sequence = 10 }),
+		corrEvent(tie, "legacy", "s1", nil),
+		corrEvent(tie, "low-seq", "s1", func(e *asymptoteobserve.Event) { e.Sequence = 5 }),
+	}
+	SortEvents(events)
+	want := []string{"legacy", "low-seq", "high-seq"}
+	if got := actions(events); !equalStrings(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
 func TestSortEventsKeepsUnstampedEventsBesideTheirNeighbours(t *testing.T) {
 	// An event with no parseable timestamp inherits the last one seen, so it stays where
 	// it arrived instead of collapsing to the epoch and jumping to the front.

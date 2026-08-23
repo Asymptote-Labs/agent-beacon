@@ -54,7 +54,12 @@ func SortEvents(events []asymptoteobserve.Event) {
 		if !a.at.Equal(b.at) {
 			return a.at.Before(b.at)
 		}
-		if a.seq != 0 && b.seq != 0 && a.seq != b.seq {
+		aHasSeq := a.seq != 0
+		bHasSeq := b.seq != 0
+		if aHasSeq != bHasSeq {
+			return !aHasSeq // unsequenced before sequenced
+		}
+		if aHasSeq && a.seq != b.seq {
 			return a.seq < b.seq
 		}
 		return a.idx < b.idx

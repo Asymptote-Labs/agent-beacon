@@ -58,6 +58,36 @@ func TestReadEventsAppendOrderFallsBackToLineOrderWhenUnsequenced(t *testing.T) 
 	}
 }
 
+func TestReadEventsAppendOrderTransitiveWithMixedSequences(t *testing.T) {
+	// Three events at the same timestamp mixing sequenced and unsequenced must sort
+	// transitively: unsequenced events come before sequenced ones (in line order among
+	// themselves), and sequenced events sort by sequence among themselves.
+	tie := "2026-05-13T01:00:00.000000000Z"
+	highSeq := testSchemaEvent(tie, "claude_code", "metric.observed", "metric", "")
+	highSeq.Sequence = 10
+	highSeq.Message = "high-seq"
+	legacy := testSchemaEvent(tie, "claude_code", "metric.observed", "metric", "")
+	legacy.Message = "legacy"
+	lowSeq := testSchemaEvent(tie, "claude_code", "metric.observed", "metric", "")
+	lowSeq.Sequence = 5
+	lowSeq.Message = "low-seq"
+
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeTestLog(t, path, marshalEvents(t, highSeq, legacy, lowSeq)...)
+
+	events, err := ReadEventsAppendOrder(path, EventQuery{})
+	if err != nil {
+		t.Fatalf("ReadEventsAppendOrder returned error: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("read %d events, want 3", len(events))
+	}
+	if events[0].Message != "legacy" || events[1].Message != "low-seq" || events[2].Message != "high-seq" {
+		t.Fatalf("order = %q, %q, %q; want legacy, low-seq, high-seq",
+			events[0].Message, events[1].Message, events[2].Message)
+	}
+}
+
 func TestBuildSummaryPicksLastEventByInstantNotByString(t *testing.T) {
 	// A log spanning the move to nanosecond stamping: ":05Z" is the older event but sorts
 	// after ":05.500000000Z" byte-wise, because 'Z' outranks '.'.

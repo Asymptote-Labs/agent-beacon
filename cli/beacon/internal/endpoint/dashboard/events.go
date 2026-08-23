@@ -175,7 +175,12 @@ func SortRecordsAppendOrder(records []EventRecord) {
 			return records[i].Parsed.Before(records[j].Parsed)
 		}
 		si, sj := records[i].Event.Sequence, records[j].Event.Sequence
-		if si != 0 && sj != 0 && si != sj {
+		iHasSeq := si != 0
+		jHasSeq := sj != 0
+		if iHasSeq != jHasSeq {
+			return !iHasSeq // unsequenced before sequenced
+		}
+		if iHasSeq && si != sj {
 			return si < sj
 		}
 		ai, li, _ := parseRecordID(records[i].ID)
