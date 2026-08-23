@@ -226,6 +226,20 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
 	applyWorkspaceFields(fields, input, filepath.Dir(params.filePath))
+	// This path writes its event directly rather than through emitHookEvent, so the raw payload
+	// that function attaches never reaches it. For Qwen that gap lands on exactly the events this
+	// runtime's taxonomy exists to produce: a successful `write_file` or `edit` is classified
+	// `file.modified` and routed here, so `permission_mode` and `tool_use_id` -- which have no
+	// schema field, and whose only home is raw.qwen -- would survive on failed and non-edit tools
+	// and vanish on the successful edits.
+	//
+	// Scoped to qwen rather than applied to every runtime with a raw convention. grok, hermes and
+	// vscode have the same gap on this path, and closing it would change their recorded event shape
+	// with no fixture here to say what it should become; that is a stated limit rather than a
+	// silent one. TestQwenRawPayloadSurvivesTheFileEditPath is what holds the Qwen half.
+	if platformFlag == "qwen" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
+	}
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 
