@@ -21,6 +21,53 @@ The schema gives every event a consistent backbone:
 | `run` and `session` | Connects activity to CI runs, cloud-agent jobs, local sessions, repositories, branches, and working directories |
 | `tool`, `command`, `file`, `mcp`, `approval`, and `policy` | Captures the entities analysts and detections need to understand agent behavior |
 | `content` | Records whether prompt or tool content was included, redacted, truncated, or omitted |
+| `harness.collection_method` and `event.fidelity` | Record how Beacon obtained the event and how sure it is of the action |
+
+## Provenance: how Beacon knows what it wrote
+
+Normalizing many runtimes into one event shape has a cost: a field that reads the same for every
+source hides how differently the sources behave. `event.action` is the field where that matters
+most. A Claude Code `PermissionRequest` hook hands Beacon a typed payload naming the operation. A
+Codex OTLP log record hands it a body string that Beacon classifies by pattern, with a fallback for
+records that match nothing. Both produce an `event.action`, and without a marker a detection cannot
+tell a report from a reading.
+
+Two optional fields carry that context.
+
+`harness.collection_method` describes the mechanism that carried the event off the runtime:
+
+| Value | Meaning |
+|-------|---------|
+| `hook` | A runtime-native hook the vendor exposes, which executes `beacon-hooks` with a structured payload |
+| `plugin` | A Beacon-managed plugin or extension file the runtime loads, which calls `beacon-hooks` from the runtime's own callbacks |
+| `otlp` | OpenTelemetry logs, traces, or metrics the runtime exported to Beacon's local collector |
+| `poll` | A periodic pull from a runtime's API, seen after the fact rather than as the agent works |
+
+`event.fidelity` describes the specific action on the event:
+
+| Value | Meaning |
+|-------|---------|
+| `observed` | The source named this action — a hook event name, a plugin event type, an explicit `event.action` attribute, or a structured attribute identifying the operation |
+| `inferred` | Beacon derived the action: a pattern match over free text, a fallback for an unrecognized event, or an action synthesized from an adjacent observation |
+
+The two are independent. One OTLP stream carries both kinds: a record that declares its
+`event.name` is `observed`, while a record carrying only prose is `inferred`. Both are
+`collection_method: otlp`.
+
+Both fields are optional and omitted rather than written empty. Events Beacon emits about itself —
+health heartbeats, self-update results — have no collecting harness and no source action to be
+faithful to, so they carry neither.
+
+Rules can match on both, so a detection that needs certainty can require it:
+
+```
+e.event.action == "approval.allowed" && e.event.fidelity == "observed"
+```
+
+Approvals are the clearest case for that. Several runtimes expose a pre-tool notification but no
+approval hook, and Beacon turns the former into an `approval.allowed` event so approval-shaped
+detections still have something to match. Those events are `inferred`: nothing was gated, a tool
+call was seen. Anything counting real operator decisions should exclude them.
 
 ## Required fields
 
@@ -33,9 +80,11 @@ The schema gives every event a consistent backbone:
 | `event.kind` | Event family, currently `agent_runtime` |
 | `event.action` | Normalized action such as `command.executed` or `tool.invoked` |
 | `event.category` | Event category, provided by the runtime or inferred from `event.action` when possible |
+| `event.fidelity` | Optional. `observed` or `inferred` — see [Provenance](#provenance-how-beacon-knows-what-it-wrote) |
 | `severity` | `info`, `low`, `medium`, `high`, or `critical` |
 | `endpoint` | Host and operating system context |
 | `harness` | Runtime that produced the signal |
+| `harness.collection_method` | Optional. `hook`, `plugin`, `otlp`, or `poll` — see [Provenance](#provenance-how-beacon-knows-what-it-wrote) |
 
 ## How it extends OpenTelemetry
 
@@ -51,6 +100,7 @@ The normalized schema is the contract between collection, detection, investigati
 - Write detections once against stable fields instead of per-runtime payloads.
 - Preserve source-specific OpenTelemetry and GenAI context without forcing downstream tools to parse raw traces.
 - Keep prompt, tool, command, file, approval, policy, and token-usage telemetry comparable across supported harnesses.
+- Say how each event was collected and how sure Beacon is of its action, so a consumer can weigh a runtime-reported fact differently from a derived one.
 - Forward one predictable JSONL shape into customer-managed analytics, SIEM, object-storage, and review workflows.
 
 ## Read next

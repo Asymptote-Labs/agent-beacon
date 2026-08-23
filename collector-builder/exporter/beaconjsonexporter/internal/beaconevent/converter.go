@@ -296,12 +296,16 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
 	ts := Timestamp(record.Timestamp().AsTime())
+	// An action the record states outright is observed by definition; only the fallback has to
+	// account for how it got there.
 	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
+	fidelity := asymptoteobserve.FidelityObserved
 	if action == "" {
-		action = InferAction(attrs, body)
+		action, fidelity = InferActionWithFidelity(attrs, body)
 	}
 	message := FirstNonEmpty(body, FirstString(attrs, "message", "log.message", "event.name"))
 	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "category")), Severity(record.SeverityText(), record.SeverityNumber().String()), HarnessName(attrs, message), ts)
+	event.Event.Fidelity = fidelity
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
 	if !record.TraceID().IsEmpty() {
@@ -322,11 +326,13 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
 	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
+	fidelity := asymptoteobserve.FidelityObserved
 	if action == "" {
-		action = InferAction(attrs, span.Name())
+		action, fidelity = InferActionWithFidelity(attrs, span.Name())
 	}
 	message := FirstNonEmpty(FirstString(attrs, "message", "gen_ai.prompt", "gen_ai.response"), span.Name())
 	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "tool")), SpanSeverity(span.Status().Code().String()), HarnessName(attrs, message, span.Name()), Timestamp(span.StartTimestamp().AsTime()))
+	event.Event.Fidelity = fidelity
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
 	if !span.TraceID().IsEmpty() {
@@ -363,7 +369,17 @@ func (c Converter) NormalizeCodexLogEvent(event *Event, attrs map[string]interfa
 	if event == nil || event.Harness.Name != "codex_cli" {
 		return
 	}
-	switch CodexLogEventName(attrs) {
+	name := CodexLogEventName(attrs)
+	switch name {
+	case CodexConversationStarts, CodexUserPrompt, CodexToolDecision, CodexToolResult:
+		// Every arm below is selected by an exact match on Codex's own `event.name`, so whatever
+		// InferAction guessed from the record body is superseded by something the source stated.
+		// Without this upgrade Codex's best telemetry -- the events it names explicitly -- would
+		// keep the fidelity of the guess that got overwritten. Names this switch does not know
+		// fall through untouched and keep theirs, which is the correct answer for them.
+		event.Event.Fidelity = asymptoteobserve.FidelityObserved
+	}
+	switch name {
 	case CodexConversationStarts:
 		event.Event.Action = "session.started"
 		event.Event.Category = "session"
@@ -443,24 +459,40 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	preserveAction := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
 	preserveCategory := preserveAction || FirstString(attrs, "beacon.event.category", "event.category", "category") != ""
 
+	originalFidelity := event.Event.Fidelity
+
 	eventName := ClaudeLogEventName(attrs, body)
 	switch eventName {
 	case ClaudeToolDecision:
+		// A decision Claude Code reported, read out of its `decision` attribute.
+		event.Event.Fidelity = asymptoteobserve.FidelityObserved
 		NormalizeClaudeToolDecision(event, attrs)
 	case ClaudeToolResult:
+		event.Event.Fidelity = asymptoteobserve.FidelityObserved
 		NormalizeClaudeToolResult(event, attrs)
 	case "":
 		return
 	default:
 		classification, ok := claudeLogEventClassifications[eventName]
 		if !ok {
+			// A `claude_code.*` event this build has never heard of. The name is real but its
+			// meaning is not known here, and session.activity is a placeholder chosen so the
+			// event is not dropped -- the one arm in this function that is a guess, and the
+			// case that makes an unrecognized event distinguishable from a classified one
+			// instead of both arriving as session.activity with nothing to tell them apart.
 			classification = eventClassification{action: "session.activity", category: "session"}
+			event.Event.Fidelity = asymptoteobserve.FidelityInferred
+		} else {
+			event.Event.Fidelity = asymptoteobserve.FidelityObserved
 		}
 		event.Event.Action = classification.action
 		event.Event.Category = classification.category
 	}
 	if preserveAction {
+		// The action came back from an explicit attribute, so its fidelity has to come back too;
+		// otherwise the event would carry this function's verdict about an action it no longer has.
 		event.Event.Action = originalAction
+		event.Event.Fidelity = originalFidelity
 	}
 	if preserveCategory {
 		event.Event.Category = originalCategory
@@ -606,6 +638,9 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 		action = "metric.observed"
 	}
 	event := NewEvent(action, "metric", "info", HarnessName(attrs, metric.Name()), time.Now().UTC())
+	// Observed on either path. A metric datapoint arriving is itself the fact being recorded, so
+	// "metric.observed" restates the signal rather than guessing at what the agent did.
+	event.Event.Fidelity = asymptoteobserve.FidelityObserved
 	event.Message = metric.Name()
 	c.PopulateCommon(&event, attrs)
 	event.Raw = c.RawPayload(attrs, map[string]interface{}{
@@ -743,6 +778,9 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 		action = "cost.usage"
 	}
 	event := NewEvent(action, "metric", "info", HarnessName(attrs, metric.Name()), Timestamp(ts.AsTime()))
+	// The metric name decides between the two actions, so this is a reading of a structured
+	// identifier rather than of free text.
+	event.Event.Fidelity = asymptoteobserve.FidelityObserved
 	event.Message = metric.Name()
 	c.PopulateCommon(&event, attrs)
 	// The datapoint value is the authoritative usage for this event. Drop any
@@ -1631,7 +1669,36 @@ func NormalizeHarnessName(name string) string {
 	return asymptoteobserve.NormalizeHarnessName(name)
 }
 
+// InferAction derives an event action from OTLP attributes. It is retained for callers that only
+// need the action; InferActionWithFidelity is the same logic and additionally reports how sure
+// Beacon is of the answer.
 func InferAction(attrs map[string]interface{}, fallback string) string {
+	action, _ := InferActionWithFidelity(attrs, fallback)
+	return action
+}
+
+// InferActionWithFidelity derives an event action and classifies how it was derived.
+//
+// The classification rule is structural, not semantic: a branch keyed on an attribute whose value
+// names the operation returns FidelityObserved, and a branch keyed on a substring of `text`
+// returns FidelityInferred. `text` is the weak input -- it folds in `fallback`, which is the log
+// record body or the span name, so free-form prose that happens to contain "file" or "exec"
+// reaches those branches -- and the `default` arm below is the weakest of all, having matched
+// nothing at all before landing on tool.invoked.
+//
+// Deliberately not a judgement about whether each mapping is semantically ideal. Some of the
+// structured branches still take a step (`execute_hook` becoming approval.requested is a reading
+// of what a hook execution means, not a restatement of it), and marking those inferred as well
+// would make the field a running commentary on this function that no reviewer could check.
+// "Did the source name the operation, or did Beacon pattern-match prose" is a question with one
+// answer per branch, which is what makes it worth recording.
+//
+// The Gemini branches are the interesting case: GeminiToolAction and GeminiFileAction both key on
+// structured attributes and would qualify as observed on their own, but they are *reached* by
+// substring-matching an event name out of the same blob, so a body mentioning
+// "gemini_cli.file_operation" arrives there too. Tightening the reach to an exact `event.name`
+// comparison would promote them, and is a behavior change rather than a labeling one.
+func InferActionWithFidelity(attrs map[string]interface{}, fallback string) (string, string) {
 	tool := strings.ToLower(FirstString(attrs, "tool.name", "gen_ai.tool.name", "beacon.tool.name", "beacon.gen_ai.tool.name", "mcp.tool", "beacon.mcp.tool", "mcp.tool.name", "function_name", "tool_name"))
 	operation := strings.ToLower(FirstString(attrs, "gen_ai.operation.name"))
 	mcpMethod := strings.ToLower(FirstString(attrs, "mcp.method.name"))
@@ -1644,41 +1711,43 @@ func InferAction(attrs map[string]interface{}, fallback string) string {
 		mcpMethod,
 		FirstString(attrs, "event.name", "codex.op", "rpc.method"),
 	}, " "))
+	observed := asymptoteobserve.FidelityObserved
+	inferred := asymptoteobserve.FidelityInferred
 	switch {
 	case harness == "copilot_cli" || harness == "vscode_copilot":
-		return CopilotAction(attrs, operation, text)
+		return CopilotActionWithFidelity(attrs, operation, text)
 	case mcpMethod == "tools/call":
-		return "mcp.tool_invoked"
+		return "mcp.tool_invoked", observed
 	case mcpMethod == "resources/read" && IsFileURI(FirstString(attrs, "mcp.resource.uri")):
-		return "file.read"
+		return "file.read", observed
 	case mcpServer != "" || FirstString(attrs, "mcp.tool", "beacon.mcp.tool", "mcp.tool.name") != "":
-		return "mcp.tool_invoked"
+		return "mcp.tool_invoked", observed
 	case operation == "execute_tool":
-		return "tool.invoked"
+		return "tool.invoked", observed
 	case (operation == "chat" || operation == "generate_content" || operation == "text_completion") && HasPromptLikeContent(attrs):
-		return "prompt.submitted"
+		return "prompt.submitted", observed
 	case HasToolCall(attrs):
-		return "tool.invoked"
+		return "tool.invoked", observed
 	case strings.Contains(text, "gemini_cli.user_prompt"):
-		return "prompt.submitted"
+		return "prompt.submitted", inferred
 	case strings.Contains(text, "gemini_cli.tool_call"):
-		return GeminiToolAction(attrs)
+		return GeminiToolAction(attrs), inferred
 	case strings.Contains(text, "gemini_cli.file_operation"):
-		return GeminiFileAction(attrs)
+		return GeminiFileAction(attrs), inferred
 	case strings.Contains(text, "approval_mode_switch") || strings.Contains(text, "approval_mode_duration") || strings.Contains(text, "plan_execution"):
-		return "approval.requested"
+		return "approval.requested", inferred
 	case strings.Contains(text, "prompt") || strings.Contains(text, "user_input"):
-		return "prompt.submitted"
+		return "prompt.submitted", inferred
 	case strings.Contains(text, "mcp"):
-		return "mcp.tool_invoked"
+		return "mcp.tool_invoked", inferred
 	case strings.Contains(text, "command") || strings.Contains(text, "shell") || strings.Contains(text, "exec"):
-		return "command.executed"
+		return "command.executed", inferred
 	case strings.Contains(text, "file") || strings.Contains(text, "write") || strings.Contains(text, "edit"):
-		return "file.modified"
+		return "file.modified", inferred
 	case strings.Contains(text, "approval"):
-		return "approval.requested"
+		return "approval.requested", inferred
 	default:
-		return "tool.invoked"
+		return "tool.invoked", inferred
 	}
 }
 
@@ -1740,40 +1809,51 @@ func HasPromptLikeContent(attrs map[string]interface{}) bool {
 	return len(LegacyMessages(attrs, "gen_ai.prompt.", "user")) > 0
 }
 
+// CopilotAction is CopilotActionWithFidelity without the fidelity, kept for callers that only
+// want the action.
 func CopilotAction(attrs map[string]interface{}, operation, text string) string {
+	action, _ := CopilotActionWithFidelity(attrs, operation, text)
+	return action
+}
+
+// CopilotActionWithFidelity classifies a Copilot event on the same structural rule as
+// InferActionWithFidelity: exact `event.name` and `gen_ai.operation.name` comparisons are
+// observed, the substring match and the catch-all are not.
+func CopilotActionWithFidelity(attrs map[string]interface{}, operation, text string) (string, string) {
+	observed := asymptoteobserve.FidelityObserved
 	if eventName := FirstString(attrs, "event.name", "name"); eventName != "" {
 		switch eventName {
 		case "copilot_chat.session.start", "copilot_chat.cloud.session.invoke":
-			return "session.activity"
+			return "session.activity", observed
 		case "copilot_chat.tool.call":
 			if strings.EqualFold(FirstString(attrs, "success"), "false") || FirstString(attrs, "error.type") != "" {
-				return "tool.failed"
+				return "tool.failed", observed
 			}
-			return "tool.invoked"
+			return "tool.invoked", observed
 		case "copilot_chat.edit.feedback", "copilot_chat.edit.hunk.action", "copilot_chat.inline.done":
-			return "file.modified"
+			return "file.modified", observed
 		}
 	}
 	switch {
 	case operation == "invoke_agent" && FirstString(attrs, "copilot_chat.user_request") != "":
-		return "prompt.submitted"
+		return "prompt.submitted", observed
 	case operation == "invoke_agent":
-		return "session.activity"
+		return "session.activity", observed
 	case operation == "execute_hook":
-		return "approval.requested"
+		return "approval.requested", observed
 	case operation == "chat":
 		initiator := strings.ToLower(FirstString(attrs, "github.copilot.initiator"))
 		turnID := FirstString(attrs, "github.copilot.turn_id")
 		if initiator == "agent" || (turnID != "" && turnID != "0") {
-			return "session.activity"
+			return "session.activity", observed
 		}
-		return "prompt.submitted"
+		return "prompt.submitted", observed
 	case operation == "execute_tool":
-		return "tool.invoked"
+		return "tool.invoked", observed
 	case strings.Contains(text, "permission"):
-		return "approval.requested"
+		return "approval.requested", asymptoteobserve.FidelityInferred
 	default:
-		return "tool.invoked"
+		return "tool.invoked", asymptoteobserve.FidelityInferred
 	}
 }
 

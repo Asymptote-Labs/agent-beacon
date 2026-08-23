@@ -154,8 +154,11 @@ func baseEvent(s Session, action, category string, severity schema.Severity, tsU
 		Action:   action,
 		Category: category,
 		Severity: severity,
-		Harness:  schema.HarnessInfo{Name: Harness},
-		Origin:   schema.OriginCloud,
+		// Poll, not hook: the Devin sessions API is read after the fact, so Beacon sees the
+		// messages a run produced rather than observing the agent as it works. Recording that
+		// here is what keeps a consumer from reading these events as endpoint-grade coverage.
+		Harness: schema.HarnessInfo{Name: Harness, CollectionMethod: schema.CollectionMethodPoll},
+		Origin:  schema.OriginCloud,
 		Run: &schema.RunInfo{
 			Provider:   Provider,
 			RunID:      s.SessionID,
