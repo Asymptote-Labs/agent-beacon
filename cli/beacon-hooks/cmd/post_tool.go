@@ -226,6 +226,9 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
 	applyWorkspaceFields(fields, input, filepath.Dir(params.filePath))
+	if platformFlag == "qwen" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
+	}
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 
