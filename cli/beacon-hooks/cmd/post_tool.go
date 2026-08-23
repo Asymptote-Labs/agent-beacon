@@ -183,6 +183,18 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("absolute_path", toolInput, toolResponse)
 	}
+	// `notebook_path` completes the set: it is read by toolFieldsWithResponse, so leaving it out
+	// here made one key resolve in one reader and not its two siblings -- the exact asymmetry that
+	// produced the earlier defects on this branch.
+	//
+	// Stated plainly: adding it changes no behavior today. `notebook_edit` targets a `.ipynb`, which
+	// is not in scannableExtensions, so this path returns before the diff is built whether or not
+	// the path resolved. The event is still recorded as `file.modified` with the right path, from
+	// toolFieldsWithResponse, and still carries no diff. This exists so the three readers agree, and
+	// so the path is already resolvable if `.ipynb` ever becomes scannable.
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("notebook_path", toolInput, toolResponse)
+	}
 	filePath = diff.NormalizePath(filePath)
 
 	if (sessionID == "" && !isDevinLikePlatform(platformFlag)) || toolName == "" || filePath == "" {

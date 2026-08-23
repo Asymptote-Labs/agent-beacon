@@ -24,6 +24,11 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 	if filePath == "" {
 		filePath = GetStringFromMaps("absolute_path", toolInput, toolResponse)
 	}
+	// Kept in step with the resolver in parseClaudeCopilotInput; see the note there for why this
+	// changes no behavior today and is here so the readers do not drift.
+	if filePath == "" {
+		filePath = GetStringFromMaps("notebook_path", toolInput, toolResponse)
+	}
 	filePath = NormalizePath(filePath)
 	if filePath == "" {
 		return ""

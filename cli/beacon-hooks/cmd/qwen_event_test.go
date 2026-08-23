@@ -527,3 +527,52 @@ func TestQwenEveryFailureSignalIsClassifiedAsAFailure(t *testing.T) {
 		t.Fatalf("a clean write was classified %q, want file.modified", got)
 	}
 }
+
+// What a Qwen `notebook_edit` actually records, pinned so the answer is written down rather than
+// rediscovered.
+//
+// It is classified `file.modified` with the notebook's path and a `modify` operation, and it carries
+// no diff. The missing diff is not the path resolver: all three readers now accept `notebook_path`.
+// It is `IsScannableFile`, which does not list `.ipynb`, so the diff path returns before a diff is
+// attempted -- and `notebook_edit`'s payload carries `cell_id` / `new_source` rather than the
+// `old_string` / `new_string` pair the diff builder knows, so there would be nothing to build from
+// without a `structuredPatch`.
+//
+// Recording the path and the action while honestly carrying no diff is the right outcome: the event
+// says a notebook changed, and does not pretend to say how.
+func TestQwenNotebookEditRecordsThePathWithoutClaimingADiff(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"session_id":      "qwen-8f21c4a0",
+		"cwd":             "/Users/example/projects/beacon-demo",
+		"hook_event_name": "PostToolUse",
+		"tool_name":       "notebook_edit",
+		"tool_input": map[string]interface{}{
+			"notebook_path": "/Users/example/projects/beacon-demo/analysis.ipynb",
+			"cell_id":       "cell-1",
+			"new_source":    "print('hello')",
+			"edit_mode":     "replace",
+		},
+		"tool_response": map[string]interface{}{"success": true},
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := qwenAction(t, event); got != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", got)
+	}
+	file, ok := event["file"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no file object: %#v", event)
+	}
+	if file["path"] != "/Users/example/projects/beacon-demo/analysis.ipynb" {
+		t.Fatalf("file.path = %q, want the notebook_path value", file["path"])
+	}
+	if file["operation"] != "modify" {
+		t.Fatalf("file.operation = %q, want modify", file["operation"])
+	}
+	if diff, ok := file["diff"]; ok {
+		t.Fatalf("file.diff = %v; a notebook edit has no diff to build, so claiming one would be "+
+			"asserting content Beacon never saw", diff)
+	}
+}
