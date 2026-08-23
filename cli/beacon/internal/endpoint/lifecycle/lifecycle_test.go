@@ -578,6 +578,12 @@ func TestInstallUserModeWithoutStartingService(t *testing.T) {
 	if len(result.HarnessConfigPaths) != 0 {
 		t.Fatalf("unexpected harness config paths: %#v", result.HarnessConfigPaths)
 	}
+	// Linger is only ever attempted as part of starting the service, so a --no-start install has
+	// not learned anything about logout persistence. Reporting it as applicable-and-off would put
+	// a logout warning on an install that never started a collector to lose.
+	if result.LingerApplicable || result.LingerEnabled || result.LingerDetail != "" || result.LingerRemediation != "" {
+		t.Errorf("a --no-start install should report no linger outcome, got %+v", result)
+	}
 }
 
 func TestInstallFailsBeforeWritingArtifactsWhenCollectorMissing(t *testing.T) {
