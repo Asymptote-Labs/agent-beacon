@@ -339,11 +339,19 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
-	if platformFlag == "qwen" {
-		if interrupted, _ := input["is_interrupt"].(bool); interrupted {
-			emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
-			return
-		}
+	// One predicate decides "did this tool fail", for both the diff-path guard in
+	// parseClaudeCopilotInput and the classification here.
+	//
+	// It was two, and they disagreed: `qwenToolFailed` reads three signals -- the failure event
+	// name, a non-empty `error`, and `is_interrupt` -- while the check above reads only the first
+	// two. An interrupt carrying an empty error therefore skipped the diff path as a failure and
+	// then arrived here to be classified a successful `file.modified`: the exact false positive
+	// this runtime's mapping exists to prevent, reintroduced by the gap between two spellings of
+	// the same question. Calling the predicate rather than restating its logic is what stops that
+	// pair drifting a second time.
+	if platformFlag == "qwen" && qwenToolFailed(input) {
+		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
+		return
 	}
 	action := actionForTool(hookEvent, toolName)
 	category := "tool"
