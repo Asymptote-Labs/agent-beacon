@@ -252,7 +252,38 @@ func writeEndpointJSON(path string, event map[string]interface{}) error {
 	if len(data) > 64*1024 {
 		return fmt.Errorf("endpoint event exceeds 64 KiB after metadata fallback")
 	}
+	// Stamped last, over the bytes that are actually about to be written, so
+	// none of the size fallbacks above can leave the ID describing an event that
+	// no longer exists.
+	if data, err = withEndpointEventID(event, data); err != nil {
+		return err
+	}
 	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+}
+
+// withEndpointEventID fills event.id on an event assembled as a map and returns
+// its re-marshalled line. line must be the marshalled form of event with no ID
+// on it, which is what EventIDForLine is derived from.
+func withEndpointEventID(event map[string]interface{}, line []byte) ([]byte, error) {
+	info, ok := event["event"].(map[string]interface{})
+	if !ok {
+		return line, nil
+	}
+	if id, _ := info["id"].(string); strings.TrimSpace(id) != "" {
+		return line, nil
+	}
+	info["id"] = asymptoteobserve.EventIDForLine(line)
+	data, err := json.Marshal(sanitizeEndpointMap(event))
+	if err != nil {
+		return nil, err
+	}
+	// An event already at the size limit keeps its bytes and goes without an ID:
+	// the limit is a hard contract, and refusing to write an event over forty
+	// bytes of identity would be the worse trade.
+	if len(data) > 64*1024 {
+		return line, nil
+	}
+	return data, nil
 }
 
 func compactEndpointContent(event map[string]interface{}) {

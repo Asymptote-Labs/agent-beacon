@@ -275,9 +275,14 @@ func TestSameHarnessRepeatsSurviveWithoutMatchingCallIDs(t *testing.T) {
 	}
 }
 
-// An equal, non-empty call ID inside the window is the one case the writer does collapse, so
-// requiring two would be a guaranteed false failure.
-func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
+// An equal, non-empty call ID is the one case the writer really does collapse, so requiring two
+// would be a guaranteed false failure.
+//
+// No window applies to it, which is the whole point: a hook writes when the tool runs and the
+// collector writes when its batch flushes, so the two reports of one call land further apart than
+// any window worth having. Both distances are pinned here because the near one used to be the only
+// one that collapsed.
+func TestMatchingCallIDsCollapseAtAnyDistance(t *testing.T) {
 	base := goodLog()
 	withID := func(line, ts, id string) string {
 		line = strings.Replace(line, "18:00:01Z", ts, 1)
@@ -286,7 +291,7 @@ func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
 	}
 	first := withID(base[1], "18:00:01Z", "call-1")
 	same := withID(base[1], "18:00:02Z", "call-1")  // 1s apart, identical call id
-	later := withID(base[1], "18:00:11Z", "call-1") // 10s apart, outside the 2s window
+	later := withID(base[1], "18:00:11Z", "call-1") // 10s apart, well past the 2s window
 
 	sc := demoScenario()
 	sc.Expect = []scenario.Expect{{
@@ -301,8 +306,9 @@ func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
 	}
 
 	outside := run(t, []string{base[0], first, later}, sc, presentSentinel(), nil)
-	if outside.Outcome != Pass {
-		t.Errorf("10s apart is outside the 2s window, so both survive:\n%s", outside.Report())
+	if outside.Outcome != Fail {
+		t.Errorf("equal call IDs are collapsed however far apart they are, so min_count 2 must "+
+			"fail at 10s too:\n%s", outside.Report())
 	}
 }
 

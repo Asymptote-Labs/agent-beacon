@@ -206,6 +206,11 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 		fields["session"] = mergeNested(fields["session"], map[string]interface{}{"id": params.sessionID})
 	}
 	applyWorkspaceFields(fields, input, filepath.Dir(params.filePath))
+	// This emitter writes its event without going through emitHookEvent, so it
+	// has to promote the call ID itself. Every file edit in the log is recorded
+	// twice -- once here, once from OTLP -- and this is the field that lets the
+	// writer tell that the two are one edit.
+	applyToolCallID(fields, input)
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 

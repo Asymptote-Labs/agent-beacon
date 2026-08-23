@@ -42,13 +42,29 @@ func IsDuplicateEndpointEvent(path string, candidateLine []byte, window time.Dur
 		if !ok || existing.key != candidate.key {
 			continue
 		}
-		// Same-harness events are normally preserved because two adjacent calls
-		// can legitimately target the same file or command. A stable tool call
-		// ID makes an exact duplicate safe to collapse.
+		// An equal, non-empty tool call ID is the runtime's own statement that
+		// these two lines describe one call, and it settles the question on its
+		// own: no window, and no interest in which capture path reported it.
+		//
+		// The window is deliberately not applied here. A hook writes when the
+		// tool runs and the collector writes when its batch flushes, so the two
+		// reports of one call routinely land five seconds apart -- past the
+		// two-second window that is the only thing that ever collapsed them.
+		if existing.callID != "" && existing.callID == candidate.callID {
+			return true
+		}
+		// Without matching IDs, only the timing heuristic is left, and only
+		// across capture paths: two adjacent calls from one path can
+		// legitimately touch the same file or command, so same-harness
+		// lookalikes are preserved.
+		//
+		// Unequal IDs are not evidence of two calls unless one path assigned
+		// both. Beacon's paths do not share an ID space -- OpenCode's own call
+		// ID and the span ID the collector sees for the same call are simply
+		// different names -- so across harnesses the IDs are ignored rather
+		// than trusted to disagree.
 		if existing.harness == candidate.harness {
-			if existing.callID == "" || candidate.callID == "" || existing.callID != candidate.callID {
-				continue
-			}
+			continue
 		}
 		diff := candidate.ts.Sub(existing.ts)
 		if diff < 0 {

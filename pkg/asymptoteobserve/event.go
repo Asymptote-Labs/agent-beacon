@@ -48,7 +48,11 @@ const (
 	AttributeRunEphemeral  = "beacon.run.ephemeral"
 )
 
+// EventInfo names what happened. ID is the event's stable identity: see
+// EventIDForLine for how it is derived and what equality between two of them
+// means.
 type EventInfo struct {
+	ID       string `json:"id,omitempty"`
 	Kind     string `json:"kind"`
 	Action   string `json:"action"`
 	Category string `json:"category,omitempty"`

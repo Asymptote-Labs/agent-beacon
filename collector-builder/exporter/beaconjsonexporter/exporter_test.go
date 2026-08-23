@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -157,6 +158,46 @@ func TestJSONLWriterDedupesRuntimeEvents(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("expected duplicate event to be suppressed, got %d lines: %s", len(lines), string(data))
+	}
+}
+
+// The collector writes an event with the same identity the hook writer would
+// give it, or the two capture paths cannot recognise each other's reports.
+func TestJSONLWriterStampsTheSameEventIDTheHookWriterWould(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writer := jsonlWriter{
+		path:           path,
+		maxEventBytes:  defaultMaxEventBytes,
+		rotateBytes:    defaultRotateBytes,
+		rotateArchives: defaultRotateArchives,
+		redactSecrets:  true,
+	}
+	event := newBeaconEvent("command.executed", "command", "info", "claude_code", time.Date(2026, 8, 21, 18, 0, 7, 0, time.UTC))
+	event.Message = "Shell command executed"
+	event.Session = &sessionInfo{ID: "s1", WorkingDirectory: "/repo"}
+	event.Command = &commandInfo{Command: "echo hi"}
+	event.GenAI = &beaconevent.GenAIInfo{Tool: &beaconevent.GenAIToolInfo{Call: &beaconevent.GenAIToolCallInfo{ID: "toolu_1"}}}
+
+	if err := writer.append(event); err != nil {
+		t.Fatalf("append returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	var written beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &written); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	// The hook path writes the same call at a different second with a different
+	// message, and derives its ID from the same four parts.
+	hookLine := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed"},` +
+		`"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},` +
+		`"command":{"command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}},` +
+		`"message":"Tool execution observed"}`
+	if want := asymptoteobserve.EventIDForLine([]byte(hookLine)); written.Event.ID != want {
+		t.Fatalf("collector event.id = %s, but the hook's report of the same call derives %s",
+			written.Event.ID, want)
 	}
 }
 

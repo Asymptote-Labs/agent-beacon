@@ -82,6 +82,21 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	if len(data) > opts.MaxBytes {
 		return "", fmt.Errorf("event exceeds maximum size after truncation: %d bytes", len(data))
 	}
+	// Stamped last, over the bytes that are actually about to be written, so the
+	// truncation fallback above cannot leave the ID describing an event that no
+	// longer exists. An event already at the size limit keeps its bytes and goes
+	// without one: the limit is a hard contract, and refusing to write an event
+	// over forty bytes of identity would be the worse trade.
+	if event.Event.ID == "" {
+		event.Event.ID = asymptoteobserve.EventIDForLine(data)
+		stamped, err := json.Marshal(event)
+		if err != nil {
+			return "", err
+		}
+		if len(stamped) <= opts.MaxBytes {
+			data = stamped
+		}
+	}
 	if err := appendJSONL(opts.Path, append(data, '\n'), opts.RotateSize, opts.RotateArchives); err != nil {
 		return "", err
 	}

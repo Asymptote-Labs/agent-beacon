@@ -110,3 +110,28 @@ func TestIsDuplicateEndpointEventMatchesToolCompletion(t *testing.T) {
 	}
 	t.Fatal("expected duplicate tool completion within custom window")
 }
+
+// The regression this exists to prevent. Duplicate suppression was fixed in July
+// to collapse the hook and OTLP reports of one action, keyed on the two paths
+// reporting different harness names. Harness normalization then landed in
+// August -- correct on its own terms, and a real fix -- after which both paths
+// reported claude_code, every pair took the same-harness branch, and that branch
+// needed a call ID that nothing ever populated. Suppression was inert from
+// that day on, and no test could have caught it because each change was right by
+// itself.
+func TestIsDuplicateEndpointEventCollapsesNormalizedHarnessOnCallID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	hook := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"echo hi"},"tool":{"name":"Bash","command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}},"message":"Shell command executed"}`
+	otlp := []byte(`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"command.executed"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"echo hi"},"tool":{"name":"Bash","command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}},"message":"Shell command executed"}`)
+	if err := os.WriteFile(path, []byte(hook+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	// Six seconds apart, which is the ordinary case rather than an edge one: the
+	// hook writes when the tool runs and the collector writes when its batch
+	// flushes. The two-second window never stood a chance, which is why an equal
+	// call ID does not consult it.
+	if !IsDuplicateEndpointEvent(path, otlp, EndpointDuplicateWindow) {
+		t.Fatal("the hook and OTLP reports of one Bash call should collapse on their shared call ID")
+	}
+}

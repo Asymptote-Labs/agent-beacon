@@ -15,6 +15,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/git"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var runInventoryHeartbeatCommand = exec.CommandContext
@@ -36,6 +37,7 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if isCascadePlatform(platformFlag) {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"cascade": input})
 	}
+	applyToolCallID(fields, input)
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}
@@ -257,7 +259,81 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 			fields[key] = value
 		}
 	}
+	// The call ID goes on every tool event, not just the MCP ones that happened
+	// to build a gen_ai object for their arguments. It is the join key: without
+	// it nothing links this call to its result, or to the OTLP record of the
+	// same action. Only the ID is promoted here -- arguments and results are a
+	// separate question about what Beacon retains, not about identity.
+	if callID := toolCallIDIn(toolInput, toolResponse); callID != "" {
+		setToolCallID(fields, callID)
+	}
 	return fields
+}
+
+// toolCallIDIn reads the runtime's own identifier for one tool invocation out of
+// the payload maps a hook mapper has to hand.
+//
+// The alias list is shared with the OTLP path so both capture paths promote the
+// same value to the same field, which is what lets duplicate suppression
+// recognise the two reports of one action as one action.
+func toolCallIDIn(inputs ...map[string]interface{}) string {
+	return firstToolStringAcross(inputs, asymptoteobserve.ToolCallIDKeys...)
+}
+
+// applyToolCallID promotes a call ID carried at the top level of a hook payload,
+// which is where Claude Code puts tool_use_id -- outside tool_input, so no
+// amount of reading the tool arguments would ever have found it.
+//
+// Only an event that already describes a tool action takes one. A session
+// lifecycle payload that happens to echo an ID is not a tool call, and giving it
+// the join key of one would join it to work it did not do.
+func applyToolCallID(fields, input map[string]interface{}) {
+	if fields == nil || toolCallIDOf(fields) != "" || !describesToolAction(fields) {
+		return
+	}
+	if callID := toolCallIDIn(input); callID != "" {
+		setToolCallID(fields, callID)
+	}
+}
+
+func describesToolAction(fields map[string]interface{}) bool {
+	for _, key := range []string{"tool", "command", "file", "mcp"} {
+		if value, ok := fields[key].(map[string]interface{}); ok && len(value) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// toolCallIDOf reads back what setToolCallID wrote, so a mapper that already
+// found the ID somewhere better is not overwritten by a weaker source.
+func toolCallIDOf(fields map[string]interface{}) string {
+	genAI, _ := fields["gen_ai"].(map[string]interface{})
+	tool, _ := genAI["tool"].(map[string]interface{})
+	call, _ := tool["call"].(map[string]interface{})
+	id, _ := call["id"].(string)
+	return strings.TrimSpace(id)
+}
+
+// setToolCallID writes gen_ai.tool.call.id, creating the objects on the way down
+// and leaving whatever is already in them alone. mergeNested cannot do this: it
+// is a one-level merge, so writing the call through it would replace the whole
+// tool object and drop the name and arguments an MCP event puts there.
+func setToolCallID(fields map[string]interface{}, callID string) {
+	genAI := mutableChild(fields["gen_ai"])
+	tool := mutableChild(genAI["tool"])
+	call := mutableChild(tool["call"])
+	call["id"] = callID
+	tool["call"] = call
+	genAI["tool"] = tool
+	fields["gen_ai"] = genAI
+}
+
+func mutableChild(value interface{}) map[string]interface{} {
+	if existing, ok := value.(map[string]interface{}); ok && existing != nil {
+		return existing
+	}
+	return map[string]interface{}{}
 }
 
 func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface{}) map[string]interface{} {

@@ -231,8 +231,8 @@ func evaluate(v *Verdict, log Log, exp scenario.Expect, idx int, canary string) 
 // Three rules matter, all taken from pkg/asymptoteobserve/dedupe.go:
 //
 //   - only dedupeActions are candidates at all; every other action is preserved verbatim
-//   - same harness collapses only on equal non-empty call IDs; different harness collapses on
-//     the window alone
+//   - equal non-empty call IDs collapse on their own, with no window and regardless of harness;
+//     otherwise a different harness collapses on the window alone and the same harness never does
 //   - the window is 2s, except tool.completed which uses 10s
 func collapseDuplicates(events []Event) []Event {
 	if len(events) < 2 {
@@ -254,12 +254,16 @@ func collapseDuplicates(events []Event) []Event {
 			if prev.Action() != e.Action() || identity(prev) != identity(e) {
 				continue
 			}
-			// Same harness needs matching, non-empty call IDs before the writer collapses.
+			// An equal, non-empty call ID settles it on its own: the writer applies no window
+			// there, because the hook and the collector report one call seconds apart.
+			if a, b := callIDOf(prev), callIDOf(e); a != "" && a == b {
+				suppressed = true
+				break
+			}
+			// Without that, the same harness never collapses: two adjacent calls can
+			// legitimately touch the same file or command.
 			if harnessOf(prev) == harnessOf(e) {
-				a, b := callIDOf(prev), callIDOf(e)
-				if a == "" || b == "" || a != b {
-					continue
-				}
+				continue
 			}
 			pts, err := time.Parse(time.RFC3339, prev.Typed.Timestamp)
 			if err != nil {
