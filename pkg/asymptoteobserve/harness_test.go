@@ -18,6 +18,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"vscode":      "vscode_copilot",
 		"pi":          "pi_cli",
 		"cline":       "cline",
+		"qwen":        "qwen_code",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -36,7 +37,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway", "pi_cli", "cline",
+		"openclaw_gateway", "pi_cli", "cline", "qwen_code",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -149,6 +150,49 @@ func TestClineIsNotAttributedToClaudeCode(t *testing.T) {
 	for _, in := range []string{"cline", "Cline", "cline_cli", "cline.bot"} {
 		if got := NormalizeHarnessName(in); got == "claude_code" {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want Cline to keep its own harness", in, got)
+		}
+	}
+}
+
+// Qwen Code reaches Beacon under more than one spelling: the hook path installs with
+// --platform qwen, while the OTLP path reports whatever the runtime puts in its resource
+// attributes. Both must land on the same canonical name or one session is recorded as two.
+func TestQwenSpellingsConvergeOnQwenCode(t *testing.T) {
+	for _, in := range []string{
+		"qwen", "Qwen", "QWEN", " qwen ", "qwen_code", "qwen-code", "Qwen Code", "qwencode",
+		"qwen_cli", "qwen-cli", "qwen cli", "qwen-coder", "Qwen Coder",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "qwen_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "qwen_code")
+			}
+		})
+	}
+}
+
+// The reason the Qwen case is an equality match rather than a Contains rule. Every Qwen model id
+// starts with the same four letters as the harness, so a substring rule would relabel any name
+// carrying a model string as a Qwen Code session -- turning a model into a runtime in every
+// dashboard grouped by harness.name.
+func TestQwenModelNamesAreNotTreatedAsTheHarness(t *testing.T) {
+	for _, name := range []string{
+		"qwen3-coder-plus", "qwen3-coder", "qwen-max", "qwen-turbo", "qwen2.5-coder-32b-instruct",
+	} {
+		if got := NormalizeHarnessName(name); got != name {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want the model name preserved rather than "+
+				"reported as the Qwen Code harness", name, got)
+		}
+	}
+}
+
+// Qwen Code is a Gemini CLI fork, which is exactly why this needs a test: the generic
+// Contains(lower, "gemini") rule sits above the Qwen case, and Qwen Code keeps some Gemini-derived
+// paths on disk. A Qwen session attributed to gemini_cli would be filed under a runtime the user
+// does not have installed.
+func TestQwenIsNotAttributedToGeminiCLI(t *testing.T) {
+	for _, in := range []string{"qwen", "qwen-code", "qwen_code", "Qwen Code"} {
+		if got := NormalizeHarnessName(in); got != "qwen_code" {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want qwen_code", in, got)
 		}
 	}
 }
