@@ -86,6 +86,10 @@ call was seen. Anything counting real operator decisions should exclude them.
 | `harness` | Runtime that produced the signal |
 | `harness.collection_method` | Optional. `hook`, `plugin`, `otlp`, or `poll` — see [Provenance](#provenance-how-beacon-knows-what-it-wrote) |
 
+`event.id` is written alongside these: a deterministic UUID identifying the event, described under
+[event identity](/telemetry-schema/normalization#event-identity). It is not required, so events
+written by earlier agent versions remain valid.
+
 ## How it extends OpenTelemetry
 
 Beacon accepts OpenTelemetry attributes, including the GenAI semantic conventions, and projects them into fields that are easier to query across agent runtimes. OpenTelemetry context is preserved under `gen_ai` where available, while commonly investigated values are also normalized into Beacon fields such as `model`, `tool.name`, `prompt.text`, `command.command`, `file.path`, and `gen_ai.usage`.

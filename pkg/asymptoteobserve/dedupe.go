@@ -39,26 +39,75 @@ func IsDuplicateEndpointEvent(path string, candidateLine []byte, window time.Dur
 	effectiveWindow := endpointDedupeWindow(candidate.action, window)
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		existing, ok := endpointDedupeCandidate(line)
-		if !ok || existing.key != candidate.key {
+		if !ok {
 			continue
 		}
-		// Same-harness events are normally preserved because two adjacent calls
-		// can legitimately target the same file or command. A stable tool call
-		// ID makes an exact duplicate safe to collapse.
-		if existing.harness == candidate.harness {
-			if existing.callID == "" || candidate.callID == "" || existing.callID != candidate.callID {
-				continue
-			}
-		}
-		diff := candidate.ts.Sub(existing.ts)
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff <= effectiveWindow {
+		if duplicateEndpointEvents(existing, candidate, effectiveWindow) {
 			return true
 		}
 	}
 	return false
+}
+
+// DuplicateEndpointLines reports whether candidate duplicates existing under the
+// same rules the writer applies when appending to a runtime log.
+//
+// Exported for readers that must agree with the writer about what one action is
+// -- the sandbox verifier, which counts captured events against a scenario's
+// expectations, and anything else that would otherwise keep a second copy of
+// these rules. A second copy is the thing this change exists to stop: two
+// implementations of one rule have already drifted apart here once, silently,
+// and a duplicated suppression rule is no safer than a duplicated harness name
+// was.
+//
+// window is the caller's base window; the action-specific floor still applies.
+func DuplicateEndpointLines(existing, candidate []byte, window time.Duration) bool {
+	parsedCandidate, ok := endpointDedupeCandidate(candidate)
+	if !ok {
+		return false
+	}
+	parsedExisting, ok := endpointDedupeCandidate(existing)
+	if !ok {
+		return false
+	}
+	return duplicateEndpointEvents(parsedExisting, parsedCandidate,
+		endpointDedupeWindow(parsedCandidate.action, window))
+}
+
+// duplicateEndpointEvents is the one pairwise decision both entry points share,
+// kept on parsed events so the tail scan does not reparse the candidate for
+// every line it compares it against.
+func duplicateEndpointEvents(existing, candidate endpointDedupeEvent, effectiveWindow time.Duration) bool {
+	if existing.key != candidate.key {
+		return false
+	}
+	// An equal, non-empty tool call ID is the runtime's own statement that these
+	// two lines describe one call, and it settles the question on its own: no
+	// window, and no interest in which capture path reported it.
+	//
+	// The window is deliberately not applied here. A hook writes when the tool
+	// runs and the collector writes when its batch flushes, so the two reports
+	// of one call routinely land five seconds apart -- past the two-second
+	// window that is the only thing that ever collapsed them.
+	if existing.callID != "" && existing.callID == candidate.callID {
+		return true
+	}
+	// Without matching IDs, only the timing heuristic is left, and only across
+	// capture paths: two adjacent calls from one path can legitimately touch the
+	// same file or command, so same-harness lookalikes are preserved.
+	//
+	// Unequal IDs are not evidence of two calls unless one path assigned both.
+	// Beacon's paths do not share an ID space -- OpenCode's own call ID and the
+	// span ID the collector sees for the same call are simply different names --
+	// so across harnesses the IDs are ignored rather than trusted to disagree.
+	if existing.harness == candidate.harness {
+		return false
+	}
+	diff := candidate.ts.Sub(existing.ts)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= effectiveWindow
 }
 
 func readEndpointDedupeTail(path string) ([]byte, error) {
@@ -163,7 +212,19 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 	case "command.executed":
 		return canonicalTarget("command", nestedString(event, "command", "command"), nestedString(event, "tool", "command"))
 	case "file.read", "file.modified":
-		return canonicalTarget("file", nestedString(event, "file", "path"), nestedString(event, "file", "operation"))
+		// The path alone, deliberately. file.operation is the one part of a file
+		// event the two capture paths describe differently for the same action:
+		// a Claude Code Write reaches the hook through diffFields, which records
+		// "modify", and reaches the collector as "create". Including it in the
+		// target let one action fail to match itself, so every Write stayed in
+		// the log twice however well the two events were identified otherwise.
+		//
+		// Nothing is lost by dropping it. The action already separates a read
+		// from a write, and within file.modified the operation only ever varies
+		// between two words for the same event -- so it discriminated nothing
+		// and disagreed often. The sandbox checker's mirror of this key has
+		// always used the path alone.
+		return canonicalTarget("file", nestedString(event, "file", "path"))
 	case "tool.completed":
 		return canonicalTarget("tool.completed", stringValue(event["model"]), stringValue(event["message"]))
 	case "tool.invoked", "tool.failed":

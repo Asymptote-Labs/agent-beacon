@@ -767,6 +767,17 @@ func TestCapturedClaudeCodeLogNormalization(t *testing.T) {
 		t.Fatalf("raw attributes changed: %#v", bash.Raw)
 	}
 
+	// Claude Code names every tool call with a tool_use_id and puts the same one
+	// on the decision and the result. Promoting it is what links an approval to
+	// the execution it approved, and this event to the hook's report of the same
+	// command; until it was promoted the value reached the log only inside raw.
+	if got := toolCallIDOfEvent(decision); got != "toolu_fixture_bash" {
+		t.Fatalf("decision call ID = %q, want the tool_use_id Claude Code assigned", got)
+	}
+	if got := toolCallIDOfEvent(bash); got != "toolu_fixture_bash" {
+		t.Fatalf("bash call ID = %q, want the tool_use_id Claude Code assigned", got)
+	}
+
 	for _, tc := range []struct {
 		name      string
 		action    string
@@ -785,6 +796,38 @@ func TestCapturedClaudeCodeLogNormalization(t *testing.T) {
 		if event.Tool == nil || event.Tool.Path != event.File.Path {
 			t.Fatalf("%s tool = %#v, want mirrored path", tc.name, event.Tool)
 		}
+		if toolCallIDOfEvent(event) == "" {
+			t.Fatalf("%s has no call ID, so nothing links it to the hook's report of the same edit", tc.name)
+		}
+	}
+	if toolCallIDOfEvent(byName["write_result"]) == toolCallIDOfEvent(byName["read_result"]) {
+		t.Fatal("the write and the read are separate calls and must not share a call ID")
+	}
+}
+
+func toolCallIDOfEvent(event Event) string {
+	if event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Call == nil {
+		return ""
+	}
+	return event.GenAI.Tool.Call.ID
+}
+
+// Codex names its calls call_id rather than tool_use_id. Both are read from one
+// shared alias list, so a runtime cannot be supported on one capture path and
+// invisible on the other.
+func TestCapturedCodexLogPromotesItsOwnCallID(t *testing.T) {
+	_, events := capturedLogEvents(t, "codex-0.142.4.json")
+	found := false
+	for _, event := range events {
+		if id := toolCallIDOfEvent(event); id != "" {
+			if id != "call_fixture" {
+				t.Fatalf("call ID = %q, want the call_id Codex assigned", id)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no event promoted Codex's call_id")
 	}
 }
 

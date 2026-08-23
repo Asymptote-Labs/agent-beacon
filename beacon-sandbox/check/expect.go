@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/scenario"
+	obs "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-// DuplicateWindow mirrors IsDuplicateEndpointEvent's suppression window in the writer.
+// DuplicateWindow is the writer's own base suppression window, not a copy of it.
 //
 // Identical events written within this window are collapsed to one, so a scenario that runs
 // the same command twice in quick succession legitimately yields a single event. Without
 // modelling this, such a scenario would be a guaranteed false failure.
-const DuplicateWindow = 2 * time.Second
+const DuplicateWindow = obs.EndpointDuplicateWindow
 
 // Sentinel describes whether the agent demonstrably performed the scenario's work.
 type Sentinel struct {
@@ -217,59 +217,28 @@ func evaluate(v *Verdict, log Log, exp scenario.Expect, idx int, canary string) 
 	})
 }
 
-// collapseDuplicates removes matches the writer would have suppressed, so counting reflects what
-// Beacon can actually be expected to have recorded.
+// collapseDuplicates removes matches the writer would have suppressed, so counting reflects
+// what Beacon can actually be expected to have recorded.
 //
-// This mirrors asymptoteobserve.IsDuplicateEndpointEvent rather than approximating it. An earlier
-// version collapsed any same-identity pair inside the window regardless of harness or call ID,
-// which over-collapsed badly: every event in a sandbox run carries harness claude_code, and the
-// real writer preserves same-harness repeats unless both events share an equal, non-empty tool
-// call ID -- because two adjacent calls can legitimately touch the same file or command. The
-// crude model therefore under-counted legitimate repeats and could fail a min_count the writer
-// would never have collapsed. Reported by Cursor Bugbot.
+// It asks the writer rather than modelling it. This used to be a hand-written mirror of
+// asymptoteobserve.IsDuplicateEndpointEvent, and it drifted twice: once by collapsing any
+// same-identity pair regardless of harness or call ID, which over-collapsed and could fail a
+// min_count the writer would never have suppressed (reported by Cursor Bugbot); and once by
+// keying on event.message, which the writer's key does not include -- so the hook and collector
+// reports of one call, whose messages differ, stayed two events here and one there. Both were
+// the same bug: a second copy of a rule, drifting.
 //
-// Three rules matter, all taken from pkg/asymptoteobserve/dedupe.go:
-//
-//   - only dedupeActions are candidates at all; every other action is preserved verbatim
-//   - same harness collapses only on equal non-empty call IDs; different harness collapses on
-//     the window alone
-//   - the window is 2s, except tool.completed which uses 10s
+// obs.DuplicateEndpointLines takes the raw lines, which is exactly what a verifier has, and
+// applies the writer's own comparison. There is nothing left here to drift.
 func collapseDuplicates(events []Event) []Event {
 	if len(events) < 2 {
 		return events
 	}
 	var out, kept []Event
 	for _, e := range events {
-		if !dedupeCandidate(e) {
-			out = append(out, e)
-			continue
-		}
-		ts, err := time.Parse(time.RFC3339, e.Typed.Timestamp)
-		if err != nil {
-			out = append(out, e)
-			continue
-		}
 		suppressed := false
 		for _, prev := range kept {
-			if prev.Action() != e.Action() || identity(prev) != identity(e) {
-				continue
-			}
-			// Same harness needs matching, non-empty call IDs before the writer collapses.
-			if harnessOf(prev) == harnessOf(e) {
-				a, b := callIDOf(prev), callIDOf(e)
-				if a == "" || b == "" || a != b {
-					continue
-				}
-			}
-			pts, err := time.Parse(time.RFC3339, prev.Typed.Timestamp)
-			if err != nil {
-				continue
-			}
-			diff := ts.Sub(pts)
-			if diff < 0 {
-				diff = -diff
-			}
-			if diff <= dedupeWindowFor(e.Action()) {
+			if obs.DuplicateEndpointLines([]byte(prev.Raw), []byte(e.Raw), DuplicateWindow) {
 				suppressed = true
 				break
 			}
@@ -281,65 +250,6 @@ func collapseDuplicates(events []Event) []Event {
 		out = append(out, e)
 	}
 	return out
-}
-
-// dedupeActions is the exact set the writer considers for suppression. Anything outside it is
-// never collapsed, so treating it as collapsible would invent suppression that does not happen.
-var dedupeActions = map[string]bool{
-	"mcp.tool_invoked": true, "command.executed": true,
-	"file.read": true, "file.modified": true,
-	"tool.invoked": true, "tool.completed": true, "tool.failed": true,
-}
-
-// dedupeCandidate mirrors the writer's preconditions: a candidate action plus a session id, since
-// an event without one is never suppressed.
-func dedupeCandidate(e Event) bool {
-	if !dedupeActions[e.Action()] {
-		return false
-	}
-	return e.Typed.Session != nil && e.Typed.Session.ID != ""
-}
-
-// dedupeWindowFor mirrors endpointDedupeWindow: tool.completed gets a longer window because the
-// same completion can legitimately be reported twice further apart.
-func dedupeWindowFor(action string) time.Duration {
-	if strings.EqualFold(action, "tool.completed") {
-		return 10 * time.Second
-	}
-	return DuplicateWindow
-}
-
-func harnessOf(e Event) string {
-	if v, ok := e.Field("harness.name"); ok {
-		return strings.ToLower(fmt.Sprint(v))
-	}
-	return ""
-}
-
-func callIDOf(e Event) string {
-	if v, ok := e.Field("gen_ai.tool.call.id"); ok {
-		return fmt.Sprint(v)
-	}
-	return ""
-}
-
-// identity approximates what the writer considers "the same event", using the fields that
-// carry the payload rather than the whole line (which includes varying timestamps).
-func identity(e Event) string {
-	parts := []string{e.Typed.Message}
-	if e.Typed.Command != nil {
-		parts = append(parts, e.Typed.Command.Command)
-	}
-	if e.Typed.Tool != nil {
-		parts = append(parts, e.Typed.Tool.Name, e.Typed.Tool.Command)
-	}
-	if e.Typed.File != nil {
-		parts = append(parts, e.Typed.File.Path)
-	}
-	if e.Typed.Prompt != nil {
-		parts = append(parts, e.Typed.Prompt.Text)
-	}
-	return strings.Join(parts, "\x00")
 }
 
 // sortedKeys keeps findings stable across runs, so a diff between two verdicts reflects

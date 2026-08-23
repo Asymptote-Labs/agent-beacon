@@ -275,9 +275,14 @@ func TestSameHarnessRepeatsSurviveWithoutMatchingCallIDs(t *testing.T) {
 	}
 }
 
-// An equal, non-empty call ID inside the window is the one case the writer does collapse, so
-// requiring two would be a guaranteed false failure.
-func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
+// An equal, non-empty call ID is the one case the writer really does collapse, so requiring two
+// would be a guaranteed false failure.
+//
+// No window applies to it, which is the whole point: a hook writes when the tool runs and the
+// collector writes when its batch flushes, so the two reports of one call land further apart than
+// any window worth having. Both distances are pinned here because the near one used to be the only
+// one that collapsed.
+func TestMatchingCallIDsCollapseAtAnyDistance(t *testing.T) {
 	base := goodLog()
 	withID := func(line, ts, id string) string {
 		line = strings.Replace(line, "18:00:01Z", ts, 1)
@@ -286,7 +291,7 @@ func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
 	}
 	first := withID(base[1], "18:00:01Z", "call-1")
 	same := withID(base[1], "18:00:02Z", "call-1")  // 1s apart, identical call id
-	later := withID(base[1], "18:00:11Z", "call-1") // 10s apart, outside the 2s window
+	later := withID(base[1], "18:00:11Z", "call-1") // 10s apart, well past the 2s window
 
 	sc := demoScenario()
 	sc.Expect = []scenario.Expect{{
@@ -301,8 +306,70 @@ func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
 	}
 
 	outside := run(t, []string{base[0], first, later}, sc, presentSentinel(), nil)
-	if outside.Outcome != Pass {
-		t.Errorf("10s apart is outside the 2s window, so both survive:\n%s", outside.Report())
+	if outside.Outcome != Fail {
+		t.Errorf("equal call IDs are collapsed however far apart they are, so min_count 2 must "+
+			"fail at 10s too:\n%s", outside.Report())
+	}
+}
+
+// The hook and the collector describe one call in different words. The hook writes
+// "Shell command executed"; the collector writes "Tool execution observed". The writer's key does
+// not include the message, so it collapses them -- and the verifier has to agree, or it counts two
+// events where the log will only ever hold one. It did not agree while it kept its own copy of the
+// rule and keyed that copy on the message. Reported by Cursor Bugbot.
+func TestOneCallDescribedInDifferentWordsCollapses(t *testing.T) {
+	base := goodLog()
+	withIDAndMessage := func(line, ts, message string) string {
+		line = strings.Replace(line, "18:00:01Z", ts, 1)
+		line = strings.Replace(line, `"message":"claude_code.tool_result"`, `"message":"`+message+`"`, 1)
+		return strings.Replace(line, `"tool":{"name":"Bash"}`,
+			`"tool":{"name":"Bash"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}`, 1)
+	}
+	hook := withIDAndMessage(base[1], "18:00:01Z", "Shell command executed")
+	collector := withIDAndMessage(base[1], "18:00:07Z", "Tool execution observed")
+
+	sc := demoScenario()
+	sc.Expect = []scenario.Expect{{
+		Action: "command.executed", Fields: []string{"command.command"}, MinCount: 2,
+		Why: "one call cannot be counted twice just because the two paths word it differently",
+	}}
+
+	v := run(t, []string{base[0], hook, collector}, sc, presentSentinel(), nil)
+	if v.Outcome != Fail {
+		t.Errorf("the two reports of one call share a call ID and must collapse to one, so "+
+			"min_count 2 has to fail:\n%s", v.Report())
+	}
+}
+
+// One MultiEdit touching two files is two edits under one call ID, and the verifier has to keep
+// both: the writer's key includes the target, so different paths are different events however
+// equal the call ID is.
+//
+// This is the guard on the previous test. Making an equal call ID sufficient on its own is the
+// obvious way to fix a message-driven under-collapse, and it silently trades it for an
+// over-collapse -- which is worse, because it fails a min_count the writer would have satisfied.
+// Asking the writer instead of reordering a copy of its rules is what keeps both true at once.
+func TestMultiEditToTwoFilesUnderOneCallIDKeepsBoth(t *testing.T) {
+	base := goodLog()
+	edit := func(path string) string {
+		return `{"timestamp":"2026-08-02T18:00:01Z","vendor":"beacon","product":"endpoint-agent",` +
+			`"schema_version":"1.0","event":{"kind":"agent_runtime","action":"file.modified",` +
+			`"category":"file"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},` +
+			`"harness":{"name":"claude_code"},"session":{"id":"s1"},"file":{"path":"` + path +
+			`","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_multi"}}},` +
+			`"message":"File edit observed"}`
+	}
+
+	sc := demoScenario()
+	sc.Expect = []scenario.Expect{{
+		Action: "file.modified", Fields: []string{"file.path"}, MinCount: 2,
+		Why: "one MultiEdit editing two files is two edits, not one",
+	}}
+
+	v := run(t, []string{base[0], edit("/repo/a.go"), edit("/repo/b.go")}, sc, presentSentinel(), nil)
+	if v.Outcome != Pass {
+		t.Errorf("two files edited under one call ID are two events and the writer keeps both, "+
+			"so min_count 2 must pass:\n%s", v.Report())
 	}
 }
 
