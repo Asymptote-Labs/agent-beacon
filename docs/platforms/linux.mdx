@@ -34,14 +34,24 @@ If you are not an administrator on the machine, or you would rather not touch sy
 tarball and install in user mode:
 
 ```bash title="Tarball install, no root required"
-VERSION=1.2.0   # or whichever release you are installing
-curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/beacon_${VERSION}_linux_amd64.tar.gz
-curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/checksums.txt
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"
+VERSION="${LATEST_URL##*/v}"
 
-# Verify before extracting. This is the integrity check for the tarball.
-sha256sum --check --ignore-missing checksums.txt
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "Beacon publishes Linux archives for amd64 and arm64, not $(uname -m)" >&2; exit 1 ;;
+esac
 
-tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+ARCHIVE="beacon_${VERSION}_linux_${ARCH}.tar.gz"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${ARCHIVE}"
+curl -fsSLO "${BASE}/checksums.txt"
+
+# Verify this exact archive before extracting it, by the name about to be extracted.
+grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
+
+tar -xzf "${ARCHIVE}"
 mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
 
 # ~/.local/bin is already on PATH on most distributions; if `beacon version` fails, add it:
@@ -49,6 +59,11 @@ mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
 beacon version
 beacon endpoint install
 ```
+
+The version comes from the current release rather than a number you have to keep up to date, and
+the architecture comes from `uname -m`: `x86_64` maps to the published `amd64` archive and
+`aarch64` to `arm64`. An architecture Beacon does not publish stops the run before anything is
+downloaded.
 
 The archive contains three binaries — the `beacon` CLI, the `beacon-hooks` adapter that captures
 tool activity, and the `beacon-otelcol` collector. All three are needed, and all three are
