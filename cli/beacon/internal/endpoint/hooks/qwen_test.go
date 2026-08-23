@@ -19,6 +19,7 @@ func decodeQwenHooks(t *testing.T, path string) map[string][]struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
+		Shell   string `json:"shell"`
 	} `json:"hooks"`
 } {
 	t.Helper()
@@ -33,6 +34,7 @@ func decodeQwenHooks(t *testing.T, path string) map[string][]struct {
 				Type    string `json:"type"`
 				Command string `json:"command"`
 				Timeout int    `json:"timeout"`
+				Shell   string `json:"shell"`
 			} `json:"hooks"`
 		} `json:"hooks"`
 	}
@@ -391,4 +393,57 @@ func readFileString(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+// The second way this installer can look correct and collect nothing.
+//
+// Beacon builds its hook command with hookCommandQuote, which single-quotes every path on every
+// platform. That is POSIX quoting: literal in bash, and *not* valid in cmd.exe, where the quotes
+// are ordinary characters and the command never resolves to an executable. Qwen picks the shell it
+// runs a command hook with, and a Node-hosted runtime left to the Windows default lands on cmd.exe
+// -- so without this field every hook on a Windows host fails to start while `endpoint hooks
+// install` still prints success and the settings file still reads correctly.
+//
+// Same silent-failure shape as a seconds-valued timeout, and it gets the same tripwire. `bash` is
+// the only one of Qwen's two documented values that can parse what Beacon writes; `powershell`
+// would treat a quoted string in command position as an expression.
+func TestQwenHooksDeclareTheShellTheirQuotingRequires(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := installQwenSettings(path, `C:\Program Files\Beacon\beacon-hooks.exe`, "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installQwenSettings returned error: %v", err)
+	}
+
+	hooks := decodeQwenHooks(t, path)
+	if len(hooks) == 0 {
+		t.Fatal("no hooks installed")
+	}
+	for event, groups := range hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if hook.Shell != qwenHookShell {
+					t.Errorf("%s shell = %q, want %q; Beacon's command is POSIX-quoted and will not "+
+						"run under the Windows default shell", event, hook.Shell, qwenHookShell)
+				}
+				// The pairing this test is really about: the declared shell has to match the
+				// quoting actually emitted. If hookCommandQuote ever stops single-quoting, this
+				// declaration becomes a lie rather than a fix.
+				if !strings.Contains(hook.Command, `'C:\Program Files\Beacon\beacon-hooks.exe'`) {
+					t.Errorf("%s command = %q, want the binary single-quoted for %s", event, hook.Command, qwenHookShell)
+				}
+			}
+		}
+	}
+}
+
+// Declaring a shell must not leak into the runtimes that share this settings writer and do not
+// expose the field. Claude Code has no `shell` key in its hook schema, and emitting one there
+// would put an unrecognized field into a file Beacon does not own.
+func TestOnlyQwenDeclaresAHookShell(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := installClaudeSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installClaudeSettings returned error: %v", err)
+	}
+	if got := readFileString(t, path); strings.Contains(got, `"shell"`) {
+		t.Fatalf("Claude settings carry a shell field:\n%s", got)
+	}
 }
