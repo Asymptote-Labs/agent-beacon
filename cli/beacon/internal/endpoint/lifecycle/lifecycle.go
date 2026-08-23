@@ -810,6 +810,8 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 			return paths, fmt.Errorf("opencode telemetry is installed with `beacon endpoint hooks install --harness opencode`, not endpoint install")
 		case "cline":
 			return paths, fmt.Errorf("Cline telemetry is installed with `beacon endpoint hooks install --harness cline`, not endpoint install")
+		case "pi", "pi_cli":
+			return paths, fmt.Errorf("Pi telemetry is installed with `beacon endpoint hooks install --harness pi`, not endpoint install")
 		case "copilot", "copilot_cli", "github_copilot":
 			return paths, fmt.Errorf("Copilot CLI telemetry is MDM-managed; set COPILOT_OTEL_ENABLED=true and OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:%d in the Copilot CLI launch environment instead of using --harness %s", cfg.Collector.HTTPPort, name)
 		case "factory", "droid":

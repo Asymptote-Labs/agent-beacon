@@ -32,6 +32,7 @@ Supported runtime surfaces today:
 - Claude Code and Codex CLI telemetry configuration through local OpenTelemetry settings.
 - Cursor hook telemetry for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, file edits, and agent reasoning (`afterAgentThought` thinking text recorded as `agent.reasoning` events in the OTel GenAI `gen_ai.output.messages` reasoning-part shape) where hook payloads expose those fields.
 - Cline hook telemetry through a Beacon-managed local plugin (`~/.cline/plugins/beacon.ts`) covering prompts, task lifecycle, tool lifecycle, commands, file reads/edits with diffs, MCP activity, and task token usage. One plugin serves Cline's VS Code, JetBrains, and CLI hosts; Cline's own OTel export and hosted prompt storage are not used. Approval decisions are not exposed by Cline's hook payloads and are not synthesized.
+- Pi hook telemetry through a Beacon-managed local extension (`~/.pi/agent/extensions/beacon.ts`, or `.pi/extensions/beacon.ts` at project level) covering session lifecycle, prompts, tool lifecycle and results, commands including operator `!` commands, file reads/creates/edits with the unified patch, agent reasoning from assistant thinking parts, and token usage/cost. The extension subscribes to seven Pi event types and ignores the streaming and provider internals. Approval decisions are not exposed by Pi's extension API -- its `tool_call` handler can block, but that is an extension deciding rather than an operator being asked -- and are not synthesized, matching the Cline decision.
 - Claude Cowork admin-configured OpenTelemetry setup guidance and local validation.
 - `beaconjson` OpenTelemetry Collector exporter that converts OTLP logs, traces, metrics, and resource attributes into Beacon endpoint JSONL.
 - Asymptote Observe TypeScript SDK instrumentation for cloud applications, starting from OpenTelemetry/OpenLLMetry patterns and `observe()` wrappers.
@@ -96,6 +97,17 @@ Run the observe SDK and threat-rules conformance tests:
 cd pkg/asymptoteobserve
 go test ./...
 ```
+
+Run the managed runtime plugin/extension checks (each verifies the checked-in copy matches its embedded twin, then runs its tests):
+
+```bash
+cd plugins/opencode-beacon && bun run check && bun test
+cd ../cline-beacon && bun run check && bun test
+cd ../pi-beacon && bun run check && bun test
+```
+
+After editing a plugin or extension source, run `bun run sync` in its directory to update the
+embedded copy under `cli/beacon/internal/endpoint/hooks/assets/`; a Go test fails if the two drift.
 
 Run TypeScript SDK checks:
 
@@ -368,6 +380,7 @@ CI runs:
 - `go test ./...` in `cli/beacon-hooks`.
 - `go test ./...` in `collector-builder/exporter/beaconjsonexporter`.
 - `go test ./...` in `pkg/asymptoteobserve` (includes threat-rules pack conformance).
+- `bun run check && bun test` in `plugins/opencode-beacon`, `plugins/cline-beacon`, and `plugins/pi-beacon`.
 - CLI help smoke checks for the public command tree.
 - macOS packaging script validation via `packaging/macos/test-endpoint-scripts.sh`.
 - macOS endpoint smoke validation via `packaging/macos/smoke-endpoint.sh`.
