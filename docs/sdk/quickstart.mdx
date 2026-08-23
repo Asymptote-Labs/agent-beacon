@@ -3,7 +3,7 @@ title: "SDK Quickstart"
 description: "Install and initialize the Asymptote TypeScript SDK"
 ---
 
-## Setup Flow
+## Setup flow
 
 Follow this path to install `@asymptote/sdk`, initialize tracing, create a first span, and flush it before the process exits.
 
@@ -15,7 +15,7 @@ npm install @asymptote/sdk
 
 The package requires Node.js 20 or newer.
 
-## 2. Configure Export
+## 2. Configure export
 
 Choose Asymptote Managed hosted Observe or a customer-managed OTLP endpoint.
 
@@ -47,7 +47,7 @@ Hosted export uses OTLP/HTTP traces.
 
 The SDK appends `/v1/observe` when the configured base URL or endpoint does not already include it.
 
-### Customer-Managed OTLP
+### Customer-managed OTLP
 
 Use an explicit OTLP endpoint when traces should go to a local or customer-managed collector instead of Asymptote Managed hosted Observe:
 
@@ -65,7 +65,7 @@ Observe.initialize({
 
 Explicit OTLP export does not require an Asymptote Managed API key.
 
-## 3. Create A First Trace
+## 3. Create a first trace
 
 Wrap application code with `Observe.observe()` to create a Beacon-compatible span.
 
@@ -95,7 +95,7 @@ await plan("Review this pull request");
 await Observe.flush();
 ```
 
-## Export Precedence
+## Export precedence
 
 `Observe.initialize()` resolves export configuration in this order:
 
@@ -118,7 +118,7 @@ Observe.initialize({
 });
 ```
 
-## What To Read Next
+## What to read next
 
 <Columns cols={2}>
   <Card title="Instrumentation" icon="wand-magic-sparkles" href="/sdk/instrumentation">
@@ -135,7 +135,7 @@ Observe.initialize({
   </Card>
 </Columns>
 
-## Flush Before Exit
+## Flush before exit
 
 For short-lived scripts, CI jobs, and serverless handlers, flush spans before the process exits:
 

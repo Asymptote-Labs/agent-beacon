@@ -271,6 +271,13 @@
             ]
           },
           {
+            "group": "Support",
+            "icon": "life-ring",
+            "pages": [
+              "support/troubleshooting"
+            ]
+          },
+          {
             "group": "Contributing",
             "icon": "code-branch",
             "pages": [
@@ -402,7 +409,14 @@
                   "cli/rules-fields"
                 ]
               },
-              "cli/scan",
+              {
+                "group": "beacon scan",
+                "root": "cli/scan",
+                "pages": [
+                  "cli/scan-local",
+                  "cli/scan-ci-gates"
+                ]
+              },
               "cli/token-usage",
               "cli/version"
             ]
@@ -453,7 +467,8 @@
             "icon": "clipboard-list",
             "root": "guides/use-cases",
             "pages": [
-              "guides/agent-runtime-telemetry"
+              "guides/agent-runtime-telemetry",
+              "guides/inventory"
             ]
           },
           {

@@ -3,7 +3,7 @@ title: "SDK Lifecycle"
 description: "Flush and shut down Asymptote Observe tracing"
 ---
 
-## Lifecycle Overview
+## Lifecycle overview
 
 Use `Observe.flush()` and `Observe.shutdown()` to control when finished spans are exported and when the SDK releases tracing resources.
 
@@ -59,7 +59,7 @@ Observe.initialize({
 
 If the SDK is already initialized, a later `Observe.initialize({ instrumentModules })` call patches additional modules without replacing the provider.
 
-## Short-Lived Example
+## Short-lived example
 
 ```typescript title="Short-lived job example" lines
 import { Observe } from "@asymptote/sdk";

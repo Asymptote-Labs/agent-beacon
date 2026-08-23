@@ -3,7 +3,7 @@ title: "Local JSONL"
 description: "Use Beacon's local runtime JSONL log as the default endpoint log and local dashboard source."
 ---
 
-## Local Log Output
+## Local log output
 
 Beacon's default destination is the local [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). The endpoint agent writes one normalized [endpoint event](/concepts/core-concepts#endpoint-event) per line and keeps the active path stable for local review, the Beacon dashboard, and downstream shippers.
 
@@ -52,7 +52,7 @@ Open the local dashboard:
 beacon endpoint dashboard --open
 ```
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to local JSONL. Review filesystem access, archive retention, and any downstream readers so retained telemetry matches your approved collection policy.
 

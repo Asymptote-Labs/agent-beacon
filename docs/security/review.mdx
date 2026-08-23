@@ -3,13 +3,13 @@ title: "Enterprise Security Review"
 description: "Procurement and security review details for Beacon endpoint telemetry"
 ---
 
-## Review Scope
+## Review scope
 
 Beacon is designed for endpoint-local collection of supported agent harness activity. During normal collection, supported runtimes send telemetry to a localhost OpenTelemetry receiver or invoke the local `beacon-hooks` adapter. Beacon normalizes those signals into endpoint events and writes them to a local JSONL log for local review or customer-controlled forwarding.
 
 Normal hook execution has no Beacon-hosted dependency. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network connection to collect supported local runtime activity.
 
-## Review Package
+## Review package
 
 <Columns cols={2}>
   <Card title="Data flow and threat model" icon="diagram-project" href="/security/data-flow-threat-model">
@@ -32,7 +32,7 @@ Normal hook execution has no Beacon-hosted dependency. The endpoint agent does n
   </Card>
 </Columns>
 
-## Default Posture
+## Default posture
 
 | Area | Default behavior |
 |------|------------------|

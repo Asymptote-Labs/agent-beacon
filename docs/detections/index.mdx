@@ -47,7 +47,7 @@ Run a high-severity gate, useful in local validation or CI-like checks:
 beacon scan --fail-on high
 ```
 
-## What Detections Look For
+## What detections look for
 
 Detections focus on risky agent behavior that is hard to understand from one raw log line alone:
 
@@ -64,7 +64,7 @@ Because rules run over the shared Beacon event model, the same rule vocabulary c
 
 [Inventory](/guides/inventory) helps explain which harnesses, local config, MCP servers, and skills are present and observable on an endpoint. Detection coverage depends on the telemetry fields emitted by those supported harnesses and visible local configuration.
 
-## Detection Coverage
+## Detection coverage
 
 Beacon ships with a small built-in baseline so `beacon scan` works before any rule store is installed. The broader rule pack is distributed as a release asset and includes categories like these:
 
@@ -82,7 +82,7 @@ Beacon ships with a small built-in baseline so `beacon scan` works before any ru
 
 Rules only evaluate events that exist in the runtime log. For example, an MCP detection needs MCP-like activity to be emitted by a supported harness, and a prompt-injection rule needs retained prompt or content fields to be present under the endpoint's local data-retention settings.
 
-## Detection Flow
+## Detection flow
 
 1. A supported agent harness emits runtime telemetry.
 2. Beacon normalizes that telemetry into endpoint events and writes `runtime.jsonl`.
@@ -93,7 +93,7 @@ Rules only evaluate events that exist in the runtime log. For example, an MCP de
 
 You can run the same local detection flow from the command line with [`beacon scan`](/cli/scan) or inspect it in the loopback-only [endpoint dashboard](/cli/dashboard). The dashboard Detections view lists active rules, while the Findings view runs those rules over the configured runtime log on demand.
 
-## Rules And Findings
+## Rules and findings
 
 A rule is the durable detection definition. It contains an `id`, `title`, `severity`, CEL logic, and test fixtures that prove the expected behavior.
 
@@ -147,7 +147,7 @@ tests:
         command: { command: "ls -la" }
 ```
 
-## Rule Sources
+## Rule sources
 
 Beacon can run detections from three sources, resolved in this order:
 
@@ -169,7 +169,7 @@ beacon rules add ./rules
 
 The per-user store is under the endpoint base directory, commonly `~/.beacon/endpoint/rules`. System-mode installs use the system endpoint base directory.
 
-## Author And Validate Rules
+## Author and validate rules
 
 Threat rules are meant to be reviewed and tested like code. A new rule should start as `experimental`, include a plain-language `emit.reason`, and carry at least one fixture that proves the expected verdict.
 
@@ -187,7 +187,7 @@ beacon rules fields
 
 Use the [Detection YAML Schema](/detections/yaml-schema) page for the rule document shape, the [Detection Standard](/detections/standard) page for maturity and conformance requirements, and the [Detection Engine](/detections/engine) page for load-time validation and evaluation behavior.
 
-## Operational Notes
+## Operational notes
 
 - `beacon scan --min-severity <level>` filters displayed findings.
 - `beacon scan --fail-on <level>` exits non-zero when any finding at or above the threshold exists.
@@ -196,13 +196,13 @@ Use the [Detection YAML Schema](/detections/yaml-schema) page for the rule docum
 - `beacon rules pull` is the only rules workflow that reaches the network, and only for the explicit URL you provide.
 - The local dashboard mirrors `beacon scan` rule resolution and finding behavior, but stays loopback-only and read-only.
 
-## Managed Detections
+## Managed detections
 
 The open-source Beacon flow runs detections locally over endpoint JSONL. [Asymptote Managed](/deployment/managed) builds on the same telemetry foundation with centralized ingest, retention, search, detections, fleet-wide visibility, policy workflows, identity mapping, SSO/RBAC, and investigation workflows.
 
 Use local Beacon detections when you need offline endpoint checks or customer-controlled forwarding. Use Managed when you need centralized review across a fleet or organization.
 
-## Read Next
+## Read next
 
 <Columns cols={2}>
   <Card title="YAML Schema" icon="code" href="/detections/yaml-schema">

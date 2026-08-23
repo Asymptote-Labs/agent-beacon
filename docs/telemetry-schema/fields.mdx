@@ -3,7 +3,7 @@ title: "Schema Fields"
 description: "Beacon event entities, optional context, and shared fields"
 ---
 
-## Field Reference
+## Field reference
 
 Beacon models each event as an action plus a set of typed entities. The [`event` object and surrounding entities](/concepts/core-concepts#entity-model) describe what happened and who or what participated in that action.
 
@@ -38,7 +38,7 @@ Top-level `sequence`, `model`, `repository`, `branch`, `message`, `raw`, and `fi
 
 `sequence` is the emitting writer's monotonic emission counter, used to order events that share a timestamp. See [event ordering](/telemetry-schema/event-schema#event-ordering) for what it does and does not compare across.
 
-For hook-based runtimes, when the runtime payload does not supply a branch, Beacon fills `branch` from the working directory's git checkout by reading `.git/HEAD` directly — no git binary is required, and the field is omitted when the directory is not a git repository or HEAD is detached. Set `BEACON_DISABLE_GIT_METADATA=1` (accepts `1`, `true`, or `yes`) in the runtime's environment to turn off local git metadata enrichment; runtime-provided branch values still pass through.
+For hook-based runtimes, when the runtime payload does not supply a branch, Beacon fills `branch` from the working directory's git checkout by reading `.git/HEAD` directly. No git binary is required, and the field is omitted when the directory is not a git repository or HEAD is detached. Set `BEACON_DISABLE_GIT_METADATA=1` (accepts `1`, `true`, or `yes`) in the runtime's environment to turn off local git metadata enrichment; runtime-provided branch values still pass through.
 
 ## GenAI context
 

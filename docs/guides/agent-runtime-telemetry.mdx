@@ -45,7 +45,7 @@ event action: endpoint.validation
 ```
 </Accordion>
 
-## 1. Generate Or Find Activity
+## 1. Generate or find activity
 
 Run a supported local agent harness, then check that Beacon has observed activity:
 
@@ -55,7 +55,7 @@ beacon endpoint inventory
 
 If the validation event appears but runtime activity does not, check [Inventory Local Agent Runtimes](/guides/inventory) for installed, configured, managed, and observed state.
 
-## 2. Open The Local Dashboard
+## 2. Open the local dashboard
 
 Open Log Search and Security Overview:
 
@@ -63,7 +63,7 @@ Open Log Search and Security Overview:
 beacon endpoint dashboard --open
 ```
 
-## 3. Inspect Key Fields
+## 3. Inspect key fields
 
 | Signal | Why it matters |
 |--------|----------------|
@@ -78,7 +78,7 @@ beacon endpoint dashboard --open
 
 Beacon normalizes runtime-specific signals into the [Endpoint Event Schema](/telemetry-schema/event-schema), so analysts can search across runtimes with the same core fields.
 
-## 4. Investigate Activity
+## 4. Investigate activity
 
 In Log Search, start with:
 
@@ -89,7 +89,7 @@ In Log Search, start with:
 - MCP-like activity
 - Repository or working directory
 
-## 5. Scan Locally
+## 5. Scan locally
 
 Run the active threat-detection rules over the runtime log:
 
@@ -105,11 +105,11 @@ beacon scan --json --fail-on high
 
 Manage the active rule store with [`beacon rules`](/cli/rules). Scanning is read-only and does not reach the network.
 
-## 6. Forward For Detection
+## 6. Forward for detection
 
 Beacon writes normalized JSONL locally first. Forward it into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, Microsoft Sentinel, AWS S3, Google Cloud Storage, or a customer-managed shipper with [Log Forwarding](/log-forwarding).
 
-## Key Features Demonstrated
+## Key features demonstrated
 
 - Local collection health and last-event freshness.
 - Runtime coverage from installed/configured/observed inventory state.

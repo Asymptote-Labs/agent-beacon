@@ -16,7 +16,7 @@ Use it to review the tool surface an agent may be able to call from local config
 
 Inventory reads local config and runtime state only. It does not authenticate to MCP servers, call their tools, or verify remote service permissions. For Claude Code, user-scoped MCP servers are commonly stored in `~/.claude.json`; project-scoped servers may also appear in project MCP/config files. For Cursor, Beacon inspects user and project `mcp.json` files.
 
-## Run MCP Inventory
+## Run MCP inventory
 
 Start with the full inventory report when reviewing MCP server configuration alongside harness and skill state:
 
@@ -36,7 +36,7 @@ Use system mode when the endpoint service and configuration are installed under 
 sudo beacon endpoint inventory --system --all
 ```
 
-## Expected Versus Unexpected Servers
+## Expected versus unexpected servers
 
 <Frame caption="Review MCP server inventory to see configured servers, source paths, scopes, and runtime context.">
   <img src="/images/mcp_server_inventory.png" alt="Beacon dashboard MCP Server Inventory view showing configured MCP servers and their source context." />
@@ -54,7 +54,7 @@ Common review questions:
 
 Beacon detections can evaluate emitted runtime telemetry when supported harnesses report MCP-like tool activity. Inventory explains that a server is configured or observable; detections evaluate the event stream when activity occurs.
 
-## Beacon MCP Is Separate
+## Beacon MCP is separate
 
 The `beacon mcp` command group exposes local Beacon activity to MCP clients. That is different from inventorying third-party MCP servers referenced by agent configs.
 

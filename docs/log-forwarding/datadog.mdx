@@ -3,19 +3,19 @@ title: "Datadog"
 description: "Forward Beacon endpoint events into Datadog Logs with Datadog Agent custom log collection."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon streams endpoint events to Datadog by writing local JSONL and letting the Datadog Agent tail that file. Beacon does not store Datadog API keys or site configuration.
 
 Use this guide for a first-time macOS setup with Datadog Logs. You can complete the setup entirely from the command line; the Datadog UI steps below are optional and are included to show where the same values appear in the Datadog onboarding flow.
 
-## What You Need
+## What you need
 
 - Beacon CLI installed.
 - Datadog Agent installed and connected to your Datadog organization.
 - Permission to edit `/opt/datadog-agent/etc/datadog.yaml` and restart the Datadog Agent.
 
-## Choose User Or System Mode
+## Choose user or system mode
 
 | Setup | Beacon commands | Runtime log |
 |-------|-----------------|-------------|
@@ -24,7 +24,7 @@ Use this guide for a first-time macOS setup with Datadog Logs. You can complete 
 
 For production or MDM deployment, prefer **system mode**. It avoids per-user home-directory permissions because the Datadog Agent can tail `/var/log/beacon-agent/runtime.jsonl`.
 
-## 1. Install Beacon And Confirm Logs
+## 1. Install Beacon and confirm logs
 
 For local testing:
 
@@ -49,7 +49,7 @@ sudo ls -l /var/log/beacon-agent/runtime.jsonl
   <img src="/images/datadog-runtime-log-file-check.png" alt="Terminal showing the Beacon runtime JSONL log exists at the user-mode path." />
 </Frame>
 
-## 2. Enable Datadog Log Collection
+## 2. Enable Datadog log collection
 
 Open the Datadog Agent config:
 
@@ -69,7 +69,7 @@ You do not need to configure Datadog's OpenTelemetry Agent for this setup. Beaco
   <img src="/images/datadog-yaml.png" alt="Datadog Agent datadog.yaml showing logs_enabled set to true." />
 </Frame>
 
-## 3. Optional: Review Custom File Logs In Datadog
+## 3. Optional: review custom file logs in Datadog
 
 This step is optional. Beacon generates the Datadog Agent config in the next step, so you do not need to copy anything manually from the Datadog UI.
 
@@ -95,7 +95,7 @@ Leave multiline parsing blank. Beacon writes one JSON event per line.
   <img src="/images/datadog-configure-custom-log-source.png" alt="Datadog Custom Files setup page filled with Beacon runtime log path, service beacon-endpoint-agent, and source beacon." />
 </Frame>
 
-## 4. Generate And Install The Beacon Config
+## 4. Generate and install the Beacon config
 
 Generate Beacon's Datadog content pack:
 
@@ -122,7 +122,7 @@ sudo chmod 0644 /opt/datadog-agent/etc/conf.d/beacon.d/conf.yaml
 sudo launchctl kickstart -k system/com.datadoghq.agent
 ```
 
-## 5. Validate End To End
+## 5. Validate end to end
 
 Write a test event:
 
@@ -158,7 +158,7 @@ Look for:
   <img src="/images/datadog-agent-status.png" alt="Datadog Agent status showing Logs Agent and beacon integration with Status OK, service beacon-endpoint-agent, source beacon, and logs sent." />
 </Frame>
 
-## 6. Search In Datadog
+## 6. Search in Datadog
 
 In Datadog Log Explorer, search for:
 
@@ -196,11 +196,11 @@ If Log Explorer is empty:
 - Run `beacon endpoint datadog validate` again.
 - Check `sudo datadog-agent status`.
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to `runtime.jsonl` and tailed by Datadog Agent. Review log access, indexes, retention, and downstream consumers so retained telemetry matches your approved collection policy.
 
-## OpenTelemetry Note
+## OpenTelemetry note
 
 Datadog's DDOT Collector is a good fit for OTel-first Linux or Kubernetes deployments, but Beacon's macOS endpoint v0 uses native Datadog Agent file log collection because it is the supported host path for tailing local JSONL files.
 

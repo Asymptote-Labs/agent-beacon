@@ -84,7 +84,7 @@ gcloud storage buckets add-iam-policy-binding "gs://${BEACON_GCS_BUCKET}" \
 Apply lifecycle, retention, logging, and CMEK controls in Google Cloud according
 to your organization's policy.
 
-## 2. Deliver The Writer Credential
+## 2. Deliver the writer credential
 
 Vector `0.56` supports a service-account JSON file through
 `GOOGLE_APPLICATION_CREDENTIALS` and GCE metadata credentials. Managed Macs do
@@ -124,7 +124,7 @@ The packaged helper stores only the credential path in
 `/Library/Application Support/Beacon/Forwarders/gcs-vector.env`; the JSON stays
 in the externally managed location.
 
-## 3. Configure The Jamf Policy
+## 3. Configure the Jamf policy
 
 Upload the signed Beacon endpoint package, which includes:
 
@@ -175,7 +175,7 @@ Runtime starts at `end` to avoid an unexpected historical upload. Inventory
 starts at `beginning` so an initial snapshot created before Vector starts is not
 missed.
 
-## 4. Validate A Managed Mac
+## 4. Validate a managed Mac
 
 Check services, files, and the non-secret configuration:
 
@@ -238,7 +238,7 @@ gcloud iam service-accounts add-iam-policy-binding \
   --role roles/iam.serviceAccountTokenCreator
 ```
 
-## Credential Rotation
+## Credential rotation
 
 Create and deliver a new key before deleting the old one:
 

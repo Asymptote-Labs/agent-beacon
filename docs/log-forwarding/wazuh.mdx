@@ -3,7 +3,7 @@ title: "Wazuh"
 description: "Forward Beacon endpoint events into Wazuh with localfile ingestion."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon writes normalized AI runtime telemetry as one JSON object per line in the active local [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Beacon keeps that handoff path bounded with local rotation. Wazuh ingests those events with a standard `localfile` input and Beacon's generated Wazuh rules.
 
@@ -221,7 +221,7 @@ Expected rule IDs:
 - `100500`: base Beacon endpoint runtime event.
 - `100550`: AI agent workflow telemetry, such as prompts, tool activity, and file activity.
 
-## Wazuh Dashboard
+## Wazuh dashboard
 
 Open Wazuh Dashboard, then go to **Threat Hunting** → **Events**. Start with one of these filters:
 

@@ -3,13 +3,11 @@ title: "Pi"
 description: "Asymptote support details for Pi endpoint telemetry"
 ---
 
-## Runtime Overview
+## Runtime overview
 
 Asymptote supports [Pi](https://pi.dev/) through a managed local extension.
 
-Pi is neither of Asymptote's two established integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, which makes the integration extension-shaped — one Asymptote-owned extension file that forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
-
-Install it with:
+Pi fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
 
 ```bash
 beacon endpoint hooks install --harness pi
@@ -17,8 +15,11 @@ beacon endpoint hooks install --harness pi
 
 ## Prerequisites
 
+Before enabling Pi telemetry, make sure:
+
 - Pi is installed and available as the `pi` executable, or has a local state directory at `~/.pi/agent`.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Pi is restarted after install or removal so new sessions load the updated extension.
 
 ## Collection path
 
@@ -29,15 +30,15 @@ Asymptote's managed Pi extension is a single TypeScript file at one of two docum
 | User | `~/.pi/agent/extensions/beacon.ts` |
 | Project | `./.pi/extensions/beacon.ts` |
 
-The distinction matters beyond the path. A project-level extension is subject to Pi's project-trust prompt, so the user-level location is the one that works without further interaction — and it is the path `beacon endpoint discover` reports on, so a project-level extension is not reflected in discovery output.
+User level is the default. A project-level extension is subject to Pi's project-trust prompt, and `beacon endpoint discover` reports on the user path only, so a project-level extension does not appear in discovery output.
 
-Asymptote identifies its own extension file by the marker `beacon-managed-pi-extension:v1`. The version suffix is part of the contract with the extension source rather than decoration: it is what will let a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry.
+Asymptote identifies its own extension file by the marker `beacon-managed-pi-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry.
 
-The integration is extension-based. Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
 
 ## Discovery and status
 
-Asymptote detects Pi through the `pi` executable, treating the `~/.pi/agent` state directory as an additional signal. Pi installed through npm, pnpm, or bun is frequently absent from the `PATH` the endpoint process inherited — a shell alias, a version manager, or a per-project install all hide it — while its state directory is still there. Treating that directory as evidence keeps discovery from reporting "not detected" for a runtime someone is actively using, the same fallback the OpenCode, Cursor, and Hermes probes make for the same reason.
+Asymptote detects Pi through the `pi` executable, and treats the `~/.pi/agent` state directory as an additional signal. Pi installed through npm, pnpm, or bun is often missing from the `PATH` the endpoint process inherited, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The OpenCode, Cursor, and Hermes probes use the same fallback.
 
 ```bash title="Show Pi discovery state"
 beacon endpoint discover --all --json
@@ -51,13 +52,11 @@ Pi reports as the `pi_cli` harness with capability `plugin`:
 | `disabled` | A `beacon.ts` exists but carries no Asymptote marker, so it is somebody else's extension sharing the filename |
 | `enabled` | Asymptote's managed extension is in place |
 
-An unmarked extension file reports `disabled` rather than `enabled` on purpose. Reporting it as enabled would show the runtime as covered while no events arrive.
+An unmarked extension file reports `disabled` rather than `enabled`, because reporting it as enabled would show the runtime as covered while no events arrive.
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. The extension is
-installed separately, because Pi loads it from the user's own profile rather than from a machine-wide
-location:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. The extension is installed separately, because Pi loads it from the user's own profile rather than from a machine-wide location:
 
 ```bash
 beacon endpoint hooks install --harness pi            # user level (default)
@@ -66,69 +65,48 @@ beacon endpoint hooks status --harness pi
 beacon endpoint hooks uninstall --harness pi
 ```
 
-Install writes one file and refuses to touch a `beacon.ts` it did not write, so an extension of your
-own that happens to share the filename is left alone and the install fails loudly rather than
-silently replacing it.
+Install writes one file and refuses to touch a `beacon.ts` it did not write, so an extension of your own that happens to share the filename is left alone and the install fails loudly rather than replacing it.
 
-`status` reports `installed=false` when the extension exists but points at a hook binary that is no
-longer there — after a Beacon uninstall, a partly applied update, or a home directory restored onto a
-different machine. In each of those cases Pi loads an extension that spawns nothing, and reporting
-that as installed would claim telemetry nobody is collecting.
+`status` reports `installed=false` when the extension exists but points at a hook binary that is no longer there, which happens after a Beacon uninstall, a partly applied update, or a home directory restored onto a different machine. In each case Pi loads an extension that spawns nothing.
 
 ## Telemetry coverage
 
 | Area | Support |
 |------|---------|
-| Runtime discovery | Supported — executable and `~/.pi/agent` detection, managed extension path, and telemetry status |
-| Harness attribution | Supported — `pi`, `pi.dev`, `pi_cli`, `pi-cli`, `pi_agent`, `pi-agent`, and `pi agent` all normalize to `pi_cli` |
+| Runtime discovery | Supported through executable and `~/.pi/agent` detection, managed extension path, and telemetry status |
+| Harness attribution | Supported. `pi`, `pi.dev`, `pi_cli`, `pi-cli`, `pi_agent`, `pi-agent`, and `pi agent` all normalize to `pi_cli` |
 | Extension install, status, uninstall, and repair | Supported |
-| Session lifecycle | Supported — `session.started` and `session.ended`, carrying why the session started or stopped |
-| Prompts | Supported — `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
-| Tool use | Supported — `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
-| Commands | Supported — `command.executed` for the agent's `bash` tool and for commands you run with Pi's `!` prefix, which are marked as operator-initiated |
-| File activity | Supported — `file.read`, `file.created`, and `file.modified`, with the unified patch on an edit |
-| Agent reasoning | Supported — `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
-| Token usage and cost | Supported — `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
-| Approval decisions | Not available — Pi exposes no operator approval decision to observe. See [Known gaps](#known-gaps) |
+| Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped |
+| Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
+| Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
+| Commands | Supported. `command.executed` for the agent's `bash` tool and for commands you run with Pi's `!` prefix, which are marked as operator-initiated |
+| File activity | Supported. `file.read`, `file.created`, and `file.modified`, with the unified patch on an edit |
+| Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
+| Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
+| Approval decisions | Not available. Pi exposes no operator approval decision to observe. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
-| MDM deployment | Supported for the endpoint agent; the Pi extension installs separately in the logged-in user's context |
+| MDM deployment | Supported for the endpoint agent. The Pi extension installs separately in the logged-in user's context |
 
-Pi's harness name is matched by equality against a closed set of spellings rather than by substring, because `pi` is two characters and appears inside names that belong to other runtimes — `copilot` contains it. A substring rule would attribute every GitHub Copilot and VS Code Copilot session to Pi.
+Harness names are matched against a closed set of spellings rather than by substring, because `pi` is two characters and appears inside names belonging to other runtimes. `copilot` contains it, so a substring rule would attribute every GitHub Copilot and VS Code Copilot session to Pi.
 
 ## Data handling
 
-Pi content is handled the same way as every other runtime: prompts, tool arguments, commands, paths,
-diffs, and reasoning text retained in local or customer-controlled logs, with local secret redaction
-and per-string limits applied before writing, a hash and byte count on each content-bearing event,
-and events over the 64 KiB limit dropping raw and retained content while preserving stable metadata
-and setting `field_truncated`.
+Pi content is handled like every other runtime. Prompts, tool arguments, commands, paths, diffs, and reasoning text are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a
-fixed argv and writes the event to its stdin; a send that has not completed in two seconds is
-abandoned so Beacon cannot stall Pi's agent loop, and a failure to spawn costs the event rather than
-the run.
+The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall Pi's agent loop, and a failure to spawn costs the event rather than the run.
 
 ## Known gaps
 
-- **No approval telemetry.** Pi's `tool_call` event lets an extension block a call, but that is an
-  extension deciding rather than an operator being asked — Pi exposes no operator approval decision
-  through the extension API. Beacon records these as tool activity and writes no approval events for
-  Pi, rather than synthesizing an approval nobody granted. The same choice applies to Cline for the
-  same reason. Detections in `rules/approval-abuse/` therefore do not fire on Pi activity.
-- **No enforcement.** Consistent with every other runtime, enforcement stays behind the optional,
-  off-by-default policy-provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Pi. Pi's
-  blocking `tool_call` handler would make it a viable target for that seam later.
-- **Streaming events are not collected.** The extension subscribes to seven of Pi's event types and
-  ignores the rest, which are provider-request and TUI-rendering internals. Assistant output is
-  recorded once when a message finalizes rather than token by token, so Beacon stays out of the
-  streaming path.
-- **Project-level installs need Pi's trust prompt.** A `.pi/extensions/beacon.ts` is subject to Pi's
-  project-trust prompt, so a user-level install is the one that works without further interaction.
+- **No approval telemetry.** Pi's `tool_call` event lets an extension block a call, but that is an extension deciding rather than an operator being asked. Pi exposes no operator approval decision through the extension API, so Beacon records these as tool activity and writes no approval events for Pi. Cline works the same way for the same reason. Detections in `rules/approval-abuse/` do not fire on Pi activity.
+- **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Pi. Pi's blocking `tool_call` handler makes it a viable target for that seam later.
+- **Streaming events are not collected.** The extension subscribes to seven of Pi's event types and ignores the rest, which are provider-request and TUI-rendering internals. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
+- **Project-level installs need Pi's trust prompt.** A `.pi/extensions/beacon.ts` is subject to Pi's project-trust prompt, so a user-level install is the one that works without further interaction.
 
 ## Deployment notes
 
-The extension is loaded when Pi starts, so an install taken while Pi is running takes effect on its
-next launch. Confirm discovery sees the runtime, then generate one Pi event and check the log:
+The extension is loaded when Pi starts, so an install taken while Pi is running takes effect on the next launch.
+
+Confirm discovery sees the runtime, then generate one Pi event and check the log:
 
 ```bash
 /opt/beacon/bin/beacon endpoint discover --all --json

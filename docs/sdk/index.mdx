@@ -3,7 +3,7 @@ title: "Asymptote Observe SDK"
 description: "Instrument cloud-hosted agent applications with Beacon-compatible telemetry"
 ---
 
-## SDK Overview
+## SDK overview
 
 Asymptote Observe instruments cloud-hosted agent applications and exports OpenTelemetry traces that remain compatible with Beacon's normalized endpoint event model. Use it for servers, serverless functions, workers, and hosted agent platforms where installing the local Beacon endpoint agent is not the right fit.
 
@@ -11,7 +11,7 @@ Hosted Observe ingest is available through Asymptote Managed. To get an `ASYMPTO
 
 The open-source `agent-beacon` repository currently includes the TypeScript package `@asymptote/sdk`. It provides the `Observe` module for OpenTelemetry setup, common AI SDK instrumentation, manual span wrappers, lifecycle helpers, and Beacon compatibility attributes.
 
-## What Asymptote Captures
+## What Asymptote captures
 
 Asymptote Observe is OpenTelemetry-first. It records supported model calls, agent turns, tool calls, custom orchestration steps, errors, and Beacon compatibility attributes as spans that can be sent to Asymptote Managed hosted Observe or a customer-managed OTLP collector.
 
@@ -46,7 +46,7 @@ Supported cloud SDK paths:
   </Card>
 </Columns>
 
-## Choose The Right Surface
+## Choose the right surface
 
 Use the SDK when agent activity runs in application code you control. Use Asymptote endpoint or CI collection when activity happens in a local harness or ephemeral build job.
 
@@ -57,7 +57,7 @@ Use the SDK when agent activity runs in application code you control. Use Asympt
 | Local coding and knowledge-worker harnesses | [Asymptote endpoint agent](/runtimes) |
 | CI jobs running Claude Code | [`beacon ci`](/cli/ci) |
 
-## SDK And Endpoint Telemetry
+## SDK and endpoint telemetry
 
 The SDK and Asymptote endpoint telemetry share an event contract, but they target different deployment surfaces.
 

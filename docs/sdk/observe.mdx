@@ -7,7 +7,7 @@ description: "Wrap custom agent functions with Asymptote Observe"
 
 Use `Observe.observe()` to create spans for custom agent orchestration: planning, tool execution, policy checks, handoffs, retrieval, and other work that provider SDKs do not expose.
 
-## Wrap A Function
+## Wrap a function
 
 ```typescript title="Wrap a tool call" lines
 import {
@@ -39,7 +39,7 @@ await Observe.flush();
 
 The wrapped function preserves the original return behavior for sync functions, promises, and async iterables. Errors are recorded on the span and then rethrown.
 
-## Observe Options
+## Observe options
 
 | Option | Purpose |
 | --- | --- |
@@ -49,7 +49,7 @@ The wrapped function preserves the original return behavior for sync functions, 
 | `ignoreInput` | Do not record `asymptote.observe.input.count` |
 | `ignoreOutput` | Do not record `asymptote.observe.output.type` |
 
-## Avoid Sensitive Metadata
+## Avoid sensitive metadata
 
 Set `ignoreInput` or `ignoreOutput` when wrapper metadata should avoid recording argument counts or output type.
 
@@ -66,7 +66,7 @@ const lookupSecretSafely = Observe.observe(
 
 Beacon compatibility attributes should still be chosen carefully. Do not place raw secrets, credentials, or high-risk prompt content in custom attributes.
 
-## Common Beacon Actions
+## Common Beacon actions
 
 Use Beacon compatibility attributes when a custom step should normalize into a known event category.
 

@@ -3,7 +3,7 @@ title: "beacon ci finish"
 description: "Stop, validate, and export a detached Beacon CI telemetry session"
 ---
 
-## Command Overview
+## Command overview
 
 `beacon ci finish` loads the state file from `beacon ci start`, stops the collector, validates the runtime log, and optionally uploads the completed JSONL artifact.
 
@@ -38,7 +38,7 @@ BEACON_CI_GCS_PREFIX="github-actions" \
 beacon ci finish --upload gcs
 ```
 
-## GitHub Actions Session
+## GitHub Actions session
 
 ```yaml
 - name: Start Beacon telemetry

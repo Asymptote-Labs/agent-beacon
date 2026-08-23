@@ -3,7 +3,7 @@ title: "GitHub Copilot CLI"
 description: "Asymptote support details for GitHub Copilot CLI endpoint telemetry"
 ---
 
-## Runtime Overview
+## Runtime overview
 
 Asymptote supports GitHub Copilot CLI through MDM-managed OpenTelemetry export to the local OTLP HTTP receiver.
 
@@ -48,7 +48,7 @@ If your deployment intentionally captures GenAI message content from Copilot tel
 export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="true"
 ```
 
-For a one-command local validation flow, see [Test GitHub Copilot CLI telemetry](/guides/local-testing/events#test-github-copilot-cli-telemetry).
+For a one-command local validation flow, see [Test GitHub Copilot CLI telemetry](/guides/local-testing/events#4-test-github-copilot-cli-telemetry).
 
 ## Telemetry coverage
 
@@ -57,7 +57,7 @@ For a one-command local validation flow, see [Test GitHub Copilot CLI telemetry]
 | Prompt telemetry | Supported from Copilot chat spans when exported over OTLP HTTP |
 | Command, tool, and file telemetry | Supported for session activity, tool invocation, and permission or approval-like spans emitted by Copilot CLI |
 | Local JSONL and dashboard | Supported after events reach the local collector |
-| MDM deployment | Supported for the endpoint agent; Copilot launch-environment configuration stays under MDM or customer policy control |
+| MDM deployment | Supported for the endpoint agent. Copilot launch-environment configuration stays under MDM or customer policy control |
 
 ## Deployment notes
 

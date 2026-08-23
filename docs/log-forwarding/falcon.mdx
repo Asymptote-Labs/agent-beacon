@@ -3,7 +3,7 @@ title: "CrowdStrike Falcon LogScale"
 description: "Forward Beacon endpoint telemetry to CrowdStrike Falcon LogScale with HTTP Event Collector."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon supports CrowdStrike Falcon HEC forwarding in two ways:
 
@@ -31,7 +31,7 @@ In CrowdStrike Falcon, go to **Next-Gen SIEM** > **Log management** > **Data onb
 
 <img src="/images/crowdstrike_data_onboarding.png" alt="CrowdStrike Falcon navigation showing Next-Gen SIEM data onboarding under Log management." />
 
-### Select the Falcon LogScale Collector
+### Select the Falcon LogScale collector
 
 Search for `logscale`, select **Falcon LogScale Collector**, then choose **Configure**.
 
@@ -301,7 +301,7 @@ sudo /opt/beacon/bin/beacon endpoint status --system --json
 sudo launchctl print system/com.beacon.endpoint.collector
 ```
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before events are written locally or forwarded through Falcon HEC. Review repository access, parser behavior, retention, and downstream consumers so retained telemetry matches your approved collection policy.
 

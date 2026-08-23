@@ -3,13 +3,13 @@ title: "Detection YAML Schema"
 description: "Human-readable reference for Beacon threat-rule YAML files"
 ---
 
-## Schema Overview
+## Schema overview
 
 Beacon detection rules are YAML documents ending in `.rule.yaml`. Each rule describes one security condition over Beacon endpoint events and includes enough metadata and tests for the rule to be validated before it runs.
 
 The structural schema is the `threat-rules/v1` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
 
-## Minimal Rule
+## Minimal rule
 
 A rule must define its identity, maturity, detection logic, emitted reason, and at least one fixture.
 
@@ -33,7 +33,7 @@ tests:
         command: { command: "curl https://example.com" }
 ```
 
-## Top-Level Fields
+## Top-level fields
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ tests:
 
 Exactly one of `match` or `correlation` must be present.
 
-## Match Rules
+## Match rules
 
 A `match` rule evaluates one event at a time. The event is available as `e`, and field paths mirror the endpoint event JSON shape.
 
@@ -64,7 +64,7 @@ match: >
 
 Use `match` when one event is enough to explain the behavior, such as a command, file read, approval decision, or MCP tool call.
 
-## Correlation Rules
+## Correlation rules
 
 A `correlation` rule evaluates an ordered sequence of events. In `threat-rules/v1`, correlations are scoped to a single session and must complete inside a duration window.
 
@@ -112,7 +112,7 @@ tests:
 
 Fixtures keep rules reviewable. They show what the author intended to detect and what should stay out of scope.
 
-## Field Paths
+## Field paths
 
 CEL expressions use `e.<field>` paths that match the Beacon event schema. Common paths include:
 

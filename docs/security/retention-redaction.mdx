@@ -3,11 +3,11 @@ title: "Redaction and Size Limits"
 description: "How Beacon handles retained content before writing endpoint events"
 ---
 
-## Retention and Redaction
+## Retention and redaction
 
 Beacon can write supported prompt, command, tool, file, approval, policy, and runtime context when a configured source runtime emits it. Before endpoint events are written to local JSONL or forwarded through configured destinations, Beacon applies redaction, sanitization, truncation, and event-size limits.
 
-## Content Handling
+## Content handling
 
 | Control | Behavior |
 |---------|----------|
@@ -16,7 +16,7 @@ Beacon can write supported prompt, command, tool, file, approval, policy, and ru
 | Truncation | Oversized fields are shortened and marked with truncation metadata |
 | Event-size limits | Events are bounded before they are written to `runtime.jsonl` or sent to configured destinations |
 
-## Prompt Event Example
+## Prompt event example
 
 Prompt content is included only when the source runtime emits it. Secret-like values are redacted before the event is written:
 
@@ -39,7 +39,7 @@ Prompt content is included only when the source runtime emits it. Secret-like va
 }
 ```
 
-## Command Event Example
+## Command event example
 
 Command events can include normalized tool and command context, with truncation metadata when fields exceed limits:
 
@@ -65,7 +65,7 @@ Command events can include normalized tool and command context, with truncation 
 }
 ```
 
-## Forwarding Implications
+## Forwarding implications
 
 Content handling is applied before events are written to `runtime.jsonl`.
 File-based destinations such as Wazuh, Elastic/Filebeat, Datadog Agent custom

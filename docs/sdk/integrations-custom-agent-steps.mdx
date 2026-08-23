@@ -3,7 +3,7 @@ title: "Custom Agent Steps"
 description: "Trace custom agent orchestration with Observe.observe"
 ---
 
-## Custom Step Tracking
+## Custom step tracking
 
 Use `Observe.observe()` for orchestration steps, tool execution, policy checks, and handoffs that provider SDKs do not expose.
 
@@ -11,7 +11,7 @@ Use `Observe.observe()` for orchestration steps, tool execution, policy checks, 
 
 Custom agent steps are the fallback integration path for frameworks, internal tools, and orchestration code without a dedicated adapter. Wrap the function you control and add Beacon compatibility attributes that describe what happened.
 
-## What Asymptote Captures
+## What Asymptote captures
 
 - A span for each wrapped function call.
 - Input count and output type unless disabled.
@@ -35,7 +35,7 @@ Set an export destination:
 export ASYMPTOTE_API_KEY=...
 ```
 
-## Getting Started
+## Getting started
 
 ```typescript title="Wrap a custom tool step" lines
 import {
@@ -68,7 +68,7 @@ await Observe.flush();
 
 The wrapped function preserves the original return behavior for sync functions, promises, and async iterables. Errors are recorded on the span and then rethrown.
 
-## Avoid Sensitive Metadata
+## Avoid sensitive metadata
 
 Set `ignoreInput` or `ignoreOutput` when wrapper metadata should avoid recording argument counts or output type.
 
@@ -86,7 +86,7 @@ const redactSensitiveStep = Observe.observe(
 );
 ```
 
-## Common Beacon Actions
+## Common Beacon actions
 
 Use Beacon compatibility attributes when a custom step should normalize into a known event category.
 
@@ -132,7 +132,7 @@ See the [SDK reference](/sdk/reference#beacon-compatibility-attributes) for the 
 - Use `ignoreInput` or `ignoreOutput` for sensitive steps.
 - Call `Observe.flush()` before short-lived scripts or jobs exit.
 
-## What's Next
+## What's next
 
 <Columns cols={2}>
   <Card title="Observe" icon="diagram-project" href="/sdk/observe">

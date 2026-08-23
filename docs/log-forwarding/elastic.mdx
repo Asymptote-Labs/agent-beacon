@@ -3,7 +3,7 @@ title: "Elastic"
 description: "Forward Beacon endpoint events into Elasticsearch and Kibana with Filebeat or standalone Elastic Agent."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon `v0.0.11` added an Elastic content pack for teams that want to search Beacon endpoint events in Elasticsearch and Kibana. Current Beacon releases write one local source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log), and keep that handoff path bounded with local rotation. Filebeat or standalone Elastic Agent reads that file and owns the Elastic hosts, API keys, usernames, and passwords.
 
@@ -76,7 +76,7 @@ beacon endpoint elastic down --pack-dir ./beacon-elastic-pack
   `beacon endpoint elastic up` and `beacon endpoint elastic down` are local validation helpers for macOS with Docker Desktop. For Linux endpoints or production deployments, use the generated Filebeat or standalone Elastic Agent configuration with your normal service manager.
 </Note>
 
-## Elastic Cloud or self-managed Elastic
+## Elastic cloud or self-managed Elastic
 
 Generate the content pack on the endpoint or in your endpoint management workflow:
 

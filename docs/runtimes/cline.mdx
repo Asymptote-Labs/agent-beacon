@@ -3,7 +3,7 @@ title: "Cline"
 description: "Asymptote support details for Cline endpoint telemetry"
 ---
 
-## Runtime Overview
+## Runtime overview
 
 Asymptote supports [Cline](https://cline.bot/) through a managed local plugin that invokes `beacon-hooks`.
 
@@ -20,7 +20,7 @@ Before enabling Cline telemetry, make sure:
 
 ## Collection path
 
-Asymptote installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required — which is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
+Asymptote installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required. That is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
 
 The plugin forwards `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` hook payloads to Asymptote's hook adapter. It spawns the adapter directly with an argument vector rather than through a shell, so the same plugin works unchanged on macOS, Linux, and Windows.
 
@@ -51,15 +51,17 @@ beacon endpoint hooks install --harness cline
 | File telemetry | `read_file`, `list_files`, `search_files`, and `list_code_definition_names` reads; `write_to_file` and `replace_in_file` modifications with diff hash and byte count |
 | MCP telemetry | `use_mcp_tool` and `access_mcp_resource` normalized as MCP tool activity |
 | Model and usage | Provider-qualified model, token counts, cache reads, and runtime-reported cost, recorded once per task |
-| Approval telemetry | Not supported — see Known gaps |
+| Approval telemetry | Not supported. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
-| MDM deployment | Supported for the endpoint agent; Cline plugins are installed separately in the logged-in user's context |
+| MDM deployment | Supported for the endpoint agent. Cline plugins are installed separately in the logged-in user's context |
 
 Cline addresses files relative to the workspace root. Beacon resolves those paths against the workspace before writing them, so a Cline file event is comparable with the same file seen through another runtime and matches threat rules written against absolute paths. A path that is already absolute is left alone, and a relative path with no resolvable workspace root stays relative rather than being joined to a guessed root.
 
-A cancelled task ends rather than fails. Cline fires its cancel hook for the cleanup that follows someone stopping or abandoning a task, so Beacon records `session.ended` at info severity with `session.cancel_reason` set, not `session.error` — otherwise every deliberate stop would count as an incident in error rollups and alerting. A cancelled task still reports the tokens it spent. Cancels and failures reach Beacon two ways: the file-based hooks name them in the hook itself, and the plugin reports them as a status on its single run-completion handler. Both are read, so the distinction holds on the surface Beacon actually installs; a run that reports no recognized outcome is recorded as a completion.
+A cancelled task ends rather than fails. Cline fires its cancel hook for the cleanup that follows someone stopping or abandoning a task, so Beacon records `session.ended` at info severity with `session.cancel_reason` set, not `session.error`. Otherwise every deliberate stop would count as an incident in error rollups and alerting. A cancelled task still reports the tokens it spent.
 
-Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary as well would double every Cline task's totals. Cost is recorded only as Cline reports it; Beacon never derives cost from a local price table.
+Cancels and failures reach Beacon two ways: the file-based hooks name them in the hook itself, and the plugin reports them as a status on its run-completion handler. Both are read, so the distinction holds on the surface Beacon installs. A run that reports no recognized outcome is recorded as a completion.
+
+Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary would double every Cline task's totals. Cost is recorded only as Cline reports it. Beacon never derives cost from a local price table.
 
 ## Data handling
 
@@ -69,8 +71,8 @@ The plugin flattens Cline's live hook context before sending it, dropping functi
 
 ## Known gaps
 
-- **Approval decisions are not recorded.** Cline requires approval for actions by default, but the documented hook context does not carry the approval state, so Beacon does not synthesize an approval decision from a tool call. The forwarded payload is preserved, so approval telemetry can be added without changing what is already collected.
-- **No enforcement.** Cline's `beforeTool` hook can cancel a tool call, and Beacon's plugin never does. Enforcement remains behind the optional, off-by-default policy-provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Cline.
+- **Approval decisions are not recorded.** Cline requires approval for actions by default, but the documented hook context does not carry the approval state, so Beacon does not synthesize an approval decision from a tool call. The forwarded payload is preserved, so approval telemetry can be added later without changing what is already collected.
+- **No enforcement.** Cline's `beforeTool` hook can cancel a tool call, and Beacon's plugin never does. Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Cline.
 
 ## Deployment notes
 

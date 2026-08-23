@@ -19,27 +19,27 @@ Use this page as a quick reference for terms used across Asymptote and Agent Bea
 
 **Asymptote Managed** is the hosted Asymptote operating model for centralized ingest, retention, search, detections, fleet visibility, policy controls, identity mapping, approvals, SSO, RBAC, audit trails, and investigation workflows. See [Managed deployment](/deployment/managed).
 
-## Private Deployment
+## Private deployment
 
 **Private Deployment** applies managed capabilities with stronger infrastructure ownership, data isolation, residency, or custom retention requirements. See [Hosting Options](/deployment/hosting-options).
 
-## Endpoint Agent
+## Endpoint agent
 
 The **endpoint agent** is the local Beacon service and configuration managed by `beacon endpoint`. It is Beacon's local collection path: it configures supported agent harnesses, runs the local collector, writes endpoint events to JSONL, and supports inspection, repair, dashboard, Wazuh, hooks, and forwarding commands.
 
-## Runtime Surface
+## Runtime surface
 
 A **runtime surface** is the telemetry interface exposed by an agent harness. Beacon supports different surfaces because each [agent harness](/runtimes) exposes activity differently, including local OpenTelemetry configuration, hook adapters, CI wrappers, cloud sandbox hooks, SDK instrumentation, admin-configured OpenTelemetry, and gateway-configured OTLP/HTTP export. See [Runtime Surface Overview](/runtimes).
 
-## Agent Harness
+## Agent harness
 
 An **agent harness** is the runtime or integration that produced an event. It can be a local coding agent, a CI job, a cloud-agent surface, an SDK-instrumented application, an admin-configured service integration, or a gateway-managed runtime surface. Examples include `claude`, `cline`, `codex`, `gemini_cli`, `grok`, `opencode`, `devin-cli`, `devin-desktop`, `factory`, `cursor`, `claude_cowork`, and `openclaw_gateway`. Beacon stores harness context in normalized events so investigators can filter by the source that generated the activity.
 
-## CI Telemetry
+## CI telemetry
 
 **CI telemetry** is agent runtime telemetry captured during ephemeral build jobs. Beacon can run a temporary collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish`, write a completed `runtime.jsonl`, and export that file as an artifact or upload target. See [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports).
 
-## Cloud-Agent Telemetry
+## Cloud-agent telemetry
 
 **Cloud-agent telemetry** is activity captured from provider-managed cloud agent
 sandboxes. Beacon cloud helpers print hook and storage setup so cloud sessions
@@ -52,7 +52,7 @@ environment becomes available, so early bootstrap turns may precede telemetry.
 
 The **Observe SDK** is the `@asymptote/sdk` TypeScript package for instrumenting cloud-hosted agent applications, services, workers, serverless functions, and agent SDK integrations. It can export to Asymptote Managed hosted Observe or to a customer-managed OTLP collector. See [Asymptote Observe SDK](/sdk).
 
-## Local Collector
+## Local collector
 
 The **local collector** is Beacon's OpenTelemetry Collector pipeline on the endpoint. It receives OTLP from supported agent harnesses, batches and processes telemetry, writes normalized Beacon JSONL through the `beaconjson` exporter, and can optionally send collector signals to Splunk HEC or Falcon LogScale HEC.
 
@@ -64,15 +64,15 @@ The **local collector** is Beacon's OpenTelemetry Collector pipeline on the endp
 
 **Hooks** are runtime-managed integration points that invoke Beacon's `beacon-hooks` adapter. Supported hook runtimes capture session, prompt, tool, command, approval, MCP-like, permission, and file edit events where those runtimes expose payloads.
 
-## Endpoint Event
+## Endpoint event
 
 An **endpoint event** is one normalized Beacon JSON object describing runtime activity. Endpoint events include a stable `event` action, endpoint context, harness context, severity, and any optional entities the source provides. CI and cloud telemetry paths use the same Beacon-compatible event model where their collection path emits normalized records. See [Endpoint event schema](/telemetry-schema/event-schema).
 
-## Entity Model
+## Entity model
 
 The **entity model** is Beacon's shared shape for runtime-specific payloads. Each event has an action plus typed context such as `endpoint`, `user`, `harness`, `origin`, `run`, `session`, `tool`, `file`, `command`, `mcp`, `approval`, `policy`, `prompt`, `content`, `gen_ai`, `destination`, and `health`. See [Telemetry fields](/telemetry-schema/fields).
 
-## Threat Rules
+## Threat rules
 
 **Threat rules** are local detection rules that match Beacon endpoint events and produce findings. Beacon's `scan` command runs the active rule corpus over local or CI JSONL without requiring hosted ingest. See [Detections](/detections).
 
@@ -80,11 +80,11 @@ The **entity model** is Beacon's shared shape for runtime-specific payloads. Eac
 
 **Findings** are detection results produced when threat rules match runtime activity. They summarize the matched event, rule metadata, severity, and evidence so operators can review suspicious agent behavior in the local dashboard or downstream systems.
 
-## Runtime JSONL Log
+## Runtime JSONL log
 
 The **runtime JSONL log** is Beacon's local audit log for endpoint collection. User-mode installs write to `~/.beacon/endpoint/logs/runtime.jsonl`; system-mode installs write to `/var/log/beacon-agent/runtime.jsonl`. Each line is a complete Beacon endpoint event. Beacon keeps that active `runtime.jsonl` path stable for dashboards and shippers, and rotates it at 10 MiB with five numbered local archives such as `runtime.jsonl.1`.
 
-## Wazuh Localfile
+## Wazuh localfile
 
 **Wazuh localfile** ingestion reads Beacon's runtime JSONL log from disk. Beacon can print localfile configuration, generate rule packs and sample events, and write validation events for Wazuh ingestion tests.
 
@@ -96,43 +96,43 @@ The **runtime JSONL log** is Beacon's local audit log for endpoint collection. U
 
 **Falcon LogScale HEC** is CrowdStrike Falcon LogScale's HTTP Event Collector ingest path. Beacon can optionally configure a collector exporter that forwards normalized OTLP logs, traces, and metrics to a customer-managed Falcon LogScale HEC endpoint while preserving the local JSONL audit log.
 
-## Elastic Content Pack
+## Elastic content pack
 
 The **Elastic content pack** is Beacon's generated Filebeat, standalone Elastic Agent, Elasticsearch, and Kibana content for shipping local Beacon JSONL into Elastic. The pack reads the runtime log; Beacon itself does not store Elastic cluster URLs or credentials.
 
-## Datadog Content Pack
+## Datadog content pack
 
 The **Datadog content pack** is Beacon's generated Datadog Agent custom log collection content for shipping local Beacon JSONL into Datadog Logs. The pack reads the runtime log; Beacon itself does not store Datadog API keys or site configuration.
 
-## Microsoft Sentinel Content Pack
+## Microsoft Sentinel content pack
 
 The **Microsoft Sentinel content pack** is Beacon's generated Azure Monitor Agent and Log Analytics custom log content for shipping local Beacon JSONL into Microsoft Sentinel. The pack reads the runtime log; Beacon itself does not store Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, or ingestion endpoints.
 
-## AWS CloudWatch Logs Content Pack
+## AWS CloudWatch Logs content pack
 
 The **AWS CloudWatch Logs content pack** is Beacon's generated Vector forwarding template, setup guidance, and sample events for shipping local Beacon JSONL into a customer-managed CloudWatch Logs log group. The pack reads the runtime log; Beacon itself does not store AWS credentials, IAM roles, log group retention, stream naming, or encryption settings.
 
-## Sumo Logic Content Pack
+## Sumo Logic content pack
 
 The **Sumo Logic content pack** is Beacon's generated setup guidance, upload smoke-test script, Vector forwarding template, and sample events for shipping local Beacon JSONL into a Sumo Logic Hosted Collector HTTP Logs & Metrics Source. The pack reads the runtime log; Beacon itself does not store Sumo Source URLs, tokens, or collector configuration.
 
-## Rapid7 Content Pack
+## Rapid7 content pack
 
 The **Rapid7 content pack** is Beacon's generated setup guidance, NDJSON upload smoke-test script, Vector forwarding template, and sample events for shipping local Beacon JSONL into a Rapid7 InsightIDR Custom Logs webhook event source. The pack reads the runtime log; Beacon itself does not store Rapid7 webhook URLs or tokens.
 
-## AWS S3 Content Pack
+## AWS S3 content pack
 
 The **AWS S3 content pack** is Beacon's generated setup guidance, AWS CLI smoke-test script, Vector `aws_s3` forwarding template, and sample events for shipping local Beacon JSONL into an S3 bucket. The current Vector path reads runtime and inventory JSONL and writes them below separate folders under one root prefix; Beacon itself does not store AWS credentials, bucket policies, lifecycle rules, or encryption settings.
 
-## Google Cloud Storage Content Pack
+## Google Cloud Storage content pack
 
 The **Google Cloud Storage content pack** is Beacon's generated setup guidance, GCS upload smoke-test script, Vector `gcp_cloud_storage` forwarding template, and sample events for shipping local Beacon JSONL into a GCS bucket. The current Vector path reads runtime and inventory JSONL and writes them below separate folders under one root prefix; Beacon itself does not store Google Cloud credentials, service accounts, bucket IAM, lifecycle rules, retention policies, or encryption settings.
 
-## Vector Forwarding
+## Vector forwarding
 
 **Vector forwarding** means a customer-managed Vector host agent tails Beacon's local JSONL streams, parses each JSON line, and delivers events to a downstream destination such as Sumo Logic, Rapid7 InsightIDR, Falcon LogScale, AWS CloudWatch Logs, AWS S3, or Google Cloud Storage. Vector owns checkpointing, batching, retries, credentials, and destination-specific settings.
 
-## Customer-Managed Forwarding
+## Customer-managed forwarding
 
 **Customer-managed forwarding** means an existing shipper, agent, Vector host agent, or SIEM pipeline reads Beacon's runtime JSONL log and routes each line to a downstream destination.
 
@@ -140,15 +140,15 @@ The **Google Cloud Storage content pack** is Beacon's generated setup guidance, 
 
 The **dashboard** is a loopback-only local view over Beacon runtime logs. It includes Log Search for investigating events, Detections and Findings for reviewing local threat-rule matches, and Security Overview for summarizing local activity, risk signals, harnesses, models, repositories, MCP servers, and runtime inventory without requiring a hosted Beacon account.
 
-## Agent Runtime Inventory
+## Agent runtime inventory
 
 **Agent Runtime Inventory** is Beacon's local view of configured, detected, and observed runtime coverage. It helps operators confirm which supported agent harnesses are present, which telemetry surfaces Beacon manages, which MCP servers are referenced by local configs, and which runtimes have recently produced events in the configured runtime log.
 
-## Content Handling
+## Content handling
 
 **Content handling** describes how Beacon treats supported prompt, command, attribute, and diff content before writing endpoint events. Beacon applies redaction, sanitization, truncation, and event-size limits before local storage or configured forwarding.
 
-## User Mode And System Mode
+## User mode and system mode
 
 **User mode** uses per-user paths under `~/.beacon/endpoint` and is the default for local evaluation. **System mode** uses root-managed paths under `/Library/Application Support/Beacon/Endpoint` and `/var/log/beacon-agent`, which is the preferred mode for packaged or MDM deployments.
 

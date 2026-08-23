@@ -3,7 +3,7 @@ title: "beacon endpoint hooks"
 description: "Install and manage Beacon endpoint hooks for supported agent harnesses"
 ---
 
-## Command Overview
+## Command overview
 
 Beacon can install [hook-based endpoint telemetry](/concepts/core-concepts#hooks) for supported [agent harnesses](/runtimes). The hook adapter emits local Beacon [endpoint events](/concepts/core-concepts#endpoint-event) for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where each runtime exposes those hook payloads.
 
@@ -427,18 +427,18 @@ If Hermes telemetry is missing, confirm `~/.hermes/config.yaml` contains command
 
 ## Qwen Code troubleshooting
 
-Beacon merges its hooks into Qwen Code's own `settings.json` — `~/.qwen/settings.json` for user-level installs, `./.qwen/settings.json` for project-level installs. Unrelated top-level keys and non-Beacon hooks in the same event group are preserved, and a re-install replaces Beacon's own entries instead of adding a second copy. Beacon identifies its entries by the `--platform qwen` argument in the hook command, since it has no file of its own in `~/.qwen` to stamp.
+Beacon merges its hooks into Qwen Code's own `settings.json`: `~/.qwen/settings.json` for user-level installs, `./.qwen/settings.json` for project-level installs. Unrelated top-level keys and non-Beacon hooks in the same event group are preserved, and a re-install replaces Beacon's own entries instead of adding a second copy. Beacon identifies its entries by the `--platform qwen` argument in the hook command, since it has no file of its own in `~/.qwen` to stamp.
 
 Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so hooks are the only collection path for this runtime. `beacon endpoint install --harness qwen` fails with a message pointing here rather than appearing to succeed.
 
 Two Qwen-specific details are worth knowing before hand-editing the file:
 
 - **Timeouts are milliseconds, not seconds.** Claude Code reads `timeout` as seconds, so a Claude-style `10` means 10 ms to Qwen and every tool event is killed mid-write while the install still reports success. Beacon writes millisecond values (30000 for prompt submission, 10000 for tool events, 45000 for stop); events with no entry inherit Qwen's own 60000 ms default.
-- **Hooks declare `shell: bash`.** Qwen only uses bash when the hook configuration asks for it. Left unset on Windows it falls back to `cmd.exe`, which cannot parse Beacon's POSIX-quoted command, so every hook fails to start. This requires `bash` on `PATH` on Windows — the same requirement Claude Code already carries there.
+- **Hooks declare `shell: bash`.** Qwen only uses bash when the hook configuration asks for it. Left unset on Windows it falls back to `cmd.exe`, which cannot parse Beacon's POSIX-quoted command, so every hook fails to start. This requires `bash` on `PATH` on Windows, the same requirement Claude Code already carries there.
 
 If Qwen telemetry is missing, check the selected level, confirm `settings.json` contains commands with `--platform qwen`, confirm `disableAllHooks` is not set in Qwen's settings, confirm hook timeouts are millisecond values, trust the folder for a project-level install, and restart Qwen so new sessions pick up the updated settings.
 
-Beacon's `PreToolUse` hook answers with an empty object on purpose. Qwen reads `hookSpecificOutput.permissionDecision` from that hook, where `allow` means *run the tool without the usual approval prompt* — so an observing hook that answered `allow` would silently disarm your own permission prompts. Approval telemetry comes from Qwen's `PermissionRequest` event instead.
+Beacon's `PreToolUse` hook answers with an empty object on purpose. Qwen reads `hookSpecificOutput.permissionDecision` from that hook, where `allow` means run the tool without the usual approval prompt, so an observing hook that answered `allow` would silently disarm your own permission prompts. Approval telemetry comes from Qwen's `PermissionRequest` event instead.
 
 ## Codex CLI troubleshooting
 

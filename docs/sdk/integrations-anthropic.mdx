@@ -3,7 +3,7 @@ title: "Anthropic"
 description: "Instrument Anthropic SDK calls with Asymptote Observe"
 ---
 
-## Integration Overview
+## Integration overview
 
 Use this integration when your application calls Anthropic's `@anthropic-ai/sdk` TypeScript package directly. Asymptote Observe uses OpenLLMetry's Anthropic instrumentation so Anthropic model calls flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
 
@@ -13,7 +13,7 @@ Initialize Asymptote Observe before creating the Anthropic client when possible.
 
 Using Claude Agent SDK instead of the direct provider SDK? See [Claude Agent SDK](/sdk/integrations-claude-agent-sdk).
 
-## What Asymptote Captures
+## What Asymptote captures
 
 - Anthropic model calls emitted by the OpenLLMetry Anthropic instrumentation.
 - OpenTelemetry resource attributes such as service name, SDK version, `beacon.origin=cloud`, and export mode.
@@ -38,7 +38,7 @@ export ASYMPTOTE_API_KEY=...
 export ANTHROPIC_API_KEY=...
 ```
 
-## Getting Started
+## Getting started
 
 Initialize `Observe` before creating the Anthropic client when possible.
 
@@ -75,7 +75,7 @@ await Observe.flush();
 
 All supported Anthropic SDK calls are now traced through the configured Asymptote exporter.
 
-## Already-Loaded Clients
+## Already-loaded clients
 
 If your application imports or creates the Anthropic client before initialization, pass the module to `instrumentModules` or patch it after initialization.
 
@@ -95,7 +95,7 @@ Observe.initialize({
 });
 ```
 
-## Existing OpenTelemetry Providers
+## Existing OpenTelemetry providers
 
 If your application already owns OpenTelemetry setup, register only Asymptote's Anthropic instrumentation with your existing provider.
 
@@ -120,7 +120,7 @@ registerInstrumentations({
 - If the Anthropic module is imported before initialization, pass it through `instrumentModules` or `Observe.patch()`.
 - Call `Observe.flush()` before short-lived scripts or jobs exit.
 
-## What's Next
+## What's next
 
 <Columns cols={2}>
   <Card title="Claude Agent SDK" icon="robot" href="/sdk/integrations-claude-agent-sdk">

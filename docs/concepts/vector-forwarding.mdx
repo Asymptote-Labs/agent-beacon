@@ -30,7 +30,7 @@ sibling `inventory_state.jsonl`. Vector runs beside Beacon only when you choose
 to forward those local streams into your own storage, SIEM, data lake, or log
 platform.
 
-## Open Source And Managed
+## Open source and managed
 
 In **Asymptote Open Source**, Agent Beacon is local-first. It configures supported agent harnesses, receives OTLP or hook telemetry, normalizes events, writes local runtime and inventory JSONL, and can generate forwarding content packs. Destination credentials, bucket policies, IAM roles, lifecycle rules, retention, encryption, and remote ingestion settings stay outside Beacon endpoint configuration.
 
@@ -46,7 +46,7 @@ That is where Vector fits. For open-source deployments, Vector is an optional cu
 
 In **Asymptote Managed**, the main path is different. Managed deployments use Asymptote-hosted ingest, retention, search, detections, governance, identity mapping, and investigation workflows. Vector is not the required managed-ingest architecture. You might still use a customer-managed Vector pipeline for an additional archive or downstream copy, but the core managed product provides the central pipeline and operational surface.
 
-## Why The Handoff Is Local
+## Why the handoff is local
 
 Beacon's local JSONL handoff keeps the endpoint posture simple and inspectable.
 The endpoint agent does not need object-storage credentials to keep collecting
@@ -59,7 +59,7 @@ This also creates a clear ownership boundary:
 - Vector owns transport mechanics and destination delivery.
 - Your cloud, SIEM, or log platform owns remote access control, encryption, retention, indexing, and downstream detections.
 
-## The Pipeline Shape
+## The pipeline shape
 
 Most Beacon Vector templates have the same shape:
 
@@ -94,7 +94,7 @@ content_type = "application/x-ndjson"
 
 The source reads Beacon's local file. The transform replaces Vector's wrapper event with the parsed Beacon JSON object. The sink writes destination-ready records without changing Beacon's event schema.
 
-## S3 In Depth
+## S3 in depth
 
 AWS S3 forwarding is one example of how Beacon's local runtime and inventory
 streams become durable object storage without Beacon storing AWS credentials.
@@ -120,7 +120,7 @@ sudo /opt/beacon/bin/beacon endpoint s3 install-pack \
 
 The pack contains a `README.md`, `sample-event.jsonl`, an AWS CLI smoke-test script, and `vector.toml`. The generated config is a template for a customer-managed Vector host agent.
 
-### File Source
+### File source
 
 The S3 template uses Vector's [`file` source](https://vector.dev/docs/reference/configuration/sources/file/) to tail the active Beacon log:
 
@@ -135,7 +135,7 @@ read_from = "end"
 
 Vector stores file checkpoints below its global [`data_dir`](https://vector.dev/docs/reference/configuration/global-options/). Those checkpoints let Vector continue from the last observed file offset after restarts. The Vector process must be able to read `runtime.jsonl`, execute its parent directories, and write its `data_dir`.
 
-### Remap Transform
+### Remap transform
 
 The source emits a Vector log event whose `.message` field contains the raw JSONL line. The [`remap` transform](https://vector.dev/docs/reference/configuration/transforms/remap/) uses Vector Remap Language to parse that message:
 
@@ -152,7 +152,7 @@ source = '''
 
 The generated S3 pack also tails `inventory_state.jsonl` through a second source, transform, and S3 sink. Runtime events and inventory snapshots land under separate prefixes so operational inventory can be archived without mixing it into the runtime event stream.
 
-### AWS S3 Sink
+### AWS S3 sink
 
 The [`aws_s3` sink](https://vector.dev/docs/reference/configuration/sinks/aws_s3/) writes batches into your bucket:
 
@@ -214,7 +214,7 @@ For a dedicated Beacon prefix, least privilege usually starts with `s3:PutObject
 
 Add `s3:PutObjectTagging`, KMS permissions, bucket-owner controls, or condition keys only when your AWS environment requires them. Bucket lifecycle, retention, server-side encryption, replication, access logs, and object lock should be configured in AWS, not in Beacon.
 
-## GCS Authentication On macOS
+## GCS authentication on macOS
 
 The packaged GCS flow mirrors the S3 runtime/inventory layout with
 `gcp_cloud_storage` sinks and a root `BEACON_GCS_PREFIX`. The signed package
@@ -257,7 +257,7 @@ vendor=beacon product=endpoint-agent destination.type=s3 destination.mode=aws_s3
 
 If events do not appear, check the same ownership boundary in order: Beacon should be writing the local runtime log, Vector should be reading the same path and writing checkpoints, the Vector service should have AWS credentials available, and the bucket policy should allow object creation for the selected prefix.
 
-## Broader Integrations
+## Broader integrations
 
 The same Vector pattern powers several Beacon content packs:
 
@@ -268,11 +268,11 @@ The same Vector pattern powers several Beacon content packs:
 
 Other customer-managed pipelines can use the same contract even when they do not use Vector: read the active Beacon JSONL log, checkpoint offsets, follow rotation, preserve each line as one event, retry transient failures, and keep destination secrets outside Beacon endpoint configuration.
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before endpoint events reach `runtime.jsonl`. Vector forwards what Beacon wrote. Review Beacon content settings, Vector service permissions, bucket or SIEM access, downstream retention, and object lifecycle policies together so retained telemetry matches your approved collection policy.
 
-## Vector References
+## Vector references
 
 Use the official Vector docs when adapting generated templates:
 

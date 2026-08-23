@@ -31,7 +31,7 @@ flowchart LR
   Vector --> S3[AWS S3]
 ```
 
-## Security Outcome
+## Security outcome
 
 After rollout:
 
@@ -54,7 +54,7 @@ s3://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<timestamp>-<uuid>.jsonl.gz
 
 Runtime objects contain agent activity. Inventory objects contain agent configuration inventory such as known hooks, MCP servers, and skills where Beacon can inspect them locally.
 
-## Product Coverage
+## Product coverage
 
 | Product surface | Jamf step | What security receives |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ BEACON_S3_PREFIX="beacon-prod" # good
 BEACON_S3_PREFIX="beacon-prod/runtime" # avoid
 ```
 
-## AWS Permission
+## AWS permission
 
 Scope write access to the Beacon prefix:
 
@@ -108,7 +108,7 @@ Beacon does not store AWS credentials in endpoint configuration. The S3 helper w
 
 That file is owned by root and mode `0600`.
 
-## Jamf Policy Plan
+## Jamf policy plan
 
 Create these policies in order:
 
@@ -121,7 +121,7 @@ Create these policies in order:
 
 Keep policies 2, 3, and 4 separate during rollout. That makes failures easier to triage and avoids hiding user-context failures behind package installation success.
 
-## Step 1: Install Beacon Package
+## Step 1: install Beacon package
 
 In Jamf Pro:
 
@@ -144,7 +144,7 @@ The package installs:
 /opt/beacon/jamf/scripts/install-cursor-hooks.sh
 ```
 
-## Step 2: Configure S3 And Claude Code
+## Step 2: configure S3 and Claude Code
 
 Create a Jamf script named `Beacon - Configure S3 Forwarding`.
 
@@ -225,7 +225,7 @@ This policy:
 - Installs Claude Code hooks for the console user.
 - Starts `com.beacon.endpoint.s3-forwarder`.
 
-## Optional: Enable Endpoint Self-Updates
+## Optional: enable endpoint self-updates
 
 Beacon package self-updates are off by default. To let Beacon apply future signed package updates after the Jamf install, add a Jamf Files and Processes payload or post-install policy command:
 
@@ -241,7 +241,7 @@ sudo /opt/beacon/bin/beacon endpoint update enable --check-only
 
 Both commands require root. `auto` mode verifies release manifest checksums, Developer ID signature, and Gatekeeper install assessment before applying a signed package. `check-only` mode writes update status events to `/var/log/beacon-agent/system.jsonl` without downloading or applying packages.
 
-## Step 3: Configure Cursor Hooks
+## Step 3: configure Cursor hooks
 
 Create a Jamf script named `Beacon - Configure Cursor Hooks`.
 
@@ -304,7 +304,7 @@ The helper switches to the console user and runs:
   --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
-## Step 4: Configure Codex CLI
+## Step 4: configure Codex CLI
 
 Codex CLI runtime telemetry is OTLP-based. It reads OTLP settings from `~/.codex/config.toml`.
 
@@ -324,11 +324,11 @@ endpoint = "http://127.0.0.1:4317"
 
 Preserve existing non-OTel Codex settings and ensure the final file is owned by the user. This step is required for Codex runtime telemetry. Optional Codex hooks can be installed separately when you want Codex sessions to trigger inventory heartbeats.
 
-## Validate A Deployed Mac
+## Validate a deployed Mac
 
 Run these checks on a target Mac after each policy completes.
 
-### 1. Confirm Services
+### 1. Confirm services
 
 ```bash
 sudo launchctl print system/com.beacon.endpoint.collector
@@ -337,7 +337,7 @@ sudo launchctl print system/com.beacon.endpoint.s3-forwarder
 
 Both services should be `running`.
 
-### 2. Confirm Local Files
+### 2. Confirm local files
 
 ```bash
 ls -l /var/log/beacon-agent/runtime.jsonl
@@ -346,7 +346,7 @@ ls -l "/Library/Application Support/Beacon/Forwarders/s3-vector.toml"
 sudo test -r "/Library/Application Support/Beacon/Forwarders/s3-vector.env"
 ```
 
-### 3. Confirm S3 Forwarder Config
+### 3. Confirm S3 forwarder config
 
 ```bash
 sudo grep -E 'runtime.jsonl|inventory_state.jsonl|runtime/date|inventory/date|read_from' \
@@ -364,7 +364,7 @@ key_prefix = "${BEACON_S3_PREFIX:-beacon}/runtime/date=%F/"
 key_prefix = "${BEACON_S3_PREFIX:-beacon}/inventory/date=%F/"
 ```
 
-### 4. Confirm Hook And Codex Config
+### 4. Confirm hook and Codex config
 
 Run as the logged-in user:
 
@@ -376,7 +376,7 @@ grep -n 'otel' ~/.codex/config.toml
 
 Claude and Cursor should reference `beacon-hooks`. Codex should include `[otel]`, `[otel.exporter."otlp-grpc"]`, and `[otel.metrics_exporter."otlp-grpc"]`.
 
-### 5. Generate Local Test Events
+### 5. Generate local test events
 
 Write a synthetic endpoint event:
 
@@ -405,7 +405,7 @@ tail -n 5 /var/log/beacon-agent/runtime.jsonl
 tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
 ```
 
-### 6. Generate Product Events
+### 6. Generate product events
 
 Generate a Claude Code event:
 
@@ -429,7 +429,7 @@ Generate a Cursor event by starting a new Cursor session after restart and sendi
 sudo grep "beacon jamf cursor test" /var/log/beacon-agent/runtime.jsonl
 ```
 
-### 7. Confirm S3 Delivery
+### 7. Confirm S3 delivery
 
 Vector batches uploads. Production configs use `timeout_secs = 300`, so allow up to five minutes.
 
@@ -452,7 +452,7 @@ aws s3 cp "s3://${BEACON_S3_BUCKET}/${BEACON_S3_PREFIX}/runtime/date=<YYYY-MM-DD
 
 ## Troubleshooting
 
-### No S3 Objects
+### No S3 objects
 
 Check the forwarder:
 
@@ -515,13 +515,13 @@ Verify that the env file has non-secret settings without printing credentials:
 sudo sh -c 'sed -E "s/(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|BEACON_S3_BUCKET|AWS_REGION|BEACON_S3_PREFIX)=.*/\1=<redacted>/" "/Library/Application Support/Beacon/Forwarders/s3-vector.env"'
 ```
 
-### Cursor Hooks Are Missing
+### Cursor hooks are missing
 
 Confirm the hook policy ran while a user was logged in. The helper exits when the console user is `root` or `loginwindow`.
 
 Run the hook policy again after login, then restart Cursor.
 
-### Claude Code Events Are Missing
+### Claude Code events are missing
 
 Confirm the S3 helper ran while a user was logged in, then check Claude settings as that user:
 
@@ -531,7 +531,7 @@ grep -n 'BEACON_ENDPOINT_CLI\|beacon-hooks' ~/.claude/settings.json
 
 Fully restart Claude Code after installing hooks.
 
-### Codex Events Are Missing
+### Codex events are missing
 
 Confirm Codex CLI is installed and the user config includes OTel:
 
@@ -542,7 +542,7 @@ grep -n 'otel\|otlp-grpc\|127.0.0.1:4317' ~/.codex/config.toml
 
 Codex runtime telemetry is OTLP-based. Re-run the Codex config policy for the logged-in user if the OTel block is missing.
 
-### Inventory Is Empty
+### Inventory is empty
 
 Force inventory and inspect the local file:
 
@@ -558,7 +558,7 @@ sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
 tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
 ```
 
-### Cloud Or Admin Products Are Missing
+### Cloud or admin products are missing
 
 Claude Cowork, Claude Code cloud agents, Cursor Cloud Agents, CI agents, and SDK-instrumented OpenAI or Anthropic applications are not configured by this Mac MDM policy. Use their runtime-specific setup pages and validate those events at the collector or destination they target.
 

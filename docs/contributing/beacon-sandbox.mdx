@@ -1,5 +1,5 @@
 ---
-title: "Testing Beacon In A Sandbox"
+title: "Testing Beacon in a Sandbox"
 description: "Run a real AI coding session in a throwaway Linux or Windows machine and check that Beacon recorded it"
 ---
 
@@ -7,7 +7,7 @@ description: "Run a real AI coding session in a throwaway Linux or Windows machi
 
 `beacon-sandbox` is a testing tool for Beacon contributors. It starts a throwaway machine, installs your local Beacon build on it, runs a real Claude Code session inside it, and then checks whether Beacon recorded what the agent actually did.
 
-You would use it when you have changed something about how Beacon captures telemetry and you want proof that it still works against a live agent — not just that the unit tests pass.
+Use it when you have changed something about how Beacon captures telemetry and you want proof that it still works against a live agent, not just that the unit tests pass.
 
 Nothing runs on your own machine, so your local Beacon setup is untouched, and the machine is destroyed when the test finishes.
 
@@ -17,20 +17,17 @@ It runs on two platforms, and where the throwaway machine comes from is the only
 |---|---|---|
 | Linux | A Modal sandbox, rented per test | A Modal account and an Anthropic API key |
 | Windows | A GitHub-hosted runner, which is already disposable | Write access to this repository and an Anthropic API key |
-| macOS | — | Not possible; neither backend offers macOS. See [Limitations](#limitations) |
+| macOS | None | Not possible. Neither backend offers macOS. See [Limitations](#limitations) |
 
-Everything after that is shared — the same scenario files, the same checks, the same verdicts, the same
-`verify` and `--mutate` commands. Most of this page applies to both. If you are working on Windows,
-read [Testing The Windows Build](#testing-the-windows-build) for the parts that differ, and skip the
-Modal setup below.
+Everything after that is shared: the same scenario files, the same checks, the same verdicts, and the same `verify` and `--mutate` commands. Most of this page applies to both. If you are working on Windows, read [Testing the Windows build](#testing-the-windows-build) for the parts that differ, and skip the Modal setup below.
 
 <Note>
-  This is a tool for working *on* Beacon. It is not part of Beacon itself, it is not included in any release, and installing Beacon does not install this. Beacon's own telemetry collection stays local and offline as always.
+  This is a tool for working on Beacon. It is not part of Beacon itself, it is not included in any release, and installing Beacon does not install it. Beacon's own telemetry collection stays local and offline as always.
 </Note>
 
-## Why A Sandbox Instead Of Unit Tests
+## Why a sandbox instead of unit tests
 
-Beacon's unit tests feed it example telemetry and check the output. That catches a lot, but it cannot answer the question that matters most: *when a real agent runs a real command, does Beacon record it?*
+Beacon's unit tests feed it example telemetry and check the output. That catches a lot, but it cannot answer the question that matters most: when a real agent runs a real command, does Beacon record it?
 
 Real agents produce messier telemetry than any handwritten example. A field can quietly stop being filled in, and every unit test still passes because none of them ever saw what the live agent actually sends.
 
@@ -39,14 +36,13 @@ The catch is that AI sessions are not repeatable. Ask an agent to run a command 
 The tool works around this with markers rather than exact comparison:
 
 - Each test puts a **random one-off string** into the prompt, then checks that string appears in Beacon's log. Since the tool invented the string, a match cannot be coincidence.
-- The agent is also asked to **write that string into a file**. If the file is there, the agent definitely did the work — so if Beacon has no record of it, that is Beacon's problem and not the model having a lazy day.
+- The agent is also asked to **write that string into a file**. If the file is there, the agent did the work, so a missing record is Beacon's problem rather than the model having a lazy day.
 
 That second part is what makes the results trustworthy. Without it, "Beacon missed the event" and "the agent never ran the command" look exactly the same.
 
-## Before You Start
+## Before you start
 
-This section covers the **Linux** backend. Testing the Windows build needs neither a Modal account nor
-any of the setup below — see [Setting It Up](#setting-it-up) in the Windows section instead.
+This section covers the **Linux** backend. Testing the Windows build needs neither a Modal account nor any of the setup below. See [Setting it up](#setting-it-up) in the Windows section instead.
 
 You need two accounts, and neither can be set up for you:
 
@@ -98,7 +94,7 @@ If something is missing, `doctor` prints the fix beside it. Run the fix, then ru
   `doctor` is worth running any time a test behaves strangely. Most confusing failures turn out to be a missing or outdated build artifact, and it will tell you.
 </Note>
 
-### Keeping Your API Key Out Of Your Shell
+### Keeping your API key out of your shell
 
 Three ways to supply the key, in the order the tool looks for them:
 
@@ -114,7 +110,7 @@ To create the Modal secret: `modal secret create my-anthropic-key ANTHROPIC_API_
   The Modal secret option keeps the key furthest from your machine, but it comes with one small trade-off: because the tool never sees the key itself, it cannot double-check that the key never leaked into the collected logs. It will say so in the results rather than quietly skipping that check.
 </Note>
 
-## Your First Test
+## Your first test
 
 Build Beacon for Linux, then run a single test:
 
@@ -140,7 +136,7 @@ This takes about three minutes and costs a few cents. You will see the sandbox s
 
 `PASS` means Beacon recorded everything this test looked for.
 
-## Understanding The Results
+## Understanding the results
 
 Every test ends in one of three states:
 
@@ -148,7 +144,7 @@ Every test ends in one of three states:
 |--------|---------|------------|
 | **PASS** | Beacon recorded what the test looked for | Nothing |
 | **FAIL** | Something the test expected is missing or empty | Read the failure detail below |
-| **INCONCLUSIVE** | The agent never did the requested work, so there was nothing to record | Run it again — this is not a Beacon problem |
+| **INCONCLUSIVE** | The agent never did the requested work, so there was nothing to record | Run it again. This is not a Beacon problem |
 
 A `FAIL` tells you which expectation broke and why that expectation exists:
 
@@ -162,11 +158,11 @@ FAIL  s02-bash-command
              rules cannot fire.
 ```
 
-Read it from the top. The agent demonstrably did the work, so the missing event is a real gap. The event counts then hint at where it went — seven events landed under a different name, which points at a labelling problem rather than a dropped event.
+Read it from the top. The agent demonstrably did the work, so the missing event is a real gap. The event counts hint at where it went: seven events landed under a different name, which points at a labelling problem rather than a dropped event.
 
-### Warnings Mean "Could Not Check"
+### Warnings mean "could not check"
 
-Alongside pass and fail, you may see `[WARN]` lines. These are not failures, but they are not clean results either — each one means a check could not run:
+Alongside pass and fail, you may see `[WARN]` lines. These are not failures, but they are not clean results either. Each one means a check could not run:
 
 | Warning | What it means |
 |---------|---------------|
@@ -177,22 +173,21 @@ Alongside pass and fail, you may see `[WARN]` lines. These are not failures, but
 
 If you are reporting results to someone else, mention these. Silence from this tool is meant to mean "checked and clean", so a warning is worth passing on.
 
-### A Failure Is Not Always A Beacon Bug
+### A failure is not always a Beacon bug
 
-Tests encode what Beacon *should* do. When Beacon's behaviour legitimately improves, an old expectation can become out of date and start failing. Before concluding you have found a bug:
+Tests encode what Beacon should do. When Beacon's behaviour legitimately improves, an old expectation can go out of date and start failing. Before concluding you have found a bug:
 
 1. Read the failing expectation's `why` and compare it against the event counts in the output. Did the event move somewhere else rather than disappear?
-2. If your change touched `collector-builder/`, check that you rebuilt it — see the warning below.
+2. If your change touched `collector-builder/`, check that you rebuilt it. See the warning below.
 3. Only then treat it as a gap in Beacon.
 
 <Warning>
   **If your change is in `collector-builder/`, rebuild it before testing.** Telemetry processing lives in a separate binary from the `beacon` command, so a test run will happily use an older copy and pass without ever exercising your change. `doctor` warns about this, and it is the single most common way to waste a test run.
 </Warning>
 
-## The Tests You Can Run
+## The tests you can run
 
-These run on the Linux backend. The Windows ones are listed in
-[Testing The Windows Build](#running-one).
+These run on the Linux backend. The Windows ones are listed in [Testing the Windows build](#running-one).
 
 ```bash
 go run ./cmd/beacon-sandbox run --scenario s01-hello   # one test
@@ -213,16 +208,9 @@ go run ./cmd/beacon-sandbox run                        # all of them, ~30 min
 
 Use one test while you are iterating. Run all of them before opening a pull request.
 
-The `s0*` tests collect through a temporary collector — the path Beacon uses in CI and cloud agents.
-The `i0*` tests install Beacon properly first, so they cover things the others cannot: whether config
-lands where Beacon says it did, whether the service actually starts, and whether a permanently
-installed collector receives telemetry.
+The `s0*` tests collect through a temporary collector, the path Beacon uses in CI and cloud agents. The `i0*` tests install Beacon properly first, so they cover things the others cannot: whether config lands where Beacon says it did, whether the service actually starts, and whether a permanently installed collector receives telemetry.
 
-`i02` is the slowest test by some margin, and the reason is worth knowing. A system-mode install on
-Linux is managed by systemd, and systemd only runs as process 1 — but Modal's own startup process
-holds that slot, so systemd refuses to start. The way around it is a privileged container inside the
-sandbox, where systemd *is* process 1, and running the whole test in there. The tool sets this up for
-you when a test asks for it:
+`i02` is the slowest test by some margin, and the reason is worth knowing. A system-mode install on Linux is managed by systemd, and systemd only runs as process 1, but Modal's own startup process holds that slot, so systemd refuses to start. The way around it is a privileged container inside the sandbox, where systemd is process 1, with the whole test running in there. The tool sets this up when a test asks for it:
 
 ```yaml title="Asking for a real systemd"
 install:
@@ -233,53 +221,39 @@ install:
   expect_service_kind: systemd
 ```
 
-`expect_service_kind` is not redundant with `expect_status_running`. Beacon falls back to a plain
-background collector when it finds no service manager, and that fallback also reports itself as
-running — so without naming the backend you expect, a test meant to cover systemd could quietly pass
-while covering the fallback instead.
+`expect_service_kind` is not redundant with `expect_status_running`. Beacon falls back to a plain background collector when it finds no service manager, and that fallback also reports itself as running. Without naming the backend you expect, a test meant to cover systemd could quietly pass while covering the fallback instead.
 
-## Testing The Windows Build
+## Testing the Windows build
 
-Modal offers Linux machines only, so Windows needs a different disposable machine. It uses a
-GitHub-hosted Windows runner, which is already one: a fresh virtual machine per job, with
-administrator rights, UAC disabled, and a real Service Control Manager — everything an endpoint
-install needs.
+Modal offers Linux machines only, so Windows needs a different disposable machine. It uses a GitHub-hosted Windows runner, which is already one: a fresh virtual machine per job, with administrator rights, UAC disabled, and a real Service Control Manager. That is everything an endpoint install needs.
 
-The difference from the Linux path is where the sandbox is. On Modal the tool starts a machine and
-drives it from outside. On Windows **the runner is the sandbox**, and the tool runs inside it. The
-collected output is uploaded and judged on your machine afterwards by the same code that judges a
-Modal run, so a Windows verdict is produced by the same rules as a Linux one.
+The difference from the Linux path is where the sandbox is. On Modal the tool starts a machine and drives it from outside. On Windows **the runner is the sandbox**, and the tool runs inside it. The collected output is uploaded and judged on your machine afterwards by the same code that judges a Modal run, so a Windows verdict comes from the same rules as a Linux one.
 
 Runner minutes are free on this public repository, so unlike the Linux tests these cost only the
 Anthropic API session.
 
-### Running One
+### Running one
 
 ```bash title="Dispatch a Windows test"
 gh workflow run windows-sandbox.yml -f scenario=w03-hook-capture
 gh run watch
 ```
 
-Leave `scenario` empty to run every Windows test. Each takes a few minutes; the whole set is about
-fifteen.
+Leave `scenario` empty to run every Windows test. Each takes a few minutes, and the whole set takes about fifteen.
 
 | Test | Covers |
 |------|--------|
-| `w00-probe` | The `beacon ci exec` collection path. Known to be unreliable on Windows — see [#320](https://github.com/asymptote-labs/agent-beacon/issues/320) |
+| `w00-probe` | The `beacon ci exec` collection path. Known to be unreliable on Windows. See [#320](https://github.com/asymptote-labs/agent-beacon/issues/320) |
 | `w01-install-service` | A system-mode install registered with the Service Control Manager, then a session against it |
 | `w02-install-supervised` | A user-mode install, which falls back to a supervised collector because Windows has no per-user service manager |
 | `w03-hook-capture` | Capture through *installed* hooks: prompts, command text, and file edits |
 | `w04-denied-tool` | Approvals and denials through installed hooks |
 
-`w03` is the one that matters most. It goes through hooks Beacon installed rather than a temporary
-collector, which is what a real user gets — and it is the only test that can tell you the command
-string Beacon writes into a runtime's settings is one that runtime can actually execute.
+`w03` is the one that matters most. It goes through hooks Beacon installed rather than a temporary collector, which is what a real user gets. It is also the only test that can confirm the command string Beacon writes into a runtime's settings is one that runtime can execute.
 
-### Setting It Up
+### Setting it up
 
-Dispatching needs write access to the repository, plus an `ANTHROPIC_API_KEY` secret in the
-`windows-sandbox` environment. Scoped to an environment rather than the repository, matching how the
-release secrets are handled:
+Dispatching needs write access to the repository, plus an `ANTHROPIC_API_KEY` secret in the `windows-sandbox` environment. It is scoped to an environment rather than the repository, matching how the release secrets are handled:
 
 ```bash title="Store the key, without it entering your shell history"
 gh api -X PUT repos/asymptote-labs/agent-beacon/environments/windows-sandbox
@@ -287,26 +261,17 @@ printf '%s' "$ANTHROPIC_API_KEY" | gh secret set ANTHROPIC_API_KEY \
   --repo asymptote-labs/agent-beacon --env windows-sandbox
 ```
 
-Use a dedicated, budget-capped key. The harness runs a real agent with
-`--dangerously-skip-permissions`, and the per-session budget in a scenario is a client-side cap
-rather than an account guard.
+Use a dedicated, budget-capped key. The harness runs a real agent with `--dangerously-skip-permissions`, and the per-session budget in a scenario is a client-side cap rather than an account guard.
 
 <Note>
-  The workflow is `workflow_dispatch` only, and deliberately. It needs an API key to run a real
-  session, and on a public repository that secret must never be reachable from a fork's pull request —
-  so there is no `pull_request` trigger and there must never be a `pull_request_target` one.
+  The workflow is `workflow_dispatch` only, deliberately. It needs an API key to run a real session, and on a public repository that secret must never be reachable from a fork's pull request. So there is no `pull_request` trigger, and there must never be a `pull_request_target` one.
 </Note>
 
-### One Check Works Differently There
+### One check works differently there
 
-Every Linux run fingerprints your own Beacon state before and after, so a test that accidentally
-installed something on your machine is caught rather than assumed impossible. That comparison only
-means something when the sandbox is a *different* machine.
+Every Linux run fingerprints your own Beacon state before and after, so a test that accidentally installed something on your machine is caught rather than assumed impossible. That comparison only means something when the sandbox is a different machine.
 
-On Windows it is not — the install being tested is itself the change the guard would report. So the
-run records a different kind of evidence: that the machine is disposable (a GitHub-hosted runner, one
-fresh VM per job). The verdict says which of the two it relied on rather than silently reporting the
-comparison as clean:
+On Windows it is not, because the install being tested is itself the change the guard would report. The run records a different kind of evidence instead: that the machine is disposable, a GitHub-hosted runner with one fresh VM per job. The verdict says which of the two it relied on rather than silently reporting the comparison as clean:
 
 ```
 [WARN] safety.host_untouched: host isolation was not verified by comparison because the guest
@@ -315,8 +280,7 @@ comparison as clean:
        (github-hosted ephemeral runner (fresh VM per job))
 ```
 
-That warning is expected on every Windows run. It is not a problem to fix; it is the tool declining to
-claim a check it could not perform.
+That warning is expected on every Windows run. It is not a problem to fix. It is the tool declining to claim a check it could not perform.
 
 ## Commands
 
@@ -330,7 +294,7 @@ claim a check it could not perform.
 
 `verify` is worth knowing about. Every run saves its output under `runs/`, and `verify` re-checks that saved output without starting a sandbox or calling the API. If you are adjusting what a test expects, use `verify` rather than paying for another run.
 
-## Writing Your Own Test
+## Writing your own test
 
 Tests are YAML files in `beacon-sandbox/scenarios/`:
 
@@ -349,7 +313,7 @@ expect:
 
 - `{{canary}}` becomes the random one-off string for that run. `{{sentinel}}` and `{{workdir}}` are also substituted.
 - `sentinel` is the file the agent must leave behind. It has to contain the canary, so a file created by setup does not count.
-- `why` is required on every expectation — a failure nobody can interpret is not useful.
+- `why` is required on every expectation, because a failure nobody can interpret is not useful.
 - `optional: true` records an expectation without failing the run, for something known to be missing.
 
 Check your file without spending anything:
@@ -358,7 +322,7 @@ Check your file without spending anything:
 go test ./scenario/
 ```
 
-## Checking That The Checks Work
+## Checking that the checks work
 
 A test that cannot fail is worse than no test, so you can deliberately damage a saved run and confirm the tool notices:
 
@@ -375,9 +339,7 @@ go test ./...
 ## Limitations
 
 <Warning>
-  **The macOS build cannot be tested this way.** Modal provides Linux machines, and the Windows path
-  above uses a GitHub-hosted Windows runner; neither offers macOS. Anything macOS-specific — launchd,
-  the signed installer, notarization — is out of reach and has to be checked by hand on a Mac.
+  **The macOS build cannot be tested this way.** Modal provides Linux machines, and the Windows path above uses a GitHub-hosted Windows runner. Neither offers macOS, so anything macOS-specific (launchd, the signed installer, notarization) has to be checked by hand on a Mac.
 </Warning>
 
 - **The systemd tests run nested.** `i02` runs inside a container within the sandbox, so it is slower and needs a few more minutes of patience than the others.

@@ -55,7 +55,7 @@ sudo /opt/beacon/bin/beacon endpoint status --system
 sudo launchctl print system/com.beacon.endpoint.collector
 ```
 
-## 2. Configure Runtime Harnesses
+## 2. Configure runtime harnesses
 
 Object storage forwarding begins after events reach Beacon's system logs.
 Configure the runtimes you use before troubleshooting the destination.
@@ -90,7 +90,7 @@ ls -l \
   /var/log/beacon-agent/inventory_state.jsonl
 ```
 
-## 3. Choose A Destination
+## 3. Choose a destination
 
 Use a root prefix such as `beacon-prod`. Do not include `runtime` or
 `inventory`; Beacon appends those folders.
@@ -290,7 +290,7 @@ external-account Workload Identity Federation on macOS. Configure lifecycle,
 retention, audit logging, and CMEK controls in Google Cloud rather than in
 Beacon.
 
-### Forward To Both
+### Forward to both
 
 The services have separate labels, configs, credentials, and checkpoint
 directories. Install both helpers to forward the same local events to S3 and
@@ -388,7 +388,7 @@ inspection commands with your administrator identity or a separate reader.
 Generate a real event from every configured harness and confirm its
 `harness.name` appears in a remote runtime object.
 
-## 5. Operate And Troubleshoot
+## 5. Operate and troubleshoot
 
 The forwarders persist checkpoints, so restarts and package upgrades resume from
 the last observed offsets. Runtime starts at the end on first install to avoid

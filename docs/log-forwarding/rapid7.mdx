@@ -3,7 +3,7 @@ title: "Rapid7 InsightIDR"
 description: "Forward Beacon endpoint events into Rapid7 InsightIDR with a Custom Logs webhook event source."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon `v0.0.25` added Rapid7 InsightIDR support for teams that want Beacon endpoint events in Rapid7 Log Search and investigations. Current Beacon releases write one local source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log), and keep that handoff path bounded with local rotation. Your customer-managed shipper or deployment tooling owns Rapid7 webhook URLs, checkpointing, rotation handling, and retries.
 
@@ -148,7 +148,7 @@ vendor=beacon product=endpoint-agent destination.type=rapid7
 
 If events do not appear, verify that your forwarder is reading the same runtime log path Beacon writes, that the webhook URL is current, and that each Beacon JSONL line is preserved as a distinct event.
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to `runtime.jsonl` and forwarded to Rapid7. Review event source access, retention, and downstream consumers so retained telemetry matches your approved collection policy.
 

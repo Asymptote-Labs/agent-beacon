@@ -3,7 +3,7 @@ title: "Instrumentation"
 description: "Initialize Asymptote Observe and configure TypeScript SDK instrumentation"
 ---
 
-## Instrumentation Model
+## Instrumentation model
 
 Use `Observe.initialize()` once at application startup to configure the OpenTelemetry provider, exporter, resource attributes, and supported AI SDK instrumentations.
 
@@ -19,7 +19,7 @@ Observe.initialize({
 
 By default, the SDK creates OpenAI and Anthropic OpenLLMetry instrumentations when they are not disabled.
 
-## Initialize Options
+## Initialize options
 
 | Option | Purpose |
 | --- | --- |
@@ -41,7 +41,7 @@ By default, the SDK creates OpenAI and Anthropic OpenLLMetry instrumentations wh
 
 `Observe.initialize()` may only be called once per process configuration. Call `Observe.shutdown()` before reinitializing with different options. A later `Observe.initialize({ instrumentModules })` call can patch additional modules without replacing the provider.
 
-## Instrument Modules
+## Instrument modules
 
 Pass modules to `instrumentModules` when they may be loaded before auto-instrumentation runs.
 
@@ -67,7 +67,7 @@ Supported module keys in the current TypeScript SDK:
 | `Anthropic` or `anthropic` | `@anthropic-ai/sdk` |
 | `claudeAgentSDK` or `claudeAgentSdk` | `@anthropic-ai/claude-agent-sdk` query export |
 
-## Patch Modules After Initialization
+## Patch modules after initialization
 
 Use `Observe.patch()` when the SDK has already initialized and a module needs to be instrumented later, such as inside a framework-specific module boundary.
 
@@ -86,7 +86,7 @@ Observe.patch({
 
 `Observe.patch()` requires at least one module. It applies supported OpenLLMetry instrumentation and wraps Claude Agent SDK query functions when the module object is writable.
 
-## Existing OpenTelemetry Providers
+## Existing OpenTelemetry providers
 
 If your application already owns OpenTelemetry setup, use `Observe.instrumentations()` with your provider instead of calling `Observe.initialize()` twice.
 

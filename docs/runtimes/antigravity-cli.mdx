@@ -3,7 +3,7 @@ title: "Antigravity CLI"
 description: "Asymptote support details for Antigravity CLI endpoint telemetry"
 ---
 
-## Runtime Overview
+## Runtime overview
 
 Asymptote supports Antigravity CLI through native hook payloads sent to `beacon-hooks`. Antigravity support was added in the endpoint agent in `v0.0.29`.
 
@@ -50,7 +50,7 @@ Asymptote writes user-level Antigravity hooks to `~/.gemini/config/hooks.json` a
 | Prompt telemetry | Supported through `PreInvocation` and `UserPromptSubmit` hooks |
 | Command, tool, and file telemetry | Supported for pre-tool, post-tool, invocation stop, command, failed edit, quoted path, diff, and file edit payloads where Antigravity exposes them |
 | Local JSONL and dashboard | Supported |
-| MDM deployment | Supported for the endpoint agent; Antigravity hooks are installed separately in the logged-in user's context or project context |
+| MDM deployment | Supported for the endpoint agent. Antigravity hooks are installed separately in the logged-in user's context or project context |
 
 Antigravity can invoke a pre-tool hook before its transcript file contains readable prompt text. Asymptote waits until the transcript is available before marking `prompt.submitted` as emitted, so the next hook in the same session can still record the prompt event.
 

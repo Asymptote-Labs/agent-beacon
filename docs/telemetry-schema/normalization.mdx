@@ -3,7 +3,7 @@ title: "Schema Normalization"
 description: "How Beacon maps OTLP attributes and hook payloads into normalized events"
 ---
 
-## Normalization Rules
+## Normalization rules
 
 Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/concepts/core-concepts#hooks) payloads into the same event contract. The collector exporter looks for common runtime fields, while hook telemetry builds those fields directly from hook payloads.
 
@@ -104,7 +104,7 @@ one, they describe one call, and the writer records that call once rather than t
 
 `event.id` is Beacon's own identity for the event: a deterministic UUID, so the same event is
 named the same way in any process and any release. Where the runtime named the action itself, the
-UUID is derived from the session, action, target and call ID, and nothing else — so the hook's
+UUID is derived from the session, action, target, and call ID, and nothing else, so the hook's
 report and the collector's report of one action carry one `event.id` even though they are written
 seconds apart with different fields. Otherwise it is derived from the event's own content, which
 makes re-reading a log produce the IDs it already had.

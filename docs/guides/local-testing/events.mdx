@@ -17,7 +17,7 @@ Confirm endpoint telemetry is configured:
 beacon endpoint status
 ```
 
-## 1. Write A Test Event
+## 1. Write a test event
 
 Run `beacon endpoint test-event` with the default per-user endpoint paths:
 
@@ -42,7 +42,7 @@ The command checks that the configured runtime log is writable, appends a synthe
 beacon endpoint validate-pipeline
 ```
 
-## 2. Print Validation Stages As JSON
+## 2. Print validation stages as JSON
 
 Use JSON output when capturing evidence for support, scripts, or rollout checks:
 
@@ -61,7 +61,7 @@ beacon endpoint test-event --json
 ```
 </Accordion>
 
-## 3. Validate A Specific Log Path
+## 3. Validate a specific log path
 
 If you are testing a non-default runtime log, pass the path explicitly:
 
@@ -75,7 +75,7 @@ For a system-mode deployment, use the system endpoint paths:
 sudo beacon endpoint test-event --system
 ```
 
-## 4. Test GitHub Copilot CLI Telemetry
+## 4. Test GitHub Copilot CLI telemetry
 
 After `beacon endpoint install` has started the local collector, run a real Copilot CLI prompt with OTLP export enabled:
 
@@ -95,7 +95,7 @@ beacon endpoint status
 beacon endpoint dashboard --open
 ```
 
-## Verify Results
+## Verify results
 
 After writing the event, confirm it with status or the local dashboard:
 

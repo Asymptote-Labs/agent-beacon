@@ -3,7 +3,7 @@ title: "Vercel AI SDK"
 description: "Use Asymptote Observe tracing with Vercel AI SDK telemetry"
 ---
 
-## Integration Overview
+## Integration overview
 
 Pass the Asymptote tracer into AI SDK telemetry so model calls and tool loops stay in the same trace.
 
@@ -13,7 +13,7 @@ AI SDK exposes OpenTelemetry hooks through `experimental_telemetry`. Asymptote O
 
 This page covers Node.js usage. For framework placement and serverless flushing, see [Next.js and serverless](/sdk/integrations-nextjs-serverless).
 
-## What Asymptote Captures
+## What Asymptote captures
 
 - AI SDK spans emitted when `experimental_telemetry.isEnabled` is `true`.
 - Model call spans for supported `generate*` and `stream*` operations.
@@ -39,7 +39,7 @@ export ASYMPTOTE_API_KEY=...
 export OPENAI_API_KEY=...
 ```
 
-## Getting Started
+## Getting started
 
 Initialize `Observe` once at application startup, then pass the tracer to AI SDK calls.
 
@@ -66,7 +66,7 @@ await Observe.flush();
 
 The same pattern applies anywhere AI SDK accepts `experimental_telemetry`.
 
-## Reuse The Tracer
+## Reuse the tracer
 
 Use `Observe.getTracer()` anywhere AI SDK accepts an OpenTelemetry tracer. This lets generated spans share the same exporter, resource attributes, and Beacon compatibility path as the rest of your application.
 
@@ -87,7 +87,7 @@ await generateText({
 });
 ```
 
-## Trace A Tool Loop
+## Trace a tool loop
 
 Pass the tracer into tool-calling AI SDK flows as well.
 
@@ -116,7 +116,7 @@ const result = await generateText({
 });
 ```
 
-## Group Calls With Custom Steps
+## Group calls with custom steps
 
 Wrap orchestration code around AI SDK calls when you need spans for planning, policy checks, retrieval, or handoffs that are not covered by model telemetry.
 
@@ -160,7 +160,7 @@ For serverless handlers, call `Observe.flush()` before returning if the invocati
 - In short-lived scripts or jobs, call `Observe.flush()` before exit.
 - In Next.js, initialize from `instrumentation.ts` in the Node.js runtime.
 
-## What's Next
+## What's next
 
 <Columns cols={2}>
   <Card title="Next.js And Serverless" icon="cloud" href="/sdk/integrations-nextjs-serverless">

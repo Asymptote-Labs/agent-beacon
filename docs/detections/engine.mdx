@@ -3,13 +3,13 @@ title: "Detection Engine"
 description: "How Beacon loads, validates, evaluates, and reports detections"
 ---
 
-## Engine Overview
+## Engine overview
 
 The Beacon detection engine runs threat rules over ordered endpoint events. The engine ships in the Beacon CLI, while the rule corpus is external data loaded from a directory, the local rule store, or a small embedded baseline.
 
 Local scanning is read-only and does not contact the network.
 
-## Active Rule Resolution
+## Active rule resolution
 
 When `beacon scan` runs, Beacon resolves the active rules in this order:
 
@@ -19,7 +19,7 @@ When `beacon scan` runs, Beacon resolves the active rules in this order:
 
 The per-user store is under the endpoint base directory, commonly `~/.beacon/endpoint/rules`. System-mode installs use the system endpoint base directory.
 
-## Load-Time Validation
+## Load-time validation
 
 Rules are checked before any event scanning begins.
 
@@ -36,7 +36,7 @@ Beacon:
 
 Invalid rules fail early so scans do not produce ambiguous results.
 
-## Event Input
+## Event input
 
 `beacon scan` reads the resolved `runtime.jsonl` endpoint log unless a different path is supplied with `--log-path`.
 
@@ -44,7 +44,7 @@ Each line is parsed as a Beacon endpoint event. The scan keeps the ordered event
 
 Use `--session` to scan only events whose `session.id` contains a given value.
 
-## Single-Event Matching
+## Single-event matching
 
 A single-event rule has a top-level `match` expression. The engine evaluates that expression independently against each event.
 
@@ -56,7 +56,7 @@ match: >
 
 If any event satisfies the expression, the rule produces a finding with that event as evidence.
 
-## Correlation Matching
+## Correlation matching
 
 A correlation rule describes ordered steps inside a session window.
 
@@ -81,7 +81,7 @@ Correlation is useful when no single event is suspicious enough on its own, but 
 
 "In order" means the order the events happened, not the order they were written. `beacon
 scan` sorts the runtime log by `(timestamp, sequence)` before evaluating, because append
-order is not emission order — a hook writes the moment it intercepts a tool call, while the
+order is not emission order. A hook writes the moment it intercepts a tool call, while the
 collector exporter writes on its export interval. See [event
 ordering](/telemetry-schema/event-schema#event-ordering).
 
@@ -98,7 +98,7 @@ When a rule fires, Beacon emits a finding. Findings include:
 
 Human output summarizes findings by severity, rule, session, reason, and evidence lines. JSON output emits machine-readable finding objects for automation.
 
-## Filtering And Gates
+## Filtering and gates
 
 `beacon scan` supports two severity controls:
 
@@ -107,7 +107,7 @@ Human output summarizes findings by severity, rule, session, reason, and evidenc
 
 The fail gate is evaluated before display filtering, so automation can fail on all matching detections even when output is narrowed for readability.
 
-## Operational Boundaries
+## Operational boundaries
 
 Scanning does not mutate endpoint telemetry, change rule files, or fetch remote content. Rule installation and remote rule pack retrieval are explicit `beacon rules` workflows.
 

@@ -3,7 +3,7 @@ title: "Endpoint Paths and Ports"
 description: "Review Beacon user-mode and system-mode paths, ports, and hook locations"
 ---
 
-## File Locations
+## File locations
 
 Beacon manages different paths depending on whether you install in user mode or system mode. The active runtime log stays at `runtime.jsonl` and rotates at 10 MiB, retaining five numbered local archives by default.
 
@@ -15,37 +15,28 @@ Beacon manages different paths depending on whether you install in user mode or 
 | Rotated runtime archives | `~/.beacon/endpoint/logs/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl.1` through `.5` |
 | Threat rule store | `~/.beacon/endpoint/rules` | `/Library/Application Support/Beacon/Endpoint/rules` | `/etc/beacon/endpoint/rules` | `%ProgramData%\Beacon\Endpoint\rules` |
 | Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` | `/etc/beacon/endpoint/otelcol.yaml` | `%ProgramData%\Beacon\Endpoint\otelcol.yaml` |
-| Installed binaries | — | `/opt/beacon/bin` | `/opt/beacon/bin` | `%ProgramFiles%\Beacon\bin` |
+| Installed binaries | None | `/opt/beacon/bin` | `/opt/beacon/bin` | `%ProgramFiles%\Beacon\bin` |
 | OTLP gRPC | `127.0.0.1:4317` | `127.0.0.1:4317` | `127.0.0.1:4317` | `127.0.0.1:4317` |
 | OTLP HTTP | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` |
 
-On Windows the system log directory sits under the base directory rather than in a separate location,
-because there is no `/var/log` equivalent. `%ProgramData%` and `%ProgramFiles%` are read from the
-environment rather than hardcoded, so a relocated or localized install is found rather than missed.
+On Windows the system log directory sits under the base directory rather than in a separate location, because there is no `/var/log` equivalent. `%ProgramData%` and `%ProgramFiles%` are read from the environment rather than hardcoded, so a relocated or localized install is found rather than missed.
 
-## Service Definitions
+## Service definitions
 
-The collector runs under whichever service manager the host provides. On Linux, Beacon picks it by looking at
-what is actually running as PID 1, not at which tools are installed, so a container with
-`systemctl` on `PATH` but no systemd still gets the supervised fallback.
+The collector runs under whichever service manager the host provides. On Linux, Beacon picks it by looking at what is actually running as PID 1, not at which tools are installed, so a container with `systemctl` on `PATH` but no systemd still gets the supervised fallback.
 
 | Platform | Service manager | System mode | User mode |
 |---|---|---|---|
 | macOS | launchd | `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist` | `~/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist` |
 | Linux | systemd | `/etc/systemd/system/beacon-collector.service` | `~/.config/systemd/user/beacon-collector.service` |
-| Windows | Service Control Manager | `BeaconCollector` service, defined at `HKLM\SYSTEM\CurrentControlSet\Services\BeaconCollector` | supervised — Windows has no per-user service manager |
+| Windows | Service Control Manager | `BeaconCollector` service, defined at `HKLM\SYSTEM\CurrentControlSet\Services\BeaconCollector` | Supervised, because Windows has no per-user service manager |
 | Containers, no init | supervised | `/etc/beacon/endpoint/collector.pid` | `~/.beacon/endpoint/collector.pid` |
 
-Windows has no unit file to point at: the service definition lives in the registry, so that is what
-`beacon endpoint status` reports where the other platforms report a path. And there is no counterpart
-to `systemctl --user` or launchd's per-user domain, so a Windows user-mode install always gets the
-supervised collector — see [Windows install](/platforms/windows#user-mode-install).
+Windows has no unit file to point at: the service definition lives in the registry, so that is what `beacon endpoint status` reports where the other platforms report a path. And there is no counterpart to `systemctl --user` or launchd's per-user domain, so a Windows user-mode install always gets the supervised collector. See [Windows install](/platforms/windows#user-mode-install).
 
-A supervised collector is a plain background process tracked by a pidfile. It works, but nothing
-restarts it if it exits or when the machine reboots — `beacon endpoint status` says so explicitly
-rather than reporting the same health as a real service.
+A supervised collector is a plain background process tracked by a pidfile. It works, but nothing restarts it if it exits or when the machine reboots. `beacon endpoint status` says so explicitly rather than reporting the same health as a real service.
 
-Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and Qwen Code hooks install an embedded `beacon-hooks` adapter under the Beacon endpoint base directory.
+Hooks, plugins, and extensions install an embedded `beacon-hooks` adapter under the Beacon endpoint base directory.
 
 Hook and plugin configuration is written to:
 
@@ -53,14 +44,15 @@ Hook and plugin configuration is written to:
 |---|---|---|
 | Antigravity CLI | `~/.gemini/config/hooks.json` | `./.agents/hooks.json` |
 | Claude Code | `~/.claude/settings.json` | `./.claude/settings.json` |
+| Cline | `~/.cline/plugins/beacon.ts` | `./.cline/plugins/beacon.ts` |
 | Cursor | `~/.cursor/hooks.json` | `./.cursor/hooks.json` |
 | Devin CLI | `~/.config/devin/config.json` | `./.devin/hooks.v1.json` |
 | Devin Desktop | `~/.codeium/windsurf/hooks.json` | `./.windsurf/hooks.json` |
 | Factory | `~/.factory/settings.json` | `./.factory/settings.json` |
 | Grok Build | `~/.grok/hooks/beacon-endpoint.json` | `./.grok/hooks/beacon-endpoint.json` |
-| Hermes Agent | `~/.hermes/config.yaml` | — |
+| Hermes Agent | `~/.hermes/config.yaml` | Not supported |
 | OpenCode | `~/.config/opencode/plugins/beacon.ts` | `./.opencode/plugins/beacon.ts` |
-| Cline | `~/.cline/plugins/beacon.ts` | `./.cline/plugins/beacon.ts` |
+| Pi | `~/.pi/agent/extensions/beacon.ts` | `./.pi/extensions/beacon.ts` |
 | Qwen Code | `~/.qwen/settings.json` | `./.qwen/settings.json` |
 
 ## Related

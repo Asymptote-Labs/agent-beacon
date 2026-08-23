@@ -12,7 +12,7 @@ description: "Capture Claude Code cloud agent telemetry and forward cloud-agent 
   />
 </Frame>
 
-## Integration Overview
+## Overview
 
 Use this integration to capture Claude Code cloud-agent activity and upload each
 session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant
@@ -29,7 +29,7 @@ sandbox.
   production cloud-agent telemetry ingest at scale.
 </Info>
 
-## Overview
+## How it works
 
 Claude Code Cloud Agents run in Anthropic's cloud environment, so Beacon cannot
 use the long-running endpoint agent that local installs use. Instead, the setup
@@ -98,7 +98,7 @@ For S3, authenticate the AWS CLI:
 aws sts get-caller-identity
 ```
 
-## 1. Create the Upload Path
+## 1. Create the upload path
 
 Choose GCS or S3 for the cloud-agent session logs.
 
@@ -242,7 +242,7 @@ AWS_SECRET_ACCESS_KEY=<secret-access-key-from-setup>
   <img src="/images/claude-code-on-the-web/claude-env-settings.png" alt="Claude Code cloud environment settings showing custom network domains, Beacon environment variables, and a setup script." />
 </Frame>
 
-## 3. Add the Setup Script
+## 3. Add the setup script
 
 Generate the setup script for your Beacon release:
 
@@ -264,7 +264,7 @@ The script:
   `print-setup --version`.
 </Tip>
 
-## 4. Run a Cloud Agent Task
+## 4. Run a cloud agent task
 
 Start a Claude Code cloud agent task that uses tools. You can start the task
 from the Claude app on your phone or from the Claude Code web application. For
@@ -278,7 +278,7 @@ Read the README, run pwd && ls, create a tiny temporary markdown note under /tmp
   <img src="/images/claude-code-on-the-web/session-init-and-task-output.png" alt="Claude Code cloud agent session showing setup completed, a README task, shell command activity, and a temporary note creation." />
 </Frame>
 
-## 5. Verify Upload
+## 5. Verify upload
 
 For GCS, list the uploaded session objects:
 
@@ -326,7 +326,7 @@ run.provider=claude_code_web
 run.run_id=cse_...
 ```
 
-## Security Note
+## Security note
 
 The self-serve GCS flow above creates a dedicated service account scoped to
 object uploads for one bucket. The S3 flow creates a dedicated IAM user scoped

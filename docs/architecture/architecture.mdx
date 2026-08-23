@@ -11,7 +11,7 @@ The endpoint architecture is local-first: local endpoint telemetry can be inspec
 
 <img src="/images/beacon-architecture.png" alt="Beacon endpoint architecture showing agent harnesses sending local OTLP or hook telemetry into Beacon collection and normalization, then writing endpoint JSONL for local dashboard, Wazuh, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, Microsoft Sentinel, AWS S3, Google Cloud Storage, optional Splunk HEC and Falcon LogScale HEC export, and customer-managed forwarding." />
 
-## Endpoint Architecture
+## Endpoint architecture
 
 1. **Runtime surfaces:** Supported [agent harnesses](/runtimes) expose different [telemetry surfaces](/concepts/core-concepts#runtime-surface). Beacon uses the strongest surface available for each runtime instead of forcing every tool through one adapter.
 2. **Local collection:** Beacon receives OTLP gRPC, OTLP HTTP, or native hook payloads on the endpoint, depending on the runtime.
@@ -19,7 +19,7 @@ The endpoint architecture is local-first: local endpoint telemetry can be inspec
 4. **Local storage and inspection:** Beacon writes one JSON object per line to the [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). The local [dashboard](/concepts/core-concepts#dashboard) reads recent runtime logs over a loopback-only service for rollout validation and investigation.
 5. **Forwarding:** External SIEM, log, and storage destinations consume the same normalized JSONL stream through [customer-managed forwarding](/concepts/core-concepts#customer-managed-forwarding), or receive events directly from optional collector exporters.
 
-## End-to-End Flow
+## End-to-end flow
 
 1. A supported runtime emits activity through OTLP or hooks.
 2. Beacon receives the signal locally and attaches endpoint and harness context.
@@ -34,7 +34,7 @@ For CI and cloud-agent setup paths, see the [runtime surface overview](/runtimes
 upload compressed per-run snapshots directly to customer-managed GCS or S3
 without the persistent endpoint collector or Vector.
 
-## Architecture Details
+## Architecture details
 
 Beacon writes an OpenTelemetry Collector configuration with localhost receivers:
 

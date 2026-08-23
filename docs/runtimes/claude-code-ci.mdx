@@ -12,11 +12,11 @@ description: "Capture supported agent telemetry in CI with Asymptote"
   />
 </Frame>
 
-## Runtime Overview
+## Runtime overview
 
 Asymptote can capture supported agent telemetry for a single CI job without installing a persistent endpoint service on the runner. The CI integration starts a temporary local collector, configures the selected agent harness, writes normalized CI runtime JSONL, and validates that events were captured before the job exits.
 
-## How It Works
+## How it works
 
 Use `beacon ci exec` when your workflow runs the agent command directly:
 
@@ -55,7 +55,7 @@ By default, Asymptote writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNN
 | Collector config | `$RUNNER_TEMP/beacon/otelcol.yaml` |
 | Collector spool | `$RUNNER_TEMP/beacon/spool/otlp.jsonl` |
 
-## Telemetry Coverage
+## Telemetry coverage
 
 CI collection captures supported prompt, tool, command, file, lifecycle, and run context where the configured agent emits telemetry during the job. For example, Claude Code CI collection captures Claude Code events when the `claude` harness is configured. When `GITHUB_ACTIONS=true`, Asymptote also records GitHub Actions metadata such as workflow, run ID, commit, ref, and actor.
 
@@ -100,7 +100,7 @@ See the sample workflow:
 - [Claude Code telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-code-telemetry.yml)
 - [Claude Code Security Review session workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-security-review-session.yml)
 
-## Upload To Object Storage
+## Upload to object storage
 
 Use `--upload` when the completed `runtime.jsonl` should be handed off through object storage after validation.
 
@@ -146,7 +146,7 @@ See the sample workflows:
 - [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
 - [S3 and GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
 
-## Validation Behavior
+## Validation behavior
 
 By default, `beacon ci exec` fails the step when telemetry validation fails. Set `--require-telemetry=false` or the action input `require-telemetry: "false"` when telemetry health should warn but not gate the child command result.
 

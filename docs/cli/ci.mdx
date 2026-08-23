@@ -3,7 +3,7 @@ title: "CI Agent Telemetry"
 description: "Wrap agent commands and CI actions with ephemeral Beacon telemetry"
 ---
 
-## Command Overview
+## Command overview
 
 `beacon ci` wraps supported agent commands and agent-launching CI steps with ephemeral Beacon telemetry. It runs for a single CI job without installing a persistent endpoint service or modifying runner-wide harness configuration.
 
@@ -19,7 +19,7 @@ Use `beacon ci exec` when the workflow runs an agent command directly. For multi
 
 For artifact upload, object storage export, and downstream SIEM handoff patterns, see [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports).
 
-## Wrap Agent Runs
+## Wrap agent runs
 
 `beacon ci exec` starts a temporary local collector, injects supported telemetry configuration into one child process, writes normalized endpoint events to a CI runtime log, then validates that matching events were captured.
 
@@ -33,7 +33,7 @@ For example, wrap a Claude Code prompt in a GitHub Actions step:
 beacon ci exec -- claude -p "Review this pull request"
 ```
 
-## Wrap Agent Actions
+## Wrap agent actions
 
 Some workflows call a third-party action that launches the agent internally. In those cases, start a detached Beacon session before the action and finish it in a cleanup step.
 

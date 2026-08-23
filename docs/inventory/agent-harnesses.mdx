@@ -14,7 +14,7 @@ Use it to answer:
 - Which harnesses appear Beacon-managed versus customer-managed?
 - Which harnesses have recently emitted Beacon endpoint events?
 
-## Coverage States
+## Coverage states
 
 <Frame caption="Use Agent Harness Inventory to compare installed, configured, managed, and observed state across supported runtimes.">
   <img src="/images/agent_harness_inventory.png" alt="Beacon dashboard Agent Harness Inventory view showing supported runtimes and coverage states." />
@@ -31,7 +31,7 @@ Use it to answer:
 
 A harness can be installed but not configured, configured but not observed, or observed in a different user-mode or system-mode runtime log than the one you are reading.
 
-## Review Workflow
+## Review workflow
 
 Start with the fleet-friendly inventory view:
 
@@ -57,7 +57,7 @@ For hook-based harnesses, inspect hook status directly:
 beacon endpoint hooks status --all
 ```
 
-## What To Look For
+## What to look for
 
 - Expected harnesses that are installed but not configured.
 - Harnesses configured through customer-managed settings instead of Beacon-managed hooks or OTLP configuration.

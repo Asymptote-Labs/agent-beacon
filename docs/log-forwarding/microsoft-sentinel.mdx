@@ -3,7 +3,7 @@ title: "Microsoft Sentinel"
 description: "Forward Beacon endpoint events into Microsoft Sentinel with Azure Monitor Agent custom log collection."
 ---
 
-## Forwarding Overview
+## Forwarding overview
 
 Beacon `v0.0.32` added the [Microsoft Sentinel content pack](/concepts/core-concepts#microsoft-sentinel-content-pack) for teams that want Beacon endpoint events in Log Analytics and Sentinel hunting workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Azure Monitor Agent tails that file and sends new records through a Data Collection Rule (DCR) into a custom Log Analytics table.
 
@@ -171,13 +171,13 @@ Use `queries.kql` for validation and starter hunting queries, including recent B
 
 Use `detections.kql` as example analytics rule logic. Review and tune thresholds, repository names, content handling policy, and severity mappings before enabling alerts in production.
 
-## CEF, Syslog, and direct APIs
+## CEF, syslog, and direct APIs
 
 Microsoft Sentinel can also collect CEF and Syslog through Azure Monitor Agent, but the generated Beacon pack uses custom logs because Beacon events are rich structured JSON with prompts, tool calls, commands, files, runtime metadata, and optional raw fields. Flattening those events into CEF loses useful context.
 
 The Azure Monitor Logs Ingestion API can be useful for a centralized customer-managed forwarder, but it should not be configured directly in Beacon endpoint agent state. Direct API forwarding requires Microsoft Entra credentials, DCR identifiers, ingestion endpoints, batching, retries, and network failure handling. Keep those concerns outside Beacon's local endpoint collector unless you are building a separate managed forwarder.
 
-## Content Handling
+## Content handling
 
 Beacon applies redaction, sanitization, truncation, and event-size limits before events are written to `runtime.jsonl` and forwarded to Microsoft Sentinel. Review workspace access, table retention, analytics rules, and downstream consumers so retained telemetry matches your approved collection policy.
 

@@ -3,7 +3,7 @@ title: "beacon endpoint doctor"
 description: "Run local Beacon endpoint health checks"
 ---
 
-## Command Overview
+## Command overview
 
 `beacon endpoint doctor` runs local health checks for the Beacon endpoint agent and exits non-zero when any hard check fails. Add `--fix` to apply safe remediations for supported findings.
 
@@ -32,11 +32,9 @@ The runtime log itself can be missing before the first event is written. In that
 
 ### `console_user_configured`
 
-System-mode only, and worth understanding because it is the one failure that a completely healthy
-endpoint can still report.
+System-mode only, and worth understanding because it is the one failure that a completely healthy endpoint can still report.
 
-A system endpoint runs as root, so it has to work out *whose* agent settings to configure — the
-collector is useless if nothing exports to it. This check asks whether that actually happened:
+A system endpoint runs as root, so it has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. This check asks whether that happened:
 
 ```
 console_user_configured: fail target=alice (alice has no agent runtime pointed at this
@@ -44,17 +42,13 @@ console_user_configured: fail target=alice (alice has no agent runtime pointed a
   action="sudo beacon endpoint user-config repair-installed --system"
 ```
 
-Everything else can be green when this fails. The collector is running, the service is loaded, and
-the harness check passes — because `doctor --system` runs as root and sees the settings the install
-wrote for root, which are correct. The person whose sessions matter is the one with nothing.
+Everything else can be green when this fails. The collector is running, the service is loaded, and the harness check passes, because `doctor --system` runs as root and sees the settings the install wrote for root. The person whose sessions matter is the one with nothing.
 
-If no logged-in user can be identified at all, this reports a warning rather than a failure: an
-unattended host legitimately has nobody to configure, and that is not something an operator can act
-on.
+If no logged-in user can be identified at all, this reports a warning rather than a failure: an unattended host legitimately has nobody to configure, and that is not something an operator can act on.
 
 ## Fix mode
 
-`beacon endpoint doctor --fix` plans and applies safe remediations for supported findings. It can create a missing runtime log, and recreate managed collector configuration and the service definition — a launchd plist or a systemd unit — when the endpoint configuration is valid.
+`beacon endpoint doctor --fix` plans and applies safe remediations for supported findings. It can create a missing runtime log, and recreate managed collector configuration and the service definition (a launchd plist or a systemd unit) when the endpoint configuration is valid.
 
 Fix mode deliberately skips cases that need operator intent, such as invalid endpoint configuration, missing harness setup, missing observed runtime events, unsafe runtime log permissions, or service repair on a host with no service manager to repair. If a collector service repair fails, Beacon rolls back the files and service state it changed where possible, then refreshes doctor results so the printed checks reflect any partial fixes that succeeded.
 

@@ -3,7 +3,7 @@ title: "beacon endpoint inventory"
 description: "Show installed, configured, and observed Beacon endpoint inventory"
 ---
 
-## Command Overview
+## Command overview
 
 `beacon endpoint inventory` shows Beacon endpoint inventory across configured harnesses, detected local runtimes, hook integrations, and observed runtime events.
 
@@ -15,7 +15,7 @@ Use inventory when you need a fleet-friendly view of what Beacon is configured t
 
 `beacon inventory` is a top-level alias for `beacon endpoint inventory`.
 
-## Inventory Data
+## Inventory data
 
 Inventory can include:
 
@@ -37,7 +37,7 @@ Use the section filters when you only need one inventory surface:
 
 The section filters can be combined. For example, `--mcp --skills --json` prints only MCP and skill inventory buckets in the JSON output.
 
-## Capturing Full Definitions
+## Capturing full definitions
 
 By default inventory is metadata- and hash-only: it reports paths, hashes, MCP transport, command basenames, argument counts, and safe environment key names, but never the raw file bodies.
 
@@ -58,7 +58,7 @@ beacon endpoint inventory --mcp --contents
 
 Content capture is opt-in and offline; `--contents` only reads files inventory already inspects locally.
 
-## Inventory Heartbeats
+## Inventory heartbeats
 
 Endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`. The hook that fires is recorded as trigger provenance, but the default heartbeat scans all supported local inventory candidates:
 

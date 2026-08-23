@@ -3,11 +3,9 @@ title: "macOS"
 description: "Install the Beacon endpoint on macOS with Homebrew or the signed package, and understand how the launchd service is managed"
 ---
 
-Beacon runs a local collector on your machine, points your agent runtimes at it, and writes
-normalized events to a JSONL log you own. On macOS the collector runs as a launchd job.
+Beacon runs a local collector on your machine, points your agent runtimes at it, and writes normalized events to a JSONL log you own. On macOS the collector runs as a launchd job.
 
-There are two ways in, and which one you want depends on whether you are setting up your own machine
-or a fleet.
+There are two ways in, and which one you want depends on whether you are setting up your own machine or a fleet.
 
 ## Your own machine
 
@@ -17,9 +15,7 @@ brew install beacon
 beacon endpoint install
 ```
 
-`beacon endpoint install` with no flags is a **user-mode** install: everything lives under
-`~/.beacon/endpoint`, the launchd job is a LaunchAgent in your own domain, and nothing needs root.
-That is the right choice for a single developer.
+`beacon endpoint install` with no flags is a **user-mode** install: everything lives under `~/.beacon/endpoint`, the launchd job is a LaunchAgent in your own domain, and nothing needs root. That is the right choice for a single developer.
 
 Then confirm it:
 
@@ -28,19 +24,13 @@ beacon endpoint status
 beacon endpoint doctor
 ```
 
-On a fresh install `doctor` reports one warning — `harness_observed`, saying telemetry is configured
-but no matching event has been seen yet. That is not a problem; it clears the first time you run your
-agent. What matters is `0 failure(s)`.
+On a fresh install `doctor` reports one warning, `harness_observed`, which says telemetry is configured but no matching event has been seen yet. That is not a problem. It clears the first time you run your agent. What matters is `0 failure(s)`.
 
 ## A managed fleet
 
-For deployment across machines, use the signed, notarized, and stapled `.pkg` attached to each
-release. Installing it performs a **system-mode** install: configuration under
-`/Library/Application Support/Beacon/Endpoint`, a LaunchDaemon, and the runtime log at
-`/var/log/beacon-agent/runtime.jsonl`.
+For deployment across machines, use the signed, notarized, and stapled `.pkg` attached to each release. Installing it performs a **system-mode** install: configuration under `/Library/Application Support/Beacon/Endpoint`, a LaunchDaemon, and the runtime log at `/var/log/beacon-agent/runtime.jsonl`.
 
-The package also configures the console user's agent runtime, because a system endpoint runs as root
-and the collector is useless if nothing is exporting to it.
+The package also configures the console user's agent runtime, because a system endpoint runs as root and the collector is useless if nothing is exporting to it.
 
 <Columns cols={2}>
   <Card title="Jamf Pro" icon="screwdriver-wrench" href="/mdm/jamf">
@@ -69,8 +59,7 @@ launchctl print "gui/$(id -u)/com.beacon.endpoint.collector.user"
 sudo launchctl print system/com.beacon.endpoint.collector
 ```
 
-`KeepAlive` restarts the collector if it exits and `RunAtLoad` starts it at login or boot. Both are
-set by the install; you do not configure them.
+`KeepAlive` restarts the collector if it exits and `RunAtLoad` starts it at login or boot. Both are set by the install; you do not configure them.
 
 If the job or its plist is missing or broken, repair it without reinstalling:
 
@@ -80,12 +69,11 @@ beacon endpoint doctor --fix
 
 ## What is macOS-specific
 
-Most of Beacon behaves identically everywhere — the event schema, the collector, hooks, the
-dashboard, threat detection. These are the parts that do not:
+Most of Beacon behaves identically everywhere: the event schema, the collector, hooks, the dashboard, and threat detection. These are the parts that do not:
 
 | Area | On macOS |
 |---|---|
-| Service manager | launchd — a LaunchAgent in user mode, a LaunchDaemon in system mode |
+| Service manager | launchd. A LaunchAgent in user mode, a LaunchDaemon in system mode |
 | System config | `/Library/Application Support/Beacon/Endpoint` |
 | Service definition | `~/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist`, or `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist` |
 | Package | Signed, notarized, and stapled `.pkg`, Apple Silicon |
@@ -93,9 +81,7 @@ dashboard, threat detection. These are the parts that do not:
 | Fleet management | Jamf, Fleet, and Rippling assets ship in the package |
 | Log forwarding helpers | Bundled Vector helpers for Falcon, S3, and GCS |
 
-Two of those have no Linux equivalent and are worth knowing if you run a mixed fleet: notarization
-gives macOS an OS-level authenticity check that Linux has no counterpart for, and the MDM assets are
-macOS-only. See [Linux](/platforms/linux) for how that platform differs.
+Two of those have no Linux equivalent and are worth knowing if you run a mixed fleet: notarization gives macOS an OS-level authenticity check that Linux has no counterpart for, and the MDM assets are macOS-only. See [Linux](/platforms/linux) for how that platform differs.
 
 ## Updates
 
@@ -106,10 +92,7 @@ sudo beacon endpoint update --check
 sudo beacon endpoint update --apply
 ```
 
-`--apply` downloads the release package, verifies its SHA-256 **and** its Apple notarization,
-installs it, restarts the collector, and rolls back if the new version fails its health check. The
-command reports which verification it performed, so a mixed fleet can tell the two platforms apart:
-macOS gets `sha256+notarization`, Linux gets `sha256` because there is no OS-level equivalent.
+`--apply` downloads the release package, verifies its SHA-256 **and** its Apple notarization, installs it, restarts the collector, and rolls back if the new version fails its health check. The command reports which verification it performed, so a mixed fleet can tell the two platforms apart: macOS gets `sha256+notarization`, Linux gets `sha256` because there is no OS-level equivalent.
 
 `--apply` requires a package install. A Homebrew install is upgraded with `brew upgrade beacon`.
 
