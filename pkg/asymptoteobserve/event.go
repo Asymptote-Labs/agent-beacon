@@ -52,6 +52,10 @@ type EventInfo struct {
 	Kind     string `json:"kind"`
 	Action   string `json:"action"`
 	Category string `json:"category,omitempty"`
+	// Fidelity records whether Action was reported by the source or derived by Beacon.
+	// See FidelityObserved / FidelityInferred in provenance.go. Empty when the question does
+	// not apply, as it does not for events Beacon emits about itself.
+	Fidelity string `json:"fidelity,omitempty"`
 }
 
 type EndpointInfo struct {
@@ -70,6 +74,10 @@ type HarnessInfo struct {
 	Version        string `json:"version,omitempty"`
 	ExecutablePath string `json:"executable_path,omitempty"`
 	ConfigPath     string `json:"config_path,omitempty"`
+	// CollectionMethod records the mechanism that carried this event off the runtime.
+	// See the CollectionMethod* constants in provenance.go. Empty for events Beacon emits
+	// about itself, which no harness collected.
+	CollectionMethod string `json:"collection_method,omitempty"`
 }
 
 type SessionInfo struct {
@@ -428,6 +436,10 @@ type NewEventOptions struct {
 	Message      string
 	Origin       Origin
 	Run          *RunInfo
+	// Fidelity is optional and defaults to empty rather than to FidelityObserved. A caller that
+	// knows how it derived Action says so; one that has not been taught to think about it stays
+	// silent instead of claiming the stronger of the two values by accident.
+	Fidelity string
 }
 
 func NewEvent(opts NewEventOptions) Event {
@@ -449,6 +461,7 @@ func NewEvent(opts NewEventOptions) Event {
 			Kind:     "agent_runtime",
 			Action:   opts.Action,
 			Category: opts.Category,
+			Fidelity: opts.Fidelity,
 		},
 		Severity: severity,
 		Endpoint: EndpointInfo{
@@ -495,6 +508,12 @@ func (e Event) Validate() error {
 		default:
 			return errors.New("origin must be local, cloud, or ci")
 		}
+	}
+	if e.Event.Fidelity != "" && !ValidFidelity(e.Event.Fidelity) {
+		return errors.New("event.fidelity must be observed or inferred")
+	}
+	if e.Harness.CollectionMethod != "" && !ValidCollectionMethod(e.Harness.CollectionMethod) {
+		return errors.New("harness.collection_method must be hook, otlp, plugin, or poll")
 	}
 	if e.Content != nil && e.Content.Retention != "" {
 		switch e.Content.Retention {

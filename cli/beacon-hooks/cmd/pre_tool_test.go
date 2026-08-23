@@ -1052,3 +1052,111 @@ func endpointEvents(t *testing.T, path string) []map[string]interface{} {
 	}
 	return events
 }
+
+// --- provenance: which approval events are real ---
+
+func eventFidelity(t *testing.T, event map[string]interface{}) string {
+	t.Helper()
+	block, ok := event["event"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no event block: %#v", event)
+	}
+	fidelity, _ := block["fidelity"].(string)
+	return fidelity
+}
+
+// Cursor exposes no approval hook. Beacon has always turned its pre-tool notification into an
+// approval.allowed carrying approval.required=true, which is not an approval anybody granted --
+// it is a tool call that was seen. The action is left alone here so existing rules keep matching;
+// what changes is that the event now says it was Beacon's reading rather than Cursor's report.
+func TestRunPreToolMarksSynthesizedCursorApprovalInferred(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runPreTool, map[string]interface{}{
+		"conversation_id": "conv-inferred",
+		"hook_event_name": "preToolUse",
+		"tool_name":       "Write",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "approval.allowed" {
+		t.Fatalf("event.action = %q, want the unchanged approval.allowed", action)
+	}
+	if got := eventFidelity(t, event); got != "inferred" {
+		t.Fatalf("event.fidelity = %q, want inferred for a synthesized approval", got)
+	}
+}
+
+// beforeShellExecution is the same synthesis on a different Cursor hook: every shell command
+// becomes an approval.allowed whether or not anything gated it.
+func TestRunPreToolMarksCursorShellApprovalInferred(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runPreTool, map[string]interface{}{
+		"conversation_id": "conv-shell-inferred",
+		"hook_event_name": "beforeShellExecution",
+		"command":         "npm test",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := eventFidelity(t, event); got != "inferred" {
+		t.Fatalf("event.fidelity = %q, want inferred for a synthesized shell approval", got)
+	}
+}
+
+// The counterpart, and the reason emitPreToolDecision takes fidelity as a parameter rather than
+// hardcoding it: the permission-request hook fires because a runtime genuinely asked for a
+// decision, so its approval events must stay observed. Marking this path inferred alongside the
+// pre-tool one would delete the distinction the field exists to record.
+func TestRunPermissionRequestKeepsRealApprovalObserved(t *testing.T) {
+	for _, platform := range []string{"devin", "claude"} {
+		t.Run(platform, func(t *testing.T) {
+			setupHookConfigDirs(t)
+			platformFlag = platform
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+			runHookWithInput(t, runPermissionRequest, map[string]interface{}{
+				"session_id": "conv-permission",
+				"tool_name":  "Bash",
+			})
+
+			event := lastEndpointEvent(t, logPath)
+			action, _ := event["event"].(map[string]interface{})["action"].(string)
+			if !strings.HasPrefix(action, "approval.") {
+				t.Fatalf("event.action = %q, want an approval event", action)
+			}
+			if got := eventFidelity(t, event); got != "observed" {
+				t.Fatalf("event.fidelity = %q, want observed for a real permission request", got)
+			}
+		})
+	}
+}
+
+// Ordinary telemetry is unaffected: a hook that fires for a named lifecycle event reports an
+// action the runtime gave it, so nothing about this change should make normal events look
+// uncertain.
+func TestRunPostToolKeepsObservedFidelity(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"conversation_id": "conv-post",
+		"hook_event_name": "afterShellExecution",
+		"command":         "go test ./...",
+		"exit_code":       float64(0),
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := eventFidelity(t, event); got != "observed" {
+		t.Fatalf("event.fidelity = %q, want observed for a reported hook event", got)
+	}
+}

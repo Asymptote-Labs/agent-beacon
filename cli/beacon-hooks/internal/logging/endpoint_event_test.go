@@ -229,3 +229,141 @@ func TestEndpointEventSurfacesWriteFailure(t *testing.T) {
 		t.Fatal("EndpointEvent returned nil, want write failure")
 	}
 }
+
+// --- provenance: harness.collection_method and event.fidelity ---
+
+func decodeSingleEndpointEvent(t *testing.T, path string) map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read endpoint log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("endpoint log has %d lines, want 1", len(lines))
+	}
+	var event map[string]interface{}
+	if err := json.Unmarshal([]byte(lines[0]), &event); err != nil {
+		t.Fatalf("unmarshal endpoint event: %v", err)
+	}
+	return event
+}
+
+func nestedString(t *testing.T, event map[string]interface{}, block, key string) (string, bool) {
+	t.Helper()
+	inner, ok := event[block].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no %q block: %#v", block, event)
+	}
+	value, present := inner[key]
+	if !present {
+		return "", false
+	}
+	text, ok := value.(string)
+	if !ok {
+		t.Fatalf("%s.%s = %#v, want a string", block, key, value)
+	}
+	return text, true
+}
+
+func TestEndpointEventRecordsHookCollectionMethod(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("pre-tool", "cursor")
+	if err := logger.EndpointEvent("file.modified", "file", "info", "File edit observed", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	if method, ok := nestedString(t, event, "harness", "collection_method"); !ok || method != "hook" {
+		t.Fatalf("harness.collection_method = %q (present=%v), want hook", method, ok)
+	}
+}
+
+// One plugin platform, because the plugin case is the one a future integration gets wrong: the
+// default is hook, so a plugin-shaped runtime that is not enumerated silently reports the wrong
+// method.
+func TestEndpointEventRecordsPluginCollectionMethod(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("cline-event", "cline")
+	if err := logger.EndpointEvent("prompt.submitted", "prompt", "info", "Prompt observed", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	if method, ok := nestedString(t, event, "harness", "collection_method"); !ok || method != "plugin" {
+		t.Fatalf("harness.collection_method = %q (present=%v), want plugin", method, ok)
+	}
+}
+
+// This path builds raw maps rather than the shared Event struct, so it gets no `omitempty` for
+// free. An empty string written into either field is worse than an absent one: a consumer would
+// have to treat "" as a third case.
+func TestEndpointEventOmitsProvenanceRatherThanWritingEmpty(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("pre-tool", "")
+	if err := logger.EndpointEventWithFidelity("tool.invoked", "tool", "info", "no platform", "", nil); err != nil {
+		t.Fatalf("EndpointEventWithFidelity returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	if _, present := nestedString(t, event, "harness", "collection_method"); present {
+		t.Fatal("harness.collection_method written for an empty platform, want the key omitted")
+	}
+	if _, present := nestedString(t, event, "event", "fidelity"); present {
+		t.Fatal("event.fidelity written when unset, want the key omitted")
+	}
+}
+
+// EndpointEvent is the ordinary path and means "the runtime named this action", so it must not
+// require every existing caller to opt in to being trusted.
+func TestEndpointEventDefaultsToObservedFidelity(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "claude")
+	if err := logger.EndpointEvent("command.executed", "command", "info", "Command observed", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	if fidelity, ok := nestedString(t, event, "event", "fidelity"); !ok || fidelity != "observed" {
+		t.Fatalf("event.fidelity = %q (present=%v), want observed", fidelity, ok)
+	}
+}
+
+func TestEndpointEventCarriesExplicitInferredFidelity(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("pre-tool", "cursor")
+	if err := logger.EndpointEventWithFidelity("approval.allowed", "approval", "info", "Pre-tool observed", "inferred", nil); err != nil {
+		t.Fatalf("EndpointEventWithFidelity returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	if fidelity, ok := nestedString(t, event, "event", "fidelity"); !ok || fidelity != "inferred" {
+		t.Fatalf("event.fidelity = %q (present=%v), want inferred", fidelity, ok)
+	}
+}
+
+// The size-limit fallback rewrites the event down to a key allowlist. Both provenance fields live
+// inside blocks that survive wholesale, but a future edit to that list could drop them -- and
+// losing the marker silently turns an inferred event into an unmarked one, which reads as trusted.
+func TestMinimalEndpointEventKeepsProvenance(t *testing.T) {
+	minimal := minimalEndpointEvent(map[string]interface{}{
+		"event":   map[string]interface{}{"action": "approval.allowed", "fidelity": "inferred"},
+		"harness": map[string]interface{}{"name": "cursor", "collection_method": "hook"},
+	})
+	if fidelity, ok := nestedString(t, minimal, "event", "fidelity"); !ok || fidelity != "inferred" {
+		t.Fatalf("compacted event.fidelity = %q (present=%v), want inferred", fidelity, ok)
+	}
+	if method, ok := nestedString(t, minimal, "harness", "collection_method"); !ok || method != "hook" {
+		t.Fatalf("compacted harness.collection_method = %q (present=%v), want hook", method, ok)
+	}
+}
