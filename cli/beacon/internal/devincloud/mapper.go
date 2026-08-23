@@ -154,6 +154,7 @@ func baseEvent(s Session, action, category string, severity schema.Severity, tsU
 		Action:   action,
 		Category: category,
 		Severity: severity,
+		Fidelity: schema.FidelityInferred,
 		// Poll, not hook: the Devin sessions API is read after the fact, so Beacon sees the
 		// messages a run produced rather than observing the agent as it works. Recording that
 		// here is what keeps a consumer from reading these events as endpoint-grade coverage.
