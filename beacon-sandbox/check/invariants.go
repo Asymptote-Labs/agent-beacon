@@ -204,13 +204,18 @@ func checkOrdering(v *Verdict, log Log) {
 		parseable int
 		collided  []string
 	)
-	seen := map[string]string{}
+	type collisionKey struct {
+		session string
+		at      int64 // UnixNano of the parsed timestamp
+	}
+	seen := map[collisionKey]string{}
 	for _, e := range log.Events {
 		if e.ParseErr != nil {
 			continue
 		}
 		ts := e.Typed.Timestamp
-		if _, err := obs.ParseTimestamp(ts); err != nil {
+		parsed, err := obs.ParseTimestamp(ts)
+		if err != nil {
 			continue
 		}
 		parseable++
@@ -225,7 +230,7 @@ func checkOrdering(v *Verdict, log Log) {
 		if e.Typed.Sequence != 0 {
 			continue
 		}
-		key := session + "\x00" + ts
+		key := collisionKey{session: session, at: parsed.UnixNano()}
 		if previous, ok := seen[key]; ok {
 			collided = append(collided, fmt.Sprintf("%s:%d (%s, shared with %s, neither sequenced)",
 				log.Path, e.Line, ts, previous))
