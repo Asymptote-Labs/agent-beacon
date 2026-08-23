@@ -106,39 +106,6 @@ func TestSessionEventsDoNotTakeAToolCallID(t *testing.T) {
 	}
 }
 
-// A tool argument named call_id (common in telephony and similar APIs) must not
-// block the real runtime invocation ID that sits at the top level of the payload.
-func TestTopLevelIDOverridesToolArgumentCallID(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "claude"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"session_id":      "claude-session",
-		"cwd":             "/repo",
-		"hook_event_name": "PostToolUse",
-		"tool_name":       "mcp__telephony__dial",
-		"tool_use_id":     "toolu_real_id",
-		"tool_input": map[string]interface{}{
-			"mcp_server": "telephony",
-			"call_id":    "tel_wrong_id",
-			"number":     "+1555000000",
-		},
-		"tool_response": map[string]interface{}{"ok": true},
-	})
-
-	events := endpointEvents(t, logPath)
-	if len(events) == 0 {
-		t.Fatal("no events written")
-	}
-	for _, event := range events {
-		if got := callIDOfEvent(event); got != "toolu_real_id" {
-			t.Fatalf("gen_ai.tool.call.id = %q, want toolu_real_id (the runtime ID, not the tool argument)", got)
-		}
-	}
-}
-
 // An MCP event already builds a gen_ai object for its arguments, so the call ID
 // has to be written into it rather than over it.
 func TestToolCallIDDoesNotDisplaceMCPToolFields(t *testing.T) {
@@ -177,6 +144,9 @@ func TestArgumentNamedCallIDNeverBecomesTheJoinKey(t *testing.T) {
 		"tool_name":       "mcp__stripe__get_charge",
 		"tool_use_id":     "toolu_REAL",
 		"tool_input":      map[string]interface{}{"mcp_server": "stripe", "call_id": "ch_ARGUMENT"},
+		// The response is checked too: it is the tool's own output, so it is no
+		// more a statement of identity than the arguments are.
+		"tool_response": map[string]interface{}{"ok": true, "call_id": "ch_RESPONSE"},
 	})
 
 	events := endpointEvents(t, logPath)
