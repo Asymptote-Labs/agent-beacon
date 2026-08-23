@@ -15,11 +15,29 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/git"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var runInventoryHeartbeatCommand = exec.CommandContext
 
 func emitHookEvent(logger *logging.Logger, action, category, severity, message string, input map[string]interface{}, fields map[string]interface{}) {
+	emitHookEventWithFidelity(logger, action, category, severity, message, asymptoteobserve.FidelityObserved, input, fields)
+}
+
+// emitInferredHookEvent is emitHookEvent for an action Beacon derived rather than read.
+//
+// The case that requires it: several runtimes expose a pre-tool notification but no approval hook,
+// and Beacon has long turned the former into an approval.allowed event carrying
+// approval.required=true. Nothing was gated -- a tool call was observed -- so recording that as a
+// reported approval overstates what is known, and it is indistinguishable from Claude Code's
+// PermissionRequest, which is a real operator decision. Marking it inferred leaves the action
+// where downstream rules expect it while letting anything that counts approvals exclude the ones
+// Beacon made up.
+func emitInferredHookEvent(logger *logging.Logger, action, category, severity, message string, input map[string]interface{}, fields map[string]interface{}) {
+	emitHookEventWithFidelity(logger, action, category, severity, message, asymptoteobserve.FidelityInferred, input, fields)
+}
+
+func emitHookEventWithFidelity(logger *logging.Logger, action, category, severity, message, fidelity string, input map[string]interface{}, fields map[string]interface{}) {
 	if fields == nil {
 		fields = map[string]interface{}{}
 	}
@@ -47,7 +65,7 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if branch := resolveBranch(input, cwd); branch != "" {
 		fields["branch"] = branch
 	}
-	if err := logger.EndpointEvent(action, category, severity, message, fields); err != nil {
+	if err := logger.EndpointEventWithFidelity(action, category, severity, message, fidelity, fields); err != nil {
 		logger.Error("Failed to write endpoint event", "error", err.Error(), "action", action)
 	}
 }
