@@ -45,8 +45,10 @@ const qwenAllToolsMatcher = "*"
 // quoted string in command position is an expression rather than a command.
 //
 // Qwen is the runtime that comment anticipated. It runs hook commands through a shell of its
-// choosing and documents exactly two values a hook may ask for, `bash` and `powershell`. Left
-// unset on Windows, a Node-hosted runtime lands on the platform default -- cmd.exe -- where
+// choosing and documents exactly two values a hook may ask for, `bash` and `powershell`. Unlike
+// Claude Code, which was measured to run hook commands through Git Bash on Windows regardless,
+// Qwen only uses bash when the hook configuration asks for it. Left unset on Windows, a
+// Node-hosted runtime lands on the platform default -- cmd.exe -- where
 // Beacon's quotes are literal characters and every hook fails to start while the install still
 // reports success. That is the same silent-failure shape as writing a seconds-valued timeout, and
 // it is worth the same care.
