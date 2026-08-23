@@ -622,8 +622,10 @@ func clineToolFields(input map[string]interface{}, completed bool) map[string]in
 		}
 	}
 
-	if encoded, err := json.Marshal(map[string]interface{}{"input": toolInput, "response": toolResponse}); err == nil && len(encoded) > 0 {
-		fields["content"] = retainedContentFields(string(encoded))
+	if _, hasContent := fields["content"]; !hasContent {
+		if encoded, err := json.Marshal(map[string]interface{}{"input": toolInput, "response": toolResponse}); err == nil && len(encoded) > 0 {
+			fields["content"] = retainedContentFields(string(encoded))
+		}
 	}
 	return fields
 }
