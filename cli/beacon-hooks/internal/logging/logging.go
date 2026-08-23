@@ -15,6 +15,10 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
+// endpointSequence numbers the endpoint events emitted by this hook process, in the order
+// they are written.
+var endpointSequence asymptoteobserve.Sequencer
+
 const (
 	defaultEndpointRotateBytes    = 10 * 1024 * 1024
 	defaultEndpointRotateArchives = 5
@@ -164,7 +168,14 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message, fidelity
 		harnessBlock["collection_method"] = method
 	}
 	event := map[string]interface{}{
-		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		"timestamp": asymptoteobserve.FormatTimestamp(time.Now()),
+		// Emission order within this hook invocation. One invocation can emit several
+		// events (a post-tool hook records the tool result, the file edit and the command
+		// in turn), and on a coarse clock those can land on the same nanosecond -- the
+		// counter is what still separates them. It restarts at 1 in every hook process,
+		// which is why it is a tiebreaker under the timestamp rather than an ordering key
+		// of its own; see asymptoteobserve.Event.Sequence.
+		"sequence":       endpointSequence.Next(),
 		"vendor":         "beacon",
 		"product":        "endpoint-agent",
 		"schema_version": "1.0",
@@ -339,7 +350,7 @@ func compactEndpointContent(event map[string]interface{}) {
 func minimalEndpointEvent(event map[string]interface{}) map[string]interface{} {
 	out := map[string]interface{}{"field_truncated": true}
 	for _, key := range []string{
-		"timestamp", "vendor", "product", "schema_version", "event", "severity",
+		"timestamp", "sequence", "vendor", "product", "schema_version", "event", "severity",
 		"endpoint", "user", "harness", "origin", "run", "session", "trace",
 		"error", "tool", "file", "command", "mcp", "approval", "policy",
 		"content", "destination", "health", "model", "repository",

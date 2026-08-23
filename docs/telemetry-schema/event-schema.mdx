@@ -73,7 +73,7 @@ call was seen. Anything counting real operator decisions should exclude them.
 
 | Field | Meaning |
 |-------|---------|
-| `timestamp` | UTC event time |
+| `timestamp` | UTC event time, RFC3339 with nanosecond precision (`2026-08-21T09:14:03.123456789Z`) |
 | `vendor` | Always `beacon` |
 | `product` | Current product identifier, `endpoint-agent` |
 | `schema_version` | Current public schema version, `1.0` |
@@ -89,6 +89,29 @@ call was seen. Anything counting real operator decisions should exclude them.
 `event.id` is written alongside these: a deterministic UUID identifying the event, described under
 [event identity](/telemetry-schema/normalization#event-identity). It is not required, so events
 written by earlier agent versions remain valid.
+
+## Event ordering
+
+Two events can only be reasoned about together if you can tell which came first, so the
+schema carries two ordering fields.
+
+| Field | Meaning |
+|-------|---------|
+| `timestamp` | The cross-source ordering key. Both capture paths stamp it from the same clock at nanosecond precision and at a fixed width, so two UTC timestamps compare the same way as strings and as instants. |
+| `sequence` | Optional. The emitting writer's monotonic emission counter for the event, starting at 1; absent means unsequenced. It breaks ties between events that share a timestamp. |
+
+`sequence` numbers one writer's stream, not the log as a whole. The hook adapter runs as a
+fresh short-lived process per hook and the collector exporter runs as one long-lived export
+loop, so neither can see the other's counter, and a hook event numbered 1 may well have
+happened after an exporter event numbered 900. Order by `timestamp` first and use
+`sequence` only to separate events that tie on it — most often the datapoints of a single
+metric export, which all carry that export's collection instant.
+
+Do not order events by their position in the log. Append order is not emission order: a
+hook writes synchronously the moment it intercepts a tool call, while the exporter writes
+on its export interval, so an event that happened earlier routinely lands in the file
+later. `beacon scan` and the dashboard's detection view sort the log by `(timestamp,
+sequence)` before evaluating correlation rules for exactly this reason.
 
 ## How it extends OpenTelemetry
 

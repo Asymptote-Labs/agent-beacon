@@ -22,6 +22,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type falconExporter struct {
@@ -170,7 +171,7 @@ func eventTime(event beaconevent.Event) (time.Time, error) {
 	if event.Timestamp == "" {
 		return time.Now().UTC(), nil
 	}
-	ts, err := time.Parse(time.RFC3339Nano, event.Timestamp)
+	ts, err := asymptoteobserve.ParseTimestamp(event.Timestamp)
 	if err != nil {
 		return time.Time{}, err
 	}

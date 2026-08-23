@@ -49,6 +49,7 @@
             "vendor": { "type": "keyword" },
             "product": { "type": "keyword" },
             "schema_version": { "type": "keyword" },
+            "sequence": { "type": "long" },
             "severity": { "type": "keyword" },
             "truncated": { "type": "boolean" },
             "harness": {

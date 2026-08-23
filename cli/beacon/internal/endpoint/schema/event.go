@@ -8,6 +8,16 @@ const (
 	SchemaVersion = asymptoteobserve.SchemaVersion
 )
 
+// TimestampFormat, FormatTimestamp and ParseTimestamp are the canonical event
+// timestamp layout and its reader/writer. Re-exported so nothing in the CLI has to
+// hand-roll a layout string and drift from what the writers emit.
+const TimestampFormat = asymptoteobserve.TimestampFormat
+
+var (
+	FormatTimestamp = asymptoteobserve.FormatTimestamp
+	ParseTimestamp  = asymptoteobserve.ParseTimestamp
+)
+
 type Severity = asymptoteobserve.Severity
 
 const (

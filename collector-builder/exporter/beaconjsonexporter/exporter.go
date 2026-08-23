@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type beaconExporter struct {
@@ -21,6 +22,12 @@ type beaconExporter struct {
 	writer    jsonlWriter
 	logger    *zap.Logger
 	converter beaconevent.Converter
+	// sequence numbers the events this exporter writes, in the order it walks them off
+	// the wire. Nanosecond timestamps order almost everything on their own, but one
+	// metric export flushes a batch of datapoints that all carry the same collection
+	// instant; the counter is what recovers their emission order without falling back
+	// to where the lines landed in the file.
+	sequence *asymptoteobserve.Sequencer
 }
 
 const (
@@ -56,7 +63,8 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 			rotateArchives: cfg.RotateArchives,
 			redactSecrets:  cfg.RedactSecrets,
 		},
-		logger: set.Logger,
+		logger:   set.Logger,
+		sequence: &asymptoteobserve.Sequencer{},
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
@@ -68,6 +76,7 @@ func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error 
 	_ = ctx
 	var firstErr error
 	for _, event := range e.eventConverter().EventsFromLogs(logs) {
+		e.stampSequence(&event)
 		if err := e.writer.append(event); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -79,6 +88,7 @@ func (e *beaconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces
 	_ = ctx
 	var firstErr error
 	for _, event := range e.eventConverter().EventsFromTraces(traces) {
+		e.stampSequence(&event)
 		if err := e.writer.append(event); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -90,11 +100,21 @@ func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Met
 	_ = ctx
 	var firstErr error
 	for _, event := range e.eventConverter().EventsFromMetrics(metrics) {
+		e.stampSequence(&event)
 		if err := e.writer.append(event); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+// stampSequence gives the event this exporter's next emission number, unless the runtime
+// already supplied one of its own on the wire and the converter promoted it.
+func (e *beaconExporter) stampSequence(event *beaconEvent) {
+	if event.Sequence != 0 {
+		return
+	}
+	event.Sequence = e.sequence.Next()
 }
 
 func shouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {

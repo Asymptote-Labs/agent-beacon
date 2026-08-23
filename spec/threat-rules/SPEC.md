@@ -124,6 +124,12 @@ Exactly one of `match` or `correlation` must be present. Required:
 
 ## Verdict model
 
+An engine evaluates the sequence it is given; putting a real event stream into the order the
+events happened is the caller's responsibility. Beacon events carry a nanosecond `timestamp`
+and an optional per-writer `sequence` for that purpose, and `beacon scan` sorts by
+`(timestamp, sequence)` before evaluating — the order lines appear in a log is not their
+emission order.
+
 An engine produces one of two verdicts for a rule against an ordered event sequence:
 
 - `match` — the rule fired.

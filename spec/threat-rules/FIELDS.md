@@ -128,6 +128,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.run.run_id` | string |
 | `e.run.workflow` | string |
 | `e.schema_version` | string |
+| `e.sequence` | uint |
 | `e.server.address` | string |
 | `e.server.port` | int |
 | `e.session.id` | string |

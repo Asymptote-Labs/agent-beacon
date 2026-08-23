@@ -150,7 +150,7 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 	if sessionID == "" {
 		return endpointDedupeEvent{}, false
 	}
-	ts, err := time.Parse(time.RFC3339Nano, stringValue(event["timestamp"]))
+	ts, err := ParseTimestamp(stringValue(event["timestamp"]))
 	if err != nil || ts.IsZero() {
 		return endpointDedupeEvent{}, false
 	}
