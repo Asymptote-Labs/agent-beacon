@@ -88,25 +88,53 @@ func ParseKind(s string) (Kind, error) {
 	}
 }
 
+// LingerOutcome is the result of the optional logout-persistence step of a service install.
+//
+// Applicable says whether linger is a question on this host at all -- it is false in system mode
+// and on every backend but systemd. That used to be encoded as an empty Detail, which meant a
+// caller could not distinguish "we did not try" from "we tried and said nothing", and made the
+// one outcome worth recording the one most easily dropped. Enabled is the state read back from
+// logind afterwards, not the exit status of the attempt. Remediation is set only when linger is
+// applicable and off: the exact command that closes the gap, ready to print.
+type LingerOutcome struct {
+	Applicable  bool
+	Enabled     bool
+	Detail      string
+	Remediation string
+}
+
 // EnableLingerIfNeeded makes a systemd --user unit survive logout, where that applies.
 //
-// The empty detail means exactly one thing: linger does not apply here -- system mode, or any
-// backend but systemd. Every applicable case reports a detail, success included, so a caller can
-// use an empty detail to mean "we did not try" without that also swallowing "we tried and it
-// worked". launchd needs no equivalent: its gui/<uid> domain persists for the login session by
-// itself.
-func (m Manager) EnableLingerIfNeeded() (bool, string) {
+// launchd needs no equivalent: its gui/<uid> domain persists for the login session by itself.
+func (m Manager) EnableLingerIfNeeded() LingerOutcome {
 	if !m.UserMode || m.resolvedKind() != KindSystemd {
-		return false, ""
+		return LingerOutcome{}
 	}
 	u, err := user.Current()
 	if err != nil || u.Username == "" {
-		return false, "could not determine the current user, so logout persistence is unverified"
+		return LingerOutcome{
+			Applicable: true,
+			Detail:     "could not determine the current user, so logout persistence is unverified",
+		}
 	}
 	if LingerEnabled(u.Username) {
-		return true, "linger already enabled for " + u.Username
+		return LingerOutcome{Applicable: true, Enabled: true, Detail: "linger already enabled for " + u.Username}
 	}
-	return EnableLinger(u.Username)
+	enabled, detail := EnableLinger(u.Username)
+	outcome := LingerOutcome{Applicable: true, Enabled: enabled, Detail: detail}
+	if !enabled {
+		outcome.Remediation = LingerRemediation(u.Username)
+	}
+	return outcome
+}
+
+// LingerRemediation is the command that gives a user's systemd units logout persistence.
+//
+// Shared rather than written out at each call site: install, repair, and doctor all tell the user
+// how to close this gap, and three independent copies of a command a user is meant to paste is
+// how they drift apart.
+func LingerRemediation(username string) string {
+	return "sudo loginctl enable-linger " + username
 }
 
 // ServiceNoun names what this backend installs, for user-facing messages.

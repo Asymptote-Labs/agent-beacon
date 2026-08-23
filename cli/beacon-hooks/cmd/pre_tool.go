@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/state"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
 
@@ -49,10 +50,10 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" {
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
 	}
 	outputJSON(preToolResponse())
 }
@@ -68,7 +69,7 @@ func emitCursorPreHook(logger *logging.Logger, input map[string]interface{}, ses
 			"decision": "allow",
 			"reason":   "Shell execution observed",
 		}
-		emitHookEvent(logger, "approval.allowed", "approval", "info", "Shell execution observed", input, fields)
+		emitInferredHookEvent(logger, "approval.allowed", "approval", "info", "Shell execution observed", input, fields)
 		return true
 	case "beforeReadFile":
 		fields := sessionFields(sessionID, input)
@@ -82,12 +83,19 @@ func emitCursorPreHook(logger *logging.Logger, input map[string]interface{}, ses
 		emitHookEvent(logger, "file.read", "file", "info", "File read observed", input, fields)
 		return true
 	default:
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed")
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
 		return true
 	}
 }
 
-func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, sessionID, action, decision, reason string) {
+// emitPreToolDecision writes an approval-category event for a tool call.
+//
+// fidelity is a required parameter rather than a constant inside because this one function serves
+// both kinds of caller, and the difference between them is the whole point of the field. The
+// permission-request hook reaches it when a runtime genuinely asked for a decision; the pre-tool
+// hook reaches it on runtimes that expose no approval gate at all, where the approval block below
+// describes what Beacon concluded from seeing a tool call rather than anything an operator did.
+func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, sessionID, action, decision, reason, fidelity string) {
 	toolName := getFirstStr(input, "tool_name", "toolName")
 	toolInput := resolveToolInput(input)
 	fields := sessionFields(sessionID, input)
@@ -99,14 +107,22 @@ func emitPreToolDecision(logger *logging.Logger, input map[string]interface{}, s
 		"decision": decision,
 		"reason":   reason,
 	}
-	emitHookEvent(logger, action, "approval", "info", reason, input, fields)
+	emitHookEventWithFidelity(logger, action, "approval", "info", reason, fidelity, input, fields)
 }
 
 func preToolResponse() map[string]interface{} {
 	if platformFlag == "antigravity" || platformFlag == "grok" {
 		return map[string]interface{}{"decision": "allow"}
 	}
-	if platformFlag == "claude" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" {
+	// Qwen Code belongs with claude here, and the reason is a security property rather than a
+	// convention. Qwen's PreToolUse contract reads a decision from
+	// `hookSpecificOutput.permissionDecision`, where "allow" means *run the tool without the usual
+	// approval prompt*. An observing hook that answered "allow" would therefore not be observing:
+	// it would silently disarm the user's own permission prompts for every tool call, on a runtime
+	// where the hook was installed to watch. An empty object carries no decision, so Qwen's normal
+	// permission flow runs untouched -- which is the only correct answer for a telemetry hook, and
+	// what TestQwenPreToolDoesNotApproveOnBehalfOfTheUser holds in place.
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" {
 		return emptyResponse
 	}
 	return allowResponse

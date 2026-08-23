@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestAppendEventWritesSingleJSONLine(t *testing.T) {
@@ -292,5 +294,82 @@ func TestSanitizeEventRedactsToolPolicyAndRawValues(t *testing.T) {
 	}
 	if len(sanitized.Tool.Path) > 2048 {
 		t.Fatalf("tool path was not truncated: %d", len(sanitized.Tool.Path))
+	}
+}
+
+var uuidV5Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func TestAppendEventStampsAStableEventID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "command.executed",
+		Harness: schema.HarnessInfo{Name: "claude_code"},
+		Message: "Shell command executed",
+	})
+	event.Timestamp = "2026-08-21T18:00:01Z"
+	event.Session = &schema.SessionInfo{ID: "s1"}
+	event.Command = &schema.CommandInfo{Command: "echo hi"}
+	event.GenAI = &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Call: &schema.GenAIToolCallInfo{ID: "toolu_1"}}}
+
+	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+
+	line, err := LastLine(path)
+	if err != nil {
+		t.Fatalf("read last line: %v", err)
+	}
+	var written schema.Event
+	if err := json.Unmarshal([]byte(line), &written); err != nil {
+		t.Fatalf("decode written event: %v", err)
+	}
+	if !uuidV5Pattern.MatchString(written.Event.ID) {
+		t.Fatalf("event.id = %q, want an RFC 4122 version 5 UUID", written.Event.ID)
+	}
+	// The ID has to describe the line it is on, so re-deriving it from that line
+	// with the field cleared has to land on the same value.
+	bare := written
+	bare.Event.ID = ""
+	data, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("re-marshal event: %v", err)
+	}
+	if got := asymptoteobserve.EventIDForLine(data); got != written.Event.ID {
+		t.Fatalf("event.id = %s, but the written line derives %s", written.Event.ID, got)
+	}
+}
+
+// The regression the call ID exists to fix: after harness normalization both
+// capture paths report claude_code, and the collector's batch lands seconds
+// after the hook's write. Nothing but a shared call ID can collapse that pair.
+func TestAppendEventCollapsesTheHookAndCollectorReportsOfOneCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	hook := schema.NewEvent(schema.NewEventOptions{
+		Action:  "command.executed",
+		Harness: schema.HarnessInfo{Name: "claude_code"},
+		Message: "Shell command executed",
+	})
+	hook.Timestamp = "2026-08-21T18:00:01Z"
+	hook.Session = &schema.SessionInfo{ID: "s1"}
+	hook.Command = &schema.CommandInfo{Command: "echo hi"}
+	hook.GenAI = &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Call: &schema.GenAIToolCallInfo{ID: "toolu_1"}}}
+
+	collector := hook
+	collector.Timestamp = "2026-08-21T18:00:07Z"
+	collector.Message = "Tool execution observed"
+
+	if _, err := AppendEvent(hook, Options{Path: path}); err != nil {
+		t.Fatalf("first AppendEvent returned error: %v", err)
+	}
+	if _, err := AppendEvent(collector, Options{Path: path}); err != nil {
+		t.Fatalf("second AppendEvent returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 1 {
+		t.Fatalf("one Bash call was recorded %d times: %s", len(lines), string(data))
 	}
 }

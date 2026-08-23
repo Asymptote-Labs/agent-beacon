@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
@@ -128,6 +129,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Service definition written to %s\n", result.PlistPath)
 	fmt.Printf("Install manifest written to %s\n", result.ManifestPath)
 	fmt.Printf("Runtime log: %s\n", result.LogPath)
+	printLingerGap(cmd.ErrOrStderr(), result)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
 		return fmt.Errorf("endpoint install completed, but hook installation failed: %w", err)
 	}
@@ -270,10 +272,35 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
+	printLingerGap(cmd.ErrOrStderr(), result)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
 		return fmt.Errorf("endpoint repair completed, but hook installation failed: %w", err)
 	}
 	return nil
+}
+
+// printLingerGap says so when the collector is running but will not outlive this login session.
+//
+// Install used to print an unbroken run of success lines here even when the systemd --user unit
+// had no linger, so the user learned about it at their next logout, with collection already
+// stopped. The headline is chosen by whether a remediation is known rather than by inspecting
+// the detail text: a known-off linger gets the fact and the exact command, and an unverifiable
+// one is reported as unverified instead of asserted as broken.
+func printLingerGap(out io.Writer, result lifecycle.InstallResult) {
+	if !result.LingerApplicable || result.LingerEnabled {
+		return
+	}
+	if result.LingerRemediation == "" {
+		fmt.Fprintln(out, "Warning: could not verify that collection survives logout.")
+	} else {
+		fmt.Fprintln(out, "Warning: the collector is running, but collection will stop when this user logs out.")
+	}
+	if result.LingerDetail != "" {
+		fmt.Fprintf(out, "Detail: %s\n", result.LingerDetail)
+	}
+	if result.LingerRemediation != "" {
+		fmt.Fprintf(out, "To keep collecting after logout, run: %s\n", result.LingerRemediation)
+	}
 }
 
 func installHookTargetsFromEndpointInstall(targets []string) error {

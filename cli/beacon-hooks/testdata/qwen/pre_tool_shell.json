@@ -1,0 +1,16 @@
+{
+  "session_id": "qwen-8f21c4a0",
+  "transcript_path": "/Users/example/.qwen/tmp/qwen-8f21c4a0/chat.json",
+  "cwd": "/Users/example/projects/beacon-demo",
+  "hook_event_name": "PreToolUse",
+  "timestamp": "2026-08-21T10:15:09.500Z",
+  "permission_mode": "default",
+  "tool_name": "run_shell_command",
+  "tool_use_id": "toolu_01QwenShell",
+  "tool_call_id": "call_shell_001",
+  "tool_input": {
+    "command": "npm test",
+    "description": "Run the unit tests",
+    "directory": "."
+  }
+}

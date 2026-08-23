@@ -46,7 +46,12 @@ var harnessTargets = []harnessTarget{
 	{name: "factory", endpointKind: endpointTargetHook, endpointAliases: []string{"factory", "droid"}, hookAliases: []string{"factory", "droid"}},
 	{name: "opencode", endpointKind: endpointTargetHook, endpointAliases: []string{"opencode"}, hookAliases: []string{"opencode"}},
 	{name: "cline", endpointKind: endpointTargetHook, endpointAliases: []string{"cline"}, hookAliases: []string{"cline"}},
+	// pi_cli is accepted alongside pi because it is the canonical harness name events are written
+	// under, so anyone reading a Pi row out of the runtime log and passing it back to a --harness
+	// flag gets the runtime they are looking at rather than an "unsupported harness" error.
+	{name: "pi", endpointKind: endpointTargetHook, endpointAliases: []string{"pi", "pi-cli", "pi_cli"}, hookAliases: []string{"pi", "pi-cli", "pi_cli"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
+	{name: "qwen", endpointKind: endpointTargetHook, endpointAliases: []string{"qwen", "qwen-code", "qwen_code"}, hookAliases: []string{"qwen", "qwen-code", "qwen_code"}},
 	{name: "hermes", endpointKind: endpointTargetHook, endpointAliases: []string{"hermes", "hermes-agent"}, hookAliases: []string{"hermes", "hermes-agent"}},
 	{name: "antigravity", endpointKind: endpointTargetHook, endpointAliases: []string{"antigravity", "antigravity-cli"}, hookAliases: []string{"antigravity", "antigravity-cli"}},
 	{name: "devin-cli", endpointKind: endpointTargetHook, endpointAliases: []string{"devin", "devin-cli"}, hookAliases: []string{"devin", "devin-cli"}},

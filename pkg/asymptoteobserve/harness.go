@@ -85,6 +85,22 @@ func NormalizeHarnessName(name string) string {
 	case lower == "cline" || lower == "cline_cli" || lower == "cline-cli" || lower == "cline cli" ||
 		lower == "cline.bot":
 		return "cline"
+	// Qwen Code is matched by equality against a closed set, not by a substring rule, and the
+	// reason is specific to this runtime rather than general caution: every Qwen model id begins
+	// with the same four letters the harness does -- qwen3-coder-plus, qwen-max, qwen-turbo. A
+	// Contains rule would therefore report any event whose harness attribute happened to carry a
+	// model string as a Qwen Code session, which is how a model name ends up masquerading as a
+	// runtime in a dashboard grouped by harness.name.
+	//
+	// The canonical spelling is qwen_code rather than qwen_cli because Qwen Code is the product's
+	// name; it follows claude_code, not codex_cli. Both spellings arrive in practice -- the hook
+	// path installs with --platform qwen, while an OTLP resource attribute carries whatever the
+	// runtime calls itself -- and pinning them here is what keeps one session from being recorded
+	// under two names.
+	case lower == "qwen" || lower == "qwen_code" || lower == "qwen-code" || lower == "qwen code" ||
+		lower == "qwencode" || lower == "qwen_cli" || lower == "qwen-cli" || lower == "qwen cli" ||
+		lower == "qwen_coder" || lower == "qwen-coder" || lower == "qwen coder":
+		return "qwen_code"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".

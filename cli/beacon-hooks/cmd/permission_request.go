@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
 
@@ -40,7 +41,7 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 	}
 
 	if isDevinLikePlatform(platformFlag) {
-		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "approve", "Permission request approved")
+		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "approve", "Permission request approved", asymptoteobserve.FidelityObserved)
 		outputJSON(devinApproveResponse)
 		return
 	}
@@ -50,7 +51,7 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	emitPreToolDecision(logger, input, sessionID, "approval.requested", "requested", "Permission request observed")
+	emitPreToolDecision(logger, input, sessionID, "approval.requested", "requested", "Permission request observed", asymptoteobserve.FidelityObserved)
 	outputJSON(emptyResponse)
 }
 

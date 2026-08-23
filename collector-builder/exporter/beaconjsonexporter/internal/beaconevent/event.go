@@ -122,7 +122,10 @@ func NewEvent(action, category, severity, harnessName string, ts time.Time) Even
 		Action:   action,
 		Category: category,
 		Severity: asymptoteobserve.Severity(severity),
-		Harness:  HarnessInfo{Name: harnessName},
+		// Every event this exporter produces came off the runtime as OpenTelemetry, whatever
+		// signal it arrived on, so the method is fixed here at the single construction point
+		// rather than repeated at each of the log/span/metric call sites.
+		Harness: HarnessInfo{Name: harnessName, CollectionMethod: asymptoteobserve.CollectionMethodOTLP},
 	})
 	return Event{
 		ObservedAt:    ts.UTC(),

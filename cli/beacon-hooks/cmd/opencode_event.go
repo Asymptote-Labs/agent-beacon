@@ -266,7 +266,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 	toolInput := firstMap(input, "tool_input", "toolInput")
 	toolResponse := firstMap(input, "tool_response", "toolResponse")
 	fields := toolFieldsWithResponse(toolName, toolInput, toolResponse)
-	callID := getFirstStr(input, "call_id", "callID")
+	callID := toolCallIDFromEnvelope(input)
 	call := map[string]interface{}{}
 	if len(toolInput) > 0 {
 		call["arguments"] = toolInput

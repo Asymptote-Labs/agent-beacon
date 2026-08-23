@@ -30,6 +30,19 @@ const (
 
 type Origin = asymptoteobserve.Origin
 
+// Provenance markers, re-exported so code in this module uses the same spellings as the hook
+// adapter and the collector exporter rather than bare string literals. See
+// pkg/asymptoteobserve/provenance.go for what each one means.
+const (
+	CollectionMethodHook   = asymptoteobserve.CollectionMethodHook
+	CollectionMethodOTLP   = asymptoteobserve.CollectionMethodOTLP
+	CollectionMethodPlugin = asymptoteobserve.CollectionMethodPlugin
+	CollectionMethodPoll   = asymptoteobserve.CollectionMethodPoll
+
+	FidelityObserved = asymptoteobserve.FidelityObserved
+	FidelityInferred = asymptoteobserve.FidelityInferred
+)
+
 const (
 	OriginLocal = asymptoteobserve.OriginLocal
 	OriginCloud = asymptoteobserve.OriginCloud

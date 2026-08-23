@@ -14,7 +14,8 @@ Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/co
 | `gen_ai.request.model`, `gen_ai.response.model`, `model`, `ai.model` | `model` |
 | `gen_ai.tool.name`, `tool.name`, `beacon.tool.name`, `function_name`, `tool_name` | `tool.name` and `gen_ai.tool.name` |
 | `gen_ai.tool.call.arguments`, `function_args`, `arguments` | `tool.command` when command-like, plus `gen_ai.tool.call.arguments` |
-| `gen_ai.tool.call.id`, `gen_ai.tool.call.result` | `gen_ai.tool.call.id`, `gen_ai.tool.call.result` |
+| `gen_ai.tool.call.id`, `tool_use_id`, `call_id`, `tool_call_id`, `callId` | `gen_ai.tool.call.id` |
+| `gen_ai.tool.call.result` | `gen_ai.tool.call.result` |
 | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` | `mcp.method.name`, `mcp.protocol.version`, `mcp.resource.uri`, `mcp.session.id` |
 | `mcp.tool`, `beacon.mcp.tool`, `mcp.tool.name` | `mcp.tool` |
 | `mcp.server`, `beacon.mcp.server`, `mcp.server.name` | `mcp.server` |
@@ -91,6 +92,23 @@ Canonical `gen_ai.usage` comes from the run-end payload only, including cache
 reads and runtime-reported cost. Recording usage at a per-model-call boundary as
 well would double-count every task's tokens in usage rollups.
 
+## Event identity
+
+Every event carries two identity fields, and both are filled on the hook path and the OTLP path alike.
+
+`gen_ai.tool.call.id` is the runtime's own name for one tool invocation, read from whichever
+attribute that runtime uses: Claude Code writes `tool_use_id`, Codex and OpenCode write `call_id`,
+Cline writes `callId`. It is what links a tool call to its result, an approval to the execution it
+approved, and a hook event to the OTLP event describing the same action. Where two events share
+one, they describe one call, and the writer records that call once rather than twice.
+
+`event.id` is Beacon's own identity for the event: a deterministic UUID, so the same event is
+named the same way in any process and any release. Where the runtime named the action itself, the
+UUID is derived from the session, action, target and call ID, and nothing else — so the hook's
+report and the collector's report of one action carry one `event.id` even though they are written
+seconds apart with different fields. Otherwise it is derived from the event's own content, which
+makes re-reading a log produce the IDs it already had.
+
 ## OpenTelemetry GenAI fields
 
 Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested `gen_ai` object and also projects selected fields into Beacon's common investigation fields. This keeps the raw GenAI context available without forcing downstream rules to parse runtime-specific attribute names.
@@ -163,6 +181,31 @@ When a runtime omits `event.category`, Beacon infers it from `event.action`:
 | `approval.*` or `policy.*` | `approval` |
 | `metric.*` | `metric` |
 | `tool.*` | `tool` |
+
+## Action inference and fidelity
+
+Actions are resolved in order, and where the answer comes from is recorded on the event as
+[`event.fidelity`](/telemetry-schema/event-schema#provenance-how-beacon-knows-what-it-wrote):
+
+| Resolution step | Fidelity |
+|-----------------|----------|
+| An explicit `beacon.event.action`, `event.action`, `gen_ai.agent.action`, or `ai.agent.action` attribute | `observed` |
+| A structured attribute naming the operation: `mcp.method.name`, `gen_ai.operation.name`, a `gen_ai.tool.call.*` value, a known Copilot `event.name` | `observed` |
+| A known runtime event name resolved after conversion: a Codex `event.name`, a recognized `claude_code.*` event | `observed` |
+| A pattern match over the log body, span name, or joined event text | `inferred` |
+| An unrecognized `claude_code.*` event, which falls back to `session.activity` | `inferred` |
+| Nothing matched, which falls back to `tool.invoked` | `inferred` |
+
+The distinction is structural rather than semantic: it records whether the source named the
+operation or Beacon pattern-matched prose, not whether a given mapping is ideal. An action resolved
+from a runtime's own event name overrides an earlier pattern match, and the fidelity is raised with
+it, so a runtime that names its events well is not penalized for also carrying a prose body.
+
+Hook and plugin telemetry is `observed` by construction, because a hook fires for a named lifecycle
+event. The exception is approval synthesis: on runtimes that expose a pre-tool notification but no
+approval hook, Beacon emits an `approval.allowed` event carrying `approval.required` so
+approval-shaped detections have something to match. Nothing was gated there, so those events are
+`inferred`.
 
 ## Related
 

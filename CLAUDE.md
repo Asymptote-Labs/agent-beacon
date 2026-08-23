@@ -32,6 +32,7 @@ Supported runtime surfaces today:
 - Claude Code and Codex CLI telemetry configuration through local OpenTelemetry settings.
 - Cursor hook telemetry for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, file edits, and agent reasoning (`afterAgentThought` thinking text recorded as `agent.reasoning` events in the OTel GenAI `gen_ai.output.messages` reasoning-part shape) where hook payloads expose those fields.
 - Cline hook telemetry through a Beacon-managed local plugin (`~/.cline/plugins/beacon.ts`) covering prompts, task lifecycle, tool lifecycle, commands, file reads/edits with diffs, MCP activity, and task token usage. One plugin serves Cline's VS Code, JetBrains, and CLI hosts; Cline's own OTel export and hosted prompt storage are not used. Approval decisions are not exposed by Cline's hook payloads and are not synthesized.
+- Pi hook telemetry through a Beacon-managed local extension (`~/.pi/agent/extensions/beacon.ts`, or `.pi/extensions/beacon.ts` at project level) covering session lifecycle, prompts, tool lifecycle and results, commands including operator `!` commands, file reads/creates/edits with the unified patch, agent reasoning from assistant thinking parts, and token usage/cost. The extension subscribes to seven Pi event types and ignores the streaming and provider internals. Approval decisions are not exposed by Pi's extension API -- its `tool_call` handler can block, but that is an extension deciding rather than an operator being asked -- and are not synthesized, matching the Cline decision.
 - Claude Cowork admin-configured OpenTelemetry setup guidance and local validation.
 - `beaconjson` OpenTelemetry Collector exporter that converts OTLP logs, traces, metrics, and resource attributes into Beacon endpoint JSONL.
 - Asymptote Observe TypeScript SDK instrumentation for cloud applications, starting from OpenTelemetry/OpenLLMetry patterns and `observe()` wrappers.
@@ -96,6 +97,17 @@ Run the observe SDK and threat-rules conformance tests:
 cd pkg/asymptoteobserve
 go test ./...
 ```
+
+Run the managed runtime plugin/extension checks (each verifies the checked-in copy matches its embedded twin, then runs its tests):
+
+```bash
+cd plugins/opencode-beacon && bun run check && bun test
+cd ../cline-beacon && bun run check && bun test
+cd ../pi-beacon && bun run check && bun test
+```
+
+After editing a plugin or extension source, run `bun run sync` in its directory to update the
+embedded copy under `cli/beacon/internal/endpoint/hooks/assets/`; a Go test fails if the two drift.
 
 Run TypeScript SDK checks:
 
@@ -353,6 +365,8 @@ Use these npm trusted publisher values:
 - For macOS-only behavior, gate tests with `runtime.GOOS == "darwin"` or assert the non-Darwin contract explicitly.
 - Keep endpoint event schema fields stable: `vendor`, `product`, `schema_version`, required event fields, and Wazuh-compatible JSONL output are release contracts.
 - Preserve optional event fields for agent-native metadata (`session`, `trace`, `tool`, `file`, `command`, `mcp`, `approval`, `content`, `model`, `repository`, and `branch`) without changing existing required field semantics.
+- Set the provenance markers on every new collection path. `harness.collection_method` (`hook`, `otlp`, `plugin`, `poll`) records the mechanism; `event.fidelity` (`observed`, `inferred`) records whether the source named the action or Beacon derived it. Both are defined in `pkg/asymptoteobserve/provenance.go` and are the only sanctioned way to express that difference — do not add per-runtime confidence fields, and do not leave a derived action unmarked. A new plugin-shaped runtime must be added to `CollectionMethodForPlatform`, whose default is `hook`. An action synthesized from an adjacent observation, such as an approval built from a pre-tool notification on a runtime with no approval hook, is `inferred`.
+- Keep event identity derivable rather than asserted. `gen_ai.tool.call.id` carries the runtime's own name for one tool invocation, promoted on every capture path from the shared alias list in `pkg/asymptoteobserve.ToolCallIDKeys`; a new runtime adds its spelling there rather than in a mapper. `event.id` is a deterministic UUID derived by `EventIDForLine` from the event about to be written, so both capture paths name one action the same way. Its namespace constant and derivation are a contract: changing either renames every event ID Beacon has written, and a test pins the value.
 - Keep `gen_ai.usage` as the single canonical token-usage representation: normalize all runtime token telemetry (span attributes, metric datapoints, legacy `llm.usage.*` aliases) into it, mirror OTel GenAI semconv JSON names exactly, and never add parallel or per-harness token fields. `gen_ai.usage.cost_usd` carries runtime-reported cost only; do not derive cost from local pricing tables.
 - When adding a new signal, include stable identifiers/counts/hashes alongside any retained raw content, and route raw fields through redaction, sanitization, truncation, and event-size controls.
 - Keep the dashboard read-only. It should inspect local status and JSONL events but must not mutate endpoint configuration or telemetry.
@@ -367,6 +381,7 @@ CI runs:
 - `go test ./...` in `cli/beacon-hooks`.
 - `go test ./...` in `collector-builder/exporter/beaconjsonexporter`.
 - `go test ./...` in `pkg/asymptoteobserve` (includes threat-rules pack conformance).
+- `bun run check && bun test` in `plugins/opencode-beacon`, `plugins/cline-beacon`, and `plugins/pi-beacon`.
 - CLI help smoke checks for the public command tree.
 - macOS packaging script validation via `packaging/macos/test-endpoint-scripts.sh`.
 - macOS endpoint smoke validation via `packaging/macos/smoke-endpoint.sh`.

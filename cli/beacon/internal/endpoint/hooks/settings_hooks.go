@@ -12,9 +12,17 @@ type settingsHookGroup struct {
 }
 
 type settingsHookRef struct {
-	Type       string `json:"type,omitempty"`
-	Command    string `json:"command"`
-	Timeout    int    `json:"timeout,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout,omitempty"`
+	// Shell names the interpreter the runtime should parse Command with, for runtimes that let a
+	// hook say. Omitted by default, so the runtimes that do not expose the field are unaffected.
+	//
+	// It exists because Command is quoted for one specific shell -- see hookCommandQuote -- and a
+	// runtime that picks a different one cannot run it at all. Saying which shell the command was
+	// written for is strictly better than emitting a second quoting dialect and hoping the runtime
+	// picks the matching one.
+	Shell      string `json:"shell,omitempty"`
 	ShowOutput *bool  `json:"show_output,omitempty"`
 }
 

@@ -12,6 +12,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Guards against the exporter Event mirror struct drifting from the shared
@@ -765,6 +767,17 @@ func TestCapturedClaudeCodeLogNormalization(t *testing.T) {
 		t.Fatalf("raw attributes changed: %#v", bash.Raw)
 	}
 
+	// Claude Code names every tool call with a tool_use_id and puts the same one
+	// on the decision and the result. Promoting it is what links an approval to
+	// the execution it approved, and this event to the hook's report of the same
+	// command; until it was promoted the value reached the log only inside raw.
+	if got := toolCallIDOfEvent(decision); got != "toolu_fixture_bash" {
+		t.Fatalf("decision call ID = %q, want the tool_use_id Claude Code assigned", got)
+	}
+	if got := toolCallIDOfEvent(bash); got != "toolu_fixture_bash" {
+		t.Fatalf("bash call ID = %q, want the tool_use_id Claude Code assigned", got)
+	}
+
 	for _, tc := range []struct {
 		name      string
 		action    string
@@ -783,6 +796,38 @@ func TestCapturedClaudeCodeLogNormalization(t *testing.T) {
 		if event.Tool == nil || event.Tool.Path != event.File.Path {
 			t.Fatalf("%s tool = %#v, want mirrored path", tc.name, event.Tool)
 		}
+		if toolCallIDOfEvent(event) == "" {
+			t.Fatalf("%s has no call ID, so nothing links it to the hook's report of the same edit", tc.name)
+		}
+	}
+	if toolCallIDOfEvent(byName["write_result"]) == toolCallIDOfEvent(byName["read_result"]) {
+		t.Fatal("the write and the read are separate calls and must not share a call ID")
+	}
+}
+
+func toolCallIDOfEvent(event Event) string {
+	if event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Call == nil {
+		return ""
+	}
+	return event.GenAI.Tool.Call.ID
+}
+
+// Codex names its calls call_id rather than tool_use_id. Both are read from one
+// shared alias list, so a runtime cannot be supported on one capture path and
+// invisible on the other.
+func TestCapturedCodexLogPromotesItsOwnCallID(t *testing.T) {
+	_, events := capturedLogEvents(t, "codex-0.142.4.json")
+	found := false
+	for _, event := range events {
+		if id := toolCallIDOfEvent(event); id != "" {
+			if id != "call_fixture" {
+				t.Fatalf("call ID = %q, want the call_id Codex assigned", id)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no event promoted Codex's call_id")
 	}
 }
 
@@ -1257,5 +1302,191 @@ func TestClaudeShellToolsPopulateTheCommandDetectionSurface(t *testing.T) {
 				t.Errorf("duration_ms = %d, want 386", event.Command.DurationMS)
 			}
 		})
+	}
+}
+
+// --- provenance: harness.collection_method and event.fidelity ---
+
+// Everything this exporter emits arrived as OpenTelemetry, so the method is the same on all three
+// signals. Asserting it per signal rather than once is what would catch a future construction path
+// that bypasses NewEvent.
+func TestCollectionMethodIsOTLPOnEverySignal(t *testing.T) {
+	logs := plog.NewLogs()
+	logRecord := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	logRecord.Body().SetStr("claude_code.assistant_response")
+	logRecord.Attributes().PutStr("service.name", "claude-code")
+	logRecord.Attributes().PutStr("event.name", "assistant_response")
+
+	traces := ptrace.NewTraces()
+	span := traces.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.SetName("chat gpt-4")
+	span.Attributes().PutStr("gen_ai.operation.name", "execute_tool")
+
+	converter := NewConverter(Options{})
+	var events []Event
+	events = append(events, converter.EventsFromLogs(logs)...)
+	events = append(events, converter.EventsFromTraces(traces)...)
+	if len(events) < 2 {
+		t.Fatalf("events = %d, want at least one per signal", len(events))
+	}
+	for _, event := range events {
+		if event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodOTLP {
+			t.Fatalf("collection_method = %q for action %q, want otlp", event.Harness.CollectionMethod, event.Event.Action)
+		}
+	}
+}
+
+// The catch-all is the whole reason the field exists: a log record whose body matches nothing
+// lands on tool.invoked, and until now nothing in the event said that the action was a fallback
+// rather than a report.
+func TestFidelityMarksCatchAllInferred(t *testing.T) {
+	record := plog.NewLogRecord()
+	record.Body().SetStr("something entirely unclassifiable")
+	record.Attributes().PutStr("service.name", "some-runtime")
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "tool.invoked" {
+		t.Fatalf("action = %q, want the tool.invoked catch-all", event.Event.Action)
+	}
+	if event.Event.Fidelity != asymptoteobserve.FidelityInferred {
+		t.Fatalf("fidelity = %q, want inferred", event.Event.Fidelity)
+	}
+}
+
+// A body containing "exec" becomes command.executed, which is the exact case that made the field
+// necessary: rules/risky-command/ matches on command.executed, and prose is not a command.
+func TestFidelityMarksKeywordMatchInferred(t *testing.T) {
+	for body, wantAction := range map[string]string{
+		"agent decided to exec something":      "command.executed",
+		"wrote the file to disk":               "file.modified",
+		"switching approval_mode_switch to on": "approval.requested",
+	} {
+		record := plog.NewLogRecord()
+		record.Body().SetStr(body)
+		record.Attributes().PutStr("service.name", "some-runtime")
+
+		event := NewConverter(Options{}).EventFromLog(nil, record)
+		if event.Event.Action != wantAction {
+			t.Fatalf("body %q gave action %q, want %q", body, event.Event.Action, wantAction)
+		}
+		if event.Event.Fidelity != asymptoteobserve.FidelityInferred {
+			t.Fatalf("body %q gave fidelity %q, want inferred", body, event.Event.Fidelity)
+		}
+	}
+}
+
+// A structured attribute that names the operation is a report, not a guess, and must not be
+// tarred with the same marker as the keyword branches -- otherwise a consumer filtering out
+// inferred events would throw away the good telemetry along with the bad.
+func TestFidelityMarksStructuredAttributesObserved(t *testing.T) {
+	for name, attrs := range map[string]map[string]string{
+		"mcp tools/call":        {"mcp.method.name": "tools/call"},
+		"gen_ai execute_tool":   {"gen_ai.operation.name": "execute_tool"},
+		"gen_ai tool call id":   {"gen_ai.tool.call.id": "call_123"},
+		"explicit event action": {"beacon.event.action": "file.read"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := plog.NewLogRecord()
+			record.Body().SetStr("prose that would otherwise be keyword-matched: exec file")
+			record.Attributes().PutStr("service.name", "some-runtime")
+			for key, value := range attrs {
+				record.Attributes().PutStr(key, value)
+			}
+			event := NewConverter(Options{}).EventFromLog(nil, record)
+			if event.Event.Fidelity != asymptoteobserve.FidelityObserved {
+				t.Fatalf("fidelity = %q for %s, want observed", event.Event.Fidelity, name)
+			}
+		})
+	}
+}
+
+// Codex names its events explicitly. Those names are resolved after construction, overwriting
+// whatever the body was guessed to mean, so the fidelity has to be upgraded with the action --
+// otherwise Codex's best telemetry would be labeled as a guess.
+func TestFidelityUpgradedWhenCodexNormalizerResolvesAction(t *testing.T) {
+	record := plog.NewLogRecord()
+	// A body that on its own reaches the "prompt" keyword branch and would be marked inferred.
+	record.Body().SetStr("codex prompt something")
+	record.Attributes().PutStr("service.name", "codex")
+	record.Attributes().PutStr("event.name", string(CodexUserPrompt))
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "prompt.submitted" {
+		t.Fatalf("action = %q, want prompt.submitted", event.Event.Action)
+	}
+	if event.Event.Fidelity != asymptoteobserve.FidelityObserved {
+		t.Fatalf("fidelity = %q, want observed after Codex normalization", event.Event.Fidelity)
+	}
+}
+
+// A known claude_code.* name is a report; an unknown one falls back to session.activity, which is
+// a placeholder. Both arrive as session.activity, so the fidelity is the only thing that tells a
+// consumer which of the two it is holding.
+func TestFidelitySeparatesKnownFromUnknownClaudeEvents(t *testing.T) {
+	known := plog.NewLogRecord()
+	known.Body().SetStr("claude_code.assistant_response")
+	known.Attributes().PutStr("service.name", "claude-code")
+	known.Attributes().PutStr("event.name", "assistant_response")
+
+	unknown := plog.NewLogRecord()
+	unknown.Body().SetStr("claude_code.future_lifecycle_event")
+	unknown.Attributes().PutStr("service.name", "claude-code")
+	unknown.Attributes().PutStr("event.name", "claude_code.future_lifecycle_event")
+
+	converter := NewConverter(Options{})
+	knownEvent := converter.EventFromLog(nil, known)
+	unknownEvent := converter.EventFromLog(nil, unknown)
+
+	if knownEvent.Event.Action != "session.activity" || unknownEvent.Event.Action != "session.activity" {
+		t.Fatalf("actions = %q / %q, want both session.activity so fidelity is the only difference",
+			knownEvent.Event.Action, unknownEvent.Event.Action)
+	}
+	if knownEvent.Event.Fidelity != asymptoteobserve.FidelityObserved {
+		t.Fatalf("known event fidelity = %q, want observed", knownEvent.Event.Fidelity)
+	}
+	if unknownEvent.Event.Fidelity != asymptoteobserve.FidelityInferred {
+		t.Fatalf("unknown event fidelity = %q, want inferred", unknownEvent.Event.Fidelity)
+	}
+}
+
+// An explicit beacon.event.action wins over the Claude normalizer, and its fidelity has to travel
+// with it. Marking this observed-by-attribute but then letting the normalizer's verdict stick
+// would describe an action the event no longer carries.
+func TestFidelityRestoredWithPreservedExplicitAction(t *testing.T) {
+	record := plog.NewLogRecord()
+	record.Body().SetStr("claude_code.future_lifecycle_event")
+	record.Attributes().PutStr("service.name", "claude-code")
+	record.Attributes().PutStr("event.name", "claude_code.future_lifecycle_event")
+	record.Attributes().PutStr("beacon.event.action", "file.read")
+
+	event := NewConverter(Options{}).EventFromLog(nil, record)
+	if event.Event.Action != "file.read" {
+		t.Fatalf("action = %q, want the explicit file.read", event.Event.Action)
+	}
+	if event.Event.Fidelity != asymptoteobserve.FidelityObserved {
+		t.Fatalf("fidelity = %q, want observed for an explicitly stated action", event.Event.Fidelity)
+	}
+}
+
+func TestCopilotFidelitySplitsNamedEventsFromFallback(t *testing.T) {
+	named, namedFidelity := CopilotActionWithFidelity(map[string]interface{}{"event.name": "copilot_chat.tool.call"}, "", "")
+	if named != "tool.invoked" || namedFidelity != asymptoteobserve.FidelityObserved {
+		t.Fatalf("named copilot event = (%q, %q), want (tool.invoked, observed)", named, namedFidelity)
+	}
+	fallback, fallbackFidelity := CopilotActionWithFidelity(map[string]interface{}{}, "", "asking for permission")
+	if fallback != "approval.requested" || fallbackFidelity != asymptoteobserve.FidelityInferred {
+		t.Fatalf("keyword copilot event = (%q, %q), want (approval.requested, inferred)", fallback, fallbackFidelity)
+	}
+}
+
+// InferAction is still exported and still returns just the action; the wrapper must not drift from
+// the function it delegates to.
+func TestInferActionMatchesWithFidelityVariant(t *testing.T) {
+	for _, fallback := range []string{"", "unclassifiable", "wrote a file", "exec something", "claude_code.assistant_response"} {
+		attrs := map[string]interface{}{"service.name": "some-runtime"}
+		want, _ := InferActionWithFidelity(attrs, fallback)
+		if got := InferAction(attrs, fallback); got != want {
+			t.Fatalf("InferAction(%q) = %q, InferActionWithFidelity = %q", fallback, got, want)
+		}
 	}
 }

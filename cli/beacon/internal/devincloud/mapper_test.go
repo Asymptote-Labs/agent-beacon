@@ -157,3 +157,24 @@ func TestObjectNameLayout(t *testing.T) {
 		t.Fatalf("ObjectName empties = %q, want %q", got2, want2)
 	}
 }
+
+// Devin Cloud is the one collection path that is neither a hook nor an OTLP stream: Beacon polls
+// the sessions API and maps whatever it returns after the run. Recording that on every event is
+// what stops these from being read as endpoint-grade observation of the agent at work.
+func TestMappedEventsRecordPollCollectionMethod(t *testing.T) {
+	s := Session{SessionID: "sess-poll", Status: "finished", UserID: "user-1", CreatedAt: 1000, UpdatedAt: 1200}
+	msgs := []Message{
+		{EventID: "e1", Source: "user", Message: "do the thing", CreatedAt: 1000},
+		{EventID: "e2", Source: "devin", Message: "done", CreatedAt: 1100},
+	}
+
+	mapped := MapSession(s, msgs)
+	if len(mapped) == 0 {
+		t.Fatal("MapSession produced no events")
+	}
+	for i, m := range mapped {
+		if got := m.Event.Harness.CollectionMethod; got != "poll" {
+			t.Fatalf("event %d (%s) collection_method = %q, want poll", i, m.Event.Event.Action, got)
+		}
+	}
+}
