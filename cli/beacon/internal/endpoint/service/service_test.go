@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -565,16 +564,16 @@ func TestDetectKindMatchesHost(t *testing.T) {
 // LingerEnabled existed but had zero callers, which meant every user-mode systemd install
 // inherited exactly that bug. These pin the wrapper that now invokes them.
 func TestEnableLingerIfNeededOnlyAppliesToSystemdUserUnits(t *testing.T) {
-	// Not applicable: nothing should be attempted or reported, so the caller records nothing.
+	// Not applicable: nothing should be attempted or reported, so the caller records nothing and
+	// no install prints a logout warning that does not apply to its backend.
 	for _, m := range []Manager{
 		{UserMode: false, Kind: KindSystemd}, // system units are not session-scoped
 		{UserMode: true, Kind: KindLaunchd},  // gui/<uid> persists on its own
 		{UserMode: true, Kind: KindSupervised},
 		{UserMode: false, Kind: KindLaunchd},
 	} {
-		ok, detail := m.EnableLingerIfNeeded()
-		if ok || detail != "" {
-			t.Errorf("%+v should not attempt linger, got ok=%v detail=%q", m, ok, detail)
+		if got := m.EnableLingerIfNeeded(); got != (LingerOutcome{}) {
+			t.Errorf("%+v should not attempt linger, got %+v", m, got)
 		}
 	}
 }
@@ -582,8 +581,11 @@ func TestEnableLingerIfNeededOnlyAppliesToSystemdUserUnits(t *testing.T) {
 // The applicable case must actually report something, or the manifest and doctor would have
 // nothing to show and the gap would stay invisible.
 func TestEnableLingerIfNeededReportsForSystemdUserUnits(t *testing.T) {
-	_, detail := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
-	if detail == "" {
+	got := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
+	if !got.Applicable {
+		t.Fatal("a systemd user unit must mark linger applicable")
+	}
+	if got.Detail == "" {
 		t.Error("a systemd user unit must report a linger outcome, whether or not it succeeded")
 	}
 }
@@ -607,29 +609,11 @@ func TestServiceNounNamesEachBackend(t *testing.T) {
 	}
 }
 
-// The success path is the one that used to report nothing. EnableLinger returned an empty detail on
-// success, and the install path reads an empty detail as "linger does not apply" -- so linger
-// actually being enabled was the single outcome the manifest dropped.
-func TestEnableLingerReportsSuccessAndFailureDistinctly(t *testing.T) {
-	if !systemdIsInit() {
-		t.Skip("needs systemd as PID 1; linger does not apply otherwise")
-	}
-	u, err := user.Current()
-	if err != nil || u.Username == "" {
-		t.Skip("needs a resolvable current user")
-	}
-	ok, detail := EnableLinger(u.Username)
-	if detail == "" {
-		t.Fatalf("EnableLinger(%q) = %v with no detail; an empty detail means "+
-			"\"does not apply\" to the caller, so every applicable outcome must say something",
-			u.Username, ok)
-	}
-}
-
-// The contract the install path depends on: an empty detail means "not applicable", never
-// "succeeded" and never "failed quietly".
-func TestEnableLingerNeverReportsAnEmptyDetailWhenItApplies(t *testing.T) {
-	// The non-applicable cases, which are the only ones allowed to be silent.
+// The contract the install path depends on: every outcome says something. An outcome that reports
+// nothing is indistinguishable from "linger does not apply here", which is how a successfully
+// enabled linger used to go unrecorded in the manifest.
+func TestEnableLingerAlwaysReportsADetail(t *testing.T) {
+	// The guard cases, which never reach loginctl at all.
 	if _, detail := EnableLinger(""); detail == "" {
 		t.Error("an empty username is a reportable problem, not a silent skip")
 	}

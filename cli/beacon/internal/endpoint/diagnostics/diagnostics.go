@@ -80,7 +80,7 @@ func lingerCheck() Check {
 	return Check{Name: "systemd_user_linger", Status: StatusWarn, Target: u.Username,
 		Message:  "linger is not enabled, so the collector stops when this user logs out",
 		Evidence: "linger_disabled",
-		Action:   "sudo loginctl enable-linger " + u.Username}
+		Action:   service.LingerRemediation(u.Username)}
 }
 
 func checkCollectorHealth(cfg endpointconfig.Config) Check {
