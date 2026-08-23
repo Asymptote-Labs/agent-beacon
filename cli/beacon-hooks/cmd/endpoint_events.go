@@ -310,11 +310,16 @@ func toolCallIDFromEnvelope(input map[string]interface{}) string {
 // which is where Claude Code puts tool_use_id -- outside tool_input, so no
 // amount of reading the tool arguments would ever have found it.
 //
+// The top-level payload ID is authoritative: it always overwrites any value that
+// toolFieldsWithResponse may have set from inside tool arguments, because tool
+// parameters are user-controlled and may coincidentally carry key names like
+// call_id without being the runtime's invocation identifier.
+//
 // Only an event that already describes a tool action takes one. A session
 // lifecycle payload that happens to echo an ID is not a tool call, and giving it
 // the join key of one would join it to work it did not do.
 func applyToolCallID(fields, input map[string]interface{}) {
-	if fields == nil || toolCallIDOf(fields) != "" || !describesToolAction(fields) {
+	if fields == nil || !describesToolAction(fields) {
 		return
 	}
 	if callID := toolCallIDFromEnvelope(input); callID != "" {
@@ -331,8 +336,7 @@ func describesToolAction(fields map[string]interface{}) bool {
 	return false
 }
 
-// toolCallIDOf reads back what setToolCallID wrote, so a mapper that already
-// found the ID somewhere better is not overwritten by a weaker source.
+// toolCallIDOf reads back what setToolCallID wrote.
 func toolCallIDOf(fields map[string]interface{}) string {
 	genAI, _ := fields["gen_ai"].(map[string]interface{})
 	tool, _ := genAI["tool"].(map[string]interface{})
