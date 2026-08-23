@@ -148,6 +148,7 @@
                       "runtimes/grok-build",
                       "runtimes/cline",
                       "runtimes/opencode",
+                      "runtimes/pi",
                       "runtimes/vscode"
                     ]
                   },
@@ -1324,6 +1325,14 @@
     {
       "source": "/supported-runtimes-cline",
       "destination": "/runtimes/cline"
+    },
+    {
+      "source": "/cli/supported-runtimes-pi",
+      "destination": "/runtimes/pi"
+    },
+    {
+      "source": "/supported-runtimes-pi",
+      "destination": "/runtimes/pi"
     },
     {
       "source": "/system-architecture",

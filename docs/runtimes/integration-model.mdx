@@ -21,6 +21,7 @@ Beacon supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surf
 | [Grok Build](/runtimes/grok-build) | Checks for Beacon's managed Grok hook file at `~/.grok/hooks/beacon-endpoint.json` or `./.grok/hooks/beacon-endpoint.json` |
 | [OpenCode](/runtimes/opencode) | Looks for the `opencode` executable or `~/.config/opencode`, then checks the managed Beacon plugin |
 | [Cline](/runtimes/cline) | Looks for `~/.cline`, treating a `cline` executable as an extra signal because the VS Code and JetBrains hosts ship none, then checks the managed Beacon plugin |
+| [Pi](/runtimes/pi) | Looks for the `pi` executable, treating `~/.pi/agent` as an extra signal because an npm or version-manager install is often off the inherited `PATH`, then checks for Beacon's managed extension at `~/.pi/agent/extensions/beacon.ts` |
 | [Devin CLI](/runtimes/devin) | Looks for the `devin` executable, `~/.config/devin`, or `./.devin`, then checks Beacon hook configuration |
 | [Devin Desktop](/runtimes/devin-desktop) | Checks Cascade/Windsurf hook configuration at `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json` |
 | [Factory Droid](/runtimes/factory-droid) | Looks for the `droid` executable and validates `OTEL_TELEMETRY_ENDPOINT` in the effective launch environment |
@@ -57,6 +58,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | [Hermes Agent](/runtimes/hermes-agent) | Shell hook payloads through `beacon-hooks` | Beacon merges user-level Hermes shell hooks and maps prompts, tools, commands, approvals, session lifecycle, and subagent stop metadata into endpoint events. |
 | [OpenCode](/runtimes/opencode) | Managed local plugin through `beacon-hooks` | Plugin invokes Beacon for chat, session, command, permission, diff, and error events where payloads are available. |
 | [Cline](/runtimes/cline) | Managed local plugin through `beacon-hooks` | One plugin covers the VS Code, JetBrains, and CLI hosts; it forwards run and tool hooks for prompt, task lifecycle, tool, command, file, MCP, and token telemetry. |
+| [Pi](/runtimes/pi) | Managed local extension through `beacon-hooks` | Pi has no hooks file and no OTLP export, so the TypeScript extension API is the only observation surface. Discovery and harness attribution ship today; the extension itself does not, so no Pi hook events are collected yet. |
 | [Devin CLI](/runtimes/devin) | Native hook payloads through `beacon-hooks` | Hooks emit session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry where Devin CLI exposes payloads. |
 | [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hook payloads through `beacon-hooks` | Hooks emit prompt, command, MCP tool, file read, and file write telemetry where Devin Desktop exposes Cascade/Windsurf payloads. |
 | [Factory Droid](/runtimes/factory-droid) | OTLP HTTP launch environment plus optional hooks | Beacon validates Factory OTLP state but does not mutate shell profiles for Droid. |
