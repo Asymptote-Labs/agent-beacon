@@ -30,6 +30,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.error.type` | string |
 | `e.event.action` | string |
 | `e.event.category` | string |
+| `e.event.fidelity` | string |
 | `e.event.kind` | string |
 | `e.field_truncated` | bool |
 | `e.file.diff_bytes` | int |
@@ -81,6 +82,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.gen_ai.usage.output_tokens` | int |
 | `e.gen_ai.usage.reasoning.output_tokens` | int |
 | `e.gen_ai.workflow.name` | string |
+| `e.harness.collection_method` | string |
 | `e.harness.config_path` | string |
 | `e.harness.executable_path` | string |
 | `e.harness.name` | string |
