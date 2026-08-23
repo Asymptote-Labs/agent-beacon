@@ -146,6 +146,23 @@ func TestQwenFailedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
 	}
 }
 
+// An interrupt with an empty error and a PostToolUse hook event must still be recorded as a
+// failure. Without this, the Qwen taxonomy maps write_file to file.modified even though the tool
+// was interrupted and the write never landed.
+func TestQwenInterruptedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_interrupt.json"))
+
+	event := lastEndpointEvent(t, logPath)
+	if got := qwenAction(t, event); got != "tool.failed" {
+		t.Fatalf("event.action = %q, want tool.failed for an interrupted tool", got)
+	}
+	if got := event["severity"]; got != "high" {
+		t.Fatalf("severity = %q, want high", got)
+	}
+}
+
 // A shell command has to reach the `command` field, not just `tool.name`: every command rule,
 // dashboard column and threat-rule match reads it from there.
 func TestQwenShellCommandIsRecordedAsACommand(t *testing.T) {
@@ -455,5 +472,58 @@ func TestQwenRawPayloadSurvivesTheFileEditPath(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The two paths that ask "did this tool fail" must never disagree.
+//
+// They did once: `qwenToolFailed` guards the diff path and reads three signals, while the
+// classification in emitPostToolObserved read only two. An interrupt with an empty error skipped
+// the diff path as a failure and was then classified a successful `file.modified` -- the exact
+// false positive this runtime's mapping exists to prevent, reintroduced by the gap between two
+// spellings of one question.
+//
+// Every signal is exercised against the same edit tool, because an edit tool is where the
+// disagreement is expensive: a misclassified `web_fetch` is noise, a misclassified `write_file`
+// asserts a file changed when it did not.
+func TestQwenEveryFailureSignalIsClassifiedAsAFailure(t *testing.T) {
+	for name, overrides := range map[string]map[string]interface{}{
+		"failure event name": {"hook_event_name": "PostToolUseFailure"},
+		"error message":      {"hook_event_name": "PostToolUse", "error": "EACCES: permission denied"},
+		"interrupt flag":     {"hook_event_name": "PostToolUse", "error": "", "is_interrupt": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logPath := setupQwenHook(t)
+			payload := readQwenFixture(t, "post_tool_write_file.json")
+			for key, value := range overrides {
+				payload[key] = value
+			}
+
+			runHookWithInput(t, runPostTool, payload)
+
+			event := lastEndpointEvent(t, logPath)
+			if got := qwenAction(t, event); got != "tool.failed" {
+				t.Fatalf("event.action = %q, want tool.failed", got)
+			}
+			if got := event["severity"]; got != "high" {
+				t.Errorf("severity = %q, want high", got)
+			}
+			// A failure never carries a diff. The content in the payload describes a write that
+			// did not land, so recording it would assert a change that never happened.
+			if file, ok := event["file"].(map[string]interface{}); ok {
+				if diff, ok := file["diff"]; ok {
+					t.Errorf("failed edit carried a diff: %v", diff)
+				}
+			}
+		})
+	}
+
+	// The control: the same payload with no failure signal is still a successful edit, so the
+	// guard above cannot be satisfied by classifying everything as a failure.
+	logPath := setupQwenHook(t)
+	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_write_file.json"))
+	event := lastEndpointEvent(t, logPath)
+	if got := qwenAction(t, event); got != "file.modified" {
+		t.Fatalf("a clean write was classified %q, want file.modified", got)
 	}
 }
