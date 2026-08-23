@@ -66,6 +66,10 @@ type InstallResult struct {
 	LogPath             string   `json:"log_path"`
 	ManifestPath        string   `json:"manifest_path"`
 	HarnessConfigPaths  []string `json:"harness_config_paths,omitempty"`
+	LingerApplicable    bool     `json:"linger_applicable,omitempty"`
+	LingerEnabled       bool     `json:"linger_enabled,omitempty"`
+	LingerDetail        string   `json:"linger_detail,omitempty"`
+	LingerRemediation   string   `json:"linger_remediation,omitempty"`
 }
 
 type Status struct {
@@ -279,6 +283,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
+	var lingerOutcome service.LingerOutcome
 	if opts.StartService {
 		// Restart when something is already running, rather than Load.
 		//
@@ -317,9 +322,10 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		// have, and refusing to install over it would be worse than collecting until logout.
 		// The outcome is recorded so status and doctor can report the gap rather than leaving
 		// the user to discover it after their next logout.
-		if ok, detail := manager.EnableLingerIfNeeded(); detail != "" {
-			manifest.LingerEnabled = ok
-			manifest.LingerDetail = detail
+		lingerOutcome = manager.EnableLingerIfNeeded()
+		if lingerOutcome.Applicable {
+			manifest.LingerEnabled = lingerOutcome.Enabled
+			manifest.LingerDetail = lingerOutcome.Detail
 		}
 		if err := endpointcollector.WaitUntilReady(cfg, 10*time.Second); err != nil {
 			tx.Rollback(manifest)
@@ -345,14 +351,23 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
 	}
-	return InstallResult{
+	result := InstallResult{
 		ConfigPath:          configPath,
 		CollectorConfigPath: cfg.Collector.ConfigPath,
 		PlistPath:           plistPath,
 		LogPath:             cfg.LogPath,
 		ManifestPath:        manifestPath,
 		HarnessConfigPaths:  harnessPaths,
-	}, nil
+	}
+	applyLingerOutcome(&result, lingerOutcome)
+	return result, nil
+}
+
+func applyLingerOutcome(result *InstallResult, outcome service.LingerOutcome) {
+	result.LingerApplicable = outcome.Applicable
+	result.LingerEnabled = outcome.Enabled
+	result.LingerDetail = outcome.Detail
+	result.LingerRemediation = outcome.Remediation
 }
 
 // Uninstall removes the endpoint and reports what it could not remove.

@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
@@ -128,10 +129,11 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Service definition written to %s\n", result.PlistPath)
 	fmt.Printf("Install manifest written to %s\n", result.ManifestPath)
 	fmt.Printf("Runtime log: %s\n", result.LogPath)
+	printLingerWarning(cmd.ErrOrStderr(), result)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
 		return fmt.Errorf("endpoint install completed, but hook installation failed: %w", err)
 	}
-	return nil
+	return maybeOfferGettingStarted(cmd)
 }
 
 func runEndpointStatus(cmd *cobra.Command, args []string) error {
@@ -270,10 +272,24 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
+	printLingerWarning(cmd.ErrOrStderr(), result)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
 		return fmt.Errorf("endpoint repair completed, but hook installation failed: %w", err)
 	}
 	return nil
+}
+
+func printLingerWarning(out io.Writer, result lifecycle.InstallResult) {
+	if !result.LingerApplicable || result.LingerEnabled {
+		return
+	}
+	fmt.Fprintln(out, "Warning: the collector is running, but collection will stop after logout because systemd linger is disabled.")
+	if result.LingerDetail != "" {
+		fmt.Fprintf(out, "Detail: %s\n", result.LingerDetail)
+	}
+	if result.LingerRemediation != "" {
+		fmt.Fprintf(out, "To keep collection running: %s\n", result.LingerRemediation)
+	}
 }
 
 func installHookTargetsFromEndpointInstall(targets []string) error {

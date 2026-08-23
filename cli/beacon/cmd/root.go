@@ -45,6 +45,7 @@ func printRootSplash(cmd *cobra.Command) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Start with:")
 	fmt.Fprintln(out, "  beacon endpoint install")
+	fmt.Fprintln(out, "  beacon getting-started")
 	fmt.Fprintln(out, "  beacon endpoint status")
 	fmt.Fprintln(out, "  beacon endpoint wazuh print-config")
 	fmt.Fprintln(out)
