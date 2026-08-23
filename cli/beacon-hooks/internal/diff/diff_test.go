@@ -145,3 +145,43 @@ func TestFromToolResponse_ClineWriteToFile(t *testing.T) {
 		t.Errorf("diff = %q, want the written content as added lines", got)
 	}
 }
+
+// "replace" is Gemini CLI's -- and so early Qwen Code's -- id for the old_string/new_string edit
+// tool. Qwen's mapper recognizes it as a file edit, so the diff builder has to recognize it too:
+// otherwise the event records that a file changed and never records how, which is the difference
+// between an auditable edit and a bare notification.
+func TestFromToolResponseBuildsADiffForTheReplaceTool(t *testing.T) {
+	toolInput := map[string]interface{}{
+		"file_path":  "/repo/src/server.ts",
+		"old_string": "const routes = []",
+		"new_string": "const routes = [health]",
+	}
+	got := FromToolResponse("replace", toolInput, nil)
+	if got == "" {
+		t.Fatal("FromToolResponse(replace) = \"\", want a diff")
+	}
+	if !strings.Contains(got, "const routes = []") || !strings.Contains(got, "const routes = [health]") {
+		t.Fatalf("diff = %q, want both sides of the replacement", got)
+	}
+	if want := FromToolResponse("edit", toolInput, nil); got != want {
+		t.Fatalf("replace and edit produced different diffs:\n replace: %q\n edit:    %q", got, want)
+	}
+}
+
+// Gemini CLI's read_file names its target `absolute_path`. The resolver already read the CamelCase
+// `AbsolutePath`; without the snake_case sibling the path is empty and FromToolResponse bails out
+// before it looks at the tool at all.
+func TestFromToolResponseResolvesAbsolutePathParameter(t *testing.T) {
+	got := FromToolResponse("write_file", map[string]interface{}{
+		"absolute_path": "/repo/src/health.ts",
+		"content":       "export const health = () => ({ ok: true })\n",
+	}, nil)
+	if got == "" {
+		t.Fatal("FromToolResponse = \"\", want a diff resolved from absolute_path")
+	}
+	// The diff header names the file by its base name, so what this asserts is that a path was
+	// resolved at all -- an unresolved path returns "" a few lines above.
+	if !strings.Contains(got, "health.ts") || !strings.Contains(got, "export const health") {
+		t.Fatalf("diff = %q, want the absolute_path target and its content", got)
+	}
+}

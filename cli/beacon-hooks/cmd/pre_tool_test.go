@@ -905,6 +905,7 @@ func setupHookConfigDirs(t *testing.T) {
 	origHermesDir := hookconfig.HermesDir
 	origOpenCodeDir := hookconfig.OpenCodeDir
 	origClineDir := hookconfig.ClineDir
+	origQwenDir := hookconfig.QwenDir
 	origPlatform := platformFlag
 	hookconfig.BeaconDir = tmp
 	hookconfig.ClaudeDir = filepath.Join(tmp, "claude")
@@ -918,6 +919,7 @@ func setupHookConfigDirs(t *testing.T) {
 	hookconfig.HermesDir = filepath.Join(tmp, "hermes")
 	hookconfig.OpenCodeDir = filepath.Join(tmp, "opencode")
 	hookconfig.ClineDir = filepath.Join(tmp, "cline")
+	hookconfig.QwenDir = filepath.Join(tmp, "qwen")
 	t.Cleanup(func() {
 		hookconfig.BeaconDir = origBeaconDir
 		hookconfig.ClaudeDir = origClaudeDir
@@ -931,6 +933,7 @@ func setupHookConfigDirs(t *testing.T) {
 		hookconfig.HermesDir = origHermesDir
 		hookconfig.OpenCodeDir = origOpenCodeDir
 		hookconfig.ClineDir = origClineDir
+		hookconfig.QwenDir = origQwenDir
 		platformFlag = origPlatform
 	})
 }

@@ -200,3 +200,30 @@ func TestHookEventsCarryAnEventID(t *testing.T) {
 		}
 	}
 }
+
+// recordLocalEdit is where this change and Qwen's raw-payload attachment (#380)
+// landed on the same line while both branches were open, because it is the one
+// emitter that bypasses emitHookEvent and so has to repeat by hand whatever that
+// function does. Each was written without the other in the tree, so a resolution
+// that kept either alone would compile and pass that branch's own tests while
+// silently dropping the other's field -- the same shape of accident as the
+// July/August pair this identity work exists to undo.
+//
+// Asserted on one event rather than in two tests: the risk is not that either
+// line is absent, it is that they cannot both be present at once.
+func TestQwenFileEditCarriesBothTheCallIDAndTheRawPayload(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_write_file.json"))
+
+	event := lastEndpointEvent(t, logPath)
+	if got := qwenAction(t, event); got != "file.modified" {
+		t.Fatalf("event.action = %q, want the file edit path that owns this line", got)
+	}
+	if got := callIDOfEvent(event); got != "toolu_01QwenWrite" {
+		t.Errorf("gen_ai.tool.call.id = %q, want the fixture's tool_use_id promoted", got)
+	}
+	if got := leaf(event, "raw", "qwen", "permission_mode"); got != "default" {
+		t.Errorf("raw.qwen.permission_mode = %q, want the payload Qwen has no schema field for", got)
+	}
+}

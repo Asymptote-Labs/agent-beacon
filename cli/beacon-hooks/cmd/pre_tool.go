@@ -50,7 +50,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" {
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -114,7 +114,15 @@ func preToolResponse() map[string]interface{} {
 	if platformFlag == "antigravity" || platformFlag == "grok" {
 		return map[string]interface{}{"decision": "allow"}
 	}
-	if platformFlag == "claude" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" {
+	// Qwen Code belongs with claude here, and the reason is a security property rather than a
+	// convention. Qwen's PreToolUse contract reads a decision from
+	// `hookSpecificOutput.permissionDecision`, where "allow" means *run the tool without the usual
+	// approval prompt*. An observing hook that answered "allow" would therefore not be observing:
+	// it would silently disarm the user's own permission prompts for every tool call, on a runtime
+	// where the hook was installed to watch. An empty object carries no decision, so Qwen's normal
+	// permission flow runs untouched -- which is the only correct answer for a telemetry hook, and
+	// what TestQwenPreToolDoesNotApproveOnBehalfOfTheUser holds in place.
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" {
 		return emptyResponse
 	}
 	return allowResponse

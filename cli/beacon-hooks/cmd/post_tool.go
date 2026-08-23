@@ -150,6 +150,23 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		return nil
 	}
 
+	// A failure is not an edit.
+	//
+	// Qwen's PostToolUseFailure carries the same `tool_name` and `tool_input` as a success -- the
+	// error is the only thing that distinguishes them -- so without this guard a `write_file` that
+	// hit EACCES would be sent down the diff path, and Beacon would build a diff from the content
+	// of a write that never landed and record it as a completed `file.modified`. That is worse than
+	// missing the event: the log would assert a file changed when it did not.
+	//
+	// Returning nil hands the payload back to emitPostToolObserved, which classifies it as
+	// `tool.failed` at high severity. Antigravity guards the same way just above, for the same
+	// reason. Scoped to the platform rather than applied to every runtime because the branch above
+	// establishes that each runtime's failure signal is its own; widening it would change Claude
+	// Code's recorded behavior with no fixture to say what that behavior should become.
+	if platformFlag == "qwen" && qwenToolFailed(input) {
+		return nil
+	}
+
 	filePath := diff.GetStringFromMaps("file_path", toolInput, toolResponse)
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("filePath", toolInput, toolResponse)
@@ -162,6 +179,21 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	}
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("absolute_path", toolInput, toolResponse)
+	}
+	// `notebook_path` completes the set: it is read by toolFieldsWithResponse, so leaving it out
+	// here made one key resolve in one reader and not its two siblings -- the exact asymmetry that
+	// produced the earlier defects on this branch.
+	//
+	// Stated plainly: adding it changes no behavior today. `notebook_edit` targets a `.ipynb`, which
+	// is not in scannableExtensions, so this path returns before the diff is built whether or not
+	// the path resolved. The event is still recorded as `file.modified` with the right path, from
+	// toolFieldsWithResponse, and still carries no diff. This exists so the three readers agree, and
+	// so the path is already resolvable if `.ipynb` ever becomes scannable.
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("notebook_path", toolInput, toolResponse)
 	}
 	filePath = diff.NormalizePath(filePath)
 
@@ -211,6 +243,19 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 	// twice -- once here, once from OTLP -- and this is the field that lets the
 	// writer tell that the two are one edit.
 	applyToolCallID(fields, input)
+	// The same gap costs Qwen its raw payload: emitHookEvent is what attaches it, and it lands on
+	// exactly the events this runtime's taxonomy exists to produce, since a successful `write_file`
+	// or `edit` is classified `file.modified` and routed here. `permission_mode` has no schema field
+	// at all and `tool_use_id` keeps its verbatim spelling only here, so both would survive on
+	// failed and non-edit tools and vanish on the successful edits.
+	//
+	// Scoped to qwen rather than applied to every runtime with a raw convention. grok, hermes and
+	// vscode have the same gap on this path, and closing it would change their recorded event shape
+	// with no fixture here to say what it should become; that is a stated limit rather than a
+	// silent one. TestQwenRawPayloadSurvivesTheFileEditPath is what holds the Qwen half.
+	if platformFlag == "qwen" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
+	}
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 
@@ -307,6 +352,20 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		fields[key] = value
 	}
 	if hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != "" {
+		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
+		return
+	}
+	// One predicate decides "did this tool fail", for both the diff-path guard in
+	// parseClaudeCopilotInput and the classification here.
+	//
+	// It was two, and they disagreed: `qwenToolFailed` reads three signals -- the failure event
+	// name, a non-empty `error`, and `is_interrupt` -- while the check above reads only the first
+	// two. An interrupt carrying an empty error therefore skipped the diff path as a failure and
+	// then arrived here to be classified a successful `file.modified`: the exact false positive
+	// this runtime's mapping exists to prevent, reintroduced by the gap between two spellings of
+	// the same question. Calling the predicate rather than restating its logic is what stops that
+	// pair drifting a second time.
+	if platformFlag == "qwen" && qwenToolFailed(input) {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
@@ -409,6 +468,9 @@ func isFileEditTool(platform, toolName string) bool {
 			strings.Contains(lower, "write") ||
 			strings.Contains(lower, "create") ||
 			strings.Contains(lower, "patch")
+	}
+	if platform == "qwen" {
+		return isQwenFileEditTool(toolName)
 	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
 }
