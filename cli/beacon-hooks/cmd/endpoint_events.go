@@ -30,6 +30,16 @@ func emitHookEvent(logger *logging.Logger, action, category, severity, message s
 	if platformFlag == "hermes" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"hermes": input})
 	}
+	// Qwen carries real signal with no endpoint-schema field of its own: `permission_mode` on every
+	// tool event, `source` on SessionStart, `stop_hook_active` and the `context_usage` /
+	// `context_limit` / `input_tokens` trio on Stop, `tool_use_id` linking a pre-tool event to its
+	// post-tool result. Keeping the payload under `raw.qwen` preserves it without inventing schema
+	// fields for one runtime. It is the whole event's own path through SanitizeMap, so raw is
+	// secret-redacted and string-limited like every other field, and it is the first thing dropped
+	// when an event exceeds the 64 KiB ceiling.
+	if platformFlag == "qwen" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
+	}
 	if platformFlag == "vscode" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"vscode": input})
 	}
@@ -241,7 +251,11 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 		fields["command"] = map[string]interface{}{"command": command}
 		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
 	}
-	if path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "DirectoryPath", "SearchPath", "searchPath"); path != "" {
+	// `absolute_path` and `notebook_path` are the snake_case siblings of `AbsolutePath` already in
+	// this list: the first is Gemini CLI's (and so early Qwen Code's) `read_file` parameter, the
+	// second is what `notebook_edit` names its target on both Qwen and Claude. Both are unambiguous
+	// file paths, so reading them costs nothing and their absence costs a `file` field.
+	if path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "absolute_path", "notebook_path", "DirectoryPath", "SearchPath", "searchPath"); path != "" {
 		fields["file"] = map[string]interface{}{
 			"path":      path,
 			"operation": fileOperation(toolName),
@@ -534,6 +548,11 @@ func normalizeToolString(value interface{}) string {
 }
 
 func fileOperation(toolName string) string {
+	if platformFlag == "qwen" {
+		if operation := qwenFileOperation(toolName); operation != "" {
+			return operation
+		}
+	}
 	lower := strings.ToLower(toolName)
 	switch {
 	case strings.Contains(lower, "read") || strings.Contains(lower, "view") || strings.Contains(lower, "list") || strings.Contains(lower, "grep") || strings.Contains(lower, "search"):
@@ -572,6 +591,17 @@ func actionForTool(hookEvent, toolName string) string {
 			return "file.read"
 		case lower == "edit" || lower == "write":
 			return "file.modified"
+		}
+	}
+	if platformFlag == "qwen" {
+		// PostToolUseFailure is classified before the tool id, so a failed edit is recorded as a
+		// failure rather than as a successful file.modified. Same ordering as grok, for the same
+		// reason: the tool name says what was attempted, not whether it worked.
+		if hookEvent == "PostToolUseFailure" {
+			return "tool.failed"
+		}
+		if action := qwenToolAction(toolName); action != "" {
+			return action
 		}
 	}
 	if platformFlag == "antigravity" {

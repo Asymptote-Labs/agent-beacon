@@ -1,0 +1,9 @@
+{
+  "session_id": "qwen-8f21c4a0",
+  "transcript_path": "/Users/example/.qwen/tmp/qwen-8f21c4a0/chat.json",
+  "cwd": "/Users/example/projects/beacon-demo",
+  "hook_event_name": "UserPromptSubmit",
+  "timestamp": "2026-08-21T10:15:04.100Z",
+  "prompt": "Add a health endpoint, then run the tests",
+  "submitted_prompt": "Add a health endpoint, then run the tests"
+}

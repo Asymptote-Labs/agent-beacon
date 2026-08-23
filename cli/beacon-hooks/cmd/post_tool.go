@@ -150,6 +150,23 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		return nil
 	}
 
+	// A failure is not an edit.
+	//
+	// Qwen's PostToolUseFailure carries the same `tool_name` and `tool_input` as a success -- the
+	// error is the only thing that distinguishes them -- so without this guard a `write_file` that
+	// hit EACCES would be sent down the diff path, and Beacon would build a diff from the content
+	// of a write that never landed and record it as a completed `file.modified`. That is worse than
+	// missing the event: the log would assert a file changed when it did not.
+	//
+	// Returning nil hands the payload back to emitPostToolObserved, which classifies it as
+	// `tool.failed` at high severity. Antigravity guards the same way just above, for the same
+	// reason. Scoped to the platform rather than applied to every runtime because the branch above
+	// establishes that each runtime's failure signal is its own; widening it would change Claude
+	// Code's recorded behavior with no fixture to say what that behavior should become.
+	if platformFlag == "qwen" && qwenToolFailed(input) {
+		return nil
+	}
+
 	filePath := diff.GetStringFromMaps("file_path", toolInput, toolResponse)
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("filePath", toolInput, toolResponse)
@@ -162,6 +179,9 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	}
 	if filePath == "" {
 		filePath = diff.GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
+	}
+	if filePath == "" {
+		filePath = diff.GetStringFromMaps("absolute_path", toolInput, toolResponse)
 	}
 	filePath = diff.NormalizePath(filePath)
 
@@ -404,6 +424,9 @@ func isFileEditTool(platform, toolName string) bool {
 			strings.Contains(lower, "write") ||
 			strings.Contains(lower, "create") ||
 			strings.Contains(lower, "patch")
+	}
+	if platform == "qwen" {
+		return isQwenFileEditTool(toolName)
 	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
 }
