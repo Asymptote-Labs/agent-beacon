@@ -91,6 +91,44 @@ Canonical `gen_ai.usage` comes from the run-end payload only, including cache
 reads and runtime-reported cost. Recording usage at a per-model-call boundary as
 well would double-count every task's tokens in usage rollups.
 
+### Qwen Code hook mapping
+
+Qwen Code sends Claude Code's payload shape with Gemini CLI's tool names, so
+tool classification is keyed on Qwen's own built-in ids rather than on the
+generic substring rules. `run_shell_command` maps to `command.executed`;
+`read_file`, `read_many_files`, `list_directory`, `glob`, `grep_search` and the
+Gemini-era `search_file_content` to `file.read`; `write_file`, `edit`, the
+Gemini-era `replace`, and `notebook_edit` to `file.modified` with a diff. Every
+other built-in — `web_fetch`, `web_search`, `todo_write`, `save_memory`, `task`,
+`skill` — stays on the shared path as `tool.invoked`, and MCP tools resolve to
+`mcp.tool_invoked`.
+
+The set is matched by exact tool id rather than by substring, because MCP tool
+names are chosen by whoever wrote the server: a substring rule would claim any
+MCP tool containing "edit" or "glob" as a Qwen built-in and send it through the
+file-diff path.
+
+`PostToolUseFailure` normalizes to `tool.failed` at high severity and is never
+recorded as a completed edit. The failure payload carries the same `tool_name`
+and `tool_input` as a success, so a failed `write_file` would otherwise produce a
+diff built from content that never reached disk.
+
+Qwen's `Stop` hook fields `context_usage`, `context_limit` and `input_tokens` are
+deliberately **not** normalized into `gen_ai.usage`. That hook fires once per
+assistant turn and its `input_tokens` is that turn's prompt count, which in a
+multi-turn session already contains every prior turn; summing it across events,
+as usage rollups do, would inflate a session's total by roughly the square of its
+length. Qwen's documentation also states the value may include output tokens
+depending on provider. All three are preserved verbatim under `raw.qwen`, along
+with `permission_mode`, `tool_use_id`, `tool_call_id` and `source` — fields with
+real signal and no endpoint-schema home, carried through the same redaction,
+truncation and event-size controls as every other field.
+
+Beacon's Qwen `PreToolUse` hook returns an empty response rather than an allow
+decision. In Qwen, `hookSpecificOutput.permissionDecision: "allow"` means run the
+tool without the usual approval prompt, so an observing hook that answered
+"allow" would silently disarm the user's own permission prompts.
+
 ## OpenTelemetry GenAI fields
 
 Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested `gen_ai` object and also projects selected fields into Beacon's common investigation fields. This keeps the raw GenAI context available without forcing downstream rules to parse runtime-specific attribute names.

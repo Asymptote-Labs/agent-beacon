@@ -1,0 +1,121 @@
+---
+title: "Qwen Code"
+description: "Asymptote support details for Qwen Code endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports [Qwen Code](https://qwen.ai/qwencode) through its native [hook system](https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/). Beacon merges its hook entries into Qwen Code's own `settings.json`, and Qwen invokes `beacon-hooks` on each event.
+
+Qwen Code is a Gemini CLI fork, but it does not carry Gemini CLI's OpenTelemetry export. There is no OTLP endpoint to point at the local collector, so hooks are the whole collection path — `beacon endpoint install --harness qwen` has nothing to configure and says so.
+
+## Prerequisites
+
+Before enabling Qwen Code hooks, make sure:
+
+- Qwen Code is installed for the user, or available in the project where hooks will run.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Asymptote hooks are installed with `beacon endpoint hooks install --harness qwen`.
+- The folder is trusted in Qwen Code before you expect project-level hooks to execute.
+- `disableAllHooks` is not set to `true` in the effective settings; it is Qwen's own kill switch and stops every hook, including Beacon's.
+- Qwen Code is restarted after hook install or removal so new sessions load the updated settings.
+
+## Collection path
+
+Qwen Code invokes Asymptote's hook adapter from entries in `settings.json`. The adapter writes normalized endpoint events to the configured runtime JSONL log. Beacon registers:
+
+| Qwen hook event | Adapter subcommand |
+|-----------------|--------------------|
+| `SessionStart` | `session-start` |
+| `UserPromptSubmit` | `prompt-submit` |
+| `PreToolUse` | `pre-tool` |
+| `PostToolUse` | `post-tool` |
+| `PostToolUseFailure` | `post-tool` |
+| `PermissionRequest` | `permission-request` |
+| `Stop` | `stop` |
+| `SubagentStart` | `subagent-start` |
+| `SubagentStop` | `subagent-stop` |
+| `SessionEnd` | `session-end` |
+
+Qwen's fire-and-forget events — `MessageDisplay`, `StopFailure`, `PostCompact`, `SessionDelete`, `TodoCreated`, `TodoCompleted` — are deliberately not registered. `MessageDisplay` alone fires roughly every 200ms for the length of every reply, and spawning a hook process that often to record assistant text Beacon does not otherwise retain would cost more than it tells anyone.
+
+Beacon's `PreToolUse` hook returns an empty response rather than an `allow` decision. In Qwen Code, `hookSpecificOutput.permissionDecision: "allow"` means *run the tool without the usual approval prompt*, so answering `allow` from a telemetry hook would silently disarm your own permission prompts. An empty response carries no decision and leaves Qwen's permission flow untouched.
+
+### Hook timeouts are milliseconds
+
+Qwen Code reads the `timeout` field in `settings.json` as **milliseconds** (default `60000`), where Claude Code reads the same-looking field as seconds. Beacon writes millisecond values — `30000` for prompt submission, `10000` for tool events, `45000` for stop. If you edit these by hand, keep them in milliseconds: a seconds-shaped value such as `10` gives the hook ten milliseconds to run, which kills it mid-write and leaves the runtime log empty while the settings file still looks correct.
+
+### Hooks run under bash
+
+Beacon writes each hook entry with `"shell": "bash"`, because the command it builds single-quotes every path — POSIX quoting, which bash reads literally and `cmd.exe` does not read at all. Without that field a Windows host would fall back to its default shell, where the quotes are ordinary characters and every hook fails to start while the install still reports success.
+
+On macOS and Linux this names the shell that would have run anyway. On Windows it means bash has to be on `PATH` (Git Bash satisfies this). If you rewrite a `command` by hand, keep the quoting and the `shell` value consistent with each other — changing one without the other is what breaks silently.
+
+## Discovery and status
+
+Asymptote looks for the `qwen` executable and treats `~/.qwen` as an additional signal, because an npm install is often absent from the inherited `PATH` while the state directory is not. It then reports on `~/.qwen/settings.json`:
+
+| Reported status | Meaning |
+|-----------------|---------|
+| `enabled` | Beacon's hook entries are present |
+| `disabled` | The settings file exists without Beacon's hooks, or `disableAllHooks` is `true` |
+| `misconfigured` | The settings JSON is invalid; install refuses to touch the file until it parses |
+| `missing` | No settings file at that path |
+
+Use `beacon endpoint hooks status --harness qwen` to inspect hook status, and `beacon endpoint discover` for the runtime as a whole.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Qwen Code hooks separately:
+
+```bash title="Install runtime hooks"
+beacon endpoint hooks install --harness qwen
+```
+
+For project-level hooks, run:
+
+```bash title="Install project-level hooks"
+beacon endpoint hooks install --harness qwen --level project
+```
+
+Beacon merges into the existing `settings.json` rather than replacing it: unrelated keys such as `theme`, `selectedAuthType` and `mcpServers` are preserved, your own hooks in the same event group survive, and a re-install replaces Beacon's entries instead of adding a second copy. Uninstall removes only the entries Beacon wrote.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported through `UserPromptSubmit` hooks |
+| Session lifecycle | Supported through `SessionStart`, `Stop`, `SessionEnd`, and the subagent pair |
+| Command, tool, and file telemetry | Supported for Qwen's built-ins: `run_shell_command` maps to command telemetry; `read_file`, `read_many_files`, `list_directory`, `glob` and `grep_search` to file reads; `write_file`, `edit`, `replace` and `notebook_edit` to file modifications with diffs |
+| Approval telemetry | Observed through `PermissionRequest`; Beacon records the request without making the decision |
+| Failed tools | `PostToolUseFailure` normalizes to `tool.failed` at high severity, and is never recorded as a completed edit |
+| Token usage | Not normalized — see below |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent; Qwen hooks are installed separately in the logged-in user's context or project context |
+
+### Why token usage is not normalized
+
+Qwen's `Stop` hook carries `context_usage`, `context_limit` and `input_tokens`, and Beacon deliberately does **not** map them into `gen_ai.usage`.
+
+Beacon's token rollups sum `gen_ai.usage` across events. Qwen's `Stop` hook fires once per assistant turn, and its `input_tokens` is the prompt token count for that turn's request — which, in a multi-turn session, already contains every prior turn. Summing it would inflate a session's total by roughly the square of its length. Qwen's own documentation also notes the value "may include output tokens depending on provider", so it is not a clean input count either.
+
+All three fields are preserved verbatim under `raw.qwen` on the stop event, where they are exact and carry no claim of being a normalized token count.
+
+## Deployment notes
+
+Project-level hooks in `./.qwen/settings.json` run only once the folder is trusted in Qwen Code. `beacon endpoint hooks install --harness qwen --level project` says so in its output; until then the file is written and nothing executes.
+
+Qwen Code's `disableAllHooks` setting stops every hook without deleting its configuration. If telemetry stops arriving while `beacon endpoint hooks status --harness qwen` reports installed, check that setting first — `beacon endpoint discover` reports it as `disabled` rather than `enabled`.
+
+Restart Qwen Code after installing or removing hooks so new sessions pick up the updated settings.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+</Columns>

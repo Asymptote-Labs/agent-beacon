@@ -25,7 +25,7 @@ beacon endpoint dashboard
 
 ## What it shows
 
-The dashboard reads the configured runtime JSONL log and provides a read-only view of local Beacon events. It follows Beacon's local rotation pattern, so Log Search can include the active file and numbered archives such as `runtime.jsonl.1`. In the default CLI setup, it reads the same per-user log used by Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks, Claude Code OTLP, Codex OTLP, optional Gemini CLI OTLP, Factory Droid OTLP, and OpenClaw Gateway OTLP telemetry.
+The dashboard reads the configured runtime JSONL log and provides a read-only view of local Beacon events. It follows Beacon's local rotation pattern, so Log Search can include the active file and numbered archives such as `runtime.jsonl.1`. In the default CLI setup, it reads the same per-user log used by Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and Qwen Code hooks, Claude Code OTLP, Codex OTLP, optional Gemini CLI OTLP, Factory Droid OTLP, and OpenClaw Gateway OTLP telemetry.
 
 - **Log Search:** investigate event rows with free-text search, harness, model, severity, and category filters.
 - **Detections:** browse the active [threat-rule](/detections) set that Beacon would use for local scans, including rules installed in the local store or the built-in baseline when no store is installed.

@@ -11,6 +11,51 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### Unreleased
+
+- **Qwen Code is a supported runtime** · `beacon endpoint hooks install --harness
+  qwen` merges Beacon's hook entries into Qwen Code's own `~/.qwen/settings.json`
+  (or `.qwen/settings.json` for a project), collecting session lifecycle, prompt
+  submission, pre-tool and post-tool activity, tool failures, permission
+  requests, subagent start and stop, commands, and file reads and edits with
+  diffs. Qwen Code is a Gemini CLI fork *without* Gemini's OpenTelemetry export,
+  so hooks are the whole collection path; `beacon endpoint install --harness
+  qwen` now says that rather than failing with "unsupported harness".
+- **Hook timeouts are written in milliseconds** · Qwen Code reads the `timeout`
+  field in `settings.json` as milliseconds where Claude Code reads the
+  same-looking field as seconds. Beacon writes millisecond values, so tool hooks
+  get 10 seconds rather than 10 milliseconds — long enough to actually run.
+  Copying the Claude values would have killed every hook mid-write while the
+  install reported success and the settings file looked correct.
+- **Hooks declare the shell their quoting requires** · Beacon's hook command
+  single-quotes every path, which only bash reads literally, so each Qwen entry
+  is written with `"shell": "bash"`. Left to the Windows default shell the
+  quotes are ordinary characters and no hook starts, while the install still
+  reports success.
+- **Qwen tool names are classified by Qwen's own ids** · `run_shell_command`,
+  `read_file`, `list_directory`, `glob`, `grep_search`, `write_file`, `edit` and
+  `notebook_edit` map to command, file-read and file-modify events. Under the
+  generic substring rules, every file write and three of the read tools fell
+  through to an unclassified `tool.invoked` — present in the log, wrong in the
+  field every rule and dashboard keys on.
+- **A failed Qwen tool is never recorded as a completed edit** ·
+  `PostToolUseFailure` carries the same tool input as a success, so a
+  permission-denied `write_file` would have produced a diff built from content
+  that never reached disk. It now normalizes to `tool.failed` at high severity.
+- **Beacon does not approve Qwen tool calls on the user's behalf** · Qwen reads
+  `hookSpecificOutput.permissionDecision: "allow"` as *skip the approval prompt*,
+  so Beacon's observing hook returns an empty response and leaves Qwen's
+  permission flow untouched.
+- **Qwen token usage is preserved, not normalized** · Qwen's `Stop` hook reports a
+  per-turn cumulative prompt count that would multiply-count if summed into
+  `gen_ai.usage`. `context_usage`, `context_limit` and `input_tokens` are kept
+  verbatim under `raw.qwen` instead.
+- **Qwen Code in discovery, inventory, repair, and the dashboard** · `beacon
+  endpoint discover` reports Qwen Code and distinguishes "hooks installed" from
+  "hooks installed but `disableAllHooks` is on" and from "settings JSON is
+  invalid"; `beacon endpoint inventory` finds `.qwen/settings.json` at both
+  scopes; `endpoint repair` and the dashboard's hook-status view include it.
+
 ### v1.2.3 · August 22, 2026
 
 - **Cline is a supported runtime** · `beacon endpoint hooks install --harness
