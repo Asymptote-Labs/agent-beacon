@@ -14,21 +14,45 @@ All three matter. `beacon-hooks` is what supported runtimes invoke to record pro
 and approvals, so an install that keeps only the CLI and the collector captures OpenTelemetry data
 and nothing from the hook path.
 
-```bash title="Download, verify, and extract (Linux amd64)"
-VERSION=1.2.0   # or whichever release you are installing
-BASE=https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}
-curl -fsSLO ${BASE}/beacon_${VERSION}_linux_amd64.tar.gz
-curl -fsSLO ${BASE}/checksums.txt
-sha256sum --check --ignore-missing checksums.txt
+```bash title="Download, verify, and extract (macOS or Linux)"
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"
+VERSION="${LATEST_URL##*/v}"
 
-tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+case "$(uname -s)" in
+  Linux) OS=linux ;;
+  Darwin) OS=darwin ;;
+  *) echo "Beacon publishes macOS and Linux archives, not $(uname -s)" >&2; exit 1 ;;
+esac
+
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "Beacon publishes amd64 and arm64 archives, not $(uname -m)" >&2; exit 1 ;;
+esac
+
+ARCHIVE="beacon_${VERSION}_${OS}_${ARCH}.tar.gz"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${ARCHIVE}"
+curl -fsSLO "${BASE}/checksums.txt"
+
+# Verify this exact archive before extracting it. macOS ships shasum rather than sha256sum.
+if [ "$OS" = darwin ]; then
+  grep "  ${ARCHIVE}$" checksums.txt | shasum -a 256 -c -
+else
+  grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
+fi
+
+tar -xzf "${ARCHIVE}"
 mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
 beacon version
 ```
 
-Swap `linux_amd64` for `linux_arm64`, `darwin_arm64`, or `darwin_amd64` as needed; on macOS use
-`shasum -a 256 -c` in place of `sha256sum --check`. The archive layout is identical across
-platforms.
+The version comes from the current release rather than a number to keep up to date, and the
+platform and architecture come from `uname`: `x86_64` maps to the published `amd64` archive and
+`aarch64` to `arm64`. A platform or architecture Beacon does not publish stops the run before
+anything is downloaded. The checksum step names the one archive about to be extracted, so it
+verifies that file rather than whatever else the directory happens to hold. The archive layout is
+identical across platforms.
 
 For managed endpoint rollouts on Apple Silicon Macs, GitHub Releases also attach
 a signed, notarized, and stapled `BeaconEndpointAgent-<version>-arm64.pkg`. The

@@ -109,7 +109,14 @@ func (c policyCandidate) event() asymptoteobserve.Event {
 			"action":   c.action,
 			"category": c.category,
 		},
-		"harness": map[string]interface{}{"name": platformFlag},
+		"harness": map[string]interface{}{
+			"name": platformFlag,
+			// The contract promises the provider the same field names it would match in the
+			// runtime JSONL, so the provenance marker belongs here too. No fidelity counterpart:
+			// this event describes a tool call that has not happened yet, so there is no
+			// observation for the action to be faithful to.
+			"collection_method": asymptoteobserve.CollectionMethodForPlatform(platformFlag),
+		},
 	}
 	for key, value := range c.fields {
 		envelope[key] = value

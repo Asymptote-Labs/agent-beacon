@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
 
@@ -163,4 +164,28 @@ func servicePlistPathForTest(userMode bool) string {
 		return ""
 	}
 	return path
+}
+
+// Install, repair, and doctor all tell the user how to give the collector logout persistence, and
+// the user should get the same command from each. They used to write it out independently, which
+// is how a command meant for copy-and-paste drifts between the places that print it.
+func TestLingerCheckOffersTheSharedRemediation(t *testing.T) {
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		t.Skip("needs a resolvable current user")
+	}
+	check := lingerCheck()
+	if check.Status == StatusOK {
+		// Linger is already on for this user, so there is nothing to remediate.
+		if check.Action != "" {
+			t.Errorf("an enabled linger needs no action, got %q", check.Action)
+		}
+		return
+	}
+	if check.Evidence == "linger_unknown" {
+		t.Skip("linger state is unverifiable on this host")
+	}
+	if want := service.LingerRemediation(u.Username); check.Action != want {
+		t.Errorf("doctor action = %q, want the shared remediation %q", check.Action, want)
+	}
 }

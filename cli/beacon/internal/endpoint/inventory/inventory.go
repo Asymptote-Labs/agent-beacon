@@ -14,6 +14,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
 
 const (
@@ -202,6 +204,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, copilotCandidates(home)...)
 	items = append(items, opencodeCandidates(home, wd)...)
 	items = append(items, clineCandidates(home, wd)...)
+	items = append(items, piCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -289,6 +292,32 @@ func clineCandidates(home, wd string) []candidate {
 		{runtime: "cline", path: filepath.Join(home, ".cline", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "cline", path: filepath.Join(wd, ".cline", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 	}
+}
+
+// piCandidates covers both documented Pi extension locations.
+//
+// The paths come from the installer rather than being rebuilt here: hooks.PiExtensionPath is the
+// one definition of where Beacon writes, and a second copy of that path is how inventory comes to
+// report on a file the installer does not touch. A resolution error yields no candidate rather than
+// a relative path, which would otherwise make inventory report on whatever sits under the current
+// working directory.
+func piCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		items = append(items, candidate{
+			runtime: "pi_cli",
+			path:    filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"),
+			scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "pi_cli",
+			path:    filepath.Join(wd, ".pi", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
 }
 
 func hermesCandidates(home string) []candidate {
@@ -622,6 +651,11 @@ func beaconManaged(item candidate, data []byte) bool {
 		return strings.Contains(text, "beacon-managed-opencode-plugin:v1")
 	case "cline":
 		return strings.Contains(text, "beacon-managed-cline-plugin:v1")
+	// Read from the installer's own constant rather than repeated as a literal here, unlike the
+	// markers above. Two spellings of a marker is how discovery comes to report on a file the
+	// installer does not write -- the reason hooks.PiManagedExtensionMarker is exported at all.
+	case "pi_cli":
+		return strings.Contains(text, hooks.PiManagedExtensionMarker)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	}

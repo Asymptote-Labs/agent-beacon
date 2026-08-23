@@ -182,6 +182,31 @@ When a runtime omits `event.category`, Beacon infers it from `event.action`:
 | `metric.*` | `metric` |
 | `tool.*` | `tool` |
 
+## Action inference and fidelity
+
+Actions are resolved in order, and where the answer comes from is recorded on the event as
+[`event.fidelity`](/telemetry-schema/event-schema#provenance-how-beacon-knows-what-it-wrote):
+
+| Resolution step | Fidelity |
+|-----------------|----------|
+| An explicit `beacon.event.action`, `event.action`, `gen_ai.agent.action`, or `ai.agent.action` attribute | `observed` |
+| A structured attribute naming the operation: `mcp.method.name`, `gen_ai.operation.name`, a `gen_ai.tool.call.*` value, a known Copilot `event.name` | `observed` |
+| A known runtime event name resolved after conversion: a Codex `event.name`, a recognized `claude_code.*` event | `observed` |
+| A pattern match over the log body, span name, or joined event text | `inferred` |
+| An unrecognized `claude_code.*` event, which falls back to `session.activity` | `inferred` |
+| Nothing matched, which falls back to `tool.invoked` | `inferred` |
+
+The distinction is structural rather than semantic: it records whether the source named the
+operation or Beacon pattern-matched prose, not whether a given mapping is ideal. An action resolved
+from a runtime's own event name overrides an earlier pattern match, and the fidelity is raised with
+it, so a runtime that names its events well is not penalized for also carrying a prose body.
+
+Hook and plugin telemetry is `observed` by construction, because a hook fires for a named lifecycle
+event. The exception is approval synthesis: on runtimes that expose a pre-tool notification but no
+approval hook, Beacon emits an `approval.allowed` event carrying `approval.required` so
+approval-shaped detections have something to match. Nothing was gated there, so those events are
+`inferred`.
+
 ## Related
 
 <Columns cols={2}>

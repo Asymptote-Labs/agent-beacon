@@ -95,7 +95,19 @@ func (l *Logger) write(entry map[string]interface{}) {
 	}
 }
 
+// EndpointEvent writes an event whose action the runtime named for us, which is the normal case
+// on this path: a hook or plugin fires for a specific lifecycle event and the action follows from
+// which one. Callers that instead derive an action from an adjacent observation must use
+// EndpointEventWithFidelity and say so.
 func (l *Logger) EndpointEvent(action, category, severity, message string, fields map[string]interface{}) error {
+	return l.EndpointEventWithFidelity(action, category, severity, message, asymptoteobserve.FidelityObserved, fields)
+}
+
+// EndpointEventWithFidelity is EndpointEvent with an explicit event.fidelity. It exists for the
+// handful of hook paths that report an action the payload did not contain -- synthesizing an
+// approval from a pre-tool notification, for instance -- so those events are distinguishable from
+// the ones a runtime actually reported.
+func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, fidelity string, fields map[string]interface{}) error {
 	path := endpointLogPath()
 	if path == "" {
 		return nil
@@ -103,7 +115,7 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 	if severity == "" {
 		severity = "info"
 	}
-	event := l.baseEndpointEvent(action, category, severity, message)
+	event := l.baseEndpointEvent(action, category, severity, message, fidelity)
 	for key, value := range fields {
 		if value == nil {
 			continue
@@ -117,7 +129,7 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 	return nil
 }
 
-func (l *Logger) baseEndpointEvent(action, category, severity, message string) map[string]interface{} {
+func (l *Logger) baseEndpointEvent(action, category, severity, message, fidelity string) map[string]interface{} {
 	hostname, _ := os.Hostname()
 	user := map[string]interface{}{
 		"name": os.Getenv("USER"),
@@ -125,30 +137,45 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message string) m
 	if uid := firstEnv("BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"); uid != "" {
 		user["uid"] = uid
 	}
+	// Both blocks are assembled before the event literal so the provenance keys can be omitted
+	// rather than written empty. This path builds raw maps instead of the shared Event struct, so
+	// it does not get `omitempty` for free, and an empty "collection_method" on every event would
+	// be both noise in the log and a value a consumer could mistake for a real one.
+	eventBlock := map[string]interface{}{
+		"kind":     "agent_runtime",
+		"action":   action,
+		"category": category,
+	}
+	if fidelity != "" {
+		eventBlock["fidelity"] = fidelity
+	}
+	harnessBlock := map[string]interface{}{
+		// Normalized rather than written raw. The OTLP path already reports the canonical name
+		// for the same session, so emitting the raw --platform value here recorded one session
+		// under two names -- splitting it for any query or SIEM detection that groups by
+		// harness.name. The flag itself is unchanged, so existing installs are fixed without
+		// having their settings.json rewritten.
+		"name": asymptoteobserve.NormalizeHarnessName(l.platform),
+	}
+	// Derived from --platform rather than from the normalized name above, because the flag is what
+	// records which integration shape is installed. The two differ for VS Code, whose hook and
+	// OTLP telemetry share a harness name.
+	if method := asymptoteobserve.CollectionMethodForPlatform(l.platform); method != "" {
+		harnessBlock["collection_method"] = method
+	}
 	event := map[string]interface{}{
 		"timestamp":      time.Now().UTC().Format(time.RFC3339),
 		"vendor":         "beacon",
 		"product":        "endpoint-agent",
 		"schema_version": "1.0",
-		"event": map[string]interface{}{
-			"kind":     "agent_runtime",
-			"action":   action,
-			"category": category,
-		},
-		"severity": severity,
+		"event":          eventBlock,
+		"severity":       severity,
 		"endpoint": map[string]interface{}{
 			"hostname": hostname,
 			"os":       runtime.GOOS,
 		},
-		"user": user,
-		"harness": map[string]interface{}{
-			// Normalized rather than written raw. The OTLP path already reports the canonical name
-			// for the same session, so emitting the raw --platform value here recorded one session
-			// under two names -- splitting it for any query or SIEM detection that groups by
-			// harness.name. The flag itself is unchanged, so existing installs are fixed without
-			// having their settings.json rewritten.
-			"name": asymptoteobserve.NormalizeHarnessName(l.platform),
-		},
+		"user":    user,
+		"harness": harnessBlock,
 		"message": asymptoteobserve.CleanString(message, asymptoteobserve.DefaultStringLimit, true),
 	}
 	if origin := firstEnv("BEACON_ORIGIN"); origin != "" {
