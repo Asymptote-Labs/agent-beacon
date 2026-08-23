@@ -21,6 +21,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 |----------------|-----------------|--------------------|
 | [Antigravity CLI](/runtimes/antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
 | [Claude Code](/runtimes/claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, lifecycle, subagent, and permission telemetry where emitted through OTLP or hooks |
+| [Cline](/runtimes/cline) | Managed plugin hooks | Prompts, task lifecycle, tool lifecycle, commands, file reads and edits with diffs, MCP activity, and token usage |
 | [Codex CLI](/runtimes/codex-cli) | Local OTLP logs plus optional inventory hooks | Session, prompt, approval, and tool-result activity from Codex semantic logs; inventory heartbeat triggers from hooks |
 | [Cursor](/runtimes/cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
 | [Devin CLI](/runtimes/devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
@@ -30,7 +31,6 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
-| [Cline](/runtimes/cline) | Managed plugin hooks | Prompts, task lifecycle, tool lifecycle, commands, file reads and edits with diffs, MCP activity, and token usage |
 | [Pi](/runtimes/pi) | Managed extension hooks | Discovery and harness attribution today; the managed extension that collects prompt, tool, command, and file telemetry is not shipped yet |
 | [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
