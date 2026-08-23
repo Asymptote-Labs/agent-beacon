@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	hookdiff "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
@@ -39,14 +38,6 @@ func runOpenCodeEvent(cmd *cobra.Command, args []string) {
 	outputJSON(emptyResponse)
 }
 
-type opencodeNormalizedEvent struct {
-	action   string
-	category string
-	severity string
-	message  string
-	fields   map[string]interface{}
-}
-
 func opencodeEndpointEvent(input map[string]interface{}, sessionID string) (string, string, string, string, map[string]interface{}) {
 	events := opencodeEndpointEvents(input, sessionID)
 	if len(events) == 0 {
@@ -56,11 +47,11 @@ func opencodeEndpointEvent(input map[string]interface{}, sessionID string) (stri
 	return event.action, event.category, event.severity, event.message, event.fields
 }
 
-func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []opencodeNormalizedEvent {
+func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []normalizedEvent {
 	eventType := getFirstStr(input, "type", "event_type", "hook")
 	fields := opencodeBaseFields(input, sessionID)
-	one := func(action, category, severity, message string, values map[string]interface{}) []opencodeNormalizedEvent {
-		return []opencodeNormalizedEvent{{action: action, category: category, severity: severity, message: message, fields: values}}
+	one := func(action, category, severity, message string, values map[string]interface{}) []normalizedEvent {
+		return []normalizedEvent{{action: action, category: category, severity: severity, message: message, fields: values}}
 	}
 
 	switch eventType {
@@ -92,24 +83,24 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 		events := one(action, category, "info", opencodeToolMessage(action), fields)
 		return append(events, opencodeFileMutationEvents(input, fields)...)
 	case "message.updated":
-		info := opencodeMap(input, "message_info", "info")
+		info := firstMap(input, "message_info", "info")
 		if len(info) == 0 {
 			info = opencodeProperties(input)
-			info = opencodeMap(info, "info")
+			info = firstMap(info, "info")
 		}
 		if getFirstStr(info, "role") != "assistant" {
 			return nil
 		}
 		mergeMap(fields, opencodeAssistantFields(info))
 		severity := "info"
-		if opencodeMap(info, "error") != nil {
+		if firstMap(info, "error") != nil {
 			severity = "high"
 		}
 		return one("agent.response.completed", "session", severity, "opencode assistant response completed", fields)
 	case "message.part.updated":
-		part := opencodeMap(input, "part")
+		part := firstMap(input, "part")
 		if len(part) == 0 {
-			part = opencodeMap(opencodeProperties(input), "part")
+			part = firstMap(opencodeProperties(input), "part")
 		}
 		return opencodePartEvents(fields, part)
 	case "session.created":
@@ -117,7 +108,7 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 	case "session.deleted":
 		return one("session.ended", "session", "info", "opencode session deleted", fields)
 	case "session.status":
-		status := opencodeMap(opencodeProperties(input), "status")
+		status := firstMap(opencodeProperties(input), "status")
 		statusType := getFirstStr(status, "type")
 		switch statusType {
 		case "idle":
@@ -131,7 +122,7 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []op
 	case "session.idle":
 		return one("session.status", "session", "info", "opencode session idle", fields)
 	case "session.error":
-		errorInfo := opencodeMap(opencodeProperties(input), "error")
+		errorInfo := firstMap(opencodeProperties(input), "error")
 		if len(errorInfo) > 0 {
 			fields["error"] = map[string]interface{}{"type": firstNonEmpty(getFirstStr(errorInfo, "name", "type"), "session_error")}
 		}
@@ -255,12 +246,12 @@ func opencodeModel(input map[string]interface{}) string {
 		model, _ = input["modelInfo"].(map[string]interface{})
 	}
 	if model == nil {
-		model = opencodeMap(opencodeProperties(input), "info")
+		model = firstMap(opencodeProperties(input), "info")
 	}
 	provider := getFirstStr(model, "providerID", "provider_id", "provider")
 	name := getFirstStr(model, "modelID", "model_id")
 	if name == "" {
-		nested := opencodeMap(model, "model")
+		nested := firstMap(model, "model")
 		provider = firstNonEmpty(provider, getFirstStr(nested, "providerID", "provider_id", "provider"))
 		name = getFirstStr(nested, "modelID", "model_id", "id", "name")
 	}
@@ -272,8 +263,8 @@ func opencodeModel(input map[string]interface{}) string {
 
 func opencodeToolFields(input map[string]interface{}, completed bool) map[string]interface{} {
 	toolName := opencodeToolName(input)
-	toolInput := opencodeMap(input, "tool_input", "toolInput")
-	toolResponse := opencodeMap(input, "tool_response", "toolResponse")
+	toolInput := firstMap(input, "tool_input", "toolInput")
+	toolResponse := firstMap(input, "tool_response", "toolResponse")
 	fields := toolFieldsWithResponse(toolName, toolInput, toolResponse)
 	callID := getFirstStr(input, "call_id", "callID")
 	call := map[string]interface{}{}
@@ -341,7 +332,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 			if duration, ok := firstToolIntAcross([]map[string]interface{}{input}, "duration_ms", "durationMs"); ok {
 				commandFields["duration_ms"] = duration
 			}
-			if metadata := opencodeMap(toolResponse, "metadata"); len(metadata) > 0 {
+			if metadata := firstMap(toolResponse, "metadata"); len(metadata) > 0 {
 				if exitCode, ok := firstToolIntAcross([]map[string]interface{}{metadata}, "exit", "exit_code", "exitCode", "status"); ok {
 					commandFields["exit_code"] = exitCode
 				}
@@ -378,7 +369,7 @@ func opencodeToolName(input map[string]interface{}) string {
 	if tool := getFirstStr(properties, "tool", "tool_name", "toolName", "permission"); tool != "" {
 		return tool
 	}
-	part := opencodeMap(input, "part")
+	part := firstMap(input, "part")
 	return getFirstStr(part, "tool")
 }
 
@@ -393,37 +384,26 @@ func opencodeDecision(input map[string]interface{}) string {
 func opencodeToolAction(input map[string]interface{}) (string, string) {
 	name := strings.ToLower(opencodeToolName(input))
 	switch {
-	case opencodeToolHasToken(name, "mcp"):
+	case toolNameHasToken(name, "mcp"):
 		return "mcp.tool_invoked", "mcp"
-	case opencodeToolHasToken(name, "bash") || opencodeToolHasToken(name, "shell") || opencodeToolHasToken(name, "terminal") || name == "powershell":
+	case toolNameHasToken(name, "bash") || toolNameHasToken(name, "shell") || toolNameHasToken(name, "terminal") || name == "powershell":
 		return "command.executed", "command"
-	case opencodeToolHasToken(name, "read"):
+	case toolNameHasToken(name, "read"):
 		return "file.read", "file"
-	case opencodeToolHasToken(name, "edit") || opencodeToolHasToken(name, "write") || opencodeToolHasToken(name, "patch") || opencodeToolHasToken(name, "create") || name == "applypatch" || name == "multiedit":
+	case toolNameHasToken(name, "edit") || toolNameHasToken(name, "write") || toolNameHasToken(name, "patch") || toolNameHasToken(name, "create") || name == "applypatch" || name == "multiedit":
 		return "file.modified", "file"
 	default:
 		return "tool.completed", "tool"
 	}
 }
 
-func opencodeToolHasToken(name, token string) bool {
-	for _, part := range strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
-	}) {
-		if part == token {
-			return true
-		}
-	}
-	return false
-}
-
 func opencodeFileOperation(name string) string {
 	switch {
-	case opencodeToolHasToken(name, "read"), opencodeToolHasToken(name, "view"), opencodeToolHasToken(name, "list"):
+	case toolNameHasToken(name, "read"), toolNameHasToken(name, "view"), toolNameHasToken(name, "list"):
 		return "read"
-	case opencodeToolHasToken(name, "write"), opencodeToolHasToken(name, "create"):
+	case toolNameHasToken(name, "write"), toolNameHasToken(name, "create"):
 		return "create"
-	case opencodeToolHasToken(name, "edit"), opencodeToolHasToken(name, "patch"), strings.EqualFold(name, "applypatch"), strings.EqualFold(name, "multiedit"):
+	case toolNameHasToken(name, "edit"), toolNameHasToken(name, "patch"), strings.EqualFold(name, "applypatch"), strings.EqualFold(name, "multiedit"):
 		return "modify"
 	default:
 		return ""
@@ -471,42 +451,42 @@ func opencodeAssistantFields(info map[string]interface{}) map[string]interface{}
 	if len(genAI) > 0 {
 		fields["gen_ai"] = genAI
 	}
-	if errInfo := opencodeMap(info, "error"); len(errInfo) > 0 {
+	if errInfo := firstMap(info, "error"); len(errInfo) > 0 {
 		fields["error"] = map[string]interface{}{"type": firstNonEmpty(getFirstStr(errInfo, "name", "type"), "assistant_error")}
 	}
 	return fields
 }
 
 func opencodeUsage(input map[string]interface{}) map[string]interface{} {
-	tokens := opencodeMap(input, "tokens")
+	tokens := firstMap(input, "tokens")
 	usage := map[string]interface{}{}
-	if value, ok := opencodeInt(tokens["input"]); ok {
+	if value, ok := jsonInt(tokens["input"]); ok {
 		usage["input_tokens"] = value
 	}
-	if value, ok := opencodeInt(tokens["output"]); ok {
+	if value, ok := jsonInt(tokens["output"]); ok {
 		usage["output_tokens"] = value
 	}
-	if value, ok := opencodeInt(tokens["reasoning"]); ok {
+	if value, ok := jsonInt(tokens["reasoning"]); ok {
 		usage["reasoning"] = map[string]interface{}{"output_tokens": value}
 	}
-	cache := opencodeMap(tokens, "cache")
-	if value, ok := opencodeInt(cache["read"]); ok {
+	cache := firstMap(tokens, "cache")
+	if value, ok := jsonInt(cache["read"]); ok {
 		usage["cache_read"] = map[string]interface{}{"input_tokens": value}
 	}
-	if value, ok := opencodeInt(cache["write"]); ok {
+	if value, ok := jsonInt(cache["write"]); ok {
 		usage["cache_creation"] = map[string]interface{}{"input_tokens": value}
 	}
-	if value, ok := opencodeFloat(input["cost"]); ok {
+	if value, ok := jsonFloat(input["cost"]); ok {
 		usage["cost_usd"] = value
 	}
 	return usage
 }
 
-func opencodePartEvents(base map[string]interface{}, part map[string]interface{}) []opencodeNormalizedEvent {
+func opencodePartEvents(base map[string]interface{}, part map[string]interface{}) []normalizedEvent {
 	if len(part) == 0 {
 		return nil
 	}
-	fields := cloneOpenCodeFields(base)
+	fields := cloneFields(base)
 	partType := getFirstStr(part, "type")
 	switch partType {
 	case "text", "reasoning":
@@ -527,19 +507,19 @@ func opencodePartEvents(base map[string]interface{}, part map[string]interface{}
 		if partType == "reasoning" {
 			action, message = "agent.reasoning", "opencode agent reasoning captured"
 		}
-		return []opencodeNormalizedEvent{{action: action, category: "session", severity: "info", message: message, fields: fields}}
+		return []normalizedEvent{{action: action, category: "session", severity: "info", message: message, fields: fields}}
 	case "tool":
-		state := opencodeMap(part, "state")
+		state := firstMap(part, "state")
 		status := getFirstStr(state, "status")
 		if status != "completed" && status != "error" {
 			return nil
 		}
-		toolInput := opencodeMap(state, "input")
+		toolInput := firstMap(state, "input")
 		response := map[string]interface{}{}
 		if output, ok := state["output"]; ok {
 			response["output"] = output
 		}
-		if metadata := opencodeMap(state, "metadata"); len(metadata) > 0 {
+		if metadata := firstMap(state, "metadata"); len(metadata) > 0 {
 			response["metadata"] = metadata
 		}
 		toolPayload := map[string]interface{}{
@@ -550,8 +530,8 @@ func opencodePartEvents(base map[string]interface{}, part map[string]interface{}
 			"tool_input":    toolInput,
 			"tool_response": response,
 		}
-		if start, ok := opencodeInt(opencodeMap(state, "time")["start"]); ok {
-			if end, ok := opencodeInt(opencodeMap(state, "time")["end"]); ok && end >= start {
+		if start, ok := jsonInt(firstMap(state, "time")["start"]); ok {
+			if end, ok := jsonInt(firstMap(state, "time")["end"]); ok && end >= start {
 				toolPayload["duration_ms"] = end - start
 			}
 		}
@@ -563,7 +543,7 @@ func opencodePartEvents(base map[string]interface{}, part map[string]interface{}
 				fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"opencode_tool_error": errText})
 				fields["content"] = retainedContentFields(errText)
 			}
-			return []opencodeNormalizedEvent{{action: "tool.failed", category: "tool", severity: "high", message: "opencode tool failed", fields: fields}}
+			return []normalizedEvent{{action: "tool.failed", category: "tool", severity: "high", message: "opencode tool failed", fields: fields}}
 		}
 		action, category := opencodeToolAction(toolPayload)
 		if action == "file.modified" {
@@ -571,16 +551,16 @@ func opencodePartEvents(base map[string]interface{}, part map[string]interface{}
 				action, category = "tool.completed", "tool"
 			}
 		}
-		return []opencodeNormalizedEvent{{action: action, category: category, severity: "info", message: opencodeToolMessage(action), fields: fields}}
+		return []normalizedEvent{{action: action, category: category, severity: "info", message: opencodeToolMessage(action), fields: fields}}
 	case "retry":
 		fields["error"] = map[string]interface{}{"type": "model_retry"}
-		return []opencodeNormalizedEvent{{action: "model.retry", category: "session", severity: "medium", message: "opencode model retry", fields: fields}}
+		return []normalizedEvent{{action: "model.retry", category: "session", severity: "medium", message: "opencode model retry", fields: fields}}
 	default:
 		return nil
 	}
 }
 
-func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{}) []opencodeNormalizedEvent {
+func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{}) []normalizedEvent {
 	properties := opencodeProperties(input)
 	rawDiff, ok := properties["diff"]
 	if !ok {
@@ -590,7 +570,7 @@ func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{
 	if !ok || len(items) == 0 {
 		return nil
 	}
-	var events []opencodeNormalizedEvent
+	var events []normalizedEvent
 	for _, item := range items {
 		diffItem, ok := item.(map[string]interface{})
 		if !ok {
@@ -598,8 +578,8 @@ func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{
 		}
 		path := getFirstStr(diffItem, "file", "path", "file_path", "filePath")
 		before, after := getFirstStr(diffItem, "before"), getFirstStr(diffItem, "after")
-		additions, _ := opencodeInt(diffItem["additions"])
-		deletions, _ := opencodeInt(diffItem["deletions"])
+		additions, _ := jsonInt(diffItem["additions"])
+		deletions, _ := jsonInt(diffItem["deletions"])
 		if path == "" || (before == after && additions == 0 && deletions == 0) {
 			continue
 		}
@@ -607,9 +587,9 @@ func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{
 		if before != "" || after != "" {
 			diffText = fmt.Sprintf("--- before\n%s\n+++ after\n%s", before, after)
 		}
-		fields := cloneOpenCodeFields(base)
+		fields := cloneFields(base)
 		mergeMap(fields, diffFields(path, diffText))
-		events = append(events, opencodeNormalizedEvent{
+		events = append(events, normalizedEvent{
 			action: "file.modified", category: "file", severity: "info",
 			message: "opencode session diff observed", fields: fields,
 		})
@@ -617,9 +597,9 @@ func opencodeDiffEvents(input map[string]interface{}, base map[string]interface{
 	return events
 }
 
-func opencodeFileMutationEvents(input map[string]interface{}, base map[string]interface{}) []opencodeNormalizedEvent {
+func opencodeFileMutationEvents(input map[string]interface{}, base map[string]interface{}) []normalizedEvent {
 	command, _ := base["command"].(map[string]interface{})
-	exitCode, ok := opencodeInt(command["exit_code"])
+	exitCode, ok := jsonInt(command["exit_code"])
 	if !ok || exitCode != 0 {
 		return nil
 	}
@@ -627,7 +607,7 @@ func opencodeFileMutationEvents(input map[string]interface{}, base map[string]in
 	if len(items) == 0 {
 		return nil
 	}
-	var events []opencodeNormalizedEvent
+	var events []normalizedEvent
 	for _, item := range items {
 		mutation, ok := item.(map[string]interface{})
 		if !ok {
@@ -638,14 +618,14 @@ func opencodeFileMutationEvents(input map[string]interface{}, base map[string]in
 		if path == "" {
 			continue
 		}
-		fields := cloneOpenCodeFields(base)
+		fields := cloneFields(base)
 		delete(fields, "command")
 		fields["file"] = map[string]interface{}{
 			"path":      path,
 			"operation": operation,
 			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
 		}
-		events = append(events, opencodeNormalizedEvent{
+		events = append(events, normalizedEvent{
 			action: "file.modified", category: "file", severity: "info",
 			message: "opencode file " + operation + " observed", fields: fields,
 		})
@@ -665,7 +645,7 @@ func opencodeApprovalAction(decision string) string {
 }
 
 func opencodePermissionCorrelation(properties map[string]interface{}) map[string]interface{} {
-	toolRef := opencodeMap(properties, "tool")
+	toolRef := firstMap(properties, "tool")
 	callID := getFirstStr(toolRef, "callID", "call_id")
 	if callID == "" {
 		return nil
@@ -687,86 +667,9 @@ func opencodePermissionCorrelation(properties map[string]interface{}) map[string
 }
 
 func opencodeProperties(input map[string]interface{}) map[string]interface{} {
-	if properties := opencodeMap(input, "properties", "data"); len(properties) > 0 {
+	if properties := firstMap(input, "properties", "data"); len(properties) > 0 {
 		return properties
 	}
-	event := opencodeMap(input, "event")
-	return opencodeMap(event, "properties", "data")
-}
-
-func opencodeMap(input map[string]interface{}, keys ...string) map[string]interface{} {
-	if input == nil {
-		return nil
-	}
-	for _, key := range keys {
-		if value, ok := input[key].(map[string]interface{}); ok {
-			return value
-		}
-	}
-	return nil
-}
-
-func opencodeInt(value interface{}) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int64:
-		return int(typed), true
-	case float64:
-		return int(typed), true
-	case json.Number:
-		result, err := typed.Int64()
-		return int(result), err == nil
-	case string:
-		result, err := strconv.Atoi(strings.TrimSpace(typed))
-		return result, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func opencodeFloat(value interface{}) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case int:
-		return float64(typed), true
-	case json.Number:
-		result, err := typed.Float64()
-		return result, err == nil
-	case string:
-		result, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
-		return result, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func cloneOpenCodeFields(input map[string]interface{}) map[string]interface{} {
-	if data, err := json.Marshal(input); err == nil {
-		var out map[string]interface{}
-		if err := json.Unmarshal(data, &out); err == nil {
-			return out
-		}
-	}
-	out := make(map[string]interface{}, len(input))
-	for key, value := range input {
-		out[key] = value
-	}
-	return out
-}
-
-func mergeMap(dst, src map[string]interface{}) {
-	for key, value := range src {
-		dst[key] = value
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
+	event := firstMap(input, "event")
+	return firstMap(event, "properties", "data")
 }

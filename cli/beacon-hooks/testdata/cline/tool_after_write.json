@@ -1,0 +1,20 @@
+{
+  "type": "afterTool",
+  "clineVersion": "3.36.0",
+  "hookName": "afterTool",
+  "timestamp": "2026-08-21T10:15:42Z",
+  "taskId": "task-3f9c1d",
+  "workspaceRoots": ["/Users/example/projects/beacon-demo"],
+  "toolCall": {
+    "name": "write_to_file",
+    "input": {
+      "path": "src/health.ts",
+      "content": "export const health = () => ({ ok: true })\n"
+    }
+  },
+  "callId": "call-7a2",
+  "durationMs": 34,
+  "result": {
+    "output": "File written"
+  }
+}

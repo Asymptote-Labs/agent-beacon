@@ -130,6 +130,16 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("opencode plugin installed: %s\n", status.PluginPath)
+	case "cline":
+		status, err := endpointhooks.InstallCline(endpointhooks.ClineOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Cline plugin installed: %s\n", status.PluginPath)
 	case "grok":
 		status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -275,6 +285,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "cline":
+		status, err := endpointhooks.UninstallCline(endpointhooks.ClineOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "grok":
 		status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -373,6 +393,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "cline":
+			statuses["cline"] = endpointhooks.ClineHookStatus(endpointhooks.ClineOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "grok":
 			statuses["grok"] = endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -430,6 +456,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "opencode":
 			status := statuses["opencode"].(endpointhooks.OpenCodeStatus)
 			fmt.Printf("opencode plugin: installed=%t path=%s\n", status.Installed, status.PluginPath)
+			fmt.Println(status.Message)
+		case "cline":
+			status := statuses["cline"].(endpointhooks.ClineStatus)
+			fmt.Printf("Cline plugin: installed=%t path=%s\n", status.Installed, status.PluginPath)
 			fmt.Println(status.Message)
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)

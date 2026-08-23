@@ -110,6 +110,66 @@ func TestResolveSessionID_Cursor(t *testing.T) {
 	}
 }
 
+// Cline names its unit of work a task, so the session identifier arrives as `taskId`. Getting this
+// wrong does not fail loudly: every event still writes, with an empty session, and the runtime log
+// silently loses the ability to group one Cline task's activity together.
+func TestResolveSessionID_Cline(t *testing.T) {
+	tests := []struct {
+		name  string
+		input map[string]interface{}
+		want  string
+	}{
+		{
+			name:  "uses taskId",
+			input: map[string]interface{}{"taskId": "task_abc123"},
+			want:  "task_abc123",
+		},
+		{
+			name:  "accepts snake_case task_id",
+			input: map[string]interface{}{"task_id": "task_abc123"},
+			want:  "task_abc123",
+		},
+		{
+			name:  "taskId wins over session spellings",
+			input: map[string]interface{}{"taskId": "task_abc123", "sessionId": "ignored"},
+			want:  "task_abc123",
+		},
+		{
+			name:  "falls back to sessionId",
+			input: map[string]interface{}{"sessionId": "sess_abc123"},
+			want:  "sess_abc123",
+		},
+		{
+			name:  "empty when the payload carries neither",
+			input: map[string]interface{}{},
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSessionID(tt.input, "cline"); got != tt.want {
+				t.Errorf("resolveSessionID(%v, \"cline\") = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// Cline hooks get no transcript path. Asserted rather than assumed: the default branch would look
+// for `transcript_path`, and a future reader could "fix" the missing value by adding a key that
+// Cline never sends.
+func TestResolveSessionIDWithTranscript_Cline(t *testing.T) {
+	sessionID, transcriptPath := resolveSessionIDWithTranscript(
+		map[string]interface{}{"taskId": "task_abc123", "transcript_path": "/not/sent/by/cline"},
+		"cline",
+	)
+	if sessionID != "task_abc123" {
+		t.Errorf("sessionID = %q, want %q", sessionID, "task_abc123")
+	}
+	if transcriptPath != "" {
+		t.Errorf("transcriptPath = %q, want empty -- Cline does not expose a transcript to hooks", transcriptPath)
+	}
+}
+
 func TestResolveSessionIDWithTranscript_Cursor(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -212,6 +272,74 @@ func TestResolveCwd(t *testing.T) {
 			},
 			platform: "cursor",
 			want:     "/projects/myapp",
+		},
+		{
+			name:     "cline uses cwd field",
+			input:    map[string]interface{}{"cwd": "/projects/myapp"},
+			platform: "cline",
+			want:     "/projects/myapp",
+		},
+		{
+			name: "cline falls back to workspaceRoots",
+			input: map[string]interface{}{
+				"workspaceRoots": []interface{}{"/workspace/root"},
+			},
+			platform: "cline",
+			want:     "/workspace/root",
+		},
+		{
+			name: "cline accepts snake_case workspace_roots",
+			input: map[string]interface{}{
+				"workspace_roots": []interface{}{"/workspace/root"},
+			},
+			platform: "cline",
+			want:     "/workspace/root",
+		},
+		{
+			name: "cline reads a workspace root object",
+			input: map[string]interface{}{
+				"workspaceRoots": []interface{}{
+					map[string]interface{}{"path": "/workspace/root", "vcs": "git"},
+				},
+			},
+			platform: "cline",
+			want:     "/workspace/root",
+		},
+		{
+			name: "cline takes the first of several roots",
+			input: map[string]interface{}{
+				"workspaceRoots": []interface{}{"/workspace/first", "/workspace/second"},
+			},
+			platform: "cline",
+			want:     "/workspace/first",
+		},
+		{
+			name: "cline cwd takes precedence over workspaceRoots",
+			input: map[string]interface{}{
+				"cwd":            "/projects/myapp",
+				"workspaceRoots": []interface{}{"/workspace/root"},
+			},
+			platform: "cline",
+			want:     "/projects/myapp",
+		},
+		{
+			// A file:// URI is not a filesystem path. Empty is the correct answer: it degrades to
+			// "no repository context" instead of writing a path that looks real and resolves to
+			// nothing.
+			name: "cline ignores a uri-only workspace root",
+			input: map[string]interface{}{
+				"workspaceRoots": []interface{}{
+					map[string]interface{}{"uri": "file:///workspace/root"},
+				},
+			},
+			platform: "cline",
+			want:     "",
+		},
+		{
+			name:     "cline returns empty when no sources",
+			input:    map[string]interface{}{},
+			platform: "cline",
+			want:     "",
 		},
 		{
 			name:     "claude uses cwd field",
