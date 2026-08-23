@@ -111,9 +111,9 @@ func TestSessionEventsDoNotTakeAToolCallID(t *testing.T) {
 func TestToolCallIDDoesNotDisplaceMCPToolFields(t *testing.T) {
 	fields := toolFieldsWithResponse("mcp__linear__list_issues", map[string]interface{}{
 		"mcp_server": "linear",
-		"call_id":    "call_42",
 		"team":       "beacon",
 	}, nil)
+	setToolCallID(fields, "call_42")
 	if got := callIDOfEvent(fields); got != "call_42" {
 		t.Fatalf("gen_ai.tool.call.id = %q, want call_42", got)
 	}
@@ -122,6 +122,52 @@ func TestToolCallIDDoesNotDisplaceMCPToolFields(t *testing.T) {
 	}
 	if got := nested(t, fields, "gen_ai", "tool", "call")["arguments"]; got == nil {
 		t.Fatal("gen_ai.tool.call.arguments was dropped when the call ID was written")
+	}
+}
+
+// Identity comes from the payload envelope, never from the tool's arguments.
+//
+// tool_input is what the model chose to pass, so a tool that legitimately takes
+// an argument called call_id used to have that value written as the join key --
+// and because an ID already present is treated as authoritative, it then shut
+// out the runtime's real tool_use_id. Reported by Cursor Bugbot.
+func TestArgumentNamedCallIDNeverBecomesTheJoinKey(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"session_id":      "claude-session",
+		"cwd":             "/repo",
+		"hook_event_name": "PostToolUse",
+		"tool_name":       "mcp__stripe__get_charge",
+		"tool_use_id":     "toolu_REAL",
+		"tool_input":      map[string]interface{}{"mcp_server": "stripe", "call_id": "ch_ARGUMENT"},
+	})
+
+	events := endpointEvents(t, logPath)
+	for _, event := range events {
+		if got := callIDOfEvent(event); got != "toolu_REAL" {
+			t.Fatalf("gen_ai.tool.call.id = %q, want the runtime's toolu_REAL rather than a tool argument", got)
+		}
+	}
+	if len(events) == 0 {
+		t.Fatal("no event was written")
+	}
+}
+
+// The same guarantee with no envelope ID to fall back on: a tool argument must
+// not be promoted at all, because a wrong join key mis-joins events, which is
+// worse than no join key.
+func TestArgumentNamedCallIDIsNotPromotedOnItsOwn(t *testing.T) {
+	fields := toolFieldsWithResponse("mcp__stripe__get_charge", map[string]interface{}{
+		"mcp_server": "stripe",
+		"call_id":    "ch_ARGUMENT",
+	}, nil)
+	applyToolCallID(fields, map[string]interface{}{"session_id": "s1"})
+	if got := callIDOfEvent(fields); got != "" {
+		t.Fatalf("gen_ai.tool.call.id = %q, want empty: a tool argument is not an identity", got)
 	}
 }
 

@@ -276,25 +276,34 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 			fields[key] = value
 		}
 	}
-	// The call ID goes on every tool event, not just the MCP ones that happened
-	// to build a gen_ai object for their arguments. It is the join key: without
-	// it nothing links this call to its result, or to the OTLP record of the
-	// same action. Only the ID is promoted here -- arguments and results are a
-	// separate question about what Beacon retains, not about identity.
-	if callID := toolCallIDIn(toolInput, toolResponse); callID != "" {
-		setToolCallID(fields, callID)
-	}
+	// No call ID is read here, deliberately: this function sees only the tool's
+	// arguments and its output, and neither is where identity lives. Callers
+	// promote it from the payload envelope instead -- emitHookEvent for every
+	// hook mapper, and the Cline, OpenCode and file-edit emitters by name.
+	//
+	// Scanning the arguments was worse than merely useless. tool_input is what
+	// the model chose to pass, so a tool that legitimately takes an argument
+	// called call_id -- an MCP wrapper over an API whose objects have call IDs,
+	// say -- had that value written as gen_ai.tool.call.id, and because an ID
+	// already present is treated as authoritative it then blocked the runtime's
+	// real tool_use_id. One wrong join key, and the right one shut out.
+	// Reported by Cursor Bugbot.
 	return fields
 }
 
-// toolCallIDIn reads the runtime's own identifier for one tool invocation out of
-// the payload maps a hook mapper has to hand.
+// toolCallIDFromEnvelope reads the runtime's own identifier for one tool
+// invocation out of a hook payload's top level.
+//
+// The envelope only. The runtime writes this field itself, whereas tool_input is
+// model-authored and tool_response is the tool's own output -- neither is a
+// statement by the runtime about which call this is, and reading identity out of
+// either lets a tool argument masquerade as the join key.
 //
 // The alias list is shared with the OTLP path so both capture paths promote the
 // same value to the same field, which is what lets duplicate suppression
 // recognise the two reports of one action as one action.
-func toolCallIDIn(inputs ...map[string]interface{}) string {
-	return firstToolStringAcross(inputs, asymptoteobserve.ToolCallIDKeys...)
+func toolCallIDFromEnvelope(input map[string]interface{}) string {
+	return firstToolStringAcross([]map[string]interface{}{input}, asymptoteobserve.ToolCallIDKeys...)
 }
 
 // applyToolCallID promotes a call ID carried at the top level of a hook payload,
@@ -308,7 +317,7 @@ func applyToolCallID(fields, input map[string]interface{}) {
 	if fields == nil || toolCallIDOf(fields) != "" || !describesToolAction(fields) {
 		return
 	}
-	if callID := toolCallIDIn(input); callID != "" {
+	if callID := toolCallIDFromEnvelope(input); callID != "" {
 		setToolCallID(fields, callID)
 	}
 }
