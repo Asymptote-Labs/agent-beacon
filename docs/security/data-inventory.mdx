@@ -17,6 +17,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Grok Build | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | OpenCode | Managed plugin hooks | Prompts, assistant text/reasoning, model and usage metadata, tool inputs/results/failures, commands and output, file activity/diffs, web/MCP calls, approvals, and session lifecycle/errors |
 | Cline | Managed plugin hooks | Prompts, model and task usage metadata, tool inputs/results/failures, commands and output, file activity/diffs, MCP calls, and task lifecycle/errors |
+| Qwen Code | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session-end, command, and file telemetry; the verbatim hook payload is retained under `raw.qwen` |
 | Devin CLI | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
 | Devin Desktop | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
 | Factory Droid | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |

@@ -91,6 +91,7 @@ CI, and cloud surfaces.
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output/reasoning, model usage/cost, tool lifecycle/results, commands, file/web/MCP activity, approvals, and session errors |
 | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle/results, commands including operator `!` commands, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
+| [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session-end, command, and file telemetry merged into Qwen's own `settings.json` |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
 
 ##### Knowledge Worker Agent Harnesses

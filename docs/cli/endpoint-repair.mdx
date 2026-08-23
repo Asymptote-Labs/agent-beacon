@@ -22,7 +22,7 @@ During repair, Beacon removes the existing managed service before reinstalling i
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
-| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` to opt in Gemini CLI telemetry, `vscode` for VS Code Copilot telemetry, `devin-cli` for Devin CLI hooks, or `devin-desktop` for Devin Desktop hooks. Claude Code, Grok Build, Cursor, Factory, OpenCode, and Cline hook telemetry are managed with `beacon endpoint hooks`. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` to opt in Gemini CLI telemetry, `vscode` for VS Code Copilot telemetry, `devin-cli` for Devin CLI hooks, or `devin-desktop` for Devin Desktop hooks. Claude Code, Grok Build, Cursor, Factory, OpenCode, Cline, and Qwen Code hook telemetry are managed with `beacon endpoint hooks`. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |

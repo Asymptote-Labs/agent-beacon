@@ -98,7 +98,7 @@ Every event carries two identity fields, and both are filled on the hook path an
 
 `gen_ai.tool.call.id` is the runtime's own name for one tool invocation, read from whichever
 attribute that runtime uses: Claude Code writes `tool_use_id`, Codex and OpenCode write `call_id`,
-Cline writes `callId`. It is what links a tool call to its result, an approval to the execution it
+Cline writes `callId`, and Qwen Code writes `tool_use_id` or `tool_call_id`. It is what links a tool call to its result, an approval to the execution it
 approved, and a hook event to the OTLP event describing the same action. Where two events share
 one, they describe one call, and the writer records that call once rather than twice.
 
