@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -99,14 +100,19 @@ func EventIDForLine(line []byte) string {
 //
 // SHA-1 is what version 5 specifies. It is used here as a namespaced identifier
 // function over data Beacon just wrote, never as a security boundary.
+//
+// The parts are streamed into the hash rather than concatenated into a sized
+// buffer first. name is a whole serialized event, so sizing an allocation from
+// its length is a computation on a value the event's own content decides -- and
+// there is no reason to hold a second copy of the event in memory to hash it.
 func eventUUID(kind, name string) string {
-	buf := make([]byte, 0, len(eventIDNamespace)+len(kind)+len(name))
-	buf = append(buf, eventIDNamespace[:]...)
-	buf = append(buf, kind...)
-	buf = append(buf, name...)
-	sum := sha1.Sum(buf)
+	digest := sha1.New()
+	// hash.Hash.Write is documented never to return an error.
+	digest.Write(eventIDNamespace[:])
+	io.WriteString(digest, kind)
+	io.WriteString(digest, name)
 	var id [16]byte
-	copy(id[:], sum[:16])
+	copy(id[:], digest.Sum(nil))
 	id[6] = (id[6] & 0x0f) | 0x50 // version 5
 	id[8] = (id[8] & 0x3f) | 0x80 // RFC 4122 variant
 	out := make([]byte, 32)
