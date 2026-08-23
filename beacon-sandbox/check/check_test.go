@@ -341,6 +341,38 @@ func TestOneCallDescribedInDifferentWordsCollapses(t *testing.T) {
 	}
 }
 
+// One MultiEdit touching two files is two edits under one call ID, and the verifier has to keep
+// both: the writer's key includes the target, so different paths are different events however
+// equal the call ID is.
+//
+// This is the guard on the previous test. Making an equal call ID sufficient on its own is the
+// obvious way to fix a message-driven under-collapse, and it silently trades it for an
+// over-collapse -- which is worse, because it fails a min_count the writer would have satisfied.
+// Asking the writer instead of reordering a copy of its rules is what keeps both true at once.
+func TestMultiEditToTwoFilesUnderOneCallIDKeepsBoth(t *testing.T) {
+	base := goodLog()
+	edit := func(path string) string {
+		return `{"timestamp":"2026-08-02T18:00:01Z","vendor":"beacon","product":"endpoint-agent",` +
+			`"schema_version":"1.0","event":{"kind":"agent_runtime","action":"file.modified",` +
+			`"category":"file"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},` +
+			`"harness":{"name":"claude_code"},"session":{"id":"s1"},"file":{"path":"` + path +
+			`","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_multi"}}},` +
+			`"message":"File edit observed"}`
+	}
+
+	sc := demoScenario()
+	sc.Expect = []scenario.Expect{{
+		Action: "file.modified", Fields: []string{"file.path"}, MinCount: 2,
+		Why: "one MultiEdit editing two files is two edits, not one",
+	}}
+
+	v := run(t, []string{base[0], edit("/repo/a.go"), edit("/repo/b.go")}, sc, presentSentinel(), nil)
+	if v.Outcome != Pass {
+		t.Errorf("two files edited under one call ID are two events and the writer keeps both, "+
+			"so min_count 2 must pass:\n%s", v.Report())
+	}
+}
+
 // Only a fixed set of actions is eligible for suppression at all. Treating others as
 // collapsible would invent suppression the writer never performs.
 func TestNonCandidateActionsAreNeverCollapsed(t *testing.T) {
