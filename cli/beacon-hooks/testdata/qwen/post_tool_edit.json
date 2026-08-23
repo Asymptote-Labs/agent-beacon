@@ -1,0 +1,19 @@
+{
+  "session_id": "qwen-8f21c4a0",
+  "transcript_path": "/Users/example/.qwen/tmp/qwen-8f21c4a0/chat.json",
+  "cwd": "/Users/example/projects/beacon-demo",
+  "hook_event_name": "PostToolUse",
+  "timestamp": "2026-08-21T10:15:24.000Z",
+  "permission_mode": "default",
+  "tool_name": "edit",
+  "tool_use_id": "toolu_01QwenEdit",
+  "tool_input": {
+    "file_path": "/Users/example/projects/beacon-demo/src/server.ts",
+    "old_string": "const routes = []",
+    "new_string": "const routes = [health]",
+    "replace_all": false
+  },
+  "tool_response": {
+    "success": true
+  }
+}

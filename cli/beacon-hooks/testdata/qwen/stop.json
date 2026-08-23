@@ -1,0 +1,12 @@
+{
+  "session_id": "qwen-8f21c4a0",
+  "transcript_path": "/Users/example/.qwen/tmp/qwen-8f21c4a0/chat.json",
+  "cwd": "/Users/example/projects/beacon-demo",
+  "hook_event_name": "Stop",
+  "timestamp": "2026-08-21T10:15:45.000Z",
+  "stop_hook_active": false,
+  "last_assistant_message": "Added the health endpoint and the tests pass.",
+  "context_usage": 0.42,
+  "context_limit": 262144,
+  "input_tokens": 110100
+}

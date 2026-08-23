@@ -21,6 +21,14 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 	if filePath == "" {
 		filePath = GetStringFromMaps("AbsolutePath", toolInput, toolResponse)
 	}
+	if filePath == "" {
+		filePath = GetStringFromMaps("absolute_path", toolInput, toolResponse)
+	}
+	// Kept in step with the resolver in parseClaudeCopilotInput; see the note there for why this
+	// changes no behavior today and is here so the readers do not drift.
+	if filePath == "" {
+		filePath = GetStringFromMaps("notebook_path", toolInput, toolResponse)
+	}
 	filePath = NormalizePath(filePath)
 	if filePath == "" {
 		return ""
@@ -33,7 +41,10 @@ func FromToolResponse(toolName string, toolInput, toolResponse map[string]interf
 
 	// Fall back to tool-specific construction
 	switch toolName {
-	case "Edit", "edit", "edit_file":
+	// "replace" is Gemini CLI's -- and so early Qwen Code's -- id for the old_string/new_string edit
+	// tool that Qwen Code now documents as "edit". Without it the tool is recognized as an edit by
+	// isFileEditTool but produces no diff, so the event records that a file changed and not how.
+	case "Edit", "edit", "edit_file", "replace":
 		oldString := resolveEditString("old_string", "oldString", "old_str", toolInput, toolResponse)
 		newString := resolveEditString("new_string", "newString", "new_str", toolInput, toolResponse)
 		return fromEditTool(filePath, oldString, newString)
