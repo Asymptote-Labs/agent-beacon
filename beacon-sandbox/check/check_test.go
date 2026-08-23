@@ -312,6 +312,35 @@ func TestMatchingCallIDsCollapseAtAnyDistance(t *testing.T) {
 	}
 }
 
+// The hook and the collector describe one call in different words. The hook writes
+// "Shell command executed"; the collector writes "Tool execution observed". The writer's key does
+// not include the message, so it collapses them -- and the verifier has to agree, or it counts two
+// events where the log will only ever hold one. It did not agree while it kept its own copy of the
+// rule and keyed that copy on the message. Reported by Cursor Bugbot.
+func TestOneCallDescribedInDifferentWordsCollapses(t *testing.T) {
+	base := goodLog()
+	withIDAndMessage := func(line, ts, message string) string {
+		line = strings.Replace(line, "18:00:01Z", ts, 1)
+		line = strings.Replace(line, `"message":"claude_code.tool_result"`, `"message":"`+message+`"`, 1)
+		return strings.Replace(line, `"tool":{"name":"Bash"}`,
+			`"tool":{"name":"Bash"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}`, 1)
+	}
+	hook := withIDAndMessage(base[1], "18:00:01Z", "Shell command executed")
+	collector := withIDAndMessage(base[1], "18:00:07Z", "Tool execution observed")
+
+	sc := demoScenario()
+	sc.Expect = []scenario.Expect{{
+		Action: "command.executed", Fields: []string{"command.command"}, MinCount: 2,
+		Why: "one call cannot be counted twice just because the two paths word it differently",
+	}}
+
+	v := run(t, []string{base[0], hook, collector}, sc, presentSentinel(), nil)
+	if v.Outcome != Fail {
+		t.Errorf("the two reports of one call share a call ID and must collapse to one, so "+
+			"min_count 2 has to fail:\n%s", v.Report())
+	}
+}
+
 // Only a fixed set of actions is eligible for suppression at all. Treating others as
 // collapsible would invent suppression the writer never performs.
 func TestNonCandidateActionsAreNeverCollapsed(t *testing.T) {

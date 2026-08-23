@@ -39,42 +39,75 @@ func IsDuplicateEndpointEvent(path string, candidateLine []byte, window time.Dur
 	effectiveWindow := endpointDedupeWindow(candidate.action, window)
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		existing, ok := endpointDedupeCandidate(line)
-		if !ok || existing.key != candidate.key {
+		if !ok {
 			continue
 		}
-		// An equal, non-empty tool call ID is the runtime's own statement that
-		// these two lines describe one call, and it settles the question on its
-		// own: no window, and no interest in which capture path reported it.
-		//
-		// The window is deliberately not applied here. A hook writes when the
-		// tool runs and the collector writes when its batch flushes, so the two
-		// reports of one call routinely land five seconds apart -- past the
-		// two-second window that is the only thing that ever collapsed them.
-		if existing.callID != "" && existing.callID == candidate.callID {
-			return true
-		}
-		// Without matching IDs, only the timing heuristic is left, and only
-		// across capture paths: two adjacent calls from one path can
-		// legitimately touch the same file or command, so same-harness
-		// lookalikes are preserved.
-		//
-		// Unequal IDs are not evidence of two calls unless one path assigned
-		// both. Beacon's paths do not share an ID space -- OpenCode's own call
-		// ID and the span ID the collector sees for the same call are simply
-		// different names -- so across harnesses the IDs are ignored rather
-		// than trusted to disagree.
-		if existing.harness == candidate.harness {
-			continue
-		}
-		diff := candidate.ts.Sub(existing.ts)
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff <= effectiveWindow {
+		if duplicateEndpointEvents(existing, candidate, effectiveWindow) {
 			return true
 		}
 	}
 	return false
+}
+
+// DuplicateEndpointLines reports whether candidate duplicates existing under the
+// same rules the writer applies when appending to a runtime log.
+//
+// Exported for readers that must agree with the writer about what one action is
+// -- the sandbox verifier, which counts captured events against a scenario's
+// expectations, and anything else that would otherwise keep a second copy of
+// these rules. A second copy is the thing this change exists to stop: two
+// implementations of one rule have already drifted apart here once, silently,
+// and a duplicated suppression rule is no safer than a duplicated harness name
+// was.
+//
+// window is the caller's base window; the action-specific floor still applies.
+func DuplicateEndpointLines(existing, candidate []byte, window time.Duration) bool {
+	parsedCandidate, ok := endpointDedupeCandidate(candidate)
+	if !ok {
+		return false
+	}
+	parsedExisting, ok := endpointDedupeCandidate(existing)
+	if !ok {
+		return false
+	}
+	return duplicateEndpointEvents(parsedExisting, parsedCandidate,
+		endpointDedupeWindow(parsedCandidate.action, window))
+}
+
+// duplicateEndpointEvents is the one pairwise decision both entry points share,
+// kept on parsed events so the tail scan does not reparse the candidate for
+// every line it compares it against.
+func duplicateEndpointEvents(existing, candidate endpointDedupeEvent, effectiveWindow time.Duration) bool {
+	if existing.key != candidate.key {
+		return false
+	}
+	// An equal, non-empty tool call ID is the runtime's own statement that these
+	// two lines describe one call, and it settles the question on its own: no
+	// window, and no interest in which capture path reported it.
+	//
+	// The window is deliberately not applied here. A hook writes when the tool
+	// runs and the collector writes when its batch flushes, so the two reports
+	// of one call routinely land five seconds apart -- past the two-second
+	// window that is the only thing that ever collapsed them.
+	if existing.callID != "" && existing.callID == candidate.callID {
+		return true
+	}
+	// Without matching IDs, only the timing heuristic is left, and only across
+	// capture paths: two adjacent calls from one path can legitimately touch the
+	// same file or command, so same-harness lookalikes are preserved.
+	//
+	// Unequal IDs are not evidence of two calls unless one path assigned both.
+	// Beacon's paths do not share an ID space -- OpenCode's own call ID and the
+	// span ID the collector sees for the same call are simply different names --
+	// so across harnesses the IDs are ignored rather than trusted to disagree.
+	if existing.harness == candidate.harness {
+		return false
+	}
+	diff := candidate.ts.Sub(existing.ts)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= effectiveWindow
 }
 
 func readEndpointDedupeTail(path string) ([]byte, error) {
