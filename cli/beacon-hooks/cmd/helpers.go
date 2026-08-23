@@ -125,6 +125,11 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	// documented as common to both.
 	case "cline":
 		return getFirstStr(input, "taskId", "task_id", "sessionId", "session_id")
+	// The Beacon extension lifts Pi's session id onto the envelope as `sessionId`, reading it from
+	// the handler context's session manager per event. The snake_case spellings are a fallback for
+	// a payload that reached this command by some other route.
+	case "pi":
+		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	default:
 		id, _ := input["session_id"].(string)
 		return id
@@ -245,6 +250,14 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 	}
 	if platform == "opencode" {
 		if cwd := getFirstStr(input, "cwd", "directory", "worktree"); cwd != "" {
+			return cwd
+		}
+	}
+	if platform == "pi" {
+		// The extension lifts Pi's cwd onto the envelope, preferring the handler context's own cwd
+		// and falling back to the session manager's. An event that carried its own cwd -- user_bash
+		// does -- wins over both, because the extension spreads event fields last.
+		if cwd := getFirstStr(input, "cwd", "workingDirectory", "working_directory"); cwd != "" {
 			return cwd
 		}
 	}

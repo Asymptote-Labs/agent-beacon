@@ -140,6 +140,19 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Cline plugin installed: %s\n", status.PluginPath)
+	case "pi":
+		status, err := endpointhooks.InstallPi(endpointhooks.PiOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Pi extension installed: %s\n", status.ExtensionPath)
+		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
+			fmt.Println("Project-level Pi extensions are subject to Pi's project-trust prompt; a user-level install needs no further interaction.")
+		}
 	case "grok":
 		status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -295,6 +308,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "pi":
+		status, err := endpointhooks.UninstallPi(endpointhooks.PiOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "grok":
 		status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -399,6 +422,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "pi":
+			statuses["pi"] = endpointhooks.PiHookStatus(endpointhooks.PiOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "grok":
 			statuses["grok"] = endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -460,6 +489,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "cline":
 			status := statuses["cline"].(endpointhooks.ClineStatus)
 			fmt.Printf("Cline plugin: installed=%t path=%s\n", status.Installed, status.PluginPath)
+			fmt.Println(status.Message)
+		case "pi":
+			status := statuses["pi"].(endpointhooks.PiStatus)
+			fmt.Printf("Pi extension: installed=%t path=%s\n", status.Installed, status.ExtensionPath)
 			fmt.Println(status.Message)
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
