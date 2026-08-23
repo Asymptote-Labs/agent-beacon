@@ -339,6 +339,12 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
+	if platformFlag == "qwen" {
+		if interrupted, _ := input["is_interrupt"].(bool); interrupted {
+			emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
+			return
+		}
+	}
 	action := actionForTool(hookEvent, toolName)
 	category := "tool"
 	if strings.HasPrefix(action, "file.") {

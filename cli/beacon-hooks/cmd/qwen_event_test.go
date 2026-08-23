@@ -146,6 +146,23 @@ func TestQwenFailedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
 	}
 }
 
+// An interrupt with an empty error and a PostToolUse hook event must still be recorded as a
+// failure. Without this, the Qwen taxonomy maps write_file to file.modified even though the tool
+// was interrupted and the write never landed.
+func TestQwenInterruptedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_interrupt.json"))
+
+	event := lastEndpointEvent(t, logPath)
+	if got := qwenAction(t, event); got != "tool.failed" {
+		t.Fatalf("event.action = %q, want tool.failed for an interrupted tool", got)
+	}
+	if got := event["severity"]; got != "high" {
+		t.Fatalf("severity = %q, want high", got)
+	}
+}
+
 // A shell command has to reach the `command` field, not just `tool.name`: every command rule,
 // dashboard column and threat-rule match reads it from there.
 func TestQwenShellCommandIsRecordedAsACommand(t *testing.T) {
