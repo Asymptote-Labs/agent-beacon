@@ -97,6 +97,27 @@ func TestQwenTimeoutsAreMillisecondsNotSeconds(t *testing.T) {
 	}
 }
 
+// Qwen Code does not run hooks through Git Bash the way Claude Code does. On Windows it defaults to
+// cmd.exe or PowerShell, where the POSIX single-quote quoting in the command string is invalid. Every
+// hook must set shell to "bash" so Qwen uses a shell that understands the quoting.
+func TestQwenHooksSpecifyBashShell(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := installQwenSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installQwenSettings returned error: %v", err)
+	}
+
+	hooks := decodeQwenHooks(t, path)
+	for event, groups := range hooks {
+		if len(groups) == 0 || len(groups[0].Hooks) == 0 {
+			t.Fatalf("%s hook was not installed", event)
+		}
+		if got := groups[0].Hooks[0].Shell; got != "bash" {
+			t.Errorf("%s shell = %q, want \"bash\"; without it Qwen uses cmd/PowerShell on "+
+				"Windows where the single-quoted command is invalid", event, got)
+		}
+	}
+}
+
 // Every Qwen hook event Beacon claims to collect has to actually be registered, wired to the right
 // subcommand, and carry the --platform value the adapter branches on.
 func TestInstallQwenRegistersEveryCollectedEvent(t *testing.T) {
