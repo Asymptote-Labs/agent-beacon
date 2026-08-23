@@ -153,6 +153,22 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		if strings.Contains(status.Message, "/hooks-trust") {
 			fmt.Println(status.Message)
 		}
+	case "qwen":
+		status, err := endpointhooks.InstallQwen(endpointhooks.QwenOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Qwen Code hooks installed: %s\n", status.SettingsPath)
+		// Printed only when it applies. A project-level install into an untrusted folder writes a
+		// file that does nothing until the user trusts the folder, and silence there would read as
+		// "collecting".
+		if strings.Contains(status.Message, "trusted") {
+			fmt.Println(status.Message)
+		}
 	case "hermes":
 		status, err := endpointhooks.InstallHermes(endpointhooks.HermesOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -305,6 +321,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "qwen":
+		status, err := endpointhooks.UninstallQwen(endpointhooks.QwenOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "hermes":
 		status, err := endpointhooks.UninstallHermes(endpointhooks.HermesOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -405,6 +431,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "qwen":
+			statuses["qwen"] = endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "hermes":
 			statuses["hermes"] = endpointhooks.HermesHookStatus(endpointhooks.HermesOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -464,6 +496,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
 			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "qwen":
+			status := statuses["qwen"].(endpointhooks.QwenStatus)
+			fmt.Printf("Qwen Code hooks: installed=%t path=%s\n", status.Installed, status.SettingsPath)
 			fmt.Println(status.Message)
 		case "hermes":
 			status := statuses["hermes"].(endpointhooks.HermesStatus)

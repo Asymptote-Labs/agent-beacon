@@ -53,3 +53,33 @@ func TestHookStatusesReportClineWithItsPluginPath(t *testing.T) {
 	}
 	t.Fatal("no cline row in the hook status list")
 }
+
+// The dashboard's runtime list is separate from the CLI's target registry, so a runtime wired into
+// `beacon endpoint hooks` but not here is invisible in the inventory view with no error to say the
+// view is incomplete. A row also has to carry a path: "not_installed" with no path tells an
+// operator nothing about where to look.
+func TestHookStatusesReportQwenWithItsSettingsPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	rows := 0
+	for _, status := range hookStatuses(filepath.Join(t.TempDir(), "runtime.jsonl"), true) {
+		if status.Target != "qwen" {
+			continue
+		}
+		rows++
+		if status.Installed {
+			t.Errorf("qwen reported installed with no settings file present: %+v", status)
+		}
+		if status.Status != "not_installed" {
+			t.Errorf("qwen status = %q, want not_installed", status.Status)
+		}
+		if want := filepath.Join(home, ".qwen", "settings.json"); status.Path != want {
+			t.Errorf("qwen path = %q, want %q", status.Path, want)
+		}
+	}
+	if rows != 1 {
+		t.Fatalf("qwen appears %d times in the hook status list, want exactly 1", rows)
+	}
+}

@@ -205,6 +205,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
+	items = append(items, qwenCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
 	for _, item := range items {
@@ -301,6 +302,17 @@ func devinCandidates(home, wd string) []candidate {
 		{runtime: "devin-cli", path: filepath.Join(wd, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		{runtime: "devin-desktop", path: filepath.Join(home, ".codeium", "windsurf", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "devin-desktop", path: filepath.Join(wd, ".windsurf", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// Qwen Code keeps hooks in the same settings.json as the rest of its configuration, so this is a
+// native config file that Beacon merges into rather than a file Beacon owns. That is why it is
+// classified KindHookConfig and detected by the hook command it contains rather than by a
+// Beacon-managed marker: there is no marker to write into a file the user also edits.
+func qwenCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 	}
 }
 
@@ -624,6 +636,11 @@ func beaconManaged(item candidate, data []byte) bool {
 		return strings.Contains(text, "beacon-managed-cline-plugin:v1")
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
+	// Matched on the hook command rather than on a marker, because Beacon merges into Qwen's own
+	// settings.json and has no file of its own there to stamp. `--platform qwen` is what the
+	// installer writes and what uninstall keys on, so it is the same string in all three places.
+	case "qwen_code":
+		return strings.Contains(text, "--platform qwen") || strings.Contains(text, "--platform=qwen")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {

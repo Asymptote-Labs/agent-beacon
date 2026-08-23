@@ -631,6 +631,8 @@ function runtimeLabel(value) {
     "devin-cli": "Devin CLI",
     "devin-desktop": "Devin Desktop",
     grok: "Grok",
+    qwen: "Qwen Code",
+    qwen_code: "Qwen Code",
     agent_skills: "Agent Skills",
   };
   return labels[value] || harnessLabel(value);
@@ -969,6 +971,7 @@ function harnessLabel(value) {
     codex_cli: "Codex CLI",
     copilot_cli: "GitHub Copilot CLI",
     grok: "Grok Build",
+    qwen_code: "Qwen Code",
     cli: "Beacon CLI",
   };
   return labels[value] || value;

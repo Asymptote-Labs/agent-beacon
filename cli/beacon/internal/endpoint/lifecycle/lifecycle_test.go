@@ -920,3 +920,17 @@ func TestGetStatusAndResolveRuntimeLogReportRequestedConfig(t *testing.T) {
 		t.Fatal("GetStatus should populate Version")
 	}
 }
+
+// Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so `endpoint install
+// --harness qwen` has nothing to point at the local collector. Naming the command that does work
+// matters more here than for most runtimes: the generic "unsupported harness" would read as "Beacon
+// does not support Qwen Code" when the support exists one command over.
+func TestConfigureHarnessesRejectsQwenAsHookManaged(t *testing.T) {
+	for _, name := range []string{"qwen", "qwen_code"} {
+		cfg := endpointconfig.Config{Harnesses: []string{name}}
+		_, err := configureHarnesses(cfg)
+		if err == nil || !strings.Contains(err.Error(), "endpoint hooks install --harness qwen") {
+			t.Fatalf("configureHarnesses(%q) error = %v, want the Qwen hook-managed error", name, err)
+		}
+	}
+}

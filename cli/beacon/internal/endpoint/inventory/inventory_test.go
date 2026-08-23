@@ -347,6 +347,8 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		{runtime: "devin-desktop", path: filepath.Join(work, ".windsurf", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		{runtime: "grok", path: filepath.Join(home, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "grok", path: filepath.Join(work, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "qwen_code", path: filepath.Join(work, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 	}
 	if got, want := len(result.Configs), len(expected); got != want {
 		t.Fatalf("config candidates = %d, want %d", got, want)
@@ -889,4 +891,28 @@ func findSkill(skills []Skill, runtime, name, manifestPath string) *Skill {
 		}
 	}
 	return nil
+}
+
+// Qwen Code's hooks live in the same settings.json as the rest of its configuration, so Beacon has
+// no file of its own there to stamp with a marker. Detection keys on the hook command instead, and
+// both directions matter: missing the install reports telemetry as absent on a machine that has it,
+// and claiming another runtime's hooks attributes someone else's install to Qwen.
+func TestQwenManagedDetectionReadsTheHookCommand(t *testing.T) {
+	for name, tc := range map[string]struct {
+		settings string
+		want     bool
+	}{
+		"flag form":       {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/opt/beacon/hooks/beacon-hooks' --platform qwen --log '/tmp/runtime.jsonl' stop"}]}]}}`, true},
+		"equals form":     {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"beacon-hooks --platform=qwen stop"}]}]}}`, true},
+		"another runtime": {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"beacon-hooks --platform claude stop"}]}]}}`, false},
+		"the user's own":  {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"my-own.sh"}]}]}}`, false},
+		"no hooks at all": {`{"theme":"Dracula"}`, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := beaconManaged(candidate{runtime: "qwen_code"}, []byte(tc.settings))
+			if got != tc.want {
+				t.Errorf("beaconManaged(qwen_code) = %t, want %t for %s", got, tc.want, tc.settings)
+			}
+		})
+	}
 }
