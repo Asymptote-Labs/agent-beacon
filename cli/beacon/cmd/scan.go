@@ -107,6 +107,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read telemetry %s: %w", runtimeLog.EffectiveLogPath, err)
 	}
 
+	// The rules engine evaluates the sequence it is handed, and the log is in append
+	// order, which is not the order the events happened: a hook writes the instant it
+	// intercepts a tool call while the exporter writes on its export interval. Ordered
+	// correlation rules silently miss without this.
+	threatrules.SortEvents(events)
+
 	findings, err := threatrules.ScanEvents(compiled, events)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)

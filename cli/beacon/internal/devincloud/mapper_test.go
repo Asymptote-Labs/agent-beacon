@@ -65,8 +65,11 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 		t.Fatalf("agent message = %q, want done", mapped[2].Event.Message)
 	}
 
-	// Timestamps come from the source unix times.
-	if mapped[0].Event.Timestamp != "1970-01-01T00:16:40Z" {
+	// Timestamps come from the source unix times, rendered in the canonical event
+	// format. Devin reports whole seconds, so the sub-second digits are zeros -- the
+	// width is fixed so that every event in the stream sorts byte-wise as well as
+	// chronologically.
+	if mapped[0].Event.Timestamp != "1970-01-01T00:16:40.000000000Z" {
 		t.Fatalf("started ts = %q, want session created_at", mapped[0].Event.Timestamp)
 	}
 }

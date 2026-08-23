@@ -65,8 +65,13 @@ type GenAIUsageReasoningInfo = asymptoteobserve.GenAIUsageReasoningInfo
 type GenAIWorkflowInfo = asymptoteobserve.GenAIWorkflowInfo
 
 type Event struct {
-	ObservedAt    time.Time                         `json:"-"`
-	Timestamp     string                            `json:"timestamp"`
+	ObservedAt time.Time `json:"-"`
+	Timestamp  string    `json:"timestamp"`
+	// Sequence mirrors asymptoteobserve.Event.Sequence: the exporter's monotonic emission
+	// counter, stamped in wire order as records are walked. It is what still separates the
+	// datapoints of one metric export, which all carry that export's collection instant
+	// and so tie on the timestamp no matter how precise the timestamp gets.
+	Sequence      uint64                            `json:"sequence,omitempty"`
 	Vendor        string                            `json:"vendor"`
 	Product       string                            `json:"product"`
 	SchemaVersion string                            `json:"schema_version"`
@@ -121,7 +126,7 @@ func NewEvent(action, category, severity, harnessName string, ts time.Time) Even
 	})
 	return Event{
 		ObservedAt:    ts.UTC(),
-		Timestamp:     ts.UTC().Format(time.RFC3339),
+		Timestamp:     asymptoteobserve.FormatTimestamp(ts),
 		Vendor:        base.Vendor,
 		Product:       base.Product,
 		SchemaVersion: base.SchemaVersion,

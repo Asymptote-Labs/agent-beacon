@@ -164,7 +164,7 @@ func baseEvent(s Session, action, category string, severity schema.Severity, tsU
 		},
 	})
 	if tsUnix > 0 {
-		ev.Timestamp = time.Unix(tsUnix, 0).UTC().Format(time.RFC3339)
+		ev.Timestamp = schema.FormatTimestamp(time.Unix(tsUnix, 0))
 	}
 	ev.Session = &schema.SessionInfo{ID: s.SessionID}
 	if repo != "" {

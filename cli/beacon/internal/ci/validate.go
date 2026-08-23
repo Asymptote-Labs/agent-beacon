@@ -111,7 +111,7 @@ func readStructuredEvents(path string, since time.Time) ([]schema.Event, []strin
 			continue
 		}
 		if filtering {
-			ts, err := time.Parse(time.RFC3339, event.Timestamp)
+			ts, err := schema.ParseTimestamp(event.Timestamp)
 			if err != nil || ts.Before(since) {
 				continue
 			}

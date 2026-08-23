@@ -235,7 +235,7 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 			repository: event.Repository,
 			usage:      Usage{Events: 1},
 		}
-		if ts, err := time.Parse(time.RFC3339, event.Timestamp); err == nil {
+		if ts, err := schema.ParseTimestamp(event.Timestamp); err == nil {
 			ue.ts = ts
 		}
 		if event.Session != nil {
@@ -586,7 +586,7 @@ func buildSessionDetail(events []*usageEvent, sessionID string) *SessionDetail {
 			Usage:        ue.usage,
 		}
 		if !ue.ts.IsZero() {
-			step.Timestamp = ue.ts.UTC().Format(time.RFC3339)
+			step.Timestamp = schema.FormatTimestamp(ue.ts)
 		}
 		steps = append(steps, step)
 		if step.SpanID != "" {

@@ -382,7 +382,19 @@ type ServerInfo struct {
 }
 
 type Event struct {
-	Timestamp     string                 `json:"timestamp"`
+	Timestamp string `json:"timestamp"`
+	// Sequence is the emitting writer's monotonic emission counter for this event,
+	// starting at 1; 0 means unsequenced. It breaks ties between events that share a
+	// timestamp -- routine while stamping was second-resolution, and still possible
+	// afterwards because one metric export flushes a batch of datapoints that all carry
+	// the same collection instant.
+	//
+	// It orders one writer's stream, not the log as a whole: the hook adapter runs as a
+	// fresh short-lived process per hook and the collector runs as one long-lived export
+	// loop, so neither can see the other's counter. Timestamp is the cross-writer
+	// ordering key and Sequence is the tiebreaker beneath it -- see
+	// threatrules.SortEvents, which is how correlation gets its ordered input.
+	Sequence      uint64                 `json:"sequence,omitempty"`
 	Vendor        string                 `json:"vendor"`
 	Product       string                 `json:"product"`
 	SchemaVersion string                 `json:"schema_version"`
@@ -441,7 +453,7 @@ func NewEvent(opts NewEventOptions) Event {
 		severity = SeverityInfo
 	}
 	return Event{
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     FormatTimestamp(time.Now()),
 		Vendor:        Vendor,
 		Product:       Product,
 		SchemaVersion: SchemaVersion,

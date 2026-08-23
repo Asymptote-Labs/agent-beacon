@@ -27,9 +27,10 @@ func (c *CompiledRule) evaluateCorrelation(events []asymptoteobserve.Event) (Ver
 // alignment in one session that satisfies the sequence within the window, or nil if none.
 //
 // Steps must occur in order; the elapsed time from the first matched step to the final
-// matched step must not exceed the window. Timestamps are RFC3339; if a step's timestamp
-// is absent the window is not enforced against it (positive fixtures need not carry
-// timestamps, while window fixtures supply them).
+// matched step must not exceed the window. "In order" means the order of the slice, which
+// the caller is responsible for (see SortEvents); if a step's timestamp is absent the
+// window is not enforced against it (positive fixtures need not carry timestamps, while
+// window fixtures supply them).
 func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) ([]asymptoteobserve.Event, error) {
 	// Try every step-0 match as a candidate anchor. A single greedy pass is not enough:
 	// an early anchor whose final step falls outside the window must not mask a later
@@ -107,13 +108,13 @@ func groupBySession(events []asymptoteobserve.Event) (map[string][]asymptoteobse
 	return groups, order
 }
 
-// eventTime parses an event's RFC3339 timestamp. The bool is false when the timestamp is
-// absent or unparseable, in which case window enforcement is skipped for that event.
+// eventTime parses an event's timestamp. The bool is false when the timestamp is absent
+// or unparseable, in which case window enforcement is skipped for that event.
 func eventTime(e asymptoteobserve.Event) (time.Time, bool) {
 	if e.Timestamp == "" {
 		return time.Time{}, false
 	}
-	t, err := time.Parse(time.RFC3339, e.Timestamp)
+	t, err := asymptoteobserve.ParseTimestamp(e.Timestamp)
 	if err != nil {
 		return time.Time{}, false
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/scenario"
+	obs "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // DuplicateWindow mirrors IsDuplicateEndpointEvent's suppression window in the writer.
@@ -244,7 +245,7 @@ func collapseDuplicates(events []Event) []Event {
 			out = append(out, e)
 			continue
 		}
-		ts, err := time.Parse(time.RFC3339, e.Typed.Timestamp)
+		ts, err := obs.ParseTimestamp(e.Typed.Timestamp)
 		if err != nil {
 			out = append(out, e)
 			continue
@@ -261,7 +262,7 @@ func collapseDuplicates(events []Event) []Event {
 					continue
 				}
 			}
-			pts, err := time.Parse(time.RFC3339, prev.Typed.Timestamp)
+			pts, err := obs.ParseTimestamp(prev.Typed.Timestamp)
 			if err != nil {
 				continue
 			}

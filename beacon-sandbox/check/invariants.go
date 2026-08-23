@@ -69,6 +69,7 @@ func Invariants(v *Verdict, log Log, secrets Secrets) {
 	checkSchema(v, log)
 	checkSizes(v, log)
 	checkTimestamps(v, log)
+	checkOrdering(v, log)
 	checkActions(v, log)
 	checkSecrets(v, log, secrets)
 }
@@ -146,7 +147,7 @@ func checkTimestamps(v *Verdict, log Log) {
 		if e.ParseErr != nil {
 			continue
 		}
-		ts, err := time.Parse(time.RFC3339, e.Typed.Timestamp)
+		ts, err := obs.ParseTimestamp(e.Typed.Timestamp)
 		if err != nil {
 			unparseable = append(unparseable, fmt.Sprintf("%s:%d (%q)", log.Path, e.Line, e.Typed.Timestamp))
 			continue
@@ -184,6 +185,94 @@ func checkTimestamps(v *Verdict, log Log) {
 			Evidence: cap5(regressions),
 		})
 	}
+}
+
+// checkOrdering requires the log to be orderable: sub-second timestamps, and a sequence
+// on the events that share one anyway.
+//
+// The pathology it exists for was measured, not imagined: in a 5,595-event runtime log,
+// zero events carried a sub-second timestamp and 97% shared a timestamp with another event
+// in the same session, so nothing downstream could tell which of two events came first and
+// ordered detection fell back to the order the lines happened to land in the file.
+//
+// A log with no sub-second timestamp at all is that regression returning, and fails. A log
+// where only some events carry one is a log spanning an agent upgrade, which is expected
+// and only warns.
+func checkOrdering(v *Verdict, log Log) {
+	var (
+		stamped   int
+		parseable int
+		collided  []string
+	)
+	seen := map[string]string{}
+	for _, e := range log.Events {
+		if e.ParseErr != nil {
+			continue
+		}
+		ts := e.Typed.Timestamp
+		if _, err := obs.ParseTimestamp(ts); err != nil {
+			continue
+		}
+		parseable++
+		if strings.Contains(ts, ".") {
+			stamped++
+		}
+		session := ""
+		if e.Typed.Session != nil {
+			session = e.Typed.Session.ID
+		}
+		// A shared timestamp is only a problem when nothing else separates the two events.
+		if e.Typed.Sequence != 0 {
+			continue
+		}
+		key := session + "\x00" + ts
+		if previous, ok := seen[key]; ok {
+			collided = append(collided, fmt.Sprintf("%s:%d (%s, shared with %s, neither sequenced)",
+				log.Path, e.Line, ts, previous))
+			continue
+		}
+		seen[key] = fmt.Sprintf("%s:%d", log.Path, e.Line)
+	}
+
+	if parseable > 0 && stamped == 0 {
+		v.Add(Finding{
+			Check: "invariant.timestamp_precision", Severity: SevFail,
+			Summary:  fmt.Sprintf("0 of %d event(s) carry a sub-second timestamp", parseable),
+			Why:      "without sub-second stamping most events in a session share a timestamp, and nothing can order them",
+			Evidence: cap5(firstTimestamps(log)),
+		})
+	} else if stamped < parseable {
+		v.Add(Finding{
+			Check: "invariant.timestamp_precision", Severity: SevWarn,
+			Summary: fmt.Sprintf("%d of %d event(s) carry a second-resolution timestamp",
+				parseable-stamped, parseable),
+			Why: "expected in a log written across an agent upgrade; otherwise a writer is not stamping canonically",
+		})
+	}
+	if len(collided) > 0 {
+		v.Add(Finding{
+			Check: "invariant.event_orderable", Severity: SevWarn,
+			Summary:  fmt.Sprintf("%d event(s) share a session timestamp with no sequence to separate them", len(collided)),
+			Why:      "two events that tie on both keys can only be ordered by where they landed in the file",
+			Evidence: cap5(collided),
+		})
+	}
+}
+
+// firstTimestamps returns the timestamps of the first few parseable events, as evidence for
+// a precision finding.
+func firstTimestamps(log Log) []string {
+	var out []string
+	for _, e := range log.Events {
+		if e.ParseErr != nil || e.Typed.Timestamp == "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s:%d (%q)", log.Path, e.Line, e.Typed.Timestamp))
+		if len(out) == 5 {
+			break
+		}
+	}
+	return out
 }
 
 func checkActions(v *Verdict, log Log) {

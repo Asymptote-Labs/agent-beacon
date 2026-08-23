@@ -79,6 +79,12 @@ For `threat-rules/v1`, correlation scope is `session`. Beacon groups events by `
 
 Correlation is useful when no single event is suspicious enough on its own, but the sequence is meaningful.
 
+"In order" means the order the events happened, not the order they were written. `beacon
+scan` sorts the runtime log by `(timestamp, sequence)` before evaluating, because append
+order is not emission order — a hook writes the moment it intercepts a tool call, while the
+collector exporter writes on its export interval. See [event
+ordering](/telemetry-schema/event-schema#event-ordering).
+
 ## Findings
 
 When a rule fires, Beacon emits a finding. Findings include:

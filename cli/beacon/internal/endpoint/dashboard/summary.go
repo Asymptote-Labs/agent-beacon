@@ -1,6 +1,11 @@
 package dashboard
 
-import "sort"
+import (
+	"sort"
+	"time"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+)
 
 type Count struct {
 	Name  string `json:"name"`
@@ -53,10 +58,19 @@ func BuildSummary(result EventResult) Summary {
 		CountsByModel:            map[string]int{},
 	}
 	sessions := map[string]bool{}
+	var lastEventAt time.Time
 	for _, record := range result.Events {
 		event := record.Event
-		if summary.LastEventTime == "" || event.Timestamp > summary.LastEventTime {
-			summary.LastEventTime = event.Timestamp
+		// Compared as instants rather than as strings. The two orderings agree only while
+		// every timestamp has the same width: in a log that spans the move to nanosecond
+		// stamping, ":05Z" sorts after ":05.500000000Z" byte-wise, because 'Z' outranks
+		// '.'. An unparseable timestamp is skipped rather than compared -- it cannot be
+		// the latest event if nothing can say when it happened.
+		if at, err := schema.ParseTimestamp(event.Timestamp); err == nil {
+			if summary.LastEventTime == "" || at.After(lastEventAt) {
+				summary.LastEventTime = event.Timestamp
+				lastEventAt = at
+			}
 		}
 		if event.Event.Action != "" {
 			summary.CountsByAction[event.Event.Action]++

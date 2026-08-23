@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestEndpointRedaction(t *testing.T) {
@@ -228,4 +230,93 @@ func TestEndpointEventSurfacesWriteFailure(t *testing.T) {
 	if err := logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil); err == nil {
 		t.Fatal("EndpointEvent returned nil, want write failure")
 	}
+}
+
+func TestEndpointEventStampsSubSecondTimestamp(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("pre-tool", "cursor")
+	if err := logger.EndpointEvent("tool.started", "tool", "info", "observed", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	event := readEndpointEvents(t, logPath)[0]
+	timestamp, _ := event["timestamp"].(string)
+	if _, err := asymptoteobserve.ParseTimestamp(timestamp); err != nil {
+		t.Fatalf("timestamp %q does not parse: %v", timestamp, err)
+	}
+	if !strings.Contains(timestamp, ".") {
+		t.Fatalf("timestamp = %q, want sub-second precision", timestamp)
+	}
+}
+
+func TestEndpointEventNumbersEventsWithinOneHookInvocation(t *testing.T) {
+	// A post-tool hook records the tool result, the file edit and the command in one
+	// process. On a coarse clock those can land on the same timestamp, and the sequence
+	// is what still says which came first.
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "cursor")
+	for _, action := range []string{"tool.completed", "file.edited", "command.executed"} {
+		if err := logger.EndpointEvent(action, "tool", "info", action, nil); err != nil {
+			t.Fatalf("EndpointEvent(%s) returned error: %v", action, err)
+		}
+	}
+
+	var previous float64
+	for i, event := range readEndpointEvents(t, logPath) {
+		sequence, ok := event["sequence"].(float64)
+		if !ok {
+			t.Fatalf("event %d has no sequence: %v", i, event)
+		}
+		if sequence < 1 {
+			t.Fatalf("event %d sequence = %v, want at least 1 (0 means unsequenced)", i, sequence)
+		}
+		if i > 0 && sequence <= previous {
+			t.Fatalf("event %d sequence = %v, want greater than %v", i, sequence, previous)
+		}
+		previous = sequence
+	}
+}
+
+func TestMinimalEndpointEventKeepsOrderingFields(t *testing.T) {
+	// The oversized-event fallback strips the event down to metadata. Dropping the
+	// ordering keys there would leave exactly the events most worth ordering unorderable.
+	minimal := minimalEndpointEvent(map[string]interface{}{
+		"timestamp": "2026-08-21T10:00:00.000000000Z",
+		"sequence":  uint64(42),
+		"message":   "big",
+	})
+	if minimal["timestamp"] != "2026-08-21T10:00:00.000000000Z" {
+		t.Fatalf("minimal timestamp = %v", minimal["timestamp"])
+	}
+	if minimal["sequence"] != uint64(42) {
+		t.Fatalf("minimal sequence = %v, want 42", minimal["sequence"])
+	}
+}
+
+// readEndpointEvents decodes every event written to the runtime log.
+func readEndpointEvents(t *testing.T, path string) []map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var events []map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+	if len(events) == 0 {
+		t.Fatalf("no events written to %s", path)
+	}
+	return events
 }

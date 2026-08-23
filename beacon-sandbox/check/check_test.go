@@ -19,9 +19,9 @@ const canary = "BEACON_E2E_TESTCANARY"
 // goodLog is a minimal but schema-valid stream shaped like a real Claude Code session.
 func goodLog() []string {
 	return []string{
-		`{"timestamp":"2026-08-02T18:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"text":"run echo ` + canary + `"},"message":"claude_code.user_prompt"}`,
-		`{"timestamp":"2026-08-02T18:00:01Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"tool":{"name":"Bash"},"command":{"command":"echo ` + canary + `"},"message":"claude_code.tool_result"}`,
-		`{"timestamp":"2026-08-02T18:00:02Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"model":"claude-opus-5","gen_ai":{"usage":{"input_tokens":100}},"message":"claude_code.token.usage"}`,
+		`{"timestamp":"2026-08-02T18:00:00.000000000Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"text":"run echo ` + canary + `"},"message":"claude_code.user_prompt"}`,
+		`{"timestamp":"2026-08-02T18:00:01.000000000Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"tool":{"name":"Bash"},"command":{"command":"echo ` + canary + `"},"message":"claude_code.tool_result"}`,
+		`{"timestamp":"2026-08-02T18:00:02.000000000Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"linux","hostname":"sandbox"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"model":"claude-opus-5","gen_ai":{"usage":{"input_tokens":100}},"message":"claude_code.token.usage"}`,
 	}
 }
 
@@ -260,7 +260,7 @@ func TestMissingEventWithoutSentinelFails(t *testing.T) {
 // writer would never have collapsed. Cursor Bugbot caught it; the test was wrong, not the fix.
 func TestSameHarnessRepeatsSurviveWithoutMatchingCallIDs(t *testing.T) {
 	base := goodLog()
-	dup := strings.Replace(base[1], "18:00:01Z", "18:00:02Z", 1) // 1s apart, no call IDs
+	dup := strings.Replace(base[1], "18:00:01.000000000Z", "18:00:02.000000000Z", 1) // 1s apart, no call IDs
 
 	sc := demoScenario()
 	sc.Expect = []scenario.Expect{{
@@ -280,13 +280,13 @@ func TestSameHarnessRepeatsSurviveWithoutMatchingCallIDs(t *testing.T) {
 func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
 	base := goodLog()
 	withID := func(line, ts, id string) string {
-		line = strings.Replace(line, "18:00:01Z", ts, 1)
+		line = strings.Replace(line, "18:00:01.000000000Z", ts, 1)
 		return strings.Replace(line, `"tool":{"name":"Bash"}`,
 			`"tool":{"name":"Bash"},"gen_ai":{"tool":{"call":{"id":"`+id+`"}}}`, 1)
 	}
-	first := withID(base[1], "18:00:01Z", "call-1")
-	same := withID(base[1], "18:00:02Z", "call-1")  // 1s apart, identical call id
-	later := withID(base[1], "18:00:11Z", "call-1") // 10s apart, outside the 2s window
+	first := withID(base[1], "18:00:01.000000000Z", "call-1")
+	same := withID(base[1], "18:00:02.000000000Z", "call-1")  // 1s apart, identical call id
+	later := withID(base[1], "18:00:11.000000000Z", "call-1") // 10s apart, outside the 2s window
 
 	sc := demoScenario()
 	sc.Expect = []scenario.Expect{{
@@ -311,7 +311,7 @@ func TestMatchingCallIDsInsideTheWindowCollapse(t *testing.T) {
 func TestNonCandidateActionsAreNeverCollapsed(t *testing.T) {
 	base := goodLog()
 	// token.usage is not in the writer's dedupe set, so two 1s apart both count.
-	dup := strings.Replace(base[2], "18:00:02Z", "18:00:03Z", 1)
+	dup := strings.Replace(base[2], "18:00:02.000000000Z", "18:00:03.000000000Z", 1)
 
 	sc := demoScenario()
 	sc.Expect = []scenario.Expect{{
@@ -730,15 +730,15 @@ func TestTimestampOrderOnlyWarnsOnLargeRegressions(t *testing.T) {
 	sc.Expect = []scenario.Expect{{Action: "session.activity", Why: "baseline"}}
 
 	// Forward progress, plus a 1s hiccup well inside the 5s tolerance.
-	fine := run(t, []string{at("2026-08-02T18:00:00Z"), at("2026-08-02T18:00:10Z"),
-		at("2026-08-02T18:00:09Z")}, sc, Sentinel{}, nil)
+	fine := run(t, []string{at("2026-08-02T18:00:00.000000000Z"), at("2026-08-02T18:00:10.000000000Z"),
+		at("2026-08-02T18:00:09.000000000Z")}, sc, Sentinel{}, nil)
 	if hasCheck(fine, "invariant.timestamp_order") {
 		t.Errorf("a 1s hiccup is inside the tolerance and must not warn:\n%s", fine.Report())
 	}
 
 	// A 30s backwards jump is outside it.
-	regressed := run(t, []string{at("2026-08-02T18:00:00Z"), at("2026-08-02T18:01:00Z"),
-		at("2026-08-02T18:00:30Z")}, sc, Sentinel{}, nil)
+	regressed := run(t, []string{at("2026-08-02T18:00:00.000000000Z"), at("2026-08-02T18:01:00.000000000Z"),
+		at("2026-08-02T18:00:30.000000000Z")}, sc, Sentinel{}, nil)
 	if !hasCheck(regressed, "invariant.timestamp_order") {
 		t.Errorf("a 30s backwards jump must warn:\n%s", regressed.Report())
 	}

@@ -118,6 +118,12 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 		return FindingsResponse{}, fmt.Errorf("read telemetry %s: %w", logPath, err)
 	}
 
+	// The rules engine evaluates the sequence it is handed, and the log is in append
+	// order, which is not the order the events happened: a hook writes the instant it
+	// intercepts a tool call while the exporter writes on its export interval. Ordered
+	// correlation rules silently miss without this.
+	threatrules.SortEvents(events)
+
 	findings, err := threatrules.ScanEvents(compiled, events)
 	if err != nil {
 		return FindingsResponse{}, fmt.Errorf("scan: %w", err)

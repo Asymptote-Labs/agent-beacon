@@ -815,6 +815,13 @@ func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 
 func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	populateRunContext(event, attrs)
+	// A runtime that numbers its own telemetry gets that number preserved; the exporter
+	// stamps its own emission counter for everything else (see beaconExporter.
+	// stampSequence). Zero and negative values are ignored -- zero is the schema's
+	// "unsequenced" and a negative counter is not one.
+	if sequence, ok := Int64Attr(attrs, "beacon.event.sequence", "event.sequence"); ok && sequence > 0 {
+		event.Sequence = uint64(sequence)
+	}
 	event.GenAI = GenAIFromAttrs(attrs)
 	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")

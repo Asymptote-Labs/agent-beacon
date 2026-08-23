@@ -58,7 +58,7 @@ Parses Beacon endpoint telemetry where each log line is one JSON object.
 | observer.type := "endpoint"
 | parseJson(prefix="Vendor.", excludeEmpty="true", handleNull="discard")
 | Vendor.timestamp := Vendor.timestamp
-| parseTimestamp(field="Vendor.timestamp", format="yyyy-MM-dd'T'HH:mm:ss[.SSS]XXX", timezone="UTC")
+| parseTimestamp(field="Vendor.timestamp", format="yyyy-MM-dd'T'HH:mm:ss[.SSSSSSSSS]XXX", timezone="UTC")
 | event.kind := "event"
 | event.action := Vendor.event.action
 | event.module := Vendor.product
