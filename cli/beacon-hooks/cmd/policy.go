@@ -170,7 +170,14 @@ func policyDenyResponse(reason string) map[string]interface{} {
 		return map[string]interface{}{"decision": "reject"}
 	case platformFlag == "antigravity" || platformFlag == "grok":
 		return map[string]interface{}{"decision": "deny"}
-	case platformFlag == "claude":
+	// Qwen Code shares Claude Code's deny shape exactly: `hookSpecificOutput.permissionDecision`
+	// with a `permissionDecisionReason`, both required by its PreToolUse contract. The
+	// `hookEventName` stays "PreToolUse" in both phases the seam runs in, matching the existing
+	// claude behavior -- Qwen's PermissionRequest event reads a differently shaped
+	// `hookSpecificOutput.decision` object, so a deny raised from that phase is not honored there.
+	// Stated rather than hidden: the seam fails open, so the cost is a deny that does not take
+	// effect on one of two phases, never a tool call blocked for the wrong reason.
+	case platformFlag == "claude" || platformFlag == "qwen":
 		return map[string]interface{}{
 			"hookSpecificOutput": map[string]interface{}{
 				"hookEventName":            "PreToolUse",

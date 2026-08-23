@@ -1,0 +1,16 @@
+{
+  "session_id": "qwen-8f21c4a0",
+  "transcript_path": "/Users/example/.qwen/tmp/qwen-8f21c4a0/chat.json",
+  "cwd": "/Users/example/projects/beacon-demo",
+  "hook_event_name": "PostToolUseFailure",
+  "timestamp": "2026-08-21T10:15:40.000Z",
+  "permission_mode": "default",
+  "tool_name": "write_file",
+  "tool_use_id": "toolu_01QwenFail",
+  "tool_input": {
+    "file_path": "/Users/example/projects/beacon-demo/src/locked.ts",
+    "content": "export const nope = true\n"
+  },
+  "error": "EACCES: permission denied, open '/Users/example/projects/beacon-demo/src/locked.ts'",
+  "is_interrupt": false
+}
