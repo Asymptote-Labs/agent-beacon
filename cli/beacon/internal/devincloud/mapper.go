@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Provider is the BEACON_RUN_PROVIDER value for Devin Cloud telemetry. It
@@ -71,16 +72,40 @@ func MapSession(s Session, msgs []Message) []MappedEvent {
 	seen := map[string]bool{}
 	for i, m := range msgs {
 		dedupID := messageDedupID(s.SessionID, m, i, seen)
+		// RetainedContent returns nil for an empty message, and the message shapes
+		// are built only alongside it, so a message with no text gets neither a
+		// marker claiming retention nor a message part with empty content.
+		//
+		// The limit passed to RetainedContent must match the limit SanitizeEvent
+		// applies to the field the text actually lives in: prompt.text is sanitized
+		// at DefaultStringLimit, while gen_ai (where assistant text lands) is
+		// sanitized at DefaultRawStringLimit.
 		switch strings.ToLower(m.Source) {
 		case "user":
+			content := asymptoteobserve.RetainedContent(m.Message, asymptoteobserve.DefaultStringLimit)
 			ev := baseEvent(s, "prompt.submitted", "prompt", schema.SeverityInfo, m.CreatedAt)
 			ev.Prompt = &schema.PromptInfo{Text: m.Message}
-			ev.Content = &schema.ContentInfo{Retention: schema.ContentRetentionFull, Included: true}
+			if content != nil {
+				ev.GenAI = &schema.GenAIInfo{Input: &schema.GenAIInputInfo{
+					Messages: asymptoteobserve.TextInputMessages(m.Message),
+				}}
+			}
+			ev.Content = content
 			ev.Message = "Devin Cloud user prompt"
 			out = append(out, MappedEvent{DedupID: dedupID, Event: ev})
 		default: // "devin" (assistant) and any future agent-side source
+			content := asymptoteobserve.RetainedContent(m.Message, asymptoteobserve.DefaultRawStringLimit)
 			ev := baseEvent(s, "agent.message", "session", schema.SeverityInfo, m.CreatedAt)
-			ev.Content = &schema.ContentInfo{Retention: schema.ContentRetentionFull, Included: true}
+			// The assistant's text reached the log only as the event message, which
+			// is a free-text label rather than a payload anything can match on. It
+			// keeps its place there and also lands in the semconv output-messages
+			// shape every other capture path now uses for assistant text.
+			if content != nil {
+				ev.GenAI = &schema.GenAIInfo{Output: &schema.GenAIOutputInfo{
+					Messages: asymptoteobserve.TextOutputMessages(m.Message),
+				}}
+			}
+			ev.Content = content
 			ev.Message = m.Message
 			out = append(out, MappedEvent{DedupID: dedupID, Event: ev})
 		}

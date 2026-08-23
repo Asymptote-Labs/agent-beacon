@@ -49,8 +49,13 @@ func TestNewExporterAcceptsDeprecatedContentRetention(t *testing.T) {
 	record.Attributes().PutStr("beacon.event.action", "prompt.submitted")
 	record.Attributes().PutStr("gen_ai.prompt", "hello")
 	event := exp.eventFromLog(nil, record)
-	if event.Content != nil {
-		t.Fatalf("deprecated content retention should not emit content marker: %#v", event.Content)
+	// The marker is what shows the knob is a no-op: it describes the retention
+	// that actually happened, and the config asked for "metadata".
+	if event.Content == nil {
+		t.Fatalf("content marker missing on a retained prompt: %#v", event)
+	}
+	if event.Content.Retention != asymptoteobserve.ContentRetentionFull || !event.Content.Included {
+		t.Fatalf("deprecated content retention changed retention: %#v", event.Content)
 	}
 }
 
@@ -1904,4 +1909,50 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestJSONLWriterCompactsRetainedContentBeforeFailing(t *testing.T) {
+	// The step between "drop raw" and "refuse to write the event" -- survivable
+	// while no OTLP event carried a turn's text, and not once they do.
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writer := jsonlWriter{
+		path:           path,
+		maxEventBytes:  1024,
+		rotateBytes:    defaultRotateBytes,
+		rotateArchives: defaultRotateArchives,
+		redactSecrets:  true,
+	}
+	long := strings.Repeat("y", 4096)
+	event := newBeaconEvent("command.executed", "command", "info", "cursor", time.Now())
+	event.Session = &sessionInfo{ID: "s-compact"}
+	event.Command = &commandInfo{Command: "make build", Output: long}
+	event.File = &fileInfo{Path: "/repo/main.go", Diff: long}
+	event.Prompt = &promptInfo{Text: long}
+	event.Content = &contentInfo{Retention: asymptoteobserve.ContentRetentionFull, Included: true, Bytes: len(long)}
+
+	if err := writer.append(event); err != nil {
+		t.Fatalf("append returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	var written beaconEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &written); err != nil {
+		t.Fatalf("decode written event: %v", err)
+	}
+	if written.Command.Output != "" || written.File.Diff != "" || written.Prompt.Text != "" {
+		t.Fatalf("retained content survived compaction: %#v", written)
+	}
+	if written.Content == nil || written.Content.Included || !written.Content.Truncated {
+		t.Fatalf("content marker = %#v, want included=false truncated=true", written.Content)
+	}
+	// The event is still identifiable: what it was and what command it described
+	// outlive the content that had to be dropped.
+	if written.Command.Command != "make build" || written.Event.Action != "command.executed" {
+		t.Fatalf("compaction lost the event's identity: %#v", written)
+	}
+	if written.Content.Bytes != len(long) {
+		t.Fatalf("content bytes = %d, want the original %d", written.Content.Bytes, len(long))
+	}
 }

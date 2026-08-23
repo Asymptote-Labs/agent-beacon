@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
@@ -30,6 +31,17 @@ func (w jsonlWriter) append(event beaconEvent) error {
 		event.Raw = nil
 		event.Message = asymptoteobserve.TruncateString(event.Message, 1024)
 		event.Truncated = true
+		data, err = json.Marshal(event)
+		if err != nil {
+			return err
+		}
+	}
+	if len(data) > w.maxEventBytes {
+		// Retained content is the next thing to go after raw, mirroring the hook
+		// writer's compactEndpointContent. Before this path existed the only step
+		// past dropping raw was the hard error below, which was survivable while
+		// no OTLP event carried a turn's text and is not now that they do.
+		compactRetainedContent(&event)
 		data, err = json.Marshal(event)
 		if err != nil {
 			return err
@@ -59,6 +71,39 @@ func (w jsonlWriter) append(event beaconEvent) error {
 	return appendJSONL(w.path, append(data, '\n'), w.rotateBytes, w.rotateArchives)
 }
 
+// compactRetainedContent drops an event's retained text and records that it did,
+// so a reader can still tell what the event was about and that its content was
+// held back rather than never captured. The hash and byte count in the content
+// marker describe the original text and stay put.
+func compactRetainedContent(event *beaconEvent) {
+	if event.File != nil {
+		event.File.Diff = ""
+	}
+	if event.Command != nil {
+		event.Command.Output = ""
+	}
+	if event.Prompt != nil {
+		event.Prompt.Text = ""
+	}
+	if event.GenAI != nil {
+		event.GenAI.Input = nil
+		event.GenAI.Output = nil
+		if event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil {
+			event.GenAI.Tool.Call.Arguments = nil
+			event.GenAI.Tool.Call.Result = nil
+		}
+		// An event whose only gen_ai content was the turn text drops the object
+		// rather than writing "gen_ai":{}.
+		if beaconevent.IsZeroJSON(event.GenAI) {
+			event.GenAI = nil
+		}
+	}
+	if event.Content != nil {
+		event.Content.Included = false
+		event.Content.Truncated = true
+	}
+}
+
 func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 	event.Message = w.cleanString(event.Message, asymptoteobserve.DefaultStringLimit)
 	if event.Tool != nil {
@@ -67,6 +112,12 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 	}
 	if event.Command != nil {
 		event.Command.Command = w.cleanString(event.Command.Command, asymptoteobserve.DefaultStringLimit)
+		event.Command.Output = w.cleanString(event.Command.Output, asymptoteobserve.DefaultStringLimit)
+	}
+	// Mirrors SanitizeEvent: retained bulk content gets the prompt-text limit and
+	// secret redaction, not the shorter raw-attribute limit.
+	if event.File != nil {
+		event.File.Diff = w.cleanString(event.File.Diff, asymptoteobserve.DefaultStringLimit)
 	}
 	if event.Approval != nil {
 		event.Approval.Reason = w.cleanString(event.Approval.Reason, asymptoteobserve.DefaultStringLimit)

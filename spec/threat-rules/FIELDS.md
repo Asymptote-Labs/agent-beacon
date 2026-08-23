@@ -15,6 +15,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.command.command` | string |
 | `e.command.duration_ms` | int |
 | `e.command.exit_code` | int |
+| `e.command.output` | string |
 | `e.content.bytes` | int |
 | `e.content.hash` | string |
 | `e.content.included` | bool |
@@ -34,6 +35,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.event.id` | string |
 | `e.event.kind` | string |
 | `e.field_truncated` | bool |
+| `e.file.diff` | string |
 | `e.file.diff_bytes` | int |
 | `e.file.diff_hash` | string |
 | `e.file.language` | string |

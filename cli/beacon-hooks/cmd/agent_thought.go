@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -56,34 +53,18 @@ func runAgentThought(cmd *cobra.Command, args []string) {
 // output-messages shape (a single assistant message with a reasoning part), so
 // hook-captured reasoning matches what semconv-native OTLP sources emit.
 func reasoningOutputMessages(text string) []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"role": "assistant",
-			"parts": []interface{}{
-				map[string]interface{}{"type": "reasoning", "content": text},
-			},
-		},
-	}
+	return asymptoteobserve.ReasoningOutputMessages(text)
 }
 
-// retainedContentFields builds the content marker for an event that retains
-// raw text, computed against the original text so hash and byte count stay
-// stable even after the sink redacts or truncates the stored copy.
+// retainedContentFields builds the content marker for an event that retains raw
+// text, computed against the original text so hash and byte count stay stable
+// even after the sink redacts or truncates the stored copy.
+//
+// The limit passed is the one this writer applies: the hook logger sanitizes the
+// whole event map at DefaultStringLimit, so that is what "truncated" has to mean
+// here. The collector answers the same question with its own limit.
 func retainedContentFields(text string) map[string]interface{} {
-	sum := sha256.Sum256([]byte(text))
-	fields := map[string]interface{}{
-		"retention": asymptoteobserve.ContentRetentionFull,
-		"included":  true,
-		"hash":      hex.EncodeToString(sum[:]),
-		"bytes":     len(text),
-	}
-	if len(text) > asymptoteobserve.DefaultStringLimit {
-		fields["truncated"] = true
-	}
-	if asymptoteobserve.RedactString(text) != text {
-		fields["redacted"] = true
-	}
-	return fields
+	return asymptoteobserve.RetainedContentFields(text, asymptoteobserve.DefaultStringLimit)
 }
 
 // thoughtMetadataFields extracts the non-content afterAgentThought payload

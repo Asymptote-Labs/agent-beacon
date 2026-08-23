@@ -161,12 +161,27 @@ type FileInfo struct {
 	Language  string `json:"language,omitempty"`
 	DiffHash  string `json:"diff_hash,omitempty"`
 	DiffBytes int    `json:"diff_bytes,omitempty"`
+	// Diff is the retained unified diff for the edit. DiffHash and DiffBytes
+	// describe the original diff, so they stay stable when the stored text is
+	// redacted or truncated; the accompanying Content marker says which happened.
+	//
+	// Declared here because the hook adapter has always written it. It assembles
+	// events as maps, so `file.diff` reached the log while this struct -- what the
+	// dashboard, `beacon scan` and the CEL rules engine read events through --
+	// dropped it on parse. The diff was captured and unreadable at the same time,
+	// and no rule could match on it because the field reference is generated from
+	// this type.
+	Diff string `json:"diff,omitempty"`
 }
 
 type CommandInfo struct {
 	Command    string `json:"command,omitempty"`
 	ExitCode   *int   `json:"exit_code,omitempty"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
+	// Output is the retained combined output of the command, when the runtime
+	// reports it. Same history as FileInfo.Diff: Cursor's afterShellExecution hook
+	// has always written `command.output`, and this struct has always dropped it.
+	Output string `json:"output,omitempty"`
 }
 
 type MCPMethodInfo struct {

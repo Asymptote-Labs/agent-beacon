@@ -61,8 +61,15 @@ func TestGrokIgnoresLegacyRetentionEnv(t *testing.T) {
 	if _, ok := raw["grok"]; !ok {
 		t.Fatalf("legacy retention env should not omit raw grok payload: %#v", raw)
 	}
-	if _, ok := event["content"]; ok {
-		t.Fatalf("legacy retention env should not emit content marker: %#v", event["content"])
+	// The marker is what proves the env is inert, rather than its absence: it
+	// reports the retention that actually happened, and BEACON_CONTENT_RETENTION
+	// asked for "metadata".
+	content, ok := event["content"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("content marker missing on a retained prompt: %#v", event)
+	}
+	if content["retention"] != "full" || content["included"] != true {
+		t.Fatalf("legacy retention env changed retention: %#v", content)
 	}
 }
 

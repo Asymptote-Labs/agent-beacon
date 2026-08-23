@@ -395,6 +395,7 @@ func emitCursorPostHookObserved(logger *logging.Logger, input map[string]interfa
 		commandFields := map[string]interface{}{"command": command}
 		if output := getFirstStr(input, "output"); output != "" {
 			commandFields["output"] = output
+			fields["content"] = retainedContentFields(output)
 		}
 		if duration, ok := input["duration"]; ok {
 			commandFields["duration_ms"] = duration
