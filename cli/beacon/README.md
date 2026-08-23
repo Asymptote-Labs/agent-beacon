@@ -550,6 +550,18 @@ The Grok Build integration writes Beacon's owned local hook file at
 for project-level installs. Project hooks require trusting the project in Grok
 with `/hooks-trust` before they execute.
 
+The Qwen Code integration merges command hooks into Qwen Code's own
+`~/.qwen/settings.json` for user-level installs or `.qwen/settings.json` for
+project-level installs. Project hooks execute only once the folder is trusted in
+Qwen Code, and Qwen's own `disableAllHooks: true` setting stops every hook
+without deleting its configuration. Note that Qwen Code reads the `timeout`
+field in milliseconds where Claude Code reads it in seconds; Beacon writes
+millisecond values, so keep them in milliseconds if you edit them by hand.
+
+Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so
+`beacon endpoint install --harness qwen` has nothing to configure and points at
+`beacon endpoint hooks install --harness qwen` instead.
+
 The Hermes Agent integration writes shell-hook entries into
 `~/.hermes/config.yaml`. Hermes prompts for first-use consent for each
 `(event, command)` pair; for non-interactive gateway, cron, or CI runs, set
