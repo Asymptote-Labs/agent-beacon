@@ -17,12 +17,23 @@ beacon endpoint install
 ```
 
 ```bash title="Linux"
-VERSION=1.2.0   # or whichever release you are installing
-curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/beacon_${VERSION}_linux_amd64.tar.gz
-curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}/checksums.txt
-sha256sum --check --ignore-missing checksums.txt
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"
+VERSION="${LATEST_URL##*/v}"
 
-tar -xzf beacon_${VERSION}_linux_amd64.tar.gz
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "Beacon publishes Linux archives for amd64 and arm64, not $(uname -m)" >&2; exit 1 ;;
+esac
+
+ARCHIVE="beacon_${VERSION}_linux_${ARCH}.tar.gz"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${ARCHIVE}"
+curl -fsSLO "${BASE}/checksums.txt"
+
+grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
+
+tar -xzf "${ARCHIVE}"
 mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
 beacon endpoint install
 ```
@@ -34,6 +45,12 @@ beacon endpoint install
   `/var/log/beacon-agent/runtime.jsonl` instead, so every command below would report on the wrong
   log. If you want the system-mode package, follow [Linux](/platforms/linux) instead of this page.
 </Note>
+
+The Linux commands resolve the current release rather than a version you have to edit in, map
+`x86_64` and `aarch64` to the archive names Beacon actually publishes, and stop before downloading
+anything on an architecture with no published archive. The checksum step names the one archive
+about to be extracted, so it verifies that file rather than whatever else the directory happens to
+hold.
 
 See [Asymptote Open Source](/deployment/open-source) for install details and runtime-specific notes,
 or [macOS](/platforms/macos), [Linux](/platforms/linux), or [Windows](/platforms/windows) for the
