@@ -50,11 +50,11 @@ func emitHookEventWithFidelity(logger *logging.Logger, action, category, severit
 	}
 	// Qwen carries real signal with no endpoint-schema field of its own: `permission_mode` on every
 	// tool event, `source` on SessionStart, `stop_hook_active` and the `context_usage` /
-	// `context_limit` / `input_tokens` trio on Stop, `tool_use_id` linking a pre-tool event to its
-	// post-tool result. Keeping the payload under `raw.qwen` preserves it without inventing schema
-	// fields for one runtime. It is the whole event's own path through SanitizeMap, so raw is
-	// secret-redacted and string-limited like every other field, and it is the first thing dropped
-	// when an event exceeds the 64 KiB ceiling.
+	// `context_limit` / `input_tokens` trio on Stop, and the verbatim `tool_use_id` whose promoted
+	// form is the join key applyToolCallID writes just below. Keeping the payload under `raw.qwen`
+	// preserves it without inventing schema fields for one runtime. It is the whole event's own path
+	// through SanitizeMap, so raw is secret-redacted and string-limited like every other field, and
+	// it is the first thing dropped when an event exceeds the 64 KiB ceiling.
 	if platformFlag == "qwen" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
 	}
@@ -64,6 +64,7 @@ func emitHookEventWithFidelity(logger *logging.Logger, action, category, severit
 	if isCascadePlatform(platformFlag) {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"cascade": input})
 	}
+	applyToolCallID(fields, input)
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}
@@ -289,7 +290,87 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 			fields[key] = value
 		}
 	}
+	// No call ID is read here, deliberately: this function sees only the tool's
+	// arguments and its output, and neither is where identity lives. Callers
+	// promote it from the payload envelope instead -- emitHookEvent for every
+	// hook mapper, and the Cline, OpenCode and file-edit emitters by name.
+	//
+	// Scanning the arguments was worse than merely useless. tool_input is what
+	// the model chose to pass, so a tool that legitimately takes an argument
+	// called call_id -- an MCP wrapper over an API whose objects have call IDs,
+	// say -- had that value written as gen_ai.tool.call.id, and because an ID
+	// already present is treated as authoritative it then blocked the runtime's
+	// real tool_use_id. One wrong join key, and the right one shut out.
+	// Reported by Cursor Bugbot.
 	return fields
+}
+
+// toolCallIDFromEnvelope reads the runtime's own identifier for one tool
+// invocation out of a hook payload's top level.
+//
+// The envelope only. The runtime writes this field itself, whereas tool_input is
+// model-authored and tool_response is the tool's own output -- neither is a
+// statement by the runtime about which call this is, and reading identity out of
+// either lets a tool argument masquerade as the join key.
+//
+// The alias list is shared with the OTLP path so both capture paths promote the
+// same value to the same field, which is what lets duplicate suppression
+// recognise the two reports of one action as one action.
+func toolCallIDFromEnvelope(input map[string]interface{}) string {
+	return firstToolStringAcross([]map[string]interface{}{input}, asymptoteobserve.ToolCallIDKeys...)
+}
+
+// applyToolCallID promotes a call ID carried at the top level of a hook payload,
+// which is where Claude Code puts tool_use_id -- outside tool_input, so no
+// amount of reading the tool arguments would ever have found it.
+//
+// The envelope is the only source of a call ID anywhere in the hook path, so
+// this is a plain promotion rather than a contest between sources. Tool
+// arguments were once read too, which let a tool parameter that happened to be
+// called call_id become the join key and shut out the runtime's real
+// tool_use_id; that read is gone rather than merely outranked, because a tool
+// parameter is not weaker evidence of identity, it is not evidence at all.
+//
+// Only an event that already describes a tool action takes one. A session
+// lifecycle payload that happens to echo an ID is not a tool call, and giving it
+// the join key of one would join it to work it did not do.
+func applyToolCallID(fields, input map[string]interface{}) {
+	if fields == nil || !describesToolAction(fields) {
+		return
+	}
+	if callID := toolCallIDFromEnvelope(input); callID != "" {
+		setToolCallID(fields, callID)
+	}
+}
+
+func describesToolAction(fields map[string]interface{}) bool {
+	for _, key := range []string{"tool", "command", "file", "mcp"} {
+		if value, ok := fields[key].(map[string]interface{}); ok && len(value) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// setToolCallID writes gen_ai.tool.call.id, creating the objects on the way down
+// and leaving whatever is already in them alone. mergeNested cannot do this: it
+// is a one-level merge, so writing the call through it would replace the whole
+// tool object and drop the name and arguments an MCP event puts there.
+func setToolCallID(fields map[string]interface{}, callID string) {
+	genAI := mutableChild(fields["gen_ai"])
+	tool := mutableChild(genAI["tool"])
+	call := mutableChild(tool["call"])
+	call["id"] = callID
+	tool["call"] = call
+	genAI["tool"] = tool
+	fields["gen_ai"] = genAI
+}
+
+func mutableChild(value interface{}) map[string]interface{} {
+	if existing, ok := value.(map[string]interface{}); ok && existing != nil {
+		return existing
+	}
+	return map[string]interface{}{}
 }
 
 func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface{}) map[string]interface{} {

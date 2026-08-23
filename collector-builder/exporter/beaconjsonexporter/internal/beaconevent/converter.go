@@ -1069,10 +1069,11 @@ func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 	if definitions, ok := AnyAttr(attrs, "gen_ai.tool.definitions"); ok {
 		tool.Definitions = definitions
 	}
+	callID := ToolCallID(attrs)
 	if args, ok := AnyAttr(attrs, "gen_ai.tool.call.arguments", "beacon.gen_ai.tool.call.arguments", "function_args", "arguments"); ok {
-		tool.Call = &GenAIToolCallInfo{Arguments: args, ID: FirstString(attrs, "gen_ai.tool.call.id", "beacon.gen_ai.tool.call.id")}
-	} else if id := FirstString(attrs, "gen_ai.tool.call.id", "beacon.gen_ai.tool.call.id"); id != "" {
-		tool.Call = &GenAIToolCallInfo{ID: id}
+		tool.Call = &GenAIToolCallInfo{Arguments: args, ID: callID}
+	} else if callID != "" {
+		tool.Call = &GenAIToolCallInfo{ID: callID}
 	}
 	if result, ok := AnyAttr(attrs, "gen_ai.tool.call.result", "beacon.gen_ai.tool.call.result"); ok {
 		if tool.Call == nil {
@@ -1756,6 +1757,18 @@ func HasToolCall(attrs map[string]interface{}) bool {
 		return true
 	}
 	return IsMeaningfulValue(attrs["gen_ai.tool.call.arguments"])
+}
+
+// ToolCallID reads the runtime's own identifier for one tool invocation.
+//
+// Claude Code writes it as tool_use_id and Codex as call_id; neither name was
+// on the promotion list, so the value reached the log only inside raw and
+// nothing linked a tool call to its result. The alias list is shared with the
+// hook path so both capture paths promote the same value to the same field --
+// which is what lets duplicate suppression recognise the two reports of one
+// action as one action.
+func ToolCallID(attrs map[string]interface{}) string {
+	return FirstString(attrs, asymptoteobserve.ToolCallIDKeys...)
 }
 
 func IsMeaningfulValue(value interface{}) bool {

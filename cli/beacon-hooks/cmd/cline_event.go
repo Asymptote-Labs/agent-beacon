@@ -574,7 +574,7 @@ func clineToolFields(input map[string]interface{}, completed bool) map[string]in
 			call["result"] = toolResponse
 		}
 	}
-	if callID := getFirstStr(input, "callId", "call_id", "toolCallId", "tool_call_id"); callID != "" {
+	if callID := toolCallIDFromEnvelope(input); callID != "" {
 		call["id"] = callID
 	}
 	fields["gen_ai"] = map[string]interface{}{

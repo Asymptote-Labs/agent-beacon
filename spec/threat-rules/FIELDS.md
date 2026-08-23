@@ -31,6 +31,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.event.action` | string |
 | `e.event.category` | string |
 | `e.event.fidelity` | string |
+| `e.event.id` | string |
 | `e.event.kind` | string |
 | `e.field_truncated` | bool |
 | `e.file.diff_bytes` | int |
