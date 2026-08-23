@@ -1,0 +1,106 @@
+---
+title: "Pi"
+description: "Asymptote support details for Pi endpoint telemetry"
+---
+
+## Runtime Overview
+
+Asymptote supports [Pi](https://pi.dev/) as a discovered runtime surface, with a managed local extension as the collection path.
+
+Pi is neither of Asymptote's two established integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, which makes the integration extension-shaped — one Asymptote-owned extension file that forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
+
+<Note>
+Pi support is currently **discovery only**. `beacon endpoint discover` identifies Pi, resolves the managed extension path, and reports whether Asymptote's extension is in place, and any Pi-attributed event that reaches the runtime log normalizes to the canonical `pi_cli` harness name. The managed extension itself is not shipped yet, so `beacon endpoint hooks install --harness pi` returns `unsupported hook harness "pi"` and no Pi hook events are collected. See [Known gaps](#known-gaps).
+</Note>
+
+## Prerequisites
+
+- Pi is installed and available as the `pi` executable, or has a local state directory at `~/.pi/agent`.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+
+## Collection path
+
+Asymptote's managed Pi extension is a single TypeScript file at one of two documented extension locations:
+
+| Level | Extension path |
+|-------|----------------|
+| User | `~/.pi/agent/extensions/beacon.ts` |
+| Project | `./.pi/extensions/beacon.ts` |
+
+The distinction matters beyond the path. A project-level extension is subject to Pi's project-trust prompt, so the user-level location is the one that works without further interaction — and it is the path `beacon endpoint discover` reports on, so a project-level extension is not reflected in discovery output.
+
+Asymptote identifies its own extension file by the marker `beacon-managed-pi-extension:v1`. The version suffix is part of the contract with the extension source rather than decoration: it is what will let a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry.
+
+The integration is extension-based. Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+
+## Discovery and status
+
+Asymptote detects Pi through the `pi` executable, treating the `~/.pi/agent` state directory as an additional signal. Pi installed through npm, pnpm, or bun is frequently absent from the `PATH` the endpoint process inherited — a shell alias, a version manager, or a per-project install all hide it — while its state directory is still there. Treating that directory as evidence keeps discovery from reporting "not detected" for a runtime someone is actively using, the same fallback the OpenCode, Cursor, and Hermes probes make for the same reason.
+
+```bash title="Show Pi discovery state"
+beacon endpoint discover --all --json
+```
+
+Pi reports as the `pi_cli` harness with capability `plugin`:
+
+| Telemetry status | Meaning |
+|------------------|---------|
+| `missing` | No extension file at the user-level managed path |
+| `disabled` | A `beacon.ts` exists but carries no Asymptote marker, so it is somebody else's extension sharing the filename |
+| `enabled` | Asymptote's managed extension is in place |
+
+An unmarked extension file reports `disabled` rather than `enabled` on purpose. Reporting it as enabled would show the runtime as covered while no events arrive.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and includes Pi in discovery. There is no Pi hook install target yet:
+
+```bash title="Not yet available"
+beacon endpoint hooks install --harness pi
+# Error: unsupported hook harness "pi"
+```
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported — executable and `~/.pi/agent` detection, managed extension path, and telemetry status |
+| Harness attribution | Supported — `pi`, `pi.dev`, `pi_cli`, `pi-cli`, `pi_agent`, `pi-agent`, and `pi agent` all normalize to `pi_cli` |
+| Extension install and repair | Not yet available — see [Known gaps](#known-gaps) |
+| Prompt, session, tool, command, file, and approval telemetry | Not yet available — no extension is shipped, so no Pi hook events are collected |
+| Local JSONL and dashboard | Supported for any Pi-attributed event already in the runtime log |
+| MDM deployment | Supported for the endpoint agent; Pi extensions will install separately in the logged-in user's context |
+
+Pi's harness name is matched by equality against a closed set of spellings rather than by substring, because `pi` is two characters and appears inside names that belong to other runtimes — `copilot` contains it. A substring rule would attribute every GitHub Copilot and VS Code Copilot session to Pi.
+
+## Data handling
+
+Discovery reads the managed extension path and reports its state. It records no prompt text, command output, tool input, or file content, because no Pi collection path is active yet.
+
+When the managed extension lands, Pi content will be handled the same way as every other runtime: prompts, tool arguments and results, commands, command output, paths, and diffs retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, a hash and byte count on each content-bearing event, and events over the 64 KiB limit dropping raw and retained content while preserving stable metadata and setting `field_truncated`.
+
+## Known gaps
+
+- **No managed extension yet.** What ships today is Pi's runtime identity and discovery: the canonical harness name, the managed extension paths, the file marker, and status reporting. The extension source and its hook-event mapping are not in the build, so `beacon endpoint hooks install --harness pi` and `beacon endpoint hooks status --harness pi` both reject `pi` as an unsupported harness.
+- **No Pi hook telemetry.** Until the extension ships, Pi activity produces no endpoint events. Discovery reporting `missing` for a detected Pi install is the expected state, not a misconfiguration.
+- **No enforcement.** Consistent with every other runtime, enforcement stays behind the optional, off-by-default policy-provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Pi.
+
+## Deployment notes
+
+Because Pi collection is not active, there is nothing to restart and no hook state to validate. Confirm that discovery sees the runtime:
+
+```bash
+/opt/beacon/bin/beacon endpoint discover --all --json
+/opt/beacon/bin/beacon endpoint doctor --system
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures each runtime.
+  </Card>
+</Columns>
