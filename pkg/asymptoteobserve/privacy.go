@@ -121,6 +121,15 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	}
 	if event.Command != nil {
 		event.Command.Command = CleanString(event.Command.Command, DefaultStringLimit, true)
+		event.Command.Output = CleanString(event.Command.Output, DefaultStringLimit, true)
+	}
+	// Retained content the writers have always emitted but this function never
+	// saw, because the struct did not declare the fields. A diff or a block of
+	// command output is exactly the kind of text that carries a credential, so
+	// these get the same limit and the same secret redaction as prompt.text
+	// rather than a weaker one.
+	if event.File != nil {
+		event.File.Diff = CleanString(event.File.Diff, DefaultStringLimit, true)
 	}
 	if event.Approval != nil {
 		event.Approval.Reason = CleanString(event.Approval.Reason, DefaultStringLimit, true)

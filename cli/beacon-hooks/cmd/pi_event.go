@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // pi-event is the single entry point for every Pi lifecycle payload.
@@ -142,14 +144,9 @@ func piBaseFields(input map[string]interface{}, sessionID string) map[string]int
 
 func piPromptEvent(fields map[string]interface{}, prompt, source string) normalizedEvent {
 	fields["prompt"] = map[string]interface{}{"text": prompt}
-	fields["gen_ai"] = map[string]interface{}{
-		"input": map[string]interface{}{
-			"messages": []interface{}{map[string]interface{}{
-				"role":  "user",
-				"parts": []interface{}{map[string]interface{}{"type": "text", "content": prompt}},
-			}},
-		},
-	}
+	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
+		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
+	})
 	fields["content"] = retainedContentFields(prompt)
 	if source != "" {
 		// Pi distinguishes interactive input from input delivered over its RPC surface or injected

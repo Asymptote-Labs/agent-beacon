@@ -495,8 +495,15 @@ func TestRunPromptSubmitIgnoresLegacyRetentionEnvForDevinDesktop(t *testing.T) {
 	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
 		t.Fatalf("prompt.text = %q, want redacted prompt", got)
 	}
-	if _, ok := event["content"]; ok {
-		t.Fatalf("legacy retention env should not emit content marker: %#v", event["content"])
+	// The marker is what proves the env is inert, rather than its absence: it
+	// reports the retention that actually happened, and BEACON_CONTENT_RETENTION
+	// asked for "metadata".
+	content, ok := event["content"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("content marker missing on a retained prompt: %#v", event)
+	}
+	if content["retention"] != "full" || content["included"] != true {
+		t.Fatalf("legacy retention env changed retention: %#v", content)
 	}
 }
 
@@ -849,8 +856,15 @@ func TestRunPromptSubmitIgnoresLegacyRetentionEnv(t *testing.T) {
 	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize this file" {
 		t.Fatalf("prompt.text = %q, want legacy retention env ignored", got)
 	}
-	if _, ok := event["content"]; ok {
-		t.Fatalf("legacy retention env should not emit content marker: %#v", event["content"])
+	// The marker is what proves the env is inert, rather than its absence: it
+	// reports the retention that actually happened, and BEACON_CONTENT_RETENTION
+	// asked for "metadata".
+	content, ok := event["content"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("content marker missing on a retained prompt: %#v", event)
+	}
+	if content["retention"] != "full" || content["included"] != true {
+		t.Fatalf("legacy retention env changed retention: %#v", content)
 	}
 }
 

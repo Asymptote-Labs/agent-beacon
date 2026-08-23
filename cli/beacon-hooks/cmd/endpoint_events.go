@@ -552,13 +552,18 @@ func diffFields(filePath, diffStr string) map[string]interface{} {
 		"operation": "modify",
 		"language":  strings.TrimPrefix(filepath.Ext(filePath), "."),
 	}
+	fields := map[string]interface{}{"file": file}
 	if diffStr != "" {
 		sum := sha256.Sum256([]byte(diffStr))
 		file["diff_hash"] = hex.EncodeToString(sum[:])
 		file["diff_bytes"] = len(diffStr)
 		file["diff"] = diffStr
+		// diff_hash and diff_bytes already describe the original diff; the marker
+		// adds what they cannot say -- whether the stored copy is the whole diff,
+		// and whether redaction rewrote part of it.
+		fields["content"] = retainedContentFields(diffStr)
 	}
-	return map[string]interface{}{"file": file}
+	return fields
 }
 
 func mergeNested(existing interface{}, values map[string]interface{}) map[string]interface{} {

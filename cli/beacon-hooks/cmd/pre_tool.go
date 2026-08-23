@@ -155,6 +155,10 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 	}
 	fields := sessionFields(sessionID, input)
 	fields["prompt"] = map[string]interface{}{"text": prompt}
+	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
+		"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
+	})
+	fields["content"] = retainedContentFields(prompt)
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
 	if err := st.SetPromptEmitted(); err != nil {
 		logger.Warn("Failed to persist prompt state", "error", err.Error())

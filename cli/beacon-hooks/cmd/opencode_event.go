@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	hookdiff "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
 )
 
@@ -58,14 +59,9 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []no
 	case "chat.message":
 		if prompt := opencodePromptText(input); prompt != "" {
 			fields["prompt"] = map[string]interface{}{"text": prompt}
-			fields["gen_ai"] = map[string]interface{}{
-				"input": map[string]interface{}{
-					"messages": []interface{}{map[string]interface{}{
-						"role":  "user",
-						"parts": []interface{}{map[string]interface{}{"type": "text", "content": prompt}},
-					}},
-				},
-			}
+			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
+				"input": map[string]interface{}{"messages": asymptoteobserve.TextInputMessages(prompt)},
+			})
 			fields["content"] = retainedContentFields(prompt)
 		}
 		return one("prompt.submitted", "prompt", "info", "Prompt submitted to opencode", fields)

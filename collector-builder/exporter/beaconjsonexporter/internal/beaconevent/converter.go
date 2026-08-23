@@ -22,9 +22,16 @@ const (
 	CodexUserPrompt         = "codex.user_prompt"
 	CodexToolDecision       = "codex.tool_decision"
 	CodexToolResult         = "codex.tool_result"
+	ClaudeAssistantResponse = "claude_code.assistant_response"
 	ClaudeAPIRequest        = "claude_code.api_request"
 	ClaudeToolDecision      = "claude_code.tool_decision"
 	ClaudeToolResult        = "claude_code.tool_result"
+	// ClaudeMCPServerConnection is Claude Code's MCP connect/disconnect record. It
+	// is classified mcp.connection by the table below, but it names its server in
+	// `server_name`, which no mcp.* alias read -- so the event arrived actioned as
+	// MCP with no mcp object on it, and every rule that gates on e.mcp.server saw
+	// nothing.
+	ClaudeMCPServerConnection = "claude_code.mcp_server_connection"
 )
 
 type eventClassification struct {
@@ -34,7 +41,7 @@ type eventClassification struct {
 
 var claudeLogEventClassifications = map[string]eventClassification{
 	"claude_code.user_prompt":             {action: "prompt.submitted", category: "prompt"},
-	"claude_code.assistant_response":      {action: "session.activity", category: "session"},
+	ClaudeAssistantResponse:               {action: "session.activity", category: "session"},
 	ClaudeToolResult:                      {},
 	ClaudeAPIRequest:                      {action: "session.activity", category: "session"},
 	"claude_code.api_error":               {action: "session.error", category: "session"},
@@ -320,6 +327,9 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	})
 	c.NormalizeCodexLogEvent(&event, attrs)
 	c.NormalizeClaudeLogEvent(&event, attrs, body)
+	// Last, so it sees the action and category the normalizers settled on rather
+	// than the ones InferAction guessed.
+	c.PromoteRetainedContent(&event, attrs, body)
 	return event
 }
 
@@ -350,6 +360,7 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 		"span_kind":   span.Kind().String(),
 		"status":      span.Status().Code().String(),
 	})
+	c.PromoteRetainedContent(&event, attrs, span.Name())
 	return event
 }
 
@@ -470,6 +481,11 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	case ClaudeToolResult:
 		event.Event.Fidelity = asymptoteobserve.FidelityObserved
 		NormalizeClaudeToolResult(event, attrs)
+	case ClaudeMCPServerConnection:
+		event.Event.Fidelity = asymptoteobserve.FidelityObserved
+		event.Event.Action = "mcp.connection"
+		event.Event.Category = "mcp"
+		normalizeClaudeMCPConnection(event, attrs)
 	case "":
 		return
 	default:
@@ -578,6 +594,21 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 		normalizeClaudeFileResult(event, toolName, input, "file.read")
 	case "write", "edit", "notebookedit":
 		normalizeClaudeFileResult(event, toolName, input, "file.modified")
+	}
+}
+
+// normalizeClaudeMCPConnection gives an mcp.connection event the mcp payload its
+// action promises, from the attributes Claude Code actually emits.
+func normalizeClaudeMCPConnection(event *Event, attrs map[string]interface{}) {
+	server := FirstString(attrs, "server_name", "mcp.server", "mcp.server.name", "mcp_server_name")
+	if server == "" {
+		return
+	}
+	if event.MCP == nil {
+		event.MCP = &MCPInfo{}
+	}
+	if event.MCP.Server == "" {
+		event.MCP.Server = server
 	}
 }
 
@@ -919,7 +950,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 		}
 	}
 	if event.Event.Category == "prompt" {
-		if text := FirstNonEmpty(FirstTextAttr(attrs, "beacon.prompt.text", "gen_ai.prompt", "prompt", "user_prompt", "input.prompt", "copilot_chat.user_request"), FirstMessageText(event.GenAI)); text != "" {
+		if text := FirstNonEmpty(FirstTextAttr(attrs, PromptTextKeys...), FirstMessageText(event.GenAI)); text != "" {
 			event.Prompt = &PromptInfo{Text: text}
 		}
 	}

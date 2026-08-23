@@ -1,6 +1,10 @@
 package devincloud
 
-import "testing"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"testing"
+)
 
 func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 	s := Session{
@@ -176,5 +180,47 @@ func TestMappedEventsRecordPollCollectionMethod(t *testing.T) {
 		if got := m.Event.Harness.CollectionMethod; got != "poll" {
 			t.Fatalf("event %d (%s) collection_method = %q, want poll", i, m.Event.Event.Action, got)
 		}
+	}
+}
+
+func TestMapSessionRecordsRetainedMessageContent(t *testing.T) {
+	// Both markers used to claim full retention with no hash and no byte count,
+	// and the assistant's text reached the log only as the event message.
+	prompt := "fix the flaky test"
+	reply := "I disabled the retry and pinned the clock."
+	mapped := MapSession(
+		Session{SessionID: "devin-1", CreatedAt: 100},
+		[]Message{
+			{EventID: "m1", Source: "user", Message: prompt, CreatedAt: 101},
+			{EventID: "m2", Source: "devin", Message: reply, CreatedAt: 102},
+		},
+	)
+	if len(mapped) != 3 {
+		t.Fatalf("mapped = %d events, want 3", len(mapped))
+	}
+
+	promptEvent := mapped[1].Event
+	promptSum := sha256.Sum256([]byte(prompt))
+	if promptEvent.Content == nil || promptEvent.Content.Hash != hex.EncodeToString(promptSum[:]) {
+		t.Fatalf("prompt content marker = %#v, want the prompt hashed", promptEvent.Content)
+	}
+	if promptEvent.Content.Bytes != len(prompt) || !promptEvent.Content.Included {
+		t.Fatalf("prompt content marker = %#v, want the retained prompt described", promptEvent.Content)
+	}
+	if promptEvent.GenAI == nil || promptEvent.GenAI.Input == nil || promptEvent.GenAI.Input.Messages == nil {
+		t.Fatalf("prompt not mirrored into gen_ai.input.messages: %#v", promptEvent.GenAI)
+	}
+
+	agentEvent := mapped[2].Event
+	if agentEvent.GenAI == nil || agentEvent.GenAI.Output == nil || agentEvent.GenAI.Output.Messages == nil {
+		t.Fatalf("assistant text not promoted into gen_ai.output.messages: %#v", agentEvent.GenAI)
+	}
+	replySum := sha256.Sum256([]byte(reply))
+	if agentEvent.Content == nil || agentEvent.Content.Hash != hex.EncodeToString(replySum[:]) {
+		t.Fatalf("agent content marker = %#v, want the reply hashed", agentEvent.Content)
+	}
+	// The message keeps its existing role as the human-readable label.
+	if agentEvent.Message != reply {
+		t.Fatalf("agent message = %q, want the reply text preserved", agentEvent.Message)
 	}
 }
