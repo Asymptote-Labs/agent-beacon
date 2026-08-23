@@ -138,6 +138,7 @@
                     "pages": [
                       "runtimes/antigravity-cli",
                       "runtimes/claude-code",
+                      "runtimes/cline",
                       "runtimes/codex-cli",
                       "runtimes/cursor",
                       "runtimes/devin",
@@ -146,7 +147,6 @@
                       "runtimes/gemini-cli",
                       "runtimes/github-copilot-cli",
                       "runtimes/grok-build",
-                      "runtimes/cline",
                       "runtimes/opencode",
                       "runtimes/vscode"
                     ]
