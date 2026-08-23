@@ -810,6 +810,8 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 			return paths, fmt.Errorf("opencode telemetry is installed with `beacon endpoint hooks install --harness opencode`, not endpoint install")
 		case "cline":
 			return paths, fmt.Errorf("Cline telemetry is installed with `beacon endpoint hooks install --harness cline`, not endpoint install")
+		case "pi", "pi_cli":
+			return paths, fmt.Errorf("Pi telemetry is installed with `beacon endpoint hooks install --harness pi`, not endpoint install")
 		// Qwen Code has no OpenTelemetry export to point at the local collector, so `endpoint
 		// install --harness qwen` has nothing to configure. Saying so beats the generic
 		// "unsupported harness", which reads as "Beacon does not support Qwen Code" when the
