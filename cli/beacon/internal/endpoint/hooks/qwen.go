@@ -35,6 +35,29 @@ const (
 // beats "probably equivalent" for the field that decides whether a hook fires at all.
 const qwenAllToolsMatcher = "*"
 
+// qwenHookShell tells Qwen which shell to parse Beacon's hook command with.
+//
+// Beacon builds that command with hookCommandQuote, which single-quotes every path on every
+// platform. Single quotes are fully literal in a POSIX shell, which is what a Windows path needs --
+// inside double quotes bash still expands `$` and eats a doubled backslash, so a profile directory
+// containing a `$` would vanish and a UNC path would lose a separator. That function's own comment
+// records the cost of the choice: the same quoting is not valid in cmd.exe, and in PowerShell a
+// quoted string in command position is an expression rather than a command.
+//
+// Qwen is the runtime that comment anticipated. It runs hook commands through a shell of its
+// choosing and documents exactly two values a hook may ask for, `bash` and `powershell`. Left
+// unset on Windows, a Node-hosted runtime lands on the platform default -- cmd.exe -- where
+// Beacon's quotes are literal characters and every hook fails to start while the install still
+// reports success. That is the same silent-failure shape as writing a seconds-valued timeout, and
+// it is worth the same care.
+//
+// `bash` rather than `powershell` because the command is already POSIX-quoted: choosing the other
+// would mean maintaining a second quoting dialect for one runtime. On macOS and Linux this names
+// the shell that would have run anyway. On Windows it requires bash on PATH, which is the same
+// requirement Claude Code already carries there -- and it strictly improves on the alternative,
+// since cmd.exe cannot parse the command at all.
+const qwenHookShell = "bash"
+
 type QwenOptions struct {
 	Level    Level
 	LogPath  string
@@ -106,16 +129,16 @@ func qwenStatusFromRuntime(status runtimeStatus) QwenStatus {
 func installQwenSettings(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("qwen", binaryPath, logPath, configPath)
 	endpointHooks := map[string]settingsHookGroup{
-		"SessionStart":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-start"}}},
-		"UserPromptSubmit":   {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: qwenPromptSubmitTimeoutMS}}},
-		"PreToolUse":         {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " pre-tool", Timeout: qwenToolTimeoutMS}}},
-		"PostToolUse":        {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS}}},
-		"PostToolUseFailure": {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS}}},
-		"PermissionRequest":  {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " permission-request", Timeout: qwenToolTimeoutMS}}},
-		"Stop":               {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " stop", Timeout: qwenStopTimeoutMS}}},
-		"SubagentStart":      {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " subagent-start"}}},
-		"SubagentStop":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " subagent-stop"}}},
-		"SessionEnd":         {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-end"}}},
+		"SessionStart":       {Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " session-start"}}},
+		"UserPromptSubmit":   {Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " prompt-submit", Timeout: qwenPromptSubmitTimeoutMS}}},
+		"PreToolUse":         {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " pre-tool", Timeout: qwenToolTimeoutMS}}},
+		"PostToolUse":        {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS}}},
+		"PostToolUseFailure": {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS}}},
+		"PermissionRequest":  {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " permission-request", Timeout: qwenToolTimeoutMS}}},
+		"Stop":               {Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " stop", Timeout: qwenStopTimeoutMS}}},
+		"SubagentStart":      {Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " subagent-start"}}},
+		"SubagentStop":       {Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " subagent-stop"}}},
+		"SessionEnd":         {Hooks: []settingsHookRef{{Type: "command", Shell: qwenHookShell, Command: prefix + " session-end"}}},
 	}
 	return installSettingsEndpointHooks(path, "qwen", endpointHooks)
 }
