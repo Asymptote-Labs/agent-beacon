@@ -32,6 +32,13 @@ var runLoginctlCommand = func(args ...string) (string, error) {
 	return string(out), err
 }
 
+// lingerSystemdPresent gates the linger helpers on systemd being PID 1.
+//
+// Separate from the systemdIsInit call in backend detection so linger tests can drive every
+// branch on any host. Stubbing detection itself would change which backend Manager picks, which
+// is a different question with its own tests.
+var lingerSystemdPresent = systemdIsInit
+
 // systemdIsInit reports whether systemd is PID 1.
 //
 // Checked by reading /proc/1/comm rather than by probing for the systemctl binary: many
@@ -201,32 +208,68 @@ func systemctlError(out string, err error, what string) error {
 // login session, whereas a systemd user manager is torn down at logout unless linger is set.
 // Without it a user-mode install silently stops collecting the moment the user logs out.
 // Best-effort, since it needs privileges that a plain user may not have.
+//
+// The reported outcome is whether linger is actually set afterwards, read back from logind,
+// rather than whether the loginctl call exited zero. Those differ in both directions:
+// authentication can be declined after a zero exit on some logind versions, and the enable can
+// land while a helper process the call spawned fails noisily. Logout persistence is the thing
+// the user cares about, so it is the thing that gets checked.
 func EnableLinger(username string) (bool, string) {
-	if !systemdIsInit() {
+	if !lingerSystemdPresent() {
 		return false, "systemd is not PID 1; linger does not apply"
 	}
 	if username == "" {
 		return false, "no username provided"
 	}
-	out, err := runLoginctlCommand("enable-linger", username)
-	if err != nil {
-		// loginctl does not always print anything on failure, and an empty detail here is
-		// indistinguishable from "linger does not apply" -- which is what the caller uses an empty
-		// detail to mean. The error is folded in so the outcome is always attributable.
-		if detail := strings.TrimSpace(out); detail != "" {
-			return false, detail
-		}
-		return false, "loginctl enable-linger " + username + " failed: " + err.Error()
+	// --no-ask-password keeps loginctl from launching a PolicyKit text agent to prompt for
+	// authentication. Linger is an optional, best-effort step during install; a password prompt
+	// mid-install is worse than reporting the gap and printing the one command that closes it.
+	out, err := runLoginctlCommand("--no-ask-password", "enable-linger", username)
+	if LingerEnabled(username) {
+		// The success path must say so. It previously returned an empty detail, which the install
+		// path reads as "not applicable" -- so the one outcome worth recording, linger actually
+		// being enabled, was the one the manifest silently dropped.
+		return true, "linger enabled for " + username
 	}
-	// The success path must say so. It previously returned an empty detail, which the install path
-	// reads as "not applicable" -- so the one outcome worth recording, linger actually being
-	// enabled, was the one the manifest silently dropped.
-	return true, "linger enabled for " + username
+	return false, lingerFailureDetail(username, out, err)
+}
+
+// lingerFailureDetail explains an unset linger in terms the user can act on.
+//
+// loginctl can spawn a PolicyKit text agent, and on a host without /usr/bin/pkttyagent that
+// prints "Failed to execute /usr/bin/pkttyagent: No such file or directory" -- naming a file the
+// user never asked about, in the middle of an otherwise successful install, and not the actual
+// reason linger is off. That chatter is dropped. Everything else loginctl says is kept, because
+// "Interactive authentication required" and a genuinely broken logind are worth reading.
+func lingerFailureDetail(username, out string, err error) string {
+	detail := "linger is disabled for " + username
+	if reason := withoutAuthAgentChatter(out); reason != "" {
+		return detail + ": " + reason
+	}
+	if err != nil {
+		return detail + "; enabling it needs administrator approval"
+	}
+	// Zero exit, nothing printed, and linger still unset: logind accepted the call and did not
+	// apply it. Saying so beats reporting a success the next logout would disprove.
+	return detail + " even though loginctl reported no error"
+}
+
+// withoutAuthAgentChatter drops PolicyKit-agent noise and returns what is left, on one line.
+func withoutAuthAgentChatter(out string) string {
+	var kept []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "pkttyagent") || strings.Contains(line, "polkit-agent") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "; ")
 }
 
 // LingerEnabled reports whether linger is on for a user, so doctor can flag the gap.
 func LingerEnabled(username string) bool {
-	if !systemdIsInit() || username == "" {
+	if !lingerSystemdPresent() || username == "" {
 		return false
 	}
 	out, err := runLoginctlCommand("show-user", username, "--property=Linger", "--value")
