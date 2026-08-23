@@ -303,30 +303,30 @@ func TestQwenSettingsPathUserAndProjectLevels(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 
-	userPath, err := qwenSettingsPath(LevelUser)
+	userPath, err := QwenSettingsPath(LevelUser)
 	if err != nil {
-		t.Fatalf("qwenSettingsPath(user) returned error: %v", err)
+		t.Fatalf("QwenSettingsPath(user) returned error: %v", err)
 	}
 	if want := filepath.Join(home, ".qwen", "settings.json"); userPath != want {
 		t.Errorf("user settings path = %q, want %q", userPath, want)
 	}
 	// An empty level means the user level, which is what an unset --level flag produces.
-	if defaulted, err := qwenSettingsPath(""); err != nil || defaulted != userPath {
-		t.Errorf("qwenSettingsPath(\"\") = %q, %v; want the user path", defaulted, err)
+	if defaulted, err := QwenSettingsPath(""); err != nil || defaulted != userPath {
+		t.Errorf("QwenSettingsPath(\"\") = %q, %v; want the user path", defaulted, err)
 	}
 
 	project := t.TempDir()
 	t.Chdir(project)
-	projectPath, err := qwenSettingsPath(LevelProject)
+	projectPath, err := QwenSettingsPath(LevelProject)
 	if err != nil {
-		t.Fatalf("qwenSettingsPath(project) returned error: %v", err)
+		t.Fatalf("QwenSettingsPath(project) returned error: %v", err)
 	}
 	if want := filepath.Join(project, ".qwen", "settings.json"); projectPath != want {
 		t.Errorf("project settings path = %q, want %q", projectPath, want)
 	}
 
-	if _, err := qwenSettingsPath(Level("nonsense")); err == nil {
-		t.Error("qwenSettingsPath(nonsense) returned no error")
+	if _, err := QwenSettingsPath(Level("nonsense")); err == nil {
+		t.Error("QwenSettingsPath(nonsense) returned no error")
 	}
 }
 

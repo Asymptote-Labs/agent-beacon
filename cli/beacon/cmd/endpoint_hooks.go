@@ -176,6 +176,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Qwen Code hooks installed: %s\n", status.SettingsPath)
+		// Printed only when it applies. A project-level install into an untrusted folder writes a
+		// file that does nothing until the user trusts the folder, and silence there would read as
+		// "collecting".
 		if strings.Contains(status.Message, "trusted") {
 			fmt.Println(status.Message)
 		}

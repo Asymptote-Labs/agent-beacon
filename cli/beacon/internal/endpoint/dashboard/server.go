@@ -345,6 +345,8 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	add("hermes", hermes.Installed, hermes.ConfigPath, hermes.BinaryPath, hermes.Message)
 	opencode := endpointhooks.OpenCodeHookStatus(endpointhooks.OpenCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("opencode", opencode.Installed, opencode.PluginPath, opencode.BinaryPath, opencode.Message)
+	qwen := endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("qwen", qwen.Installed, qwen.SettingsPath, qwen.BinaryPath, qwen.Message)
 	vscode := endpointhooks.VSCodeHookStatus(endpointhooks.VSCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("vscode", vscode.Installed, vscode.HooksPath, vscode.BinaryPath, vscode.Message)
 	return out
