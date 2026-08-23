@@ -251,17 +251,21 @@ func collapseDuplicates(events []Event) []Event {
 		}
 		suppressed := false
 		for _, prev := range kept {
-			if prev.Action() != e.Action() || identity(prev) != identity(e) {
+			if prev.Action() != e.Action() {
 				continue
 			}
 			// An equal, non-empty call ID settles it on its own: the writer applies no window
-			// there, because the hook and the collector report one call seconds apart.
+			// there, because the hook and the collector report one call seconds apart and
+			// routinely differ in message across capture paths.
 			if a, b := callIDOf(prev), callIDOf(e); a != "" && a == b {
 				suppressed = true
 				break
 			}
-			// Without that, the same harness never collapses: two adjacent calls can
-			// legitimately touch the same file or command.
+			if identity(prev) != identity(e) {
+				continue
+			}
+			// Without matching call IDs, the same harness never collapses: two adjacent
+			// calls can legitimately touch the same file or command.
 			if harnessOf(prev) == harnessOf(e) {
 				continue
 			}
