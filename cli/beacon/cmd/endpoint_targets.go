@@ -51,6 +51,10 @@ var harnessTargets = []harnessTarget{
 	// flag gets the runtime they are looking at rather than an "unsupported harness" error.
 	{name: "pi", endpointKind: endpointTargetHook, endpointAliases: []string{"pi", "pi-cli", "pi_cli"}, hookAliases: []string{"pi", "pi-cli", "pi_cli"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
+	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
+	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen
+	// Code, and an alias nobody uses is an alias to keep working.
+	{name: "qwen", endpointKind: endpointTargetHook, endpointAliases: []string{"qwen", "qwen-code"}, hookAliases: []string{"qwen", "qwen-code"}},
 	{name: "hermes", endpointKind: endpointTargetHook, endpointAliases: []string{"hermes", "hermes-agent"}, hookAliases: []string{"hermes", "hermes-agent"}},
 	{name: "antigravity", endpointKind: endpointTargetHook, endpointAliases: []string{"antigravity", "antigravity-cli"}, hookAliases: []string{"antigravity", "antigravity-cli"}},
 	{name: "devin-cli", endpointKind: endpointTargetHook, endpointAliases: []string{"devin", "devin-cli"}, hookAliases: []string{"devin", "devin-cli"}},

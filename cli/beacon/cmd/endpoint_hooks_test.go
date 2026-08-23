@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,4 +41,57 @@ func TestEveryHookTargetIsWired(t *testing.T) {
 	if !seen["cline"] {
 		t.Error("cline is missing from the hook target registry")
 	}
+}
+
+// The install -> status -> uninstall round trip for Qwen Code, through the CLI entry points rather
+// than the package API.
+//
+// Wiring a runtime into `beacon endpoint hooks` means five separate switches (install, uninstall,
+// status collection, status printing, repair) plus a registry row, and every one of them fails by
+// omission rather than by error. TestEveryHookTargetIsWired proves each switch has a case; this
+// proves the cases do the thing their name claims.
+func TestEndpointHooksInstallAndUninstallQwen(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfg := endpointconfig.Config{LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
+
+	origLevel := endpointOpts.hookLevel
+	t.Cleanup(func() { endpointOpts.hookLevel = origLevel })
+	endpointOpts.hookLevel = "user"
+
+	settings := filepath.Join(home, ".qwen", "settings.json")
+	if err := installEndpointHookTarget("qwen", cfg); err != nil {
+		t.Fatalf("installEndpointHookTarget(qwen) returned error: %v", err)
+	}
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatalf("install did not write %s: %v", settings, err)
+	}
+	if !strings.Contains(string(data), "--platform qwen") {
+		t.Fatalf("settings do not carry the Qwen hook command:\n%s", data)
+	}
+
+	if err := uninstallEndpointHookTarget("qwen", cfg); err != nil {
+		t.Fatalf("uninstallEndpointHookTarget(qwen) returned error: %v", err)
+	}
+	data, err = os.ReadFile(settings)
+	if err != nil {
+		t.Fatalf("uninstall removed the settings file itself: %v", err)
+	}
+	if strings.Contains(string(data), "--platform qwen") {
+		t.Fatalf("uninstall left the Qwen hook behind:\n%s", data)
+	}
+}
+
+// `endpoint hooks repair` walks a hard-coded list rather than the registry, so a runtime absent
+// from it is never repaired -- and repair is what fixes a hook whose binary path went stale after
+// an upgrade. It fails silently: repair reports success having skipped the runtime entirely.
+func TestQwenIsInTheRepairTargetList(t *testing.T) {
+	for _, name := range repairTargetOrder() {
+		if name == "qwen" {
+			return
+		}
+	}
+	t.Fatal("qwen is missing from the repair target list; `endpoint repair` would silently skip it")
 }

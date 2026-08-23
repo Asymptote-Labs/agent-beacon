@@ -75,7 +75,7 @@ type QwenStatus struct {
 
 var qwenRuntime = hookRuntime{
 	displayName: "Qwen Code",
-	configPath:  qwenSettingsPath,
+	configPath:  QwenSettingsPath,
 	install:     installQwenSettings,
 	uninstall:   removeQwenEndpointHooks,
 	isInstalled: isQwenInstalledAt,
@@ -157,13 +157,19 @@ func isQwenInstalledAt(path string) bool {
 	return isSettingsEndpointInstalledAt(path, "qwen")
 }
 
-// qwenSettingsPath returns the settings file Beacon merges into for a given install level.
+// QwenSettingsPath returns the settings file Beacon merges into for a given install level.
 //
 // Qwen Code resolves settings from `~/.qwen/settings.json` for the user and `.qwen/settings.json`
 // in the project root, with project settings taking precedence. The user level is the default here
 // for the same reason it is elsewhere: a project-level install only takes effect once the folder is
 // trusted, so it is the one that needs a caveat rather than the one to reach for first.
-func qwenSettingsPath(level Level) (string, error) {
+//
+// Exported because `harness` reports on the same file and must not rebuild the path itself. Two
+// copies of "where the settings live" is how discovery comes to report on a file the installer does
+// not write -- and here it would do so in the worst way: an unresolved home directory turns the
+// user path into the *project* path, so discovery would read whatever repository the command ran
+// from and report it as the machine's state.
+func QwenSettingsPath(level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		home, err := os.UserHomeDir()
