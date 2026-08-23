@@ -421,3 +421,39 @@ func TestQwenSessionLifecycleIsRecorded(t *testing.T) {
 		t.Fatalf("last event after session-end = %q, want the log left intact", got)
 	}
 }
+
+// The diff path writes its event directly rather than through emitHookEvent, so the raw payload
+// that function attaches does not reach it.
+//
+// That gap lands on exactly the events this runtime's taxonomy exists to produce. A successful
+// `write_file` or `edit` is classified `file.modified` and routed through recordLocalEdit, so
+// without an explicit attachment there, `permission_mode` and `tool_use_id` -- which have no schema
+// field and whose only home is raw.qwen -- survive on failed and non-edit tools and vanish on the
+// successful edits. TestQwenRawPayloadPreservesFieldsWithNoSchemaHome does not catch it because it
+// exercises the pre-tool path, which does go through emitHookEvent.
+func TestQwenRawPayloadSurvivesTheFileEditPath(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	for _, fixture := range []string{"post_tool_write_file.json", "post_tool_edit.json"} {
+		t.Run(fixture, func(t *testing.T) {
+			runHookWithInput(t, runPostTool, readQwenFixture(t, fixture))
+			event := lastEndpointEvent(t, logPath)
+			if got := qwenAction(t, event); got != "file.modified" {
+				t.Fatalf("event.action = %q, want file.modified", got)
+			}
+			raw, ok := event["raw"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("file.modified event has no raw object: %#v", event)
+			}
+			payload, ok := raw["qwen"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("file.modified event has no raw.qwen payload: %#v", raw)
+			}
+			for _, key := range []string{"permission_mode", "tool_use_id", "hook_event_name"} {
+				if payload[key] == nil || payload[key] == "" {
+					t.Errorf("raw.qwen on a file edit is missing %s: %#v", key, payload)
+				}
+			}
+		})
+	}
+}
