@@ -179,7 +179,19 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 	case "command.executed":
 		return canonicalTarget("command", nestedString(event, "command", "command"), nestedString(event, "tool", "command"))
 	case "file.read", "file.modified":
-		return canonicalTarget("file", nestedString(event, "file", "path"), nestedString(event, "file", "operation"))
+		// The path alone, deliberately. file.operation is the one part of a file
+		// event the two capture paths describe differently for the same action:
+		// a Claude Code Write reaches the hook through diffFields, which records
+		// "modify", and reaches the collector as "create". Including it in the
+		// target let one action fail to match itself, so every Write stayed in
+		// the log twice however well the two events were identified otherwise.
+		//
+		// Nothing is lost by dropping it. The action already separates a read
+		// from a write, and within file.modified the operation only ever varies
+		// between two words for the same event -- so it discriminated nothing
+		// and disagreed often. The sandbox checker's mirror of this key has
+		// always used the path alone.
+		return canonicalTarget("file", nestedString(event, "file", "path"))
 	case "tool.completed":
 		return canonicalTarget("tool.completed", stringValue(event["model"]), stringValue(event["message"]))
 	case "tool.invoked", "tool.failed":

@@ -135,3 +135,37 @@ func TestIsDuplicateEndpointEventCollapsesNormalizedHarnessOnCallID(t *testing.T
 		t.Fatal("the hook and OTLP reports of one Bash call should collapse on their shared call ID")
 	}
 }
+
+// A Claude Code Write reaches the hook through diffFields, which records
+// file.operation "modify", and reaches the collector as "create" -- two words
+// for one action. While the target included the operation, the pair could not
+// match itself however well the call ID identified it, so every Write stayed in
+// the log twice. Reported by Cursor Bugbot.
+func TestIsDuplicateEndpointEventCollapsesAWriteDescribedTwoWays(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	hook := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"modify"},"tool":{"name":"Write","path":"/repo/notes.md"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`
+	collector := []byte(`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"create"},"tool":{"name":"Write","path":"/repo/notes.md"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`)
+	if err := os.WriteFile(path, []byte(hook+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if !IsDuplicateEndpointEvent(path, collector, EndpointDuplicateWindow) {
+		t.Fatal("one Write reported by both paths should collapse despite create/modify disagreeing")
+	}
+}
+
+// Two edits to different files in one MultiEdit share a call ID, and must not
+// collapse into one: the path is what separates them, so dropping the operation
+// from the target must not have taken the path with it.
+func TestIsDuplicateEndpointEventKeepsEditsToDifferentFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	first := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/a.go","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_m"}}}}`
+	second := []byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/b.go","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_m"}}}}`)
+	if err := os.WriteFile(path, []byte(first+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if IsDuplicateEndpointEvent(path, second, EndpointDuplicateWindow) {
+		t.Fatal("two files edited by one MultiEdit are two edits and must both survive")
+	}
+}

@@ -84,3 +84,14 @@ func TestEventIDForLineIsStableAcrossReleases(t *testing.T) {
 			"ever written just changed meaning", got, want)
 	}
 }
+
+// The same disagreement, at the identity layer: the hook's and the collector's
+// reports of one Write must derive one event ID even though they name the
+// operation differently.
+func TestEventIDForLineIgnoresHowTheOperationIsNamed(t *testing.T) {
+	hook := EventIDForLine([]byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`))
+	collector := EventIDForLine([]byte(`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"create"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`))
+	if hook != collector {
+		t.Fatalf("one Write derived two IDs: %s and %s", hook, collector)
+	}
+}
