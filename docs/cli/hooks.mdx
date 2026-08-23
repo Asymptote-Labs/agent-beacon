@@ -40,6 +40,7 @@ beacon endpoint hooks [command]
 | Hermes Agent | `~/.hermes/config.yaml` | Not supported | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | OpenCode | `~/.config/opencode/plugins/beacon.ts` | `./.opencode/plugins/beacon.ts` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Cline | `~/.cline/plugins/beacon.ts` | `./.cline/plugins/beacon.ts` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Qwen Code | `~/.qwen/settings.json` | `./.qwen/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 
 In system mode, the hook binary is written under `/Library/Application Support/Beacon/Endpoint/hooks/` and the default runtime log is `/var/log/beacon-agent/runtime.jsonl`.
 
@@ -47,7 +48,7 @@ In system mode, the hook binary is written under `/Library/Application Support/B
 
 | Flag | Description |
 |------|-------------|
-| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `cline`, `codex`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, or `antigravity,claude,cline,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`. Defaults to `cursor` |
+| `--harness <list>` | Comma-separated hook harnesses, such as `antigravity`, `claude`, `cline`, `codex`, `cursor`, `devin-cli`, `devin-desktop`, `factory`, `grok`, `hermes`, `opencode`, `qwen`, or `antigravity,claude,cline,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode,qwen`. `devin` remains a legacy alias for `devin-cli`; `hermes-agent` maps to `hermes`; `qwen-code` maps to `qwen`. Defaults to `cursor` |
 | `--level <level>` | Hook install level: `user` or `project` |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
@@ -160,6 +161,12 @@ Install Hermes Agent hooks at the user level:
 beacon endpoint hooks install --harness hermes
 ```
 
+Install Qwen Code hooks at the user level:
+
+```bash title="Install Qwen Code hooks at the user level"
+beacon endpoint hooks install --harness qwen
+```
+
 Install Grok Build hooks at the project level:
 
 ```bash title="Install Grok Build hooks at the project level"
@@ -167,6 +174,14 @@ beacon endpoint hooks install --harness grok --level project
 ```
 
 Project-level Grok Build hooks require `/hooks-trust` in Grok before they execute.
+
+Install Qwen Code hooks at the project level:
+
+```bash title="Install Qwen Code hooks at the project level"
+beacon endpoint hooks install --harness qwen --level project
+```
+
+Project-level Qwen Code hooks are only executed in a folder Qwen trusts, so a user-level install is the one that collects without further interaction.
 
 Hermes Agent hooks support user-level config only. `beacon endpoint hooks install --harness hermes --level project` returns an error instead of writing project files.
 
@@ -178,10 +193,10 @@ beacon endpoint hooks install --all
 
 When `--all` is used with `--level project`, Beacon skips Hermes Agent because Hermes shell hooks are user-level only.
 
-Install Antigravity, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log:
+Install Antigravity, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and Qwen Code hooks with the same runtime log:
 
-```bash title="Install Antigravity, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, and OpenCode hooks with the same runtime log"
-beacon endpoint hooks install --harness antigravity,claude,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode
+```bash title="Install Antigravity, Claude Code, Codex CLI, Cursor, Devin CLI, Devin Desktop, Factory, Grok Build, Hermes Agent, OpenCode, and Qwen Code hooks with the same runtime log"
+beacon endpoint hooks install --harness antigravity,claude,codex,cursor,devin-cli,devin-desktop,factory,grok,hermes,opencode,qwen
 ```
 
 Use a custom runtime log:
@@ -260,6 +275,12 @@ Check Hermes Agent hook status:
 
 ```bash title="Check Hermes Agent hook status"
 beacon endpoint hooks status --harness hermes
+```
+
+Check Qwen Code hook status:
+
+```bash title="Check Qwen Code hook status"
+beacon endpoint hooks status --harness qwen
 ```
 
 Print hook status as JSON:
@@ -374,6 +395,12 @@ Remove user-level Hermes Agent hooks:
 beacon endpoint hooks uninstall --harness hermes
 ```
 
+Remove user-level Qwen Code hooks:
+
+```bash title="Remove user-level Qwen Code hooks"
+beacon endpoint hooks uninstall --harness qwen
+```
+
 Remove project-level Grok Build hooks:
 
 ```bash title="Remove project-level Grok Build hooks"
@@ -397,6 +424,21 @@ If Grok telemetry is missing, check the selected level, confirm the hook file co
 Beacon merges Hermes Agent hooks into `~/.hermes/config.yaml`. Hermes hooks are user-level only; project-level install, status, or uninstall requests return a clear error. Beacon preserves existing Hermes settings and non-Beacon hooks, and replaces only Beacon-managed commands, identified by the endpoint settings flags (`--log`, `--config`, `--cli`) or a legacy `BEACON_ENDPOINT_MODE=1` prefix, together with `--platform hermes`.
 
 If Hermes telemetry is missing, confirm `~/.hermes/config.yaml` contains commands with `--platform hermes`, restart Hermes, and verify hook consent. Hermes prompts for first-use consent for each `(event, command)` pair; for non-interactive gateway, cron, or CI runs, set `HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure `hooks_auto_accept: true`.
+
+## Qwen Code troubleshooting
+
+Beacon merges its hooks into Qwen Code's own `settings.json` — `~/.qwen/settings.json` for user-level installs, `./.qwen/settings.json` for project-level installs. Unrelated top-level keys and non-Beacon hooks in the same event group are preserved, and a re-install replaces Beacon's own entries instead of adding a second copy. Beacon identifies its entries by the `--platform qwen` argument in the hook command, since it has no file of its own in `~/.qwen` to stamp.
+
+Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so hooks are the only collection path for this runtime. `beacon endpoint install --harness qwen` fails with a message pointing here rather than appearing to succeed.
+
+Two Qwen-specific details are worth knowing before hand-editing the file:
+
+- **Timeouts are milliseconds, not seconds.** Claude Code reads `timeout` as seconds, so a Claude-style `10` means 10 ms to Qwen and every tool event is killed mid-write while the install still reports success. Beacon writes millisecond values (30000 for prompt submission, 10000 for tool events, 45000 for stop); events with no entry inherit Qwen's own 60000 ms default.
+- **Hooks declare `shell: bash`.** Qwen only uses bash when the hook configuration asks for it. Left unset on Windows it falls back to `cmd.exe`, which cannot parse Beacon's POSIX-quoted command, so every hook fails to start. This requires `bash` on `PATH` on Windows — the same requirement Claude Code already carries there.
+
+If Qwen telemetry is missing, check the selected level, confirm `settings.json` contains commands with `--platform qwen`, confirm `disableAllHooks` is not set in Qwen's settings, confirm hook timeouts are millisecond values, trust the folder for a project-level install, and restart Qwen so new sessions pick up the updated settings.
+
+Beacon's `PreToolUse` hook answers with an empty object on purpose. Qwen reads `hookSpecificOutput.permissionDecision` from that hook, where `allow` means *run the tool without the usual approval prompt* — so an observing hook that answered `allow` would silently disarm your own permission prompts. Approval telemetry comes from Qwen's `PermissionRequest` event instead.
 
 ## Codex CLI troubleshooting
 

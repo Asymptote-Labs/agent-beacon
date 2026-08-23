@@ -149,6 +149,7 @@
                       "runtimes/grok-build",
                       "runtimes/opencode",
                       "runtimes/pi",
+                      "runtimes/qwen-code",
                       "runtimes/vscode"
                     ]
                   },
