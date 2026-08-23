@@ -105,17 +105,22 @@ func qwenStatusFromRuntime(status runtimeStatus) QwenStatus {
 // text Beacon does not otherwise retain would cost more than it tells anyone.
 func installQwenSettings(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("qwen", binaryPath, logPath, configPath)
+	// Shell is set to "bash" on every hook. The commands use POSIX single-quote quoting
+	// (via hookCommandQuote), which is correct for bash but invalid in cmd.exe and PowerShell.
+	// Unlike Claude Code, which always runs hooks through Git Bash even on Windows, Qwen Code
+	// selects cmd/PowerShell by default and only uses bash when the hook config says so.
+	const shell = "bash"
 	endpointHooks := map[string]settingsHookGroup{
-		"SessionStart":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-start"}}},
-		"UserPromptSubmit":   {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: qwenPromptSubmitTimeoutMS}}},
-		"PreToolUse":         {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " pre-tool", Timeout: qwenToolTimeoutMS}}},
-		"PostToolUse":        {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS}}},
-		"PostToolUseFailure": {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS}}},
-		"PermissionRequest":  {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " permission-request", Timeout: qwenToolTimeoutMS}}},
-		"Stop":               {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " stop", Timeout: qwenStopTimeoutMS}}},
-		"SubagentStart":      {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " subagent-start"}}},
-		"SubagentStop":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " subagent-stop"}}},
-		"SessionEnd":         {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-end"}}},
+		"SessionStart":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-start", Shell: shell}}},
+		"UserPromptSubmit":   {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: qwenPromptSubmitTimeoutMS, Shell: shell}}},
+		"PreToolUse":         {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " pre-tool", Timeout: qwenToolTimeoutMS, Shell: shell}}},
+		"PostToolUse":        {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS, Shell: shell}}},
+		"PostToolUseFailure": {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " post-tool", Timeout: qwenToolTimeoutMS, Shell: shell}}},
+		"PermissionRequest":  {Matcher: qwenAllToolsMatcher, Hooks: []settingsHookRef{{Type: "command", Command: prefix + " permission-request", Timeout: qwenToolTimeoutMS, Shell: shell}}},
+		"Stop":               {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " stop", Timeout: qwenStopTimeoutMS, Shell: shell}}},
+		"SubagentStart":      {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " subagent-start", Shell: shell}}},
+		"SubagentStop":       {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " subagent-stop", Shell: shell}}},
+		"SessionEnd":         {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-end", Shell: shell}}},
 	}
 	return installSettingsEndpointHooks(path, "qwen", endpointHooks)
 }

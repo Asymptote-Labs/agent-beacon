@@ -15,6 +15,7 @@ type settingsHookRef struct {
 	Type       string `json:"type,omitempty"`
 	Command    string `json:"command"`
 	Timeout    int    `json:"timeout,omitempty"`
+	Shell      string `json:"shell,omitempty"`
 	ShowOutput *bool  `json:"show_output,omitempty"`
 }
 
