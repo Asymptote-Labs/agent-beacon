@@ -27,6 +27,11 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   get 10 seconds rather than 10 milliseconds — long enough to actually run.
   Copying the Claude values would have killed every hook mid-write while the
   install reported success and the settings file looked correct.
+- **Hooks declare the shell their quoting requires** · Beacon's hook command
+  single-quotes every path, which only bash reads literally, so each Qwen entry
+  is written with `"shell": "bash"`. Left to the Windows default shell the
+  quotes are ordinary characters and no hook starts, while the install still
+  reports success.
 - **Qwen tool names are classified by Qwen's own ids** · `run_shell_command`,
   `read_file`, `list_directory`, `glob`, `grep_search`, `write_file`, `edit` and
   `notebook_edit` map to command, file-read and file-modify events. Under the

@@ -45,6 +45,12 @@ Beacon's `PreToolUse` hook returns an empty response rather than an `allow` deci
 
 Qwen Code reads the `timeout` field in `settings.json` as **milliseconds** (default `60000`), where Claude Code reads the same-looking field as seconds. Beacon writes millisecond values — `30000` for prompt submission, `10000` for tool events, `45000` for stop. If you edit these by hand, keep them in milliseconds: a seconds-shaped value such as `10` gives the hook ten milliseconds to run, which kills it mid-write and leaves the runtime log empty while the settings file still looks correct.
 
+### Hooks run under bash
+
+Beacon writes each hook entry with `"shell": "bash"`, because the command it builds single-quotes every path — POSIX quoting, which bash reads literally and `cmd.exe` does not read at all. Without that field a Windows host would fall back to its default shell, where the quotes are ordinary characters and every hook fails to start while the install still reports success.
+
+On macOS and Linux this names the shell that would have run anyway. On Windows it means bash has to be on `PATH` (Git Bash satisfies this). If you rewrite a `command` by hand, keep the quoting and the `shell` value consistent with each other — changing one without the other is what breaks silently.
+
 ## Discovery and status
 
 Asymptote looks for the `qwen` executable and treats `~/.qwen` as an additional signal, because an npm install is often absent from the inherited `PATH` while the state directory is not. It then reports on `~/.qwen/settings.json`:
