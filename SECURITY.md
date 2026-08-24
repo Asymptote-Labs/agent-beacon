@@ -12,7 +12,7 @@ For the full enterprise review package, see the
 
 | Area | Default behavior |
 | --- | --- |
-| Collection | Local OpenTelemetry receivers on `127.0.0.1` or local `beacon-hooks` adapter execution |
+| Collection | Local OpenTelemetry receivers on `127.0.0.1`, local `beacon-hooks` adapter execution, or the optional browser extension posting to the same loopback receiver |
 | Content handling | Retained local telemetry is subject to secret redaction, sanitization, truncation, and event-size limits |
 | Forwarding | Optional and customer configured |
 | Hosted dependency | None required for normal endpoint collection or hook execution |
@@ -36,6 +36,15 @@ telemetry through a configured local surface. Required event fields identify the
 event, endpoint, and harness; optional entities add session, tool, command,
 file, approval, MCP-like, prompt, destination, and health context when
 available.
+
+The optional browser extension is a distinct surface. It observes only the chat
+request and response streams on `claude.ai`, `chatgpt.com`, and
+`chat.openai.com`, and posts them as OTLP logs to the same loopback receiver as
+every other source. It has no access to other tabs, browsing history, or page
+content elsewhere, and it never writes files. Its retention setting defaults to
+`full`, so complete prompt and assistant response text is retained in the local
+runtime log unless an operator changes it in the extension's options page.
+Retention is enforced in the browser before anything is sent.
 
 Review the full
 [data inventory](https://docs.asymptotelabs.ai/cli/security-review-data-inventory).

@@ -42,7 +42,9 @@ flowchart LR
 
 ## Current boundaries
 
-Beacon focuses on supported agent harness telemetry and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, browser or SaaS telemetry, credential-use attribution, Datadog API export from Beacon, Sumo Logic API export from Beacon, Rapid7 API export from Beacon, or automatic mutation of Factory Droid shell profiles.
+Beacon focuses on supported agent harness telemetry and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, general browser or SaaS activity monitoring outside the supported chat surfaces, credential-use attribution, Datadog API export from Beacon, Sumo Logic API export from Beacon, Rapid7 API export from Beacon, or automatic mutation of Factory Droid shell profiles.
+
+Browser chat telemetry is limited to the Claude.ai and ChatGPT conversation streams captured by the optional [Agent Beacon browser extension](/runtimes/browser-extension). Beacon does not observe other tabs, browsing history, or page content elsewhere. That extension retains full prompt and response text by default, which is the most sensitive default in the product; see [its retention modes](/runtimes/browser-extension).
 
 Provider-managed cloud agents use a separate ephemeral boundary from the local
 endpoint. Their hook adapter writes sandbox-local JSONL and can send compressed

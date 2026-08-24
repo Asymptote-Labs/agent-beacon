@@ -102,6 +102,22 @@ CI, and cloud surfaces.
 | [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
 | [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
+##### Browser Chat Surfaces
+
+| Agent harness | Collection path | Telemetry coverage |
+| --- | --- | --- |
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call telemetry from the chatgpt.com chat stream |
+
+The optional Chrome MV3 extension in [`browser-extension/`](browser-extension/) posts OTLP GenAI
+logs to the collector already listening on `http://127.0.0.1:4318/v1/logs`, so browser chat lands in
+`runtime.jsonl` beside agent activity and forwards through the same shippers. It reads only the chat
+streams on those two sites and never writes files.
+
+Treat it as experimental: it parses private, undocumented APIs, so a change on either site can
+interrupt capture until the adapter is updated. **Retention defaults to `full`**, meaning complete
+prompt and response text is retained locally unless you change it in the extension's options page.
+
 #### CI Agents
 
 | Harness | Collection path | Telemetry coverage |

@@ -40,3 +40,18 @@ sh packaging/macos/smoke-endpoint.sh
 
 Each directory above is a separate Go module; run Go commands from inside the module you are
 changing.
+
+The npm and bun subprojects are separate from the Go modules and are not covered by the commands
+above:
+
+```bash
+cd packages/asymptote-sdk-js && npm ci && npm test && npm run check
+cd browser-extension && npm ci && npm run check && npm run test:unit
+cd plugins/opencode-beacon && bun run check && bun test
+cd plugins/cline-beacon && bun run check && bun test
+cd plugins/pi-beacon && bun run check && bun test
+```
+
+The browser extension's Playwright replay e2e (`npm test` in `browser-extension`) needs `openssl`
+on PATH and a one-time `npx playwright install chromium`. It replays recorded SSE through the real
+extension in headless Chromium, so it is deterministic, needs no login, and costs nothing to run.

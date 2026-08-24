@@ -160,6 +160,12 @@
                       "runtimes/hermes-agent",
                       "runtimes/openclaw-gateway"
                     ]
+                  },
+                  {
+                    "group": "Browser Chat",
+                    "pages": [
+                      "runtimes/browser-extension"
+                    ]
                   }
                 ]
               },
