@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { max-width: 520px; margin: 24px auto; padding: 0 16px; font: 14px system-ui, sans-serif; color: #111; }
+      h1 { font-size: 18px; }
+      label { display: block; margin: 14px 0 4px; font-weight: 600; }
+      input[type="text"] { width: 100%; padding: 6px 8px; font: inherit; box-sizing: border-box; }
+      .site { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 6px 0; }
+      button { margin-top: 16px; padding: 8px 14px; font: inherit; }
+      .saved { color: #2a7; margin-left: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Agent Beacon — Browser Collector</h1>
+
+    <label for="endpoint">OTLP logs endpoint</label>
+    <input type="text" id="endpoint" data-testid="endpoint" />
+
+    <label>Sites</label>
+    <div class="site"><input type="checkbox" id="site_claude_web" /><span>claude.ai</span></div>
+    <div class="site"><input type="checkbox" id="site_chatgpt_web" /><span>chatgpt.com</span></div>
+
+    <div>
+      <button id="save">Save</button>
+      <span class="saved" id="saved" hidden>Saved ✓</span>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

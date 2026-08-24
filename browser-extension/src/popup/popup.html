@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { width: 260px; margin: 0; padding: 14px; font: 13px system-ui, sans-serif; color: #111; }
+      h1 { font-size: 14px; margin: 0 0 10px; }
+      .row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
+      .muted { color: #666; font-size: 12px; }
+      select, button { font: inherit; }
+      .status { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+    </style>
+  </head>
+  <body>
+    <h1>Agent Beacon — Browser Collector</h1>
+    <div class="row">
+      <label for="enabled">Capture enabled</label>
+      <input type="checkbox" id="enabled" />
+    </div>
+    <div class="row">
+      <label for="retention">Content retention</label>
+      <select id="retention">
+        <option value="full">Full</option>
+        <option value="redacted">Redacted</option>
+        <option value="metadata">Metadata only</option>
+      </select>
+    </div>
+    <div class="status muted">
+      <div>Endpoint: <span id="endpoint" data-testid="endpoint">…</span></div>
+      <div>Queue depth: <span id="queue" data-testid="queue">…</span></div>
+      <div>Active streams: <span id="active" data-testid="active">…</span></div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

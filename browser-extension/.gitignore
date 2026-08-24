@@ -1,0 +1,17 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+# Persistent authed browser profiles used for live smoke / fixture recording.
+# Contains real session cookies — must never be committed.
+.auth-profiles/
+# Raw fixture-recorder output may contain personal chat/account data. Only
+# hand-sanitized *.sse fixtures are committed.
+fixtures/**/*.page.html
+fixtures/**/*.meta.json
+fixtures/**/real-*.sse
+fixtures/**/diag-*.sse
+*.log
+.DS_Store
