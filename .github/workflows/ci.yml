@@ -42,6 +42,113 @@ jobs:
         working-directory: packages/asymptote-sdk-js
         run: npm run pack:smoke
 
+  # Chrome MV3 browser collector. Deliberately a single Node version rather than
+  # the [20, 22, 24] matrix the SDK job uses: the SDK is published and its
+  # consumers pick the Node version, so that matrix tests a real contract. Here
+  # Node is only the build host -- the shipped artifact is browser JavaScript run
+  # by Chrome -- so a matrix would triple the Chromium download and the serial
+  # e2e wall time for no signal.
+  browser-extension:
+    runs-on: ubuntu-latest
+    # The e2e launches a persistent Chromium context against a local HTTPS replay
+    # server. A wedged browser is a plausible failure mode, so bound it rather
+    # than holding a runner for the six-hour GitHub default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser-extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: browser-extension
+        run: npm ci
+
+      - name: Type-check extension
+        working-directory: browser-extension
+        run: npm run check
+
+      - name: Unit-test extension
+        working-directory: browser-extension
+        run: npm run test:unit
+
+      - name: Build extension
+        working-directory: browser-extension
+        run: npm run build
+
+      # esbuild exits 0 on an empty entry point, and a missing static copy would
+      # only surface as a broken extension at load time. Assert the five bundles
+      # and three static files exist before spending a browser on them.
+      - name: Verify the build produced a loadable MV3 extension
+        working-directory: browser-extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in manifest.json sw.js content.js interceptor.js \
+                   popup.html popup.js options.html options.js; do
+            test -s "dist/$f" || { echo "missing or empty dist/$f"; exit 1; }
+          done
+          node -e "
+            const m = require('./dist/manifest.json');
+            if (m.manifest_version !== 3) throw new Error('not MV3');
+            if (m.version !== require('./package.json').version) {
+              throw new Error('manifest.json and package.json versions disagree');
+            }
+          "
+
+      # e2e/helpers/cert.ts shells out to openssl for the throwaway self-signed
+      # cert the replay server uses. Fail here with a clear message rather than
+      # inside a Playwright fixture.
+      - name: Verify openssl is available
+        run: openssl version
+
+      - name: Resolve Playwright version
+        id: pw
+        working-directory: browser-extension
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      # Split from the browser download on purpose: the apt packages live outside
+      # ~/.cache/ms-playwright, so a cache hit must not skip them.
+      - name: Install Playwright system dependencies
+        working-directory: browser-extension
+        run: npx playwright install-deps chromium
+
+      # The full Chromium build, not the headless shell: e2e/fixtures.ts uses
+      # channel: 'chromium', which is what supports MV3 extensions in headless.
+      - name: Install Chromium for Playwright
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: browser-extension
+        run: npx playwright install chromium
+
+      # `npx playwright test`, not `npm test`: the pretest hook would rebuild
+      # dist/ and hide a build failure inside the e2e step. GitHub sets CI=true,
+      # which the config already reads for forbidOnly and retries: 1.
+      - name: Replay e2e
+        working-directory: browser-extension
+        run: npx playwright test
+
+      # test-results/ carries the traces, videos and screenshots the config
+      # retains on failure; the HTML report alone is not enough to debug from.
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension-playwright-report
+          path: |
+            browser-extension/playwright-report/
+            browser-extension/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
   go-test:
     runs-on: macos-latest
     steps:
