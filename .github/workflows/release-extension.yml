@@ -47,28 +47,56 @@ jobs:
         working-directory: browser-extension
         run: npm ci
 
-      # Mirrors the sdk-js tag gate, with one addition: manifest.json carries the
-      # version Chrome actually shows, and package.json is the one humans bump.
-      # Requiring all three to agree makes drift impossible rather than merely
-      # discouraged.
-      - name: Verify tag matches the extension version
-        if: startsWith(github.ref, 'refs/tags/')
+      # Resolves the version once, here, and every later step reads
+      # steps.version.outputs.value. Deriving `${GITHUB_REF_NAME#ext-v}`
+      # separately in each step is what let the packaging and verification steps
+      # disagree with this gate: the gate was skipped on a non-tag run while they
+      # went ahead and used the raw ref.
+      #
+      # The guard is on the shape of the ref, not on the event, because
+      # workflow_dispatch against a *tag* is a legitimate way to re-run a
+      # release. Dispatching from a branch is not: `${ref#ext-v}` leaves the
+      # branch name intact, which would name the archive after a branch (with a
+      # slash in it) and then fail the manifest comparison anyway. Failing here
+      # with an explanation beats failing three steps later with a confusing
+      # version mismatch.
+      #
+      # manifest.json carries the version Chrome actually shows and package.json
+      # is the one humans bump, so all three must agree.
+      - name: Resolve and verify the release version
+        id: version
         working-directory: browser-extension
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#ext-v}"
+          case "$GITHUB_REF_NAME" in
+            ext-v*) ;;
+            *)
+              echo "This workflow must run against an 'ext-v*' tag; got '$GITHUB_REF_NAME'."
+              echo "To re-run a release manually, pick the tag (not a branch) as the ref."
+              exit 1
+              ;;
+          esac
+
+          version="${GITHUB_REF_NAME#ext-v}"
+          if [ -z "$version" ]; then
+            echo "Tag '$GITHUB_REF_NAME' has no version after the 'ext-v' prefix."
+            exit 1
+          fi
+
           manifest_version="$(node -p "require('./src/manifest.json').version")"
           pkg_version="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$manifest_version" ]; then
-            echo "Tag version ($tag) does not match src/manifest.json version ($manifest_version)"
+          if [ "$version" != "$manifest_version" ]; then
+            echo "Tag version ($version) does not match src/manifest.json version ($manifest_version)"
             exit 1
           fi
           if [ "$pkg_version" != "$manifest_version" ]; then
             echo "package.json version ($pkg_version) does not match src/manifest.json version ($manifest_version)"
             exit 1
           fi
-          echo "version=$tag"
+
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing extension version $version"
 
       - name: Type-check extension
         working-directory: browser-extension
@@ -86,10 +114,11 @@ jobs:
         id: pack
         working-directory: browser-extension
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#ext-v}"
-          name="agent-beacon-browser-extension-${version}-chrome.zip"
+          name="agent-beacon-browser-extension-${VERSION}-chrome.zip"
 
           # esbuild emits sourcemaps. Chrome ignores them, they roughly double the
           # archive, and shipping them publishes unminified sources as a
@@ -111,6 +140,8 @@ jobs:
       - name: Verify the archive contains a loadable MV3 extension
         working-directory: browser-extension
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
@@ -129,16 +160,17 @@ jobs:
               if (f.endsWith(".map")) throw new Error("sourcemap leaked into the archive: " + f);
             }
             console.log("archive ok: MV3 " + m.version);
-          ' "$tmp" "${GITHUB_REF_NAME#ext-v}"
+          ' "$tmp" "$VERSION"
 
       - name: Publish the GitHub release
         working-directory: browser-extension
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${TAG#ext-v}"
+          version="$VERSION"
 
           printf '%s\n' \
             "Unpacked Chrome MV3 build of the Agent Beacon browser collector (\`browser-extension/\`)." \
