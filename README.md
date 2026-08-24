@@ -54,8 +54,9 @@ paths under customer control.
   <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
 </p>
 
-- **Agent runtime layer:** Hooks, OpenTelemetry sources, CI wrappers, and SDKs
-  capture supported activity from AI agent harnesses wherever they run.
+- **Agent runtime layer:** Hooks, OpenTelemetry sources, CI wrappers, SDKs, and an
+  optional browser extension capture supported activity from AI agent harnesses
+  wherever they run, including chat on Claude.ai and ChatGPT.
 - **Beacon endpoint layer:** Local processing normalizes events, applies
   retention and redaction settings, and writes durable endpoint telemetry.
 - **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
@@ -106,8 +107,8 @@ CI, and cloud surfaces.
 
 | Agent harness | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
-| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call telemetry from the chatgpt.com chat stream |
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call telemetry from the chatgpt.com chat stream |
 
 The optional Chrome MV3 extension in [`browser-extension/`](browser-extension/) posts OTLP GenAI
 logs to the collector already listening on `http://127.0.0.1:4318/v1/logs`, so browser chat lands in
@@ -331,6 +332,21 @@ go run ./cmd/beacon-sandbox run --scenario s02-bash-command
 
 See [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox)
 for setup, what it can verify, and its limitations.
+
+The browser extension is a separate, optional component that builds on its own. It
+needs a running Beacon endpoint to post to, and its test suite replays recorded
+chat streams through the real extension in headless Chromium, so it needs no login
+and no network:
+
+```bash
+cd browser-extension
+npm ci
+npm run build          # load dist/ unpacked in Chrome
+npm test               # replay e2e
+```
+
+See [`browser-extension/README.md`](browser-extension/) for what it captures and
+what it retains.
 
 For setup, deployment, integrations, and command details, see the
 [Beacon CLI docs](https://docs.asymptotelabs.ai).

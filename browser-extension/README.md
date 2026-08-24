@@ -89,8 +89,28 @@ npm run report        # open the last HTML report
 
 ## Loading the extension in your own browser
 
-`npm run build`, then in Chrome → Extensions → Developer mode → **Load unpacked** → select `dist/`.
-Make sure the beacon endpoint agent is running (it provides the `127.0.0.1:4318` collector).
+**Beta, and not on the Chrome Web Store.** It installs unpacked, so Chrome will not
+auto-update it: to move to a new version, rebuild or re-download and reload.
+
+Build it, or download `agent-beacon-browser-extension-<version>-chrome.zip` from an
+[`ext-v*` release](https://github.com/Asymptote-Labs/agent-beacon/releases) and unzip it:
+
+```bash
+npm ci
+npm run build      # produces dist/
+```
+
+Then:
+
+1. Make sure the Beacon endpoint agent is running. It provides the `127.0.0.1:4318` collector.
+2. Open `chrome://extensions`.
+3. Turn on **Developer mode**, top right.
+4. Choose **Load unpacked**, and select `dist/` (or the unzipped release folder).
+5. Send a message on claude.ai or chatgpt.com, then check for `claude_web` / `chatgpt_web`
+   events in `runtime.jsonl` or `beacon endpoint dashboard`.
+
+Read [Retained content](#retained-content) before enabling it on a browser profile you
+also use personally.
 
 ## Retained content
 

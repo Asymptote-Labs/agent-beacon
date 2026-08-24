@@ -7,7 +7,7 @@ description: "Asymptote support details for Claude.ai and ChatGPT browser chat t
 
 Asymptote supports browser chat on Claude.ai and ChatGPT through an optional Chrome MV3 extension that relays conversation telemetry into the same local pipeline as agent activity.
 
-The extension is experimental. It reads the chat streams of two sites whose APIs are private and undocumented, so a change on either site can interrupt capture until the adapter is updated.
+The extension is in beta. It is not published on the Chrome Web Store and installs unpacked. It also reads the chat streams of two sites whose APIs are private and undocumented, so a change on either site can interrupt capture until the adapter is updated.
 
 Browser chat resolves to two harness names, `claude_web` and `chatgpt_web`, so browser activity is attributed separately from CLI agents in the runtime log and the dashboard.
 
@@ -35,9 +35,47 @@ To confirm it is working, generate a chat turn on either site and look for `clau
 
 ## Install or configuration support
 
-Build the extension from `browser-extension/` in the agent-beacon repository, or download the zip from an `ext-v*` release, then load it unpacked through Chrome's developer mode.
+<Note>
+The browser extension is in beta and is not published on the Chrome Web Store. It installs unpacked through Chrome's developer mode, so Chrome will not auto-update it: to move to a new version, download it again and reload. The published archive is unsigned, and its `.sha256` is the only integrity check it has.
+</Note>
+
+Install it one of two ways.
+
+### From a release
+
+1. Download `agent-beacon-browser-extension-<version>-chrome.zip` and its `.sha256` from the [`ext-v*` releases](https://github.com/Asymptote-Labs/agent-beacon/releases).
+2. Verify the archive, then unzip it:
+
+```bash
+shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
+unzip agent-beacon-browser-extension-<version>-chrome.zip -d agent-beacon-extension
+```
+
+### From source
+
+```bash
+cd browser-extension
+npm ci
+npm run build
+```
+
+The loadable extension is the `dist/` directory.
+
+### Load it in Chrome
+
+1. Make sure the Beacon endpoint is running, since the extension posts to the local collector on `127.0.0.1:4318`.
+2. Open `chrome://extensions`.
+3. Turn on **Developer mode**, top right.
+4. Choose **Load unpacked**, and select the unzipped folder or `browser-extension/dist`.
+5. Open claude.ai or chatgpt.com and send a message, then confirm `claude_web` or `chatgpt_web` events appear in the runtime log or the local dashboard.
+
+Chrome disables unpacked extensions when it restarts in some managed configurations. If capture stops, check that the extension is still enabled in `chrome://extensions`.
+
+### Configuration
 
 Capture is configured in the extension's own options page: on/off, retention mode, the collector endpoint, and per-site toggles. There is no `beacon` command that configures it.
+
+Review the retention mode before enabling it on a machine where the same browser profile is used for personal conversations. The default retains full chat text.
 
 ## Retained content
 

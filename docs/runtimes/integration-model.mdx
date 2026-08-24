@@ -67,6 +67,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | [Cursor](/runtimes/cursor) | Native hook payloads through `beacon-hooks` | Hooks emit session, prompt, tool, command, MCP-like, approval, and file edit telemetry where Cursor exposes payloads. |
 | [Claude Cowork](/runtimes/claude-cowork) | Admin-configured OTLP from Anthropic's service | Production Cowork telemetry should use a durable customer-managed HTTPS collector endpoint. |
 | [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP export | Beacon prints Gateway diagnostics settings and validates OpenClaw-derived events in the runtime log. |
+| [Browser Extension](/runtimes/browser-extension) | Managed browser extension over local OTLP | A Chrome MV3 extension parses the claude.ai and chatgpt.com chat streams and posts OTLP GenAI logs to the local collector. Beta, installed unpacked rather than from the Chrome Web Store, and configured in the extension's own options page rather than by `beacon`. |
 
 ## Hook telemetry
 
