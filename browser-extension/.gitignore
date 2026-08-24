@@ -32,6 +32,12 @@ fixtures/**/diag-*.sse
 *.log
 .DS_Store
 
+# Release archives. Built by .github/workflows/release-extension.yml, but the
+# same `zip` step is runnable locally, and a committed binary here would be a
+# stale copy of a published asset.
+*.zip
+*.zip.sha256
+
 # Note for future work: the repo-root .gitignore ignores `*.jsonl` everywhere,
 # with per-destination `!` negations. If a future integration test needs a
 # committed golden runtime.jsonl under this directory, add the negation HERE --
