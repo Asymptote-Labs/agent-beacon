@@ -1,4 +1,6 @@
-# agent-beacon-browser-extension
+# Agent Beacon browser extension
+
+Part of the [agent-beacon](../README.md) monorepo. MIT, under the repository root `LICENSE`.
 
 Chrome (MV3) extension that relays LLM chat telemetry from the browser — Claude.ai and
 ChatGPT — into the **same local Agent Beacon pipeline** as the endpoint agent, normalized into
@@ -62,8 +64,13 @@ Each captured turn emits one `prompt.submitted` + one `agent.response.completed`
 
 ## Setup
 
+Requires Node 22 or newer (`npm run record:fixtures` uses `--experimental-strip-types`,
+which landed in Node 22.6). The e2e harness also needs `openssl` on `PATH` — it
+generates a throwaway self-signed cert for the local replay server.
+
 ```bash
-npm install
+cd browser-extension
+npm ci
 npx playwright install chromium   # one-time, for the e2e harness
 ```
 
@@ -72,13 +79,11 @@ npx playwright install chromium   # one-time, for the e2e harness
 ```bash
 npm run build         # bundle src/ → dist/ (esbuild)
 npm run build:watch   # rebuild on change
-npm run typecheck     # tsc --noEmit
+npm run check         # tsc --noEmit
 npm run test:unit     # pure adapter + normalization tests (vitest, no browser)
 npm test              # builds dist/, runs the Playwright replay e2e (THE autonomous loop)
 npm run test:headed   # watch it drive a browser
 npm run record:fixtures -- --site claude|chatgpt --name <n>   # capture a fixture (headed, authed)
-npm run test:integration   # opt-in, NOT YET WIRED (no spec): route through the real beacon-otelcol
-npm run test:live          # opt-in, NOT YET WIRED (no spec): headed smoke vs the real sites
 npm run report        # open the last HTML report
 ```
 
@@ -86,6 +91,50 @@ npm run report        # open the last HTML report
 
 `npm run build`, then in Chrome → Extensions → Developer mode → **Load unpacked** → select `dist/`.
 Make sure the beacon endpoint agent is running (it provides the `127.0.0.1:4318` collector).
+
+## Retained content
+
+**The default is `retention: 'full'`.** With the extension enabled, the *complete text* of your
+prompts and of the model's responses on claude.ai and chatgpt.com is sent to the local Beacon
+collector and written to `runtime.jsonl` — and forwarded onward by whatever shippers you have
+configured. This is deliberate: browser chat telemetry is worthless for investigation without
+content. It is also the most sensitive default in the product.
+
+Turn it down in the extension's options page before enabling it on a machine where you use these
+sites personally:
+
+| Mode | What is retained |
+|---|---|
+| `full` (default) | Complete prompt text, full assistant response, tool call arguments and results |
+| `redacted` | The same text with emails and API-key-shaped tokens scrubbed client-side |
+| `metadata` | No chat text at all. Actions, models, token counts, and tool names only |
+
+Retention is enforced in the browser, before anything is sent — under `metadata` the text never
+leaves the page. Beacon's endpoint-side redaction, sanitization, truncation, and event-size limits
+apply to whatever the extension does send, but they are a safety net, not a content filter.
+
+Note that retained prompt text also appears verbatim under `raw.attributes` in the written event,
+which is consistent with how every other OTLP source is recorded.
+
+The extension reads only the chat streams on `claude.ai`, `chatgpt.com`, and `chat.openai.com`.
+It has no access to other tabs, browsing history, or page content elsewhere, and it never writes
+files.
+
+## Recording fixtures
+
+`npm run record:fixtures` drives a **real, logged-in Chrome** against your actual Claude.ai or
+ChatGPT account to capture new `.sse` fixtures when a site changes its stream format. Two
+consequences worth understanding before running it:
+
+- It persists a browser profile under `.auth-profiles/<site>/`, which contains **real session
+  cookies**.
+- Its raw output (`*.page.html`, `*.meta.json`, `real-*.sse`, `diag-*.sse`) can contain personal
+  chat and account data.
+
+None of that is committable: the four `fixtures/**` patterns plus `.auth-profiles/` in
+[`.gitignore`](.gitignore) are what enforce it, and they are marked PRIVACY-CRITICAL there for the
+same reason. **Only hand-sanitized `*.sse` files are ever committed** — check the diff before
+staging one. Prefer a throwaway account where practical.
 
 ## Layout
 
@@ -107,10 +156,13 @@ Make sure the beacon endpoint agent is running (it provides the `127.0.0.1:4318`
 - **(b) e2e replay** — a local HTTPS server impersonates the chat site (via `--host-resolver-rules`
   mapping the real hostname to it + a throwaway self-signed cert), the real extension loads, and a
   **mock collector** captures what it POSTs. Fully autonomous — **this is the loop run every iteration.**
-- **(c) integration** (opt-in) — route through the real `beacon-otelcol` binary into a temp
-  `runtime.jsonl`; assert the actual `Event` schema. *(Phase 4)*
+- **(c) collector conformance** *(planned)* — now that this lives in the agent-beacon monorepo,
+  the consumer of these envelopes is in-tree at `collector-builder/exporter/beaconjsonexporter`.
+  The plan is a Go test that feeds committed golden envelopes straight through the real exporter
+  and asserts the resulting `Event` — no binary, no ports, no network — rather than the
+  out-of-tree `/opt/beacon/bin/beacon-otelcol` approach sketched in `tools/integration-otelcol/`.
 - **(d) live smoke** (opt-in, headed) — drive the real sites in a persistent authed profile; a
-  drift alarm that flags when recorded fixtures go stale. *(Phase 4)*
+  drift alarm that flags when recorded fixtures go stale. *(not yet implemented)*
 
 ## Status
 

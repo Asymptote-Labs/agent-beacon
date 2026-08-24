@@ -7,17 +7,18 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "build:watch": "node esbuild.config.mjs --watch",
-    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "pretest": "npm run build",
     "test": "playwright test",
     "test:headed": "HEADED=1 playwright test --headed",
     "test:ui": "playwright test --ui",
-    "test:integration": "RUN_INTEGRATION=1 playwright test integration",
-    "test:live": "RUN_LIVE=1 HEADED=1 playwright test smoke.live",
     "record:fixtures": "node --experimental-strip-types tools/record-fixtures.ts",
     "report": "playwright show-report"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

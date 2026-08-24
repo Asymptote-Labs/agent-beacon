@@ -26,8 +26,6 @@ import { registerAdapter, type SiteAdapter, type TurnParser } from './adapter.js
 import { SSEParser, type SSEEvent } from './sse.js';
 import { turnId } from '../shared/ids.js';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 class ChatGptParser implements TurnParser {
   private sse = new SSEParser();
   private reqId: number;

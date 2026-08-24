@@ -31,7 +31,6 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (!extensionAlive()) {
     if (!warnedInvalidated) {
       warnedInvalidated = true;
-      // eslint-disable-next-line no-console
       console.debug('[agent-beacon] extension context invalidated; refresh this tab to resume capture.');
     }
     return;
