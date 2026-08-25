@@ -15,9 +15,17 @@ Browser chat resolves to two harness names, `claude_web` and `chatgpt_web`, so b
 
 Before enabling browser chat telemetry, make sure:
 
-- The Beacon endpoint is installed and running, because the extension posts to the local collector on `http://127.0.0.1:4318/v1/logs`.
+- The Beacon endpoint is [installed](/cli/install) and running. The extension posts to the local collector on `http://127.0.0.1:4318/v1/logs`, which a default endpoint install already listens on, so no collector configuration is needed.
+- Chrome, or another Chromium browser that can load an unpacked MV3 extension. Firefox and Safari are not supported.
+- Node 22 or newer, if you are building from source rather than using a release archive.
 - You have reviewed what the extension retains. It captures full prompt and response text by default.
 - The people whose browsers it runs in know it is there, since it reads their Claude.ai and ChatGPT conversations.
+
+Confirm the endpoint is up before installing the extension:
+
+```bash
+beacon endpoint status
+```
 
 ## Collection path
 
@@ -29,9 +37,9 @@ Events collected this way carry `harness.collection_method` of `otlp`.
 
 ## Discovery and status
 
-Asymptote treats the browser extension as a user-installed source. It is not configured by `beacon endpoint install` and has no hook or plugin file on disk.
+Asymptote treats the browser extension as a user-installed source. It is not configured by `beacon endpoint install`, has no hook or plugin file on disk, and does not appear in `beacon endpoint status`, which reports on the endpoint service rather than on browser extensions.
 
-To confirm it is working, generate a chat turn on either site and look for `claude_web` or `chatgpt_web` events in the runtime log or the local dashboard.
+Its presence is therefore observed rather than declared: the evidence that it is working is `claude_web` or `chatgpt_web` events arriving in the runtime log. See [Confirm it is working](#confirm-it-is-working).
 
 ## Install or configuration support
 
@@ -39,43 +47,84 @@ To confirm it is working, generate a chat turn on either site and look for `clau
 The browser extension is in beta and is not published on the Chrome Web Store. It installs unpacked through Chrome's developer mode, so Chrome will not auto-update it: to move to a new version, download it again and reload. The published archive is unsigned, and its `.sha256` is the only integrity check it has.
 </Note>
 
-Install it one of two ways.
+### Build it
 
-### From a release
+No prebuilt archive is published yet, so building from source is currently the only way to get the extension. It needs Node 22 or newer and takes a few seconds:
 
-1. Download `agent-beacon-browser-extension-<version>-chrome.zip` and its `.sha256` from the [`ext-v*` releases](https://github.com/Asymptote-Labs/agent-beacon/releases).
-2. Verify the archive, then unzip it:
+```bash
+git clone https://github.com/Asymptote-Labs/agent-beacon.git
+cd agent-beacon/browser-extension
+npm ci
+npm run build
+```
+
+That writes the loadable extension to `browser-extension/dist`. Note the full path, because Chrome asks for it in the next step:
+
+```bash
+pwd -P  # then append /dist
+```
+
+### From a release archive
+
+Once an `ext-v*` release is published, you will be able to skip the build and download `agent-beacon-browser-extension-<version>-chrome.zip` with its `.sha256` from the [releases page](https://github.com/Asymptote-Labs/agent-beacon/releases), then verify and unzip it:
 
 ```bash
 shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
 unzip agent-beacon-browser-extension-<version>-chrome.zip -d agent-beacon-extension
 ```
 
-### From source
-
-```bash
-cd browser-extension
-npm ci
-npm run build
-```
-
-The loadable extension is the `dist/` directory.
+The unzipped folder is what you load, in place of `dist`.
 
 ### Load it in Chrome
 
-1. Make sure the Beacon endpoint is running, since the extension posts to the local collector on `127.0.0.1:4318`.
-2. Open `chrome://extensions`.
-3. Turn on **Developer mode**, top right.
-4. Choose **Load unpacked**, and select the unzipped folder or `browser-extension/dist`.
-5. Open claude.ai or chatgpt.com and send a message, then confirm `claude_web` or `chatgpt_web` events appear in the runtime log or the local dashboard.
-
-Chrome disables unpacked extensions when it restarts in some managed configurations. If capture stops, check that the extension is still enabled in `chrome://extensions`.
+1. Open `chrome://extensions`.
+2. Turn on **Developer mode**, top right.
+3. Choose **Load unpacked**, then select the `dist` folder you built (or the unzipped release folder).
+4. Confirm "Agent Beacon — Browser Collector" now appears in the list and is enabled.
+5. Click the extension's toolbar icon to check its status and, if you want, change the retention mode before capturing anything.
 
 ### Configuration
 
-Capture is configured in the extension's own options page: on/off, retention mode, the collector endpoint, and per-site toggles. There is no `beacon` command that configures it.
+The extension is configured in its own UI, not by `beacon`. There is no CLI command and no config file on disk. Settings are split across two surfaces:
 
-Review the retention mode before enabling it on a machine where the same browser profile is used for personal conversations. The default retains full chat text.
+| Surface | How to open it | Settings |
+|---------|----------------|----------|
+| Popup | Click the extension's toolbar icon | Capture on/off, content retention (`full`, `redacted`, `metadata`), plus live queue depth and active stream count |
+| Options page | Right-click the icon and choose **Options**, or use **Details** then **Extension options** in `chrome://extensions` | OTLP logs endpoint, and per-site checkboxes for claude.ai and chatgpt.com |
+
+Review the retention mode in the popup before capturing anything on a machine where the same browser profile is used for personal conversations. The default retains full chat text.
+
+## Confirm it is working
+
+Send one message on claude.ai or chatgpt.com, then look for the event:
+
+```bash
+grep -c '"claude_web"\|"chatgpt_web"' ~/.beacon/endpoint/logs/runtime.jsonl
+```
+
+A count of one or more means the whole path worked: the extension parsed the stream, the collector accepted the OTLP payload, and the exporter wrote a normalized event. To read one:
+
+```bash
+grep '"claude_web"\|"chatgpt_web"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -1 | jq '{action: .event.action, harness: .harness.name, method: .harness.collection_method, model, session: .session.id}'
+```
+
+On a system-mode install the log lives at `/var/log/beacon-agent/runtime.jsonl` instead, and reading it needs `sudo`.
+
+Or browse them in the [local dashboard](/cli/dashboard):
+
+```bash
+beacon endpoint dashboard
+```
+
+If nothing arrives, work through it in this order:
+
+- **The extension's toolbar popup** shows the queue depth and active streams. A growing queue means it captured the turn but cannot deliver it, which points at the collector rather than the adapter.
+- **`beacon endpoint status`** confirms the collector is running and listening on `4318`.
+- **The service worker console**, reachable from `chrome://extensions` by clicking "service worker" under the extension, shows delivery errors.
+- **A hard reload of the chat tab.** The interceptor installs at document start, so a tab opened before the extension was loaded is not instrumented until it reloads.
+- **Capture may be off, or off for that site.** Check the popup and the options page.
+
+Chrome also disables unpacked extensions on restart in some managed configurations. If capture stops after a browser restart, check that it is still enabled in `chrome://extensions`.
 
 ## Retained content
 
@@ -89,7 +138,7 @@ Retention defaults to `full`. Browser chat telemetry has little investigative va
 
 Retention is enforced in the browser before anything is sent, so under `metadata` the text never leaves the page. Endpoint-side redaction, sanitization, truncation, and event-size limits apply to whatever is sent.
 
-Change the mode in the extension's options page before enabling it on a machine where the same browser profile is used for personal conversations.
+Change the mode in the extension's popup before enabling it on a machine where the same browser profile is used for personal conversations.
 
 ## Telemetry coverage
 

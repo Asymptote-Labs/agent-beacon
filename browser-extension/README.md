@@ -120,7 +120,7 @@ collector and written to `runtime.jsonl` — and forwarded onward by whatever sh
 configured. This is deliberate: browser chat telemetry is worthless for investigation without
 content. It is also the most sensitive default in the product.
 
-Turn it down in the extension's options page before enabling it on a machine where you use these
+Turn it down in the extension's popup (toolbar icon) before enabling it on a machine where you use these
 sites personally:
 
 | Mode | What is retained |
@@ -165,7 +165,8 @@ staging one. Prefer a throwaway account where practical.
 | `src/interceptor/` | MAIN-world `fetch`/stream tee. |
 | `src/content/` | ISOLATED-world relay + (future) DOM fallback. |
 | `src/background/` | Service worker: `assembler.ts`, `delivery.ts` (durable queue + backoff), `settings.ts`, `sw.ts`. |
-| `src/popup/`, `src/options/` | On/off, retention toggle, endpoint + per-site config. |
+| `src/popup/` | Capture on/off, retention selector, live queue depth and active stream count. |
+| `src/options/` | OTLP endpoint and per-site toggles. |
 | `e2e/` | Playwright fixtures + helpers (`mock-collector`, `sse-replay-server`, `otlp-assertions`) + specs. |
 | `test/unit/` | vitest unit tests. |
 | `fixtures/<site>/*.sse` | Recorded, sanitized chat streams — real captures for `claude/` and `chatgpt/`. |
