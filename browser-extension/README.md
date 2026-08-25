@@ -92,8 +92,10 @@ npm run report        # open the last HTML report
 **Beta, and not on the Chrome Web Store.** It installs unpacked, so Chrome will not
 auto-update it: to move to a new version, rebuild or re-download and reload.
 
-Build it, or download `agent-beacon-browser-extension-<version>-chrome.zip` from an
-[`ext-v*` release](https://github.com/Asymptote-Labs/agent-beacon/releases) and unzip it:
+No prebuilt archive is published yet, so build it. (Once an `ext-v*` release exists,
+`agent-beacon-browser-extension-<version>-chrome.zip` from the
+[releases page](https://github.com/Asymptote-Labs/agent-beacon/releases) will be
+loadable in place of `dist/`.)
 
 ```bash
 npm ci

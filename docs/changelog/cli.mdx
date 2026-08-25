@@ -18,8 +18,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   agent activity, normalized into the same schema. Its service worker posts OTLP
   GenAI logs to the collector already listening on `127.0.0.1:4318`, so browser
   chats land in `runtime.jsonl` beside agent activity and forward through the
-  same shippers. Build it from `browser-extension/`, or download the zip from an
-  `ext-v*` release, then load it unpacked in Chrome.
+  same shippers. Build it from `browser-extension/` and load it unpacked in
+  Chrome.
 - **Narrow by construction** · The extension reads the chat streams on
   `claude.ai`, `chatgpt.com`, and `chat.openai.com`, and nothing else. It has no
   access to other tabs, browsing history, or page content elsewhere, and it never
@@ -31,9 +31,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   `metadata` in the extension's options page before enabling it on a machine
   where the same browser profile is used for personal conversations. Retention is
   enforced in the browser, so under `metadata` the text never leaves the page.
-- **Released on its own tags** · An `ext-v*` tag publishes the unpacked build as a
-  zip with a `.sha256`, independent of the CLI's `v*` releases. The archive is
-  unsigned, and Chrome Web Store publication is not yet available.
+- **Release path in place, not yet used** · An `ext-v*` tag publishes the unpacked
+  build as a zip with a `.sha256`, independent of the CLI's `v*` releases. No such
+  release has been cut yet, so building from source is currently the way to get
+  it. Chrome Web Store publication is not yet available.
 - **Documented boundaries updated** · The security overview, threat model, and FAQ
   previously listed browser telemetry as out of scope. They now scope that
   statement to general browser activity, which the extension still does not
