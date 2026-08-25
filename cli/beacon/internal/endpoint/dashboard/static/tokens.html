@@ -10,20 +10,44 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Local-only</p>
-        <h1>Beacon Endpoint Token Usage</h1>
+        <h1>Token Usage</h1>
       </div>
       <nav class="nav-toggle" aria-label="Dashboard navigation">
-        <a href="/">Log Search</a>
-        <a href="/overview.html">Security Analytics</a>
-        <a href="/findings.html">Findings</a>
-        <a href="/detections.html">Detections</a>
-        <a href="/inventory.html">Agent Inventory</a>
-        <a class="active" href="/tokens.html" aria-current="page">Token Usage</a>
+        <div class="nav-search" aria-hidden="true">Find...</div>
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <a href="/findings.html">Findings</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Analytics</div>
+          <a class="active" aria-current="page" href="/tokens.html">Token Usage</a>
+          <a href="/overview.html">Agent Activity</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Observe</div>
+          <a href="/inventory.html">Agent Inventory</a>
+          <a href="/">Agent Activity Sessions</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Control</div>
+          <a href="/detections.html">Detections</a>
+        </div>
       </nav>
       <button id="refresh">Refresh</button>
     </header>
 
     <main>
+      <section class="dashboard-hero analytics-hero">
+        <div>
+          <h2>Token usage analytics</h2>
+          <p class="muted">Token consumption, runtime-reported cost, cache usage, and context-window pressure across local AI agents.</p>
+        </div>
+        <div class="range-pills" aria-label="Local token analytics range">
+          <span class="active">Local log</span>
+          <span>1h buckets</span>
+        </div>
+      </section>
+
       <section class="panel status-panel">
         <div>
           <h2>Endpoint</h2>
@@ -41,6 +65,33 @@
         </div>
         <div class="cards" id="token-cards"></div>
       </section>
+
+      <section class="analytics-grid token-analytics-grid">
+        <div class="analytics-panel">
+          <div class="panel-title-row">
+            <div>
+              <h2>Token throughput</h2>
+              <p class="muted">Hourly local usage trend from the runtime log. Bars include input, cache, output, and reasoning tokens when captured.</p>
+            </div>
+          </div>
+          <div class="chart-legend">
+            <span><i class="legend-input"></i>Input</span>
+            <span><i class="legend-output"></i>Output</span>
+          </div>
+          <div class="throughput-bars" id="token-throughput"></div>
+        </div>
+        <div class="analytics-panel">
+          <div class="panel-title-row">
+            <div>
+              <h2>Token split</h2>
+              <p class="muted">Fresh input, cached input, output, and reasoning share for the selected local log.</p>
+            </div>
+          </div>
+          <div id="token-split" class="token-split"></div>
+        </div>
+      </section>
+
+      <section id="token-breakdowns" class="analytics-stack"></section>
 
       <section class="panel">
         <h2>Context Window Utilization</h2>

@@ -121,7 +121,7 @@ func TestStatusUsesRequestedRuntimeLogSource(t *testing.T) {
 // TestSummaryEndpointAggregatesAllMatchedEvents guards /api/summary against
 // truncated aggregation: total_events comes from the full match count, so the
 // breakdown counts must be computed over the same full set even when the
-// request carries a small ?limit= from the Log Search view.
+	// request carries a small ?limit= from the Agent Activity Sessions view.
 func TestSummaryEndpointAggregatesAllMatchedEvents(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	mk := func(minute int) string {
@@ -567,13 +567,13 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		path string
 		want string
 	}{
-		{path: "/", want: "Beacon Endpoint Log Search"},
-		{path: "/overview.html", want: "Beacon Endpoint Security Analytics"},
+		{path: "/", want: "Beacon Endpoint Agent Activity"},
+		{path: "/overview.html", want: "Beacon Endpoint Agent Activity"},
 		{path: "/tokens.html", want: "Beacon Endpoint Token Usage"},
 		{path: "/detections.html", want: "Beacon Endpoint Detections"},
 		{path: "/findings.html", want: "Beacon Endpoint Findings"},
 		{path: "/inventory.html", want: "Beacon Endpoint Agent Inventory"},
-		{path: "/inventory-hooks.html", want: "Beacon Endpoint Hook Inventory"},
+		{path: "/inventory-hooks.html", want: "Beacon Endpoint Agent Inventory"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {

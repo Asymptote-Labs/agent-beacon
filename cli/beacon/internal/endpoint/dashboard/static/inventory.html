@@ -10,160 +10,70 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Local-only</p>
-        <h1>Beacon Endpoint Agent Inventory</h1>
+        <h1>Agent Inventory</h1>
       </div>
       <nav class="nav-toggle" aria-label="Dashboard navigation">
-        <a href="/">Log Search</a>
-        <a href="/overview.html">Security Analytics</a>
-        <a href="/findings.html">Findings</a>
-        <a href="/detections.html">Detections</a>
-        <a class="active" href="/inventory.html" aria-current="page">Agent Inventory</a>
-        <a href="/tokens.html">Token Usage</a>
+        <div class="nav-search" aria-hidden="true">Find...</div>
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <a href="/findings.html">Findings</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Analytics</div>
+          <a href="/tokens.html">Token Usage</a>
+          <a href="/overview.html">Agent Activity</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Observe</div>
+          <a class="active" aria-current="page" href="/inventory.html">Agent Inventory</a>
+          <a href="/">Agent Activity Sessions</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Control</div>
+          <a href="/detections.html">Detections</a>
+        </div>
       </nav>
       <button id="refresh">Refresh</button>
     </header>
 
     <main>
-      <section class="panel status-panel">
-        <div>
-          <h2>Endpoint</h2>
-          <p id="log-path" class="muted">Loading runtime log...</p>
-        </div>
-        <div id="inventory-meta" class="muted"></div>
-      </section>
+      <div class="inventory-page-head">
+        <h1>Agent Inventory</h1>
+      </div>
 
-      <section>
-        <div class="section-head overview-head">
-          <div>
-            <h2>Inventory at a Glance</h2>
-            <p class="muted">Local discovery of installed AI agent runtimes, their telemetry posture, configuration files, and MCP servers. Read-only and offline.</p>
+      <section class="inventory-workspace" id="inventory-workspace">
+        <div class="inventory-controls">
+          <div class="inventory-filter-grid" aria-label="Inventory filters">
+            <select id="inventory-user-filter" aria-label="User filter">
+              <option value="">All users</option>
+            </select>
+            <select id="inventory-runtime-filter" aria-label="Runtime filter">
+              <option value="">All runtimes</option>
+            </select>
           </div>
-        </div>
-        <div class="cards" id="inventory-cards"></div>
-      </section>
-
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2>Agent Runtimes</h2>
-            <p class="muted">Every supported runtime Beacon probes for, with detection and telemetry status.</p>
-          </div>
-        </div>
-        <div id="inventory-harnesses" class="harnesses"></div>
-      </section>
-
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2>Discovered Configurations</h2>
-            <p class="muted">Config, hook, plugin, and profile files found on this endpoint. Paths and hashes only &mdash; file contents are never read into the dashboard.</p>
-          </div>
-          <label class="inline-toggle">
-            <input type="checkbox" id="inventory-show-all" />
-            <span>Show probed paths not found</span>
+          <label class="inventory-search">
+            <span class="search-icon" aria-hidden="true"></span>
+            <input id="inventory-search" type="search" placeholder="Search configurations by name, status, path, or command..." />
           </label>
+          <div class="inventory-tabs" id="inventory-view-tabs" aria-label="Inventory views"></div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Runtime</th>
-                <th>Scope</th>
-                <th>Kind</th>
-                <th>Parser</th>
-                <th>MCP</th>
-                <th>Beacon Managed</th>
-                <th>Modified</th>
-                <th>Manifest SHA</th>
-                <th>Path</th>
-              </tr>
-            </thead>
-            <tbody id="inventory-configs"></tbody>
-          </table>
-        </div>
-      </section>
 
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2>MCP Servers</h2>
-            <p class="muted">Model Context Protocol servers declared across discovered runtime configs. Secret-bearing env keys are filtered out.</p>
+        <section class="panel inventory-table-panel" id="inventory-active-panel">
+          <div class="section-head">
+            <div>
+              <h2 id="inventory-active-title">Agent Runtime Configurations</h2>
+              <p id="inventory-active-description" class="muted">Config, hook, plugin, and profile files found on this endpoint. Paths and hashes only; file contents are never read into the dashboard.</p>
+            </div>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Runtime</th>
-                <th>Server</th>
-                <th>Scope</th>
-                <th>Transport</th>
-                <th>Command</th>
-                <th>Args</th>
-                <th>Env Keys</th>
-                <th>Source SHA</th>
-                <th>Definition SHA</th>
-                <th>Source</th>
-              </tr>
-            </thead>
-            <tbody id="inventory-mcp"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2>Agent Skills</h2>
-            <p class="muted">Local skill manifests discovered under supported agent skill roots. Skill instruction bodies are not retained.</p>
+          <div class="table-wrap">
+            <table>
+              <thead id="inventory-active-head"></thead>
+              <tbody id="inventory-active-body">
+                <tr><td class="muted">Loading inventory...</td></tr>
+              </tbody>
+            </table>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Runtime</th>
-                <th>Skill</th>
-                <th>Scope</th>
-                <th>Status</th>
-                <th>Modified</th>
-                <th>Manifest SHA</th>
-                <th>Manifest</th>
-              </tr>
-            </thead>
-            <tbody id="inventory-skills"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2>Hook Configurations</h2>
-            <p class="muted">Hook manifests discovered across supported runtimes. Hook command bodies are not shown here.</p>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Runtime</th>
-                <th>Scope</th>
-                <th>Status</th>
-                <th>Beacon Managed</th>
-                <th>Modified</th>
-                <th>Manifest SHA</th>
-                <th>Manifest</th>
-              </tr>
-            </thead>
-            <tbody id="inventory-hooks"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Scan Scope</h2>
-        <div id="inventory-scope" class="scope-grid"></div>
+        </section>
       </section>
     </main>
 

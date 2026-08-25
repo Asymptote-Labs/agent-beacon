@@ -3,22 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Beacon Endpoint Hook Inventory</title>
+    <title>Beacon Endpoint Agent Inventory</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body data-page="inventory-hooks">
     <header class="topbar">
       <div>
         <p class="eyebrow">Local-only</p>
-        <h1>Beacon Endpoint Hook Inventory</h1>
+        <h1>Agent Inventory</h1>
       </div>
       <nav class="nav-toggle" aria-label="Dashboard navigation">
-        <a href="/">Log Search</a>
-        <a href="/overview.html">Security Analytics</a>
-        <a href="/findings.html">Findings</a>
-        <a href="/detections.html">Detections</a>
-        <a class="active" href="/inventory-hooks.html" aria-current="page">Agent Inventory</a>
-        <a href="/tokens.html">Token Usage</a>
+        <div class="nav-search" aria-hidden="true">Find...</div>
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <a href="/findings.html">Findings</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Analytics</div>
+          <a href="/tokens.html">Token Usage</a>
+          <a href="/overview.html">Agent Activity</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Observe</div>
+          <a class="active" aria-current="page" href="/inventory.html">Agent Inventory</a>
+          <a href="/">Agent Activity Sessions</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Control</div>
+          <a href="/detections.html">Detections</a>
+        </div>
       </nav>
       <button id="refresh">Refresh</button>
     </header>
