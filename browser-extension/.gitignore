@@ -1,0 +1,44 @@
+# Dependencies and build output. `node_modules/` and `dist/` are also matched by
+# the repo-root .gitignore (both are bare patterns there, so they apply at any
+# depth). Kept here so this directory stays self-contained if it is ever
+# extracted back into its own repository.
+node_modules/
+dist/
+
+# Playwright artifacts. NOT covered by the repo-root .gitignore -- these four
+# lines are the only thing keeping them out of the repository.
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Persistent authed browser profiles used for live smoke / fixture recording.
+# Contains real session cookies -- must never be committed.
+.auth-profiles/
+
+# Raw fixture-recorder output may contain personal chat/account data. Only
+# hand-sanitized *.sse fixtures are committed.
+#
+# PRIVACY-CRITICAL: do not delete, narrow, or move these four patterns. They are
+# the sole mechanism preventing an unsanitized capture from being committed, and
+# a mistake here fails silently -- the first bad capture just gets committed.
+# `npm run record:fixtures` writes files matching every one of them. See the
+# "Recording fixtures" section of README.md.
+fixtures/**/*.page.html
+fixtures/**/*.meta.json
+fixtures/**/real-*.sse
+fixtures/**/diag-*.sse
+
+*.log
+.DS_Store
+
+# Release archives. Built by .github/workflows/release-extension.yml, but the
+# same `zip` step is runnable locally, and a committed binary here would be a
+# stale copy of a published asset.
+*.zip
+*.zip.sha256
+
+# Note for future work: the repo-root .gitignore ignores `*.jsonl` everywhere,
+# with per-destination `!` negations. If a future integration test needs a
+# committed golden runtime.jsonl under this directory, add the negation HERE --
+# a deeper .gitignore wins on a per-file basis -- rather than editing the root.

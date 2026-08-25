@@ -1,0 +1,201 @@
+name: Release Browser Extension
+
+# Publishes the unpacked Chrome MV3 build as a zip on a pushed `ext-v*` tag.
+#
+# Independent of the CLI's `v*` release on purpose: the extension versions on its
+# own cadence and shares no assets with the binary. GitHub tag patterns anchor at
+# the start, so the `v*` filter in release.yml does not match `ext-v0.1.0` and the
+# two never collide.
+#
+# No `environment: release`. That environment exists to gate the Apple signing
+# secrets; this job has none -- it uses github.token only -- so putting it behind
+# the same approval would add friction without protecting anything. Same
+# reasoning as the windows-package job in release.yml.
+#
+# Chrome Web Store publication is deferred. Until then the artifact is a zip you
+# load unpacked, and its .sha256 is the only integrity check it has.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "ext-v*"
+
+concurrency:
+  group: release-extension-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser-extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: browser-extension
+        run: npm ci
+
+      # Resolves the version once, here, and every later step reads
+      # steps.version.outputs.value. Deriving `${GITHUB_REF_NAME#ext-v}`
+      # separately in each step is what let the packaging and verification steps
+      # disagree with this gate: the gate was skipped on a non-tag run while they
+      # went ahead and used the raw ref.
+      #
+      # The guard is on the shape of the ref, not on the event, because
+      # workflow_dispatch against a *tag* is a legitimate way to re-run a
+      # release. Dispatching from a branch is not: `${ref#ext-v}` leaves the
+      # branch name intact, which would name the archive after a branch (with a
+      # slash in it) and then fail the manifest comparison anyway. Failing here
+      # with an explanation beats failing three steps later with a confusing
+      # version mismatch.
+      #
+      # manifest.json carries the version Chrome actually shows and package.json
+      # is the one humans bump, so all three must agree.
+      - name: Resolve and verify the release version
+        id: version
+        working-directory: browser-extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            ext-v*) ;;
+            *)
+              echo "This workflow must run against an 'ext-v*' tag; got '$GITHUB_REF_NAME'."
+              echo "To re-run a release manually, pick the tag (not a branch) as the ref."
+              exit 1
+              ;;
+          esac
+
+          version="${GITHUB_REF_NAME#ext-v}"
+          if [ -z "$version" ]; then
+            echo "Tag '$GITHUB_REF_NAME' has no version after the 'ext-v' prefix."
+            exit 1
+          fi
+
+          manifest_version="$(node -p "require('./src/manifest.json').version")"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$manifest_version" ]; then
+            echo "Tag version ($version) does not match src/manifest.json version ($manifest_version)"
+            exit 1
+          fi
+          if [ "$pkg_version" != "$manifest_version" ]; then
+            echo "package.json version ($pkg_version) does not match src/manifest.json version ($manifest_version)"
+            exit 1
+          fi
+
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing extension version $version"
+
+      - name: Type-check extension
+        working-directory: browser-extension
+        run: npm run check
+
+      - name: Unit-test extension
+        working-directory: browser-extension
+        run: npm run test:unit
+
+      - name: Build extension
+        working-directory: browser-extension
+        run: npm run build
+
+      - name: Package the unpacked extension
+        id: pack
+        working-directory: browser-extension
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          name="agent-beacon-browser-extension-${VERSION}-chrome.zip"
+
+          # esbuild emits sourcemaps. Chrome ignores them, they roughly double the
+          # archive, and shipping them publishes unminified sources as a
+          # downloadable asset.
+          find dist -name '*.map' -delete
+
+          # -X drops extra file attributes so the archive is reproducible.
+          ( cd dist && zip -q -r -X "../$name" . )
+          shasum -a 256 "$name" > "$name.sha256"
+
+          unzip -l "$name"
+          cat "$name.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # Verify the bytes that are about to be published, not the directory they
+      # came from. Same principle as the MSI job proving its package installs
+      # before attaching it: verification by execution over verification by
+      # assumption.
+      - name: Verify the archive contains a loadable MV3 extension
+        working-directory: browser-extension
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          unzip -q "${{ steps.pack.outputs.name }}" -d "$tmp"
+          node -e '
+            const fs = require("fs");
+            const dir = process.argv[1], want = process.argv[2];
+            const m = JSON.parse(fs.readFileSync(dir + "/manifest.json", "utf8"));
+            if (m.manifest_version !== 3) throw new Error("not MV3");
+            if (m.version !== want) throw new Error("manifest version " + m.version + " != " + want);
+            for (const f of ["sw.js", "content.js", "interceptor.js",
+                             "popup.html", "popup.js", "options.html", "options.js"]) {
+              if (!fs.existsSync(dir + "/" + f)) throw new Error("missing " + f);
+            }
+            for (const f of fs.readdirSync(dir)) {
+              if (f.endsWith(".map")) throw new Error("sourcemap leaked into the archive: " + f);
+            }
+            console.log("archive ok: MV3 " + m.version);
+          ' "$tmp" "$VERSION"
+
+      - name: Publish the GitHub release
+        working-directory: browser-extension
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$VERSION"
+
+          printf '%s\n' \
+            "Unpacked Chrome MV3 build of the Agent Beacon browser collector (\`browser-extension/\`)." \
+            "" \
+            "**Install:** download and unzip, then Chrome -> Extensions -> Developer mode -> Load unpacked -> select the unzipped folder." \
+            "" \
+            "Requires a running Beacon endpoint: the extension POSTs OTLP GenAI logs to \`http://127.0.0.1:4318/v1/logs\`." \
+            "" \
+            "**Retention defaults to \`full\`**, meaning complete prompt and response text from claude.ai and chatgpt.com is written to the local runtime log. Change it in the extension's options page before enabling it on a machine where you use those sites personally." \
+            "" \
+            "The archive is unsigned. Verify it against the \`.sha256\` published beside it:" \
+            "" \
+            '```' \
+            "shasum -a 256 -c agent-beacon-browser-extension-${version}-chrome.zip.sha256" \
+            '```' \
+            > /tmp/ext-release-notes.md
+
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" \
+              --title "Browser extension $TAG" \
+              --notes-file /tmp/ext-release-notes.md \
+              --verify-tag
+          fi
+
+          gh release upload "$TAG" \
+            "${{ steps.pack.outputs.name }}" \
+            "${{ steps.pack.outputs.name }}.sha256" \
+            --repo "$REPO" --clobber

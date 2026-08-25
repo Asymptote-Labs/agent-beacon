@@ -29,9 +29,24 @@ Useful contributions include:
 - `cli/beacon`: public `beacon` CLI, endpoint runtime, local dashboard, and
   endpoint integrations.
 - `cli/beacon-hooks`: hook adapter invoked by supported AI agent runtimes.
+- `pkg/asymptoteobserve`: shared endpoint event schema, provenance markers, and
+  the threat-rules engine. Imported by the modules above through a `replace`.
 - `collector-builder`: OpenTelemetry Collector distribution and
   `beaconjson` exporter.
-- `packaging`: macOS package scripts, deployment helpers, and MDM assets.
+- `packages/asymptote-sdk-js`: the `@asymptote/sdk` TypeScript SDK for cloud
+  agent telemetry. npm.
+- `plugins/*-beacon`: managed plugin and extension sources for OpenCode, Cline,
+  and Pi. bun. Each is the root source for a copy embedded in `cli/beacon`, and
+  tests on both sides fail if the two drift.
+- `browser-extension`: optional Chrome MV3 collector for Claude.ai and ChatGPT
+  chat telemetry. npm, with a Playwright replay harness that loads the real
+  extension into headless Chromium.
+- `rules`: the threat-rule corpus, shipped as a release asset rather than
+  embedded in the binary.
+- `spec/threat-rules`: the open Threat Rules format, its JSON schema, and the
+  generated field reference.
+- `packaging`: macOS, Linux, and Windows package scripts, deployment helpers,
+  and MDM assets.
 - `beacon-sandbox`: end-to-end verification tool that runs a real Claude Code
   session in a disposable Linux sandbox and checks what Beacon captured. See
   [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox).
@@ -129,10 +144,28 @@ cd cli/beacon && go test ./...
 cd cli/beacon && go test -race ./internal/endpoint/...
 cd cli/beacon-hooks && go test ./...
 cd collector-builder/exporter/beaconjsonexporter && go test ./...
+cd pkg/asymptoteobserve && go test ./...
 cd beacon-sandbox && go test ./...
 sh packaging/macos/test-endpoint-scripts.sh
 sh packaging/macos/smoke-endpoint.sh
 ```
+
+The npm and bun subprojects are separate from the Go modules. Run the ones your
+change touches:
+
+```bash
+cd packages/asymptote-sdk-js && npm ci && npm test && npm run check
+cd browser-extension && npm ci && npm run check && npm run test:unit && npm test
+cd plugins/opencode-beacon && bun run check && bun test
+cd plugins/cline-beacon && bun run check && bun test
+cd plugins/pi-beacon && bun run check && bun test
+```
+
+The browser extension's `npm test` builds the bundle and runs the Playwright
+replay e2e, which needs `openssl` on PATH and a one-time
+`npx playwright install chromium`. After editing a plugin or extension source
+under `plugins/`, run `bun run sync` in its directory so the copy embedded in
+`cli/beacon` matches; a Go test fails if the two drift.
 
 If you cannot run a relevant check locally, mention that in the pull request and
 explain why.

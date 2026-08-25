@@ -47,8 +47,10 @@ Beacon can help investigate this when the data appears in emitted prompts, tool
 results, command output, file activity, or retained content. That can make it
 possible to spot data from an unexpected source in a session timeline.
 
-Beacon is not a browser monitor, email collector, SaaS audit log collector,
-kernel monitor, or universal data-origin tracker. If a runtime does not expose
+Beacon is not a general browser monitor, email collector, SaaS audit log
+collector, kernel monitor, or universal data-origin tracker. The optional
+browser extension is narrow: it reads the chat streams on claude.ai and
+chatgpt.com and nothing else you browse. If a runtime does not expose
 the source content or action, Beacon cannot reconstruct it from outside the
 runtime.
 

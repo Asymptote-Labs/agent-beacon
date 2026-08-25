@@ -10,6 +10,7 @@ Beacon Endpoint Agent is a local-only endpoint telemetry agent for AI runtimes. 
 - `cli/beacon-hooks`: hook adapter invoked by Cursor and other supported runtimes.
 - `collector-builder`: OpenTelemetry Collector distribution and Beacon JSONL exporter.
 - `packages/asymptote-sdk-js`: TypeScript SDK for cloud agent telemetry that exports Beacon-compatible OpenTelemetry spans.
+- `browser-extension`: optional Chrome MV3 collector that relays Claude.ai and ChatGPT chat telemetry into the local pipeline as OTLP.
 - `packaging`: macOS packaging and deployment assets.
 
 Do not recreate or depend on removed `asymptote` mirror trees. Keep new work focused on the Beacon paths above.
@@ -34,6 +35,7 @@ Supported runtime surfaces today:
 - Cline hook telemetry through a Beacon-managed local plugin (`~/.cline/plugins/beacon.ts`) covering prompts, task lifecycle, tool lifecycle, commands, file reads/edits with diffs, MCP activity, and task token usage. One plugin serves Cline's VS Code, JetBrains, and CLI hosts; Cline's own OTel export and hosted prompt storage are not used. Approval decisions are not exposed by Cline's hook payloads and are not synthesized.
 - Pi hook telemetry through a Beacon-managed local extension (`~/.pi/agent/extensions/beacon.ts`, or `.pi/extensions/beacon.ts` at project level) covering session lifecycle, prompts, tool lifecycle and results, commands including operator `!` commands, file reads/creates/edits with the unified patch, agent reasoning from assistant thinking parts, and token usage/cost. The extension subscribes to seven Pi event types and ignores the streaming and provider internals. Approval decisions are not exposed by Pi's extension API -- its `tool_call` handler can block, but that is an extension deciding rather than an operator being asked -- and are not synthesized, matching the Cline decision.
 - Claude Cowork admin-configured OpenTelemetry setup guidance and local validation.
+- Browser chat telemetry through an optional Chrome MV3 extension (`browser-extension/`) covering claude.ai and chatgpt.com. A main-world interceptor tees the streamed response, a per-site adapter parses it into a normalized turn, and the service worker POSTs OTLP GenAI logs to the local collector on `127.0.0.1:4318`; the extension never writes files and never contacts a remote endpoint. `harness.name` resolves to `claude_web` or `chatgpt_web` (already handled by `NormalizeHarnessName` in `pkg/asymptoteobserve/harness.go`, where the browser cases must stay above the generic `claude` rule) and `harness.collection_method` is `otlp`. Scope is deliberately narrow: only those origins' chat streams, never other tabs or general browsing. Retention defaults to `full`, so prompt and response text is retained by default; this is documented rather than defaulted down, because browser chat telemetry without content has no investigative value. Treat the adapters as experimental, since both sites' stream formats are private and undocumented.
 - `beaconjson` OpenTelemetry Collector exporter that converts OTLP logs, traces, metrics, and resource attributes into Beacon endpoint JSONL.
 - Asymptote Observe TypeScript SDK instrumentation for cloud applications, starting from OpenTelemetry/OpenLLMetry patterns and `observe()` wrappers.
 - Elasticsearch/Filebeat content pack generation for forwarding local Beacon JSONL into customer-managed Elastic deployments or the bundled loopback-only development stack.
@@ -44,7 +46,7 @@ Supported runtime surfaces today:
 
 Current non-goals unless explicitly requested:
 
-- Kernel/process monitoring, EDR replacement, shell history scraping, cloud audit ingestion, browser/SaaS telemetry, credential-use attribution, and MCP configuration inventory.
+- Kernel/process monitoring, EDR replacement, shell history scraping, cloud audit ingestion, general browser or SaaS activity monitoring beyond the supported chat surfaces, credential-use attribution, and MCP configuration inventory.
 - Direct hosted integrations for Datadog, Snowflake, Chronicle, Panther, or other SIEM destinations beyond explicitly supported local/customer-managed forwarding patterns.
 - Dependency vulnerability scanning or package security remediation.
 
@@ -117,6 +119,19 @@ npm test
 npm run check
 npm run build
 npm run pack:dry-run
+```
+
+Run browser extension checks. The e2e replays recorded SSE through the real
+extension in headless Chromium, so it needs `openssl` on PATH and a one-time
+Chromium download, but no login and no network:
+
+```bash
+cd browser-extension
+npm ci
+npm run check
+npm run test:unit
+npx playwright install chromium   # one-time
+npm test                          # builds dist/, runs the replay e2e
 ```
 
 Run the local dashboard during manual testing:
@@ -358,6 +373,42 @@ Use these npm trusted publisher values:
 - Workflow filename: `npm-publish-sdk.yml`
 - Environment: leave unset unless the workflow is updated to declare one
 
+### Browser Extension Release
+
+The browser extension versions independently of the CLI. A pushed `ext-v*` tag
+runs `.github/workflows/release-extension.yml`, which creates its own GitHub
+release carrying the unpacked Chrome build as a zip plus a `.sha256`.
+
+`ext-v*` and the CLI's `v*` trigger cannot collide: GitHub tag patterns anchor at
+the start, so `v*` does not match `ext-v0.1.0`.
+
+Bump the version in **both** `browser-extension/package.json` and
+`browser-extension/src/manifest.json` before tagging. The workflow requires the
+tag and both files to agree and fails otherwise.
+
+```bash
+cd browser-extension
+npm run check && npm run test:unit && npm run build
+cd ../
+git tag -a ext-v<version> -m "ext-v<version>"
+git push origin ext-v<version>
+gh run list --workflow release-extension.yml --limit 5
+```
+
+The zip is unsigned, so its `.sha256` is the only integrity check it has, the
+same posture as the Windows MSI. The workflow proves the artifact works by
+unzipping the published bytes and asserting they are a loadable MV3 extension.
+Verify after the run:
+
+```bash
+gh release download ext-v<version> --repo Asymptote-Labs/agent-beacon \
+  --pattern 'agent-beacon-browser-extension-*-chrome.zip*'
+shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
+```
+
+Chrome Web Store publication is not yet wired. Until it is, the zip is loaded
+unpacked through Chrome's developer mode.
+
 ## Implementation Notes
 
 - Prefer deterministic tests that use `t.TempDir()`, `t.Setenv("HOME", ...)`, fake binaries, and free local ports.
@@ -382,6 +433,8 @@ CI runs:
 - `go test ./...` in `collector-builder/exporter/beaconjsonexporter`.
 - `go test ./...` in `pkg/asymptoteobserve` (includes threat-rules pack conformance).
 - `bun run check && bun test` in `plugins/opencode-beacon`, `plugins/cline-beacon`, and `plugins/pi-beacon`.
+- `npm run check`, `npm run test:unit`, and `npm run build` in `browser-extension` on Node 22, plus a check that the build produced a loadable MV3 extension.
+- Playwright replay e2e in `browser-extension` on ubuntu, running the real extension in headless Chromium against a local HTTPS replay server; the HTML report and traces upload on failure.
 - CLI help smoke checks for the public command tree.
 - macOS packaging script validation via `packaging/macos/test-endpoint-scripts.sh`.
 - macOS endpoint smoke validation via `packaging/macos/smoke-endpoint.sh`.

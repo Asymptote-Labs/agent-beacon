@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Beacon — Browser Collector",
+  "version": "0.1.0",
+  "description": "Relays LLM chat telemetry (Claude, ChatGPT) into the local Agent Beacon pipeline.",
+  "permissions": ["storage", "alarms", "scripting"],
+  "host_permissions": [
+    "*://claude.ai/*",
+    "*://chatgpt.com/*",
+    "*://chat.openai.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Agent Beacon Collector"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["*://claude.ai/*", "*://chatgpt.com/*", "*://chat.openai.com/*"],
+      "js": ["interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://claude.ai/*", "*://chatgpt.com/*", "*://chat.openai.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["interceptor.js"],
+      "matches": ["*://claude.ai/*", "*://chatgpt.com/*", "*://chat.openai.com/*"]
+    }
+  ]
+}

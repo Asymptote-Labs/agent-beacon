@@ -88,4 +88,6 @@ For dedicated infrastructure, stricter data boundaries, or residency requirement
 
 ## Boundaries
 
-Beacon currently focuses on endpoint telemetry for supported agent harnesses and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, browser or SaaS telemetry, credential-use attribution, or automatic mutation of Factory Droid shell profiles. Use [Log Forwarding](/log-forwarding) for supported SIEM, observability, object-storage, local JSONL, and customer-managed destinations.
+Beacon currently focuses on endpoint telemetry for supported agent harnesses and local endpoint configuration context. It does not provide kernel or process monitoring, shell history collection, cloud audit ingestion, general browser or SaaS activity monitoring outside the supported chat surfaces, credential-use attribution, or automatic mutation of Factory Droid shell profiles. Use [Log Forwarding](/log-forwarding) for supported SIEM, observability, object-storage, local JSONL, and customer-managed destinations.
+
+Browser chat telemetry is limited to the Claude.ai and ChatGPT conversation streams captured by the optional [Agent Beacon browser extension](/runtimes/browser-extension). Beacon does not observe other tabs, browsing history, or page content elsewhere.

@@ -11,6 +11,34 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### Browser extension · August 24, 2026
+
+- **Browser chat is a supported surface** · An optional Chrome MV3 extension
+  relays Claude.ai and ChatGPT conversations into the same local pipeline as
+  agent activity, normalized into the same schema. Its service worker posts OTLP
+  GenAI logs to the collector already listening on `127.0.0.1:4318`, so browser
+  chats land in `runtime.jsonl` beside agent activity and forward through the
+  same shippers. Build it from `browser-extension/`, or download the zip from an
+  `ext-v*` release, then load it unpacked in Chrome.
+- **Narrow by construction** · The extension reads the chat streams on
+  `claude.ai`, `chatgpt.com`, and `chat.openai.com`, and nothing else. It has no
+  access to other tabs, browsing history, or page content elsewhere, and it never
+  writes files. Activity is attributed to the `claude_web` and `chatgpt_web`
+  harnesses, so browser chat stays distinguishable from CLI agents.
+- **Retention defaults to full** · Complete prompt and assistant response text is
+  retained locally. Browser chat telemetry without content has little
+  investigative value, so the default keeps it. Change it to `redacted` or
+  `metadata` in the extension's options page before enabling it on a machine
+  where the same browser profile is used for personal conversations. Retention is
+  enforced in the browser, so under `metadata` the text never leaves the page.
+- **Released on its own tags** · An `ext-v*` tag publishes the unpacked build as a
+  zip with a `.sha256`, independent of the CLI's `v*` releases. The archive is
+  unsigned, and Chrome Web Store publication is not yet available.
+- **Documented boundaries updated** · The security overview, threat model, and FAQ
+  previously listed browser telemetry as out of scope. They now scope that
+  statement to general browser activity, which the extension still does not
+  collect.
+
 ### Documentation · August 23, 2026
 
 - **One house style across the docs** · Rewrote the pages that had drifted into
