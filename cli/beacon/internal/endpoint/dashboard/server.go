@@ -150,15 +150,16 @@ func Handler(opts Options) (http.Handler, error) {
 			methodNotAllowed(w)
 			return
 		}
-		// Token rollups need the full matching log in append order, not the
-		// latest page. tokenOptions carries the session, so AggregateScoped
-		// applies the exact session filter; the dashboard never scopes by run.
-		events, err := ReadEventsAppendOrder(opts.LogPath, parseQuery(r, maxEventLimit))
+		// Token rollups need the full matching log in append order, plus
+		// unfiltered SessionStart context for user attribution. tokenOptions
+		// carries the session, so AggregateScopedWithContexts applies the exact
+		// session filter; the dashboard never scopes by run.
+		events, contexts, err := ReadTokenEventsAppendOrder(opts.LogPath, parseQuery(r, maxEventLimit))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, tokens.AggregateScoped(events, "", tokenOptions(r)))
+		writeJSON(w, tokens.AggregateScopedWithContexts(events, contexts, "", tokenOptions(r)))
 	})
 	mux.HandleFunc("/api/detections", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

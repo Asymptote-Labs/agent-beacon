@@ -11,6 +11,22 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### Codex token attribution · August 27, 2026
+
+- **Turn-level usage** · Beacon now configures Codex's local trace exporter and
+  retains only the completed turn span carrying thread, turn, model, and token
+  fields. The same canonical `gen_ai.usage` schema used by Claude Code records
+  uncached input, cache read, cache creation, output, and reasoning tokens.
+- **User and session rollups** · A metadata-only SessionStart hook records the
+  local OS user for each Codex session. The token report and dashboard join that
+  context by session ID and add a per-user breakdown.
+- **One live source** · Beacon-managed Codex configuration no longer enables the
+  anonymous token histogram alongside traces. Historical metric rows remain
+  readable, and post-cutover overlaps prefer the attributable turn span.
+- **Rollouts stay out of band** · Beacon does not continuously scan Codex
+  transcript files. Rollout JSONL remains a possible explicit recovery source,
+  not part of normal endpoint execution.
+
 ### Browser extension · August 24, 2026
 
 - **Browser chat is a supported surface** · An optional Chrome MV3 extension

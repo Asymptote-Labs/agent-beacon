@@ -10,6 +10,55 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+type CodexUsageSignals struct {
+	SessionContexts int
+	TurnSpans       int
+	LegacyMetrics   int
+}
+
+// ScanCodexUsageSignals summarizes which Codex attribution source has reached
+// the active runtime log. It reads metadata only; prompt and tool content are
+// never decoded.
+func ScanCodexUsageSignals(logPath string) CodexUsageSignals {
+	var signals CodexUsageSignals
+	if logPath == "" {
+		return signals
+	}
+	file, err := os.Open(logPath)
+	if err != nil {
+		return signals
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		var event struct {
+			Event struct {
+				Action string `json:"action"`
+			} `json:"event"`
+			Harness struct {
+				Name string `json:"name"`
+			} `json:"harness"`
+			Raw map[string]interface{} `json:"raw"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil ||
+			asymptoteobserve.NormalizeHarnessName(event.Harness.Name) != "codex_cli" {
+			continue
+		}
+		if event.Event.Action == "session.context" {
+			signals.SessionContexts++
+		}
+		if source, _ := event.Raw["source"].(string); source == "codex_turn_span" {
+			signals.TurnSpans++
+		}
+		if metric, _ := event.Raw["metric_name"].(string); metric == "codex.turn.token_usage" {
+			signals.LegacyMetrics++
+		}
+	}
+	return signals
+}
+
 func HasRecentHarnessEvent(logPath, harnessName string) bool {
 	_, ok := LastHarnessEvent(logPath, harnessName)
 	return ok

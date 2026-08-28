@@ -66,3 +66,17 @@ func TestVSCodeAndCopilotCLIRemainDistinct(t *testing.T) {
 		t.Error("a Copilot CLI event matched VS Code, which is a different product")
 	}
 }
+
+func TestScanCodexUsageSignalsSeparatesAttributionSources(t *testing.T) {
+	log := writeLog(t,
+		`{"event":{"action":"session.context"},"harness":{"name":"codex"},"raw":{"source":"codex_session_start_hook"}}`,
+		`{"event":{"action":"token.usage"},"harness":{"name":"codex_cli"},"raw":{"source":"codex_turn_span","turn_id":"turn-1"}}`,
+		`{"event":{"action":"token.usage"},"harness":{"name":"codex_cli"},"raw":{"metric_name":"codex.turn.token_usage"}}`,
+		`{"event":{"action":"token.usage"},"harness":{"name":"claude_code"},"raw":{"metric_name":"claude_code.token.usage"}}`,
+	)
+
+	got := ScanCodexUsageSignals(log)
+	if got.SessionContexts != 1 || got.TurnSpans != 1 || got.LegacyMetrics != 1 {
+		t.Fatalf("signals = %#v, want one of each Codex source", got)
+	}
+}

@@ -57,7 +57,7 @@ func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
 	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
 		t.Fatalf("otlp targets = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(hooks, ","), "devin-cli,devin-desktop,hermes"; got != want {
+	if got, want := strings.Join(hooks, ","), "codex,devin-cli,devin-desktop,hermes"; got != want {
 		t.Fatalf("hook targets = %q, want %q", got, want)
 	}
 }
@@ -189,7 +189,7 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	for _, want := range []string{
 		"[otel]",
 		`endpoint = "http://127.0.0.1:4317"`,
-		"[otel.metrics_exporter.\"otlp-grpc\"]",
+		"[otel.trace_exporter.\"otlp-grpc\"]",
 	} {
 		if !strings.Contains(string(codexConfig), want) {
 			t.Fatalf("Codex config missing %q:\n%s", want, codexConfig)

@@ -138,6 +138,11 @@ The dashboard reads the configured runtime JSONL log and serves a local,
 read-only view on loopback. It has no external network dependency during normal
 use.
 
+Use `./beacon token-usage` for the same token data in the terminal. Claude Code
+and supported Codex versions share the canonical `gen_ai.usage` schema; Codex
+turn traces add per-session and per-model counts, and its metadata-only
+SessionStart hook enables local OS-user rollups.
+
 Use the search bar to find events by action, command, file path, MCP tool,
 approval decision, repository, session, or message. Quick filters surface
 high-severity events, failures, approvals, MCP activity, file changes, and events

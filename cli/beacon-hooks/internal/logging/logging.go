@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	osuser "os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -135,11 +136,17 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 
 func (l *Logger) baseEndpointEvent(action, category, severity, message, fidelity string) map[string]interface{} {
 	hostname, _ := os.Hostname()
+	userName := os.Getenv("USER")
 	user := map[string]interface{}{
-		"name": os.Getenv("USER"),
+		"name": userName,
 	}
 	if uid := firstEnv("BEACON_CLOUD_USER_ID_HASH", "BEACON_CLOUD_USER_ID"); uid != "" {
 		user["uid"] = uid
+	} else if current, err := osuser.Current(); err == nil {
+		user["uid"] = current.Uid
+		if userName == "" {
+			user["name"] = current.Username
+		}
 	}
 	// Both blocks are assembled before the event literal so the provenance keys can be omitted
 	// rather than written empty. This path builds raw maps instead of the shared Event struct, so

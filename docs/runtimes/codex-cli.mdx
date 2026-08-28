@@ -5,33 +5,41 @@ description: "Asymptote support details for Codex CLI endpoint telemetry"
 
 ## Runtime overview
 
-Asymptote supports Codex CLI runtime telemetry through local OTLP logs and token usage metrics, with optional raw Codex spans for troubleshooting. Codex hooks can also trigger endpoint inventory heartbeats without replacing the OTLP runtime path.
+Asymptote supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. A lightweight SessionStart hook records the local OS user for token attribution and also triggers endpoint inventory heartbeats.
 
 ## Prerequisites
 
 Before enabling Codex CLI telemetry, make sure:
 
 - Codex CLI is installed and available as the `codex` executable for the user or managed endpoint.
+- Codex CLI 0.149.1 or newer is used for verified turn-trace token attribution.
 - `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
 - The install includes the `codex` harness, either through the default harness list or an explicit `--harness codex` value.
 - Your team has reviewed content handling and destination access for prompt telemetry.
 
 ## Collection path
 
-Codex CLI exports local OpenTelemetry logs and metrics to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events, and keeps the `codex.turn.token_usage` metric for token attribution. Other high-volume Codex metrics, and Codex spans, are suppressed by default. Optional Codex hooks are heartbeat-only and refresh `inventory_state.jsonl`; they do not write duplicate runtime prompt or session events.
+Codex CLI exports local OpenTelemetry logs and traces to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The SessionStart hook writes a metadata-only `session.context` event and refreshes `inventory_state.jsonl`; it never reads transcript content.
 
-Use `--include-codex-spans` during install or repair only when you need raw Codex spans for troubleshooting.
+Use `--include-codex-spans` during install or repair only when you need every raw Codex span for troubleshooting. It is not required for token attribution.
 
 ### Token usage and cost
 
-`beacon endpoint install` configures both the Codex log exporter and the Codex metrics exporter in `~/.codex/config.toml`, so Codex's per-turn `codex.turn.token_usage` metric reaches the collector. Beacon normalizes it into the canonical `gen_ai.usage` fields (`input_tokens`, `output_tokens`, `cache_read.input_tokens`, `reasoning.output_tokens`). Codex reports prompt tokens inclusive of the cached portion, so Beacon subtracts cached input to keep `input_tokens` and `cache_read` disjoint and avoid double-counting in totals.
+`beacon endpoint install` configures Codex's log and trace exporters in `~/.codex/config.toml`. Beacon normalizes the completed turn span into the same canonical `gen_ai.usage` fields used for Claude Code: uncached `input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens`, and `reasoning.output_tokens`. Codex's input count includes both cache reads and cache writes, so Beacon subtracts both before recording uncached input.
 
-Two attribution limits are specific to Codex and follow from what Codex emits, not from Beacon:
+The span directly supplies the model and `session.id` (from Codex `thread.id`). Beacon joins the matching SessionStart context event to attribute local reports by OS user. The runtime log therefore contains both the token event and its session identity context, and both forward through configured JSONL shippers.
 
-- **No cost.** Codex does not emit a cost signal, so `gen_ai.usage.cost_usd` is empty for Codex turns. Beacon never derives cost from local pricing tables.
-- **No per-session attribution.** Codex's usage metric carries no conversation id, so Codex turns do not roll up by session. Model, harness, repository, and run attribution work normally.
+Codex still does not emit a cost signal on this span, so `gen_ai.usage.cost_usd` remains empty. Beacon never puts locally estimated pricing into that runtime-reported field.
+
+Legacy `codex.turn.token_usage` metrics in older logs remain reportable, but they have no session or user identity. New Beacon-managed configuration uses traces as the single live token source so spans and metrics cannot double-count the same turn.
 
 See [How token attribution works](/cli/token-usage#how-token-attribution-works) for the cross-runtime model.
+
+### Rollout JSONL recovery
+
+Beacon does not continuously scan `~/.codex/sessions` or ingest rollout transcripts. Turn traces are structured, attributable, and avoid reading files that can contain prompts, tool output, and code.
+
+If historical backfill is added later, it should be an explicit recovery action over a hook-provided transcript path. A safe parser must read only session metadata, turn boundaries, and `token_count` records; compute positive field-by-field deltas from cumulative totals; handle repeated snapshots, forks, and resumes; and atomically checkpoint complete JSONL lines. It must never inspect `auth.json`.
 
 ## CI support
 
@@ -66,16 +74,18 @@ Asymptote detects Codex CLI through the `codex` executable and `~/.codex/config.
 
 `beacon endpoint install` writes Codex OTLP exporter tables to `~/.codex/config.toml`.
 
-To let Codex sessions trigger inventory heartbeats, install optional Codex hooks after the endpoint is installed:
+`beacon endpoint install --harness codex` installs the required user-level
+session context and inventory hooks with the OTLP configuration. To refresh
+them independently, run:
 
 ```bash
 beacon endpoint hooks install --harness codex
 ```
 
-The hook installer writes heartbeat-only hooks to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
+The hook installer writes the metadata-only session context hook plus inventory heartbeats to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
 
 ```text
-Codex CLI inventory hooks installed: /Users/you/.codex/hooks.json
+Codex CLI endpoint hooks installed: /Users/you/.codex/hooks.json
 ```
 
 ## Telemetry coverage
@@ -84,9 +94,10 @@ Codex CLI inventory hooks installed: /Users/you/.codex/hooks.json
 |------|---------|
 | Prompt telemetry | Supported when emitted through Codex semantic logs |
 | Command, tool, and file telemetry | Supported when emitted through Codex semantic logs |
-| Token usage | Supported through the `codex.turn.token_usage` metric (input, output, cache read, reasoning) |
+| Token usage | Supported per turn through a selective OTLP trace (input, output, cache read, cache creation, reasoning) |
 | Cost attribution | Not available; Codex emits no cost signal |
-| Per-session attribution | Not available; Codex usage metric carries no conversation id |
+| Per-session attribution | Supported from `thread.id` on the turn span |
+| Per-user attribution | Supported in local reports by joining the OS-user SessionStart context |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported through the system-mode package or MDM-managed config |
 

@@ -153,8 +153,15 @@ func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorRes
 	if !status.RuntimeLog.EffectiveUserMode {
 		checks = append(checks, consoleUserConfigCheck())
 	}
+	codexDetected := false
 	for _, h := range status.Harnesses {
 		checks = append(checks, harnessCheck(h, status.LogPath, status.RuntimeLog.EffectiveUserMode))
+		if h.Detected && h.Name == "codex_cli" {
+			codexDetected = true
+		}
+	}
+	if codexDetected {
+		checks = append(checks, codexTokenAttributionCheck(status.LogPath, status.RuntimeLog.EffectiveUserMode))
 	}
 	result := doctorResult{
 		Status:      aggregateCheckStatus(checks),
@@ -1242,6 +1249,38 @@ func harnessCheck(h harness.Harness, logPath string, effectiveUserMode bool) dia
 
 func harnessEventObserved(logPath, name string) bool {
 	return endpointintegrations.HasRecentHarnessEvent(logPath, name)
+}
+
+func codexTokenAttributionCheck(logPath string, effectiveUserMode bool) diagnostics.Check {
+	signals := endpointintegrations.ScanCodexUsageSignals(logPath)
+	check := diagnostics.Check{
+		Name:     "codex_token_attribution",
+		Target:   "codex_cli",
+		Severity: diagnostics.SeverityInfo,
+	}
+	switch {
+	case signals.TurnSpans > 0:
+		check.Status = diagnostics.StatusOK
+		check.Message = "session-attributed Codex turn usage is present"
+		check.Evidence = "codex_turn_usage_observed"
+	case signals.SessionContexts > 0:
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityMedium
+		check.Message = "Codex session context is present but no attributable turn usage span has arrived"
+		check.Evidence = "codex_session_without_turn_usage"
+		check.Action = doctorRepairCommand(effectiveUserMode) + " and restart Codex"
+	case signals.LegacyMetrics > 0:
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityLow
+		check.Message = "only legacy aggregate Codex token metrics are present; session and user attribution are unavailable"
+		check.Evidence = "codex_legacy_usage_metrics"
+		check.Action = doctorRepairCommand(effectiveUserMode) + " and restart Codex"
+	default:
+		check.Status = diagnostics.StatusOK
+		check.Message = "no Codex token usage has been observed yet"
+		check.Evidence = "codex_usage_not_observed"
+	}
+	return check
 }
 
 func harnessAction(h harness.Harness, effectiveUserMode bool) string {

@@ -1532,7 +1532,12 @@ func TestCodexInternalSpanFilter(t *testing.T) {
 		t.Fatal("expected Codex transport span to be dropped")
 	}
 	if !exp.shouldDropSpan(codexAttrs, testSpan("session_task.turn")) {
-		t.Fatal("expected Codex session_task span to be dropped")
+		t.Fatal("expected Codex turn span without usage to be dropped")
+	}
+	usageSpan := testSpan("session_task.turn")
+	usageSpan.Attributes().PutInt("codex.turn.token_usage.input_tokens", 10)
+	if exp.shouldDropSpan(codexAttrs, usageSpan) {
+		t.Fatal("expected Codex turn span with usage to be kept")
 	}
 	if !exp.shouldDropSpan(codexAttrs, testSpan("op.dispatch.user_input_with_turn_context")) {
 		t.Fatal("expected Codex user input span to be dropped")

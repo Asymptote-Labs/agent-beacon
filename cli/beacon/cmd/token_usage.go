@@ -63,7 +63,7 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 		}
 		query.Until = parsed
 	}
-	events, err := dashboard.ReadEventsAppendOrder(runtimeLog.EffectiveLogPath, query)
+	events, contexts, err := dashboard.ReadTokenEventsAppendOrder(runtimeLog.EffectiveLogPath, query)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 		}
 		opts.BucketSize = parsed
 	}
-	report := tokens.AggregateScoped(events, tokenUsageOpts.runID, opts)
+	report := tokens.AggregateScopedWithContexts(events, contexts, tokenUsageOpts.runID, opts)
 	out := cmd.OutOrStdout()
 	if tokenUsageOpts.jsonOutput {
 		encoder := json.NewEncoder(out)

@@ -188,6 +188,71 @@ func TestEventFromSpanNormalizesClaudeCodeLLMRequestUsage(t *testing.T) {
 	}
 }
 
+func TestEventsFromTracesKeepsAndNormalizesCodexTurnUsage(t *testing.T) {
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "codex_exec")
+	spans := rs.ScopeSpans().AppendEmpty().Spans()
+
+	internal := spans.AppendEmpty()
+	internal.SetName("handle_responses")
+
+	turn := spans.AppendEmpty()
+	turn.SetName("session_task.turn")
+	turn.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
+	turn.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000005, 0).UTC()))
+	turn.Attributes().PutStr("thread.id", "codex-session")
+	turn.Attributes().PutStr("turn.id", "codex-turn")
+	turn.Attributes().PutStr("model", "gpt-5.6-sol")
+	turn.Attributes().PutInt("codex.turn.token_usage.input_tokens", 13347)
+	turn.Attributes().PutInt("codex.turn.token_usage.cached_input_tokens", 0)
+	turn.Attributes().PutInt("codex.turn.token_usage.cache_write_input_tokens", 13344)
+	turn.Attributes().PutInt("codex.turn.token_usage.non_cached_input_tokens", 13347)
+	turn.Attributes().PutInt("codex.turn.token_usage.output_tokens", 6)
+	turn.Attributes().PutInt("codex.turn.token_usage.reasoning_output_tokens", 2)
+	turn.Attributes().PutInt("codex.turn.token_usage.total_tokens", 13353)
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want only the usage-bearing turn span", len(events))
+	}
+	event := events[0]
+	if event.Event.Action != "token.usage" || event.Event.Category != "metric" || event.Event.Fidelity != asymptoteobserve.FidelityObserved {
+		t.Fatalf("event = %#v, want observed token.usage metric", event.Event)
+	}
+	if event.Session == nil || event.Session.ID != "codex-session" {
+		t.Fatalf("session = %#v, want codex-session", event.Session)
+	}
+	if event.Model != "gpt-5.6-sol" {
+		t.Fatalf("model = %q, want gpt-5.6-sol", event.Model)
+	}
+	if event.Timestamp != "2023-11-14T22:13:25.000000000Z" {
+		t.Fatalf("timestamp = %q, want turn completion time", event.Timestamp)
+	}
+	usage := event.GenAI.Usage
+	if usage == nil || usage.InputTokens == nil || *usage.InputTokens != 3 {
+		t.Fatalf("input usage = %#v, want 3 uncached tokens", usage)
+	}
+	if usage.CacheRead == nil || usage.CacheRead.InputTokens == nil || *usage.CacheRead.InputTokens != 0 {
+		t.Fatalf("cache read = %#v, want explicit zero", usage.CacheRead)
+	}
+	if usage.CacheCreation == nil || usage.CacheCreation.InputTokens == nil || *usage.CacheCreation.InputTokens != 13344 {
+		t.Fatalf("cache creation = %#v, want 13344", usage.CacheCreation)
+	}
+	if usage.OutputTokens == nil || *usage.OutputTokens != 6 {
+		t.Fatalf("output usage = %#v, want 6", usage)
+	}
+	if usage.Reasoning == nil || usage.Reasoning.OutputTokens == nil || *usage.Reasoning.OutputTokens != 2 {
+		t.Fatalf("reasoning usage = %#v, want 2", usage)
+	}
+	if event.Raw["source"] != "codex_turn_span" || event.Raw["turn_id"] != "codex-turn" {
+		t.Fatalf("raw source metadata = %#v", event.Raw)
+	}
+	if event.Raw["turn_start_timestamp"] != "2023-11-14T22:13:20.000000000Z" {
+		t.Fatalf("turn start metadata = %#v", event.Raw["turn_start_timestamp"])
+	}
+}
+
 func TestEventFromSpanCapturesTraceIdentity(t *testing.T) {
 	span, traces := newObserveSDKTraceSpan("agent.step")
 	span.SetTraceID(pcommon.TraceID([16]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}))
@@ -444,15 +509,16 @@ func TestEventsFromMetricsNormalizesCodexTurnTokenUsage(t *testing.T) {
 	metric.SetName("codex.turn.token_usage")
 	histogram := metric.SetEmptyHistogram()
 	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
-	// Codex's input (120) is inclusive of cached_input (90), and total = input +
-	// output. The normalized input_tokens must drop to the uncached portion (30)
-	// so input_tokens + cache_read == input and totals don't double-count cache.
+	// Codex's input (120) is inclusive of cached_input (90) and
+	// cache_write_input (10). The normalized input_tokens must drop to the
+	// uncached portion (20) so the canonical fields remain disjoint.
 	tokenTypes := map[string]float64{
-		"input":            120,
-		"cached_input":     90,
-		"output":           45,
-		"reasoning_output": 30,
-		"total":            165,
+		"input":             120,
+		"cached_input":      90,
+		"cache_write_input": 10,
+		"output":            45,
+		"reasoning_output":  30,
+		"total":             165,
 	}
 	for tokenType, value := range tokenTypes {
 		dp := histogram.DataPoints().AppendEmpty()
@@ -466,7 +532,7 @@ func TestEventsFromMetricsNormalizesCodexTurnTokenUsage(t *testing.T) {
 	if len(events) != len(tokenTypes) {
 		t.Fatalf("expected %d events (one per token_type), got %d", len(tokenTypes), len(events))
 	}
-	var input, cacheRead, output, reasoning int64
+	var input, cacheRead, cacheCreation, output, reasoning int64
 	for _, event := range events {
 		if event.Event.Action != "token.usage" || event.Harness.Name != "codex_cli" {
 			t.Fatalf("event = %#v, want codex token.usage", event.Event)
@@ -484,15 +550,18 @@ func TestEventsFromMetricsNormalizesCodexTurnTokenUsage(t *testing.T) {
 		if usage.CacheRead != nil && usage.CacheRead.InputTokens != nil {
 			cacheRead += *usage.CacheRead.InputTokens
 		}
+		if usage.CacheCreation != nil && usage.CacheCreation.InputTokens != nil {
+			cacheCreation += *usage.CacheCreation.InputTokens
+		}
 		if usage.Reasoning != nil && usage.Reasoning.OutputTokens != nil {
 			reasoning += *usage.Reasoning.OutputTokens
 		}
 	}
-	if input != 30 || cacheRead != 90 || output != 45 || reasoning != 30 {
-		t.Fatalf("normalized usage = input %d, cache_read %d, output %d, reasoning %d (want 30/90/45/30)", input, cacheRead, output, reasoning)
+	if input != 20 || cacheRead != 90 || cacheCreation != 10 || output != 45 || reasoning != 30 {
+		t.Fatalf("normalized usage = input %d, cache_read %d, cache_creation %d, output %d, reasoning %d (want 20/90/10/45/30)", input, cacheRead, cacheCreation, output, reasoning)
 	}
-	if input+cacheRead != 120 {
-		t.Fatalf("input_tokens + cache_read = %d, want 120 (= Codex input, no double-count)", input+cacheRead)
+	if input+cacheRead+cacheCreation != 120 {
+		t.Fatalf("input + cache_read + cache_creation = %d, want 120 (= Codex input, no double-count)", input+cacheRead+cacheCreation)
 	}
 }
 

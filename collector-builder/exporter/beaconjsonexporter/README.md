@@ -27,7 +27,7 @@ Required behavior:
 - Redact common secrets and cap event size before writing.
 - Emit health failure events when write failures occur.
 
-Token and cost usage metrics:
+Token and cost usage:
 
 - Metrics named `gen_ai.client.token.usage` or ending in `.token.usage` or
   `.cost.usage` (for example `claude_code.token.usage` and
@@ -44,14 +44,18 @@ Token and cost usage metrics:
   cumulative series.
 - All other metrics, and usage metrics without datapoints, keep the single
   `metric.observed` event.
+- Codex's current live token source is the completed `session_task.turn` trace,
+  not its anonymous histogram. The exporter keeps that one span by default,
+  promotes `thread.id`/`turn.id`/model, and maps cache reads and cache writes to
+  disjoint canonical usage fields. Legacy Codex metric events remain readable.
 
 Noise controls:
 
 - Generic process/runtime metrics are dropped by default unless
   `include_runtime_metrics: true` is set.
-- Codex spans are dropped by default because Codex semantic logs carry the
-  endpoint activity Beacon needs. Set `include_codex_spans: true` only when
-  troubleshooting Codex OTLP internals.
+- Codex spans are dropped by default except for a completed turn span carrying
+  `codex.turn.token_usage.*`. Set `include_codex_spans: true` only when
+  troubleshooting all Codex OTLP internals.
 - Codex metrics and transport/startup/debug logs remain suppressed by default so
   one prompt does not flood the endpoint runtime log.
 - Copilot CLI metrics are suppressed by default, including

@@ -1145,6 +1145,7 @@ function renderTokensPage(report, session) {
   renderUtilizationRows(report.utilization || []);
   renderUsageGroupRows("#token-models", report.by_model || [], "model");
   renderUsageGroupRows("#token-sessions", report.by_session || [], "session");
+  renderUsageGroupRows("#token-users", report.by_user || []);
   renderUsageGroupRows("#token-runs", report.by_run || []);
   renderUsageGroupRows("#token-harnesses", report.by_harness || []);
   renderSessionDetail(report.session_detail, session);

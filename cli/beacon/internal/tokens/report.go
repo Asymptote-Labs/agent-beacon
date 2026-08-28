@@ -17,6 +17,7 @@ func RenderText(w io.Writer, report Report) {
 
 	writeGroups(w, "BY MODEL", report.ByModel)
 	writeGroups(w, "BY SESSION", report.BySession)
+	writeGroups(w, "BY USER", report.ByUser)
 	writeGroups(w, "BY HARNESS", report.ByHarness)
 	writeGroups(w, "BY REPOSITORY", report.ByRepository)
 	writeGroups(w, "BY RUN", report.ByRun)
