@@ -335,13 +335,18 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
+	codexTurnUsage := IsCodexTurnUsageSpan(attrs, span.Name())
 	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	fidelity := asymptoteobserve.FidelityObserved
 	if action == "" {
 		action, fidelity = InferActionWithFidelity(attrs, span.Name())
 	}
 	message := FirstNonEmpty(FirstString(attrs, "message", "gen_ai.prompt", "gen_ai.response"), span.Name())
-	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "tool")), SpanSeverity(span.Status().Code().String()), HarnessName(attrs, message, span.Name()), Timestamp(span.StartTimestamp().AsTime()))
+	eventTime := span.StartTimestamp().AsTime()
+	if codexTurnUsage && span.EndTimestamp() != 0 {
+		eventTime = span.EndTimestamp().AsTime()
+	}
+	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "tool")), SpanSeverity(span.Status().Code().String()), HarnessName(attrs, message, span.Name()), Timestamp(eventTime))
 	event.Event.Fidelity = fidelity
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
@@ -354,12 +359,18 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 			event.Trace.ParentSpanID = span.ParentSpanID().String()
 		}
 	}
-	event.Raw = c.RawPayload(attrs, map[string]interface{}{
+	rawExtra := map[string]interface{}{
 		"otel_signal": "traces",
 		"span_name":   span.Name(),
 		"span_kind":   span.Kind().String(),
 		"status":      span.Status().Code().String(),
-	})
+	}
+	if codexTurnUsage {
+		rawExtra["source"] = "codex_turn_span"
+		rawExtra["turn_id"] = FirstString(attrs, "turn.id", "turn_id")
+		NormalizeCodexTurnUsageSpan(&event, attrs)
+	}
+	event.Raw = c.RawPayload(attrs, rawExtra)
 	c.PromoteRetainedContent(&event, attrs, span.Name())
 	return event
 }
@@ -368,11 +379,112 @@ func (c Converter) ShouldDropSpan(resourceAttrs map[string]interface{}, span ptr
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
 	switch HarnessName(attrs, span.Name()) {
 	case "codex_cli":
-		return !c.opts.IncludeCodexSpans
+		return !c.opts.IncludeCodexSpans && !IsCodexTurnUsageSpan(attrs, span.Name())
 	case "vscode_copilot":
 		return shouldDropVSCodeCopilotSpan(attrs, span.Name(), c.opts.IncludeRuntimeMetrics)
 	default:
 		return false
+	}
+}
+
+// IsCodexTurnUsageSpan identifies the single completed-turn span that carries
+// Codex's session-attributable token totals. The span name alone is not enough:
+// unfinished turns and some older builds can emit the same span with no usage.
+func IsCodexTurnUsageSpan(attrs map[string]interface{}, spanName string) bool {
+	if HarnessName(attrs, spanName) != "codex_cli" {
+		return false
+	}
+	for _, key := range []string{
+		"codex.turn.token_usage.input_tokens",
+		"codex.turn.token_usage.cached_input_tokens",
+		"codex.turn.token_usage.cache_write_input_tokens",
+		"codex.turn.token_usage.output_tokens",
+		"codex.turn.token_usage.reasoning_output_tokens",
+		"codex.turn.token_usage.total_tokens",
+	} {
+		if HasAttr(attrs, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeCodexTurnUsageSpan maps Codex's completed-turn trace attributes to
+// Beacon's canonical, disjoint gen_ai.usage representation.
+func NormalizeCodexTurnUsageSpan(event *Event, attrs map[string]interface{}) {
+	if event == nil {
+		return
+	}
+	event.Event.Action = "token.usage"
+	event.Event.Category = "metric"
+	event.Event.Fidelity = asymptoteobserve.FidelityObserved
+	event.Message = "codex.turn.token_usage"
+
+	sessionID := FirstString(attrs, "thread.id", "thread_id")
+	if sessionID != "" {
+		workingDirectory := ""
+		if event.Session != nil {
+			workingDirectory = event.Session.WorkingDirectory
+		}
+		event.Session = &SessionInfo{ID: sessionID, WorkingDirectory: workingDirectory}
+		if event.GenAI == nil {
+			event.GenAI = &GenAIInfo{}
+		}
+		event.GenAI.Conversation = &GenAIConversationInfo{ID: sessionID}
+	}
+	if event.GenAI == nil {
+		event.GenAI = &GenAIInfo{}
+	}
+	usage := &GenAIUsageInfo{}
+	hasUsage := false
+
+	inputTotal, hasInput := Int64Attr(attrs, "codex.turn.token_usage.input_tokens")
+	cached, hasCached := Int64Attr(attrs, "codex.turn.token_usage.cached_input_tokens")
+	cacheWrite, hasCacheWrite := Int64Attr(attrs, "codex.turn.token_usage.cache_write_input_tokens")
+	if !hasInput {
+		if nonCached, ok := Int64Attr(attrs, "codex.turn.token_usage.non_cached_input_tokens"); ok {
+			inputTotal = nonCached + cached
+			hasInput = true
+		}
+	}
+	if hasInput || hasCached || hasCacheWrite {
+		uncached := inputTotal - cached - cacheWrite
+		if uncached < 0 {
+			uncached = 0
+		}
+		usage.InputTokens = &uncached
+		hasUsage = true
+	}
+	if hasCached {
+		if cached < 0 {
+			cached = 0
+		}
+		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &cached}
+		hasUsage = true
+	}
+	if hasCacheWrite {
+		if cacheWrite < 0 {
+			cacheWrite = 0
+		}
+		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &cacheWrite}
+		hasUsage = true
+	}
+	if output, ok := Int64Attr(attrs, "codex.turn.token_usage.output_tokens"); ok {
+		if output < 0 {
+			output = 0
+		}
+		usage.OutputTokens = &output
+		hasUsage = true
+	}
+	if reasoning, ok := Int64Attr(attrs, "codex.turn.token_usage.reasoning_output_tokens"); ok {
+		if reasoning < 0 {
+			reasoning = 0
+		}
+		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &reasoning}
+		hasUsage = true
+	}
+	if hasUsage {
+		event.GenAI.Usage = usage
 	}
 }
 
@@ -715,18 +827,19 @@ func (c Converter) EventsFromMetric(resourceAttrs map[string]interface{}, metric
 
 func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) []Event {
 	var events []Event
-	// Codex reports input tokens inclusive of the cached_input subset (input =
-	// uncached + cached, and total = input + output). Beacon's gen_ai.usage keeps
-	// input_tokens and cache_read disjoint like Claude Code, so reduce input by
-	// the per-turn cached_input before normalizing; otherwise totals double-count
-	// cached prompt tokens. Returns nil (no-op) for every other usage metric.
-	cachedInputByTurn := codexCachedInputByTimestamp(metric)
+	// Codex reports input tokens inclusive of both cached_input and
+	// cache_write_input. Beacon's gen_ai.usage keeps uncached input, cache read,
+	// and cache creation disjoint, so reduce input by both per-turn subsets;
+	// otherwise totals double-count cached prompt tokens. Returns nil (no-op)
+	// for every other usage metric.
+	inputSubsetsByTurn := codexInputSubsetsByTimestamp(metric)
 	adjustValue := func(dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64) float64 {
-		if cachedInputByTurn == nil {
+		if inputSubsetsByTurn == nil {
 			return value
 		}
 		if tt := FirstString(AttrsToMap(dpAttrs), "token_type"); strings.EqualFold(tt, "input") {
-			if value -= cachedInputByTurn[ts.AsTime().UnixNano()]; value < 0 {
+			subsets := inputSubsetsByTurn[ts.AsTime().UnixNano()]
+			if value -= subsets.cached + subsets.cacheWrite; value < 0 {
 				value = 0
 			}
 		}
@@ -769,28 +882,39 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 	return events
 }
 
-// codexCachedInputByTimestamp sums each turn's cached_input datapoints from the
-// codex.turn.token_usage histogram, keyed by datapoint timestamp, so the input
-// datapoint can be reduced to its uncached portion (Codex's input is inclusive
-// of cached_input). Returns nil for any other metric so the generic usage path
-// is unaffected.
-func codexCachedInputByTimestamp(metric pmetric.Metric) map[int64]float64 {
+type codexInputSubsets struct {
+	cached     float64
+	cacheWrite float64
+}
+
+// codexInputSubsetsByTimestamp collects each turn's cached and cache-write
+// datapoints so Codex's inclusive input count can be reduced to the canonical
+// uncached remainder. Returns nil for every other metric.
+func codexInputSubsetsByTimestamp(metric pmetric.Metric) map[int64]codexInputSubsets {
 	if !strings.EqualFold(strings.TrimSpace(metric.Name()), "codex.turn.token_usage") {
 		return nil
 	}
 	if metric.Type() != pmetric.MetricTypeHistogram {
 		return nil
 	}
-	out := map[int64]float64{}
+	out := map[int64]codexInputSubsets{}
 	dps := metric.Histogram().DataPoints()
 	for i := 0; i < dps.Len(); i++ {
 		dp := dps.At(i)
 		if !dp.HasSum() {
 			continue
 		}
-		if tt := FirstString(AttrsToMap(dp.Attributes()), "token_type"); strings.EqualFold(tt, "cached_input") {
-			out[dp.Timestamp().AsTime().UnixNano()] += dp.Sum()
+		key := dp.Timestamp().AsTime().UnixNano()
+		subsets := out[key]
+		switch strings.ToLower(FirstString(AttrsToMap(dp.Attributes()), "token_type")) {
+		case "cached_input":
+			subsets.cached += dp.Sum()
+		case "cache_write_input":
+			subsets.cacheWrite += dp.Sum()
+		default:
+			continue
 		}
+		out[key] = subsets
 	}
 	return out
 }
@@ -868,7 +992,7 @@ func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 		usage.OutputTokens = &value
 	case "cacheread", "cachedinput":
 		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
-	case "cachecreation":
+	case "cachecreation", "cachewrite", "cachewriteinput":
 		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
 	case "reasoning", "reasoningoutput":
 		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}

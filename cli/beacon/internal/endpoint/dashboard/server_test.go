@@ -173,6 +173,7 @@ func itoa2(v int) string {
 func TestTokensEndpointAggregatesUsage(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	lines := []string{
+		`{"timestamp":"2026-06-11T09:59:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"session.context","category":"session"},"severity":"info","endpoint":{"os":"darwin"},"user":{"name":"alice","uid":"501"},"harness":{"name":"claude_code"},"session":{"id":"local-session"},"message":"Session context observed"}`,
 		// Claude Code metric datapoint events (delta temporality).
 		`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"claude_code"},"session":{"id":"local-session"},"model":"claude-sonnet-4-5","gen_ai":{"usage":{"input_tokens":100}},"message":"claude_code.token.usage","raw":{"metric_name":"claude_code.token.usage","metric_temporality":"Delta"}}`,
 		`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"claude_code"},"session":{"id":"local-session"},"model":"claude-sonnet-4-5","gen_ai":{"usage":{"output_tokens":40}},"message":"claude_code.token.usage","raw":{"metric_name":"claude_code.token.usage","metric_temporality":"Delta"}}`,
@@ -206,6 +207,9 @@ func TestTokensEndpointAggregatesUsage(t *testing.T) {
 	}
 	if len(report.BySession) != 2 {
 		t.Fatalf("by_session = %#v", report.BySession)
+	}
+	if len(report.ByUser) != 1 || report.ByUser[0].Key != "alice [501]" || report.ByUser[0].Usage.InputTokens != 100 {
+		t.Fatalf("by_user = %#v", report.ByUser)
 	}
 	if len(report.Series) != 2 {
 		t.Fatalf("series = %#v", report.Series)

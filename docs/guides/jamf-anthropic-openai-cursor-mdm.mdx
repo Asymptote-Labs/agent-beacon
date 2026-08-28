@@ -40,7 +40,7 @@ After rollout:
 - The S3 forwarder runs as `com.beacon.endpoint.s3-forwarder`.
 - Claude Code hooks write local runtime telemetry.
 - Cursor hooks write local runtime telemetry.
-- Codex CLI sends OTLP logs and token metrics to Beacon's local collector.
+- Codex CLI sends OTLP logs and an attributable turn-usage trace to Beacon's local collector; its SessionStart hook records the console user.
 - Runtime telemetry is written locally to `/var/log/beacon-agent/runtime.jsonl`.
 - Inventory telemetry is written locally to `/var/log/beacon-agent/inventory_state.jsonl`.
 - Vector uploads both JSONL streams to your S3 bucket.
@@ -60,7 +60,7 @@ Runtime objects contain agent activity. Inventory objects contain agent configur
 | --- | --- | --- |
 | Claude Code | S3 helper installs Claude Code hooks for the console user | Prompt, lifecycle, tool, permission, command, file, and inventory telemetry where Claude Code exposes it |
 | Cursor | Separate user hook policy installs Cursor hooks | Prompt, tool, shell command, MCP-like, approval, file edit, and inventory telemetry where Cursor exposes it |
-| Codex CLI | Separate user config policy writes `~/.codex/config.toml` | Codex semantic logs and token usage metrics emitted through local OTLP |
+| Codex CLI | User config repair writes `~/.codex/config.toml` and endpoint hooks | Codex semantic logs plus per-user/session/model turn usage emitted through local OTLP and joined to OS-user context |
 | Claude Cowork, cloud agents, CI, SDK apps | Out of scope for this Mac MDM runbook | Configure those from their runtime-specific pages |
 
 ## Prerequisites

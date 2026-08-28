@@ -101,6 +101,7 @@ type Report struct {
 	Totals          Usage              `json:"totals"`
 	ByModel         []Group            `json:"by_model,omitempty"`
 	BySession       []Group            `json:"by_session,omitempty"`
+	ByUser          []Group            `json:"by_user,omitempty"`
 	ByHarness       []Group            `json:"by_harness,omitempty"`
 	ByRepository    []Group            `json:"by_repository,omitempty"`
 	ByRun           []Group            `json:"by_run,omitempty"`
@@ -118,8 +119,10 @@ type usageEvent struct {
 	order        int
 	action       string
 	name         string
+	endpoint     string
 	harness      string
 	session      string
+	user         string
 	model        string
 	repository   string
 	run          string
@@ -129,6 +132,7 @@ type usageEvent struct {
 	usage        Usage
 	cumulative   bool
 	metricName   string
+	rawSource    string
 	seriesField  string
 	seriesValue  float64
 }
@@ -149,12 +153,14 @@ func Aggregate(events []schema.Event, opts Options) Report {
 		opts.NearLimitRatio = defaultNearLimitRatio
 	}
 	report := Report{TotalEvents: len(events)}
-	usageEvents := collectUsageEvents(events)
+	usageEvents := collectUsageEvents(events, sessionUserContexts(events))
+	usageEvents = preferCodexTurnSpans(usageEvents)
 	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
 
 	byModel := map[string]*Usage{}
 	bySession := map[string]*Usage{}
+	byUser := map[string]*Usage{}
 	byHarness := map[string]*Usage{}
 	byRepository := map[string]*Usage{}
 	byRun := map[string]*Usage{}
@@ -163,6 +169,7 @@ func Aggregate(events []schema.Event, opts Options) Report {
 		report.Totals.add(ue.usage)
 		addGroup(byModel, ue.model, ue.usage)
 		addGroup(bySession, ue.session, ue.usage)
+		addGroup(byUser, ue.user, ue.usage)
 		addGroup(byHarness, ue.harness, ue.usage)
 		addGroup(byRepository, ue.repository, ue.usage)
 		addGroup(byRun, ue.run, ue.usage)
@@ -177,6 +184,7 @@ func Aggregate(events []schema.Event, opts Options) Report {
 	report.EventsWithUsage = len(usageEvents)
 	report.ByModel = sortedGroups(byModel, opts.TopLimit)
 	report.BySession = sortedGroups(bySession, opts.TopLimit)
+	report.ByUser = sortedGroups(byUser, opts.TopLimit)
 	report.ByHarness = sortedGroups(byHarness, opts.TopLimit)
 	report.ByRepository = sortedGroups(byRepository, opts.TopLimit)
 	report.ByRun = sortedGroups(byRun, opts.TopLimit)
@@ -219,7 +227,110 @@ func AggregateScoped(events []schema.Event, runID string, opts Options) Report {
 	return Aggregate(filtered, opts)
 }
 
-func collectUsageEvents(events []schema.Event) []*usageEvent {
+type sessionContextKey struct {
+	endpoint string
+	harness  string
+	session  string
+}
+
+type endpointContextKey struct {
+	endpoint string
+	harness  string
+}
+
+type endpointUserNameKey struct {
+	endpoint string
+	harness  string
+	name     string
+}
+
+type sessionUserIndex struct {
+	bySession      map[sessionContextKey]string
+	byEndpoint     map[endpointContextKey]string
+	byEndpointName map[endpointUserNameKey]string
+}
+
+func sessionUserContexts(events []schema.Event) sessionUserIndex {
+	contexts := sessionUserIndex{
+		bySession:      map[sessionContextKey]string{},
+		byEndpoint:     map[endpointContextKey]string{},
+		byEndpointName: map[endpointUserNameKey]string{},
+	}
+	ambiguousEndpoints := map[endpointContextKey]bool{}
+	ambiguousNames := map[endpointUserNameKey]bool{}
+	for _, event := range events {
+		if event.Session == nil || strings.TrimSpace(event.Session.ID) == "" {
+			continue
+		}
+		user := userKey(event.User)
+		if user == "" {
+			continue
+		}
+		key := sessionKey(event)
+		if event.Event.Action == "session.context" || contexts.bySession[key] == "" {
+			contexts.bySession[key] = user
+		}
+		if event.Event.Action != "session.context" {
+			continue
+		}
+		endpointKey := endpointKey(event)
+		if current := contexts.byEndpoint[endpointKey]; current == "" {
+			if !ambiguousEndpoints[endpointKey] {
+				contexts.byEndpoint[endpointKey] = user
+			}
+		} else if current != user {
+			delete(contexts.byEndpoint, endpointKey)
+			ambiguousEndpoints[endpointKey] = true
+		}
+		if name := strings.ToLower(strings.TrimSpace(event.User.Name)); name != "" {
+			nameKey := endpointUserNameKey{endpoint: endpointKey.endpoint, harness: endpointKey.harness, name: name}
+			if current := contexts.byEndpointName[nameKey]; current == "" {
+				if !ambiguousNames[nameKey] {
+					contexts.byEndpointName[nameKey] = user
+				}
+			} else if current != user {
+				delete(contexts.byEndpointName, nameKey)
+				ambiguousNames[nameKey] = true
+			}
+		}
+	}
+	return contexts
+}
+
+func endpointKey(event schema.Event) endpointContextKey {
+	return endpointContextKey{
+		endpoint: strings.ToLower(strings.TrimSpace(event.Endpoint.Hostname)),
+		harness:  strings.ToLower(strings.TrimSpace(event.Harness.Name)),
+	}
+}
+
+func sessionKey(event schema.Event) sessionContextKey {
+	session := ""
+	if event.Session != nil {
+		session = event.Session.ID
+	}
+	endpoint := endpointKey(event)
+	return sessionContextKey{
+		endpoint: endpoint.endpoint,
+		harness:  endpoint.harness,
+		session:  strings.ToLower(strings.TrimSpace(session)),
+	}
+}
+
+func userKey(user schema.UserInfo) string {
+	name := strings.TrimSpace(user.Name)
+	uid := strings.TrimSpace(user.UID)
+	switch {
+	case name != "" && uid != "":
+		return name + " [" + uid + "]"
+	case uid != "":
+		return uid
+	default:
+		return name
+	}
+}
+
+func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []*usageEvent {
 	var out []*usageEvent
 	for i, event := range events {
 		if event.GenAI == nil || event.GenAI.Usage == nil {
@@ -230,7 +341,9 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 			order:      i,
 			action:     event.Event.Action,
 			name:       event.Message,
+			endpoint:   event.Endpoint.Hostname,
 			harness:    event.Harness.Name,
+			user:       userKey(event.User),
 			model:      event.Model,
 			repository: event.Repository,
 			usage:      Usage{Events: 1},
@@ -240,6 +353,22 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 		}
 		if event.Session != nil {
 			ue.session = event.Session.ID
+			if contextualUser := sessionUsers.bySession[sessionKey(event)]; contextualUser != "" {
+				ue.user = contextualUser
+			}
+		}
+		if ue.user == userKey(event.User) {
+			endpoint := endpointKey(event)
+			nameKey := endpointUserNameKey{
+				endpoint: endpoint.endpoint,
+				harness:  endpoint.harness,
+				name:     strings.ToLower(strings.TrimSpace(event.User.Name)),
+			}
+			if namedUser := sessionUsers.byEndpointName[nameKey]; namedUser != "" {
+				ue.user = namedUser
+			} else if endpointUser := sessionUsers.byEndpoint[endpoint]; endpointUser != "" {
+				ue.user = endpointUser
+			}
 		}
 		if event.Run != nil {
 			ue.run = RunKey(event.Run.Provider, event.Run.RunID)
@@ -275,8 +404,53 @@ func collectUsageEvents(events []schema.Event) []*usageEvent {
 				ue.cumulative = true
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
+			ue.rawSource, _ = event.Raw["source"].(string)
 		}
 		out = append(out, ue)
+	}
+	return out
+}
+
+// preferCodexTurnSpans makes the attributable turn trace authoritative from
+// the first time it appears for an endpoint/model. Legacy aggregate metrics
+// before that cutover remain reportable, while a manually configured
+// trace+metric overlap after it cannot double-count the same turns.
+func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
+	type sourceKey struct {
+		endpoint string
+		harness  string
+		model    string
+	}
+	keyFor := func(event *usageEvent) sourceKey {
+		return sourceKey{
+			endpoint: strings.ToLower(strings.TrimSpace(event.endpoint)),
+			harness:  strings.ToLower(strings.TrimSpace(event.harness)),
+			model:    strings.ToLower(strings.TrimSpace(event.model)),
+		}
+	}
+	cutovers := map[sourceKey]time.Time{}
+	for _, event := range events {
+		if !strings.EqualFold(event.rawSource, "codex_turn_span") || event.ts.IsZero() {
+			continue
+		}
+		key := keyFor(event)
+		if current, ok := cutovers[key]; !ok || event.ts.Before(current) {
+			cutovers[key] = event.ts
+		}
+	}
+	if len(cutovers) == 0 {
+		return events
+	}
+	out := events[:0]
+	for _, event := range events {
+		cutover, ok := cutovers[keyFor(event)]
+		if ok &&
+			strings.EqualFold(event.metricName, "codex.turn.token_usage") &&
+			!event.ts.IsZero() &&
+			!event.ts.Before(cutover) {
+			continue
+		}
+		out = append(out, event)
 	}
 	return out
 }

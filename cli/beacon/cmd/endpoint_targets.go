@@ -128,6 +128,14 @@ func splitEndpointTargets(values []string) (otlp []string, hooks []string, err e
 				otlp = append(otlp, target.Name)
 				seenOTLP[target.Name] = true
 			}
+			// Codex usage comes from OTLP turn spans, but those spans do not
+			// identify the local OS account. Its SessionStart context hook is
+			// therefore part of the token integration rather than an optional
+			// duplicate activity path.
+			if target.Name == "codex" && !seenHooks["codex"] {
+				hooks = append(hooks, "codex")
+				seenHooks["codex"] = true
+			}
 		case endpointTargetHook:
 			if !seenHooks[target.Name] {
 				hooks = append(hooks, target.Name)

@@ -99,7 +99,7 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Codex CLI inventory hooks installed: %s\n", status.HooksPath)
+		fmt.Printf("Codex CLI endpoint hooks installed: %s\n", status.HooksPath)
 	case "vscode":
 		status, err := endpointhooks.InstallVSCode(endpointhooks.VSCodeOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
+func TestInstallCodexHooksUsesInventoryAndSessionContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex inventory-heartbeat"}]}],"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex codex-usage-sync"}]}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
@@ -29,6 +29,7 @@ func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
 		"UserPromptSubmit",
 		"--platform codex",
 		"inventory-heartbeat",
+		"codex-session-context",
 		"--log '/tmp/runtime.jsonl'",
 		"--config '/tmp/config.json'",
 	} {
@@ -38,7 +39,7 @@ func TestInstallCodexHooksUsesInventoryHeartbeatOnly(t *testing.T) {
 	}
 	for _, forbidden := range []string{"session-start", "prompt-submit", " stop", " session-end", "codex-usage-sync"} {
 		if strings.Contains(text, forbidden) {
-			t.Fatalf("Codex inventory hooks should not emit runtime hook events %q:\n%s", forbidden, text)
+			t.Fatalf("Codex hooks should not install duplicate generic runtime hooks %q:\n%s", forbidden, text)
 		}
 	}
 	if !strings.Contains(text, "SessionStart") || strings.Contains(text, `"Stop"`) {

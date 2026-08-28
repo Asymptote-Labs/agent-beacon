@@ -5,7 +5,7 @@ description: "Report token usage and attribution from Beacon runtime logs"
 
 ## Command overview
 
-`beacon token-usage` reads Beacon runtime events from the JSONL log and summarizes token usage, cost, models, sessions, runs, harnesses, and repositories.
+`beacon token-usage` reads Beacon runtime events from the JSONL log and summarizes token usage, cost, users, models, sessions, runs, harnesses, and repositories.
 
 ```bash title="Command syntax"
 beacon token-usage [flags]
@@ -23,19 +23,23 @@ Beacon normalizes token telemetry from every runtime into one canonical [`gen_ai
 
 A few rules shape how the numbers read:
 
-- **Counts are kept disjoint.** `input_tokens`, `output_tokens`, `cache_read`, and `cache_creation` do not overlap, so a total is `input + output + cache_read + cache_creation` without double-counting. When a runtime reports prompt tokens inclusive of cache (Codex), Beacon subtracts the cached portion so the disjoint model holds.
+- **Counts are kept disjoint.** `input_tokens`, `output_tokens`, `cache_read`, and `cache_creation` do not overlap, so a total is `input + output + cache_read + cache_creation` without double-counting. Codex reports input inclusive of both cache reads and cache writes, so Beacon subtracts both before storing uncached input.
 - **Cost is runtime-reported only.** `cost_usd` reflects what the runtime emits. Beacon never derives cost from local pricing tables, so cost appears only for runtimes that report it.
-- **Attribution depends on the metadata a runtime attaches.** Model, harness, repository, and run grouping work whenever those fields are present. Per-session grouping (`--session`, the session step tree) requires a session or conversation id on the usage signal.
+- **Attribution depends on the metadata a runtime attaches.** Model, harness, repository, and run grouping work whenever those fields are present. Per-session grouping (`--session`, the session step tree) requires a session or conversation id on the usage signal. Per-user grouping uses the event user directly or a matching session context event from a local hook.
 - **Duplicate channels are de-duplicated.** When a runtime emits the same usage on more than one signal (Claude Code reports it on both logs and metrics), Beacon counts it once.
 
 ### Per-runtime coverage
 
-| Runtime | Tokens | Cost | Per-session |
-|---------|--------|------|-------------|
-| Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes |
-| Codex CLI | input, output, cache read, reasoning | Not emitted by Codex | No (metric carries no conversation id) |
+| Runtime | Tokens | Cost | Per-session | Per-user |
+|---------|--------|------|-------------|----------|
+| Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | When local user context is present |
+| Codex CLI | input, output, cache read, cache creation, reasoning | Not emitted by Codex | Yes, from the turn trace | Yes, from matching SessionStart context |
 
-`cost_usd` and `--session` detail are empty for Codex because Codex does not emit a cost signal or a conversation id on its usage metric. This is not a Beacon limitation. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
+`cost_usd` remains empty for Codex because the attributable turn trace does not emit cost. Legacy metric-only Codex rows remain visible in historical totals but cannot be assigned to a session or user. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
+
+### Cost estimates are separate
+
+Beacon does not turn Codex token counts into `cost_usd`. A future report may show a separately labeled estimate with the pricing source, effective date, model, and service tier. Unknown models must remain unknown rather than reading as zero cost, and reasoning tokens must not be charged a second time because they are already included in output.
 
 ## Examples
 

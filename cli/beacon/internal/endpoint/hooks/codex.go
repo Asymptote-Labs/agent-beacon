@@ -63,7 +63,10 @@ func codexStatusFromRuntime(status runtimeStatus) CodexStatus {
 func installCodexHooks(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("codex", binaryPath, logPath, configPath)
 	endpointHooks := map[string]settingsHookGroup{
-		"SessionStart":     {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10}}},
+		"SessionStart": {Hooks: []settingsHookRef{
+			{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10},
+			{Type: "command", Command: prefix + " codex-session-context", Timeout: 10},
+		}},
 		"UserPromptSubmit": {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10}}},
 	}
 	return installSettingsEndpointHooks(path, "codex", endpointHooks)

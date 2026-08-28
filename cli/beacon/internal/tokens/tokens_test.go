@@ -73,6 +73,78 @@ func TestAggregateSumsDeltaUsageAcrossGroups(t *testing.T) {
 	}
 }
 
+func TestAggregateAttributesUsageToSessionUserContext(t *testing.T) {
+	contextEvent := func(host, user, uid string) schema.Event {
+		return schema.Event{
+			Timestamp: "2026-06-11T09:59:00Z",
+			Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.context", Category: "session"},
+			Endpoint:  schema.EndpointInfo{Hostname: host, OS: "darwin"},
+			User:      schema.UserInfo{Name: user, UID: uid},
+			Harness:   schema.HarnessInfo{Name: "codex_cli"},
+			Session:   &schema.SessionInfo{ID: "shared-session"},
+		}
+	}
+	usageEvent := func(host string, input int64) schema.Event {
+		return usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "shared-session", "gpt-5.6-sol", func(e *schema.Event) {
+			e.Endpoint = schema.EndpointInfo{Hostname: host, OS: "darwin"}
+			e.User = schema.UserInfo{Name: "root", UID: "0"}
+			e.GenAI.Usage.InputTokens = int64Ptr(input)
+		})
+	}
+
+	report := Aggregate([]schema.Event{
+		contextEvent("host-a", "alice", "501"),
+		usageEvent("host-a", 10),
+		contextEvent("host-b", "bob", "502"),
+		usageEvent("host-b", 20),
+	}, Options{})
+
+	if len(report.ByUser) != 2 {
+		t.Fatalf("by_user = %#v, want two endpoint-scoped users", report.ByUser)
+	}
+	users := map[string]Usage{}
+	for _, group := range report.ByUser {
+		users[group.Key] = group.Usage
+	}
+	if users["alice [501]"].InputTokens != 10 || users["bob [502]"].InputTokens != 20 {
+		t.Fatalf("by_user = %#v, want session context to override collector identity", users)
+	}
+}
+
+func TestAggregateAttributesAuxiliaryCodexSessionToUniqueEndpointUser(t *testing.T) {
+	contextEvent := schema.Event{
+		Timestamp: "2026-06-11T09:59:00Z",
+		Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.context", Category: "session"},
+		Endpoint:  schema.EndpointInfo{Hostname: "host-a", OS: "darwin"},
+		User:      schema.UserInfo{Name: "shukan", UID: "501"},
+		Harness:   schema.HarnessInfo{Name: "codex_cli"},
+		Session:   &schema.SessionInfo{ID: "main-session"},
+	}
+	auxiliaryStarted := schema.Event{
+		Timestamp: "2026-06-11T10:00:00Z",
+		Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.started", Category: "session"},
+		Endpoint:  schema.EndpointInfo{Hostname: "host-a", OS: "darwin"},
+		User:      schema.UserInfo{Name: "shukan"},
+		Harness:   schema.HarnessInfo{Name: "codex_cli"},
+		Session:   &schema.SessionInfo{ID: "title-session"},
+	}
+	mainUsage := usageEventFixture("2026-06-11T10:00:05Z", "codex_cli", "main-session", "gpt-5.6-sol", func(e *schema.Event) {
+		e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
+		e.User = schema.UserInfo{Name: "shukan"}
+		e.GenAI.Usage.InputTokens = int64Ptr(10)
+	})
+	auxiliaryUsage := usageEventFixture("2026-06-11T10:00:06Z", "codex_cli", "title-session", "gpt-5.6-sol", func(e *schema.Event) {
+		e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
+		e.User = schema.UserInfo{Name: "shukan"}
+		e.GenAI.Usage.InputTokens = int64Ptr(20)
+	})
+
+	report := Aggregate([]schema.Event{contextEvent, auxiliaryStarted, mainUsage, auxiliaryUsage}, Options{})
+	if len(report.ByUser) != 1 || report.ByUser[0].Key != "shukan [501]" || report.ByUser[0].Usage.InputTokens != 30 {
+		t.Fatalf("by_user = %#v, want both Codex sessions attributed to the unique endpoint user", report.ByUser)
+	}
+}
+
 func TestAggregateDedupesDualChannelUsage(t *testing.T) {
 	// Claude Code reports each request's usage on both a claude_code.api_request
 	// log record (no metric_name) and the claude_code.token.usage metric, under
@@ -129,6 +201,40 @@ func TestAggregateDedupesDualChannelUsage(t *testing.T) {
 	}
 	if codex := byModel["gpt-5"]; codex.InputTokens != 500 {
 		t.Fatalf("metrics-only scope was dropped: %#v", codex)
+	}
+}
+
+func TestAggregatePrefersCodexTurnSpansAfterCutover(t *testing.T) {
+	codexMetric := func(ts string, input int64) schema.Event {
+		return usageEventFixture(ts, "codex_cli", "", "gpt-5.6-sol", func(e *schema.Event) {
+			e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
+			e.GenAI.Usage.InputTokens = int64Ptr(input)
+			e.Raw = map[string]interface{}{
+				"metric_name":        "codex.turn.token_usage",
+				"metric_temporality": "Delta",
+			}
+		})
+	}
+	turnSpan := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "session-1", "gpt-5.6-sol", func(e *schema.Event) {
+		e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
+		e.GenAI.Usage.InputTokens = int64Ptr(20)
+		e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_id": "turn-1"}
+	})
+	events := []schema.Event{
+		// A pre-upgrade metric remains part of historical totals.
+		codexMetric("2026-06-11T09:00:00Z", 10),
+		turnSpan,
+		// The same live turn also flushed through a manually retained metric
+		// exporter; the turn span wins after cutover.
+		codexMetric("2026-06-11T10:00:05Z", 20),
+	}
+
+	report := Aggregate(events, Options{})
+	if report.Totals.InputTokens != 30 || report.Totals.Events != 2 {
+		t.Fatalf("totals = %#v, want legacy metric plus turn span only", report.Totals)
+	}
+	if len(report.BySession) != 1 || report.BySession[0].Key != "session-1" {
+		t.Fatalf("by_session = %#v, want attributable turn span", report.BySession)
 	}
 }
 
