@@ -368,6 +368,9 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 	if codexTurnUsage {
 		rawExtra["source"] = "codex_turn_span"
 		rawExtra["turn_id"] = FirstString(attrs, "turn.id", "turn_id")
+		if span.StartTimestamp() != 0 {
+			rawExtra["turn_start_timestamp"] = asymptoteobserve.FormatTimestamp(span.StartTimestamp().AsTime())
+		}
 		NormalizeCodexTurnUsageSpan(&event, attrs)
 	}
 	event.Raw = c.RawPayload(attrs, rawExtra)

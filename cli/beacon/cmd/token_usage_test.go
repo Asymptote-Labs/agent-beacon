@@ -95,6 +95,25 @@ func TestTokenUsageJSONReport(t *testing.T) {
 	}
 }
 
+func TestTokenUsageTimeFilterKeepsEarlierUserContext(t *testing.T) {
+	logPath := writeTokensFixtureLog(t)
+	output := runTokenUsageCommand(t,
+		"--log-path", logPath,
+		"--json",
+		"--since", "2026-06-11T10:00:00Z",
+	)
+	var report tokens.Report
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("unmarshal JSON report: %v\n%s", err, output)
+	}
+	if report.TotalEvents != 3 {
+		t.Fatalf("total events = %d, want only the three time-matched usage events", report.TotalEvents)
+	}
+	if len(report.ByUser) != 1 || report.ByUser[0].Key != "alice [501]" {
+		t.Fatalf("by_user = %#v, want context from before --since", report.ByUser)
+	}
+}
+
 func TestTokenUsageRunIDFilterAcceptsBareAndCompositeKeys(t *testing.T) {
 	logPath := writeTokensFixtureLog(t)
 	// The BY RUN rollup labels this run "github_actions/777"; both that

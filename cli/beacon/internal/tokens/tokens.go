@@ -133,6 +133,7 @@ type usageEvent struct {
 	cumulative   bool
 	metricName   string
 	rawSource    string
+	sourceStart  time.Time
 	seriesField  string
 	seriesValue  float64
 }
@@ -149,11 +150,15 @@ type usageEvent struct {
 // slice order to recover the emission sequence. Passing events newest-first
 // makes each cumulative step-down look like a counter reset and inflates totals.
 func Aggregate(events []schema.Event, opts Options) Report {
+	return aggregate(events, opts, sessionUserContexts(events))
+}
+
+func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserIndex) Report {
 	if opts.NearLimitRatio <= 0 {
 		opts.NearLimitRatio = defaultNearLimitRatio
 	}
 	report := Report{TotalEvents: len(events)}
-	usageEvents := collectUsageEvents(events, sessionUserContexts(events))
+	usageEvents := collectUsageEvents(events, sessionUsers)
 	usageEvents = preferCodexTurnSpans(usageEvents)
 	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
@@ -206,10 +211,19 @@ func Aggregate(events []schema.Event, opts Options) Report {
 // filtering. Events should already be in chronological (append) order; see
 // Aggregate.
 func AggregateScoped(events []schema.Event, runID string, opts Options) Report {
+	return AggregateScopedWithContexts(events, events, runID, opts)
+}
+
+// AggregateScopedWithContexts applies report filters to events while resolving
+// user attribution from an unfiltered set of session context events. Callers
+// that filter by time, model, or session before aggregation should use this
+// form so a SessionStart outside the selected window can still identify usage.
+func AggregateScopedWithContexts(events, contextEvents []schema.Event, runID string, opts Options) Report {
 	session := strings.TrimSpace(opts.SessionID)
 	runID = strings.TrimSpace(runID)
+	sessionUsers := sessionUserContexts(contextEvents)
 	if session == "" && runID == "" {
-		return Aggregate(events, opts)
+		return aggregate(events, opts, sessionUsers)
 	}
 	filtered := make([]schema.Event, 0, len(events))
 	for _, event := range events {
@@ -224,7 +238,7 @@ func AggregateScoped(events []schema.Event, runID string, opts Options) Report {
 		}
 		filtered = append(filtered, event)
 	}
-	return Aggregate(filtered, opts)
+	return aggregate(filtered, opts, sessionUsers)
 }
 
 type sessionContextKey struct {
@@ -405,6 +419,9 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
 			ue.rawSource, _ = event.Raw["source"].(string)
+			if rawStart, _ := event.Raw["turn_start_timestamp"].(string); rawStart != "" {
+				ue.sourceStart, _ = schema.ParseTimestamp(rawStart)
+			}
 		}
 		out = append(out, ue)
 	}
@@ -434,8 +451,12 @@ func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 			continue
 		}
 		key := keyFor(event)
-		if current, ok := cutovers[key]; !ok || event.ts.Before(current) {
-			cutovers[key] = event.ts
+		cutover := event.sourceStart
+		if cutover.IsZero() {
+			cutover = event.ts
+		}
+		if current, ok := cutovers[key]; !ok || cutover.Before(current) {
+			cutovers[key] = cutover
 		}
 	}
 	if len(cutovers) == 0 {

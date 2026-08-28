@@ -105,6 +105,29 @@ func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error
 	return events, nil
 }
 
+// ReadTokenEventsAppendOrder returns query-matched events plus every
+// session.context event in one pass over the log. Session context is kept
+// separate so token totals and TotalEvents still describe only the requested
+// time/model/session slice while user attribution can reach back to SessionStart.
+func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, []schema.Event, error) {
+	result, err := ReadEvents(path, EventQuery{NoLimit: true})
+	if err != nil {
+		return nil, nil, err
+	}
+	SortRecordsAppendOrder(result.Events)
+	events := make([]schema.Event, 0, len(result.Events))
+	contexts := make([]schema.Event, 0)
+	for _, record := range result.Events {
+		if record.Event.Event.Action == "session.context" {
+			contexts = append(contexts, record.Event)
+		}
+		if matchesQuery(record, query) {
+			events = append(events, record.Event)
+		}
+	}
+	return events, contexts, nil
+}
+
 // StreamEvents reads every event from the runtime log and its rotated archives in
 // chronological (append) order and invokes fn for each, with no limit and no result
 // buffering. Rule evaluation (beacon scan) needs the full, ordered stream — ReadEvents

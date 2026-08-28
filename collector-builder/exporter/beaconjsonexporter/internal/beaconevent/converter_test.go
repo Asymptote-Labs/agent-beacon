@@ -248,6 +248,9 @@ func TestEventsFromTracesKeepsAndNormalizesCodexTurnUsage(t *testing.T) {
 	if event.Raw["source"] != "codex_turn_span" || event.Raw["turn_id"] != "codex-turn" {
 		t.Fatalf("raw source metadata = %#v", event.Raw)
 	}
+	if event.Raw["turn_start_timestamp"] != "2023-11-14T22:13:20.000000000Z" {
+		t.Fatalf("turn start metadata = %#v", event.Raw["turn_start_timestamp"])
+	}
 }
 
 func TestEventFromSpanCapturesTraceIdentity(t *testing.T) {

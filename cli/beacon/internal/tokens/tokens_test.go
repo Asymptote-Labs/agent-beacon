@@ -143,6 +143,14 @@ func TestAggregateAttributesAuxiliaryCodexSessionToUniqueEndpointUser(t *testing
 	if len(report.ByUser) != 1 || report.ByUser[0].Key != "shukan [501]" || report.ByUser[0].Usage.InputTokens != 30 {
 		t.Fatalf("by_user = %#v, want both Codex sessions attributed to the unique endpoint user", report.ByUser)
 	}
+	scoped := AggregateScoped(
+		[]schema.Event{contextEvent, auxiliaryStarted, mainUsage, auxiliaryUsage},
+		"",
+		Options{SessionID: "title-session"},
+	)
+	if len(scoped.ByUser) != 1 || scoped.ByUser[0].Key != "shukan [501]" || scoped.ByUser[0].Usage.InputTokens != 20 {
+		t.Fatalf("scoped by_user = %#v, want auxiliary session attributed from unfiltered context", scoped.ByUser)
+	}
 }
 
 func TestAggregateDedupesDualChannelUsage(t *testing.T) {
@@ -218,7 +226,11 @@ func TestAggregatePrefersCodexTurnSpansAfterCutover(t *testing.T) {
 	turnSpan := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "session-1", "gpt-5.6-sol", func(e *schema.Event) {
 		e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
 		e.GenAI.Usage.InputTokens = int64Ptr(20)
-		e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_id": "turn-1"}
+		e.Raw = map[string]interface{}{
+			"source":               "codex_turn_span",
+			"turn_id":              "turn-1",
+			"turn_start_timestamp": "2026-06-11T09:59:55Z",
+		}
 	})
 	events := []schema.Event{
 		// A pre-upgrade metric remains part of historical totals.
@@ -226,7 +238,7 @@ func TestAggregatePrefersCodexTurnSpansAfterCutover(t *testing.T) {
 		turnSpan,
 		// The same live turn also flushed through a manually retained metric
 		// exporter; the turn span wins after cutover.
-		codexMetric("2026-06-11T10:00:05Z", 20),
+		codexMetric("2026-06-11T09:59:59Z", 20),
 	}
 
 	report := Aggregate(events, Options{})
