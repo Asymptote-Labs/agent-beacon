@@ -64,6 +64,19 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Consult MDR after the prompt.submitted event is recorded, so the prompt is
+	// captured even when the verdict steers the turn.
+	var mdrResponse map[string]interface{}
+	if hasPrompt {
+		if resp, actioned := evaluateMDR(logger, input, sessionID, prompt); actioned {
+			mdrResponse = resp
+		}
+	}
+
 	maybeUploadCursorCloudTelemetry(logger)
+	if mdrResponse != nil {
+		outputJSON(mdrResponse)
+		return
+	}
 	outputJSON(hookNoopResponse())
 }
