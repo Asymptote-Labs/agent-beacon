@@ -50,6 +50,12 @@ var harnessTargets = []harnessTarget{
 	// under, so anyone reading a Pi row out of the runtime log and passing it back to a --harness
 	// flag gets the runtime they are looking at rather than an "unsupported harness" error.
 	{name: "pi", endpointKind: endpointTargetHook, endpointAliases: []string{"pi", "pi-cli", "pi_cli"}, hookAliases: []string{"pi", "pi-cli", "pi_cli"}},
+	// Oh My Pi is a separate row from Pi rather than an alias of it. The two are separately
+	// installed products with different config roots and different capability surfaces, and folding
+	// either spelling into the other would install one runtime's extension while the operator asked
+	// for the other's. "oh-my-pi" is accepted because it is the repository name people reach for;
+	// "omp" is the binary, and the canonical harness name events are written under.
+	{name: "omp", endpointKind: endpointTargetHook, endpointAliases: []string{"omp", "oh-my-pi", "ohmypi"}, hookAliases: []string{"omp", "oh-my-pi", "ohmypi"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen

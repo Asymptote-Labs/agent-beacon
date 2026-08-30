@@ -153,6 +153,23 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
 			fmt.Println("Project-level Pi extensions are subject to Pi's project-trust prompt; a user-level install needs no further interaction.")
 		}
+	case "omp":
+		status, err := endpointhooks.InstallOmp(endpointhooks.OmpOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Oh My Pi extension installed: %s\n", status.ExtensionPath)
+		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
+			// Unlike Pi, Oh My Pi has no per-directory trust gate -- its own isProjectTrusted()
+			// always returns true because `.omp` project inputs are loaded unconditionally. So the
+			// note here is about scope rather than about a prompt: a project install covers one
+			// checkout, and the operator's other Oh My Pi sessions stay uninstrumented.
+			fmt.Println("Project-level Oh My Pi extensions cover only this working directory; a user-level install follows the operator across checkouts.")
+		}
 	case "grok":
 		status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -334,6 +351,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "omp":
+		status, err := endpointhooks.UninstallOmp(endpointhooks.OmpOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "grok":
 		status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -454,6 +481,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "omp":
+			statuses["omp"] = endpointhooks.OmpHookStatus(endpointhooks.OmpOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "grok":
 			statuses["grok"] = endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -525,6 +558,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "pi":
 			status := statuses["pi"].(endpointhooks.PiStatus)
 			fmt.Printf("Pi extension: installed=%t path=%s\n", status.Installed, status.ExtensionPath)
+			fmt.Println(status.Message)
+		case "omp":
+			status := statuses["omp"].(endpointhooks.OmpStatus)
+			fmt.Printf("Oh My Pi extension: installed=%t path=%s\n", status.Installed, status.ExtensionPath)
 			fmt.Println(status.Message)
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
