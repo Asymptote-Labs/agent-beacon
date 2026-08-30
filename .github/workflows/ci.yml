@@ -519,12 +519,18 @@ jobs:
   # The mirror of linux-package-smoke, which installs the .deb and checks the endpoint came up.
   windows-package-smoke:
     runs-on: windows-2025
-    # Bounded for the same reason windows-test is: a wedged msiexec would otherwise hold a runner for
-    # the GitHub default of six hours.
-    timeout-minutes: 25
+    # A backstop only. Every msiexec call below waits with its own timeout, so a wedged installer
+    # fails in minutes with its log rather than holding a runner until a job timeout expires -- which
+    # is the difference between a diagnosable failure and a red X with nothing in it.
+    timeout-minutes: 15
     defaults:
       run:
         shell: pwsh
+    env:
+      # Named here rather than only in build-msi.ps1 so the cache key below can be exact: the key has
+      # to say which WiX it restored, or a version bump would silently reuse the previous toolset.
+      BEACON_WIX_VERSION: '5.0.2'
+      BEACON_COLLECTOR_BUILDER_VERSION: v0.121.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -548,9 +554,35 @@ jobs:
           go build -o beacon.exe .
           if ($LASTEXITCODE -ne 0) { throw "beacon build failed" }
 
+      # The collector is the most expensive thing this job builds -- the OTel builder resolves and
+      # compiles a full distribution -- and it is also the part that changes least often, so it is
+      # keyed on everything that determines its bytes rather than rebuilt every run.
+      #
+      # The key covers the exporter sources and pkg/asymptoteobserve because builder.yaml pulls the
+      # first in by path and replaces the second in; a key that named only builder.yaml would serve a
+      # stale collector to a PR that changed the exporter. Test files are in the hash too. They
+      # cannot change the binary, so they cost an occasional needless rebuild -- which is the right
+      # side to err on, because the other side is an MSI packaged from code nobody wrote.
+      # cli/beacon/go.mod is in the hash for the Go version it pins, which setup-go reads and which
+      # compiles the binary, and the builder version is named separately because it lives in this
+      # workflow rather than in any file the hash would see.
+      #
+      # No restore-keys, deliberately: a partial match here would mean the wrong collector, and a
+      # cache miss costs 80 seconds while a wrong hit costs a green build that proved nothing.
+      - name: Cache the built collector
+        id: collector-cache
+        uses: actions/cache@v4
+        with:
+          path: collector-builder/beacon-otelcol.exe
+          key: >-
+            beacon-otelcol-windows-amd64-${{ env.BEACON_COLLECTOR_BUILDER_VERSION }}-${{
+            hashFiles('collector-builder/builder.yaml', 'collector-builder/exporter/**',
+            'pkg/asymptoteobserve/**', 'cli/beacon/go.mod') }}
+
       - name: Build the collector
+        if: steps.collector-cache.outputs.cache-hit != 'true'
         run: |
-          go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
+          go install "go.opentelemetry.io/collector/cmd/builder@$env:BEACON_COLLECTOR_BUILDER_VERSION"
           Set-Location collector-builder
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
@@ -566,6 +598,28 @@ jobs:
           if (-not (Test-Path -LiteralPath $produced)) { throw "collector build produced no binary" }
           Copy-Item $produced beacon-otelcol.exe
 
+      # WiX arrives as a dotnet global tool, which is a NuGet download on every run otherwise. The
+      # shims live at one absolute path under the runner's profile, so a restored cache is directly
+      # runnable rather than needing a reinstall to relocate.
+      - name: Cache the WiX toolset
+        id: wix-cache
+        uses: actions/cache@v4
+        with:
+          path: ~\.dotnet\tools
+          key: wix-${{ runner.os }}-${{ env.BEACON_WIX_VERSION }}
+
+      - name: Install the WiX toolset
+        if: steps.wix-cache.outputs.cache-hit != 'true'
+        run: |
+          dotnet tool install --global wix --version $env:BEACON_WIX_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "installing WiX failed with exit code $LASTEXITCODE" }
+
+      # Exported for the steps that follow rather than for this one, so build-msi.ps1 finds wix on
+      # PATH and takes its already-installed branch. Without this the script would install WiX again
+      # inside its own process, which is exactly the download the cache above exists to avoid.
+      - name: Put the dotnet global tools on PATH
+        run: Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE '.dotnet\tools')
+
       - name: Build two MSIs, so the upgrade path can be exercised
         run: |
           # Two versions rather than one. Installing over an existing install is a different code path
@@ -575,6 +629,7 @@ jobs:
           foreach ($version in @('0.0.1', '0.0.2')) {
             pwsh -NoProfile -File packaging\windows\build-msi.ps1 `
               -Version $version `
+              -WixVersion $env:BEACON_WIX_VERSION `
               -BeaconExe cli\beacon\beacon.exe `
               -HooksExe cli\beacon-hooks\beacon-hooks.exe `
               -CollectorExe collector-builder\beacon-otelcol.exe `
@@ -589,17 +644,12 @@ jobs:
 
       - name: Install it
         run: |
-          # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
-          # without it msiexec reports only an exit code.
-          $log = "$env:GITHUB_WORKSPACE\install.log"
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
-          )
-          if ($p.ExitCode -ne 0) {
-            Write-Output "--- install log (tail) ---"
-            Get-Content -LiteralPath $log -Tail 120 | Write-Output
-            throw "msiexec /i exited $($p.ExitCode)"
-          }
+          # /qn is silent, and the verbose log the helper turns on is what makes a custom-action
+          # failure diagnosable -- without it msiexec reports only an exit code.
+          & .github\scripts\run-msiexec.ps1 `
+            -What install `
+            -LogPath "$env:GITHUB_WORKSPACE\install.log" `
+            -Arguments @('/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn')
 
       - name: The endpoint must be installed and running
         run: |
@@ -633,14 +683,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
 
           $log = "$env:GITHUB_WORKSPACE\upgrade.log"
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
-          )
-          if ($p.ExitCode -ne 0) {
-            Write-Output "--- upgrade log (tail) ---"
-            Get-Content -LiteralPath $log -Tail 150 | Write-Output
-            throw "msiexec upgrade exited $($p.ExitCode)"
-          }
+          & .github\scripts\run-msiexec.ps1 `
+            -What upgrade `
+            -LogPath $log `
+            -Arguments @('/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn')
 
           # 3010 is "reboot required", which msiexec returns when it could not replace a file in use
           # and deferred it. It is not an error code, which is exactly why it has to be checked for:
@@ -719,14 +765,10 @@ jobs:
 
           # The upgraded product is what is installed, so that is what gets removed. Each build gets a
           # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
-            '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
-          )
-          if ($p.ExitCode -ne 0) {
-            Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
-            throw "msiexec /x exited $($p.ExitCode)"
-          }
+          & .github\scripts\run-msiexec.ps1 `
+            -What uninstall `
+            -LogPath "$env:GITHUB_WORKSPACE\uninstall.log" `
+            -Arguments @('/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn')
 
           # The failure this guards against is the one review caught in the service backend: an
           # uninstall that reports success while the service stays registered and starts at boot.
