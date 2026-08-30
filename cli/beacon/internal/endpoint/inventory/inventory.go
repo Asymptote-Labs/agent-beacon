@@ -43,6 +43,11 @@ const (
 	ScopeSystem    = "system"
 	ScopeUnknown   = "unknown"
 
+	// fxRuntime is the runtime key inventory files fx's configuration under. It is the same
+	// canonical harness name the collector writes on every fx event, so an inventory row and a log
+	// line describe one runtime rather than two.
+	fxRuntime = "vercel_fx"
+
 	StatusOK          = "ok"
 	StatusPartial     = "partial"
 	StatusParseFailed = "parse_failed"
@@ -209,6 +214,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
 	items = append(items, qwenCandidates(home, wd)...)
+	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
 	for _, item := range items {
@@ -342,6 +348,28 @@ func qwenCandidates(home, wd string) []candidate {
 	return []candidate{
 		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// fx keeps no Beacon-written file, so every entry here is fx's own configuration rather than
+// something Beacon installed -- which is why they are all KindNativeConfig and why beacon_managed
+// stays false for them. Reporting them is still the point of an inventory: what runtimes are on
+// this machine and what they are wired to.
+//
+// The MCP files are the reason this is worth having at all. fx's profile server list lives in
+// ~/.fx/mcp.json under an `mcp` key (with `mcpServers` accepted as an alias), and a workspace can
+// add a Claude-compatible .mcp.json with `mcpServers` -- both keys the scanner already reads, so
+// fx's MCP servers land in the same inventory as every other runtime's with no parser of their own.
+//
+// The workspace .mcp.json is attributed to fx and to nothing else here, even though other runtimes
+// read the same file: attributing one file to several runtimes would report one server as several,
+// and fx is the runtime this pass is adding. A machine running two agents over one .mcp.json still
+// gets its servers inventoried once.
+func fxCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "mcp.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(wd, ".mcp.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
 	}
 }
 
