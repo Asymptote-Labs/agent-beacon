@@ -251,14 +251,14 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		return false, nil
 	}
 
-	for _, item := range mapped {
+	for i, item := range mapped {
 		if err := emit(item.Event, opts); err != nil {
 			// Advance the cursor to cover events that were fully emitted so the
 			// next sweep does not re-append them. Only source events whose entire
 			// set of mapped events was written are advanced past; the partially
 			// written source event is re-emitted in full on the next sweep, and
 			// its coordinate-derived event IDs make the duplicates identifiable.
-			advanceCursorPartial(cursor, ref, events, mapped, &item)
+			advanceCursorPartial(cursor, ref, events, mapped, i)
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -306,14 +306,15 @@ func advanceCursor(cursor *Cursor, ref SessionRef, events []Event, stats Stats) 
 
 // advanceCursorPartial moves the cursor past source events whose mapped events
 // were all emitted, so the next sweep retries only from the source event that
-// failed. failedItem is the mapped event whose emit returned an error.
-func advanceCursorPartial(cursor *Cursor, ref SessionRef, events []Event, mapped []MappedEvent, failedItem *MappedEvent) {
+// failed. failedIdx is the index into mapped of the event whose emit returned
+// an error.
+func advanceCursorPartial(cursor *Cursor, ref SessionRef, events []Event, mapped []MappedEvent, failedIdx int) {
 	// Walk backwards from the failed item to find the last source event that
 	// was completely emitted (all its mapped events were written).
 	var lastCompleteSeq uint64
 	found := false
 	for i := range mapped {
-		if &mapped[i] == failedItem {
+		if i == failedIdx {
 			break
 		}
 		// When the next mapped event is from a different (higher) source seq,
