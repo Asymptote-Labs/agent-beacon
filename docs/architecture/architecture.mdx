@@ -5,7 +5,7 @@ description: "How Agent Beacon collects, normalizes, stores, correlates, and det
 
 ## Overview
 
-Agent Beacon is the open-source telemetry layer for AI agents wherever they run: on laptops, in the browser, inside application code, in [CI](/concepts/core-concepts#ci-telemetry), and in [provider-managed cloud sandboxes](/concepts/core-concepts#cloud-agent-telemetry). Each surface reports activity differently, so Beacon meets each one on its own terms and then normalizes all of it into a single [endpoint event](/concepts/core-concepts#endpoint-event) model.
+Agent Beacon is the open-source telemetry layer for AI agents wherever they run: on laptops, in the browser, inside application code, in [CI](/concepts/core-concepts#ci-telemetry), and in [provider-managed cloud sandboxes](/concepts/core-concepts#cloud-agent-telemetry). Each surface reports activity differently, so Beacon extends OpenTelemetry where a runtime emits it and instruments custom hooks, plugins, and adapters where it does not, then normalizes what it captures into a single [event model](/telemetry-schema/event-schema).
 
 <img src="/images/beacon-architecture.png" alt="Agent Beacon architecture. Six source surfaces (local agents, browser, agents in code, CI pipelines, cloud agents, and third-party AI SaaS) feed a Beacon layer that collects, normalizes, stores, correlates, and detects. The resulting unified AI telemetry flows to observability, SIEM, search, data platform, object storage, and security platform destinations." />
 
