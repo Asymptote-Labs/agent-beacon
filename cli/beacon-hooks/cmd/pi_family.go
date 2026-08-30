@@ -40,6 +40,9 @@ type piFamily struct {
 var (
 	piRuntime  = piFamily{platform: "pi", displayName: "Pi"}
 	ompRuntime = piFamily{platform: "omp", displayName: "Oh My Pi"}
+	// Prime Agent shares this envelope but not the tool surface, so it uses these fields and the
+	// shared handlers while mapping its own tool events. See prime_event.go.
+	primeRuntime = piFamily{platform: "prime", displayName: "Prime Agent"}
 )
 
 // rawKey namespaces a runtime-specific detail inside the `raw` block.
@@ -389,21 +392,29 @@ func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[stri
 	}
 
 	action, category := piToolAction(name)
-	// A file action with no file is not a file action. The read tool accepts a path that failed to
-	// resolve, and a custom tool can share a built-in's name, so reporting file.read with no file
-	// field would produce a row every file-scoped query matches and none can explain -- the same
-	// guard clineToolAfterEvents applies for the same reason.
+	action, category = piDowngradeUnsupportedAction(fields, action, category)
+	return f.one(action, category, "info", piToolMessageSuffix(action), fields)
+}
+
+// piDowngradeUnsupportedAction rewrites a file or command action that has no field to stand on.
+//
+// A file action with no file is not a file action: the read tool accepts a path that failed to
+// resolve, and a custom tool can share a built-in's name, so reporting file.read with no file field
+// would produce a row every file-scoped query matches and none can explain -- the same guard
+// clineToolAfterEvents applies for the same reason. Shared with the Prime Agent mapper, whose
+// kernel cell reaches command.executed by a different route and needs the same floor under it.
+func piDowngradeUnsupportedAction(fields map[string]interface{}, action, category string) (string, string) {
 	if strings.HasPrefix(action, "file.") {
 		if _, ok := fields["file"]; !ok {
-			action, category = "tool.completed", "tool"
+			return "tool.completed", "tool"
 		}
 	}
 	if action == "command.executed" {
 		if _, ok := fields["command"]; !ok {
-			action, category = "tool.completed", "tool"
+			return "tool.completed", "tool"
 		}
 	}
-	return f.one(action, category, "info", piToolMessageSuffix(action), fields)
+	return action, category
 }
 
 // piEditDiff returns the unified patch the edit tool reports, when it reported one.

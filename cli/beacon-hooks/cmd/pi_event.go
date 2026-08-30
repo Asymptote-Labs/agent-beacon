@@ -33,6 +33,17 @@ func runPiEvent(cmd *cobra.Command, args []string) {
 // Shared by pi-event and omp-event because the transport is identical -- the extension spawns the
 // hook binary and writes one JSON object to its stdin -- and only the runtime it describes differs.
 func runPiFamilyEvent(runtime piFamily) {
+	runPiFamilyEventFrom(runtime, runtime.endpointEvents)
+}
+
+// runPiFamilyEventFrom is the same transport with a caller-supplied mapper.
+//
+// Prime Agent is why it is separate. It delivers this exact envelope, so the session lifecycle,
+// prompts, operator commands and assistant messages are the shared mapping above -- but its agent
+// has one tool, a Python kernel cell, and the shared read/edit/write/bash reading would record its
+// whole session as undifferentiated tool calls. So it supplies its own mapper for the tool surface
+// and the two events it alone fires, and delegates the rest (see prime_event.go).
+func runPiFamilyEventFrom(runtime piFamily, events func(map[string]interface{}, string) []normalizedEvent) {
 	input, err := readStdinJSON()
 	if err != nil {
 		outputJSON(emptyResponse)
@@ -40,7 +51,7 @@ func runPiFamilyEvent(runtime piFamily) {
 	}
 	sessionID := resolveSessionID(input, runtime.platform)
 	logger := newHookLogger(runtime.platform+"-event", runtime.platform, sessionID)
-	for _, event := range runtime.endpointEvents(input, sessionID) {
+	for _, event := range events(input, sessionID) {
 		if event.action == "" {
 			continue
 		}

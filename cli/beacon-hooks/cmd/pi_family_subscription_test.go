@@ -27,6 +27,9 @@ func TestManagedExtensionSubscriptionsMatchTheirMappers(t *testing.T) {
 	}{
 		{"pi", filepath.Join("..", "..", "..", "plugins", "pi-beacon", "src", "beacon.ts"), supportedPiEventTypes()},
 		{"omp", filepath.Join("..", "..", "..", "plugins", "omp-beacon", "src", "beacon.ts"), supportedOmpEventTypes()},
+		// Prime Agent renders from Pi's source, so its row reads the same file and differs only in
+		// which of that source's per-runtime lists it resolves.
+		{"prime", filepath.Join("..", "..", "..", "plugins", "pi-beacon", "src", "beacon.ts"), supportedPrimeEventTypes()},
 	} {
 		t.Run(tc.runtime, func(t *testing.T) {
 			subscribed := subscribedEventTypes(t, tc.source, tc.runtime)

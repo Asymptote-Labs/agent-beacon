@@ -129,10 +129,16 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	// the handler context's session manager per event. The snake_case spellings are a fallback for
 	// a payload that reached this command by some other route.
 	//
-	// Oh My Pi shares this reader because it shares the envelope: its extension is built from the
-	// same contract. Some of its events -- the approval pair -- also carry a `sessionId` of their
-	// own, which lands on the same key and needs no separate spelling.
-	case "pi", "omp":
+	// Oh My Pi and Prime Agent share this reader because they share the envelope: both extensions
+	// are built from the same contract and both lift the session identity onto it as `sessionId`.
+	// Some of Oh My Pi's events -- the approval pair -- also carry a `sessionId` of their own, which
+	// lands on the same key and needs no separate spelling.
+	//
+	// Falling through to the default instead would read only `session_id`, which none of the three
+	// sends: every event would still be written, and every one of them would lose session.id -- the
+	// field that groups a run -- so the log would look healthy while nothing in it could be tied
+	// together.
+	case "pi", "omp", "prime":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	default:
 		id, _ := input["session_id"].(string)
