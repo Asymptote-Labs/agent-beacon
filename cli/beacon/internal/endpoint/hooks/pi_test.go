@@ -188,24 +188,25 @@ func TestRemovePiExtensionIsQuietWhenNothingIsInstalled(t *testing.T) {
 // The placeholder check is what turns a template rename into a loud failure instead of an install
 // that reports success and spawns nothing.
 func TestRenderPiExtensionRejectsATemplateMissingItsPlaceholder(t *testing.T) {
-	if _, err := renderPiExtensionTemplate("// __BEACON_MANAGED_MARKER__\nconst x = 1\n", "/tmp/beacon-hooks", "", ""); err == nil {
-		t.Fatal("renderPiExtensionTemplate accepted a template with no argv placeholder")
+	if _, err := renderPiFamilyExtension("// __BEACON_MANAGED_MARKER__\nconst x = 1\n", piFamilyPi, "/tmp/beacon-hooks", "", ""); err == nil {
+		t.Fatal("renderPiFamilyExtension accepted a template with no argv placeholder")
 	}
 }
 
 func TestRenderPiExtensionRejectsUnresolvedPlaceholders(t *testing.T) {
-	template := "// __BEACON_MANAGED_MARKER__\nconst beaconArgv: string[] = [\"__BEACON_ARGV__\"]\nconst leftover = \"__BEACON_SOMETHING_ELSE__\"\n"
-	if _, err := renderPiExtensionTemplate(template, "/tmp/beacon-hooks", "", ""); err == nil {
-		t.Fatal("renderPiExtensionTemplate accepted a template with an unresolved placeholder")
+	template := "// __BEACON_MANAGED_MARKER__\nconst beaconArgv: string[] = [\"__BEACON_ARGV__\"]\n" +
+		"const beaconRuntime = \"__BEACON_RUNTIME__\"\nconst leftover = \"__BEACON_SOMETHING_ELSE__\"\n"
+	if _, err := renderPiFamilyExtension(template, piFamilyPi, "/tmp/beacon-hooks", "", ""); err == nil {
+		t.Fatal("renderPiFamilyExtension accepted a template with an unresolved placeholder")
 	}
 }
 
 func TestPiEmbeddedExtensionMatchesRootSource(t *testing.T) {
-	embedded, err := os.ReadFile(piEmbeddedExtensionSourcePath())
+	embedded, err := os.ReadFile(piFamilyEmbeddedExtensionSourcePath())
 	if err != nil {
 		t.Fatalf("read embedded extension source: %v", err)
 	}
-	root, err := os.ReadFile(piRootExtensionSourcePath())
+	root, err := os.ReadFile(piFamilyRootExtensionSourcePath())
 	if err != nil {
 		t.Fatalf("read root extension source: %v", err)
 	}
@@ -298,13 +299,13 @@ func TestPiExtensionReferencesBinaryHandlesWindowsPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderPiExtension returned error: %v", err)
 	}
-	if !piExtensionReferencesBinary(source, binary) {
+	if !piFamilyExtensionReferencesBinary(source, binary) {
 		t.Fatal("a correctly installed Windows extension was reported as not referencing its own binary")
 	}
-	if piExtensionReferencesBinary(source, `C:\Other\beacon-hooks.exe`) {
-		t.Fatal("piExtensionReferencesBinary matched a binary the extension does not spawn")
+	if piFamilyExtensionReferencesBinary(source, `C:\Other\beacon-hooks.exe`) {
+		t.Fatal("piFamilyExtensionReferencesBinary matched a binary the extension does not spawn")
 	}
-	if piExtensionReferencesBinary(source, "") {
-		t.Fatal("piExtensionReferencesBinary matched an empty binary path")
+	if piFamilyExtensionReferencesBinary(source, "") {
+		t.Fatal("piFamilyExtensionReferencesBinary matched an empty binary path")
 	}
 }
