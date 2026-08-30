@@ -78,7 +78,7 @@ Beacon ships with a small built-in baseline so `beacon scan` works before any ru
 | `external-access` | Cloud metadata endpoint access, link-local target fetches, external MCP tool calls |
 | `approval-abuse` | Permission-bypass execution or high-risk approvals without reviewer context, denied-command re-invocation through renamed binaries |
 | `source-control` | Git hook installation, remote tampering, Git config execution injection, history rewriting (filter-branch / filter-repo / rebase -i), force-push to protected branches |
-| `agent-control` | Agent CLIs spawned with permission-elevating env vars, sandbox-escape primitives, inter-agent credential handoff |
+| `agent-control` | Agent CLIs spawned with permission-elevating env vars, sandbox-escape primitives, inter-agent credential handoff, injected instructions persisted into a self-improving agent's durable harness |
 
 Rules only evaluate events that exist in the runtime log. For example, an MCP detection needs MCP-like activity to be emitted by a supported harness, and a prompt-injection rule needs retained prompt or content fields to be present under the endpoint's local data-retention settings.
 
