@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
@@ -99,6 +100,23 @@ func (s *State) cursor(sessionID string) *Cursor {
 		s.Sessions[sessionID] = c
 	}
 	return c
+}
+
+// DefaultStatePath is where the collector keeps its cursor for the current user.
+//
+// It lives beside Beacon's other endpoint state rather than in fx's directory: it is Beacon's
+// record of what Beacon has read, and writing it into ~/.fx would put a file fx does not know about
+// inside the store fx owns.
+//
+// Falls back to the OS temp directory when there is no home to put it in. Some cron and service
+// environments have none, and a sweep with a cursor somewhere volatile still beats a sweep with no
+// cursor at all -- the latter re-appends every session's whole history on every run.
+func DefaultStatePath() string {
+	base := filepath.Join(os.TempDir(), "beacon")
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		base = filepath.Join(home, ".beacon")
+	}
+	return filepath.Join(base, "endpoint", "state", "fx.json")
 }
 
 // CollectOptions configures one sweep over fx's session store.
