@@ -29,7 +29,7 @@ func TestManagedExtensionSubscriptionsMatchTheirMappers(t *testing.T) {
 		{"omp", filepath.Join("..", "..", "..", "plugins", "omp-beacon", "src", "beacon.ts"), supportedOmpEventTypes()},
 	} {
 		t.Run(tc.runtime, func(t *testing.T) {
-			subscribed := subscribedEventTypes(t, tc.source)
+			subscribed := subscribedEventTypes(t, tc.source, tc.runtime)
 
 			want := append([]string(nil), tc.supported...)
 			sort.Strings(want)
@@ -62,7 +62,7 @@ func TestEverySubscribedTypeIsMappedToAnEvent(t *testing.T) {
 		{ompRuntime, filepath.Join("..", "..", "..", "plugins", "omp-beacon", "src", "beacon.ts")},
 	} {
 		t.Run(tc.runtime.platform, func(t *testing.T) {
-			for _, name := range subscribedEventTypes(t, tc.source) {
+			for _, name := range subscribedEventTypes(t, tc.source, tc.runtime.platform) {
 				payload, ok := fixtures[name]
 				if !ok {
 					t.Fatalf("no fixture for %q, which the %s extension subscribes to",
@@ -77,26 +77,93 @@ func TestEverySubscribedTypeIsMappedToAnEvent(t *testing.T) {
 	}
 }
 
-// subscribedEventTypes reads the `subscribedEvents` array out of an extension source.
+// subscribedEventTypes reads the event list an extension subscribes to for one runtime.
 //
 // Parsed from the shipped file rather than duplicated here, so this test cannot pass against a list
 // that only exists in the test.
-func subscribedEventTypes(t *testing.T, path string) []string {
+//
+// Two source shapes are read, because Beacon ships both. Oh My Pi has a source of its own and names
+// its list outright. Pi's source is shared with Prime Agent, which subscribes to Pi's events plus
+// two of its own, so it declares one list per distribution in an eventsByRuntime map and the
+// installer substitutes the runtime name that selects between them. Resolving that map here is what
+// keeps the check on the file that actually ships: reading only a flat array would have this test
+// pass by finding nothing to disagree with.
+func subscribedEventTypes(t *testing.T, path, runtime string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("extension source is unreadable: %v", err)
 	}
-	block := regexp.MustCompile(`(?s)const subscribedEvents = \[(.*?)\] as const`).FindSubmatch(data)
-	if len(block) != 2 {
-		t.Fatalf("%s has no subscribedEvents array; the mapper's contract is with that list", path)
-	}
+	arrays := extensionEventArrays(data)
+
 	var names []string
-	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(block[1], -1) {
-		names = append(names, string(match[1]))
-	}
-	if len(names) == 0 {
-		t.Fatalf("%s subscribes to no events", path)
+	if expression, ok := runtimeEventExpression(data, runtime); ok {
+		// The expression is either one list's name or a spread of several. Both resolve the same
+		// way: every identifier in it that names a list contributes that list's events.
+		for _, match := range regexp.MustCompile(`[A-Za-z][A-Za-z0-9]*`).FindAllString(expression, -1) {
+			names = append(names, arrays[match]...)
+		}
+		if len(names) == 0 {
+			t.Fatalf("%s maps runtime %q to %q, which names no event list", path, runtime, expression)
+		}
+	} else {
+		names = arrays["subscribedEvents"]
+		if len(names) == 0 {
+			t.Fatalf("%s has no subscribedEvents array and no entry for runtime %q; the mapper's "+
+				"contract is with that list", path, runtime)
+		}
 	}
 	return names
+}
+
+// extensionEventArrays collects every `const <name> = [...] as const` list in an extension source,
+// keyed by the name it is declared under.
+func extensionEventArrays(data []byte) map[string][]string {
+	arrays := map[string][]string{}
+	for _, declaration := range regexp.MustCompile(`(?s)const ([A-Za-z][A-Za-z0-9]*) = \[(.*?)\] as const`).FindAllSubmatch(data, -1) {
+		var names []string
+		for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(declaration[2], -1) {
+			names = append(names, string(match[1]))
+		}
+		arrays[string(declaration[1])] = names
+	}
+	return arrays
+}
+
+// runtimeEventExpression returns what a shared source's eventsByRuntime map assigns to one runtime,
+// and whether the source has such a map at all.
+func runtimeEventExpression(data []byte, runtime string) (string, bool) {
+	block := regexp.MustCompile(`(?s)const eventsByRuntime[^=]*= \{(.*?)\n\}`).FindSubmatch(data)
+	if len(block) != 2 {
+		return "", false
+	}
+	entry := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(runtime) + `:\s*(.+?),?\s*$`).FindSubmatch(block[1])
+	if len(entry) != 2 {
+		return "", false
+	}
+	return string(entry[1]), true
+}
+
+// The shared source's second list, which no mapper claims yet.
+//
+// Prime Agent subscribes to Pi's events plus two of its own, declared as a spread of both lists.
+// Nothing above reads that form -- Pi's entry names a single list outright -- so without this the
+// resolver could stop understanding a spread and the first symptom would be Prime Agent's own
+// mapper contract, once it lands, checking an empty list and passing.
+func TestPrimeAgentSubscribesToPiEventsPlusItsOwn(t *testing.T) {
+	source := filepath.Join("..", "..", "..", "plugins", "pi-beacon", "src", "beacon.ts")
+
+	want := append(subscribedEventTypes(t, source, "pi"), "session_compact", "refine_complete")
+	sort.Strings(want)
+	got := subscribedEventTypes(t, source, "prime")
+	sort.Strings(got)
+
+	if len(got) != len(want) {
+		t.Fatalf("prime subscribes to %v, want Pi's events plus its own: %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("prime subscribes to %v, want Pi's events plus its own: %v", got, want)
+		}
+	}
 }
