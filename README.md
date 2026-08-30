@@ -33,142 +33,106 @@
 
 ## What is Agent Beacon
 
-Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry) for AI agents wherever they run: locally, in CI, in the browser, or in the cloud.
+Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
+for AI agents wherever they run: locally, in CI, in the browser, or in the cloud.
+Agent activity is fragmented across runtimes, so Beacon extends the OpenTelemetry
+GenAI standard and normalizes runtime events into one data model.
 
-The problem is that AI agent activity is fragmented across runtimes, leaving teams without a consistent way to get visibility into what agents are doing. Agent Beacon solves this by extending the OpenTelemetry GenAI standard and normalizing runtime events into a unified data model.
+Security and IT teams deploy it through [MDM](#mdm-deployment), CI workflows, and
+cloud-agent setup paths, then forward the resulting logs to the
+[major enterprise-grade SIEMs](#output-destinations).
 
-Beacon is built to be easy to deploy for Security and IT teams through
-[MDM deployment](#mdm-deployment), CI workflows, and cloud-agent setup paths, and to
-emit agent harness telemetry logs to
-all the [major enterprise-grade SIEMs](https://github.com/Asymptote-Labs/agent-beacon#output-destinations).
-
-Learn more in the [Agent Beacon Documentation](https://docs.asymptotelabs.ai).
+Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
 ## High-Level Architecture
-
-Beacon keeps endpoint collection, processing, and inspection local by default,
-while extending the same normalized event model to CI and cloud-agent telemetry
-paths under customer control.
 
 <p align="center">
   <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
 </p>
 
-- **Agent runtime layer:** Hooks, OpenTelemetry sources, CI wrappers, SDKs, and an
-  optional browser extension capture supported activity from AI agent harnesses
-  wherever they run, including chat on Claude.ai and ChatGPT.
-- **Beacon endpoint layer:** Local processing normalizes events, applies
-  retention and redaction settings, and writes durable endpoint telemetry.
-- **Output layer:** Teams inspect events in the local dashboard, retain JSONL,
-  or forward records into all the [major enterprise-grade SIEMs](https://github.com/Asymptote-Labs/agent-beacon#output-destinations).
+- **Agent runtime layer** — hooks, OpenTelemetry sources, CI wrappers, SDKs, and an
+  optional browser extension capture supported agent activity.
+- **Beacon endpoint layer** — local processing normalizes events, applies retention
+  and redaction settings, and writes durable endpoint telemetry.
+- **Output layer** — inspect events in the local dashboard, retain JSONL, or forward
+  records into the [major enterprise-grade SIEMs](#output-destinations).
+
+Collection, processing, and inspection stay local by default; the same normalized
+event model extends to CI and cloud-agent paths under customer control.
 
 ## Supported Surfaces
 
-Beacon captures supported agent harness activity across local endpoints, CI
-jobs, and cloud-agent surfaces, then writes normalized events that teams can
-inspect in place or forward into customer-managed security pipelines.
-
 ### Agent Runtimes
 
-Agent Beacon supports the most popular enterprise agent harnesses across local,
-CI, and cloud surfaces.
+#### Local Coding Agents
 
-#### Local Agents
-
-##### Coding Agent Harnesses
-
-| Agent harness | Collection path | Telemetry coverage |
+| Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file telemetry where Antigravity exposes hook payloads |
-| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, approval, API/model lifecycle, MCP connection, subagent, and session telemetry where emitted through OTLP or hooks |
-| [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Managed plugin hooks | Prompts, task lifecycle/errors, tool lifecycle/results, commands with exit codes, file reads/edits with diffs, MCP activity, and task token usage/cost |
-| [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OTLP logs and selective turn traces plus a session identity hook | Session, prompt, approval, tool-result activity, and per-user/session/model turn token usage |
-| [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
-| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
-| [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
-| [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
-| [fx (Vercel Labs)](https://github.com/vercel-labs/fx) | Session-log collection through `beacon endpoint fx sync` | Session start, prompts, tool calls with arguments, commands with exit codes and output, file reads/creates/edits with diffs, MCP tool calls, agent messages, history compaction, and per-turn token usage plus reported cost |
-| [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
-| [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
-| [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
-| [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle/results, operator approval decisions with the session's approval mode, commands including operator `!` and `$` commands, file reads/writes/edits with diffs, MCP tool activity, agent reasoning, and token usage/cost |
-| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output/reasoning, model usage/cost, tool lifecycle/results, commands, file/web/MCP activity, approvals, and session errors |
-| [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle/results, commands including operator `!` commands, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
-| [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session-end, command, and file telemetry merged into Qwen's own `settings.json` |
-| [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
+| [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file |
+| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, approval, API/model lifecycle, MCP connection, subagent, and session |
+| [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Managed plugin hooks | Prompts, task lifecycle and errors, tool lifecycle and results, commands with exit codes, file reads/edits with diffs, MCP activity, and token usage/cost |
+| [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OTLP plus a session identity hook | Session, prompt, approval, tool results, and per-user/session/model turn token usage |
+| [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Native hooks | Prompt, tool, shell command, MCP-like activity, approval, and file edits |
+| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session end, approval, and file |
+| [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write |
+| [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, and session end |
+| [fx (Vercel Labs)](https://github.com/vercel-labs/fx) | Poll of fx's own session records under `~/.fx/sessions/` through `beacon endpoint fx sync`; events land a turn late and cannot gate a tool call | Session start, prompts, tool calls, commands with exit codes and output, file reads/creates/edits with diffs, MCP tool calls, agent messages, compaction, and token usage/cost. No approval or session-end record, because fx persists neither |
+| [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events |
+| [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity |
+| [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session end, command, and file |
+| [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, approval decisions with the session's approval mode, commands including operator `!` and `$`, file reads/writes/edits with diffs, MCP activity, agent reasoning, and token usage/cost |
+| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output and reasoning, model usage/cost, tool lifecycle and results, commands, file/web/MCP activity, approvals, and session errors |
+| [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, commands including operator `!`, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
+| [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session end, command, and file |
+| [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity, plus extra lifecycle detail through optional hooks |
 
-fx is the one supported runtime with no third-party observation surface: its lifecycle hooks are
-compiled into the binary, it ships no OpenTelemetry export, and MCP describes the tools it calls
-rather than what it did. What it does have is a durable, append-only record of every session under
-`~/.fx/sessions/`, so Beacon reads that:
+#### Local Knowledge Worker Agents
 
-```bash
-beacon endpoint fx status          # fx sessions on this machine and how much has been collected
-beacon endpoint fx sync --print    # show what would be collected, writing nothing
-beacon endpoint fx sync            # read new records into the runtime log
-beacon endpoint fx sync --watch    # keep reading on an interval
-```
-
-Every fx event carries `harness.collection_method=poll`, and that marker is the honest limit of this
-integration. Beacon reads what a turn did after fx committed it, so nothing here can hold, deny, or
-delay a tool call the way a hook can, and activity appears in the log a turn late rather than
-live. What the records do carry is fx's own account of what happened -- the tool, the call id, the
-file, the exit code, the diff -- so the events are `event.fidelity=observed` rather than inferred.
-
-Two things fx does not record, and Beacon does not invent: there is no per-call approve/deny
-decision (fx keeps the feedback a person typed at a permission prompt, which Beacon records as
-evidence rather than as an approval event), and there is no session-end record, since fx sessions
-are resumable. One gap is worth knowing about: fx compacts a long session's log by folding older
-turns into an opaque blob, so a turn committed after the last sweep and before a compaction is not
-recoverable. Sweeping on a schedule keeps that window small.
-
-##### Knowledge Worker Agent Harnesses
-
-| Agent harness | Collection path | Telemetry coverage |
+| Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
-| [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
+| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OTLP | Prompt, command, tool, and file |
+| [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop |
 | [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
-##### Browser Chat Surfaces
+#### Browser Chat
 
-| Agent harness | Collection path | Telemetry coverage |
+| Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
-| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call telemetry from the chatgpt.com chat stream |
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
 
-The optional Chrome MV3 extension in [`browser-extension/`](browser-extension/) posts OTLP GenAI
-logs to the collector already listening on `http://127.0.0.1:4318/v1/logs`, so browser chat lands in
-`runtime.jsonl` beside agent activity and forwards through the same shippers. It reads only the chat
-streams on those two sites and never writes files.
-
-Treat it as experimental: it parses private, undocumented APIs, so a change on either site can
-interrupt capture until the adapter is updated. **Retention defaults to `full`**, meaning complete
-prompt and response text is retained locally unless you change it in the extension's options page.
+The optional Chrome MV3 extension in [`browser-extension/`](browser-extension/)
+posts OTLP GenAI logs to the collector already listening on
+`http://127.0.0.1:4318/v1/logs`, so browser chat lands in `runtime.jsonl` beside
+agent activity. It reads only those two chat streams and never writes files. Treat
+it as experimental: it parses private, undocumented APIs, so a change on either site
+can interrupt capture until the adapter is updated. **Retention defaults to `full`**,
+meaning complete prompt and response text is retained locally unless you change it in
+the extension's options page.
 
 #### CI Agents
 
-| Harness | Collection path | Telemetry coverage |
+| Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [CI agent telemetry](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | Temporary local collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish` | Supported agent prompt, tool, command, file, and run context where emitted during the job |
+| [CI agent telemetry](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | Temporary local collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish` | Supported agent prompt, tool, command, file, and run context emitted during the job |
 
 #### Cloud Agents
 
-| Cloud surface | Collection path | Telemetry coverage |
+| Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
+| [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
-| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
-| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction telemetry after project hooks become active |
-| [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | Org-wide API poll via `beacon cloud devin pull`, with GCS upload | Session, prompt, agent message, status, pull request, and ACU usage telemetry the Devin sessions API exposes (message-level; the autonomous agent runs no in-sandbox hooks) |
-| [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
+| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle |
+| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction once project hooks are active |
+| [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | Org-wide API poll through `beacon cloud devin pull`, with GCS upload | Session, prompt, agent message, status, pull request, and ACU usage at message level; the autonomous agent runs no in-sandbox hooks |
+| [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | OpenAI model call spans, errors, and OpenTelemetry attributes |
 | [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
 
 ### Output Destinations
 
-Agent Beacon writes endpoint telemetry to local JSONL by default and supports
-customer-controlled forwarding into common security information and event
-management (SIEM), log aggregation, and object storage destinations.
+Beacon writes endpoint telemetry to local JSONL by default and supports
+customer-controlled forwarding into SIEM, log aggregation, and object storage
+destinations.
 
 #### Security Information and Event Management (SIEM)
 
@@ -205,20 +169,15 @@ management (SIEM), log aggregation, and object storage destinations.
 
 ### MDM Deployment
 
-Agent Beacon is designed for Security and IT teams to deploy and validate
-through standard MDM workflows.
-
 Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
-`.pkg` to GitHub Releases for MDM/manual download, `.deb` and `.rpm` packages for
-Linux on amd64 and arm64, and an x64 `.msi` for Windows. Homebrew and release
-archives remain available for CLI installs across supported macOS, Linux, and
-Windows architectures.
+`.pkg`, `.deb` and `.rpm` packages for Linux on amd64 and arm64, and an x64 `.msi`
+for Windows. Homebrew and release archives remain available for CLI installs.
 
 Installing a native package performs the system-mode install itself: it registers
-and starts the service, writes configuration to the platform's machine-wide
-location, and points the interactive user's agent runtimes at the local
-collector. See the [Linux install guide](https://docs.asymptotelabs.ai/platforms/linux)
-or the [Windows install guide](https://docs.asymptotelabs.ai/platforms/windows).
+and starts the service, writes machine-wide configuration, and points the
+interactive user's agent runtimes at the local collector. See the
+[Linux](https://docs.asymptotelabs.ai/platforms/linux) and
+[Windows](https://docs.asymptotelabs.ai/platforms/windows) install guides.
 
 | Platform | Package | Service manager | Notes |
 | --- | --- | --- | --- |
@@ -233,33 +192,31 @@ or the [Windows install guide](https://docs.asymptotelabs.ai/platforms/windows).
 
 The macOS package includes GCS forwarder helpers at
 `/opt/beacon/jamf/claude/gcs/{install-forwarder.sh,run-forwarder.sh,repair-hooks-and-forwarder.sh}`.
-They run bundled Vector as `com.beacon.endpoint.gcs-forwarder`, write runtime
-and inventory objects below one root prefix, and reference an externally
-delivered service-account JSON through `GOOGLE_APPLICATION_CREDENTIALS`.
+They run bundled Vector as `com.beacon.endpoint.gcs-forwarder`, write runtime and
+inventory objects below one root prefix, and reference an externally delivered
+service-account JSON through `GOOGLE_APPLICATION_CREDENTIALS`.
 
 ## Dashboard and Local Detection
 
-Beacon includes a local, read-only dashboard for validating endpoint activity
-without a hosted backend. See the [dashboard docs](https://docs.asymptotelabs.ai/cli/dashboard)
-for overview, log search, and runtime JSONL inspection.
-
-Beacon writes endpoint activity to `runtime.jsonl` and periodic Cursor/Claude
-Code configuration inventory metadata to the sibling `inventory_state.jsonl`.
-Local log storage and retention behavior are summarized in the
+Beacon includes a local, read-only [dashboard](https://docs.asymptotelabs.ai/cli/dashboard)
+for validating endpoint activity without a hosted backend. It reads `runtime.jsonl`,
+where Beacon writes endpoint activity, alongside the sibling `inventory_state.jsonl`
+of periodic Cursor and Claude Code configuration inventory. Storage and retention
+behavior is summarized in the
 [local testing and logs docs](https://docs.asymptotelabs.ai/cli/local-testing-logs).
 
 For offline threat detection, `beacon scan` runs open threat rules over local
 telemetry with no network access. See the
-[Threat Rules spec](spec/threat-rules/SPEC.md) and generated
-[rule field reference](spec/threat-rules/FIELDS.md) for rule format, CEL
-matching, fixtures, and supported event fields.
+[Threat Rules spec](spec/threat-rules/SPEC.md) and the generated
+[rule field reference](spec/threat-rules/FIELDS.md) for rule format, CEL matching,
+fixtures, and supported event fields.
 
 ## Start Here
 
 - [Beacon CLI docs](https://docs.asymptotelabs.ai) — full documentation index.
 - [Installation](https://docs.asymptotelabs.ai/cli/installation) — install Beacon locally.
 - [For Security & IT Teams](https://docs.asymptotelabs.ai/cli/security-it-teams) — rollout, validation, and security workflows.
-- [Security review](https://docs.asymptotelabs.ai/cli/security-review) — review Beacon's architecture, data handling, and local-only posture.
+- [Security review](https://docs.asymptotelabs.ai/cli/security-review) — architecture, data handling, and local-only posture.
 - [Endpoint agent](https://docs.asymptotelabs.ai/cli/endpoint) — install, status, repair, and uninstall.
 - [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard) — inspect local runtime logs.
 - [Endpoint event schema](https://docs.asymptotelabs.ai/cli/event-schema) — normalized JSONL event model.
@@ -268,17 +225,15 @@ matching, fixtures, and supported event fields.
 
 ## Quickstart
 
-See the [Quickstart](https://docs.asymptotelabs.ai/cli/quickstart) docs for the
-full setup paths.
+See the [Quickstart docs](https://docs.asymptotelabs.ai/cli/quickstart) for the full
+setup paths.
 
-### First-run onboarding
+### First-Run Onboarding
 
 The first time you run `beacon endpoint install` in a terminal, Beacon asks two
 questions — your email and whether this is work or personal use — and sends the
 answers to Asymptote once. Knowing who runs Beacon is how we decide which runtimes
-and integrations to build next.
-
-Exactly what is sent, and nothing else:
+and integrations to build next. Exactly what is sent, and nothing else:
 
 | Field | Example |
 | --- | --- |
@@ -293,8 +248,8 @@ Exactly what is sent, and nothing else:
 or anything else Beacon captures. The endpoint agent itself stays local-only — this is
 one HTTP request at install time, not an ongoing channel.
 
-It happens once per machine. The answer is recorded in `~/.beacon/profile.json`, which
-survives uninstall so a reinstall does not ask again.
+It happens once per machine, recorded in `~/.beacon/profile.json`, which survives
+uninstall so a reinstall does not ask again.
 
 **It never runs non-interactively.** Package postinstall scripts, MDM deployments,
 `--system` installs, CI, `--dry-run`, and any piped or redirected stdin skip it
@@ -324,15 +279,14 @@ To have your record deleted, email the install ID shown by
 
 ### For Security & IT Teams
 
-Start with the
-[security and IT quickstart](https://docs.asymptotelabs.ai/cli/quickstart) and
-[managed deployment guidance](https://docs.asymptotelabs.ai/cli/security-it-teams)
-for rollout, validation, retention, and SIEM forwarding. For vendor review, see
-the [security review](https://docs.asymptotelabs.ai/cli/security-review).
+Start with the [security and IT quickstart](https://docs.asymptotelabs.ai/cli/quickstart)
+and [managed deployment guidance](https://docs.asymptotelabs.ai/cli/security-it-teams)
+for rollout, validation, retention, and SIEM forwarding. For vendor review, see the
+[security review](https://docs.asymptotelabs.ai/cli/security-review).
 
 ### For Developers
 
-Install the released Beacon CLI locally with Homebrew:
+Install the released CLI with Homebrew, or build from source:
 
 ```bash
 brew tap asymptote-labs/tap
@@ -340,16 +294,14 @@ brew install beacon
 beacon version
 ```
 
-Or build from source:
-
 ```bash
 cd cli/beacon
 make build
 ```
 
-To verify a change against a **real** Claude Code session rather than only
-synthetic payloads, `beacon-sandbox` runs one in a disposable Linux sandbox and
-checks what Beacon actually captured:
+To verify a change against a **real** Claude Code session rather than only synthetic
+payloads, `beacon-sandbox` runs one in a disposable Linux sandbox and checks what
+Beacon actually captured:
 
 ```bash
 cd beacon-sandbox
@@ -358,12 +310,12 @@ go run ./cmd/beacon-sandbox run --scenario s02-bash-command
 ```
 
 See [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox)
-for setup, what it can verify, and its limitations.
+for setup, coverage, and limitations.
 
 The browser extension is a separate, optional component that builds on its own. It
-needs a running Beacon endpoint to post to, and its test suite replays recorded
-chat streams through the real extension in headless Chromium, so it needs no login
-and no network:
+needs a running Beacon endpoint to post to, and its test suite replays recorded chat
+streams through the real extension in headless Chromium, so it needs no login and no
+network:
 
 ```bash
 cd browser-extension
@@ -373,10 +325,7 @@ npm test               # replay e2e
 ```
 
 See [`browser-extension/README.md`](browser-extension/) for what it captures and
-what it retains.
-
-For setup, deployment, integrations, and command details, see the
-[Beacon CLI docs](https://docs.asymptotelabs.ai).
+retains.
 
 ## Star Growth
 
