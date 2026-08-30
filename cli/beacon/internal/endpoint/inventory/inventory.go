@@ -210,6 +210,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, opencodeCandidates(home, wd)...)
 	items = append(items, clineCandidates(home, wd)...)
 	items = append(items, piCandidates(home, wd)...)
+	items = append(items, ompCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -321,6 +322,33 @@ func piCandidates(home, wd string) []candidate {
 		items = append(items, candidate{
 			runtime: "pi_cli",
 			path:    filepath.Join(wd, ".pi", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// ompCandidates covers both Oh My Pi extension locations.
+//
+// Like piCandidates, the paths come from the installer rather than being rebuilt here: a second
+// copy of the path is how inventory comes to report on a file the installer does not touch. That
+// matters more for Oh My Pi than for Pi, because its user path is not a fixed string -- a profile
+// or a PI_CODING_AGENT_DIR override moves it, and only the installer knows the rule.
+func ompCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OmpExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "omp",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "omp",
+			path:    filepath.Join(wd, ".omp", "extensions", "beacon.ts"),
 			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
 		})
 	}
@@ -696,6 +724,10 @@ func beaconManaged(item candidate, data []byte) bool {
 	// installer does not write -- the reason hooks.PiManagedExtensionMarker is exported at all.
 	case "pi_cli":
 		return strings.Contains(text, hooks.PiManagedExtensionMarker)
+	// Distinct from Pi's marker, and matched separately, so a file found at either runtime's path
+	// is attributed to the runtime that actually loads it rather than to whichever case ran first.
+	case "omp":
+		return strings.Contains(text, hooks.OmpManagedExtensionMarker)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	// Matched on the hook command rather than on a marker, because Beacon merges into Qwen's own
