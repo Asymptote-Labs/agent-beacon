@@ -161,32 +161,20 @@ destinations.
 
 ### MDM Deployment
 
-Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
-`.pkg`, `.deb` and `.rpm` packages for Linux on amd64 and arm64, and an x64 `.msi`
-for Windows. Homebrew and release archives remain available for CLI installs.
-
-Installing a native package performs the system-mode install itself: it registers
-and starts the service, writes machine-wide configuration, and points the
-interactive user's agent runtimes at the local collector. See the
-[Linux](https://docs.asymptotelabs.ai/platforms/linux) and
-[Windows](https://docs.asymptotelabs.ai/platforms/windows) install guides.
+Every version tag publishes native packages that perform the system-mode install
+themselves: they register and start the service, write machine-wide configuration, and
+point the interactive user's agent runtimes at the local collector. Homebrew and release
+archives remain available for CLI installs.
 
 | Platform | Package | Service manager | Notes |
 | --- | --- | --- | --- |
-| macOS | Signed, notarized `.pkg` (Apple Silicon) | launchd | Homebrew for single machines |
-| Linux | `.deb` / `.rpm` (amd64, arm64) | systemd | Supervised fallback without systemd |
-| Windows | `.msi` (x64) | Service Control Manager | Unsigned for now; verify the published `.sha256` |
+| [macOS](https://docs.asymptotelabs.ai/platforms/macos) | Signed, notarized `.pkg` (Apple Silicon) | launchd | [Jamf Pro](https://docs.asymptotelabs.ai/mdm/jamf), [Fleet](https://docs.asymptotelabs.ai/mdm/fleet), and [Rippling](https://docs.asymptotelabs.ai/mdm/rippling) assets; Homebrew for single machines |
+| [Linux](https://docs.asymptotelabs.ai/platforms/linux) | `.deb` / `.rpm` (amd64, arm64) | systemd | Supervised fallback without systemd |
+| [Windows](https://docs.asymptotelabs.ai/platforms/windows) | `.msi` (x64) | Service Control Manager | Unsigned for now; verify the published `.sha256` |
 
-| MDM platform | Support path |
-| --- | --- |
-| [Fleet](https://docs.asymptotelabs.ai/cli/fleet) | macOS package and user-context deployment helpers |
-| [Jamf Pro](https://docs.asymptotelabs.ai/cli/jamf) | macOS package, policy scripts, validation, and Extension Attributes |
-
-The macOS package includes GCS forwarder helpers at
-`/opt/beacon/jamf/claude/gcs/{install-forwarder.sh,run-forwarder.sh,repair-hooks-and-forwarder.sh}`.
-They run bundled Vector as `com.beacon.endpoint.gcs-forwarder`, write runtime and
-inventory objects below one root prefix, and reference an externally delivered
-service-account JSON through `GOOGLE_APPLICATION_CREDENTIALS`.
+The macOS package also ships
+[GCS forwarder helpers](https://docs.asymptotelabs.ai/mdm/jamf/claude) under
+`/opt/beacon/jamf/claude/gcs/` that run bundled Vector as a launchd job.
 
 ## Dashboard and Local Detection
 
