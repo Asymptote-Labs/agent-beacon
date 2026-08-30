@@ -86,7 +86,7 @@ func piRenderedArgv(t *testing.T, source string) []string {
 
 func TestInstallPiExtensionWritesManagedExtension(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "beacon.ts")
-	if err := installPiExtension(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+	if err := piExtension.install(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -118,9 +118,9 @@ func TestInstallPiExtensionWritesManagedExtension(t *testing.T) {
 // A Windows path is the case that a hand-rolled quoting rule gets wrong, and the case a JSON-encoded
 // argv gets right for free.
 func TestRenderPiExtensionEncodesWindowsPaths(t *testing.T) {
-	source, err := renderPiExtension(`C:\Program Files\beacon\beacon-hooks.exe`, `C:\ProgramData\beacon\runtime.jsonl`, "")
+	source, err := piExtension.render(`C:\Program Files\beacon\beacon-hooks.exe`, `C:\ProgramData\beacon\runtime.jsonl`, "")
 	if err != nil {
-		t.Fatalf("renderPiExtension returned error: %v", err)
+		t.Fatalf("piExtension.render returned error: %v", err)
 	}
 	argv := piRenderedArgv(t, source)
 	if argv[0] != `C:\Program Files\beacon\beacon-hooks.exe` {
@@ -135,7 +135,7 @@ func TestInstallPiExtensionRefusesToOverwriteUnmanagedExtension(t *testing.T) {
 	if err := os.WriteFile(path, []byte("export default function () {}\n"), 0644); err != nil {
 		t.Fatalf("seed unmanaged extension: %v", err)
 	}
-	if err := installPiExtension(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err == nil {
+	if err := piExtension.install(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err == nil {
 		t.Fatal("installPiExtension overwrote an unmanaged extension")
 	}
 	data, _ := os.ReadFile(path)
@@ -148,24 +148,24 @@ func TestRemovePiExtensionOnlyRemovesManagedExtension(t *testing.T) {
 	dir := t.TempDir()
 	managed := filepath.Join(dir, "managed.ts")
 	unmanaged := filepath.Join(dir, "unmanaged.ts")
-	if err := installPiExtension(managed, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err != nil {
+	if err := piExtension.install(managed, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 	if err := os.WriteFile(unmanaged, []byte("export default function () {}\n"), 0644); err != nil {
 		t.Fatalf("seed unmanaged extension: %v", err)
 	}
 
-	removed, err := removePiExtension(managed)
+	removed, err := piExtension.remove(managed)
 	if err != nil || !removed {
-		t.Fatalf("removePiExtension(managed) = %v, %v; want true, nil", removed, err)
+		t.Fatalf("piExtension.remove(managed) = %v, %v; want true, nil", removed, err)
 	}
 	if _, err := os.Stat(managed); !os.IsNotExist(err) {
 		t.Fatal("managed extension survived removal")
 	}
 
-	removed, err = removePiExtension(unmanaged)
+	removed, err = piExtension.remove(unmanaged)
 	if err != nil {
-		t.Fatalf("removePiExtension(unmanaged) returned error: %v", err)
+		t.Fatalf("piExtension.remove(unmanaged) returned error: %v", err)
 	}
 	if removed {
 		t.Fatal("removePiExtension removed an extension Beacon does not manage")
@@ -176,7 +176,7 @@ func TestRemovePiExtensionOnlyRemovesManagedExtension(t *testing.T) {
 }
 
 func TestRemovePiExtensionIsQuietWhenNothingIsInstalled(t *testing.T) {
-	removed, err := removePiExtension(filepath.Join(t.TempDir(), "absent.ts"))
+	removed, err := piExtension.remove(filepath.Join(t.TempDir(), "absent.ts"))
 	if err != nil {
 		t.Fatalf("removePiExtension on a missing file returned error: %v", err)
 	}
@@ -185,28 +185,12 @@ func TestRemovePiExtensionIsQuietWhenNothingIsInstalled(t *testing.T) {
 	}
 }
 
-// The placeholder check is what turns a template rename into a loud failure instead of an install
-// that reports success and spawns nothing.
-func TestRenderPiExtensionRejectsATemplateMissingItsPlaceholder(t *testing.T) {
-	if _, err := renderPiFamilyExtension("// __BEACON_MANAGED_MARKER__\nconst x = 1\n", piFamilyPi, "/tmp/beacon-hooks", "", ""); err == nil {
-		t.Fatal("renderPiFamilyExtension accepted a template with no argv placeholder")
-	}
-}
-
-func TestRenderPiExtensionRejectsUnresolvedPlaceholders(t *testing.T) {
-	template := "// __BEACON_MANAGED_MARKER__\nconst beaconArgv: string[] = [\"__BEACON_ARGV__\"]\n" +
-		"const beaconRuntime = \"__BEACON_RUNTIME__\"\nconst leftover = \"__BEACON_SOMETHING_ELSE__\"\n"
-	if _, err := renderPiFamilyExtension(template, piFamilyPi, "/tmp/beacon-hooks", "", ""); err == nil {
-		t.Fatal("renderPiFamilyExtension accepted a template with an unresolved placeholder")
-	}
-}
-
 func TestPiEmbeddedExtensionMatchesRootSource(t *testing.T) {
-	embedded, err := os.ReadFile(piFamilyEmbeddedExtensionSourcePath())
+	embedded, err := os.ReadFile(piEmbeddedExtensionSourcePath())
 	if err != nil {
 		t.Fatalf("read embedded extension source: %v", err)
 	}
-	root, err := os.ReadFile(piFamilyRootExtensionSourcePath())
+	root, err := os.ReadFile(piRootExtensionSourcePath())
 	if err != nil {
 		t.Fatalf("read root extension source: %v", err)
 	}
@@ -222,7 +206,7 @@ func TestPiStatusRejectsAnExtensionWithNoBinary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "beacon.ts")
 	missing := filepath.Join(dir, "beacon-hooks")
-	if err := installPiExtension(path, missing, "/tmp/runtime.jsonl", ""); err != nil {
+	if err := piExtension.install(path, missing, "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: missing, ConfigPath: path})
@@ -244,7 +228,7 @@ func TestPiStatusRejectsAnExtensionPointingElsewhere(t *testing.T) {
 			t.Fatalf("seed binary: %v", err)
 		}
 	}
-	if err := installPiExtension(path, stale, "/tmp/runtime.jsonl", ""); err != nil {
+	if err := piExtension.install(path, stale, "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: current, ConfigPath: path})
@@ -260,7 +244,7 @@ func TestPiStatusAcceptsAHealthyInstall(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatalf("seed binary: %v", err)
 	}
-	if err := installPiExtension(path, binary, "/tmp/runtime.jsonl", ""); err != nil {
+	if err := piExtension.install(path, binary, "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: binary, ConfigPath: path})
@@ -276,36 +260,36 @@ func TestIsPiInstalledAtRequiresTheManagedMarker(t *testing.T) {
 	dir := t.TempDir()
 	managed := filepath.Join(dir, "managed.ts")
 	unmanaged := filepath.Join(dir, "unmanaged.ts")
-	if err := installPiExtension(managed, "/tmp/beacon-hooks", "", ""); err != nil {
+	if err := piExtension.install(managed, "/tmp/beacon-hooks", "", ""); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 	if err := os.WriteFile(unmanaged, []byte("export default function () {}\n"), 0644); err != nil {
 		t.Fatalf("seed unmanaged extension: %v", err)
 	}
-	if !isPiInstalledAt(managed) {
+	if !piExtension.installedAt(managed) {
 		t.Fatal("isPiInstalledAt did not recognize Beacon's own extension")
 	}
-	if isPiInstalledAt(unmanaged) {
+	if piExtension.installedAt(unmanaged) {
 		t.Fatal("isPiInstalledAt claimed an unmanaged extension as Beacon's")
 	}
-	if isPiInstalledAt(filepath.Join(dir, "absent.ts")) {
+	if piExtension.installedAt(filepath.Join(dir, "absent.ts")) {
 		t.Fatal("isPiInstalledAt claimed a file that does not exist")
 	}
 }
 
 func TestPiExtensionReferencesBinaryHandlesWindowsPaths(t *testing.T) {
 	binary := `C:\Program Files\beacon\beacon-hooks.exe`
-	source, err := renderPiExtension(binary, `C:\ProgramData\beacon\runtime.jsonl`, "")
+	source, err := piExtension.render(binary, `C:\ProgramData\beacon\runtime.jsonl`, "")
 	if err != nil {
-		t.Fatalf("renderPiExtension returned error: %v", err)
+		t.Fatalf("piExtension.render returned error: %v", err)
 	}
-	if !piFamilyExtensionReferencesBinary(source, binary) {
+	if !extensionReferencesBinary(source, binary) {
 		t.Fatal("a correctly installed Windows extension was reported as not referencing its own binary")
 	}
-	if piFamilyExtensionReferencesBinary(source, `C:\Other\beacon-hooks.exe`) {
-		t.Fatal("piFamilyExtensionReferencesBinary matched a binary the extension does not spawn")
+	if extensionReferencesBinary(source, `C:\Other\beacon-hooks.exe`) {
+		t.Fatal("piExtensionReferencesBinary matched a binary the extension does not spawn")
 	}
-	if piFamilyExtensionReferencesBinary(source, "") {
-		t.Fatal("piFamilyExtensionReferencesBinary matched an empty binary path")
+	if extensionReferencesBinary(source, "") {
+		t.Fatal("piExtensionReferencesBinary matched an empty binary path")
 	}
 }

@@ -43,6 +43,10 @@ cli/beacon-hooks/*.exe
 !cli/beacon/internal/endpoint/cloudwatch/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/gcs/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/sentinel/pack/sample-event.jsonl
+# A session log captured from the real fx binary, kept as a test fixture rather than produced
+# during development. Without this exception the `*.jsonl` rule above silently drops it and the
+# tests that read it fail on a fresh clone while passing on the machine that captured it.
+!cli/beacon/internal/fxsession/testdata/**/*.jsonl
 !cli/beacon/internal/endpoint/falcon/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/gcs/pack/sample-event.jsonl
 *.log

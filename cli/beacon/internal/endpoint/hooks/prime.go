@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	piextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/pi"
 )
 
 // Prime Agent (Prime Intellect) is observed the same way Pi is, and for the same reasons: no hooks
 // configuration file to merge into, no OpenTelemetry support to point at the local collector, and a
 // TypeScript extension API that is its documented observation surface. The mechanics of writing and
-// checking that file live in piextension.go; what is below is Prime Agent's alone.
+// checking that file live in managedExtension, shared with Pi and Oh My Pi; what is below is Prime
+// Agent's alone.
 const (
+	primeExtensionFileName = "beacon.ts"
+
 	// PrimeManagedExtensionMarker identifies an extension file as one Beacon wrote for Prime Agent.
 	//
 	// Exported for the same three readers PiManagedExtensionMarker is: `hooks` writes it and
@@ -28,16 +33,6 @@ const (
 	PrimeManagedExtensionMarker = "beacon-managed-prime-extension:v1"
 )
 
-// primeFamilyRuntime is the Prime Agent half of the shared extension install. Its platform value is
-// both the `--platform` flag the hook binary is invoked with and the runtime name the extension
-// reads to pick its subscription list.
-var primeFamilyRuntime = piFamilyRuntime{
-	platform:    "prime",
-	hookCommand: "prime-event",
-	marker:      PrimeManagedExtensionMarker,
-	displayName: "Prime Agent",
-}
-
 type PrimeOptions struct {
 	Level    Level
 	LogPath  string
@@ -51,13 +46,22 @@ type PrimeStatus struct {
 	Message       string `json:"message,omitempty"`
 }
 
-var primeRuntime = hookRuntime{
+// The platform value does double duty, which is what keeps this install self-consistent: it is the
+// `--platform` flag the hook binary is invoked with, the `prime-event` subcommand the extension
+// spawns, and the runtime name substituted into the shared source that decides which events the
+// extension subscribes to. One value feeding all three cannot disagree with itself.
+var primeExtension = managedExtension{
+	platform:    "prime",
 	displayName: "Prime Agent",
-	configPath:  PrimeExtensionPath,
-	install:     installPrimeExtension,
-	uninstall:   removePrimeExtension,
-	isInstalled: isPrimeInstalledAt,
+	marker:      PrimeManagedExtensionMarker,
+	// Pi's source, rendered with Prime Agent's runtime name. The two products ship the same
+	// extension API, so there is one file and one drift check for both.
+	template:       piextension.Template,
+	sharedTemplate: true,
+	configPath:     PrimeExtensionPath,
 }
+
+var primeRuntime = primeExtension.runtime()
 
 func InstallPrime(opts PrimeOptions) (PrimeStatus, error) {
 	status, err := installRuntimeHooks(primeRuntime, RuntimeOptions(opts))
@@ -86,36 +90,13 @@ func IsPrimeInstalled(opts PrimeOptions) bool {
 // primeStatusFromRuntime reports installed only when the extension can actually reach the hook
 // binary.
 func primeStatusFromRuntime(status runtimeStatus) PrimeStatus {
-	out := PrimeStatus{
+	status = primeExtension.reachableStatus(status)
+	return PrimeStatus{
 		Installed:     status.Installed,
 		BinaryPath:    status.BinaryPath,
 		ExtensionPath: status.ConfigPath,
 		Message:       status.Message,
 	}
-	if !out.Installed || out.BinaryPath == "" {
-		return out
-	}
-	if healthy, message := piFamilyExtensionHealth(primeFamilyRuntime, out.ExtensionPath, out.BinaryPath); !healthy {
-		out.Installed = false
-		out.Message = message
-	}
-	return out
-}
-
-func installPrimeExtension(path, binaryPath, logPath, configPath string) error {
-	return installPiFamilyExtension(piFamilyExtensionTemplate, primeFamilyRuntime, path, binaryPath, logPath, configPath)
-}
-
-func removePrimeExtension(path string) (bool, error) {
-	return removePiFamilyExtension(PrimeManagedExtensionMarker, path)
-}
-
-func isPrimeInstalledAt(path string) bool {
-	return isPiFamilyExtensionInstalledAt(PrimeManagedExtensionMarker, path)
-}
-
-func renderPrimeExtension(binaryPath, logPath, configPath string) (string, error) {
-	return renderPiFamilyExtension(piFamilyExtensionTemplate, primeFamilyRuntime, binaryPath, logPath, configPath)
 }
 
 // PrimeExtensionPath returns the extension file Beacon manages for a given install level.
@@ -130,7 +111,7 @@ func PrimeExtensionPath(level Level) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, piFamilyExtensionFileName), nil
+	return filepath.Join(dir, primeExtensionFileName), nil
 }
 
 // primeExtensionDir resolves the directory for a level.
