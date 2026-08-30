@@ -50,6 +50,10 @@ var harnessTargets = []harnessTarget{
 	// under, so anyone reading a Pi row out of the runtime log and passing it back to a --harness
 	// flag gets the runtime they are looking at rather than an "unsupported harness" error.
 	{name: "pi", endpointKind: endpointTargetHook, endpointAliases: []string{"pi", "pi-cli", "pi_cli"}, hookAliases: []string{"pi", "pi-cli", "pi_cli"}},
+	// prime_agent is accepted alongside prime for the same reason pi_cli is: it is the canonical
+	// harness name Prime Agent events are written under. "prime-agent" is the name of the command
+	// the runtime installs, which is what someone typing from memory will reach for.
+	{name: "prime", endpointKind: endpointTargetHook, endpointAliases: []string{"prime", "prime-agent", "prime_agent"}, hookAliases: []string{"prime", "prime-agent", "prime_agent"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen
