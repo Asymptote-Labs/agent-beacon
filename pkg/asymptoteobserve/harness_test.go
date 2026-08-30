@@ -20,6 +20,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"omp":         "omp",
 		"cline":       "cline",
 		"qwen":        "qwen_code",
+		"prime":       "prime_agent",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -38,7 +39,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "vercel_fx",
+		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "vercel_fx",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -262,6 +263,54 @@ func TestEmptyNameStaysEmpty(t *testing.T) {
 	for _, in := range []string{"", "   ", "\t"} {
 		if got := NormalizeHarnessName(in); got != "" {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want empty", in, got)
+		}
+	}
+}
+
+// Prime Agent reaches Beacon under more than one spelling for the same reason Qwen Code does: the
+// hook path installs with --platform prime, while an OTLP resource attribute carries whatever the
+// runtime calls itself, which is prime-agent.
+func TestPrimeAgentSpellingsConvergeOnPrimeAgent(t *testing.T) {
+	for _, in := range []string{
+		"prime", "Prime", "PRIME", " prime ", "prime_agent", "prime-agent", "Prime Agent",
+		"primeagent", "prime_cli", "prime-cli", "prime cli", "prime-intellect", "Prime Intellect",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "prime_agent" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "prime_agent")
+			}
+		})
+	}
+}
+
+// Prime Agent is a Pi distribution -- it ships Pi's extension API under a rebranded config
+// directory -- which is exactly why this needs a test. The two runtimes are observed through the
+// same mechanism, so the temptation is to file them under one name; doing that would merge two
+// products' sessions in every query that groups by harness.name, and would make "which runtime is
+// running here" unanswerable from the log.
+func TestPrimeAgentIsNotAttributedToPi(t *testing.T) {
+	for _, in := range []string{"prime", "prime-agent", "prime_agent", "Prime Agent"} {
+		if got := NormalizeHarnessName(in); got == "pi_cli" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; Prime Agent must not be recorded as Pi", in, got)
+		}
+	}
+	for _, in := range []string{"pi", "pi.dev", "pi-agent"} {
+		if got := NormalizeHarnessName(in); got != "pi_cli" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; adding Prime Agent must not move Pi", in, got)
+		}
+	}
+}
+
+// The reason the Prime case is an equality match rather than a Contains rule. "prime" is an
+// ordinary word: it turns up in model ids, vendor names, and directory paths that have nothing to
+// do with this runtime, and a substring rule would file every one of them under prime_agent.
+func TestPrimeSubstringsAreNotTreatedAsTheHarness(t *testing.T) {
+	for _, name := range []string{
+		"prime-numbers", "amazon_prime", "primer", "optimus-prime-cli", "claude_code_primed",
+	} {
+		if got := NormalizeHarnessName(name); got == "prime_agent" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; a name that merely contains \"prime\" must not be "+
+				"reported as the Prime Agent harness", name, got)
 		}
 	}
 }

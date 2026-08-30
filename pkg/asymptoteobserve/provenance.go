@@ -99,7 +99,7 @@ func CollectionMethodForPlatform(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
 	case "":
 		return ""
-	case "opencode", "cline", "pi", "omp":
+	case "opencode", "cline", "pi", "omp", "prime":
 		return CollectionMethodPlugin
 	default:
 		return CollectionMethodHook
