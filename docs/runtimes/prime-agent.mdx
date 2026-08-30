@@ -1,0 +1,144 @@
+---
+title: "Prime Agent"
+description: "Asymptote support details for Prime Agent endpoint telemetry"
+---
+
+## Runtime overview
+
+Asymptote supports [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) through a managed local extension.
+
+Prime Agent ships the Pi coding agent under its own branding: the same TypeScript extension API, the same event objects, and a rebranded `~/.prime/agent` config directory. So it fits Asymptote's integration model the same way Pi does — no hooks configuration file to merge a managed block into, and no OpenTelemetry exporter to point at the local collector — and the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`.
+
+What differs is what the agent *does*. Prime Agent has one tool, `ipython`, which runs a cell of Python in a persistent kernel. Reading a file, editing a file, running a shell command, and calling out to the network are all Python written into that cell rather than distinct tool calls, so Asymptote maps this runtime's activity differently from Pi's.
+
+```bash
+beacon endpoint hooks install --harness prime
+```
+
+## Prerequisites
+
+Before enabling Prime Agent telemetry, make sure:
+
+- Prime Agent is installed and available as the `prime-agent` executable, or has a local state directory at `~/.prime/agent`.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Prime Agent is restarted after install or removal so new sessions load the updated extension.
+
+## Collection path
+
+Asymptote's managed Prime Agent extension is a single TypeScript file at one of two extension locations:
+
+| Level | Extension path |
+|-------|----------------|
+| User | `~/.prime/agent/extensions/beacon.ts` |
+| Project | `./.prime/agent/extensions/beacon.ts` |
+
+User level is the default. Both paths keep the full `.prime/agent` segment — unlike Pi, whose `agent` segment appears only under the home directory — because Prime Agent's loader joins the same config directory name to the home directory and to the working directory.
+
+Asymptote identifies its own extension file by the marker `beacon-managed-prime-extension:v1`. That is deliberately not Pi's marker, even though both files are rendered from one source: the two runtimes have separate directories and separate installs, so a shared marker would let either runtime's uninstall remove a file it did not write, and let either status report the other's install as its own.
+
+Prime Agent's own trace upload is a hosted destination rather than an OpenTelemetry exporter Asymptote can redirect, so there is no OTLP path for this runtime and nothing about this integration leaves the machine.
+
+Asymptote does not read the `PRIME_AGENT_CODING_AGENT_DIR` override the runtime honors. Install, status, discovery, and inventory run in different processes and have to agree on one path; a location that depended on the caller's environment would have install write one file and status report on another. If you relocate the agent directory, install the extension there yourself.
+
+## Discovery and status
+
+Asymptote detects Prime Agent through the `prime-agent` executable, and treats the `~/.prime/agent` state directory as an additional signal. A runtime installed through a version manager or a per-project install is often missing from the `PATH` the endpoint process inherited while its state directory is still present. The Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
+
+```bash title="Show Prime Agent discovery state"
+beacon endpoint discover --all --json
+```
+
+Prime Agent reports as the `prime_agent` harness with capability `plugin`:
+
+| Telemetry status | Meaning |
+|------------------|---------|
+| `missing` | No extension file at the user-level managed path |
+| `disabled` | A `beacon.ts` exists but carries no Asymptote Prime Agent marker, so it is somebody else's extension — or a Pi extension in the wrong directory |
+| `enabled` | Asymptote's managed extension is in place |
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. The extension is installed separately, because Prime Agent loads it from the user's own profile rather than from a machine-wide location:
+
+```bash
+beacon endpoint hooks install --harness prime            # user level (default)
+beacon endpoint hooks install --harness prime --level project
+beacon endpoint hooks status --harness prime
+beacon endpoint hooks uninstall --harness prime
+```
+
+Install writes one file and refuses to touch a `beacon.ts` it did not write, so an extension of your own that happens to share the filename is left alone and the install fails loudly rather than replacing it.
+
+`status` reports `installed=false` when the extension exists but points at a hook binary that is no longer there, which happens after a Beacon uninstall, a partly applied update, or a home directory restored onto a different machine. In each case Prime Agent loads an extension that spawns nothing.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through executable and `~/.prime/agent` detection, managed extension path, and telemetry status |
+| Harness attribution | Supported. `prime`, `prime-agent`, `prime_agent`, `prime agent`, `primeagent`, `prime-cli`, and `prime-intellect` all normalize to `prime_agent` |
+| Extension install, status, uninstall, and repair | Supported |
+| Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped |
+| Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
+| Tool use | Supported. `tool.invoked` before execution, then `command.executed`, `tool.completed`, or `tool.failed` |
+| Kernel cells and commands | Supported. Each `ipython` cell is recorded as `command.executed` with the Python source in `command.command`, the kernel's duration in `command.duration_ms`, and stdout and stderr in `command.output`. Commands you run with the `!` prefix are recorded separately and marked operator-initiated |
+| File activity | Partial. `file.modified` with the replacement, for every edit the kernel streamed. See [Known gaps](#known-gaps) |
+| Agent-to-agent messages | Supported. `agent.message.sent` when a cell messages another agent session, with the target session, the receiver's role in the agent tree, and the message body |
+| Context compaction | Supported. `session.compacted` when the conversation history is rewritten |
+| Harness self-modification | Supported. `agent.harness.refined` when the agent rewrites its own durable prompts, memories, and skill descriptions, at `medium` severity when the change is global in scope |
+| Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
+| Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
+| Approval decisions | Not available. Prime Agent exposes no operator approval decision to observe. See [Known gaps](#known-gaps) |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent. The Prime Agent extension installs separately in the logged-in user's context |
+
+Harness names are matched against a closed set of spellings rather than by substring. "prime" is an ordinary word that turns up in model ids, vendor names, and directory paths, so a substring rule would file every one of them under `prime_agent`.
+
+### Why the Python cell is recorded as a command
+
+Prime Agent's kernel is the only thing its agent ever executes. Recording a cell as an opaque tool input would mean no command-shaped detection — in `beacon scan` or in a customer's SIEM — ever matches a Prime Agent session, while the same activity in every other supported runtime matches. So the cell source reaches `command.command`, and `tool.name` stays `ipython` beside it, so a reader can always tell a Python cell from a shell command.
+
+No exit code is derived. The kernel reports `ok`, `error`, or `aborted`, which is not a process exit status; that value is kept under `raw.prime_cell_status` instead of being converted into a number the runtime never produced.
+
+### Detections
+
+Rules that match on `command.command` apply to Prime Agent cells, including the `risky-command`, `credential-access`, and `context-exfiltration` families. `rules/agent-control/injected-instruction-persisted-to-harness` is specific to this runtime: it fires when an injection-shaped prompt is followed, in the same session, by the agent rewriting its own durable harness — the case where one successful injection outlives the session that carried it.
+
+## Data handling
+
+Prime Agent content is handled like every other runtime. Prompts, kernel cells, command output, paths, diffs, agent messages, refinement summaries, and reasoning text are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+
+The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall the agent loop, and a failure to spawn costs the event rather than the run.
+
+## Known gaps
+
+- **File writes outside the edit skill are not structured.** Prime Agent's `edit` skill emits a payload for every replacement it makes, which is what becomes `file.modified`. A file written by plain Python — `Path.write_text`, a shell redirect through the kernel's `bash()` helper — emits nothing, and is visible only as text inside the cell's `command.command`. Beacon records what the runtime reports rather than parsing Python to guess at paths, which would produce confident, wrong ones.
+- **Shell commands inside a cell are not separated.** The kernel's `bash()` helper does not report the commands it runs, so a shell command appears as part of the Python source rather than as its own `command.executed` event.
+- **No approval telemetry.** Prime Agent's `tool_call` event lets an extension block a call, but that is an extension deciding rather than an operator being asked. It exposes no operator approval decision through the extension API, so Beacon records these as tool activity and writes no approval events. Pi and Cline work the same way for the same reason. Detections in `rules/approval-abuse/` do not fire on Prime Agent activity.
+- **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Prime Agent.
+- **Streaming events are not collected.** The extension subscribes to nine of the runtime's event types and ignores the rest, which are provider-request and TUI-rendering internals. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
+- **Subagent spawns are not their own events.** `rlm.run` reaches the host through the kernel bridge rather than the extension API, so a spawned subagent is visible as the cell that spawned it and, once it messages back, as `agent.message.sent`.
+
+## Deployment notes
+
+The extension is loaded when Prime Agent starts, so an install taken while it is running takes effect on the next launch.
+
+Confirm discovery sees the runtime, then generate one Prime Agent event and check the log:
+
+```bash
+/opt/beacon/bin/beacon endpoint discover --all --json
+/opt/beacon/bin/beacon endpoint hooks status --harness prime
+/opt/beacon/bin/beacon endpoint doctor --system
+grep '"name":"prime_agent"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures each runtime.
+  </Card>
+</Columns>
