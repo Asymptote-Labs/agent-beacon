@@ -50,6 +50,11 @@ func ompPayloads() map[string]map[string]interface{} {
 		"tool_call":        {"type": "tool_call", "toolName": "bash", "toolCallId": "c1", "input": map[string]interface{}{"command": "ls"}},
 		"tool_result":      {"type": "tool_result", "toolName": "bash", "toolCallId": "c1", "input": map[string]interface{}{"command": "ls"}},
 		"user_bash":        {"type": "user_bash", "command": "git status", "cwd": "/repo"},
+		"user_python":      {"type": "user_python", "code": "print(1)", "cwd": "/repo"},
+		"tool_approval_requested": {"type": "tool_approval_requested", "toolName": "bash", "toolCallId": "c1",
+			"approvalMode": "always-ask", "reason": "writes outside the workspace"},
+		"tool_approval_resolved": {"type": "tool_approval_resolved", "toolName": "bash", "toolCallId": "c1",
+			"approved": true},
 		"message_end": {"type": "message_end", "message": map[string]interface{}{
 			"role":  "assistant",
 			"usage": map[string]interface{}{"input": float64(10), "output": float64(5)},
@@ -132,7 +137,17 @@ func TestOmpEventIsAttributedToOhMyPiNotPi(t *testing.T) {
 // above, this pins the property that matters -- one shared shape, two identities -- rather than
 // just asserting each side in isolation.
 func TestPiAndOmpProduceTheSameShapeUnderDifferentIdentities(t *testing.T) {
+	shared := map[string]bool{}
+	for _, name := range supportedPiEventTypes() {
+		shared[name] = true
+	}
 	for name, payload := range ompPayloads() {
+		// The Oh My Pi-only types are excluded rather than expected to match: Pi's extension never
+		// sends them, so there is no Pi behavior to compare against. TestOmpOnlyEventTypesAreNotInPis
+		// pins that asymmetry from the other side.
+		if !shared[name] {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			piEvents := piRuntime.endpointEvents(cloneFields(payload), "sess-1")
 			ompEvents := ompRuntime.endpointEvents(cloneFields(payload), "sess-1")

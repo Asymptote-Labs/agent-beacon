@@ -22,9 +22,12 @@ import (
 // names (see asymptoteobserve.NormalizeHarnessName), and every event carries its own runtime's
 // name in `raw` so an operator reading a row can tell which binary produced it.
 //
-// Events one runtime has and the other does not are mapped by that runtime, not here. Oh My Pi
-// exposes operator approval decisions and Pi does not, and inventing a Pi approval to keep the two
-// symmetric would put a decision nobody made into the log.
+// Events one runtime has and the other does not are mapped here too, and gated by the subscription
+// list rather than by a branch: Oh My Pi's extension subscribes to its approval and user_python
+// events, Pi's does not, so those cases are simply never reached for Pi. That is a stronger
+// guarantee than a platform check would be -- Beacon cannot synthesize a Pi approval because Pi
+// never sends one, not because a condition remembered to say so. Inventing one to keep the two
+// runtimes symmetric would put a decision nobody made into the log.
 type piFamily struct {
 	// platform is the `--platform` value the runtime's hook is installed with. It selects the
 	// session-id and working-directory readers in helpers.go, keys this runtime's block inside
@@ -119,12 +122,80 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		})
 		return f.one("command.executed", "command", "info", "user command executed", fields)
 
+	case "user_python":
+		// The `$` prefix runs Python in the runtime's own REPL rather than a shell. It is the
+		// operator's code, not the agent's, and it is executed just as literally as a bash command
+		// -- `os.system("rm -rf /")` is a shell command wearing a Python hat -- so it is recorded
+		// in the command category where the risky-command rules can see it, marked as the
+		// operator's and as Python rather than being passed off as a shell command.
+		code := getFirstStr(input, "code")
+		if code == "" {
+			return nil
+		}
+		fields["command"] = map[string]interface{}{"command": code}
+		fields["tool"] = map[string]interface{}{"name": "user_python", "command": code}
+		fields["content"] = retainedContentFields(code)
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{
+			f.rawKey("user_initiated"):       true,
+			f.rawKey("user_python"):          true,
+			f.rawKey("exclude_from_context"): input["excludeFromContext"],
+		})
+		return f.one("command.executed", "command", "info", "user Python executed", fields)
+
+	case "tool_approval_requested":
+		return f.approvalEvents(input, fields, "approval.requested", "requested", "approval requested")
+
+	case "tool_approval_resolved":
+		// The runtime states the outcome as a boolean rather than as a word, so there is no
+		// unknown case to fall back to: an event that reached here had a decision made on it.
+		if approved, _ := input["approved"].(bool); approved {
+			return f.approvalEvents(input, fields, "approval.allowed", "approve", "approval allowed")
+		}
+		return f.approvalEvents(input, fields, "approval.denied", "deny", "approval denied")
+
 	case "message_end":
 		return f.messageEndEvents(input, fields)
 
 	default:
 		return nil
 	}
+}
+
+// approvalEvents records an operator approval decision the runtime actually asked for.
+//
+// This is the one thing Oh My Pi exposes that Pi does not. It matters because Beacon has always
+// refused to synthesize an approval from a tool call: a `tool_call` handler that blocks is an
+// extension deciding, and recording that as an approval would be indistinguishable from a decision
+// a human made. Here the runtime reports a real prompt and a real answer, so the event is
+// `observed` rather than `inferred` and carries the operator's decision verbatim.
+//
+// The approval carries the tool's name and the runtime's `toolCallId` but not its arguments -- the
+// runtime does not put them on these events. The call id is the join back to the tool.invoked that
+// does carry them, which is why it is promoted here as carefully as on the tool events themselves.
+func (f piFamily) approvalEvents(input, fields map[string]interface{}, action, decision, messageSuffix string) []normalizedEvent {
+	toolName := piToolName(input)
+	if toolName != "" {
+		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName})
+		f.applyMCPAttribution(fields, toolName)
+	}
+
+	approval := map[string]interface{}{"required": true, "decision": decision}
+	// The runtime's own words for why, when it gave any. Left absent rather than filled with a
+	// Beacon-authored sentence, so a reader can tell an operator's reason from a default.
+	if reason := getFirstStr(input, "reason"); reason != "" {
+		approval["reason"] = reason
+	}
+	fields["approval"] = approval
+
+	// Which approval policy the session was running under. "yolo" means the operator turned the
+	// prompts off, which is the single most load-bearing fact about any approval row: it is the
+	// difference between a decision someone made and a decision nobody was asked to make.
+	if mode := getFirstStr(input, "approvalMode"); mode != "" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{f.rawKey("approval_mode"): mode})
+	}
+
+	applyToolCallID(fields, input)
+	return f.one(action, "approval", "info", messageSuffix, fields)
 }
 
 // one wraps a single event, prefixing the runtime's display name onto the message.
@@ -222,6 +293,7 @@ func (f piFamily) toolFields(input map[string]interface{}, withResult bool) map[
 	if len(tool) > 0 {
 		fields["tool"] = tool
 	}
+	f.applyMCPAttribution(fields, name)
 	if withResult {
 		if usage := piUsage(firstMap(input, "usage")); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
@@ -240,6 +312,57 @@ func piFileOperation(name string) string {
 	default:
 		return "modify"
 	}
+}
+
+// applyMCPAttribution fills the `mcp` block when a tool name names an MCP-routed tool.
+//
+// Without it an MCP call lands in the log as a tool named `mcp__github_create_issue` and nothing
+// else -- no server, no tool -- so the two questions actually asked about MCP activity ("which
+// server did this agent reach, and what did it call there") have no field to answer them.
+func (f piFamily) applyMCPAttribution(fields map[string]interface{}, toolName string) {
+	server, tool := piMCPServerTool(toolName)
+	if server == "" && tool == "" {
+		return
+	}
+	mcp := map[string]interface{}{}
+	if server != "" {
+		mcp["server"] = server
+	}
+	if tool != "" {
+		mcp["tool"] = tool
+	}
+	fields["mcp"] = mergeNested(fields["mcp"], mcp)
+	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
+		"operation": map[string]interface{}{"name": "execute_tool"},
+	})
+}
+
+// piMCPServerTool splits a Pi-family MCP tool name into its server and tool halves.
+//
+// Two spellings reach here and they disagree about the separator. `mcp__<server>__<tool>` is the
+// widely used double-underscore form, and deriveMCPServerTool already reads it; Oh My Pi mints
+// `mcp__<server>_<tool>` with a single underscore (createMCPToolName in its mcp/tool-bridge.ts),
+// which that function returns nothing for because it needs three `__`-separated parts.
+//
+// The double-underscore form is tried first because it is unambiguous. The single-underscore
+// fallback splits on the first underscore, which is exactly what Oh My Pi's own parseMCPToolName
+// does -- including its ambiguity, since a server named `my_server` yields `mcp__my_server_run` and
+// both parsers read that as server `my`. Reproducing the runtime's reading rather than inventing a
+// better one is deliberate: Beacon's `mcp.server` should say what the runtime itself would say, so
+// an operator comparing the two never finds them disagreeing.
+func piMCPServerTool(toolName string) (string, string) {
+	if server, tool := deriveMCPServerTool(toolName); server != "" || tool != "" {
+		return server, tool
+	}
+	rest, ok := strings.CutPrefix(strings.TrimSpace(toolName), "mcp__")
+	if !ok {
+		return "", ""
+	}
+	server, tool, ok := strings.Cut(rest, "_")
+	if !ok || server == "" || tool == "" {
+		return "", ""
+	}
+	return server, tool
 }
 
 // toolResultEvents maps a completed tool call onto its outcome event.
@@ -300,6 +423,13 @@ func piToolAction(name string) (string, string) {
 	case "write":
 		return "file.created", "file"
 	default:
+		// An MCP-routed tool is real, attributable activity rather than an anonymous custom tool,
+		// and mcp.tool_invoked is the action every other Beacon capture path already uses for it --
+		// so an MCP call through Oh My Pi joins the same rows a detection reads for Cline, Cursor
+		// and Claude Code rather than hiding under tool.completed.
+		if server, tool := piMCPServerTool(name); server != "" || tool != "" {
+			return "mcp.tool_invoked", "mcp"
+		}
 		// grep, glob, and any tool another extension registered. These are real tool activity with
 		// no file or command semantics worth asserting: grep takes a pattern, not a path, and a
 		// custom tool's arguments mean whatever its author decided.
@@ -320,6 +450,8 @@ func piToolMessageSuffix(action string) string {
 		return "file modified"
 	case "tool.failed":
 		return "tool failed"
+	case "mcp.tool_invoked":
+		return "MCP tool invoked"
 	default:
 		return "tool completed"
 	}
