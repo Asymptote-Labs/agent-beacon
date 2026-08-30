@@ -68,7 +68,7 @@ func TestPrimeManagedExtensionMarkerIsStable(t *testing.T) {
 
 func TestInstallPrimeExtensionWritesManagedExtension(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "beacon.ts")
-	if err := installPrimeExtension(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+	if err := primeExtension.install(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -97,7 +97,7 @@ func TestInstallPrimeExtensionWritesManagedExtension(t *testing.T) {
 	}
 	// The runtime name is what the extension reads to pick its subscription list. Rendered as Pi's,
 	// a Prime Agent install would never observe a compaction or a harness refinement.
-	if got := piFamilyRenderedRuntime(t, source); got != "prime" {
+	if got := renderedRuntimeName(t, source); got != "prime" {
 		t.Fatalf("rendered beaconRuntime = %q, want prime", got)
 	}
 }
@@ -106,14 +106,14 @@ func TestInstallPrimeExtensionWritesManagedExtension(t *testing.T) {
 // argv gets right for free.
 func TestRenderPrimeExtensionEncodesWindowsPaths(t *testing.T) {
 	binary := `C:\Program Files\beacon\beacon-hooks.exe`
-	source, err := renderPrimeExtension(binary, `C:\ProgramData\beacon\runtime.jsonl`, "")
+	source, err := primeExtension.render(binary, `C:\ProgramData\beacon\runtime.jsonl`, "")
 	if err != nil {
 		t.Fatalf("renderPrimeExtension returned error: %v", err)
 	}
 	if argv := piRenderedArgv(t, source); argv[0] != binary {
 		t.Fatalf("argv[0] = %q, want the unescaped Windows path back", argv[0])
 	}
-	if !piFamilyExtensionReferencesBinary(source, binary) {
+	if !extensionReferencesBinary(source, binary) {
 		t.Fatal("a correctly installed Windows extension was reported as not referencing its own binary")
 	}
 }
@@ -125,7 +125,7 @@ func TestInstallPrimeExtensionRefusesToOverwriteUnmanagedExtension(t *testing.T)
 	if err := os.WriteFile(path, []byte("export default function () {}\n"), 0644); err != nil {
 		t.Fatalf("seed unmanaged extension: %v", err)
 	}
-	if err := installPrimeExtension(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err == nil {
+	if err := primeExtension.install(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err == nil {
 		t.Fatal("installPrimeExtension overwrote an unmanaged extension")
 	}
 	data, _ := os.ReadFile(path)
@@ -140,23 +140,23 @@ func TestPrimeAndPiExtensionsDoNotClaimEachOther(t *testing.T) {
 	dir := t.TempDir()
 	primePath := filepath.Join(dir, "prime.ts")
 	piPath := filepath.Join(dir, "pi.ts")
-	if err := installPrimeExtension(primePath, "/tmp/beacon-hooks", "", ""); err != nil {
+	if err := primeExtension.install(primePath, "/tmp/beacon-hooks", "", ""); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
-	if err := installPiExtension(piPath, "/tmp/beacon-hooks", "", ""); err != nil {
+	if err := piExtension.install(piPath, "/tmp/beacon-hooks", "", ""); err != nil {
 		t.Fatalf("installPiExtension returned error: %v", err)
 	}
 
-	if isPiInstalledAt(primePath) {
+	if piExtension.installedAt(primePath) {
 		t.Fatal("Pi claimed Prime Agent's extension as its own install")
 	}
-	if isPrimeInstalledAt(piPath) {
+	if primeExtension.installedAt(piPath) {
 		t.Fatal("Prime Agent claimed Pi's extension as its own install")
 	}
-	if removed, _ := removePiExtension(primePath); removed {
+	if removed, _ := piExtension.remove(primePath); removed {
 		t.Fatal("a Pi uninstall removed Prime Agent's extension")
 	}
-	if removed, _ := removePrimeExtension(piPath); removed {
+	if removed, _ := primeExtension.remove(piPath); removed {
 		t.Fatal("a Prime Agent uninstall removed Pi's extension")
 	}
 	for _, path := range []string{primePath, piPath} {
@@ -170,24 +170,24 @@ func TestRemovePrimeExtensionOnlyRemovesManagedExtension(t *testing.T) {
 	dir := t.TempDir()
 	managed := filepath.Join(dir, "managed.ts")
 	unmanaged := filepath.Join(dir, "unmanaged.ts")
-	if err := installPrimeExtension(managed, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err != nil {
+	if err := primeExtension.install(managed, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
 	if err := os.WriteFile(unmanaged, []byte("export default function () {}\n"), 0644); err != nil {
 		t.Fatalf("seed unmanaged extension: %v", err)
 	}
 
-	removed, err := removePrimeExtension(managed)
+	removed, err := primeExtension.remove(managed)
 	if err != nil || !removed {
-		t.Fatalf("removePrimeExtension(managed) = %v, %v; want true, nil", removed, err)
+		t.Fatalf("primeExtension.remove(managed) = %v, %v; want true, nil", removed, err)
 	}
 	if _, err := os.Stat(managed); !os.IsNotExist(err) {
 		t.Fatal("managed extension survived removal")
 	}
 
-	removed, err = removePrimeExtension(unmanaged)
+	removed, err = primeExtension.remove(unmanaged)
 	if err != nil {
-		t.Fatalf("removePrimeExtension(unmanaged) returned error: %v", err)
+		t.Fatalf("primeExtension.remove(unmanaged) returned error: %v", err)
 	}
 	if removed {
 		t.Fatal("removePrimeExtension removed an extension Beacon does not manage")
@@ -195,7 +195,7 @@ func TestRemovePrimeExtensionOnlyRemovesManagedExtension(t *testing.T) {
 }
 
 func TestRemovePrimeExtensionIsQuietWhenNothingIsInstalled(t *testing.T) {
-	removed, err := removePrimeExtension(filepath.Join(t.TempDir(), "absent.ts"))
+	removed, err := primeExtension.remove(filepath.Join(t.TempDir(), "absent.ts"))
 	if err != nil {
 		t.Fatalf("removePrimeExtension on a missing file returned error: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestPrimeStatusRejectsAnExtensionWithNoBinary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "beacon.ts")
 	missing := filepath.Join(dir, "beacon-hooks")
-	if err := installPrimeExtension(path, missing, "/tmp/runtime.jsonl", ""); err != nil {
+	if err := primeExtension.install(path, missing, "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
 	status := primeStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: missing, ConfigPath: path})
@@ -233,7 +233,7 @@ func TestPrimeStatusRejectsAnExtensionPointingElsewhere(t *testing.T) {
 			t.Fatalf("seed binary: %v", err)
 		}
 	}
-	if err := installPrimeExtension(path, stale, "/tmp/runtime.jsonl", ""); err != nil {
+	if err := primeExtension.install(path, stale, "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
 	status := primeStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: current, ConfigPath: path})
@@ -249,7 +249,7 @@ func TestPrimeStatusAcceptsAHealthyInstall(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatalf("seed binary: %v", err)
 	}
-	if err := installPrimeExtension(path, binary, "/tmp/runtime.jsonl", ""); err != nil {
+	if err := primeExtension.install(path, binary, "/tmp/runtime.jsonl", ""); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
 	status := primeStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: binary, ConfigPath: path})
@@ -265,19 +265,19 @@ func TestIsPrimeInstalledAtRequiresTheManagedMarker(t *testing.T) {
 	dir := t.TempDir()
 	managed := filepath.Join(dir, "managed.ts")
 	unmanaged := filepath.Join(dir, "unmanaged.ts")
-	if err := installPrimeExtension(managed, "/tmp/beacon-hooks", "", ""); err != nil {
+	if err := primeExtension.install(managed, "/tmp/beacon-hooks", "", ""); err != nil {
 		t.Fatalf("installPrimeExtension returned error: %v", err)
 	}
 	if err := os.WriteFile(unmanaged, []byte("export default function () {}\n"), 0644); err != nil {
 		t.Fatalf("seed unmanaged extension: %v", err)
 	}
-	if !isPrimeInstalledAt(managed) {
+	if !primeExtension.installedAt(managed) {
 		t.Fatal("isPrimeInstalledAt did not recognize Beacon's own extension")
 	}
-	if isPrimeInstalledAt(unmanaged) {
+	if primeExtension.installedAt(unmanaged) {
 		t.Fatal("isPrimeInstalledAt claimed an unmanaged extension as Beacon's")
 	}
-	if isPrimeInstalledAt(filepath.Join(dir, "absent.ts")) {
+	if primeExtension.installedAt(filepath.Join(dir, "absent.ts")) {
 		t.Fatal("isPrimeInstalledAt claimed a file that does not exist")
 	}
 }

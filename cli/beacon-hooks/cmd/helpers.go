@@ -129,11 +129,16 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	// the handler context's session manager per event. The snake_case spellings are a fallback for
 	// a payload that reached this command by some other route.
 	//
-	// Prime Agent shares the case because it delivers the same envelope through the same extension.
-	// Falling through to the default instead reads only `session_id`, which neither runtime sends:
-	// every event still gets written, and every one of them loses session.id -- the field that
-	// groups a run -- so the log looks healthy while nothing in it can be tied together.
-	case "pi", "prime":
+	// Oh My Pi and Prime Agent share this reader because they share the envelope: both extensions
+	// are built from the same contract and both lift the session identity onto it as `sessionId`.
+	// Some of Oh My Pi's events -- the approval pair -- also carry a `sessionId` of their own, which
+	// lands on the same key and needs no separate spelling.
+	//
+	// Falling through to the default instead would read only `session_id`, which none of the three
+	// sends: every event would still be written, and every one of them would lose session.id -- the
+	// field that groups a run -- so the log would look healthy while nothing in it could be tied
+	// together.
+	case "pi", "omp", "prime":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	default:
 		id, _ := input["session_id"].(string)
@@ -258,10 +263,11 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 			return cwd
 		}
 	}
-	if platform == "pi" {
-		// The extension lifts Pi's cwd onto the envelope, preferring the handler context's own cwd
-		// and falling back to the session manager's. An event that carried its own cwd -- user_bash
-		// does -- wins over both, because the extension spreads event fields last.
+	if platform == "pi" || platform == "omp" {
+		// The extension lifts the runtime's cwd onto the envelope, preferring the handler context's
+		// own cwd and falling back to the session manager's. An event that carried its own cwd --
+		// user_bash does, and so does Oh My Pi's user_python -- wins over both, because the
+		// extension spreads event fields last.
 		if cwd := getFirstStr(input, "cwd", "workingDirectory", "working_directory"); cwd != "" {
 			return cwd
 		}

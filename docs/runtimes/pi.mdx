@@ -7,6 +7,10 @@ description: "Asymptote support details for Pi endpoint telemetry"
 
 Asymptote supports [Pi](https://pi.dev/) through a managed local extension.
 
+<Note>
+Looking for [Oh My Pi](/runtimes/oh-my-pi) (`omp`)? It is a fork of Pi, supported separately and recorded under its own harness name. Unlike Pi, it reports operator approval decisions.
+</Note>
+
 Pi fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
 
 ```bash

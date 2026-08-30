@@ -28,9 +28,9 @@ var primeEventCmd = &cobra.Command{
 
 // runPrimeEvent is named rather than inlined into the command so tests can drive the whole path --
 // stdin envelope to written event -- without building a cobra command.
-var runPrimeEvent = piFamilyEventRunner(primeMapping, primeEndpointEvents)
-
-var primeMapping = piFamilyMapping{platform: "prime", displayName: "Prime Agent"}
+func runPrimeEvent(cmd *cobra.Command, args []string) {
+	runPiFamilyEventFrom(primeRuntime, primeEndpointEvents)
+}
 
 // primeKernelToolName is the name of the tool that is Prime Agent's entire execution surface.
 const primeKernelToolName = "ipython"
@@ -69,19 +69,9 @@ func supportedPrimeEventTypes() []string {
 // subscribes to, and a future one arriving here should be silent rather than becoming an
 // undifferentiated "something happened" row that every query matches and none can explain.
 func primeEndpointEvents(input map[string]interface{}, sessionID string) []normalizedEvent {
-	fields := primeMapping.baseFields(input, sessionID)
-
 	switch getFirstStr(input, "type") {
-	case "session_start":
-		return primeMapping.sessionStartEvents(input, fields)
-
-	case "session_shutdown":
-		return primeMapping.sessionShutdownEvents(input, fields)
-
-	case "input":
-		return primeMapping.inputEvents(input, fields)
-
 	case "tool_call":
+		fields := primeRuntime.baseFields(input, sessionID)
 		// The pre-execution half of a tool call: the runtime has decided to run it and named its
 		// arguments, but nothing has happened yet. Recorded as tool.invoked, and deliberately not
 		// as an approval -- the tool_call handler can block, but that is an extension deciding
@@ -91,25 +81,24 @@ func primeEndpointEvents(input map[string]interface{}, sessionID string) []norma
 		// cell never returns: a kernel that hangs, is interrupted, or takes the process down with
 		// it produces no tool_result at all.
 		mergeMap(fields, primeToolFields(input))
-		return piFamilyOneEvent("tool.invoked", "tool", "info", primeMapping.message("tool invoked"), fields)
+		applyToolCallID(fields, input)
+		return primeRuntime.one("tool.invoked", "tool", "info", "tool invoked", fields)
 
 	case "tool_result":
-		return primeToolResultEvents(input, fields)
-
-	case "user_bash":
-		return primeMapping.userBashEvents(input, fields)
-
-	case "message_end":
-		return primeMapping.messageEndEvents(input, fields)
+		return primeToolResultEvents(input, primeRuntime.baseFields(input, sessionID))
 
 	case "session_compact":
-		return primeSessionCompactEvents(input, fields)
+		return primeSessionCompactEvents(input, primeRuntime.baseFields(input, sessionID))
 
 	case "refine_complete":
-		return primeRefineCompleteEvents(input, fields)
+		return primeRefineCompleteEvents(input, primeRuntime.baseFields(input, sessionID))
 
 	default:
-		return nil
+		// session_start, session_shutdown, input, user_bash and message_end are the envelope Prime
+		// Agent shares with Pi, mapped once in pi_family.go. Delegating rather than restating them
+		// is what keeps the two runtimes from drifting apart on what a session start means; an
+		// unrecognized type falls through that mapper's own default and produces nothing.
+		return primeRuntime.endpointEvents(input, sessionID)
 	}
 }
 
@@ -132,24 +121,18 @@ func primeIsKernelTool(name string) bool {
 // extension registered -- goes through the shared reader, which names what it recognizes and
 // invents nothing for what it does not.
 func primeToolFields(input map[string]interface{}) map[string]interface{} {
-	name := piFamilyToolName(input)
-	args := piFamilyToolInput(input)
-
-	var fields map[string]interface{}
-	if primeIsKernelTool(name) {
-		fields = map[string]interface{}{}
-		if code := getFirstStr(args, "code"); code != "" {
-			fields["tool"] = map[string]interface{}{"command": code}
-			fields["command"] = map[string]interface{}{"command": code}
-			fields["content"] = retainedContentFields(code)
-		}
-	} else {
-		fields = piFamilyBuiltinToolFields(name, args)
+	name := piToolName(input)
+	if !primeIsKernelTool(name) {
+		return primeRuntime.toolFields(input, false)
 	}
 
-	if name != "" {
-		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": name})
+	fields := map[string]interface{}{}
+	if code := getFirstStr(piToolInput(input), "code"); code != "" {
+		fields["tool"] = map[string]interface{}{"command": code}
+		fields["command"] = map[string]interface{}{"command": code}
+		fields["content"] = retainedContentFields(code)
 	}
+	fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": name})
 	return fields
 }
 
@@ -158,21 +141,10 @@ func primeToolAction(name string) (string, string) {
 	if primeIsKernelTool(name) {
 		return "command.executed", "command"
 	}
-	switch strings.ToLower(name) {
-	case "bash":
-		return "command.executed", "command"
-	case "read":
-		return "file.read", "file"
-	case "edit":
-		return "file.modified", "file"
-	case "write":
-		return "file.created", "file"
-	default:
-		// Any tool another extension registered. Real tool activity with no file or command
-		// semantics worth asserting, because a custom tool's arguments mean whatever its author
-		// decided.
-		return "tool.completed", "tool"
-	}
+	// Everything else -- the file and shell tools the package still defines, an MCP-routed tool, or
+	// any tool another extension registered -- reads the same as it does for Pi, and reads through
+	// the same function so the two cannot drift on what a `write` is.
+	return piToolAction(name)
 }
 
 // primeToolResultEvents maps a completed tool call onto the outcome events it justifies.
@@ -187,35 +159,36 @@ func primeToolAction(name string) (string, string) {
 // not un-write the file the third line wrote.
 func primeToolResultEvents(input map[string]interface{}, base map[string]interface{}) []normalizedEvent {
 	details := firstMap(input, "details")
-	name := piFamilyToolName(input)
+	name := piToolName(input)
 
 	fields := cloneFields(base)
 	mergeMap(fields, primeToolFields(input))
 	if primeIsKernelTool(name) {
 		primeApplyCellOutcome(fields, details)
 	}
+	// The join key back to the tool.invoked that named this call. It is applied after the tool and
+	// command blocks are in place, because applyToolCallID only writes onto an event that describes
+	// a tool action -- and it is the only thing linking the two halves of one call, which otherwise
+	// sit in the log as unrelated events sharing a session and a nearby timestamp.
+	applyToolCallID(fields, input)
 
 	var events []normalizedEvent
 	if primeToolFailed(input, details) {
 		fields["error"] = map[string]interface{}{"type": primeErrorType(details)}
-		events = append(events, normalizedEvent{
-			action: "tool.failed", category: "tool", severity: "high",
-			message: primeMapping.toolMessage("tool.failed"), fields: fields,
-		})
+		events = append(events, primeRuntime.one("tool.failed", "tool", "high",
+			piToolMessageSuffix("tool.failed"), fields)...)
 	} else {
 		action, category := primeToolAction(name)
-		action, category = piFamilyDowngradeUnsupportedAction(action, category, fields)
-		events = append(events, normalizedEvent{
-			action: action, category: category, severity: "info",
-			message: primeMapping.toolMessage(action), fields: fields,
-		})
+		action, category = piDowngradeUnsupportedAction(fields, action, category)
+		events = append(events, primeRuntime.one(action, category, "info",
+			piToolMessageSuffix(action), fields)...)
 	}
 
 	// Built from the base rather than from the enriched fields on purpose. A file edit and an agent
 	// message are their own facts, and copying the whole Python cell onto each of them would repeat
 	// the cell body once per edit while telling a reader nothing the cell's own row does not. The
 	// link back to the cell is gen_ai.tool.call.id, which every event from this payload carries.
-	events = append(events, primeKernelDiffEvents(details, base)...)
+	events = append(events, primeKernelDiffEvents(input, details, base)...)
 	events = append(events, primeAgentMessageEvents(details, base)...)
 	return events
 }
@@ -277,13 +250,13 @@ func primeApplyCellOutcome(fields map[string]interface{}, details map[string]int
 	// compare against real process exit codes.
 	promoted := map[string]interface{}{}
 	if status := getFirstStr(details, "status"); status != "" {
-		promoted[primeMapping.rawKey("cell_status")] = status
+		promoted[primeRuntime.rawKey("cell_status")] = status
 	}
 	if restarted, ok := details["kernelRestarted"].(bool); ok && restarted {
 		// The cell ran against a kernel that had just been killed and restarted, so none of the
 		// variables, imports or running tasks the agent set up earlier in the session survived into
 		// it. A reader reconstructing what the agent was working from needs to know that.
-		promoted[primeMapping.rawKey("kernel_restarted")] = true
+		promoted[primeRuntime.rawKey("kernel_restarted")] = true
 	}
 	if len(promoted) > 0 {
 		fields["raw"] = mergeNested(fields["raw"], promoted)
@@ -318,7 +291,7 @@ func primeCellOutput(details map[string]interface{}) string {
 // Both spellings of each key are read because both occur: the skill emits snake_case from Python
 // and the host converts to camelCase on the way to the extension, so a payload that reached Beacon
 // without passing through that conversion still maps.
-func primeKernelDiffEvents(details map[string]interface{}, base map[string]interface{}) []normalizedEvent {
+func primeKernelDiffEvents(input, details map[string]interface{}, base map[string]interface{}) []normalizedEvent {
 	if details == nil {
 		return nil
 	}
@@ -345,10 +318,9 @@ func primeKernelDiffEvents(details map[string]interface{}, base map[string]inter
 		}
 		fields := cloneFields(base)
 		mergeMap(fields, diffFields(path, diffText))
-		events = append(events, normalizedEvent{
-			action: "file.modified", category: "file", severity: "info",
-			message: primeMapping.toolMessage("file.modified"), fields: fields,
-		})
+		applyToolCallID(fields, input)
+		events = append(events, primeRuntime.one("file.modified", "file", "info",
+			piToolMessageSuffix("file.modified"), fields)...)
 	}
 	return events
 }
@@ -383,34 +355,32 @@ func primeAgentMessageEvents(details map[string]interface{}, base map[string]int
 			// details, for the same reason the refinement summary is: it is the content of this
 			// event, and a reader asking what one agent told another should not have to walk into
 			// a raw payload to find it.
-			promoted[primeMapping.rawKey("agent_message_text")] = text
+			promoted[primeRuntime.rawKey("agent_message_text")] = text
 			fields["content"] = retainedContentFields(text)
 		}
 		if id := getFirstStr(sent, "id"); id != "" {
-			promoted[primeMapping.rawKey("agent_message_id")] = id
+			promoted[primeRuntime.rawKey("agent_message_id")] = id
 		}
 		if status := getFirstStr(sent, "deliveryStatus", "delivery_status"); status != "" {
-			promoted[primeMapping.rawKey("agent_message_delivery")] = status
+			promoted[primeRuntime.rawKey("agent_message_delivery")] = status
 		}
 		if role := getFirstStr(sent, "receiverRole", "receiver_role"); role != "" {
 			// parent, sibling or child: which direction in the agent tree this message travelled.
-			promoted[primeMapping.rawKey("agent_message_receiver_role")] = role
+			promoted[primeRuntime.rawKey("agent_message_receiver_role")] = role
 		}
 		if target != nil {
 			if id := getFirstStr(target, "sessionId", "session_id"); id != "" {
-				promoted[primeMapping.rawKey("agent_message_target_session")] = id
+				promoted[primeRuntime.rawKey("agent_message_target_session")] = id
 			}
 			if name := getFirstStr(target, "sessionName", "session_name"); name != "" {
-				promoted[primeMapping.rawKey("agent_message_target_name")] = name
+				promoted[primeRuntime.rawKey("agent_message_target_name")] = name
 			}
 		}
 		if len(promoted) > 0 {
 			fields["raw"] = mergeNested(fields["raw"], promoted)
 		}
-		events = append(events, normalizedEvent{
-			action: "agent.message.sent", category: "session", severity: "info",
-			message: primeMapping.message("agent message sent"), fields: fields,
-		})
+		events = append(events, primeRuntime.one("agent.message.sent", "session", "info",
+			"agent message sent", fields)...)
 	}
 	return events
 }
@@ -424,10 +394,10 @@ func primeSessionCompactEvents(input map[string]interface{}, fields map[string]i
 	if fromExtension, ok := input["fromExtension"].(bool); ok {
 		// A compaction another extension triggered is not one the agent or the operator asked for.
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{
-			primeMapping.rawKey("compaction_from_extension"): fromExtension,
+			primeRuntime.rawKey("compaction_from_extension"): fromExtension,
 		})
 	}
-	return piFamilyOneEvent("session.compacted", "session", "info", primeMapping.message("session compacted"), fields)
+	return primeRuntime.one("session.compacted", "session", "info", "session compacted", fields)
 }
 
 // primeRefineCompleteEvents records the agent editing its own harness.
@@ -447,13 +417,13 @@ func primeRefineCompleteEvents(input map[string]interface{}, fields map[string]i
 
 	promoted := map[string]interface{}{}
 	if id := getFirstStr(input, "id"); id != "" {
-		promoted[primeMapping.rawKey("refinement_id")] = id
+		promoted[primeRuntime.rawKey("refinement_id")] = id
 	}
 	if scope != "" {
-		promoted[primeMapping.rawKey("refinement_scope")] = scope
+		promoted[primeRuntime.rawKey("refinement_scope")] = scope
 	}
 	if hasApplied {
-		promoted[primeMapping.rawKey("refinement_applied_edits")] = applied
+		promoted[primeRuntime.rawKey("refinement_applied_edits")] = applied
 	}
 	if len(promoted) > 0 {
 		fields["raw"] = mergeNested(fields["raw"], promoted)
@@ -463,7 +433,7 @@ func primeRefineCompleteEvents(input map[string]interface{}, fields map[string]i
 		// about itself" is the question this event exists to answer, and an answer three levels
 		// down inside raw is one a dashboard column cannot show.
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{
-			primeMapping.rawKey("refinement_summary"): summary,
+			primeRuntime.rawKey("refinement_summary"): summary,
 		})
 		fields["content"] = retainedContentFields(summary)
 	}
@@ -472,6 +442,5 @@ func primeRefineCompleteEvents(input map[string]interface{}, fields map[string]i
 	if scope == "global" && (!hasApplied || applied > 0) {
 		severity = "medium"
 	}
-	return piFamilyOneEvent("agent.harness.refined", "session", severity,
-		primeMapping.message("harness refined"), fields)
+	return primeRuntime.one("agent.harness.refined", "session", severity, "harness refined", fields)
 }
