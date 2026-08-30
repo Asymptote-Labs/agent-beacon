@@ -43,6 +43,11 @@ const (
 	ScopeSystem    = "system"
 	ScopeUnknown   = "unknown"
 
+	// fxRuntime is the runtime key inventory files fx's configuration under. It is the same
+	// canonical harness name the collector writes on every fx event, so an inventory row and a log
+	// line describe one runtime rather than two.
+	fxRuntime = "vercel_fx"
+
 	StatusOK          = "ok"
 	StatusPartial     = "partial"
 	StatusParseFailed = "parse_failed"
@@ -205,11 +210,13 @@ func candidates(home, wd string) []candidate {
 	items = append(items, opencodeCandidates(home, wd)...)
 	items = append(items, clineCandidates(home, wd)...)
 	items = append(items, piCandidates(home, wd)...)
+	items = append(items, ompCandidates(home, wd)...)
 	items = append(items, primeCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
 	items = append(items, qwenCandidates(home, wd)...)
+	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
 	for _, item := range items {
@@ -322,12 +329,43 @@ func piCandidates(home, wd string) []candidate {
 	return items
 }
 
+// ompCandidates covers both Oh My Pi extension locations.
+//
+// Like piCandidates, the paths come from the installer rather than being rebuilt here: a second
+// copy of the path is how inventory comes to report on a file the installer does not touch. That
+// matters more for Oh My Pi than for Pi, because its user path is not a fixed string -- a profile
+// or a PI_CODING_AGENT_DIR override moves it, and only the installer knows the rule.
+func ompCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OmpExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "omp",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "omp",
+			path:    filepath.Join(wd, ".omp", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
 // primeCandidates covers both Prime Agent extension locations.
 //
 // Both keep the full `.prime/agent` segment, which is where this differs from piCandidates: Prime
 // Agent's loader joins the same config directory name to the home directory and to the working
 // directory, while Pi drops the `agent` segment for its project path. Copying Pi's shape here would
 // have inventory look for the project extension in a directory the runtime never reads.
+//
+// Spelled out rather than read from the installer the way ompCandidates does, because Prime Agent's
+// path is a fixed string: its own PRIME_AGENT_CODING_AGENT_DIR override is deliberately not honored
+// (see hooks.primeExtensionDir), so there is no rule here that only the installer knows.
 func primeCandidates(home, wd string) []candidate {
 	items := []candidate{}
 	if home != "" {
@@ -368,6 +406,28 @@ func qwenCandidates(home, wd string) []candidate {
 	return []candidate{
 		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// fx keeps no Beacon-written file, so every entry here is fx's own configuration rather than
+// something Beacon installed -- which is why they are all KindNativeConfig and why beacon_managed
+// stays false for them. Reporting them is still the point of an inventory: what runtimes are on
+// this machine and what they are wired to.
+//
+// The MCP files are the reason this is worth having at all. fx's profile server list lives in
+// ~/.fx/mcp.json under an `mcp` key (with `mcpServers` accepted as an alias), and a workspace can
+// add a Claude-compatible .mcp.json with `mcpServers` -- both keys the scanner already reads, so
+// fx's MCP servers land in the same inventory as every other runtime's with no parser of their own.
+//
+// The workspace .mcp.json is attributed to fx and to nothing else here, even though other runtimes
+// read the same file: attributing one file to several runtimes would report one server as several,
+// and fx is the runtime this pass is adding. A machine running two agents over one .mcp.json still
+// gets its servers inventoried once.
+func fxCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "mcp.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(wd, ".mcp.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
 	}
 }
 
@@ -694,6 +754,10 @@ func beaconManaged(item candidate, data []byte) bool {
 	// installer does not write -- the reason hooks.PiManagedExtensionMarker is exported at all.
 	case "pi_cli":
 		return strings.Contains(text, hooks.PiManagedExtensionMarker)
+	// Distinct from Pi's marker, and matched separately, so a file found at either runtime's path
+	// is attributed to the runtime that actually loads it rather than to whichever case ran first.
+	case "omp":
+		return strings.Contains(text, hooks.OmpManagedExtensionMarker)
 	// Prime Agent's own marker, not Pi's, even though both files are rendered from one source. The
 	// two runtimes have separate directories and separate installs, so a file carrying the other's
 	// marker is not this runtime's install and reporting it as one would attribute telemetry to the

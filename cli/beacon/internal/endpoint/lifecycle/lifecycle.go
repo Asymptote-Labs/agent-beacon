@@ -827,6 +827,8 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 			return paths, fmt.Errorf("Cline telemetry is installed with `beacon endpoint hooks install --harness cline`, not endpoint install")
 		case "pi", "pi_cli":
 			return paths, fmt.Errorf("Pi telemetry is installed with `beacon endpoint hooks install --harness pi`, not endpoint install")
+		case "omp", "oh_my_pi", "oh-my-pi":
+			return paths, fmt.Errorf("Oh My Pi telemetry is installed with `beacon endpoint hooks install --harness omp`, not endpoint install")
 		case "prime", "prime_agent":
 			return paths, fmt.Errorf("Prime Agent telemetry is installed with `beacon endpoint hooks install --harness prime`, not endpoint install")
 		// Qwen Code has no OpenTelemetry export to point at the local collector, so `endpoint

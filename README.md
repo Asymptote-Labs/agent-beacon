@@ -87,14 +87,41 @@ CI, and cloud surfaces.
 | [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
 | [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
 | [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
+| [fx (Vercel Labs)](https://github.com/vercel-labs/fx) | Session-log collection through `beacon endpoint fx sync` | Session start, prompts, tool calls with arguments, commands with exit codes and output, file reads/creates/edits with diffs, MCP tool calls, agent messages, history compaction, and per-turn token usage plus reported cost |
 | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
+| [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle/results, operator approval decisions with the session's approval mode, commands including operator `!` and `$` commands, file reads/writes/edits with diffs, MCP tool activity, agent reasoning, and token usage/cost |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output/reasoning, model usage/cost, tool lifecycle/results, commands, file/web/MCP activity, approvals, and session errors |
 | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle/results, commands including operator `!` commands, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
 | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Managed extension hooks | Session lifecycle, prompts, Python kernel cells recorded as commands with output/duration, streamed file edits, agent-to-agent messages, context compaction, harness self-modification, agent reasoning, and token usage/cost |
 | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session-end, command, and file telemetry merged into Qwen's own `settings.json` |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
+
+fx is the one supported runtime with no third-party observation surface: its lifecycle hooks are
+compiled into the binary, it ships no OpenTelemetry export, and MCP describes the tools it calls
+rather than what it did. What it does have is a durable, append-only record of every session under
+`~/.fx/sessions/`, so Beacon reads that:
+
+```bash
+beacon endpoint fx status          # fx sessions on this machine and how much has been collected
+beacon endpoint fx sync --print    # show what would be collected, writing nothing
+beacon endpoint fx sync            # read new records into the runtime log
+beacon endpoint fx sync --watch    # keep reading on an interval
+```
+
+Every fx event carries `harness.collection_method=poll`, and that marker is the honest limit of this
+integration. Beacon reads what a turn did after fx committed it, so nothing here can hold, deny, or
+delay a tool call the way a hook can, and activity appears in the log a turn late rather than
+live. What the records do carry is fx's own account of what happened -- the tool, the call id, the
+file, the exit code, the diff -- so the events are `event.fidelity=observed` rather than inferred.
+
+Two things fx does not record, and Beacon does not invent: there is no per-call approve/deny
+decision (fx keeps the feedback a person typed at a permission prompt, which Beacon records as
+evidence rather than as an approval event), and there is no session-end record, since fx sessions
+are resumable. One gap is worth knowing about: fx compacts a long session's log by folding older
+turns into an opaque blob, so a turn committed after the last sweep and before a compaction is not
+recoverable. Sweeping on a schedule keeps that window small.
 
 ##### Knowledge Worker Agent Harnesses
 

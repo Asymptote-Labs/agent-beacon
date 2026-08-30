@@ -1,0 +1,28 @@
+{
+ "schema_version": 3,
+ "storage_format": "event_log_v1",
+ "id": "1788051418424-1788051418424884928-a177316124162631",
+ "authority_id": "08f69f0df4ac45e82079810bd03449a4",
+ "log_generation": "3b4c72027563ff60190f0299461ee01c",
+ "created_at_ms": 1788051418424,
+ "updated_at_ms": 1788051418741,
+ "origin_workspace_root": "/home/dev/api",
+ "workspace_root": "/home/dev/api",
+ "conversation_language": "und-Latn",
+ "history_len": 1,
+ "total_input_tokens": 1234,
+ "total_output_tokens": 56,
+ "last_event_seq": 26,
+ "event_log_bytes": 34379,
+ "event_log_stat_fingerprint": "23fcca61e5a55cc64ad35e6c0760e9f5638555dc5a806970998f44d7ed794e61",
+ "generation_base_seq": 1,
+ "generation_base_bytes": 1054,
+ "checkpoint_seq": 2,
+ "checkpoint_sha256": "9575eb1719ae531296bc95b1b16e8e40ec684e31ad4478a4327e1ee7602e0250",
+ "preferences": {
+  "model": "moonshotai/kimi-k3",
+  "effort": "auto",
+  "fast_mode": false,
+  "provider": "gateway"
+ }
+}

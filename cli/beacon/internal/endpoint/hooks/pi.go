@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	piextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/pi"
 )
 
 // Pi (pi.dev) has no hooks configuration file and no OpenTelemetry support, so neither of Beacon's
 // two established integration shapes applies to it. Its only observation surface is the TypeScript
-// extension API, which makes the integration plugin-shaped. The mechanics of writing, checking and
-// removing that file are shared with Prime Agent and live in piextension.go; what is Pi's alone is
-// below.
+// extension API, which makes the integration plugin-shaped: Beacon writes one extension file that
+// forwards runtime events to the `beacon-hooks` binary. That is the same shape as the opencode
+// plugin, and the handling of that file lives in managedExtension, shared with Oh My Pi and with
+// Prime Agent, which renders from this same source.
 const (
+	piExtensionFileName = "beacon.ts"
+
 	// PiManagedExtensionMarker identifies an extension file as one Beacon wrote.
 	//
 	// Exported because three packages need the same answer and must not disagree: `hooks` writes
@@ -27,16 +32,6 @@ const (
 	PiManagedExtensionMarker = "beacon-managed-pi-extension:v1"
 )
 
-// piRuntime is the Pi half of the shared extension install. Its platform value is both the
-// `--platform` flag the hook binary is invoked with and the runtime name the extension reads to
-// pick its subscription list.
-var piFamilyPi = piFamilyRuntime{
-	platform:    "pi",
-	hookCommand: "pi-event",
-	marker:      PiManagedExtensionMarker,
-	displayName: "Pi",
-}
-
 type PiOptions struct {
 	Level    Level
 	LogPath  string
@@ -50,13 +45,17 @@ type PiStatus struct {
 	Message       string `json:"message,omitempty"`
 }
 
-var piRuntime = hookRuntime{
+var piExtension = managedExtension{
+	platform:    "pi",
 	displayName: "Pi",
-	configPath:  PiExtensionPath,
-	install:     installPiExtension,
-	uninstall:   removePiExtension,
-	isInstalled: isPiInstalledAt,
+	marker:      PiManagedExtensionMarker,
+	template:    piextension.Template,
+	// Shared with Prime Agent, which renders the same source with its own runtime name.
+	sharedTemplate: true,
+	configPath:     PiExtensionPath,
 }
+
+var piRuntime = piExtension.runtime()
 
 func InstallPi(opts PiOptions) (PiStatus, error) {
 	status, err := installRuntimeHooks(piRuntime, RuntimeOptions(opts))
@@ -84,36 +83,24 @@ func IsPiInstalled(opts PiOptions) bool {
 
 // piStatusFromRuntime reports installed only when the extension can actually reach the hook binary.
 func piStatusFromRuntime(status runtimeStatus) PiStatus {
-	out := PiStatus{
+	status = piExtension.reachableStatus(status)
+	return PiStatus{
 		Installed:     status.Installed,
 		BinaryPath:    status.BinaryPath,
 		ExtensionPath: status.ConfigPath,
 		Message:       status.Message,
 	}
-	if !out.Installed || out.BinaryPath == "" {
-		return out
-	}
-	if healthy, message := piFamilyExtensionHealth(piFamilyPi, out.ExtensionPath, out.BinaryPath); !healthy {
-		out.Installed = false
-		out.Message = message
-	}
-	return out
 }
 
-func installPiExtension(path, binaryPath, logPath, configPath string) error {
-	return installPiFamilyExtension(piFamilyExtensionTemplate, piFamilyPi, path, binaryPath, logPath, configPath)
+// The two copies of the extension source a test compares. The embedded one is what ships in the
+// binary; the root one is what a contributor edits and `bun run sync` copies over. Prime Agent
+// renders from this same file, so one drift check covers both distributions.
+func piEmbeddedExtensionSourcePath() string {
+	return filepath.Clean(filepath.Join("assets", "pi", "beacon.ts"))
 }
 
-func removePiExtension(path string) (bool, error) {
-	return removePiFamilyExtension(PiManagedExtensionMarker, path)
-}
-
-func isPiInstalledAt(path string) bool {
-	return isPiFamilyExtensionInstalledAt(PiManagedExtensionMarker, path)
-}
-
-func renderPiExtension(binaryPath, logPath, configPath string) (string, error) {
-	return renderPiFamilyExtension(piFamilyExtensionTemplate, piFamilyPi, binaryPath, logPath, configPath)
+func piRootExtensionSourcePath() string {
+	return filepath.Clean(filepath.Join("..", "..", "..", "..", "..", "plugins", "pi-beacon", "src", "beacon.ts"))
 }
 
 // PiExtensionPath returns the extension file Beacon manages for a given install level.
@@ -127,7 +114,7 @@ func PiExtensionPath(level Level) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, piFamilyExtensionFileName), nil
+	return filepath.Join(dir, piExtensionFileName), nil
 }
 
 func piExtensionDir(level Level) (string, error) {
