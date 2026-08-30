@@ -86,6 +86,7 @@ event model extends to CI and cloud-agent paths under customer control.
 | [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output and reasoning, model usage/cost, tool lifecycle and results, commands, file/web/MCP activity, approvals, and session errors |
 | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, commands including operator `!`, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
+| [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, commands including operator `!`, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
 | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session end, command, and file |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity, plus extra lifecycle detail through optional hooks |
 
@@ -93,17 +94,8 @@ event model extends to CI and cloud-agent paths under customer control.
 
 | Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
-| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
-
-The optional Chrome MV3 extension in [`browser-extension/`](browser-extension/)
-posts OTLP GenAI logs to the collector already listening on
-`http://127.0.0.1:4318/v1/logs`, so browser chat lands in `runtime.jsonl` beside
-agent activity. It reads only those two chat streams and never writes files. Treat
-it as experimental: it parses private, undocumented APIs, so a change on either site
-can interrupt capture until the adapter is updated. **Retention defaults to `full`**,
-meaning complete prompt and response text is retained locally unless you change it in
-the extension's options page.
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
 
 #### CI Agents
 
@@ -215,7 +207,7 @@ fixtures, and supported event fields.
 - [Endpoint agent](https://docs.asymptotelabs.ai/cli/endpoint) — install, status, repair, and uninstall.
 - [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard) — inspect local runtime logs.
 - [Endpoint event schema](https://docs.asymptotelabs.ai/cli/event-schema) — normalized JSONL event model.
-- [Supported surfaces](https://docs.asymptotelabs.ai/cli/supported-surfaces) — supported runtimes, destinations, and boundaries.
+- [Supported surfaces](https://docs.asymptotelabs.ai/runtimes) — supported runtimes, destinations, and boundaries.
 - [Command reference](https://docs.asymptotelabs.ai/cli/command-reference) — detailed CLI command docs.
 
 ## Quickstart
