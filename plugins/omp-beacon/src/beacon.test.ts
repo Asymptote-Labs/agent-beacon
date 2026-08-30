@@ -300,6 +300,121 @@ describe("beacon oh my pi extension", () => {
     }
   })
 
+  // Oh My Pi's approval events name the tool and the call but carry none of its arguments. Every
+  // approval detection Beacon ships matches on the command or the file path rather than on a tool
+  // name, so an approval that said only "the operator denied bash" would be telemetry no rule could
+  // act on. The extension carries the arguments across from the tool_call that proposed the call.
+  test("carries the decided tool's arguments onto an approval", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire(
+      { type: "tool_call", toolName: "bash", toolCallId: "call-1", input: { command: "rm -rf /var/data" } },
+      context(),
+    )
+    await omp.fire(
+      { type: "tool_approval_requested", toolName: "bash", toolCallId: "call-1", approvalMode: "always-ask" },
+      context(),
+    )
+    await omp.fire(
+      { type: "tool_approval_resolved", toolName: "bash", toolCallId: "call-1", approved: false },
+      context(),
+    )
+
+    expect(sent[1].input).toEqual({ command: "rm -rf /var/data" })
+    expect(sent[2].input).toEqual({ command: "rm -rf /var/data" })
+  })
+
+  // The join is the runtime's own call id, never a timestamp or a guess. An approval enriched with
+  // some other call's arguments would be worse than one with none, because it would read as
+  // evidence of a decision that was never made about it.
+  test("never attaches another call's arguments to an approval", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire(
+      { type: "tool_call", toolName: "bash", toolCallId: "call-1", input: { command: "ls" } },
+      context(),
+    )
+    await omp.fire(
+      { type: "tool_approval_requested", toolName: "write", toolCallId: "call-2" },
+      context(),
+    )
+
+    expect(sent[1].input).toBeUndefined()
+  })
+
+  test("an approval with no call id is not enriched", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire(
+      { type: "tool_call", toolName: "bash", toolCallId: "call-1", input: { command: "ls" } },
+      context(),
+    )
+    await omp.fire({ type: "tool_approval_requested", toolName: "bash" }, context())
+
+    expect(sent[1].input).toBeUndefined()
+  })
+
+  // A finished call is forgotten, so a later approval reusing an id cannot inherit stale arguments.
+  test("forgets a tool call once it has finished", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire(
+      { type: "tool_call", toolName: "bash", toolCallId: "call-1", input: { command: "ls" } },
+      context(),
+    )
+    await omp.fire({ type: "tool_result", toolName: "bash", toolCallId: "call-1", isError: false }, context())
+    await omp.fire({ type: "tool_approval_requested", toolName: "bash", toolCallId: "call-1" }, context())
+
+    expect(sent[2].input).toBeUndefined()
+  })
+
+  // `/new`, a resume, a fork and a shutdown all end the run a pending call belonged to.
+  test("forgets pending calls when the session ends or restarts", async () => {
+    for (const boundary of ["session_start", "session_shutdown"]) {
+      const sent = captureSends()
+      const omp = fakeOmp()
+      createBeaconExtension().register(omp.api)
+
+      await omp.fire(
+        { type: "tool_call", toolName: "bash", toolCallId: "call-1", input: { command: "ls" } },
+        context(),
+      )
+      await omp.fire({ type: boundary }, context())
+      await omp.fire({ type: "tool_approval_requested", toolName: "bash", toolCallId: "call-1" }, context())
+
+      expect(sent[2].input).toBeUndefined()
+    }
+  })
+
+  // The cache is bounded, so a run whose tool calls never finish -- an aborted session, a tool torn
+  // down mid-flight -- cannot grow it for the life of the process.
+  test("bounds how many in-flight tool calls it remembers", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    for (let i = 0; i < 200; i++) {
+      await omp.fire(
+        { type: "tool_call", toolName: "bash", toolCallId: `call-${i}`, input: { command: `echo ${i}` } },
+        context(),
+      )
+    }
+    // The oldest is evicted; the newest is still there.
+    await omp.fire({ type: "tool_approval_requested", toolName: "bash", toolCallId: "call-0" }, context())
+    await omp.fire({ type: "tool_approval_requested", toolName: "bash", toolCallId: "call-199" }, context())
+
+    expect(sent[200].input).toBeUndefined()
+    expect(sent[201].input).toEqual({ command: "echo 199" })
+  })
+
   // Event fields win over the lifted identity fields on a key collision, so a value Oh My Pi
   // reported is never overwritten by one Beacon derived. user_bash and user_python carry their own
   // cwd; the approval events carry their own sessionId.

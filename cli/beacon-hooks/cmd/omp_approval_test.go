@@ -130,6 +130,67 @@ func TestOmpApprovalJoinsToTheToolCallItDecided(t *testing.T) {
 	}
 }
 
+// The extension carries the decided call's arguments across from its tool_call, and the mapper has
+// to turn them into the fields a detection reads. Every approval rule Beacon ships matches on
+// `command.command` or `file.path`, never on a tool name, so an approval that resolved to neither
+// would be telemetry no rule could act on.
+func TestOmpApprovalResolvesTheDecidedCommand(t *testing.T) {
+	logPath := ompTestLog(t)
+
+	runHookWithInput(t, runOmpEvent, map[string]interface{}{
+		"type": "tool_approval_resolved", "sessionId": "sess-1",
+		"toolName": "bash", "toolCallId": "call-1", "approved": false,
+		"input": map[string]interface{}{"command": "rm -rf /var/data"},
+	})
+
+	event := ompEventWithAction(t, logPath, "approval.denied")
+	if command := nested(t, event, "command"); command["command"] != "rm -rf /var/data" {
+		t.Fatalf("command.command = %v, want the command the operator denied -- every approval "+
+			"rule matches on this field", command["command"])
+	}
+	if tool := nested(t, event, "tool"); tool["name"] != "bash" || tool["command"] != "rm -rf /var/data" {
+		t.Fatalf("tool = %v, want the bash tool and its command", tool)
+	}
+}
+
+func TestOmpApprovalResolvesTheDecidedFile(t *testing.T) {
+	logPath := ompTestLog(t)
+
+	runHookWithInput(t, runOmpEvent, map[string]interface{}{
+		"type": "tool_approval_requested", "sessionId": "sess-1",
+		"toolName": "write", "toolCallId": "call-1", "approvalMode": "always-ask",
+		"input": map[string]interface{}{"path": "/repo/.github/workflows/release.yml"},
+	})
+
+	event := ompEventWithAction(t, logPath, "approval.requested")
+	file := nested(t, event, "file")
+	if file["path"] != "/repo/.github/workflows/release.yml" || file["operation"] != "create" {
+		t.Fatalf("file = %v, want the path the operator was asked about", file)
+	}
+}
+
+// An approval for a call the extension never saw proposed still records the decision. Losing the
+// arguments is bad; losing the record that an operator was asked at all is worse.
+func TestOmpApprovalWithoutArgumentsStillRecordsTheDecision(t *testing.T) {
+	logPath := ompTestLog(t)
+
+	runHookWithInput(t, runOmpEvent, map[string]interface{}{
+		"type": "tool_approval_resolved", "sessionId": "sess-1",
+		"toolName": "bash", "toolCallId": "call-1", "approved": true,
+	})
+
+	event := ompEventWithAction(t, logPath, "approval.allowed")
+	if approval := nested(t, event, "approval"); approval["decision"] != "approve" {
+		t.Fatalf("approval.decision = %v, want approve", approval["decision"])
+	}
+	if tool := nested(t, event, "tool"); tool["name"] != "bash" {
+		t.Fatalf("tool.name = %v, want bash", tool["name"])
+	}
+	if _, ok := event["command"]; ok {
+		t.Fatalf("an approval with no arguments invented a command block: %v", event["command"])
+	}
+}
+
 // Pi must not gain approvals by sharing the mapper. It never sends these events, so the cases are
 // unreachable for it -- a stronger guarantee than a platform check, which could be forgotten.
 func TestOmpOnlyEventTypesAreNotInPis(t *testing.T) {
