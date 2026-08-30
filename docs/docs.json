@@ -531,11 +531,65 @@
       {
         "tab": "Asymptote Blog",
         "icon": "newspaper",
-        "pages": [
-          "blog/index",
-          "blog/introducing-beacon-endpoint-telemetry",
-          "blog/enterprises-are-counting-tokens-because",
-          "blog/agent-visibility-beyond-the-endpoint"
+        "groups": [
+          {
+            "group": "Blog",
+            "icon": "newspaper",
+            "pages": [
+              "blog/index"
+            ]
+          },
+          {
+            "group": "Company and Perspectives",
+            "icon": "building",
+            "pages": [
+              "blog/asymptote-achieves-soc-2-type-ii-compliance",
+              "blog/agent-visibility-beyond-the-endpoint",
+              "blog/enterprises-are-counting-tokens-because",
+              "blog/introducing-beacon-endpoint-telemetry"
+            ]
+          },
+          {
+            "group": "Beacon Platform Updates",
+            "icon": "satellite-dish",
+            "pages": [
+              "blog/beacon-codex-turn-level-usage",
+              "blog/beacon-browser-chat-telemetry",
+              "blog/beacon-cline-runtime-support",
+              "blog/beacon-opencode-agent-traces"
+            ]
+          },
+          {
+            "group": "Harness Coverage",
+            "icon": "signal-stream",
+            "pages": [
+              "blog/beacon-harness-browser-claude-ai",
+              "blog/beacon-harness-browser-chatgpt",
+              "blog/beacon-harness-qwen-code",
+              "blog/beacon-harness-pi",
+              "blog/beacon-harness-oh-my-pi",
+              "blog/beacon-harness-cline",
+              "blog/beacon-harness-devin-cloud-agents",
+              "blog/beacon-harness-cursor-cloud-agents",
+              "blog/beacon-harness-claude-code-cloud-agents",
+              "blog/beacon-harness-ci-agent-telemetry",
+              "blog/beacon-harness-hermes-agent",
+              "blog/beacon-harness-devin-desktop",
+              "blog/beacon-harness-vscode-copilot",
+              "blog/beacon-harness-antigravity-cli",
+              "blog/beacon-harness-github-copilot-cli",
+              "blog/beacon-harness-grok-build",
+              "blog/beacon-harness-openclaw-gateway",
+              "blog/beacon-harness-devin-cli",
+              "blog/beacon-harness-gemini-cli",
+              "blog/beacon-harness-opencode",
+              "blog/beacon-harness-factory-droid",
+              "blog/beacon-harness-cursor",
+              "blog/beacon-harness-codex-cli",
+              "blog/beacon-harness-claude-cowork",
+              "blog/beacon-harness-claude-code"
+            ]
+          }
         ]
       },
       {
@@ -1450,7 +1504,7 @@
         ]
       }
     ],
-    "content": "\u00a9 2025 Asymptote Labs Inc. All rights reserved."
+    "content": "© 2025 Asymptote Labs Inc. All rights reserved."
   },
   "appearance": {
     "hidePoweredBy": true

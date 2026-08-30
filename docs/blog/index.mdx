@@ -3,24 +3,19 @@ title: "Asymptote Blog"
 description: "Writing from the Asymptote team on building secure, observable AI systems."
 ---
 
-Browse the latest Asymptote writing below.
+Every Asymptote post, newest first. Articles open on
+[asymptotelabs.ai/blog](https://asymptotelabs.ai/blog) or Substack.
+
+## Company and perspectives
 
 <CardGroup cols={2}>
   <Card
-    title="Introducing Beacon Endpoint Telemetry"
-    icon="satellite-dish"
-    img="https://substackcdn.com/image/fetch/$s_!j9gN!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F9ca5d88a-1ba5-4bc5-801d-c59353bbffae_1574x1370.png"
-    href="https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry"
+    title="Asymptote Achieves SOC 2 Type II Compliance"
+    icon="shield-check"
+    img="https://asymptotelabs.ai/soc2_compliance_badge.png"
+    href="https://asymptotelabs.ai/blog/asymptote-achieves-soc-2-type-ii-compliance"
   >
-    An introduction to Beacon's endpoint telemetry model and why local-first agent visibility matters.
-  </Card>
-  <Card
-    title="Enterprises Are Counting Tokens Because..."
-    icon="coins"
-    img="https://substackcdn.com/image/fetch/$s_!vRqJ!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F1a5380fc-c481-43a5-9439-ca479f23b9a6_1440x796.png"
-    href="https://justindsouza.substack.com/p/enterprises-are-counting-tokens-because"
-  >
-    A short take on why token accounting has become an enterprise operating concern.
+    Our SOC 2 Type II attestation validates that Asymptote security controls are operating effectively over time.
   </Card>
   <Card
     title="Agent Visibility Beyond the Endpoint"
@@ -28,6 +23,238 @@ Browse the latest Asymptote writing below.
     img="https://substackcdn.com/image/fetch/$s_!4cvt!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff61aff23-e952-4245-ad16-d6f68be74975_1664x1108.png"
     href="https://justindsouza.substack.com/p/agent-visibility-beyond-the-endpoint"
   >
-    A look at broader agent visibility beyond single-endpoint instrumentation alone.
+    Why enterprises need an open system of record for AI agent activity across endpoints, CI, sandboxes, and hosted runtimes.
+  </Card>
+  <Card
+    title="Enterprises Are Counting Tokens Because They Can't Measure Value"
+    icon="coins"
+    img="https://substackcdn.com/image/fetch/$s_!vRqJ!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F1a5380fc-c481-43a5-9439-ca479f23b9a6_1440x796.png"
+    href="https://justindsouza.substack.com/p/enterprises-are-counting-tokens-because"
+  >
+    Why token accounting has become a proxy for deeper questions about AI adoption, visibility, controls, and enterprise risk.
+  </Card>
+  <Card
+    title="Introducing Beacon: Endpoint Telemetry for AI Agents"
+    icon="satellite-dish"
+    img="https://substackcdn.com/image/fetch/$s_!j9gN!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F9ca5d88a-1ba5-4bc5-801d-c59353bbffae_1574x1370.png"
+    href="https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry"
+  >
+    A closer look at Beacon, open-source endpoint telemetry for understanding how AI agents and local developer workflows behave on machines.
+  </Card>
+</CardGroup>
+
+## Beacon platform updates
+
+<CardGroup cols={2}>
+  <Card
+    title="Codex Turn-Level Usage in Beacon"
+    icon="chart-line"
+    href="https://asymptotelabs.ai/blog/beacon-codex-turn-level-usage"
+  >
+    Beacon reads Codex usage at the completed-turn level, tying token counts back to sessions, models, repositories, and local users. (August 28, 2026)
+  </Card>
+  <Card
+    title="Browser Chat Telemetry for Claude.ai and ChatGPT"
+    icon="window-maximize"
+    href="https://asymptotelabs.ai/blog/beacon-browser-chat-telemetry"
+  >
+    Beacon treats browser AI chat as a supported surface, bringing Claude.ai and ChatGPT conversations into the same local pipeline as endpoint agent activity. (August 24, 2026)
+  </Card>
+  <Card
+    title="Cline Runtime Support in Beacon"
+    icon="puzzle-piece"
+    href="https://asymptotelabs.ai/blog/beacon-cline-runtime-support"
+  >
+    One managed Cline plugin covers the VS Code extension, JetBrains plugin, and CLI hosts. (August 22, 2026)
+  </Card>
+  <Card
+    title="OpenCode Agent Traces in Beacon"
+    icon="diagram-project"
+    href="https://asymptotelabs.ai/blog/beacon-opencode-agent-traces"
+  >
+    Full OpenCode agent traces through a managed plugin: prompts, tools, approvals, files, and session lifecycle, correlated. (July 20, 2026)
+  </Card>
+</CardGroup>
+
+## Harness coverage
+
+Each release note covers what Beacon collects from one agent runtime, how it is
+collected, and where the matching documentation lives.
+
+<CardGroup cols={2}>
+  <Card
+    title="Claude.ai Browser Chat Telemetry in Beacon"
+    icon="globe"
+    href="https://asymptotelabs.ai/blog/beacon-harness-browser-claude-ai"
+  >
+    Beacon brings Claude.ai browser conversations into the same runtime log as endpoint agent activity. (August 24, 2026)
+  </Card>
+  <Card
+    title="ChatGPT Browser Chat Telemetry in Beacon"
+    icon="globe"
+    href="https://asymptotelabs.ai/blog/beacon-harness-browser-chatgpt"
+  >
+    Beacon captures supported ChatGPT browser conversations as endpoint AI activity under a distinct web harness. (August 24, 2026)
+  </Card>
+  <Card
+    title="Qwen Code Telemetry in Beacon"
+    icon="language"
+    href="https://asymptotelabs.ai/blog/beacon-harness-qwen-code"
+  >
+    Beacon supports Qwen Code through native hook payloads sent to beacon-hooks. (August 23, 2026)
+  </Card>
+  <Card
+    title="Pi Telemetry Coverage in Beacon"
+    icon="circle-nodes"
+    href="https://asymptotelabs.ai/blog/beacon-harness-pi"
+  >
+    Beacon documents Pi endpoint telemetry as a managed extension path with prompts, tools, commands, file changes, reasoning, and usage. (August 23, 2026)
+  </Card>
+  <Card
+    title="Oh My Pi Telemetry in Beacon"
+    icon="circle-nodes"
+    href="https://asymptotelabs.ai/blog/beacon-harness-oh-my-pi"
+  >
+    Beacon documents Oh My Pi endpoint telemetry through managed extension hooks. (August 23, 2026)
+  </Card>
+  <Card
+    title="Cline Runtime Telemetry in Beacon"
+    icon="puzzle-piece"
+    href="https://asymptotelabs.ai/blog/beacon-harness-cline"
+  >
+    Beacon installs one managed Cline plugin that covers the VS Code extension, JetBrains plugin, and CLI hosts. (August 22, 2026)
+  </Card>
+  <Card
+    title="Devin Cloud Agent Telemetry in Beacon"
+    icon="cloud"
+    href="https://asymptotelabs.ai/blog/beacon-harness-devin-cloud-agents"
+  >
+    Beacon captures autonomous Devin Cloud agent telemetry org-wide using a Devin organization service key. (June 15, 2026)
+  </Card>
+  <Card
+    title="Cursor Cloud Agent Telemetry in Beacon"
+    icon="cloud"
+    href="https://asymptotelabs.ai/blog/beacon-harness-cursor-cloud-agents"
+  >
+    Beacon supports Cursor cloud-agent telemetry through committed project hooks and sandbox-local Beacon binaries. (June 10, 2026)
+  </Card>
+  <Card
+    title="Claude Code Cloud Agent Telemetry in Beacon"
+    icon="cloud"
+    href="https://asymptotelabs.ai/blog/beacon-harness-claude-code-cloud-agents"
+  >
+    Beacon captures Claude Code cloud sessions from inside the cloud sandbox and uploads per-session runtime logs to customer-managed storage. (June 10, 2026)
+  </Card>
+  <Card
+    title="CI Agent Telemetry in Beacon"
+    icon="gears"
+    href="https://asymptotelabs.ai/blog/beacon-harness-ci-agent-telemetry"
+  >
+    Beacon captures supported agent activity inside CI jobs without installing a persistent endpoint service. (June 7, 2026)
+  </Card>
+  <Card
+    title="Hermes Agent Telemetry in Beacon"
+    icon="feather"
+    href="https://asymptotelabs.ai/blog/beacon-harness-hermes-agent"
+  >
+    Beacon supports Hermes Agent as a first-class hook harness with managed shell hooks. (June 5, 2026)
+  </Card>
+  <Card
+    title="Devin Desktop Telemetry in Beacon"
+    icon="desktop"
+    href="https://asymptotelabs.ai/blog/beacon-harness-devin-desktop"
+  >
+    Beacon captures Devin Desktop activity through Cascade/Windsurf-compatible hook configuration. (June 4, 2026)
+  </Card>
+  <Card
+    title="VS Code Copilot Chat Telemetry in Beacon"
+    icon="code"
+    href="https://asymptotelabs.ai/blog/beacon-harness-vscode-copilot"
+  >
+    Beacon supports VS Code Copilot Chat through local OpenTelemetry export and optional preview hooks. (May 27, 2026)
+  </Card>
+  <Card
+    title="Antigravity CLI Telemetry in Beacon"
+    icon="rocket"
+    href="https://asymptotelabs.ai/blog/beacon-harness-antigravity-cli"
+  >
+    Beacon supports Antigravity CLI endpoint telemetry through user-level and project-level hook adapters. (May 26, 2026)
+  </Card>
+  <Card
+    title="GitHub Copilot CLI Telemetry in Beacon"
+    icon="github"
+    href="https://asymptotelabs.ai/blog/beacon-harness-github-copilot-cli"
+  >
+    Beacon discovers Copilot CLI, reports status, and normalizes OTLP spans for prompt, session, tool, and approval-like activity. (May 24, 2026)
+  </Card>
+  <Card
+    title="Grok Build Telemetry in Beacon"
+    icon="bolt"
+    href="https://asymptotelabs.ai/blog/beacon-harness-grok-build"
+  >
+    Beacon supports Grok Build through managed hook files for session, prompt, tool, command, and file telemetry. (May 21, 2026)
+  </Card>
+  <Card
+    title="OpenClaw Gateway Telemetry in Beacon"
+    icon="network-wired"
+    href="https://asymptotelabs.ai/blog/beacon-harness-openclaw-gateway"
+  >
+    Beacon supports OpenClaw Gateway through endpoint integration commands for OTLP/HTTP configuration, status checks, and validation events. (May 20, 2026)
+  </Card>
+  <Card
+    title="Devin CLI Telemetry in Beacon"
+    icon="terminal"
+    href="https://asymptotelabs.ai/blog/beacon-harness-devin-cli"
+  >
+    Beacon adds Devin hook installation, status, uninstall, discovery, and normalization through the devin hook harness. (May 20, 2026)
+  </Card>
+  <Card
+    title="Gemini CLI Telemetry in Beacon"
+    icon="sparkles"
+    href="https://asymptotelabs.ai/blog/beacon-harness-gemini-cli"
+  >
+    Beacon supports Gemini CLI through opt-in local OpenTelemetry export to the endpoint collector. (May 19, 2026)
+  </Card>
+  <Card
+    title="OpenCode Telemetry in Beacon"
+    icon="code-branch"
+    href="https://asymptotelabs.ai/blog/beacon-harness-opencode"
+  >
+    Beacon installs a managed OpenCode plugin and normalizes chat, session, command, permission, diff, and error events. (May 18, 2026)
+  </Card>
+  <Card
+    title="Factory Droid Telemetry in Beacon"
+    icon="robot"
+    href="https://asymptotelabs.ai/blog/beacon-harness-factory-droid"
+  >
+    Beacon discovers Factory Droid, validates its OTLP endpoint, and can install hooks for richer prompt, tool, file, and lifecycle telemetry. (May 15, 2026)
+  </Card>
+  <Card
+    title="Cursor Telemetry in Beacon"
+    icon="arrow-pointer"
+    href="https://asymptotelabs.ai/blog/beacon-harness-cursor"
+  >
+    Beacon captures local Cursor hook payloads for prompts, tools, shell commands, MCP-like activity, approvals, file edits, and reasoning. (May 13, 2026)
+  </Card>
+  <Card
+    title="Codex CLI Telemetry in Beacon"
+    icon="terminal"
+    href="https://asymptotelabs.ai/blog/beacon-harness-codex-cli"
+  >
+    Beacon has supported Codex CLI since the first endpoint release and now attributes usage by turn, session, model, repository, and user. (May 13, 2026)
+  </Card>
+  <Card
+    title="Claude Cowork Telemetry in Beacon"
+    icon="users"
+    href="https://asymptotelabs.ai/blog/beacon-harness-claude-cowork"
+  >
+    Beacon validates Claude Cowork telemetry when an administrator configures OTLP export to the local collector. (May 13, 2026)
+  </Card>
+  <Card
+    title="Claude Code Telemetry in Beacon"
+    icon="terminal"
+    href="https://asymptotelabs.ai/blog/beacon-harness-claude-code"
+  >
+    Beacon supports Claude Code through local OpenTelemetry export and optional hooks for richer lifecycle and tool activity. (May 13, 2026)
   </Card>
 </CardGroup>
