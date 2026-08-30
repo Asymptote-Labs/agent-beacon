@@ -11,6 +11,70 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### v1.2.6 · August 30, 2026
+
+- **fx is a supported runtime** · `beacon endpoint fx sync` reads the session
+  records fx (vercel-labs/fx) commits under `~/.fx/sessions` and converts them
+  into endpoint events: session start, prompts, tool calls, commands with exit
+  codes and output, file reads, creates and edits with diffs, MCP tool calls,
+  agent messages, history compaction, and per-turn token usage with reported
+  cost. fx is the first supported runtime with no third-party observation
+  surface. There is no hook config to merge into, no plugin directory to install
+  to, and no OpenTelemetry export to point at the collector; its lifecycle hooks
+  are compiled into the binary. What it does have is a durable session log, so
+  collection is a command you run rather than a configuration you write. Reading
+  is local and offline.
+- **How the fx sweep behaves** · Every fx event carries
+  `harness.collection_method=poll`, because Beacon sees a turn once fx has
+  committed it rather than as the agent works. A cursor at
+  `~/.beacon/endpoint/state/fx.json` records how much of each session has been
+  read, so a sweep resumes where the last one stopped and a sweep that fails
+  partway does not re-append what it already wrote. `beacon endpoint fx status`
+  shows the sessions on this machine and how much of each has been collected,
+  `sync --print` previews mapped events without writing them or moving the
+  cursor, and `sync --watch` sweeps on an interval.
+- **What fx telemetry does not include** · Nothing on a poll path can hold or
+  deny a tool call, so there is no enforcement here. fx persists permission
+  feedback text rather than a per-call decision, so no approval events are
+  synthesized, matching the Cline and Pi posture. No session-end event is
+  invented either, because fx sessions are resumable.
+- **Oh My Pi is a supported runtime** · `beacon endpoint hooks install --harness
+  omp` installs a Beacon-managed extension at `~/.omp/agent/extensions/beacon.ts`,
+  or `./.omp/extensions/beacon.ts` for a project-level install, collecting session
+  lifecycle, prompts, tool lifecycle and results, commands including operator `!`
+  shell and `$` Python commands, file reads, creates and edits with the unified
+  patch, MCP tool activity, agent reasoning, and token usage and cost. Oh My Pi is
+  a fork of pi-mono and kept Pi's event payload shapes, so the two share one event
+  mapper, but they never share identity: separate harness names, separate
+  extension markers, separate install directories. A machine running both produces
+  two distinct streams and nothing is merged.
+- **Oh My Pi reports real approval decisions** · Unlike Pi and Cline, Oh My Pi
+  exposes operator approval events, so Beacon records them as `observed` rather
+  than withholding them. Beacon still never synthesizes an approval from an
+  extension that merely blocks a call, which is a decision by an extension rather
+  than an operator being asked. Those approval events carry no tool arguments, so
+  the extension remembers each tool call's input by call ID and attaches it to the
+  approval. Without that, approval rules, which all match on `command.command` or
+  `file.path`, could not read an Oh My Pi approval at all.
+- **A join key on the Pi-family path** · Pi and Oh My Pi events now promote
+  `gen_ai.tool.call.id`, the runtime's own name for one tool invocation, so a tool
+  call links to its result and an approval links to the execution it approved.
+- **Prime Agent has its own harness name** · Prime Agent ships Pi's extension API
+  under a rebranded config directory. Its spellings now normalize to
+  `prime_agent` instead of folding into `pi_cli`, which would merge two separate
+  products under one name in every query, dashboard, and detection grouping by
+  `harness.name`. Harness identity and collection-method metadata ship now; the
+  managed extension follows. If you group by `harness.name`, expect
+  `prime_agent`, `vercel_fx`, and `omp` as new values.
+- **fx and Oh My Pi across the rest of the surface** · `beacon endpoint discover`,
+  agent inventory, which also reports fx's configured MCP servers, and the local
+  dashboard list both runtimes alongside the others, and `beacon scan` matches
+  their events with the same rules it applies to every other harness.
+- **Documentation** · Browser chat telemetry now has a page per site for
+  Claude.ai and ChatGPT instead of one combined extension page, fx, Oh My Pi, and
+  Prime Agent have runtime pages, `beacon endpoint fx` has a command page, and the
+  runtime support matrix and README tables cover every supported harness.
+
 ### v1.2.5 · August 28, 2026
 
 - **Turn-level usage** · Beacon now configures Codex's local trace exporter and
@@ -77,6 +141,81 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   extension as unshipped; it now lists the telemetry Pi actually collects. The
   matrix also links the Windows package alongside macOS and Linux, and the
   endpoint path reference lists Pi's extension paths.
+
+### v1.2.4 · August 23, 2026
+
+- **Qwen Code is a supported runtime** · `beacon endpoint hooks install --harness
+  qwen` merges a Beacon hook block into Qwen Code's own settings, at
+  `~/.qwen/settings.json` for a user install or `./.qwen/settings.json` for a
+  project one, registering all ten Qwen events: `SessionStart`,
+  `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+  `PermissionRequest`, `Stop`, `SubagentStart`, `SubagentStop`, and `SessionEnd`.
+  Unrelated keys and non-Beacon hooks in the same event group are preserved, and
+  a reinstall replaces Beacon's entries rather than adding a second copy. Qwen
+  Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so hooks are
+  its only collection path; `beacon endpoint install --harness qwen` says so
+  instead of appearing to succeed. Two Qwen-specific details worth knowing: its
+  hook timeouts are milliseconds rather than seconds, and a project-level install
+  requires a trusted folder. `beacon endpoint discover`, hook status, and agent
+  inventory report it as `qwen_code`.
+- **Events carry a join key again** · `gen_ai.tool.call.id` was populated on
+  nothing. The promotion list held only the canonical OpenTelemetry name, which
+  no runtime actually writes: Claude Code writes `tool_use_id`, Codex and
+  OpenCode write `call_id`, Cline writes `callId`, so the value sat unread in
+  `raw`. Nothing linked a tool call to its result, an approval to the execution
+  it approved, or a hook event to the OTLP event for the same action. One shared
+  alias list, read by both capture paths so a runtime cannot be supported on one
+  and invisible on the other, now promotes each runtime's own spelling. Duplicate
+  suppression was the visible casualty: once harness normalization landed in
+  v1.2.1 both paths reported the same harness name, and that branch needs a call
+  ID to collapse a pair, so dedup had been inert since. It works again.
+- **One action, one event ID** · `event.id` is a deterministic UUID derived from
+  the event being written, so the hook path and the OTLP path name the same
+  action identically rather than each asserting its own identifier.
+- **Events can be ordered** · Timestamps are now RFC3339 in UTC with fixed-width
+  nanoseconds (`2026-08-21T09:14:03.123456789Z`) on both writers, deliberately
+  not `time.RFC3339Nano`, whose trimming renders the same clock at three
+  different widths. Fixed width is what makes a byte-wise comparison of two
+  timestamps agree with their chronological order, which the dashboard summary, a
+  `sort` over a JSONL tail, and SIEM queries all rely on. Previously no event
+  carried a sub-second timestamp and most shared a timestamp with another event
+  in the same session, so ordered correlation fell back to file-append order,
+  which is not emission order: a hook writes synchronously the moment it
+  intercepts a tool call, while the collector exporter writes on its export
+  interval, so an earlier event routinely landed later in the log. Every
+  ordered-window rule missed silently as a result. On the OTLP path nothing new
+  is captured; the precision was arriving off the wire and being discarded while
+  formatting.
+- **A `sequence` field** · Optional, the emitting writer's monotonic counter
+  starting at 1, promoted from the runtime's own value when one is supplied and
+  stamped by the writer otherwise. It breaks the tie a more precise clock cannot.
+  The timestamp parser still accepts second-resolution values, so a log spanning
+  an agent upgrade reads back end to end.
+- **Retained text that was already arriving is now readable** · No event carried
+  assistant text, command output, or a content object, while hundreds of
+  assistant responses sat unpromoted in `raw`. Claude Code's response attribute
+  is now promoted into `gen_ai.output.messages` and prompt text mirrored into
+  `gen_ai.input.messages`, so hook-captured and OTLP-captured text arrive under
+  the same structure; a source that already speaks semconv keeps its own
+  messages. Each carries a content marker: a hash and byte count over the
+  original text plus truncated and redacted flags, computed against the writer's
+  own truncation limit rather than a constant, since the two writers do not share
+  one.
+- **`file.diff` and `command.output` are declared fields** · Both had been
+  written to the log for as long as the hook paths producing them have existed,
+  every file edit and every captured command, but the types the dashboard,
+  `beacon scan`, and the CEL rules engine read events through dropped them on
+  parse. Captured and unreadable at the same time, and unmatchable by any rule,
+  since the field reference is generated from those types. They are now declared,
+  listed in `FIELDS.md` as `e.file.diff` and `e.command.output`, and routed
+  through sanitization and secret redaction at the prompt-text limit, which
+  neither had passed through before.
+- **Content markers tell the truth about truncation** · Devin assistant events
+  stamped the marker at a 4096-byte limit while the payload was sanitized at
+  2048, so a reply between the two reported itself untruncated while being cut.
+  Separately, Cline and OpenCode overwrote the diff's content marker with one
+  describing the tool input and output, so `content.hash` disagreed with
+  `file.diff_hash` on every edit.
 
 ### v1.2.3 · August 22, 2026
 
