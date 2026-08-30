@@ -10,6 +10,7 @@ Asymptote supports multiple [runtime surfaces](/concepts/core-concepts#runtime-s
 These integrations are grouped by where the agent runs and how telemetry is collected:
 
 - **Local**: Agent harnesses running on an endpoint write telemetry to Asymptote's local collector, hook adapter, plugin, or gateway path.
+- **Browser chat**: An optional Chrome extension reads the chat streams of supported sites in the browser and posts them to the same local collector.
 - **[CI](/concepts/core-concepts#ci-telemetry)**: Ephemeral CI jobs use a temporary collector and write normalized runtime JSONL as a build artifact or upload target instead of installing a persistent endpoint service.
 - **[Cloud](/concepts/core-concepts#cloud-agent-telemetry)**: Provider-managed cloud agents can write session telemetry from the cloud sandbox to customer-managed storage, while [SDK integrations](/concepts/core-concepts#observe-sdk) instrument agent applications that run in servers, serverless functions, workers, and hosted agent platforms.
 
@@ -48,14 +49,14 @@ Two rows in that table are not hook or OTLP integrations. [fx](/runtimes/vercel-
 | [Hermes Agent](/runtimes/hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
 | [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
-### Local browser chat surfaces
+### Browser chat surfaces
 
 | Agent harness | Collection path | Telemetry coverage |
 |----------------|-----------------|--------------------|
-| [Claude.ai](/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
-| [ChatGPT](/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call telemetry from the chatgpt.com chat stream |
+| [Claude.ai](/runtimes/claude-web) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
+| [ChatGPT](/runtimes/chatgpt-web) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and web search tool telemetry from the chatgpt.com chat stream. No token usage, which the site does not report |
 
-Browser chat resolves to the `claude_web` and `chatgpt_web` harness names, so it stays distinguishable from CLI agents. The extension retains full prompt and response text by default. See [Browser Extension](/runtimes/browser-extension) for the retention modes.
+Both sites are collected by one optional Chrome extension. Browser chat resolves to the `claude_web` and `chatgpt_web` harness names, so it stays distinguishable from CLI agents. The extension retains full prompt and response text by default. See [Browser Extension](/runtimes/browser-extension) to install it and to change the retention mode.
 
 ### CI harnesses
 

@@ -1,23 +1,36 @@
 ---
 title: "Browser Extension"
-description: "Asymptote support details for Claude.ai and ChatGPT browser chat telemetry"
+description: "Install and configure the Asymptote browser extension that collects Claude.ai and ChatGPT chat telemetry"
 ---
 
-## Runtime overview
+## Overview
 
-Asymptote supports browser chat on Claude.ai and ChatGPT through an optional Chrome MV3 extension that relays conversation telemetry into the same local pipeline as agent activity.
+Asymptote collects browser chat telemetry through an optional Chrome MV3 extension. It reads the chat streams of the sites you enable and relays them into the same local pipeline as agent activity, so browser conversations land in the runtime log next to CLI agent events.
 
-The extension is in beta. It is not published on the Chrome Web Store and installs unpacked. It also reads the chat streams of two sites whose APIs are private and undocumented, so a change on either site can interrupt capture until the adapter is updated.
+One extension covers both supported sites:
 
-Browser chat resolves to two harness names, `claude_web` and `chatgpt_web`, so browser activity is attributed separately from CLI agents in the runtime log and the dashboard.
+<Columns cols={2}>
+  <Card title="Claude.ai" icon="message" href="/runtimes/claude-web">
+    Prompts, responses, tool calls, and token usage from the claude.ai chat stream.
+  </Card>
+  <Card title="ChatGPT" icon="message" href="/runtimes/chatgpt-web">
+    Prompts, responses, and tool activity from the chatgpt.com chat stream.
+  </Card>
+</Columns>
+
+This page covers install, configuration, and verification, which are the same for both sites. The site pages cover what each one captures and where each one falls short.
+
+<Note>
+The extension is in beta. It is not published on the Chrome Web Store and installs unpacked. It reads two chat streams whose APIs are private and undocumented, so a change on either site can interrupt capture until the adapter is updated.
+</Note>
 
 ## Prerequisites
 
-Before enabling browser chat telemetry, make sure:
+Before installing the extension, make sure:
 
 - The Beacon endpoint is [installed](/cli/install) and running. The extension posts to the local collector on `http://127.0.0.1:4318/v1/logs`, which a default endpoint install already listens on, so no collector configuration is needed.
-- Chrome, or another Chromium browser that can load an unpacked MV3 extension. Firefox and Safari are not supported.
-- Node 22 or newer, if you are building from source rather than using a release archive.
+- You have Chrome, or another Chromium browser that can load an unpacked MV3 extension. Firefox and Safari are not supported.
+- You have Node 22 or newer, if you are building from source rather than using a release archive.
 - You have reviewed what the extension retains. It captures full prompt and response text by default.
 - The people whose browsers it runs in know it is there, since it reads their Claude.ai and ChatGPT conversations.
 
@@ -33,7 +46,7 @@ A content script running in the page's main world tees the streamed chat respons
 
 The extension never writes files and never contacts a remote endpoint. Delivery is queued in local extension storage and retried with backoff, so a turn survives the service worker being suspended mid-stream.
 
-Events collected this way carry `harness.collection_method` of `otlp`.
+Events collected this way carry `harness.collection_method` of `otlp`, and a harness name of `claude_web` or `chatgpt_web`, so browser activity stays distinguishable from CLI agents in the runtime log and the dashboard.
 
 ## Discovery and status
 
@@ -41,13 +54,11 @@ Asymptote treats the browser extension as a user-installed source. It is not con
 
 Its presence is therefore observed rather than declared: the evidence that it is working is `claude_web` or `chatgpt_web` events arriving in the runtime log. See [Confirm it is working](#confirm-it-is-working).
 
-## Install or configuration support
+## Install
 
-<Note>
-The browser extension is in beta and is not published on the Chrome Web Store. It installs unpacked through Chrome's developer mode, so Chrome will not auto-update it: to move to a new version, download it again and reload. The published archive is unsigned, and its `.sha256` is the only integrity check it has.
-</Note>
+The extension installs unpacked through Chrome's developer mode, so Chrome will not auto-update it. To move to a new version, download or build it again and reload.
 
-### Build it
+### Build from source
 
 No prebuilt archive is published yet, so building from source is currently the only way to get the extension. It needs Node 22 or newer and takes a few seconds:
 
@@ -58,13 +69,13 @@ npm ci
 npm run build
 ```
 
-That writes the loadable extension to `browser-extension/dist`. Note the full path, because Chrome asks for it in the next step:
+That writes the loadable extension to `browser-extension/dist`. Note the full path, because Chrome asks for it when you load it:
 
 ```bash
 pwd -P  # then append /dist
 ```
 
-### From a release archive
+### Use a release archive
 
 Once an `ext-v*` release is published, you will be able to skip the build and download `agent-beacon-browser-extension-<version>-chrome.zip` with its `.sha256` from the [releases page](https://github.com/Asymptote-Labs/agent-beacon/releases), then verify and unzip it:
 
@@ -73,26 +84,40 @@ shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
 unzip agent-beacon-browser-extension-<version>-chrome.zip -d agent-beacon-extension
 ```
 
-The unzipped folder is what you load, in place of `dist`.
+The archive is unsigned, so its `.sha256` is the only integrity check it has. The unzipped folder is what you load, in place of `dist`.
 
 ### Load it in Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**, top right.
-3. Choose **Load unpacked**, then select the `dist` folder you built (or the unzipped release folder).
-4. Confirm "Agent Beacon — Browser Collector" now appears in the list and is enabled.
+3. Choose **Load unpacked**, then select the `dist` folder you built, or the unzipped release folder.
+4. Confirm the Agent Beacon browser collector now appears in the list and is enabled.
 5. Click the extension's toolbar icon to check its status and, if you want, change the retention mode before capturing anything.
 
-### Configuration
+## Configuration
 
 The extension is configured in its own UI, not by `beacon`. There is no CLI command and no config file on disk. Settings are split across two surfaces:
 
 | Surface | How to open it | Settings |
 |---------|----------------|----------|
-| Popup | Click the extension's toolbar icon | Capture on/off, content retention (`full`, `redacted`, `metadata`), plus live queue depth and active stream count |
+| Popup | Click the extension's toolbar icon | Capture on or off, content retention (`full`, `redacted`, `metadata`), plus live queue depth and active stream count |
 | Options page | Right-click the icon and choose **Options**, or use **Details** then **Extension options** in `chrome://extensions` | OTLP logs endpoint, and per-site checkboxes for claude.ai and chatgpt.com |
 
-Review the retention mode in the popup before capturing anything on a machine where the same browser profile is used for personal conversations. The default retains full chat text.
+Both sites are enabled by default. Turn one off in the options page to collect from the other alone.
+
+## Retained content
+
+Retention defaults to `full`. Browser chat telemetry has little investigative value without content, so the default keeps it, and the tradeoff is documented rather than defaulted away.
+
+| Mode | What is retained |
+|------|------------------|
+| `full` (default) | Complete prompt text, full assistant response, tool call arguments and results |
+| `redacted` | The same text with emails and API-key-shaped tokens scrubbed in the browser |
+| `metadata` | No chat text. Actions, models, token counts, and tool names only |
+
+Retention is enforced in the browser before anything is sent, so under `metadata` the text never leaves the page. Endpoint-side redaction, sanitization, truncation, and event-size limits apply to whatever is sent.
+
+Change the mode in the extension's popup before enabling it on a machine where the same browser profile is used for personal conversations.
 
 ## Confirm it is working
 
@@ -110,11 +135,13 @@ grep '"claude_web"\|"chatgpt_web"' ~/.beacon/endpoint/logs/runtime.jsonl | tail 
 
 On a system-mode install the log lives at `/var/log/beacon-agent/runtime.jsonl` instead, and reading it needs `sudo`.
 
-Or browse them in the [local dashboard](/cli/dashboard):
+Or browse the events in the [local dashboard](/cli/dashboard):
 
 ```bash
 beacon endpoint dashboard
 ```
+
+## Troubleshooting
 
 If nothing arrives, work through it in this order:
 
@@ -126,30 +153,29 @@ If nothing arrives, work through it in this order:
 
 Chrome also disables unpacked extensions on restart in some managed configurations. If capture stops after a browser restart, check that it is still enabled in `chrome://extensions`.
 
-## Retained content
-
-Retention defaults to `full`. Browser chat telemetry has little investigative value without content, so the default keeps it, and the tradeoff is documented rather than defaulted away.
-
-| Mode | What is retained |
-|------|------------------|
-| `full` (default) | Complete prompt text, full assistant response, tool call arguments and results |
-| `redacted` | The same text with emails and API-key-shaped tokens scrubbed in the browser |
-| `metadata` | No chat text. Actions, models, token counts, and tool names only |
-
-Retention is enforced in the browser before anything is sent, so under `metadata` the text never leaves the page. Endpoint-side redaction, sanitization, truncation, and event-size limits apply to whatever is sent.
-
-Change the mode in the extension's popup before enabling it on a machine where the same browser profile is used for personal conversations.
-
 ## Telemetry coverage
+
+Coverage that is the same for both sites:
 
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
 | Assistant response telemetry | Supported, including the response text and model |
-| Tool telemetry | Supported where the chat stream exposes tool calls, including call id, arguments, and results |
-| Token usage | Supported for Claude.ai. ChatGPT web does not report usage in its stream |
 | Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
 | Approval telemetry | Not available. Neither site exposes approval decisions to a page script |
 | Session lifecycle | Partial. Turns are correlated by conversation id; there is no session start or stop signal |
 | Local JSONL and dashboard | Supported after events reach the collector |
 | MDM deployment | Not covered by Beacon's MDM assets. Distribute through browser policy instead |
+
+Tool telemetry and token usage differ by site. See [Claude.ai](/runtimes/claude-web) and [ChatGPT](/runtimes/chatgpt-web).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Retention and redaction" icon="shield" href="/security/retention-redaction">
+    How retained content is handled once it reaches the endpoint.
+  </Card>
+</Columns>
