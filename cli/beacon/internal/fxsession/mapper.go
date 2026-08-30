@@ -1,10 +1,12 @@
 package fxsession
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -41,8 +43,9 @@ var fxMCPControlTools = map[string]bool{
 // position within the turn -- rather than from the event's content, so the same fx record maps to
 // the same id on every sweep no matter how many times the log is read.
 type MappedEvent struct {
-	DedupID string
-	Event   schema.Event
+	DedupID   string
+	SourceSeq uint64
+	Event     schema.Event
 }
 
 // MapOptions controls one mapping pass over a session's decoded log.
@@ -741,9 +744,12 @@ func (m *mapper) emitUsage(event *Event) {
 }
 
 func (m *mapper) append(event *Event, suffix string, ev schema.Event) {
+	dedupID := fmt.Sprintf("%s:%s:%d:%s", m.sessionID(), event.LogGeneration, event.Seq, suffix)
+	ev.Event.ID = fxEventID(dedupID)
 	m.out = append(m.out, MappedEvent{
-		DedupID: fmt.Sprintf("%s:%s:%d:%s", m.sessionID(), event.LogGeneration, event.Seq, suffix),
-		Event:   ev,
+		DedupID:   dedupID,
+		SourceSeq: event.Seq,
+		Event:     ev,
 	})
 }
 
@@ -899,6 +905,31 @@ func firstNonEmpty(values ...string) string {
 func sha256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// fxIDNamespace is the fixed UUID namespace for fx dedup-coordinate event IDs.
+// It is distinct from the content-based namespace in asymptoteobserve so the two
+// derivations can never collide.
+var fxIDNamespace = [16]byte{
+	0x3a, 0x7c, 0x1f, 0x4b, 0x5a, 0x2c, 0x8e, 0x6d,
+	0x0d, 0x3f, 0x61, 0x9b, 0x2a, 0x8c, 0x5e, 0x14,
+}
+
+// fxEventID derives a deterministic UUID v5 from a dedup coordinate, so the same
+// fx record always produces the same event ID regardless of how many times it is
+// read. The coordinate encodes session, generation, sequence and position within
+// the turn, which is everything that identifies one mapped event.
+func fxEventID(dedupID string) string {
+	digest := sha1.New()
+	digest.Write(fxIDNamespace[:])
+	io.WriteString(digest, dedupID)
+	var id [16]byte
+	copy(id[:], digest.Sum(nil))
+	id[6] = (id[6] & 0x0f) | 0x50 // version 5
+	id[8] = (id[8] & 0x3f) | 0x80 // RFC 4122 variant
+	out := make([]byte, 32)
+	hex.Encode(out, id[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
 }
 
 // millis converts fx's millisecond timestamps into the instant the event writers stamp events with.

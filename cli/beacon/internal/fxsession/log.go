@@ -27,6 +27,10 @@ type Stats struct {
 	Decoded   int // envelopes decoded, including kinds with no mapped payload
 	Skipped   int // envelopes skipped: unknown kind or unsupported schema version
 	Malformed int // lines that were not a decodable envelope, or exceeded MaxFrameBytes
+	// MaxSeq is the highest sequence number across all decoded envelopes, including
+	// non-mapped kinds the decoder skipped. advanceCursor uses it to advance past
+	// storage-only events so the cheap skip in collectSession stays effective.
+	MaxSeq uint64
 	// PartialTail is set when the file ended without a newline, which means fx was mid-append.
 	// The incomplete bytes are not decoded and not counted as malformed: they are a frame that
 	// has not been written yet, and the next sweep will read it whole.
@@ -96,6 +100,9 @@ func (d *Decoder) Next() (*Event, error) {
 			continue
 		}
 		d.stats.Decoded++
+		if event.Seq > d.stats.MaxSeq {
+			d.stats.MaxSeq = event.Seq
+		}
 		if !mapsToPayload(event.Kind) {
 			d.stats.Skipped++
 			continue
