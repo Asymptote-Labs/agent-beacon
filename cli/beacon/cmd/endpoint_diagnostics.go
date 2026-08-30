@@ -876,7 +876,7 @@ func hookTargets() ([]string, error) {
 }
 
 func allHookTargetsForLevel() []string {
-	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "cline", "pi", "grok", "qwen", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "cline", "pi", "omp", "grok", "qwen", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 	if endpointOpts.hookLevel != "project" {
 		return all
 	}
@@ -929,6 +929,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.PluginPath, Raw: status}
 		case "pi":
 			status := endpointhooks.PiHookStatus(endpointhooks.PiOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ExtensionPath, Raw: status}
+		case "omp":
+			status := endpointhooks.OmpHookStatus(endpointhooks.OmpOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ExtensionPath, Raw: status}
 		case "grok":
 			status := endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
@@ -1291,6 +1294,11 @@ func harnessAction(h harness.Harness, effectiveUserMode bool) string {
 		return doctorRepairCommand(effectiveUserMode)
 	case "admin_otel":
 		return "beacon endpoint integrations claude-cowork setup"
+	// fx has nothing to install into, so the remedy is to run a collection sweep rather than to
+	// configure the runtime. Pointing at `hooks install` here would name a command that cannot
+	// succeed for this harness.
+	case "session_log":
+		return "beacon endpoint fx sync"
 	}
 	return ""
 }

@@ -305,6 +305,11 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/bash")
+	// Oh My Pi's user extension path is the one candidate an environment variable can move, so the
+	// two it reads are cleared: a developer who happens to run Oh My Pi under a profile would
+	// otherwise see this test fail on a path that is correct for their machine.
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	t.Setenv("PI_CONFIG_DIR", "")
 
 	result := Scan(Options{
 		HomeDir:    home,
@@ -344,6 +349,10 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// not, so the two paths are spelled out rather than derived from each other.
 		{runtime: "pi_cli", path: filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "pi_cli", path: filepath.Join(work, ".pi", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		// Oh My Pi's paths mirror Pi's asymmetry -- an `agent` segment under home and none in the
+		// project -- but under its own `.omp` root, because the two runtimes install separately.
+		{runtime: "omp", path: filepath.Join(home, ".omp", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "omp", path: filepath.Join(work, ".omp", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
@@ -353,6 +362,12 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		{runtime: "grok", path: filepath.Join(work, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(work, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
+		// are the ones that carry information nothing else here reports: fx's profile server list
+		// and the workspace servers it shares with Claude-compatible runtimes.
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "mcp.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(work, ".mcp.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
 	}
 	if got, want := len(result.Configs), len(expected); got != want {
 		t.Fatalf("config candidates = %d, want %d", got, want)
@@ -918,5 +933,76 @@ func TestQwenManagedDetectionReadsTheHookCommand(t *testing.T) {
 				t.Errorf("beaconManaged(qwen_code) = %t, want %t for %s", got, tc.want, tc.settings)
 			}
 		})
+	}
+}
+
+// fx keeps its profile MCP servers under an `mcp` key and accepts `mcpServers` as an alias, and a
+// workspace can add a Claude-compatible .mcp.json. Both keys are ones the scanner already reads, so
+// what this test protects is the wiring: fx's files being scanned at all, and being attributed to
+// the same harness name the collector writes on fx events.
+func TestScanFxMCPInventory(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	writeFile(t, filepath.Join(home, ".fx", "mcp.json"), `{
+  "mcp": {
+    "docs": {
+      "command": "docs-server",
+      "args": ["--stdio"],
+      "env": {"DOCS_TOKEN": "secret"}
+    }
+  }
+}`)
+	writeFile(t, filepath.Join(work, ".mcp.json"), `{
+  "mcpServers": {
+    "issues": {
+      "url": "https://example.test/mcp",
+      "transport": "http"
+    }
+  }
+}`)
+	writeFile(t, filepath.Join(home, ".fx", "settings.json"), `{"collapse_tool_calls": true}`)
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	// One env key, and its name is withheld: DOCS_TOKEN reads as a secret, so the inventory counts
+	// it without naming it. The count is the point -- a server with credentials in its environment
+	// is worth knowing about even when the key names are not safe to print.
+	assertServer(t, result.MCPServers, fxRuntime, "docs", TransportStdio, true, 1, 0, 1)
+	assertServer(t, result.MCPServers, fxRuntime, "issues", TransportHTTP, false, 0, 0, 0)
+
+	settings := findConfig(result.Configs, fxRuntime, filepath.Join(home, ".fx", "settings.json"))
+	if settings == nil {
+		t.Fatal("fx settings.json is not in the inventory")
+	}
+	if !settings.Exists || settings.ParserStatus != StatusOK {
+		t.Fatalf("fx settings status = exists:%t parser:%s", settings.Exists, settings.ParserStatus)
+	}
+	// Beacon writes nothing into fx, so claiming these files as Beacon-managed would assert an
+	// install that does not exist -- and would make `endpoint inventory` disagree with
+	// `endpoint discover`, which reports fx as a runtime Beacon reads rather than configures.
+	if settings.BeaconManaged {
+		t.Error("fx settings.json is reported as Beacon-managed; Beacon writes nothing into fx")
+	}
+}
+
+// A machine with fx installed and no MCP servers configured must produce inventory rows saying the
+// files are absent, not an error and not a phantom server.
+func TestScanFxWithoutMCPConfigurationIsQuiet(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	for _, server := range result.MCPServers {
+		if server.Runtime == fxRuntime {
+			t.Fatalf("fx server reported with no fx configuration on disk: %#v", server)
+		}
+	}
+	config := findConfig(result.Configs, fxRuntime, filepath.Join(home, ".fx", "mcp.json"))
+	if config == nil {
+		t.Fatal("fx mcp.json candidate is missing from the inventory")
+	}
+	if config.Exists || config.ParserStatus != StatusNotFound {
+		t.Errorf("absent fx mcp.json reported as exists:%t parser:%s", config.Exists, config.ParserStatus)
 	}
 }
