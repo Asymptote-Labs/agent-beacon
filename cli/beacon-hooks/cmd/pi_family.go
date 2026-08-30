@@ -55,6 +55,13 @@ func (f piFamily) rawKey(suffix string) string {
 // mapper drops unknown stages: these runtimes publish far more events than the extension
 // subscribes to, and a future one arriving here should be silent rather than becoming an
 // undifferentiated "something happened" row that every query matches and none can explain.
+//
+// Both halves of a tool call carry the runtime's own `toolCallId`, and both promote it to
+// `gen_ai.tool.call.id` through the shared alias list in asymptoteobserve.ToolCallIDKeys. That
+// field is the only thing linking tool.invoked to the tool.completed, file.modified or
+// command.executed it turned into -- and, on Oh My Pi, an approval decision to the execution it
+// approved. Without it those rows sit in the log as unrelated events that merely happen to share a
+// session id and a nearby timestamp.
 func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string) []normalizedEvent {
 	fields := f.baseFields(input, sessionID)
 
@@ -88,6 +95,7 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		// can block, but that is an extension deciding rather than an operator being asked. Oh My
 		// Pi's real approval decisions arrive as their own events and are mapped there.
 		mergeMap(fields, f.toolFields(input, false))
+		applyToolCallID(fields, input)
 		return f.one("tool.invoked", "tool", "info", "tool invoked", fields)
 
 	case "tool_result":
@@ -237,6 +245,7 @@ func piFileOperation(name string) string {
 // toolResultEvents maps a completed tool call onto its outcome event.
 func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
 	mergeMap(fields, f.toolFields(input, true))
+	applyToolCallID(fields, input)
 	name := piToolName(input)
 
 	if isErr, ok := input["isError"].(bool); ok && isErr {
