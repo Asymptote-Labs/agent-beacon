@@ -211,6 +211,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, clineCandidates(home, wd)...)
 	items = append(items, piCandidates(home, wd)...)
 	items = append(items, ompCandidates(home, wd)...)
+	items = append(items, primeCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -349,6 +350,35 @@ func ompCandidates(home, wd string) []candidate {
 		items = append(items, candidate{
 			runtime: "omp",
 			path:    filepath.Join(wd, ".omp", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// primeCandidates covers both Prime Agent extension locations.
+//
+// Both keep the full `.prime/agent` segment, which is where this differs from piCandidates: Prime
+// Agent's loader joins the same config directory name to the home directory and to the working
+// directory, while Pi drops the `agent` segment for its project path. Copying Pi's shape here would
+// have inventory look for the project extension in a directory the runtime never reads.
+//
+// Spelled out rather than read from the installer the way ompCandidates does, because Prime Agent's
+// path is a fixed string: its own PRIME_AGENT_CODING_AGENT_DIR override is deliberately not honored
+// (see hooks.primeExtensionDir), so there is no rule here that only the installer knows.
+func primeCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		items = append(items, candidate{
+			runtime: "prime_agent",
+			path:    filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts"),
+			scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "prime_agent",
+			path:    filepath.Join(wd, ".prime", "agent", "extensions", "beacon.ts"),
 			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
 		})
 	}
@@ -728,6 +758,12 @@ func beaconManaged(item candidate, data []byte) bool {
 	// is attributed to the runtime that actually loads it rather than to whichever case ran first.
 	case "omp":
 		return strings.Contains(text, hooks.OmpManagedExtensionMarker)
+	// Prime Agent's own marker, not Pi's, even though both files are rendered from one source. The
+	// two runtimes have separate directories and separate installs, so a file carrying the other's
+	// marker is not this runtime's install and reporting it as one would attribute telemetry to the
+	// wrong harness.
+	case "prime_agent":
+		return strings.Contains(text, hooks.PrimeManagedExtensionMarker)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	// Matched on the hook command rather than on a marker, because Beacon merges into Qwen's own

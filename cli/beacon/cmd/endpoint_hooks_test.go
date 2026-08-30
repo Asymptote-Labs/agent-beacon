@@ -151,3 +151,15 @@ func TestPrimeIsInTheAllTargetsList(t *testing.T) {
 	}
 	t.Fatal("prime is missing from the all-harnesses hook target list")
 }
+
+// `endpoint hooks repair` walks a hard-coded list rather than the registry, so a runtime absent
+// from it is never repaired -- and repair is what fixes an extension whose binary path went stale
+// after an upgrade. It fails silently: repair reports success having skipped the runtime entirely.
+func TestPrimeIsInTheRepairTargetList(t *testing.T) {
+	for _, name := range repairTargetOrder() {
+		if name == "prime" {
+			return
+		}
+	}
+	t.Fatal("prime is missing from the repair target list; `endpoint repair` would silently skip it")
+}
