@@ -62,7 +62,7 @@ func TestPiEventEverySupportedTypeProducesTelemetry(t *testing.T) {
 		if !ok {
 			t.Fatalf("no fixture for supported Pi event type %q; the mapper claims to handle it", name)
 		}
-		events := piEndpointEvents(payload, "sess-1")
+		events := piRuntime.endpointEvents(payload, "sess-1")
 		if len(events) == 0 {
 			t.Fatalf("supported Pi event type %q produced no telemetry", name)
 		}
@@ -74,7 +74,7 @@ func TestPiEventEverySupportedTypeProducesTelemetry(t *testing.T) {
 // with records no query asks for.
 func TestPiEventUnknownTypeProducesNothing(t *testing.T) {
 	for _, name := range []string{"message_update", "before_provider_request", "turn_start", "", "totally_new"} {
-		events := piEndpointEvents(map[string]interface{}{"type": name}, "sess-1")
+		events := piRuntime.endpointEvents(map[string]interface{}{"type": name}, "sess-1")
 		if len(events) != 0 {
 			t.Fatalf("Pi event type %q produced %d events, want none", name, len(events))
 		}
@@ -133,7 +133,7 @@ func TestPiEventInputRecordsPrompt(t *testing.T) {
 // An input event with no text is Pi announcing an empty submission. Recording a prompt event with
 // no prompt would put a row in the log that every prompt query matches and none can explain.
 func TestPiEventEmptyInputProducesNothing(t *testing.T) {
-	events := piEndpointEvents(map[string]interface{}{"type": "input", "source": "interactive"}, "sess-1")
+	events := piRuntime.endpointEvents(map[string]interface{}{"type": "input", "source": "interactive"}, "sess-1")
 	if len(events) != 0 {
 		t.Fatalf("empty input produced %d events, want none", len(events))
 	}
@@ -197,7 +197,7 @@ func TestPiEventToolResultActionsPerTool(t *testing.T) {
 		{"my_custom_tool", map[string]interface{}{"anything": true}, "tool.completed"},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
-			events := piEndpointEvents(map[string]interface{}{
+			events := piRuntime.endpointEvents(map[string]interface{}{
 				"type": "tool_result", "toolName": tc.tool, "input": tc.args,
 			}, "sess-1")
 			if len(events) != 1 {
@@ -214,7 +214,7 @@ func TestPiEventToolResultActionsPerTool(t *testing.T) {
 // resolve, and a custom tool can share a built-in's name, so a file.read with no file field would
 // produce a row every file-scoped query matches and none can explain.
 func TestPiEventFileActionWithoutAPathFallsBackToTool(t *testing.T) {
-	events := piEndpointEvents(map[string]interface{}{
+	events := piRuntime.endpointEvents(map[string]interface{}{
 		"type": "tool_result", "toolName": "read", "input": map[string]interface{}{},
 	}, "sess-1")
 	if len(events) != 1 || events[0].action != "tool.completed" {
@@ -225,7 +225,7 @@ func TestPiEventFileActionWithoutAPathFallsBackToTool(t *testing.T) {
 // The same guard on the command side: a bash result whose arguments carried no command is a tool
 // call, not a command execution, and rules/risky-command/ all match on command.command.
 func TestPiEventCommandActionWithoutACommandFallsBackToTool(t *testing.T) {
-	events := piEndpointEvents(map[string]interface{}{
+	events := piRuntime.endpointEvents(map[string]interface{}{
 		"type": "tool_result", "toolName": "bash", "input": map[string]interface{}{},
 	}, "sess-1")
 	if len(events) != 1 || events[0].action != "tool.completed" {
@@ -362,7 +362,7 @@ func TestPiEventMessageEndRecordsUsageAndReasoning(t *testing.T) {
 // empty usage record in the log on every turn.
 func TestPiEventMessageEndIgnoresNonAssistantMessages(t *testing.T) {
 	for _, role := range []string{"user", "toolResult"} {
-		events := piEndpointEvents(map[string]interface{}{
+		events := piRuntime.endpointEvents(map[string]interface{}{
 			"type":    "message_end",
 			"message": map[string]interface{}{"role": role, "usage": map[string]interface{}{"input": float64(5)}},
 		}, "sess-1")
@@ -375,7 +375,7 @@ func TestPiEventMessageEndIgnoresNonAssistantMessages(t *testing.T) {
 // An assistant message with neither usage nor reasoning is a message Beacon has nothing to say
 // about, which is different from one it failed to read.
 func TestPiEventMessageEndWithNothingToReportProducesNothing(t *testing.T) {
-	events := piEndpointEvents(map[string]interface{}{
+	events := piRuntime.endpointEvents(map[string]interface{}{
 		"type":    "message_end",
 		"message": map[string]interface{}{"role": "assistant", "content": []interface{}{}},
 	}, "sess-1")

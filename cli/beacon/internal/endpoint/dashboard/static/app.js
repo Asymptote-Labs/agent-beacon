@@ -633,6 +633,7 @@ function runtimeLabel(value) {
     grok: "Grok",
     qwen: "Qwen Code",
     qwen_code: "Qwen Code",
+    vercel_fx: "fx (Vercel Labs)",
     agent_skills: "Agent Skills",
   };
   return labels[value] || harnessLabel(value);
@@ -972,6 +973,7 @@ function harnessLabel(value) {
     copilot_cli: "GitHub Copilot CLI",
     grok: "Grok Build",
     qwen_code: "Qwen Code",
+    vercel_fx: "fx (Vercel Labs)",
     cli: "Beacon CLI",
   };
   return labels[value] || value;
