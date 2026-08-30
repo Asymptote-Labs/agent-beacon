@@ -1,0 +1,104 @@
+---
+title: "Claude.ai"
+description: "Asymptote support details for Claude.ai browser chat telemetry"
+---
+
+## Runtime overview
+
+Asymptote collects Claude.ai chat telemetry through the optional [browser extension](/runtimes/browser-extension). Every turn on claude.ai becomes prompt, response, and tool events in the local runtime log, attributed to the `claude_web` harness so it stays separate from Claude Code and other CLI agents.
+
+Support is in beta. The claude.ai chat API is private and undocumented, so a change on the site can interrupt capture until the adapter is updated.
+
+## Prerequisites
+
+- The Beacon endpoint is installed and running, and the browser extension is loaded. See [Browser Extension](/runtimes/browser-extension) for both steps.
+- claude.ai is enabled in the extension's options page. It is enabled by default.
+
+## Collection path
+
+The extension's main-world interceptor tees the streamed response from claude.ai's completion endpoint. The Claude adapter reads the Anthropic-style Server-Sent Event stream and rebuilds one turn from it:
+
+| Stream signal | What Asymptote takes from it |
+|---------------|------------------------------|
+| The outbound request body | Prompt text and the input messages |
+| The conversation id in the request URL or body | `session.id` and `gen_ai.conversation.id` |
+| `message_start` | Response model and input token count |
+| `content_block_delta` | Assistant response text, and tool call arguments as they stream |
+| `content_block_start` for a `tool_use` block | Tool call id and name |
+| `message_delta` | Output token count |
+| `message_stop` | Turn completion |
+
+The service worker then posts the turn to the local collector as OTLP GenAI logs. Events carry `harness.collection_method` of `otlp`.
+
+A turn whose stream is cut off before `message_stop` is still delivered, recorded as `agent.response` rather than `agent.response.completed`.
+
+## Events
+
+One claude.ai turn produces:
+
+| Event | When |
+|-------|------|
+| `prompt.submitted` | The request body carried prompt text or input messages |
+| `agent.response.completed` | The stream finished normally |
+| `agent.response` | The stream ended early, so the response is partial |
+| `tool.invoked` | Once per `tool_use` block in the turn, with the call id, name, and arguments |
+
+Turns from one conversation share a session id, so a conversation reads as a session in the dashboard even though the site sends no session start or stop signal.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
+| Assistant response telemetry | Supported, including the response text and the model reported by the stream |
+| Tool telemetry | Supported. Tool call id, name, and arguments are captured from `tool_use` blocks |
+| Tool results | Not available. The chat stream carries the tool call, not the result Anthropic computed for it |
+| Token usage | Supported. Input and output token counts are normalized into `gen_ai.usage` |
+| Cost | Not available. claude.ai does not report per-turn cost to the page |
+| Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
+| Approval telemetry | Not available. claude.ai does not expose approval decisions to a page script |
+| Session lifecycle | Partial. Turns are correlated by conversation id; there is no session start or stop signal |
+| Local JSONL and dashboard | Supported after events reach the collector |
+| MDM deployment | Not covered by Beacon's MDM assets. Distribute through browser policy instead |
+
+## Confirm it is working
+
+Send one message on claude.ai, then look for the event:
+
+```bash
+grep -c '"claude_web"' ~/.beacon/endpoint/logs/runtime.jsonl
+```
+
+To read the most recent one, including its token counts:
+
+```bash
+grep '"claude_web"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -1 | jq '{action: .event.action, harness: .harness.name, model, session: .session.id, usage: .gen_ai.usage}'
+```
+
+On a system-mode install the log lives at `/var/log/beacon-agent/runtime.jsonl` instead, and reading it needs `sudo`.
+
+If nothing arrives, work through the [troubleshooting steps](/runtimes/browser-extension#troubleshooting) on the extension page.
+
+## Limits
+
+- **The stream format is private.** The adapter is written defensively and degrades to a partial turn rather than failing, but a site change can still stop capture until the adapter is updated.
+- **Only the chat stream is read.** Attachments, artifacts rendered outside the stream, and project files are not captured.
+- **Prompt text comes from the request body.** A turn sent through a path the adapter does not recognize arrives with the response but without the prompt.
+- **Retention defaults to `full`.** Prompt and response text is retained unless you change the mode in the extension's popup. See [retained content](/runtimes/browser-extension#retained-content).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Browser Extension" icon="download" href="/runtimes/browser-extension">
+    Install, configure, and verify the extension.
+  </Card>
+  <Card title="ChatGPT" icon="message" href="/runtimes/chatgpt-web">
+    The other supported browser chat surface.
+  </Card>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Retention and redaction" icon="shield" href="/security/retention-redaction">
+    How retained content is handled once it reaches the endpoint.
+  </Card>
+</Columns>

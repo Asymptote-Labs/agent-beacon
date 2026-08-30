@@ -1,0 +1,108 @@
+---
+title: "ChatGPT"
+description: "Asymptote support details for ChatGPT browser chat telemetry"
+---
+
+## Runtime overview
+
+Asymptote collects ChatGPT chat telemetry through the optional [browser extension](/runtimes/browser-extension). Every turn on chatgpt.com becomes prompt and response events in the local runtime log, attributed to the `chatgpt_web` harness so it stays separate from Codex CLI and other agents.
+
+Both `chatgpt.com` and the older `chat.openai.com` host are covered.
+
+Support is in beta. The ChatGPT chat API is private and undocumented, so a change on the site can interrupt capture until the adapter is updated.
+
+## Prerequisites
+
+- The Beacon endpoint is installed and running, and the browser extension is loaded. See [Browser Extension](/runtimes/browser-extension) for both steps.
+- chatgpt.com is enabled in the extension's options page. It is enabled by default.
+
+## Collection path
+
+The extension's main-world interceptor tees the streamed response from the message-send endpoint, `POST /backend-api/f/conversation`. The ChatGPT adapter reads the site's `delta_encoding: v1` Server-Sent Event stream, where each frame patches a running document rather than carrying a finished message, and rebuilds one turn from it:
+
+| Stream signal | What Asymptote takes from it |
+|---------------|------------------------------|
+| The outbound request body | Prompt text, the input messages, and the requested model |
+| `conversation_id` in the request body or the resume token | `session.id` and `gen_ai.conversation.id` |
+| `add`, `append`, `replace`, and `patch` delta frames | Assistant response text, assembled as it streams |
+| The assistant message metadata | The model that actually answered, which can differ from the requested one |
+| `message_stream_complete` or `[DONE]` | Turn completion |
+
+Only the visible assistant message is tracked. Tool and aside messages addressed to another recipient are skipped, so the recorded response is what the user saw.
+
+The service worker then posts the turn to the local collector as OTLP GenAI logs. Events carry `harness.collection_method` of `otlp`.
+
+A turn whose stream is cut off before completion is still delivered, recorded as `agent.response` rather than `agent.response.completed`.
+
+## Events
+
+One ChatGPT turn produces:
+
+| Event | When |
+|-------|------|
+| `prompt.submitted` | The request body carried prompt text or input messages |
+| `agent.response.completed` | The stream finished normally |
+| `agent.response` | The stream ended early, so the response is partial |
+| `tool.invoked` | The turn included web search results, recorded as a `web_search` call |
+
+Turns from one conversation share a session id, so a conversation reads as a session in the dashboard even though the site sends no session start or stop signal.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
+| Assistant response telemetry | Supported, including the response text, the requested model, and the model that answered |
+| Tool telemetry | Partial. Web search activity is captured from the assistant message metadata; other built-in tools are not exposed in a form the adapter can read |
+| Token usage | Not available. ChatGPT web does not report token counts in its stream |
+| Cost | Not available. ChatGPT web does not report per-turn cost to the page |
+| Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
+| Approval telemetry | Not available. ChatGPT does not expose approval decisions to a page script |
+| Session lifecycle | Partial. Turns are correlated by conversation id; there is no session start or stop signal |
+| Local JSONL and dashboard | Supported after events reach the collector |
+| MDM deployment | Not covered by Beacon's MDM assets. Distribute through browser policy instead |
+
+Token usage is the main difference from [Claude.ai](/runtimes/claude-web), which does report counts. Reports that roll up token usage will show ChatGPT web turns with no token attribution.
+
+## Confirm it is working
+
+Send one message on chatgpt.com, then look for the event:
+
+```bash
+grep -c '"chatgpt_web"' ~/.beacon/endpoint/logs/runtime.jsonl
+```
+
+To read the most recent one:
+
+```bash
+grep '"chatgpt_web"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -1 | jq '{action: .event.action, harness: .harness.name, model, session: .session.id}'
+```
+
+On a system-mode install the log lives at `/var/log/beacon-agent/runtime.jsonl` instead, and reading it needs `sudo`.
+
+If nothing arrives, work through the [troubleshooting steps](/runtimes/browser-extension#troubleshooting) on the extension page.
+
+## Limits
+
+- **The stream format is private.** The adapter is written defensively and degrades to a partial turn rather than failing, but a site change can still stop capture until the adapter is updated.
+- **Handed-off streams are not captured yet.** ChatGPT sometimes moves a response to a separate resume endpoint instead of streaming it inline. Those turns are missed today; capturing them is a planned follow-up.
+- **No token usage.** Nothing in the stream carries token counts, and Asymptote does not estimate them.
+- **Only the chat stream is read.** Uploaded files, canvas documents, and content rendered outside the stream are not captured.
+- **Retention defaults to `full`.** Prompt and response text is retained unless you change the mode in the extension's popup. See [retained content](/runtimes/browser-extension#retained-content).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Browser Extension" icon="download" href="/runtimes/browser-extension">
+    Install, configure, and verify the extension.
+  </Card>
+  <Card title="Claude.ai" icon="message" href="/runtimes/claude-web">
+    The other supported browser chat surface.
+  </Card>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Retention and redaction" icon="shield" href="/security/retention-redaction">
+    How retained content is handled once it reaches the endpoint.
+  </Card>
+</Columns>
