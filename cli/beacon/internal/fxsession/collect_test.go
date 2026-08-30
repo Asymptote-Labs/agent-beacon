@@ -3,6 +3,7 @@ package fxsession
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -432,5 +433,131 @@ func TestSecretsInFxOutputAreRedactedByTheWriter(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "REDACTED") {
 		t.Error("the command output was dropped rather than redacted")
+	}
+}
+
+// failingWriter accepts n writes and then fails, standing in for a runtime log that fills a disk
+// or loses permissions partway through a session.
+type failingWriter struct {
+	accepted int
+	limit    int
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.accepted >= w.limit {
+		return 0, errors.New("writer failed")
+	}
+	w.accepted++
+	return len(p), nil
+}
+
+// A sweep that fails partway has written some events and not others. The cursor has to advance far
+// enough to cover the fx records whose events were *all* written -- otherwise the retry re-appends
+// them -- and no further, or the record that was half-written is lost.
+func TestPartialEmitAdvancesPastFullyEmittedRecordsOnly(t *testing.T) {
+	f := newSweepFixture(t)
+	lines := []string{
+		sessionStartedLine(1, "/repo"),
+		usageCheckpointLine(2, 1000, 200, 0.10),
+		assistantTurnLine(3),
+	}
+	f.writeSessionLog(t, testSessionID, lines)
+
+	// Fails on the third event, which lands inside the turn at seq 3: the session start (seq 1)
+	// and the checkpoint (seq 2) are each fully emitted by then.
+	failing := &failingWriter{limit: 2}
+	_, err := CollectOnce(CollectOptions{
+		SessionsDir: f.root,
+		StatePath:   f.statePath,
+		Print:       true,
+		Out:         failing,
+	})
+	if err == nil {
+		t.Fatal("the sweep reported success despite a failing writer")
+	}
+
+	state, loadErr := LoadState(f.statePath)
+	if loadErr != nil {
+		t.Fatalf("LoadState: %v", loadErr)
+	}
+	cursor := state.Sessions[testSessionID]
+	if cursor == nil {
+		t.Fatal("the failed sweep saved no cursor, so the retry re-emits everything")
+	}
+	if cursor.LastSeq != 2 {
+		t.Fatalf("cursor.LastSeq = %d, want 2 -- the last fx record whose events were all written", cursor.LastSeq)
+	}
+
+	// The retry picks up at the record that failed, and does not repeat the two before it.
+	var retried bytes.Buffer
+	summary, err := CollectOnce(CollectOptions{
+		SessionsDir: f.root,
+		StatePath:   f.statePath,
+		Print:       true,
+		Out:         &retried,
+	})
+	if err != nil {
+		t.Fatalf("retry sweep: %v", err)
+	}
+	if summary.EventsEmitted == 0 {
+		t.Fatal("the retry collected nothing, so the half-written record was lost")
+	}
+	if strings.Contains(retried.String(), `"session.started"`) {
+		t.Error("the retry re-emitted the session start, which the failed sweep had already written")
+	}
+	if !strings.Contains(retried.String(), `"prompt.submitted"`) {
+		t.Error("the retry did not re-emit the record that failed")
+	}
+}
+
+// fx writes far more storage bookkeeping than agent activity, and a session often ends on a
+// recovery checkpoint rather than a turn. If the cursor only ever advanced to the last *mapped*
+// event, it would sit permanently behind the manifest's last sequence and every sweep would re-read
+// the whole session -- correct output, wasted work, forever.
+func TestStorageOnlyTailStillAdvancesTheCursor(t *testing.T) {
+	f := newSweepFixture(t)
+	lines := []string{
+		sessionStartedLine(1, "/repo"),
+		assistantTurnLine(2),
+		frame(3, 1770000005000, KindRecoveryCheckpointSet, `{"checkpoint":{"seq":3}}`),
+		frame(4, 1770000006000, KindRecoveryCheckpointSet, `{"checkpoint":{"seq":4}}`),
+	}
+	f.writeSessionLog(t, testSessionID, lines)
+
+	if _, err := CollectOnce(f.options()); err != nil {
+		t.Fatalf("first sweep: %v", err)
+	}
+	state, err := LoadState(f.statePath)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if got := state.Sessions[testSessionID].LastSeq; got != 4 {
+		t.Fatalf("cursor.LastSeq = %d, want 4 -- the last committed record, not the last mapped one", got)
+	}
+
+	second, err := CollectOnce(f.options())
+	if err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if second.SessionsChanged != 0 {
+		t.Error("the second sweep re-read a session that had not changed")
+	}
+}
+
+// `sync --json` and `status --json` are read by the same scripts. A summary serialized with Go's
+// default PascalCase field names would be the one JSON contract in this command group that does not
+// match the others.
+func TestSweepSummaryUsesSnakeCaseJSONKeys(t *testing.T) {
+	data, err := json.Marshal(Summary{Sessions: 1, SessionsChanged: 1, EventsEmitted: 5, MalformedLines: 2, PartialSessions: 1})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{
+		`"sessions"`, `"sessions_changed"`, `"events_emitted"`, `"errors"`,
+		`"malformed_lines"`, `"partial_sessions"`,
+	} {
+		if !strings.Contains(string(data), key) {
+			t.Errorf("summary JSON %s is missing %s", data, key)
+		}
 	}
 }
