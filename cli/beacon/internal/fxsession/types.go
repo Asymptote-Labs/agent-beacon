@@ -231,21 +231,31 @@ type ToolCall struct {
 // three are carried through to Beacon rather than collapsed, because a reader who cannot tell a
 // short output from a truncated one cannot tell what the agent actually saw.
 type ToolResult struct {
-	ToolCallID         DurableString    `json:"tool_call_id"`
-	ToolName           DurableString    `json:"tool_name"`
-	Status             string           `json:"status"`
-	Output             DurableString    `json:"output"`
-	OutputHandle       *string          `json:"output_handle"`
-	Preview            *string          `json:"preview"`
-	OutputBytes        int64            `json:"output_bytes"`
-	StoredOutputBytes  int64            `json:"stored_output_bytes"`
-	Truncated          bool             `json:"truncated"`
-	ProviderNative     bool             `json:"provider_native"`
-	CreatedAtMS        int64            `json:"created_at_ms"`
-	PermissionFeedback []DurableString  `json:"permission_feedback"`
-	CommittedFile      *CommittedFile   `json:"committed_file_presentation"`
-	CommandProcess     *ProcessOutcome  `json:"command_process_presentation"`
-	TerminalAction     *TerminalOutcome `json:"terminal_action_presentation"`
+	ToolCallID          DurableString    `json:"tool_call_id"`
+	ToolName            DurableString    `json:"tool_name"`
+	Status              string           `json:"status"`
+	Output              DurableString    `json:"output"`
+	OutputHandle        *string          `json:"output_handle"`
+	Preview             *string          `json:"preview"`
+	OutputBytes         int64            `json:"output_bytes"`
+	StoredOutputBytes   int64            `json:"stored_output_bytes"`
+	Truncated           bool             `json:"truncated"`
+	ProviderNative      bool             `json:"provider_native"`
+	CreatedAtMS         int64            `json:"created_at_ms"`
+	PermissionFeedback  []DurableString  `json:"permission_feedback"`
+	CommittedFile       *CommittedFile   `json:"committed_file_presentation"`
+	CommandOutputReplay *CommandReplay   `json:"command_output_replay"`
+	CommandProcess      *ProcessOutcome  `json:"command_process_presentation"`
+	TerminalAction      *TerminalOutcome `json:"terminal_action_presentation"`
+}
+
+// CommandReplay is fx's pointer to a command's full captured output, which it stores in a framed
+// file beside the session rather than in the record. Kind is "available" with a handle, or
+// "unavailable". Beacon records the handle and does not try to read the frame format.
+type CommandReplay struct {
+	Kind        string        `json:"kind"`
+	Handle      DurableString `json:"handle"`
+	FramedBytes int64         `json:"framed_bytes"`
 }
 
 // CommittedFile is the diff fx committed for a write or edit: the path, whether the file was added

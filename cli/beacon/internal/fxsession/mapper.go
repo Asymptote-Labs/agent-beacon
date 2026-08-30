@@ -94,6 +94,13 @@ type mapper struct {
 	// lastUsage is the previous cumulative usage snapshot, kept so a checkpoint can be emitted as
 	// the difference from the one before it. See usageEvent.
 	lastUsage *UsageSnapshot
+	// lastTotals is the session's cumulative token count as of the previous committed turn, used
+	// to derive a turn's own usage on fx builds that write no turn summary. See emitTurnUsage.
+	lastTotals struct {
+		input  int64
+		output int64
+		seen   bool
+	}
 	// turnIndex counts committed turns, so a dedup id can name which turn an event came from even
 	// though fx numbers turns only within its own history.
 	turnIndex int
@@ -599,34 +606,73 @@ func unifiedDiff(file *CommittedFile) string {
 // Only input and output tokens come from here. Cost and cache tokens exist only in fx's cumulative
 // usage snapshots and are emitted from those as deltas, in fields this event leaves unset -- so the
 // two sources add up rather than overlapping.
+//
+// Two sources for the per-turn counts, because fx has shipped both shapes. A build that writes a
+// turn summary is read from it, flags and durations included. A build that writes none -- fx 0.0.7
+// omits the summary entirely, which is how this was found: a real session through the released
+// binary produced no token usage at all -- falls back to the difference between this turn's
+// cumulative session totals and the previous turn's. Same discipline as the checkpoint deltas, and
+// the same reason: the alternative is either no usage or a session's whole history counted once per
+// turn. raw.fx.token_source says which was used, because an exact per-turn count and a difference
+// of two running totals are not equally trustworthy.
 func (m *mapper) emitTurnUsage(event *Event, turn Turn) {
-	if turn.Execution == nil || turn.Execution.TurnSummary == nil {
-		return
+	usage := &schema.GenAIUsageInfo{}
+	raw := map[string]interface{}{}
+
+	summary := (*TurnSummary)(nil)
+	if turn.Execution != nil {
+		summary = turn.Execution.TurnSummary
 	}
-	progress := turn.Execution.TurnSummary.TokenProgress
-	if progress.InputTokens <= 0 && progress.OutputTokens <= 0 {
+	switch {
+	case summary != nil && (summary.TokenProgress.InputTokens > 0 || summary.TokenProgress.OutputTokens > 0):
+		progress := summary.TokenProgress
+		if progress.InputTokens > 0 {
+			input := progress.InputTokens
+			usage.InputTokens = &input
+		}
+		if progress.OutputTokens > 0 {
+			output := progress.OutputTokens
+			usage.OutputTokens = &output
+		}
+		// fx says when a count is its own estimate rather than the provider's number. Carrying the
+		// flags is what keeps a cost report from presenting an estimate as a measurement.
+		raw["token_source"] = "turn_summary"
+		raw["input_exact"] = progress.InputExact
+		raw["output_exact"] = progress.OutputExact
+		raw["turn_duration_ms"] = summary.TurnDurationMS
+		raw["thinking_duration_ms"] = summary.ThinkingDurationMS
+	default:
+		input := delta(int64(event.TurnCommitted.TotalInputTokens), m.lastTotals.input)
+		output := delta(int64(event.TurnCommitted.TotalOutputTokens), m.lastTotals.output)
+		if input > 0 {
+			usage.InputTokens = &input
+		}
+		if output > 0 {
+			usage.OutputTokens = &output
+		}
+		raw["token_source"] = "session_totals_delta"
+	}
+	m.recordTotals(event.TurnCommitted)
+
+	if usage.InputTokens == nil && usage.OutputTokens == nil {
 		return
 	}
 	ev := m.base(event, "token.usage", "metric", schema.SeverityInfo, schema.FidelityObserved, "fx token usage")
-	usage := &schema.GenAIUsageInfo{}
-	if progress.InputTokens > 0 {
-		input := progress.InputTokens
-		usage.InputTokens = &input
-	}
-	if progress.OutputTokens > 0 {
-		output := progress.OutputTokens
-		usage.OutputTokens = &output
-	}
 	ev.GenAI = m.withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) { genAI.Usage = usage })
-	// fx says when a count is its own estimate rather than the provider's number. Carrying the
-	// flags is what keeps a cost report from presenting an estimate as a measurement.
-	ev.Raw = mergeRaw(ev.Raw, map[string]interface{}{
-		"input_exact":          progress.InputExact,
-		"output_exact":         progress.OutputExact,
-		"turn_duration_ms":     turn.Execution.TurnSummary.TurnDurationMS,
-		"thinking_duration_ms": turn.Execution.TurnSummary.ThinkingDurationMS,
-	})
+	ev.Raw = mergeRaw(ev.Raw, raw)
 	m.append(event, fmt.Sprintf("turn.%d.usage", m.turnIndex), ev)
+}
+
+// recordTotals advances the cumulative baseline the fallback above measures against. It runs for
+// every committed turn, including ones this sweep is not emitting, so a resumed sweep measures the
+// first turn it emits against the turn before it rather than against zero.
+func (m *mapper) recordTotals(committed *TurnCommitted) {
+	if committed == nil {
+		return
+	}
+	m.lastTotals.input = int64(committed.TotalInputTokens)
+	m.lastTotals.output = int64(committed.TotalOutputTokens)
+	m.lastTotals.seen = true
 }
 
 // emitUsage reports a usage checkpoint as the difference from the previous one.
@@ -737,6 +783,13 @@ func toolResultRaw(result ToolResult) map[string]interface{} {
 		"stored_output_bytes": result.StoredOutputBytes,
 		"truncated":           result.Truncated,
 		"provider_native":     result.ProviderNative,
+	}
+	if result.CommandOutputReplay != nil && result.CommandOutputReplay.Handle != "" {
+		// The full captured output of a command is not in the record: fx keeps it in a framed
+		// replay file beside the session and puts the handle here. Beacon cannot read that framing,
+		// so it carries the handle rather than pretending the stored text is the whole output.
+		raw["command_output_handle"] = result.CommandOutputReplay.Handle.String()
+		raw["command_output_framed_bytes"] = result.CommandOutputReplay.FramedBytes
 	}
 	if result.CommandProcess != nil {
 		raw["process_outcome"] = result.CommandProcess.Kind
