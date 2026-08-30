@@ -120,11 +120,14 @@ func (m *mapper) consume(event *Event) {
 			m.workspace = root
 		}
 		m.applyPreferences(event.SessionStarted.Preferences)
-		// A session_started can carry the usage the session resumed with. Seeding the delta
-		// baseline from it stops the first checkpoint after a resume from being reported as if
-		// the whole prior session had happened just then.
+		// A session_started can carry the usage the session resumed with. Seeding both delta
+		// baselines from it stops the first checkpoint and the first turn after a resume from
+		// being reported as if the whole prior session had happened just then.
 		if event.SessionStarted.Usage != nil {
 			m.lastUsage = event.SessionStarted.Usage
+			m.lastTotals.input = event.SessionStarted.Usage.InputTokens
+			m.lastTotals.output = event.SessionStarted.Usage.OutputTokens
+			m.lastTotals.seen = true
 		}
 		if emit && !m.opts.SkipSessionStarted {
 			m.emitSessionStarted(event)

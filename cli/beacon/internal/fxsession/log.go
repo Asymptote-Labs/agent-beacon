@@ -91,6 +91,12 @@ func (d *Decoder) Next() (*Event, error) {
 		switch {
 		case errors.Is(err, ErrUnsupportedSchema):
 			d.stats.Skipped++
+			var env struct {
+				Seq uint64 `json:"seq"`
+			}
+			if json.Unmarshal(line, &env) == nil && env.Seq > d.stats.MaxSeq {
+				d.stats.MaxSeq = env.Seq
+			}
 			continue
 		case err != nil:
 			d.stats.Malformed++
