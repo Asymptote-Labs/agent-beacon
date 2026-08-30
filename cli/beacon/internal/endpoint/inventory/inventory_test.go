@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
 
 func TestScanCurrentUserMCPInventory(t *testing.T) {
@@ -344,6 +346,11 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// not, so the two paths are spelled out rather than derived from each other.
 		{runtime: "pi_cli", path: filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "pi_cli", path: filepath.Join(work, ".pi", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		// Prime Agent keeps the full `.prime/agent` segment at both scopes, which is exactly where
+		// it differs from Pi above -- its loader joins the same config directory name to the home
+		// directory and to the working directory.
+		{runtime: "prime_agent", path: filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "prime_agent", path: filepath.Join(work, ".prime", "agent", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
@@ -918,5 +925,55 @@ func TestQwenManagedDetectionReadsTheHookCommand(t *testing.T) {
 				t.Errorf("beaconManaged(qwen_code) = %t, want %t for %s", got, tc.want, tc.settings)
 			}
 		})
+	}
+}
+
+// An extension Beacon wrote has to be recognized as Beacon's, or inventory reports a managed file
+// as an unknown one and a repair has no way to tell a stale install from a third-party extension.
+//
+// Both markers are checked from both directions because the two runtimes render from one source:
+// the risk is not that the marker is missing but that either runtime accepts the other's.
+func TestScanRecognizesPrimeAgentManagedExtension(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("SHELL", "/bin/bash")
+	primePath := filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts")
+	writeFile(t, primePath, "// "+hooks.PrimeManagedExtensionMarker+"\nexport default () => {}\n")
+	piPath := filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts")
+	writeFile(t, piPath, "// "+hooks.PiManagedExtensionMarker+"\nexport default () => {}\n")
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	prime := findConfig(result.Configs, "prime_agent", primePath)
+	if prime == nil {
+		t.Fatal("Prime Agent extension candidate not found")
+	}
+	if !prime.BeaconManaged {
+		t.Fatalf("Prime Agent extension was not recognized as Beacon-managed: %+v", prime)
+	}
+	pi := findConfig(result.Configs, "pi_cli", piPath)
+	if pi == nil || !pi.BeaconManaged {
+		t.Fatalf("adding Prime Agent broke Pi's own recognition: %+v", pi)
+	}
+}
+
+// The failure this guards is silent: a Pi extension sitting in Prime Agent's directory forwards its
+// events as Pi's, so calling it a managed Prime Agent install would report telemetry as arriving
+// for a runtime it is not arriving for.
+func TestScanDoesNotAcceptPiMarkerAsPrimeAgent(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("SHELL", "/bin/bash")
+	primePath := filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts")
+	writeFile(t, primePath, "// "+hooks.PiManagedExtensionMarker+"\nexport default () => {}\n")
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	prime := findConfig(result.Configs, "prime_agent", primePath)
+	if prime == nil {
+		t.Fatal("Prime Agent extension candidate not found")
+	}
+	if prime.BeaconManaged {
+		t.Fatal("a Pi extension in Prime Agent's directory was reported as a managed Prime Agent install")
 	}
 }
