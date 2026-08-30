@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -246,16 +245,11 @@ func runEndpointFxStatus(cmd *cobra.Command, args []string) error {
 // resolveFxStatePath always returns a path so the cursor survives between runs. Without one, every
 // scheduled sweep would re-append every session's whole history.
 //
-// It prefers the endpoint state directory next to the runtime log, and falls back to the OS temp
-// directory when there is no home to put it in -- some cron and service environments have none, and
-// a sweep with no cursor is worse than a cursor in a volatile place.
+// A system-mode sweep keeps its cursor beside the system runtime log; everything else uses the
+// per-user default in fxsession.DefaultStatePath.
 func resolveFxStatePath(override string, userMode bool) string {
 	if strings.TrimSpace(override) != "" {
 		return override
-	}
-	base := filepath.Join(os.TempDir(), "beacon")
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		base = filepath.Join(home, ".beacon")
 	}
 	if !userMode {
 		// A system-mode sweep collects on behalf of the machine, so its cursor belongs beside the
@@ -264,5 +258,5 @@ func resolveFxStatePath(override string, userMode bool) string {
 			return filepath.Join(dir, "fx-state.json")
 		}
 	}
-	return filepath.Join(base, "endpoint", "state", "fx.json")
+	return fxsession.DefaultStatePath()
 }
