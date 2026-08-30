@@ -52,8 +52,7 @@ Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 ## High-Level Architecture
 
 Beacon captures activity where each agent actually runs, then normalizes it into a
-single OpenTelemetry-based event model. That one stream is what the local dashboard,
-JSONL retention, and every SIEM destination read from.
+single OpenTelemetry-based event model.
 
 <p align="center">
   <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
