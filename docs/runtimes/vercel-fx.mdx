@@ -1,0 +1,138 @@
+---
+title: "fx (Vercel Labs)"
+description: "Asymptote support details for fx (vercel-labs/fx) endpoint telemetry"
+---
+
+## Runtime overview
+
+Asymptote supports [fx](https://github.com/vercel-labs/fx), Vercel Labs' native coding agent, by reading the session records fx commits to disk.
+
+fx is the one supported runtime with no third-party observation surface at all. Its lifecycle hooks are Zig handlers compiled into the binary rather than commands a settings file can point at, it ships no OpenTelemetry export, and its plugin story is MCP — which describes the tools fx calls, not what fx did. What it does have is a durable, append-only record of every session under `~/.fx/sessions`, so Asymptote reads that.
+
+```bash
+beacon endpoint fx sync
+```
+
+<Note>
+There is nothing to install into fx and nothing to configure inside it. Collection is an action you run rather than a setting Asymptote writes, which is why fx has a command instead of a `beacon endpoint hooks install --harness` target.
+</Note>
+
+## Prerequisites
+
+Before collecting fx telemetry, make sure:
+
+- fx is installed and has run at least once, so `~/.fx/sessions` exists.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Something runs `beacon endpoint fx sync` on a schedule, or leaves `--watch` running. Nothing sweeps on its own.
+
+## Collection path
+
+Every fx event carries `harness.collection_method=poll`. Asymptote sees what a turn did once fx committed it, rather than observing the agent as it works. Stating the consequence plainly: nothing on this path can hold or deny a tool call, and nothing appears in the runtime log until the turn is committed.
+
+| Item | Path |
+|------|------|
+| fx session store | `~/.fx/sessions/<session>/events.jsonl` |
+| fx session manifest | `~/.fx/sessions/<session>/session.json` |
+| Collector cursor (user mode) | `~/.beacon/endpoint/state/fx.json` |
+| Collector cursor (system mode) | `fx-state.json` beside the system runtime log |
+
+A sweep reads each session's log only as far as the manifest's committed watermark, so a frame fx is still writing is left for the next sweep rather than counted as corruption. The cursor stores both the sequence number and fx's log generation, because fx restarts sequence numbers when it compacts a log; without the generation a compaction would look like a rewind and replay the session.
+
+Re-reading is safe. Each event's dedup id comes from the record's own coordinates — session, log generation, sequence, and position within the turn — not from its content, so the same fx record maps to the same event on every sweep.
+
+fx has no OpenTelemetry export and no hook or plugin file for Asymptote to write, so there is no OTLP path and no managed file for this runtime.
+
+## Discovery and status
+
+Asymptote detects fx through the `fx` executable, and treats `~/.fx` as an additional signal. fx installed through its setup script, a shell alias, or a per-user bin directory is often missing from the `PATH` the endpoint process inherited while its profile directory is still present. The Pi, Oh My Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
+
+```bash title="Show fx discovery state"
+beacon endpoint discover --all --json
+```
+
+fx reports as the `vercel_fx` harness with capability `session_log`, which no other runtime has. The other capabilities describe something Asymptote writes into the runtime and the runtime then calls; fx offers nothing to write into, so there is no marker to check. That changes what "telemetry enabled" can honestly mean here: the only evidence telemetry is flowing is that a sweep has actually run and is level with the sessions on this machine.
+
+| Telemetry status | Meaning |
+|------------------|---------|
+| `missing` | fx has written no sessions on this machine, so there is nothing to collect yet |
+| `disabled` | Sessions are present and none have been collected; run `beacon endpoint fx sync` |
+| `enabled` | Sweeps have collected some or all sessions; the message names how many of how many |
+| `misconfigured` | The collector cursor file exists but could not be read |
+
+A session whose manifest cannot be read is reported as not caught up rather than assumed to be, because it cannot say how far fx has committed.
+
+## Install or configuration support
+
+```bash
+beacon endpoint fx status                # sessions fx has written, and how much of each has been read
+beacon endpoint fx sync                  # one sweep, then exit
+beacon endpoint fx sync --print          # map records to events without writing or advancing the cursor
+beacon endpoint fx sync --watch          # sweep continuously
+beacon endpoint fx sync --watch --interval 5m
+```
+
+See [`beacon endpoint fx`](/cli/endpoint-fx) for the full flag reference.
+
+`--print` is a dry run in both directions: it neither writes the runtime log nor advances the cursor, so running it twice shows the same events and running it does not quietly consume the work a later real sweep would do.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through executable and profile-directory detection, plus how much of the session store has been collected |
+| Harness attribution | Supported. `fx`, `fx_cli`, `fx-cli`, `fx.sh`, `fx_agent`, `vercel_fx`, and `vercel fx` all normalize to `vercel_fx` |
+| Configuration and MCP inventory | Supported. `~/.fx/settings.json`, `~/.fx/mcp.json`, and a workspace `.mcp.json` are inventoried as fx's own configuration |
+| Session start | Supported. `session.started`, emitted once per session even though fx writes a fresh start record at sequence 1 of every log generation |
+| Session context | Supported. `session.context` for a model or provider change and for a workspace rebind, since fx sessions are portable across directories |
+| Prompts | Supported. `prompt.submitted`, with the path and media type of any attached images. The event is stamped at the turn's start rather than at commit time, so a prompt does not sort after the tool calls it caused |
+| Tool use | Supported. `tool.invoked`, `tool.completed`, and `tool.failed`, joined by `gen_ai.tool.call.id`. A call that was in flight when the user interrupted the turn is recorded too, as a `tool.invoked` with no result |
+| Commands | Supported. `command.executed` for fx's `run_command` and `terminal` tools, with the exit status or signal and the captured output |
+| File activity | Supported. `file.read`, `file.created`, and `file.modified`, with the diff, its hash, and its byte count on an edit |
+| MCP activity | Supported. `mcp.tool_invoked` for calls that went to a connected server. fx's own `mcp_search_tools`, `mcp_select_tool`, and `mcp_features` control tools share the `mcp_` prefix and are excluded, so the prefix stays a reliable signal |
+| Agent messages | Supported. `agent.message` when a turn's assistant reply is committed |
+| History compaction | Supported. `session.compacting` when fx drops turns from its own history to reclaim context |
+| Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, derived per turn from fx's cumulative totals, plus runtime-reported cost |
+| Event fidelity | Every event is `observed`. fx's record names the tool, the call id, the file, the action, the exit code, and the diff, so nothing here is derived by keyword match |
+| Threat detection | Supported. fx events reach `beacon scan` through the same `command.command` and `file.path` fields the rule pack already matches on |
+| Local JSONL and dashboard | Supported. The dashboard labels the harness "fx (Vercel Labs)" |
+| MDM deployment | Supported for the endpoint agent. The sweep itself is a command to schedule, not a file to deploy |
+
+## Data handling
+
+fx content is handled like every other runtime. Prompts, assistant replies, tool arguments, commands, command output, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+
+The sweep is local and offline. It reads files already on this machine and writes the runtime log; nothing about it reaches the network.
+
+## Known gaps
+
+- **No approvals.** fx persists permission feedback as text rather than a per-call decision, so there is nothing to record as an approval. Asymptote does not synthesize one, matching the [Cline](/runtimes/cline) and [Pi](/runtimes/pi) posture.
+- **No session end.** fx sessions are resumable, so there is no point at which fx declares one over. Asymptote does not invent a `session.ended` for a session that may be resumed tomorrow.
+- **No enforcement, and none possible on this path.** A poll sees a committed record. Even the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`) has nothing to attach to here, because the tool call already ran.
+- **Events land a turn late.** fx commits a turn when it finishes, so telemetry arrives at turn granularity rather than as the agent works, and no sooner than the next sweep.
+- **Nothing sweeps automatically.** `beacon endpoint fx sync` runs when you run it. Schedule it, or leave `--watch` running, or the runtime log stops at the last sweep.
+- **Unknown record kinds are skipped by name.** A kind fx adds later is skipped as unknown rather than mistaken for one Asymptote maps, so new fx behavior needs a Beacon update before it appears.
+
+## Deployment notes
+
+Confirm discovery sees the runtime, preview what a sweep would emit, then sweep and check the log:
+
+```bash
+/opt/beacon/bin/beacon endpoint discover --all --json
+/opt/beacon/bin/beacon endpoint fx status
+/opt/beacon/bin/beacon endpoint fx sync --print
+/opt/beacon/bin/beacon endpoint fx sync
+grep '"name":"vercel_fx"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+For continuous collection, run the sweep under whatever scheduler the platform already uses — a `launchd` agent, a systemd timer, a Scheduled Task, or a cron entry — or leave `beacon endpoint fx sync --watch` running in the operator's session. The interval floor is 5 seconds; a sweep re-reads each changed session's log, so a very short interval spends real work to shorten a window fx's own commit latency already bounds.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon endpoint fx" icon="terminal" href="/cli/endpoint-fx">
+    Flags, output, and cursor behavior for the sweep.
+  </Card>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+</Columns>

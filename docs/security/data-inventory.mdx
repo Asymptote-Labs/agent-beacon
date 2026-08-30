@@ -24,8 +24,8 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Cursor | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
 | Claude Cowork | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
 | OpenClaw Gateway | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
-| Claude.ai (`claude_web`) | Managed browser extension over local OTLP | Prompt text, assistant response text, request and response model, tool call id/name/arguments/results, token usage, and conversation id from the claude.ai chat stream |
-| ChatGPT (`chatgpt_web`) | Managed browser extension over local OTLP | Prompt text, assistant response text, model, tool call activity, and conversation id from the chatgpt.com chat stream. ChatGPT web does not report token usage in its stream |
+| [Claude.ai](/runtimes/claude-web) (`claude_web`) | Managed browser extension over local OTLP | Prompt text, assistant response text, request and response model, tool call id/name/arguments/results, token usage, and conversation id from the claude.ai chat stream |
+| [ChatGPT](/runtimes/chatgpt-web) (`chatgpt_web`) | Managed browser extension over local OTLP | Prompt text, assistant response text, model, tool call activity, and conversation id from the chatgpt.com chat stream. ChatGPT web does not report token usage in its stream |
 
 The browser extension is the only surface that reads content from a site the
 person is signed into personally, so its boundaries are worth stating explicitly.

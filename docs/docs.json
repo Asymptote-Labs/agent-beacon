@@ -144,12 +144,14 @@
                       "runtimes/devin",
                       "runtimes/devin-desktop",
                       "runtimes/factory-droid",
+                      "runtimes/vercel-fx",
                       "runtimes/gemini-cli",
                       "runtimes/github-copilot-cli",
                       "runtimes/grok-build",
                       "runtimes/oh-my-pi",
                       "runtimes/opencode",
                       "runtimes/pi",
+                      "runtimes/prime-agent",
                       "runtimes/qwen-code",
                       "runtimes/vscode"
                     ]
@@ -161,13 +163,15 @@
                       "runtimes/hermes-agent",
                       "runtimes/openclaw-gateway"
                     ]
-                  },
-                  {
-                    "group": "Browser Chat",
-                    "pages": [
-                      "runtimes/browser-extension"
-                    ]
                   }
+                ]
+              },
+              {
+                "group": "Browser Chat",
+                "pages": [
+                  "runtimes/browser-extension",
+                  "runtimes/claude-web",
+                  "runtimes/chatgpt-web"
                 ]
               },
               {
@@ -366,6 +370,7 @@
                   "cli/endpoint-uninstall",
                   "cli/endpoint-config",
                   "cli/endpoint-onboarding",
+                  "cli/endpoint-fx",
                   "cli/dashboard",
                   "cli/wazuh",
                   "cli/elastic",

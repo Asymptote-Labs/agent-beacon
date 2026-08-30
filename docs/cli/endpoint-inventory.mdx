@@ -21,8 +21,8 @@ Inventory can include:
 
 - Endpoint config path, runtime log path, and configured OTLP harnesses
 - Detected supported runtimes and telemetry status, including MDM-managed launch-environment state for GitHub Copilot CLI and Factory Droid
-- Hook integration status for Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, OpenCode, and Qwen Code
-- Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally, including Claude Code `~/.claude.json` and Cursor `mcp.json`
+- Hook and managed-plugin integration status for Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, Oh My Pi, OpenCode, Pi, and Qwen Code
+- Supported agent configuration files and MCP server configuration context where Beacon can inspect them locally, including Claude Code `~/.claude.json`, Cursor `mcp.json`, and fx `~/.fx/settings.json`, `~/.fx/mcp.json`, and a workspace `.mcp.json`
 - Local agent skill manifests discovered under supported skill roots, including symlinked Claude Code skill directories, reported as metadata and hashes by default (add `--contents` for redacted full bodies)
 - Recently observed Beacon runtime events when the runtime log exists
 - Admin-configured integration observations such as Claude Cowork and OpenClaw Gateway events

@@ -10,6 +10,7 @@ Asymptote supports multiple [runtime surfaces](/concepts/core-concepts#runtime-s
 These integrations are grouped by where the agent runs and how telemetry is collected:
 
 - **Local**: Agent harnesses running on an endpoint write telemetry to Asymptote's local collector, hook adapter, plugin, or gateway path.
+- **Browser chat**: An optional Chrome extension reads the chat streams of supported sites in the browser and posts them to the same local collector.
 - **[CI](/concepts/core-concepts#ci-telemetry)**: Ephemeral CI jobs use a temporary collector and write normalized runtime JSONL as a build artifact or upload target instead of installing a persistent endpoint service.
 - **[Cloud](/concepts/core-concepts#cloud-agent-telemetry)**: Provider-managed cloud agents can write session telemetry from the cloud sandbox to customer-managed storage, while [SDK integrations](/concepts/core-concepts#observe-sdk) instrument agent applications that run in servers, serverless functions, workers, and hosted agent platforms.
 
@@ -27,14 +28,18 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [Devin CLI](/runtimes/devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
 | [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
 | [Factory Droid](/runtimes/factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
+| [fx (Vercel Labs)](/runtimes/vercel-fx) | Poll of fx's own session records under `~/.fx/sessions` through `beacon endpoint fx sync` | Session start, prompts, tool calls, commands with exit codes and output, file reads and edits with diffs, MCP tool calls, agent messages, history compaction, and token usage and cost. No approval or session-end telemetry, because fx persists neither |
 | [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
 | [Oh My Pi](/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle, operator approval decisions, commands including operator `!` and `$` commands, file reads and edits with the unified patch, MCP tool activity, agent reasoning, and token usage |
 | [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
 | [Pi](/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle, commands including operator `!` commands, file reads and edits with the unified patch, agent reasoning, and token usage |
+| [Prime Agent](/runtimes/prime-agent) | Not yet collected | Harness identity only. Prime Agent is recognized as its own runtime and its collection method is defined, but no managed extension ships yet, so no events are collected |
 | [Qwen Code](/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request, subagent, stop, session-end, command, and file telemetry |
 | [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity through OTel; optional hooks for extra lifecycle and cross-agent detail |
+
+Two rows in that table are not hook or OTLP integrations. [fx](/runtimes/vercel-fx) exposes no hook, plugin, or OpenTelemetry surface at all, so Asymptote reads the session records fx commits to disk; every fx event is marked `harness.collection_method=poll`, meaning it was read after the turn was committed rather than observed as the agent worked, and nothing on that path can hold or deny a tool call. [Prime Agent](/runtimes/prime-agent) is listed because Asymptote already recognizes it as its own harness, but no managed extension ships yet, so it collects nothing today.
 
 ### Local knowledge worker agent harnesses
 
@@ -44,14 +49,14 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [Hermes Agent](/runtimes/hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
 | [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 
-### Local browser chat surfaces
+### Browser chat surfaces
 
 | Agent harness | Collection path | Telemetry coverage |
 |----------------|-----------------|--------------------|
-| [Claude.ai](/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
-| [ChatGPT](/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call telemetry from the chatgpt.com chat stream |
+| [Claude.ai](/runtimes/claude-web) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage telemetry from the claude.ai chat stream |
+| [ChatGPT](/runtimes/chatgpt-web) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and web search tool telemetry from the chatgpt.com chat stream. No token usage, which the site does not report |
 
-Browser chat resolves to the `claude_web` and `chatgpt_web` harness names, so it stays distinguishable from CLI agents. The extension retains full prompt and response text by default. See [Browser Extension](/runtimes/browser-extension) for the retention modes.
+Both sites are collected by one optional Chrome extension. Browser chat resolves to the `claude_web` and `chatgpt_web` harness names, so it stays distinguishable from CLI agents. The extension retains full prompt and response text by default. See [Browser Extension](/runtimes/browser-extension) to install it and to change the retention mode.
 
 ### CI harnesses
 
@@ -102,11 +107,12 @@ MDM assets, meaning Jamf Pro Extension Attributes, Fleet osquery queries, and Ri
 | Runtime | Enterprise configuration |
 |---------|--------------------------|
 | Gemini CLI | Opt in by adding `gemini` to the endpoint harness list, for example `claude,codex,gemini`. Asymptote can then manage `~/.gemini/settings.json` for local OTLP collection. |
+| fx (Vercel Labs) | Nothing to configure in fx. Schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) in the logged-in user's context, or leave `--watch` running, so committed sessions keep reaching the runtime log. Nothing sweeps on its own. |
 | GitHub Copilot CLI | Configure launch environment through MDM or customer policy: `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Asymptote validates the endpoint but does not edit shell profiles or launch environments. |
 | Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
 | OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
 
-Install hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, OpenCode, Pi, Qwen Code, and the optional VS Code hooks.
+Install hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, Oh My Pi, OpenCode, Pi, Qwen Code, and the optional VS Code hooks. fx is the exception with no hooks to install: schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) instead.
 
 If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
 

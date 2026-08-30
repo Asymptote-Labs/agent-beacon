@@ -1,0 +1,110 @@
+---
+title: "beacon endpoint fx"
+description: "Collect endpoint telemetry from fx (vercel-labs/fx) session records"
+---
+
+## Command overview
+
+`beacon endpoint fx` collects telemetry from [fx](/runtimes/vercel-fx), Vercel Labs' native coding agent, by reading the session records fx commits under `~/.fx/sessions` and converting them into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint fx [command]
+```
+
+It is a command rather than an install step because fx has nothing to install into. Every other supported runtime exposes a hook config, a plugin directory, or an OTLP endpoint, so Beacon writes something once and the runtime calls it. fx has none of those: what it has is a durable session log, so collecting from it is an action rather than a configuration.
+
+Every event is marked `harness.collection_method=poll`. Beacon sees what a turn did once fx committed it, rather than observing the agent as it works, so nothing here can hold or deny a tool call.
+
+Reading is local and offline. Nothing this command does reaches the network.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint fx sync` | Read new fx session records into the runtime log |
+| `beacon endpoint fx status` | Show fx sessions on this machine and how much of each has been collected |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--sessions-dir <path>` | fx session directory. Defaults to `~/.fx/sessions` |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/fx.json` |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths. The cursor moves beside the system runtime log |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them or advancing the cursor |
+| `--watch` | Sweep continuously on `--interval` instead of sweeping once and exiting |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint fx sync
+```
+
+```bash title="Preview without writing anything"
+beacon endpoint fx sync --print
+```
+
+`--print` is a dry run in both directions: it neither writes the runtime log nor advances the cursor, so running it twice shows the same events and running it does not quietly consume the work a later real sweep would do.
+
+```bash title="Sweep continuously"
+beacon endpoint fx sync --watch --interval 5m
+```
+
+Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running.
+
+A sweep prints what it did, and says out loud the two conditions a counter would hide:
+
+```text
+fx sync: 4 sessions, 2 changed, 37 events, 0 errors
+  1 unreadable line(s) in fx session logs
+  1 session(s) had a partly written record; it will be read on the next sweep
+```
+
+A damaged session log and an empty one produce the same event count, and only one of them is a reason to look at the machine. The summary is reported even when the sweep hit an error, because a sweep that collected nine sessions and failed on the tenth did nine sessions' worth of work.
+
+## Status
+
+```bash title="Show fx sessions and collection progress"
+beacon endpoint fx status
+```
+
+```text
+fx sessions: 2 in /Users/you/.fx/sessions
+  1788051418424-...  collected  seq 41/41  /Users/you/src/app
+  1788139022101-...  pending    seq 0/12   /Users/you/src/api
+```
+
+`collected` means the cursor is level with what fx's own manifest says it has committed, in the same log generation. A session whose manifest cannot be read is reported as pending rather than assumed collected, because it cannot say how far fx has committed.
+
+## Cursor behavior
+
+The cursor is what keeps a scheduled sweep from re-appending every session's whole history. It stores both the sequence number and fx's log generation, because fx restarts sequence numbers when it compacts a session log; without the generation a compaction would look like a rewind.
+
+| Mode | Default cursor path |
+|------|--------------------|
+| User | `~/.beacon/endpoint/state/fx.json` |
+| System | `fx-state.json` beside the system runtime log |
+
+A sweep reads each session's log only as far as the manifest's committed watermark, so a frame fx is still writing is left for the next sweep rather than counted as corruption. Re-reading is safe: each event's dedup id comes from the record's own coordinates rather than its content, so the same fx record maps to the same event every time.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="fx (Vercel Labs)" icon="code" href="/runtimes/vercel-fx">
+    Telemetry coverage, discovery, and known gaps for the runtime.
+  </Card>
+  <Card title="beacon endpoint discover" icon="magnifying-glass" href="/cli/endpoint-discover">
+    Check whether fx is detected and how much has been collected.
+  </Card>
+</Columns>
