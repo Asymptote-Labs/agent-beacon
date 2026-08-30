@@ -125,10 +125,15 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	// documented as common to both.
 	case "cline":
 		return getFirstStr(input, "taskId", "task_id", "sessionId", "session_id")
-	// The Beacon extension lifts Pi's session id onto the envelope as `sessionId`, reading it from
+	// The Beacon extension lifts the session id onto the envelope as `sessionId`, reading it from
 	// the handler context's session manager per event. The snake_case spellings are a fallback for
 	// a payload that reached this command by some other route.
-	case "pi":
+	//
+	// Prime Agent shares the case because it delivers the same envelope through the same extension.
+	// Falling through to the default instead reads only `session_id`, which neither runtime sends:
+	// every event still gets written, and every one of them loses session.id -- the field that
+	// groups a run -- so the log looks healthy while nothing in it can be tied together.
+	case "pi", "prime":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	default:
 		id, _ := input["session_id"].(string)
