@@ -140,12 +140,12 @@ type CollectOptions struct {
 // Summary reports what a sweep did. Malformed and PartialSessions are reported rather than logged
 // because "Beacon collected nothing" and "Beacon could not read this" look identical from outside.
 type Summary struct {
-	Sessions        int
-	SessionsChanged int
-	EventsEmitted   int
-	Errors          int
-	MalformedLines  int
-	PartialSessions int
+	Sessions        int `json:"sessions"`
+	SessionsChanged int `json:"sessions_changed"`
+	EventsEmitted   int `json:"events_emitted"`
+	Errors          int `json:"errors"`
+	MalformedLines  int `json:"malformed_lines"`
+	PartialSessions int `json:"partial_sessions"`
 }
 
 // CollectOnce performs one sweep: list fx's sessions, read the ones that moved since the last
@@ -247,15 +247,18 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 
 	mapped := MapSession(ref, events, MapOptions{MinSeq: minSeq, SkipSessionStarted: cursor.Started})
 	if len(mapped) == 0 {
-		advanceCursor(cursor, ref, events)
+		advanceCursor(cursor, ref, events, stats)
 		return false, nil
 	}
 
 	for _, item := range mapped {
 		if err := emit(item.Event, opts); err != nil {
-			// The cursor is deliberately not advanced here. The events already written stay
-			// written, and the next sweep re-reads from the last confirmed position -- which the
-			// writer's duplicate window and the deterministic event ids make safe.
+			// Advance the cursor to cover events that were fully emitted so the
+			// next sweep does not re-append them. Only source events whose entire
+			// set of mapped events was written are advanced past; the partially
+			// written source event is re-emitted in full on the next sweep, and
+			// its coordinate-derived event IDs make the duplicates identifiable.
+			advanceCursorPartial(cursor, ref, events, mapped, &item)
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -263,7 +266,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 			cursor.Started = true
 		}
 	}
-	advanceCursor(cursor, ref, events)
+	advanceCursor(cursor, ref, events, stats)
 	return true, nil
 }
 
@@ -272,22 +275,66 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 // It uses the events actually decoded rather than the manifest's numbers, so a manifest that runs
 // ahead of the log -- a copied session directory, an interrupted sync -- cannot advance the cursor
 // past records that were never read.
-func advanceCursor(cursor *Cursor, ref SessionRef, events []Event) {
+func advanceCursor(cursor *Cursor, ref SessionRef, events []Event, stats Stats) {
 	if len(events) == 0 {
 		return
 	}
 	last := events[len(events)-1]
 	cursor.Generation = last.LogGeneration
 	cursor.LastSeq = last.Seq
+	// The decoder sees every committed envelope, including non-mapped kinds like
+	// recovery checkpoints that it skips. When those land after the last mapped
+	// event, the cursor's seq falls behind the manifest's LastEventSeq and the
+	// cheap skip in collectSession never fires. Advancing to the highest decoded
+	// seq fixes the gap without trusting the manifest's claim, which can overrun
+	// the log in a copied or interrupted-sync directory.
+	if stats.MaxSeq > cursor.LastSeq {
+		cursor.LastSeq = stats.MaxSeq
+	}
 	if ref.Manifest != nil {
 		cursor.UpdatedAtMS = ref.Manifest.UpdatedAtMS
 	} else {
 		cursor.UpdatedAtMS = ref.ModTimeUnixMS
 	}
-	// A session whose start was collected before this cursor existed still counts as started: the
-	// records are in the log, and re-reporting the start on the next generation would double it.
 	for i := range events {
 		if events[i].Kind == KindSessionStarted && events[i].Seq <= cursor.LastSeq {
+			cursor.Started = true
+			break
+		}
+	}
+}
+
+// advanceCursorPartial moves the cursor past source events whose mapped events
+// were all emitted, so the next sweep retries only from the source event that
+// failed. failedItem is the mapped event whose emit returned an error.
+func advanceCursorPartial(cursor *Cursor, ref SessionRef, events []Event, mapped []MappedEvent, failedItem *MappedEvent) {
+	// Walk backwards from the failed item to find the last source event that
+	// was completely emitted (all its mapped events were written).
+	var lastCompleteSeq uint64
+	found := false
+	for i := range mapped {
+		if &mapped[i] == failedItem {
+			break
+		}
+		// When the next mapped event is from a different (higher) source seq,
+		// the current one's source seq is fully emitted.
+		if i+1 < len(mapped) && mapped[i+1].SourceSeq != mapped[i].SourceSeq {
+			lastCompleteSeq = mapped[i].SourceSeq
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+	cursor.Generation = generationOf(events)
+	cursor.LastSeq = lastCompleteSeq
+	if ref.Manifest != nil {
+		cursor.UpdatedAtMS = ref.Manifest.UpdatedAtMS
+	} else {
+		cursor.UpdatedAtMS = ref.ModTimeUnixMS
+	}
+	for i := range events {
+		if events[i].Kind == KindSessionStarted && events[i].Seq <= lastCompleteSeq {
 			cursor.Started = true
 			break
 		}
