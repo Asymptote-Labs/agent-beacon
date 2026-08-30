@@ -17,6 +17,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"antigravity": "antigravity_cli",
 		"vscode":      "vscode_copilot",
 		"pi":          "pi_cli",
+		"omp":         "omp",
 		"cline":       "cline",
 		"qwen":        "qwen_code",
 	} {
@@ -37,7 +38,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway", "pi_cli", "cline", "qwen_code", "vercel_fx",
+		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "vercel_fx",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -110,6 +111,56 @@ func TestNamesMerelyStartingWithPiAreNotPi(t *testing.T) {
 		if got := NormalizeHarnessName(name); got != name {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
 		}
+	}
+}
+
+// Oh My Pi's canonical name is reachable from the spellings the two write paths produce: the hook
+// path installs with --platform omp, and the OTLP path would read a service.name that could just
+// as easily be the repository name.
+func TestOmpSpellingsConvergeOnOmp(t *testing.T) {
+	for _, in := range []string{
+		"omp", "OMP", " omp ", "omp_cli", "omp-cli", "omp cli",
+		"oh-my-pi", "oh_my_pi", "ohmypi", "Oh My Pi", "omp.sh",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "omp" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "omp")
+			}
+		})
+	}
+}
+
+// "omp" is three characters and sits inside ordinary words that reach this field, so matching it by
+// substring would attribute unrelated runtimes to Oh My Pi. "prompt" is the concrete case: it
+// appears in harness and service names across this codebase. This test is what keeps the Oh My Pi
+// case an equality match.
+func TestOmpDoesNotSwallowNamesContainingOmp(t *testing.T) {
+	for _, name := range []string{"prompt-runner", "compass", "comp-agent", "ompa-cli"} {
+		if got := NormalizeHarnessName(name); got != name {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved -- a substring rule for "+
+				"Oh My Pi would reassign this runtime's sessions to omp", name, got)
+		}
+	}
+}
+
+// Oh My Pi and Pi are separate products that a fleet can have installed side by side, and every Oh
+// My Pi spelling ends in "pi". Neither may resolve to the other: merging them would attribute one
+// runtime's commands, edits and approvals to the other in every harness-grouped query.
+func TestOmpAndPiStaySeparateRuntimes(t *testing.T) {
+	for name, want := range map[string]string{
+		"oh-my-pi": "omp",
+		"oh_my_pi": "omp",
+		"omp":      "omp",
+		"pi":       "pi_cli",
+		"pi.dev":   "pi_cli",
+		"pi_cli":   "pi_cli",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got != want {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- Oh My Pi and Pi must not be "+
+					"recorded under one name", name, got, want)
+			}
+		})
 	}
 }
 

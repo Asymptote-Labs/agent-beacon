@@ -58,6 +58,28 @@ func NormalizeHarnessName(name string) string {
 		return "vscode_copilot"
 	case strings.Contains(lower, "github-copilot") || strings.Contains(lower, "copilot_cli") || strings.Contains(lower, "copilot"):
 		return "copilot_cli"
+	// Oh My Pi (omp) is a separate product from Pi, not another Pi host, so it gets its own
+	// canonical name rather than folding into pi_cli. It is a fork of pi-mono with its own binary
+	// (`omp`), its own config root (`~/.omp`), its own npm package, and an event API Pi does not
+	// have -- approval decisions among them. Recording both under one name would merge two
+	// separately installed runtimes' activity in every query that groups by harness.name, which is
+	// the one thing a security log must not do to two different products on the same machine.
+	//
+	// The canonical spelling is `omp` because that is what the user sees: the binary they run and
+	// the directory Beacon installs into. `oh-my-pi` is the repository name, not the command.
+	//
+	// Equality against a closed set, like Pi below and for a sharper version of the same reason:
+	// "omp" is three characters and sits inside ordinary words this field carries in practice --
+	// "prompt" contains it, and so does any harness name containing "comp". A Contains rule would
+	// report those as Oh My Pi sessions.
+	//
+	// Placed above the Pi case deliberately. Equality makes the order irrelevant today, but every
+	// Oh My Pi spelling here ends in "pi", so if the Pi case were ever loosened to a substring
+	// match, resolving Oh My Pi first is what keeps "oh-my-pi" from being recorded as Pi.
+	case lower == "omp" || lower == "omp_cli" || lower == "omp-cli" || lower == "omp cli" ||
+		lower == "oh-my-pi" || lower == "oh_my_pi" || lower == "ohmypi" || lower == "oh my pi" ||
+		lower == "omp.sh":
+		return "omp"
 	// Pi is matched by equality against a fixed set of spellings, not by substring, because "pi" is
 	// two characters and appears inside names that belong to other runtimes: "copilot" contains it,
 	// so a Contains rule here would report every GitHub Copilot and VS Code Copilot session as Pi.
