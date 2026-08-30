@@ -95,3 +95,59 @@ func TestQwenIsInTheRepairTargetList(t *testing.T) {
 	}
 	t.Fatal("qwen is missing from the repair target list; `endpoint repair` would silently skip it")
 }
+
+// The install -> status -> uninstall round trip for Prime Agent, through the CLI entry points
+// rather than the package API.
+//
+// TestEveryHookTargetIsWired proves each switch has a case; this proves the cases do the thing
+// their name claims -- and, specifically for this runtime, that the file lands in Prime Agent's own
+// directory rather than in Pi's, which is the mistake a shared extension source invites.
+func TestEndpointHooksInstallAndUninstallPrime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfg := endpointconfig.Config{LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
+
+	origLevel := endpointOpts.hookLevel
+	t.Cleanup(func() { endpointOpts.hookLevel = origLevel })
+	endpointOpts.hookLevel = "user"
+
+	extension := filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts")
+	if err := installEndpointHookTarget("prime", cfg); err != nil {
+		t.Fatalf("installEndpointHookTarget(prime) returned error: %v", err)
+	}
+	data, err := os.ReadFile(extension)
+	if err != nil {
+		t.Fatalf("install did not write %s: %v", extension, err)
+	}
+	for _, want := range []string{`"--platform"`, `"prime"`, `"prime-event"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("installed extension does not carry %s:\n%s", want, data)
+		}
+	}
+	// Installing Prime Agent must not touch Pi's directory. Both runtimes render from one source,
+	// so a descriptor wired to the wrong path would install a working extension for the wrong
+	// product and report success.
+	if _, err := os.Stat(filepath.Join(home, ".pi")); !os.IsNotExist(err) {
+		t.Fatalf("installing Prime Agent created Pi's config directory: %v", err)
+	}
+
+	if err := uninstallEndpointHookTarget("prime", cfg); err != nil {
+		t.Fatalf("uninstallEndpointHookTarget(prime) returned error: %v", err)
+	}
+	if _, err := os.Stat(extension); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the Prime Agent extension behind: %v", err)
+	}
+}
+
+// `endpoint hooks status --all` walks a hard-coded list rather than the registry, so a runtime
+// absent from it never appears in a status report -- the failure mode where an operator concludes
+// Beacon is not watching a runtime it is watching, or the reverse.
+func TestPrimeIsInTheAllTargetsList(t *testing.T) {
+	for _, name := range allHookTargetsForLevel() {
+		if name == "prime" {
+			return
+		}
+	}
+	t.Fatal("prime is missing from the all-harnesses hook target list")
+}

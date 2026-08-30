@@ -56,6 +56,13 @@ var harnessTargets = []harnessTarget{
 	// for the other's. "oh-my-pi" is accepted because it is the repository name people reach for;
 	// "omp" is the binary, and the canonical harness name events are written under.
 	{name: "omp", endpointKind: endpointTargetHook, endpointAliases: []string{"omp", "oh-my-pi", "ohmypi"}, hookAliases: []string{"omp", "oh-my-pi", "ohmypi"}},
+	// Prime Agent is its own row for the same reason, and it needs saying twice as loudly: it
+	// renders from Pi's extension source, so a spelling folded into Pi's row would install a file
+	// that looks right and reports the wrong runtime. prime_agent is accepted alongside prime
+	// because it is the canonical harness name Prime Agent events are written under;
+	// "prime-agent" is the name of the command the runtime installs, which is what someone typing
+	// from memory will reach for.
+	{name: "prime", endpointKind: endpointTargetHook, endpointAliases: []string{"prime", "prime-agent", "prime_agent"}, hookAliases: []string{"prime", "prime-agent", "prime_agent"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen

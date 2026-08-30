@@ -12,7 +12,7 @@ import (
 // assert a property of that shape rather than of one runtime walk this list, so a runtime added
 // later inherits the same guarantees instead of quietly opting out of them.
 func managedExtensions() []managedExtension {
-	return []managedExtension{piExtension, ompExtension}
+	return []managedExtension{piExtension, ompExtension, primeExtension}
 }
 
 // testExtension builds a managedExtension over a caller-supplied template, so the render contract
