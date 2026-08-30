@@ -198,6 +198,8 @@ jobs:
           ./beacon endpoint hooks --help > /tmp/beacon-hooks-help.txt
           ./beacon endpoint onboarding --help > /tmp/beacon-onboarding-help.txt
           ./beacon endpoint integrations claude-cowork --help > /tmp/beacon-cowork-help.txt
+          ./beacon endpoint fx --help > /tmp/beacon-fx-help.txt
+          ./beacon endpoint fx sync --help > /tmp/beacon-fx-sync-help.txt
           ./beacon endpoint wazuh --help > /tmp/beacon-wazuh-help.txt
           ./beacon endpoint rapid7 --help > /tmp/beacon-rapid7-help.txt
           ./beacon scan --help > /tmp/beacon-scan-help.txt

@@ -35,8 +35,11 @@ const (
 	// because Beacon ships and versions the plugin source, so its coverage is Beacon's to fix
 	// rather than the vendor's to expose.
 	CollectionMethodPlugin = "plugin"
-	// CollectionMethodPoll is a periodic pull from a runtime's API, where Beacon sees whatever
-	// the API returns after the fact rather than observing the agent as it works.
+	// CollectionMethodPoll is a periodic pull from a source the runtime maintains -- its API, or
+	// the session store it commits to disk -- where Beacon sees whatever that source holds after
+	// the fact rather than observing the agent as it works. The Devin sessions API and fx's
+	// ~/.fx/sessions log are both this: different transports, the same posture, and the same thing
+	// a consumer needs to know, which is that nothing on this path could have been intercepted.
 	CollectionMethodPoll = "poll"
 )
 

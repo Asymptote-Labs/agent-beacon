@@ -38,7 +38,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code",
+		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "vercel_fx",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -263,5 +263,57 @@ func TestEmptyNameStaysEmpty(t *testing.T) {
 		if got := NormalizeHarnessName(in); got != "" {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want empty", in, got)
 		}
+	}
+}
+
+// fx (vercel-labs/fx) reaches Beacon under the spellings a reader is likely to type and the ones
+// the session collector records, and all of them must land on one canonical name. fx has no hook
+// or OTLP surface, so the collector is currently the only writer -- but harness names also arrive
+// from `--harness` flags and hand-written queries, and one session recorded as both "fx" and
+// "vercel_fx" splits it for anything grouping by harness.name.
+func TestFxSpellingsConvergeOnVercelFx(t *testing.T) {
+	for _, in := range []string{
+		"fx", "FX", " fx ", "fx_cli", "fx-cli", "fx cli", "fx.sh", "vercel_fx", "vercel-fx",
+		"Vercel FX", "vercel fx cli", "fx_agent", "fx-agent",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "vercel_fx" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "vercel_fx")
+			}
+		})
+	}
+}
+
+// The reason the fx case is an equality match rather than a Contains rule. "fx" is two characters
+// and sits inside ordinary words, so a substring rule would relabel unrelated runtimes -- and
+// unlike a wrong name on a known runtime, this failure invents fx activity on a machine that has
+// never run fx.
+func TestFxDoesNotSwallowNamesContainingFx(t *testing.T) {
+	for _, name := range []string{"fxagent", "sfx", "soundfx", "fxr", "myfx-cli", "fx-runner"} {
+		if got := NormalizeHarnessName(name); got != name {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved -- a substring rule for fx "+
+				"would report this runtime's sessions as fx activity", name, got)
+		}
+	}
+}
+
+// fx runs on Vercel AI Gateway and can authenticate against ChatGPT and Grok subscriptions, so its
+// events carry provider and model strings from three vendors. None of those makes the harness
+// something other than fx, and none of the harness rules above may claim an fx session because a
+// provider name happens to appear beside it.
+func TestFxIsNotAttributedToItsModelProviders(t *testing.T) {
+	if got := NormalizeHarnessName("fx"); got != "vercel_fx" {
+		t.Errorf("NormalizeHarnessName(%q) = %q, want vercel_fx", "fx", got)
+	}
+	for _, provider := range []string{"gateway", "grok", "xai"} {
+		if got := NormalizeHarnessName(provider); got != provider {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", provider, got)
+		}
+	}
+	// "codex" is the one provider spelling fx uses that an existing rule already claims for the
+	// Codex CLI. That rule stays as it is: an event whose harness is literally "codex" is the
+	// Codex CLI, and fx's own events say "fx".
+	if got := NormalizeHarnessName("codex"); got != "codex_cli" {
+		t.Errorf("NormalizeHarnessName(%q) = %q, want codex_cli", "codex", got)
 	}
 }

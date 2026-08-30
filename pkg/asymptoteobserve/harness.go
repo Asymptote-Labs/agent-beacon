@@ -123,6 +123,20 @@ func NormalizeHarnessName(name string) string {
 		lower == "qwencode" || lower == "qwen_cli" || lower == "qwen-cli" || lower == "qwen cli" ||
 		lower == "qwen_coder" || lower == "qwen-coder" || lower == "qwen coder":
 		return "qwen_code"
+	// fx (vercel-labs/fx) is matched by equality against a closed set for the same reason Pi is,
+	// only more so: "fx" is two characters and appears inside ordinary words a harness attribute
+	// can plausibly carry -- "sfx", "fx-runner", "effects" does not contain it but "fxagent" does
+	// -- so a Contains rule would claim sessions that are not fx's. There is no prefix rule here
+	// either: a future runtime named "fxr" is not this one.
+	//
+	// The canonical name is vercel_fx rather than fx because harness.name is what a SIEM query
+	// groups by, and a two-letter value there says nothing about which product produced the row.
+	// The vendor prefix follows what the product is called in practice ("Vercel fx") and keeps the
+	// name self-describing for a reader who has never seen it before.
+	case lower == "fx" || lower == "fx_cli" || lower == "fx-cli" || lower == "fx cli" ||
+		lower == "fx.sh" || lower == "vercel_fx" || lower == "vercel-fx" || lower == "vercel fx" ||
+		lower == "vercel fx cli" || lower == "fx_agent" || lower == "fx-agent":
+		return "vercel_fx"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
