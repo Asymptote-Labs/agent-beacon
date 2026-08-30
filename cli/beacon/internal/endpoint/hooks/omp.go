@@ -118,7 +118,26 @@ func ompRootExtensionSourcePath() string {
 // project-local inputs are already loaded unconditionally. A user-level install is still the
 // default, because it follows the operator rather than one checkout.
 func OmpExtensionPath(level Level) (string, error) {
-	dir, err := ompExtensionDir(level)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Only the user level needs a home directory. Failing here for a project install would
+		// refuse a path that does not depend on the value that could not be read.
+		if level == LevelProject {
+			return OmpExtensionPathForHome("", level)
+		}
+		return "", err
+	}
+	return OmpExtensionPathForHome(home, level)
+}
+
+// OmpExtensionPathForHome is OmpExtensionPath against a caller-supplied home directory.
+//
+// Exported for inventory, which scans a home directory it was handed rather than the process's own
+// -- a scan of another user's tree, or of a fixture. Sharing the resolution rather than rebuilding
+// the path there is what keeps inventory from reporting on a file the installer does not write:
+// this path is not a fixed string, since a profile or a PI_CODING_AGENT_DIR override moves it.
+func OmpExtensionPathForHome(home string, level Level) (string, error) {
+	dir, err := ompExtensionDir(home, level)
 	if err != nil {
 		return "", err
 	}
@@ -138,15 +157,14 @@ func OmpExtensionPath(level Level) (string, error) {
 //
 // Deriving either path from the other, or applying `PI_CONFIG_DIR` to both, would write the file
 // where Oh My Pi does not look -- and the install would report success and collect nothing.
-func ompExtensionDir(level Level) (string, error) {
+func ompExtensionDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		if agentDir := os.Getenv(ompAgentDirEnv); agentDir != "" {
 			return filepath.Join(agentDir, "extensions"), nil
 		}
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
+		if home == "" {
+			return "", fmt.Errorf("home directory is required to resolve the Oh My Pi extension path")
 		}
 		configDir := ompConfigDirName
 		if named := os.Getenv(ompConfigDirEnv); named != "" {
