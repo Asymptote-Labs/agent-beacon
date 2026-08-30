@@ -33,6 +33,16 @@ type managedExtension struct {
 	marker string
 	// template is the extension source with its placeholders still in it.
 	template string
+	// sharedTemplate marks a template that more than one runtime renders from, and which therefore
+	// carries the runtime placeholder alongside the argv. Pi's source is shared with Prime Agent,
+	// which ships the same @earendil-works/pi-coding-agent extension API under a rebranded config
+	// directory; Oh My Pi's is its own file and carries no such placeholder.
+	//
+	// Declared per descriptor rather than inferred from whether the template happens to contain the
+	// placeholder. A shared source that lost it would then render quietly, installing a file that
+	// falls back to the common event set instead of the one its mapper handles -- and that failure
+	// only shows up as events that never arrive.
+	sharedTemplate bool
 	// configPath resolves the file Beacon manages for an install level.
 	configPath func(Level) (string, error)
 }
@@ -48,6 +58,16 @@ const argvPlaceholder = `["__BEACON_ARGV__"]`
 // of the checked-in source is what lets one test assert the shipped file and its embedded twin are
 // byte-identical while each install still carries a versioned marker.
 const managedMarkerPlaceholder = "__BEACON_MANAGED_MARKER__"
+
+// runtimePlaceholder is where a shared template's runtime name goes. It includes the surrounding
+// quotes because the value substituted in is JSON-encoded and brings its own: the source holds
+// `const beaconRuntime = "__BEACON_RUNTIME__"`, and the rendered file must hold a quoted string
+// there rather than a bare identifier.
+//
+// The extension selects its event subscription from this value, and the hook adapter dispatches its
+// mapper on the `--platform` flag, so both are rendered from the descriptor's one platform field --
+// a value that feeds both cannot disagree with itself.
+const runtimePlaceholder = `"__BEACON_RUNTIME__"`
 
 func (m managedExtension) runtime() hookRuntime {
 	return hookRuntime{
@@ -73,10 +93,27 @@ func (m managedExtension) render(binaryPath, logPath, configPath string) (string
 		return "", err
 	}
 	source := strings.ReplaceAll(m.template, managedMarkerPlaceholder, m.marker)
-	if !strings.Contains(source, argvPlaceholder) {
-		return "", fmt.Errorf("%s extension template is missing the %s placeholder", m.platform, argvPlaceholder)
+	// An ordered list rather than a map, so a template missing more than one placeholder always
+	// names the same one first. A test that reads an error message should not depend on map
+	// iteration order.
+	substitutions := []struct{ placeholder, value string }{
+		{argvPlaceholder, string(argv)},
 	}
-	source = strings.ReplaceAll(source, argvPlaceholder, string(argv))
+	if m.sharedTemplate {
+		runtimeName, err := json.Marshal(m.platform)
+		if err != nil {
+			return "", err
+		}
+		substitutions = append(substitutions, struct{ placeholder, value string }{
+			runtimePlaceholder, string(runtimeName),
+		})
+	}
+	for _, substitution := range substitutions {
+		if !strings.Contains(source, substitution.placeholder) {
+			return "", fmt.Errorf("%s extension template is missing the %s placeholder", m.platform, substitution.placeholder)
+		}
+		source = strings.ReplaceAll(source, substitution.placeholder, substitution.value)
+	}
 	if strings.Contains(source, "__BEACON_") {
 		return "", fmt.Errorf("%s extension template contains unresolved Beacon placeholders", m.platform)
 	}

@@ -2,7 +2,7 @@
   "name": "@asymptote-labs/pi-beacon",
   "version": "0.0.0",
   "private": true,
-  "description": "Beacon endpoint telemetry extension for Pi",
+  "description": "Beacon endpoint telemetry extension for the Pi coding agent and its distributions (Pi, Prime Agent)",
   "type": "module",
   "scripts": {
     "check": "bun --check src/beacon.ts && cmp src/beacon.ts ../../cli/beacon/internal/endpoint/hooks/assets/pi/beacon.ts",

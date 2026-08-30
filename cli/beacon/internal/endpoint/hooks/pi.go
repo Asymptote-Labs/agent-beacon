@@ -12,7 +12,8 @@ import (
 // two established integration shapes applies to it. Its only observation surface is the TypeScript
 // extension API, which makes the integration plugin-shaped: Beacon writes one extension file that
 // forwards runtime events to the `beacon-hooks` binary. That is the same shape as the opencode
-// plugin, and the handling of that file lives in managedExtension, shared with Oh My Pi.
+// plugin, and the handling of that file lives in managedExtension, shared with Oh My Pi and with
+// Prime Agent, which renders from this same source.
 const (
 	piExtensionFileName = "beacon.ts"
 
@@ -49,7 +50,9 @@ var piExtension = managedExtension{
 	displayName: "Pi",
 	marker:      PiManagedExtensionMarker,
 	template:    piextension.Template,
-	configPath:  PiExtensionPath,
+	// Shared with Prime Agent, which renders the same source with its own runtime name.
+	sharedTemplate: true,
+	configPath:     PiExtensionPath,
 }
 
 var piRuntime = piExtension.runtime()
@@ -89,6 +92,9 @@ func piStatusFromRuntime(status runtimeStatus) PiStatus {
 	}
 }
 
+// The two copies of the extension source a test compares. The embedded one is what ships in the
+// binary; the root one is what a contributor edits and `bun run sync` copies over. Prime Agent
+// renders from this same file, so one drift check covers both distributions.
 func piEmbeddedExtensionSourcePath() string {
 	return filepath.Clean(filepath.Join("assets", "pi", "beacon.ts"))
 }

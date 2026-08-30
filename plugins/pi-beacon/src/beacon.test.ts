@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { createBeaconExtension } from "./beacon"
 
-const senderKey = Symbol.for("beacon.pi.testSender")
+const senderKey = Symbol.for("beacon.extension.testSender")
 
 type Sent = Record<string, unknown>
 
@@ -44,13 +44,13 @@ afterEach(() => {
   delete (globalThis as Record<symbol, unknown>)[senderKey]
 })
 
-describe("beacon pi extension", () => {
+describe("beacon pi-family extension", () => {
   // These strings are the contract between this extension and the pi-event mapper in the hook
   // adapter. A typo on either side produces no telemetry rather than an error, so the list is
   // pinned here and asserted against the mapper's own list on the Go side.
-  test("subscribes to exactly the events the mapper handles", () => {
+  test("subscribes to exactly the events the pi-event mapper handles", () => {
     const pi = fakePi()
-    createBeaconExtension().register(pi.api)
+    createBeaconExtension("pi").register(pi.api)
 
     expect([...pi.handlers.keys()].sort()).toEqual([
       "input",
@@ -63,21 +63,72 @@ describe("beacon pi extension", () => {
     ])
   })
 
-  // Pi publishes many more events than these, most of them provider-request and TUI internals.
-  // Subscribing to one would put Beacon in the path of every streaming token update.
-  test("does not subscribe to streaming or provider internals", () => {
+  // Prime Agent's list is Pi's plus the two events its build acts on: a compaction rewrites the
+  // history the agent is working from, and a refinement rewrites the durable harness it will start
+  // every future session with. Both are invisible in the shared events.
+  test("subscribes to exactly the events the prime-event mapper handles", () => {
     const pi = fakePi()
-    createBeaconExtension().register(pi.api)
+    createBeaconExtension("prime").register(pi.api)
 
-    for (const noisy of [
-      "message_update",
-      "before_provider_request",
-      "before_provider_headers",
-      "after_provider_response",
-      "context",
-      "tool_execution_update",
-    ]) {
-      expect(pi.handlers.has(noisy)).toBe(false)
+    expect([...pi.handlers.keys()].sort()).toEqual([
+      "input",
+      "message_end",
+      "refine_complete",
+      "session_compact",
+      "session_shutdown",
+      "session_start",
+      "tool_call",
+      "tool_result",
+      "user_bash",
+    ])
+  })
+
+  // Pi must not pick up the Prime-only events. Pi's build has no refinement loop, so a subscription
+  // to an event it never fires is dead code -- and if a future Pi release did fire one, Beacon would
+  // start writing rows its pi-event mapper does not handle.
+  test("keeps the prime-only events off the pi subscription", () => {
+    const pi = fakePi()
+    createBeaconExtension("pi").register(pi.api)
+
+    expect(pi.handlers.has("session_compact")).toBe(false)
+    expect(pi.handlers.has("refine_complete")).toBe(false)
+  })
+
+  // A hand-edited file that lost its rendered runtime name still observes the shared events. The
+  // installer never writes an unknown name, so this is the broken-file case, and reporting the
+  // common events beats reporting none.
+  test("falls back to the shared events for an unknown runtime", () => {
+    const pi = fakePi()
+    createBeaconExtension("__BEACON_RUNTIME__").register(pi.api)
+
+    expect([...pi.handlers.keys()].sort()).toEqual([
+      "input",
+      "message_end",
+      "session_shutdown",
+      "session_start",
+      "tool_call",
+      "tool_result",
+      "user_bash",
+    ])
+  })
+
+  // Both runtimes publish many more events than these, most of them provider-request and TUI
+  // internals. Subscribing to one would put Beacon in the path of every streaming token update.
+  test("does not subscribe to streaming or provider internals", () => {
+    for (const runtime of ["pi", "prime"]) {
+      const pi = fakePi()
+      createBeaconExtension(runtime).register(pi.api)
+
+      for (const noisy of [
+        "message_update",
+        "before_provider_request",
+        "before_provider_headers",
+        "after_provider_response",
+        "context",
+        "tool_execution_update",
+      ]) {
+        expect(pi.handlers.has(noisy)).toBe(false)
+      }
     }
   })
 

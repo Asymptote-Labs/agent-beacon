@@ -3,6 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -278,5 +279,121 @@ func TestReachableStatusDowngradesAnUnreachableInstall(t *testing.T) {
 				t.Fatal("reported installed for an extension that spawns a different binary")
 			}
 		})
+	}
+}
+
+// renderedRuntimeName extracts the distribution name the installer substituted into a shared
+// template.
+//
+// Read back out of the rendered source rather than trusted, because this value is what the
+// extension selects its subscription list from: a rendering that left it as the placeholder, or
+// wrote it unquoted, produces a file that either subscribes to the wrong events or does not parse.
+// The optional carriage return is load-bearing for the same reason it is in the argv helper -- the
+// extension source is a checked-in file, and a Windows checkout converts its line endings.
+func renderedRuntimeName(t *testing.T, source string) string {
+	t.Helper()
+	match := regexp.MustCompile(`(?m)^const beaconRuntime = "([^"]*)"\r?$`).FindStringSubmatch(source)
+	if len(match) != 2 {
+		t.Fatalf("no beaconRuntime assignment in rendered extension:\n%s", source)
+	}
+	return match[1]
+}
+
+// The runtime name and the --platform flag must be the same string. The extension picks its event
+// subscription from the former and the hook adapter dispatches its mapper on the latter, so a
+// rendering where they disagreed would subscribe to one runtime's events and map them as another's.
+func TestRenderSubstitutesTheRuntimeNameIntoASharedTemplate(t *testing.T) {
+	source, err := piExtension.render("/tmp/beacon-hooks", "/tmp/runtime.jsonl", "")
+	if err != nil {
+		t.Fatalf("piExtension.render returned error: %v", err)
+	}
+	if got := renderedRuntimeName(t, source); got != piExtension.platform {
+		t.Fatalf("rendered beaconRuntime = %q, want %q", got, piExtension.platform)
+	}
+	argv := piRenderedArgv(t, source)
+	platform := ""
+	for i, value := range argv {
+		if value == "--platform" && i+1 < len(argv) {
+			platform = argv[i+1]
+		}
+	}
+	if platform != piExtension.platform {
+		t.Fatalf("rendered --platform = %q, want %q; the extension would subscribe as one runtime "+
+			"and be mapped as another", platform, piExtension.platform)
+	}
+}
+
+// The same guard the argv placeholder has, for the same reason: a template edit that renamed this
+// placeholder would otherwise install a file that quietly falls back to the shared event list
+// instead of the one its mapper handles. Only a descriptor that declares its template shared is
+// held to it -- Oh My Pi renders from its own source, which carries no runtime placeholder.
+func TestRenderRejectsASharedTemplateMissingTheRuntimePlaceholder(t *testing.T) {
+	template := "// __BEACON_MANAGED_MARKER__\nconst beaconArgv: string[] = [\"__BEACON_ARGV__\"]\n"
+	shared := testExtension(template)
+	shared.sharedTemplate = true
+	_, err := shared.render("/tmp/beacon-hooks", "", "")
+	if err == nil {
+		t.Fatal("render accepted a shared template with no runtime placeholder")
+	}
+	if !strings.Contains(err.Error(), "__BEACON_RUNTIME__") {
+		t.Fatalf("error = %v, want it to name the missing placeholder", err)
+	}
+	// The same template is fine for a runtime that does not share its source, which is what keeps
+	// this requirement from reaching Oh My Pi's own file.
+	if _, err := testExtension(template).render("/tmp/beacon-hooks", "", ""); err != nil {
+		t.Fatalf("render rejected an unshared template with no runtime placeholder: %v", err)
+	}
+}
+
+// One template, two products: whatever a descriptor carries has to reach the rendered file, or a
+// second distribution would silently install Pi's copy. This renders a descriptor that shares
+// nothing with Pi's and asserts every field of it landed.
+func TestRenderCarriesTheDescriptorIntoASharedFile(t *testing.T) {
+	other := managedExtension{
+		platform:       "example",
+		displayName:    "Example",
+		marker:         "beacon-managed-example-extension:v9",
+		template:       piExtension.template,
+		sharedTemplate: true,
+		configPath:     PiExtensionPath,
+	}
+	source, err := other.render("/tmp/beacon-hooks", "", "")
+	if err != nil {
+		t.Fatalf("render returned error: %v", err)
+	}
+	if !strings.Contains(source, other.marker) {
+		t.Fatal("rendered extension is missing the descriptor's marker, so uninstall would refuse to remove it")
+	}
+	if strings.Contains(source, PiManagedExtensionMarker) {
+		t.Fatal("rendered extension carries Pi's marker; two distributions would claim each other's files")
+	}
+	if got := renderedRuntimeName(t, source); got != other.platform {
+		t.Fatalf("rendered beaconRuntime = %q, want %q", got, other.platform)
+	}
+	argv := piRenderedArgv(t, source)
+	if want := other.platform + "-event"; argv[len(argv)-1] != want {
+		t.Fatalf("rendered argv ends with %q, want %q", argv[len(argv)-1], want)
+	}
+}
+
+// The checked-in Pi source has to keep offering both subscription lists, because the Go side has no
+// other way to tell that a rendered file will observe the events its mapper expects. A source edit
+// that dropped Prime Agent's events would otherwise install a file that reports only Pi's.
+func TestSharedPiExtensionSourceCarriesBothSubscriptionLists(t *testing.T) {
+	for _, snippet := range []string{
+		`"session_start"`,
+		`"tool_call"`,
+		`"tool_result"`,
+		`"user_bash"`,
+		`"message_end"`,
+		`"session_compact"`,
+		`"refine_complete"`,
+		`pi: sharedEvents`,
+		`prime: [...sharedEvents, ...primeOnlyEvents]`,
+	} {
+		if !strings.Contains(piExtension.template, snippet) {
+			t.Fatalf("extension source no longer contains %q; a rendered install would subscribe to "+
+				"a different set of events than its mapper handles", snippet)
+		}
 	}
 }

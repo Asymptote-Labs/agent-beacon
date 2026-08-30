@@ -1,6 +1,18 @@
 // __BEACON_MANAGED_MARKER__
-// Beacon endpoint telemetry extension for Pi.
-// Managed by beacon endpoint hooks install --harness pi.
+// Beacon endpoint telemetry extension for the Pi coding agent and its distributions.
+// Managed by beacon endpoint hooks install --harness pi (or --harness prime).
+
+// One file serves Pi and Prime Agent because they are one extension API.
+//
+// Prime Agent (Prime Intellect) ships @earendil-works/pi-coding-agent with a rebranded config
+// directory: same `on(event, handler)` surface, same event objects, same default export contract,
+// a different `~/.prime/agent` root. Beacon therefore installs the same source into both, rendered
+// twice with a different runtime name -- rather than keeping a second copy that would drift from
+// this one the first time either side is fixed.
+//
+// What the runtime name decides is deliberately small: which hook subcommand the argv below
+// invokes, which events are subscribed to, and which debug variable turns on logging. Everything
+// else -- serialization, spawning, identity lifting -- is identical because the runtimes are.
 
 // The argv Beacon's installer writes, as an array rather than a command line.
 //
@@ -10,22 +22,32 @@
 // shell whose quoting rules would hold.
 const beaconArgv: string[] = ["__BEACON_ARGV__"]
 
-const debugEnabled = process.env.BEACON_PI_DEBUG === "1"
+// Which distribution this rendered copy was installed for: "pi" or "prime".
+//
+// Substituted by the installer, like the argv above, rather than sniffed at runtime. A file that
+// guessed -- from the directory it sits in, or from an environment variable -- would subscribe to
+// the wrong event set on a machine that runs both, and the guess would be wrong exactly when both
+// runtimes are present, which is the case the field exists to distinguish.
+const beaconRuntime = "__BEACON_RUNTIME__"
 
-// A send that has not finished in this long is abandoned. Pi awaits event handlers before
+// Debug logging is per runtime -- BEACON_PI_DEBUG or BEACON_PRIME_DEBUG -- so turning it on for one
+// does not flood the terminal of the other on a machine running both.
+const debugEnabled = process.env[`BEACON_${beaconRuntime.toUpperCase()}_DEBUG`] === "1"
+
+// A send that has not finished in this long is abandoned. Both runtimes await event handlers before
 // continuing the agent loop, so this is the worst case Beacon can add to a tool call.
 const sendTimeoutMs = 2000
 
 // How deep into an event the serializer will walk before giving up.
 const maxDepth = 8
 
-// Pi's own event objects, narrowed to the fields Beacon reads.
+// The runtime's own event objects, narrowed to the fields Beacon reads.
 //
 // Declared here rather than imported from @earendil-works/pi-coding-agent on purpose. The installed
-// file sits in ~/.pi/agent/extensions with no node_modules beside it, and Pi loads it through jiti,
-// which strips types without resolving them. A value import would fail at load; a type import would
-// resolve for nobody. Local structural types cost the compile-time link to Pi's definitions and buy
-// a file that loads wherever Pi does.
+// file sits in ~/.pi/agent/extensions -- or ~/.prime/agent/extensions -- with no node_modules beside
+// it, and the host loads it through jiti, which strips types without resolving them. A value import
+// would fail at load; a type import would resolve for nobody. Local structural types cost the
+// compile-time link to the vendor definitions and buy a file that loads wherever the runtime does.
 type PiEvent = Record<string, unknown> & { type: string }
 
 interface PiSessionManager {
@@ -42,21 +64,24 @@ interface PiContext {
 
 // The events Beacon subscribes to, and nothing else.
 //
-// Pi publishes roughly thirty event types, most of them provider-request and TUI-rendering
+// Both runtimes publish roughly thirty event types, most of them provider-request and TUI-rendering
 // internals that describe no agent action. Subscribing to all of them would fill the runtime log
 // with rows no query asks for -- the same reason the Cline mapper drops unrecognized stages -- and
 // would put Beacon in the path of every streaming token update.
 //
 // `tool_call` and `tool_result` are the pair that carries tool activity: the first names the tool
 // and its arguments before it runs, the second carries the outcome. `user_bash` is a command the
-// human ran with Pi's `!` prefix, which no tool event covers.
+// human ran with the `!` prefix, which no tool event covers.
 //
-// Deliberately absent: any approval event. Pi's `tool_call` handler can block a call, but that is
-// an extension deciding, not an operator being asked -- Pi exposes no operator approval decision
-// through this API. Synthesizing an approval from a pre-tool notification would put a decision
-// nobody made into the log, so Beacon records these as tool activity and leaves approval telemetry
-// empty for Pi, exactly as it does for Cline.
-const subscribedEvents = [
+// Deliberately absent from both lists: any approval event. The `tool_call` handler can block a
+// call, but that is an extension deciding, not an operator being asked -- neither runtime exposes
+// an operator approval decision through this API. Synthesizing an approval from a pre-tool
+// notification would put a decision nobody made into the log, so Beacon records these as tool
+// activity and leaves approval telemetry empty here, exactly as it does for Cline.
+//
+// These strings are the contract with the `pi-event` and `prime-event` mappers in the hook adapter.
+// A typo on either side produces no telemetry rather than an error, so both sides pin the list.
+const sharedEvents = [
   "session_start",
   "session_shutdown",
   "input",
@@ -66,11 +91,38 @@ const subscribedEvents = [
   "message_end",
 ] as const
 
+// Prime Agent adds two events that Pi's build does not act on, and both describe something Beacon
+// has no other way to see.
+//
+// `session_compact` says the conversation history was rewritten. Reading a Prime log without it,
+// the prompts and tool calls before a compaction look like they are still in context when they are
+// not, which changes what a reviewer concludes the agent was working from.
+//
+// `refine_complete` says the agent edited its own harness -- the durable prompts, memories, and
+// skill descriptions it will start every future session with. That is the self-improving loop the
+// product is built around, and it is the one action in the runtime that outlives the session that
+// took it, so an endpoint telemetry agent that cannot see it is missing the change with the longest
+// blast radius.
+const primeOnlyEvents = ["session_compact", "refine_complete"] as const
+
+const eventsByRuntime: Record<string, readonly string[]> = {
+  pi: sharedEvents,
+  prime: [...sharedEvents, ...primeOnlyEvents],
+}
+
+// An unrecognized runtime name still observes the shared events rather than nothing. The installer
+// only ever writes a name this map knows, so reaching the fallback means the file was edited by
+// hand -- and a hand-edited file that reports the common events is a better failure than one that
+// silently reports none.
+function eventsFor(runtime: string): readonly string[] {
+  return eventsByRuntime[runtime] ?? sharedEvents
+}
+
 function debugLog(message: string, extra?: unknown) {
   if (!debugEnabled) return
   try {
     // eslint-disable-next-line no-console
-    console.error("[beacon-pi]", message, extra ?? "")
+    console.error(`[beacon-${beaconRuntime}]`, message, extra ?? "")
   } catch {
     // Debug logging must stay best-effort.
   }
@@ -117,10 +169,10 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
 
 async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
   // Flattened before anything else sees it, so every consumer of this function is handed plain
-  // data rather than a live Pi event with cycles and functions still attached.
+  // data rather than a live runtime event with cycles and functions still attached.
   const safe = safeClone(payload)
 
-  const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("beacon.pi.testSender")]
+  const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("beacon.extension.testSender")]
   if (typeof testSender === "function") {
     await (testSender as (value: unknown) => unknown)(safe)
     return
@@ -138,7 +190,7 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
   try {
     // Imported lazily so a host without node:child_process fails to send rather than failing to
     // load: a throwing import at module scope would surface to the user as a broken extension, and
-    // Pi reports an extension that throws at load time rather than continuing without it.
+    // the host reports an extension that throws at load time rather than continuing without it.
     const { spawn } = await import("node:child_process")
     await new Promise<void>((resolve) => {
       let settled = false
@@ -167,7 +219,7 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
         debugLog("hook binary timed out", { type: payload?.type })
         finish()
       }, sendTimeoutMs)
-      // An unreferenced timer cannot keep Pi alive at exit waiting on Beacon telemetry.
+      // An unreferenced timer cannot keep the host alive at exit waiting on Beacon telemetry.
       if (typeof timer.unref === "function") timer.unref()
       const done = () => {
         clearTimeout(timer)
@@ -189,7 +241,7 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
     })
   } catch (err) {
     debugLog("send failed", err)
-    // Beacon telemetry must never interrupt Pi execution.
+    // Beacon telemetry must never interrupt the agent run.
   }
 }
 
@@ -237,8 +289,13 @@ type PiExtensionAPI = {
   on: (event: string, handler: (event: PiEvent, ctx: PiContext) => Promise<void> | void) => void
 }
 
-// createBeaconExtension is exported for tests; Pi loads the default export below.
-export function createBeaconExtension() {
+// createBeaconExtension is exported for tests; the runtime loads the default export below.
+//
+// The runtime name is a parameter with the installed value as its default, so a test can build the
+// Pi and the Prime subscription without rendering the template first, and the rendered file still
+// needs no argument.
+export function createBeaconExtension(runtime: string = beaconRuntime) {
+  const subscribedEvents = eventsFor(runtime)
   const forward = async (event: PiEvent, ctx: PiContext) => {
     try {
       await sendToBeacon({ ...identity(ctx), ...event })
@@ -253,14 +310,14 @@ export function createBeaconExtension() {
     register(pi: PiExtensionAPI) {
       for (const name of subscribedEvents) {
         // Every handler returns undefined. Beacon observes; it never blocks a tool call, rewrites a
-        // prompt, transforms input, or replaces a message. Pi reads a returned object as a request
-        // to change behavior -- `{ block: true }` on tool_call, `{ action: "transform" }` on input
-        // -- so returning nothing is what keeps this extension an observer. Enforcement lives
-        // behind the policy provider seam in the hook adapter, not here.
+        // prompt, transforms input, or replaces a message. The host reads a returned object as a
+        // request to change behavior -- `{ block: true }` on tool_call, `{ action: "transform" }`
+        // on input -- so returning nothing is what keeps this extension an observer. Enforcement
+        // lives behind the policy provider seam in the hook adapter, not here.
         pi.on(name, forward)
       }
     },
-    // Exposed so a test can assert the subscription list without a live Pi instance.
+    // Exposed so a test can assert the subscription list without a live host instance.
     subscribedEvents: [...subscribedEvents],
   }
 }
