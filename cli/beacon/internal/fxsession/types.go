@@ -236,7 +236,7 @@ type ToolResult struct {
 	Status             string           `json:"status"`
 	Output             DurableString    `json:"output"`
 	OutputHandle       *string          `json:"output_handle"`
-	Preview            *string          `json:"preview"`
+	Preview            *DurableString   `json:"preview"`
 	OutputBytes        int64            `json:"output_bytes"`
 	StoredOutputBytes  int64            `json:"stored_output_bytes"`
 	Truncated          bool             `json:"truncated"`
@@ -301,9 +301,9 @@ type TerminalReturns struct {
 // did, and whether it succeeded. It exists alongside CommittedFile because not every file action
 // produces a diff -- a read, a delete, or a failed write all leave a record here and nothing there.
 type FileRecord struct {
-	Path         DurableString `json:"path"`
-	NewPath      *string       `json:"new_path"`
-	ToolCallID   DurableString `json:"tool_call_id"`
+	Path         DurableString  `json:"path"`
+	NewPath      *DurableString `json:"new_path"`
+	ToolCallID   DurableString  `json:"tool_call_id"`
 	ToolName     DurableString `json:"tool_name"`
 	Action       string        `json:"action"`
 	Status       string        `json:"status"`

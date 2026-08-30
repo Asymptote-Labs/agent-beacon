@@ -23,6 +23,9 @@ const (
 	// without it. See Store.Read.
 	ManifestSchemaVersion = 3
 
+	// ManifestStorageFormat is the only storage format this reader trusts a byte watermark from.
+	ManifestStorageFormat = "event_log_v1"
+
 	// MaxManifestBytes bounds the manifest read. fx's own limit is smaller; this leaves room for
 	// growth while still refusing to read an arbitrarily large file that happens to sit at that
 	// path.
@@ -210,6 +213,9 @@ func ReadManifest(path string) (*Manifest, error) {
 	if manifest.SchemaVersion != ManifestSchemaVersion {
 		return nil, fmt.Errorf("fx manifest %s: unsupported schema version %d", path, manifest.SchemaVersion)
 	}
+	if manifest.StorageFormat != ManifestStorageFormat {
+		return nil, fmt.Errorf("fx manifest %s: unsupported storage format %q", path, manifest.StorageFormat)
+	}
 	if manifest.EventLogBytes < 0 {
 		return nil, fmt.Errorf("fx manifest %s: negative event_log_bytes", path)
 	}
@@ -234,7 +240,10 @@ func (s *Store) Read(ref SessionRef) ([]Event, Stats, error) {
 	defer file.Close()
 
 	limit := int64(0)
-	if ref.Manifest != nil && ref.Manifest.EventLogBytes > 0 {
+	if ref.Manifest != nil {
+		if ref.Manifest.EventLogBytes == 0 {
+			return nil, Stats{}, nil
+		}
 		limit = ref.Manifest.EventLogBytes
 		if info, err := file.Stat(); err == nil && info.Size() < limit {
 			limit = info.Size()
