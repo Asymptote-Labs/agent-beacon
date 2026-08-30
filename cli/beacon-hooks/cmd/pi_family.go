@@ -169,14 +169,22 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 // a human made. Here the runtime reports a real prompt and a real answer, so the event is
 // `observed` rather than `inferred` and carries the operator's decision verbatim.
 //
-// The approval carries the tool's name and the runtime's `toolCallId` but not its arguments -- the
-// runtime does not put them on these events. The call id is the join back to the tool.invoked that
-// does carry them, which is why it is promoted here as carefully as on the tool events themselves.
+// The runtime does not put the tool's arguments on these events, so the extension carries them: it
+// remembers the `tool_call` that proposed the call and attaches its `input` to the approval under
+// the same key. That is what makes the approval readable by a detection. Every approval rule Beacon
+// ships matches on `command.command` or `file.path` rather than on a tool name, so an approval that
+// said only "the operator denied bash" would be telemetry no rule could act on.
+//
+// When the arguments are absent -- an approval for a call the extension never saw proposed -- the
+// event still records the decision, the tool name and the call id. The call id is the join back to
+// the tool.invoked that does carry the arguments, which is why it is promoted here as carefully as
+// on the tool events themselves.
 func (f piFamily) approvalEvents(input, fields map[string]interface{}, action, decision, messageSuffix string) []normalizedEvent {
 	toolName := piToolName(input)
 	if toolName != "" {
-		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName})
-		f.applyMCPAttribution(fields, toolName)
+		// toolFields resolves the command, file and MCP blocks from the decided call's arguments
+		// when the extension attached them, and yields just the tool name when it did not.
+		mergeMap(fields, f.toolFields(input, false))
 	}
 
 	approval := map[string]interface{}{"required": true, "decision": decision}

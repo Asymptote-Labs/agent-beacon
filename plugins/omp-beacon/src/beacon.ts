@@ -75,6 +75,57 @@ const subscribedEvents = [
   "message_end",
 ] as const
 
+// How many in-flight tool calls the approval enrichment below will remember at once.
+//
+// Bounded because the map is cleared by `tool_result`, and a call that never produces one -- an
+// aborted run, a session torn down mid-tool -- would otherwise leave an entry behind for the life
+// of the process. Oh My Pi runs a handful of tools concurrently at most, so this is far above the
+// working set and small enough that the worst case is a few kilobytes.
+const maxPendingToolCalls = 64
+
+// Arguments of tool calls that have been proposed but not yet finished, keyed by the runtime's own
+// tool call id.
+//
+// This exists for one reason: Oh My Pi's approval events name the tool and the call, but carry none
+// of its arguments. An approval that says "the operator denied `bash`" is far less than one that
+// says "the operator denied `rm -rf /`", and every approval detection Beacon ships matches on the
+// command or file path rather than on the tool name -- so without this, approval telemetry is
+// recorded but no detection can read it.
+//
+// The `tool_call` event carries those arguments and fires before the approval gate, in this same
+// process, so remembering it until `tool_result` is exact: the join is the runtime's own call id,
+// not a timestamp or a guess.
+const pendingToolCalls = new Map<string, unknown>()
+
+function rememberToolCall(event: OmpEvent) {
+  const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
+  if (!id) return
+  // Re-inserting moves the entry to the end of the Map's insertion order, which is what makes the
+  // eviction below drop the genuinely oldest call rather than the least recently seen one.
+  pendingToolCalls.delete(id)
+  pendingToolCalls.set(id, event.input)
+  while (pendingToolCalls.size > maxPendingToolCalls) {
+    const oldest = pendingToolCalls.keys().next()
+    if (oldest.done) break
+    pendingToolCalls.delete(oldest.value)
+  }
+}
+
+function forgetToolCall(event: OmpEvent) {
+  const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
+  if (id) pendingToolCalls.delete(id)
+}
+
+// decidedToolInput returns the arguments of the tool call an approval event is deciding on.
+//
+// Absent rather than guessed when the call is unknown: an approval enriched with some other call's
+// arguments would be worse than one with none, because it would read as evidence.
+function decidedToolInput(event: OmpEvent): unknown {
+  const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
+  if (!id) return undefined
+  return pendingToolCalls.get(id)
+}
+
 function debugLog(message: string, extra?: unknown) {
   if (!debugEnabled) return
   try {
@@ -256,7 +307,26 @@ export function createBeaconExtension() {
       // The event is spread last so a field it carries itself wins over the context's. `user_bash`
       // and `user_python` both carry their own cwd, and the approval events carry their own
       // sessionId -- in each case the event's is the one that describes this action.
-      await sendToBeacon({ ...identity(ctx), ...event })
+      const envelope: Record<string, unknown> = { ...identity(ctx), ...event }
+
+      if (event.type === "tool_call") {
+        rememberToolCall(event)
+      } else if (event.type === "tool_result") {
+        forgetToolCall(event)
+      } else if (event.type === "session_start" || event.type === "session_shutdown") {
+        // `/new`, a resume, a fork and a shutdown all end the run these calls belonged to. Clearing
+        // keeps a call abandoned mid-flight from being joined to an approval in a later session.
+        // Done here rather than in a second `pi.on` registration so the whole cache lifecycle is
+        // visible in one place.
+        pendingToolCalls.clear()
+      } else if (event.type === "tool_approval_requested" || event.type === "tool_approval_resolved") {
+        // Attached under `input`, the same key `tool_call` uses, so the mapper reads one shape for
+        // both and an approval resolves to the same command or file path its tool call did.
+        const decided = decidedToolInput(event)
+        if (decided !== undefined) envelope.input = decided
+      }
+
+      await sendToBeacon(envelope)
     } catch (err) {
       // Unreachable in practice: sendToBeacon swallows its own failures. Kept because a handler
       // that rejects is a handler that can break the run it was observing.
