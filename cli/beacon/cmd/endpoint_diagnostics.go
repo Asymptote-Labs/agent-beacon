@@ -876,7 +876,7 @@ func hookTargets() ([]string, error) {
 }
 
 func allHookTargetsForLevel() []string {
-	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "cline", "pi", "grok", "qwen", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "cline", "pi", "omp", "grok", "qwen", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 	if endpointOpts.hookLevel != "project" {
 		return all
 	}
@@ -929,6 +929,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.PluginPath, Raw: status}
 		case "pi":
 			status := endpointhooks.PiHookStatus(endpointhooks.PiOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ExtensionPath, Raw: status}
+		case "omp":
+			status := endpointhooks.OmpHookStatus(endpointhooks.OmpOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ExtensionPath, Raw: status}
 		case "grok":
 			status := endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
