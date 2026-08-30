@@ -94,8 +94,8 @@ event model extends to CI and cloud-agent paths under customer control.
 
 | Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
-| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
 
 #### CI Agents
 
@@ -207,7 +207,7 @@ fixtures, and supported event fields.
 - [Endpoint agent](https://docs.asymptotelabs.ai/cli/endpoint) — install, status, repair, and uninstall.
 - [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard) — inspect local runtime logs.
 - [Endpoint event schema](https://docs.asymptotelabs.ai/cli/event-schema) — normalized JSONL event model.
-- [Supported surfaces](https://docs.asymptotelabs.ai/cli/supported-surfaces) — supported runtimes, destinations, and boundaries.
+- [Supported surfaces](https://docs.asymptotelabs.ai/runtimes) — supported runtimes, destinations, and boundaries.
 - [Command reference](https://docs.asymptotelabs.ai/cli/command-reference) — detailed CLI command docs.
 
 ## Quickstart
