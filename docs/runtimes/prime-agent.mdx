@@ -1,0 +1,51 @@
+---
+title: "Prime Agent"
+description: "Asymptote support status for Prime Agent (Prime Intellect) endpoint telemetry"
+---
+
+## Runtime overview
+
+[Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) is Prime Intellect's coding and research harness. Like [Oh My Pi](/runtimes/oh-my-pi), it is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono) and kept its TypeScript extension API, so it fits the same integration shape as [Pi](/runtimes/pi): no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector.
+
+<Warning>
+**Partial support.** Harness identity ships today; collection does not. Asymptote recognizes Prime Agent as its own runtime and resolves every spelling to one canonical harness name, but there is no managed extension, no installer, and no discovery probe yet, so `beacon` collects no Prime Agent telemetry. There is nothing to install for this runtime at present.
+</Warning>
+
+## What ships today
+
+| Area | Support |
+|------|---------|
+| Harness attribution | Supported. `prime`, `prime_agent`, `prime-agent`, `primeagent`, `prime_cli`, `prime-cli`, `prime_intellect`, and `prime-intellect` all normalize to `prime_agent` |
+| Collection method | Defined. The `prime` platform is registered as a plugin-shaped integration, so any Prime Agent event carries `harness.collection_method=plugin` rather than defaulting to `hook` |
+| Managed extension | Not shipped |
+| Discovery and telemetry status | Not shipped. `beacon endpoint discover` does not probe for Prime Agent |
+| Install, status, uninstall, repair | Not shipped. `beacon endpoint hooks install --harness prime` is not a supported target |
+| Runtime event collection | Not shipped. No prompt, tool, command, file, MCP, reasoning, or token telemetry is collected |
+
+## Why the harness name ships first
+
+`harness.name` is a release contract: dashboards, SIEM queries, and the rule pack group by it, so the name has to be pinned before any events are written under it. Two decisions are already fixed and will not change when collection lands.
+
+**Prime Agent is not Pi.** Recording its sessions as `pi_cli` would merge two separately installed products' activity under one name in every query that groups by harness — the one thing a security log must not do to two different runtimes on the same machine. It gets its own canonical name, as Oh My Pi does, for the same reason.
+
+**Matching is by equality against a closed set, not by substring.** "prime" is an ordinary English word that appears in model ids, file paths, and vendor names, so a substring rule would report any event whose harness attribute merely contained it as a Prime Agent session. Both the hook spelling (`--platform prime`) and the runtime's own name (`prime-agent`) are pinned, so one session cannot be recorded under two names.
+
+## What collection will look like
+
+Prime Agent's observation surface is its extension API, the same one Pi and Oh My Pi expose, so support will follow the same shape those runtimes use: one Asymptote-owned TypeScript extension file, installed at user or project level, forwarding runtime events to the local `beacon-hooks` binary. That is why the platform is already registered as `plugin` rather than left to the `hook` default — a plugin platform reported as `hook` overstates vendor support.
+
+Two things will not change with it. Asymptote will not synthesize approval decisions from a blocking tool handler, matching the [Pi](/runtimes/pi) and [Cline](/runtimes/cline) posture, and enforcement will stay behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`).
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Pi" icon="code" href="/runtimes/pi">
+    The upstream runtime Prime Agent forked, supported through a managed extension.
+  </Card>
+  <Card title="Oh My Pi" icon="code" href="/runtimes/oh-my-pi">
+    Another pi-mono fork, and the shape Prime Agent support will follow.
+  </Card>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+</Columns>
