@@ -94,17 +94,8 @@ event model extends to CI and cloud-agent paths under customer control.
 
 | Runtime | Collection path | Telemetry coverage |
 | --- | --- | --- |
-| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
-| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) (beta) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
-
-The optional Chrome MV3 extension in [`browser-extension/`](browser-extension/)
-posts OTLP GenAI logs to the collector already listening on
-`http://127.0.0.1:4318/v1/logs`, so browser chat lands in `runtime.jsonl` beside
-agent activity. It reads only those two chat streams and never writes files. Treat
-it as experimental: it parses private, undocumented APIs, so a change on either site
-can interrupt capture until the adapter is updated. **Retention defaults to `full`**,
-meaning complete prompt and response text is retained locally unless you change it in
-the extension's options page.
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/browser-extension) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
 
 #### CI Agents
 
