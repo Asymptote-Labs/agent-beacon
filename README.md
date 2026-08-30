@@ -34,13 +34,22 @@
 ## What is Agent Beacon
 
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
-for AI agents wherever they run: locally, in CI, in the browser, or in the cloud.
-Agent activity is fragmented across runtimes, so Beacon extends the OpenTelemetry
-GenAI standard and normalizes runtime events into one data model.
+for AI agents — one normalized record of what every agent did, wherever it ran.
+Agents now work across dozens of runtimes and four environments — the laptop, CI,
+the browser, and the cloud — and each one reports differently, or not at all, so
+there is no single place to answer what an agent touched. Beacon covers 31 of
+those surfaces today — 21 local runtimes, 2 browser chat surfaces, CI jobs, and 7
+cloud SDK integrations — extending the OpenTelemetry GenAI standard to normalize
+all of them into one data model.
 
-Security and IT teams deploy it through [MDM](#mdm-deployment), CI workflows, and
-cloud-agent setup paths, then forward the resulting logs to the
-[major enterprise-grade SIEMs](#output-destinations).
+It ships in two pieces: a single endpoint binary for anything running on a
+machine, and a TypeScript SDK for cloud agents and applications. A machine is
+covered in one command, a fleet through [MDM](#mdm-deployment) with a signed macOS
+`.pkg` plus `.deb`, `.rpm`, and `.msi` packages that register and start the service
+themselves, and the resulting logs forward into
+[13 SIEM, log aggregation, and object storage destinations](#output-destinations),
+Splunk, Microsoft Sentinel, CrowdStrike Falcon LogScale, Elastic, and Datadog
+among them.
 
 Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
