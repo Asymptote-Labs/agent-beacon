@@ -1291,6 +1291,11 @@ func harnessAction(h harness.Harness, effectiveUserMode bool) string {
 		return doctorRepairCommand(effectiveUserMode)
 	case "admin_otel":
 		return "beacon endpoint integrations claude-cowork setup"
+	// fx has nothing to install into, so the remedy is to run a collection sweep rather than to
+	// configure the runtime. Pointing at `hooks install` here would name a command that cannot
+	// succeed for this harness.
+	case "session_log":
+		return "beacon endpoint fx sync"
 	}
 	return ""
 }
