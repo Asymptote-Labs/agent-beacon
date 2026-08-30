@@ -35,10 +35,11 @@
 
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
 for AI agents, giving you one record of what every agent did, wherever it ran.
-Agents run in a lot of places now: on laptops, in CI, in the browser, and in the
-cloud, and every runtime logs differently or not at all. Beacon supports 21+
-local runtimes and covers every surface agents run on, normalizing all of them
-into one data model built on the OpenTelemetry GenAI standard.
+Agent activity is fragmented across runtimes and environments. The same agent can
+run on a laptop, in CI, in the browser, or in the cloud, and every runtime records
+what it did differently, or not at all, so there is no one place to look. Beacon
+supports 21+ local runtimes and covers every surface agents run on, normalizing
+all of them into one data model built on the OpenTelemetry GenAI standard.
 
 It ships as a single endpoint binary plus a TypeScript SDK, installs on one
 machine in one command or across a fleet through [MDM](#mdm-deployment), and
