@@ -222,10 +222,13 @@ setup paths.
 
 ### First-Run Onboarding
 
-The first time you run `beacon endpoint install` in a terminal, Beacon asks two
-questions — your email and whether this is work or personal use — and sends the
-answers to Asymptote once. Knowing who runs Beacon is how we decide which runtimes
-and integrations to build next. Exactly what is sent, and nothing else:
+The first time you run `beacon endpoint install` in a terminal, Beacon asks for your
+email and whether this is work or personal use, and sends that to Asymptote once.
+Knowing who runs Beacon is how we decide which runtimes and integrations to build
+next. It happens once per machine and never runs non-interactively: MDM deployments,
+package postinstall scripts, `--system` installs, CI, `--dry-run`, and piped stdin all
+skip it silently, and `--no-onboarding` or `BEACON_ONBOARDING=0` turns it off. Exactly
+what is sent, and nothing else:
 
 | Field | Example |
 | --- | --- |
@@ -237,37 +240,12 @@ and integrations to build next. Exactly what is sent, and nothing else:
 | A random install ID | `64871b2b…` |
 
 **Never sent:** prompts, file contents, commands, telemetry events, repository names,
-or anything else Beacon captures. The endpoint agent itself stays local-only — this is
+or anything else Beacon captures. The endpoint agent itself stays local-only; this is
 one HTTP request at install time, not an ongoing channel.
 
-It happens once per machine, recorded in `~/.beacon/profile.json`, which survives
-uninstall so a reinstall does not ask again.
-
-**It never runs non-interactively.** Package postinstall scripts, MDM deployments,
-`--system` installs, CI, `--dry-run`, and any piped or redirected stdin skip it
-silently. Unattended installs that still need it suppressed can set:
-
-```bash
-BEACON_ONBOARDING=0 beacon endpoint install
-```
-
-For a fleet rollout where you *do* want attribution but have no terminal, supply the
-answers up front:
-
-```bash
-BEACON_ONBOARDING_EMAIL=it@company.com BEACON_ONBOARDING_USAGE=work \
-  beacon endpoint install
-```
-
-Inspect or clear the record at any time:
-
-```bash
-beacon endpoint onboarding          # show what was recorded
-beacon endpoint onboarding --reset  # clear it
-```
-
-To have your record deleted, email the install ID shown by
-`beacon endpoint onboarding` to <support@asymptotelabs.ai>.
+See the [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
+for fleet attribution without a terminal, inspecting or clearing the record, and
+deletion requests.
 
 ### For Security & IT Teams
 
