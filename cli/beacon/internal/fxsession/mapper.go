@@ -148,6 +148,11 @@ func (m *mapper) consume(event *Event) {
 		if emit {
 			m.emitTurn(event)
 		}
+		// After emitting, and for every turn including the ones this sweep skips. The token
+		// fallback in emitTurnUsage measures against this baseline, so a resumed sweep has to
+		// carry it forward over the turns it is not re-emitting -- otherwise the first turn it
+		// does emit reports the session's entire history as its own usage.
+		m.recordTotals(event.TurnCommitted)
 	case KindUsageCheckpointed:
 		if event.UsageCheckpointed == nil {
 			return
@@ -652,8 +657,6 @@ func (m *mapper) emitTurnUsage(event *Event, turn Turn) {
 		}
 		raw["token_source"] = "session_totals_delta"
 	}
-	m.recordTotals(event.TurnCommitted)
-
 	if usage.InputTokens == nil && usage.OutputTokens == nil {
 		return
 	}
@@ -663,9 +666,9 @@ func (m *mapper) emitTurnUsage(event *Event, turn Turn) {
 	m.append(event, fmt.Sprintf("turn.%d.usage", m.turnIndex), ev)
 }
 
-// recordTotals advances the cumulative baseline the fallback above measures against. It runs for
-// every committed turn, including ones this sweep is not emitting, so a resumed sweep measures the
-// first turn it emits against the turn before it rather than against zero.
+// recordTotals advances the cumulative baseline the fallback above measures against. Its caller
+// runs it for every committed turn, including ones this sweep is not emitting, so a resumed sweep
+// measures the first turn it emits against the turn before it rather than against zero.
 func (m *mapper) recordTotals(committed *TurnCommitted) {
 	if committed == nil {
 		return

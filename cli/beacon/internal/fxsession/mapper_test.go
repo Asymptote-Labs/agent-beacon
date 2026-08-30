@@ -2,6 +2,7 @@ package fxsession
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -665,4 +666,76 @@ func rawFx(t *testing.T, ev schema.Event) map[string]interface{} {
 		t.Fatalf("decode raw.fx: %v", err)
 	}
 	return out
+}
+
+// turnWithoutSummaryLine is the shape fx 0.0.7 commits: an execution block with no turn summary,
+// and the session's cumulative token totals on the record. See testdata/fx-0.0.7-session for the
+// captured original.
+func turnWithoutSummaryLine(seq int, totalInput, totalOutput int64) string {
+	payload := fmt.Sprintf(
+		`{"conversation_language":"und-Latn","total_input_tokens":%d,"total_output_tokens":%d,"turn":{`+
+			`"kind":"assistant","user":{"text":"turn %d","images":[]},"assistant":"done",`+
+			`"execution":{"schema_version":4,"tool_steps":[],"files":[]}}}`,
+		totalInput, totalOutput, seq)
+	return frame(seq, 1770000000000+int64(seq)*1000, KindHistoryTurnCommitted, payload)
+}
+
+// On a build that writes no turn summary, each turn's usage is the increase in the session's
+// cumulative totals -- not the totals themselves, which would report the whole history once per
+// turn in any rollup that sums events.
+func TestTurnsWithoutASummaryReportTheIncreaseNotTheRunningTotal(t *testing.T) {
+	lines := []string{
+		sessionStartedLine(1, "/repo"),
+		turnWithoutSummaryLine(2, 1000, 200),
+		turnWithoutSummaryLine(3, 2500, 450),
+	}
+	mapped := mapFixture(t, lines, MapOptions{})
+	usage := findAll(mapped, "token.usage")
+	if len(usage) != 2 {
+		t.Fatalf("usage events = %d, want one per turn", len(usage))
+	}
+	if got := *usage[0].GenAI.Usage.InputTokens; got != 1000 {
+		t.Errorf("first turn input tokens = %d, want 1000", got)
+	}
+	if got := *usage[1].GenAI.Usage.InputTokens; got != 1500 {
+		t.Errorf("second turn input tokens = %d, want the 1500 increase rather than the 2500 total", got)
+	}
+	if got := *usage[1].GenAI.Usage.OutputTokens; got != 250 {
+		t.Errorf("second turn output tokens = %d, want 250", got)
+	}
+	if source := rawFx(t, usage[1])["token_source"]; source != "session_totals_delta" {
+		t.Errorf("raw.fx.token_source = %v, want session_totals_delta", source)
+	}
+}
+
+// The baseline has to carry across turns a sweep is not re-emitting. Without that, the first turn a
+// resumed sweep emits reports the session's entire history as its own usage -- the exact
+// double-count the delta exists to prevent.
+func TestResumedSweepMeasuresAgainstTheTurnBeforeTheCursor(t *testing.T) {
+	lines := []string{
+		sessionStartedLine(1, "/repo"),
+		turnWithoutSummaryLine(2, 1000, 200),
+		turnWithoutSummaryLine(3, 2500, 450),
+	}
+	mapped := mapFixture(t, lines, MapOptions{MinSeq: 2})
+	usage := findAll(mapped, "token.usage")
+	if len(usage) != 1 {
+		t.Fatalf("usage events = %d, want only the turn past the cursor", len(usage))
+	}
+	if got := *usage[0].GenAI.Usage.InputTokens; got != 1500 {
+		t.Fatalf("input tokens = %d, want the 1500 increase over the skipped turn, not the 2500 total", got)
+	}
+}
+
+// A turn summary, when fx writes one, still wins: it is the runtime's own per-turn count with its
+// exactness flags, and the cumulative difference is only a fallback.
+func TestATurnSummaryIsPreferredOverTheCumulativeFallback(t *testing.T) {
+	mapped := mapFixture(t, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)}, MapOptions{})
+	usage := find(t, mapped, "token.usage")
+	if source := rawFx(t, usage)["token_source"]; source != "turn_summary" {
+		t.Fatalf("raw.fx.token_source = %v, want turn_summary", source)
+	}
+	if got := *usage.GenAI.Usage.InputTokens; got != 1200 {
+		t.Errorf("input tokens = %d, want the summary's 1200 rather than the record's 4200 total", got)
+	}
 }
