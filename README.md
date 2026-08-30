@@ -51,6 +51,10 @@ Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
 ## High-Level Architecture
 
+Beacon captures activity where each agent actually runs, then normalizes it on the
+endpoint into a single OpenTelemetry-based event model. That one stream is what the
+local dashboard, JSONL retention, and every SIEM destination read from.
+
 <p align="center">
   <img src="images/beacon-architecture.png" alt="Beacon endpoint architecture" width="860">
 </p>
@@ -63,7 +67,11 @@ Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
   records into the [major enterprise-grade SIEMs](#output-destinations).
 
 Collection, processing, and inspection stay local by default; the same normalized
-event model extends to CI and cloud-agent paths under customer control.
+event model extends to CI and cloud-agent paths under customer control. See the
+[open-source architecture reference](https://docs.asymptotelabs.ai/architecture/architecture)
+for the full collection, normalization, storage, and forwarding pipeline, or the
+[system architecture overview](https://docs.asymptotelabs.ai/architecture/system-architecture)
+to compare it with the managed path.
 
 ## Supported Surfaces
 
