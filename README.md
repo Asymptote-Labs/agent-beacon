@@ -34,13 +34,18 @@
 ## What is Agent Beacon
 
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
-for AI agents wherever they run: locally, in CI, in the browser, or in the cloud.
-Agent activity is fragmented across runtimes, so Beacon extends the OpenTelemetry
-GenAI standard and normalizes runtime events into one data model.
+for AI agents. Today there is no way to see all of your agent activity in one
+place: it is fragmented across runtimes and environments, from laptops to CI to
+the browser to the cloud. Beacon supports [21+ local runtimes](#local-agents) and
+covers [every surface agents run on](#supported-surfaces), normalizing all of it
+into [one data model](https://docs.asymptotelabs.ai/cli/event-schema) built on the
+[OpenTelemetry GenAI standard](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
 
-Security and IT teams deploy it through [MDM](#mdm-deployment), CI workflows, and
-cloud-agent setup paths, then forward the resulting logs to the
-[major enterprise-grade SIEMs](#output-destinations).
+It ships as a single [endpoint binary](https://docs.asymptotelabs.ai/cli/endpoint)
+plus a [TypeScript SDK](#cloud-agents), installs in
+[one command](https://docs.asymptotelabs.ai/cli/installation) or across a fleet
+through [MDM](#mdm-deployment), and forwards to the
+[major SIEM and log destinations](#output-destinations).
 
 Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
@@ -156,32 +161,20 @@ destinations.
 
 ### MDM Deployment
 
-Version tags publish a signed, notarized, and stapled Apple Silicon endpoint
-`.pkg`, `.deb` and `.rpm` packages for Linux on amd64 and arm64, and an x64 `.msi`
-for Windows. Homebrew and release archives remain available for CLI installs.
-
-Installing a native package performs the system-mode install itself: it registers
-and starts the service, writes machine-wide configuration, and points the
-interactive user's agent runtimes at the local collector. See the
-[Linux](https://docs.asymptotelabs.ai/platforms/linux) and
-[Windows](https://docs.asymptotelabs.ai/platforms/windows) install guides.
+Every version tag publishes native packages that perform the system-mode install
+themselves: they register and start the service, write machine-wide configuration, and
+point the interactive user's agent runtimes at the local collector. Homebrew and release
+archives remain available for CLI installs.
 
 | Platform | Package | Service manager | Notes |
 | --- | --- | --- | --- |
-| macOS | Signed, notarized `.pkg` (Apple Silicon) | launchd | Homebrew for single machines |
-| Linux | `.deb` / `.rpm` (amd64, arm64) | systemd | Supervised fallback without systemd |
-| Windows | `.msi` (x64) | Service Control Manager | Unsigned for now; verify the published `.sha256` |
+| [macOS](https://docs.asymptotelabs.ai/platforms/macos) | Signed, notarized `.pkg` (Apple Silicon) | launchd | [Jamf Pro](https://docs.asymptotelabs.ai/mdm/jamf), [Fleet](https://docs.asymptotelabs.ai/mdm/fleet), and [Rippling](https://docs.asymptotelabs.ai/mdm/rippling) assets; Homebrew for single machines |
+| [Linux](https://docs.asymptotelabs.ai/platforms/linux) | `.deb` / `.rpm` (amd64, arm64) | systemd | Supervised fallback without systemd |
+| [Windows](https://docs.asymptotelabs.ai/platforms/windows) | `.msi` (x64) | Service Control Manager | Unsigned for now; verify the published `.sha256` |
 
-| MDM platform | Support path |
-| --- | --- |
-| [Fleet](https://docs.asymptotelabs.ai/cli/fleet) | macOS package and user-context deployment helpers |
-| [Jamf Pro](https://docs.asymptotelabs.ai/cli/jamf) | macOS package, policy scripts, validation, and Extension Attributes |
-
-The macOS package includes GCS forwarder helpers at
-`/opt/beacon/jamf/claude/gcs/{install-forwarder.sh,run-forwarder.sh,repair-hooks-and-forwarder.sh}`.
-They run bundled Vector as `com.beacon.endpoint.gcs-forwarder`, write runtime and
-inventory objects below one root prefix, and reference an externally delivered
-service-account JSON through `GOOGLE_APPLICATION_CREDENTIALS`.
+The macOS package also ships
+[GCS forwarder helpers](https://docs.asymptotelabs.ai/mdm/jamf/claude) under
+`/opt/beacon/jamf/claude/gcs/` that run bundled Vector as a launchd job.
 
 ## Dashboard and Local Detection
 
@@ -217,10 +210,13 @@ setup paths.
 
 ### First-Run Onboarding
 
-The first time you run `beacon endpoint install` in a terminal, Beacon asks two
-questions — your email and whether this is work or personal use — and sends the
-answers to Asymptote once. Knowing who runs Beacon is how we decide which runtimes
-and integrations to build next. Exactly what is sent, and nothing else:
+The first time you run `beacon endpoint install` in a terminal, Beacon asks for your
+email and whether this is work or personal use, and sends that to Asymptote once.
+Knowing who runs Beacon is how we decide which runtimes and integrations to build
+next. It happens once per machine and never runs non-interactively: MDM deployments,
+package postinstall scripts, `--system` installs, CI, `--dry-run`, and piped stdin all
+skip it silently, and `--no-onboarding` or `BEACON_ONBOARDING=0` turns it off. Exactly
+what is sent, and nothing else:
 
 | Field | Example |
 | --- | --- |
@@ -232,37 +228,12 @@ and integrations to build next. Exactly what is sent, and nothing else:
 | A random install ID | `64871b2b…` |
 
 **Never sent:** prompts, file contents, commands, telemetry events, repository names,
-or anything else Beacon captures. The endpoint agent itself stays local-only — this is
+or anything else Beacon captures. The endpoint agent itself stays local-only; this is
 one HTTP request at install time, not an ongoing channel.
 
-It happens once per machine, recorded in `~/.beacon/profile.json`, which survives
-uninstall so a reinstall does not ask again.
-
-**It never runs non-interactively.** Package postinstall scripts, MDM deployments,
-`--system` installs, CI, `--dry-run`, and any piped or redirected stdin skip it
-silently. Unattended installs that still need it suppressed can set:
-
-```bash
-BEACON_ONBOARDING=0 beacon endpoint install
-```
-
-For a fleet rollout where you *do* want attribution but have no terminal, supply the
-answers up front:
-
-```bash
-BEACON_ONBOARDING_EMAIL=it@company.com BEACON_ONBOARDING_USAGE=work \
-  beacon endpoint install
-```
-
-Inspect or clear the record at any time:
-
-```bash
-beacon endpoint onboarding          # show what was recorded
-beacon endpoint onboarding --reset  # clear it
-```
-
-To have your record deleted, email the install ID shown by
-`beacon endpoint onboarding` to <support@asymptotelabs.ai>.
+See the [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
+for fleet attribution without a terminal, inspecting or clearing the record, and
+deletion requests.
 
 ### For Security & IT Teams
 
