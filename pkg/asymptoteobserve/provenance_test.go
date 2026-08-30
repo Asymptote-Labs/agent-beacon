@@ -113,6 +113,7 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		"opencode": CollectionMethodPlugin,
 		"cline":    CollectionMethodPlugin,
 		"pi":       CollectionMethodPlugin,
+		"omp":      CollectionMethodPlugin,
 		// Unset stays unset rather than defaulting to a method, so an event with no platform does
 		// not claim one.
 		"": "",
