@@ -101,6 +101,25 @@ func NormalizeHarnessName(name string) string {
 		lower == "qwencode" || lower == "qwen_cli" || lower == "qwen-cli" || lower == "qwen cli" ||
 		lower == "qwen_coder" || lower == "qwen-coder" || lower == "qwen coder":
 		return "qwen_code"
+	// Prime Agent (Prime Intellect) ships the same extension API as Pi, which is why Beacon
+	// observes it the same way -- but it is a separate product, and recording its sessions as
+	// pi_cli would merge two runtimes' activity under one name in every query that groups by
+	// harness.name. The canonical spelling is prime_agent because that is the product's name and
+	// the command it installs; it follows claude_code and qwen_code, not codex_cli.
+	//
+	// Equality against a closed set, like Pi, Cline and Qwen Code above rather than the Contains
+	// rules further up. "prime" is an ordinary English word that appears in model ids, file paths
+	// and vendor names, so a substring rule would report any event whose harness attribute merely
+	// contained it as a Prime Agent session. The set is closed rather than a prefix rule for the
+	// same reason.
+	//
+	// Both the hook spelling and the runtime's own are pinned here: the hook path installs with
+	// --platform prime, while the runtime calls itself prime-agent, and without this one session
+	// would be recorded under two names.
+	case lower == "prime" || lower == "prime_agent" || lower == "prime-agent" || lower == "prime agent" ||
+		lower == "primeagent" || lower == "prime_cli" || lower == "prime-cli" || lower == "prime cli" ||
+		lower == "prime_intellect" || lower == "prime-intellect" || lower == "prime intellect":
+		return "prime_agent"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
