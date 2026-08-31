@@ -1250,6 +1250,7 @@ func TestClaudeNormalizerDoesNotAffectOtherHarnesses(t *testing.T) {
 }
 
 func TestCapturedClaudeCoworkNormalizesThroughClaudeOTelPipeline(t *testing.T) {
+	t.Setenv("UID", "501")
 	fixture, events := capturedLogEvents(t, "claude-cowork-2.1.251.json")
 	if len(events) != len(fixture.Records) {
 		t.Fatalf("events = %d, want %d", len(events), len(fixture.Records))
@@ -1289,6 +1290,9 @@ func TestCapturedClaudeCoworkNormalizesThroughClaudeOTelPipeline(t *testing.T) {
 	}
 	if response.Content == nil || !response.Content.Included {
 		t.Fatalf("assistant response content marker = %#v, want retained content", response.Content)
+	}
+	if response.User.Name != "operator@example.com" || response.User.UID != "" {
+		t.Fatalf("assistant response user = %#v, want cloud identity without collector UID", response.User)
 	}
 
 	apiRequest := byName["api_request"]

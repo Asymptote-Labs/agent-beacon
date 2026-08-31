@@ -752,9 +752,10 @@ func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}) {
 	}
 	if name := FirstString(attrs, "user.email", "enduser.id", "user.account_id", "user.account_uuid", "user.id"); name != "" {
 		event.User.Name = name
-	}
-	if uid := FirstString(attrs, "user.account_uuid", "user.account_id", "user.id"); uid != "" {
-		event.User.UID = uid
+		// The base event carries the collector process UID. Once a cloud identity
+		// replaces that process user, keep only a source-provided account ID;
+		// otherwise the record would mix a Cowork operator with the collector UID.
+		event.User.UID = FirstString(attrs, "user.account_uuid", "user.account_id", "user.id")
 	}
 }
 
