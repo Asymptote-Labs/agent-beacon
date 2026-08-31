@@ -34,18 +34,21 @@
 ## What is Agent Beacon
 
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
-for AI agents. Today there is no way to see all of your agent activity in one
-place: it is fragmented across runtimes and environments, from laptops to CI to
-the browser to the cloud. Beacon supports [21+ local runtimes](#local-agents) and
-covers [every surface agents run on](#supported-surfaces), normalizing all of it
-into [one data model](https://docs.asymptotelabs.ai/cli/event-schema) built on the
+for AI agents.
+
+Agent activity is fragmented across runtimes and environments, from endpoints and
+CI to browsers and the cloud. Beacon captures that activity and normalizes agent
+telemetry into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema)
+built on the
 [OpenTelemetry GenAI standard](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
 
-It ships as a single [endpoint binary](https://docs.asymptotelabs.ai/cli/endpoint)
-plus a [TypeScript SDK](#cloud-agents), installs in
-[one command](https://docs.asymptotelabs.ai/cli/installation) or across a fleet
-through [MDM](#mdm-deployment), and forwards to the
-[major SIEM and log destinations](#output-destinations).
+Beacon supports [21+ local agent runtimes](#local-agents) and
+[every major surface agents run on](#supported-surfaces). It ships as a
+lightweight [endpoint binary](https://docs.asymptotelabs.ai/cli/endpoint) and
+[TypeScript SDK](#cloud-agents), installs with
+[one command](https://docs.asymptotelabs.ai/cli/installation) or fleet-wide
+through [MDM](#mdm-deployment), and forwards telemetry to
+[major SIEM, observability, and data platforms](#output-destinations).
 
 Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
