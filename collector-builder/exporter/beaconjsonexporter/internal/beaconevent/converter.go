@@ -576,10 +576,20 @@ func codexArgumentCommand(args string) string {
 	return strings.TrimSpace(payload.Cmd)
 }
 
+func isClaudeOTelLogHarness(name string) bool {
+	switch name {
+	case "claude_code", "claude_cowork":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interface{}, body string) {
-	if event == nil || event.Harness.Name != "claude_code" {
+	if event == nil || !isClaudeOTelLogHarness(event.Harness.Name) {
 		return
 	}
+	normalizeClaudeCoworkContext(event, attrs)
 	originalAction := event.Event.Action
 	originalCategory := event.Event.Category
 	preserveAction := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
@@ -667,6 +677,7 @@ func NormalizeClaudeToolDecision(event *Event, attrs map[string]interface{}) {
 	ensureClaudeTool(event, toolName)
 
 	params := JSONMapAttr(attrs, "tool_parameters")
+	normalizeClaudeMCPTool(event, params)
 	if command := claudeCommand(nil, params); command != "" {
 		event.Command = &CommandInfo{Command: command}
 		event.Tool.Command = command
@@ -682,6 +693,7 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 	ensureClaudeTool(event, toolName)
 	input := JSONMapAttr(attrs, "tool_input")
 	params := JSONMapAttr(attrs, "tool_parameters")
+	mcpServer, mcpTool := normalizeClaudeMCPTool(event, params)
 
 	switch strings.ToLower(toolName) {
 	// PowerShell alongside Bash, because they are the same signal under different names.
@@ -709,7 +721,60 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 		normalizeClaudeFileResult(event, toolName, input, "file.read")
 	case "write", "edit", "notebookedit":
 		normalizeClaudeFileResult(event, toolName, input, "file.modified")
+	default:
+		if mcpServer != "" || mcpTool != "" {
+			event.Event.Action = "mcp.tool_invoked"
+			event.Event.Category = "mcp"
+		}
+		if strings.EqualFold(mcpServer, "remote-devices") && strings.EqualFold(mcpTool, "device_bash") {
+			if command := FirstString(input, "command", "cmd"); command != "" {
+				event.Event.Action = "command.executed"
+				event.Event.Category = "command"
+				event.Command = &CommandInfo{Command: command}
+				if duration, ok := Int64Attr(attrs, "duration_ms"); ok {
+					event.Command.DurationMS = duration
+				}
+				event.Tool.Command = command
+			}
+		}
 	}
+}
+
+func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}) {
+	if event.Harness.Name != "claude_cowork" {
+		return
+	}
+	switch strings.ToLower(FirstString(attrs, "cowork.surface")) {
+	case "remote", "cloud", "web", "mobile":
+		event.Origin = asymptoteobserve.OriginCloud
+	case "local", "desktop":
+		event.Origin = asymptoteobserve.OriginLocal
+	}
+	if name := FirstString(attrs, "user.email", "enduser.id", "user.account_id", "user.account_uuid", "user.id"); name != "" {
+		event.User.Name = name
+		// The base event carries the collector process UID. Once a cloud identity
+		// replaces that process user, keep only a source-provided account ID;
+		// otherwise the record would mix a Cowork operator with the collector UID.
+		event.User.UID = FirstString(attrs, "user.account_uuid", "user.account_id", "user.id")
+	}
+}
+
+func normalizeClaudeMCPTool(event *Event, params map[string]interface{}) (string, string) {
+	server := FirstString(params, "mcp_server_name", "mcp.server", "mcp.server.name")
+	tool := FirstString(params, "mcp_tool_name", "mcp.tool", "mcp.tool.name")
+	if server == "" && tool == "" {
+		return "", ""
+	}
+	if event.MCP == nil {
+		event.MCP = &MCPInfo{}
+	}
+	if event.MCP.Server == "" {
+		event.MCP.Server = server
+	}
+	if event.MCP.Tool == "" {
+		event.MCP.Tool = tool
+	}
+	return server, tool
 }
 
 // normalizeClaudeMCPConnection gives an mcp.connection event the mcp payload its
@@ -1019,6 +1084,9 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 		event.Sequence = uint64(sequence)
 	}
 	event.GenAI = GenAIFromAttrs(attrs)
+	if version := FirstString(attrs, "service.version"); version != "" {
+		event.Harness.Version = version
+	}
 	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
@@ -1274,7 +1342,7 @@ func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.reasoning.output_tokens"); ok {
 		usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: &value}
 	}
-	if value, ok := FloatAttr(attrs, "gen_ai.usage.cost"); ok {
+	if value, ok := FloatAttr(attrs, "gen_ai.usage.cost_usd", "gen_ai.usage.cost", "cost_usd"); ok {
 		usage.CostUSD = &value
 	}
 	if IsZeroJSON(usage) {

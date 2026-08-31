@@ -50,7 +50,7 @@ var assistantTextKeys = []string{
 // which is what keeps a survey answer from being recorded as something the model
 // said.
 func claudeAssistantText(harness, eventName string, attrs map[string]interface{}) string {
-	if harness != "claude_code" || eventName != ClaudeAssistantResponse {
+	if !isClaudeOTelLogHarness(harness) || eventName != ClaudeAssistantResponse {
 		return ""
 	}
 	return FirstTextAttr(attrs, "response")

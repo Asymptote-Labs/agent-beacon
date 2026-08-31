@@ -1290,6 +1290,56 @@ func TestConsumeLogsNormalizesCapturedClaudeCodeToolEvents(t *testing.T) {
 	}
 }
 
+func TestConsumeLogsNormalizesCapturedClaudeCoworkEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	exp, err := newExporter(&Config{
+		Path:          path,
+		MaxEventBytes: defaultMaxEventBytes,
+		RotateBytes:   defaultRotateBytes,
+		RedactSecrets: true,
+	}, exporter.Settings{})
+	if err != nil {
+		t.Fatalf("newExporter returned error: %v", err)
+	}
+
+	if err := exp.consumeLogs(context.Background(), capturedClaudeLogs(t, "claude-cowork-2.1.251.json")); err != nil {
+		t.Fatalf("consumeLogs returned error: %v", err)
+	}
+
+	output, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read runtime JSONL: %v", err)
+	}
+	var sawPrompt, sawResponse, sawApproval, sawCommand, sawConnection, sawLifecycle bool
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		var event beaconEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode runtime event: %v", err)
+		}
+		if event.Harness.Name != "claude_cowork" || event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodOTLP {
+			t.Fatalf("unexpected Cowork harness: %#v", event.Harness)
+		}
+		switch event.Message {
+		case "claude_code.user_prompt":
+			sawPrompt = event.Event.Action == "prompt.submitted" && event.Prompt != nil
+		case "claude_code.assistant_response":
+			sawResponse = event.Event.Action == "session.activity" && event.GenAI != nil && event.GenAI.Output != nil
+		case "claude_code.tool_decision":
+			sawApproval = event.Event.Action == "approval.allowed" && event.MCP != nil && event.MCP.Tool == "device_bash"
+		case "claude_code.tool_result":
+			sawCommand = event.Event.Action == "command.executed" && event.Command != nil && event.Command.Command == "printf COWORK_COMMAND_MARKER"
+		case "claude_code.mcp_server_connection":
+			sawConnection = event.Event.Action == "mcp.connection" && event.MCP != nil && event.MCP.Server == "remote-devices"
+		case "claude_code.hook_execution_complete":
+			sawLifecycle = event.Event.Action == "session.activity" && event.Event.Category == "session"
+		}
+	}
+	if !sawPrompt || !sawResponse || !sawApproval || !sawCommand || !sawConnection || !sawLifecycle {
+		t.Fatalf("normalized Cowork events missing: prompt=%v response=%v approval=%v command=%v connection=%v lifecycle=%v\n%s",
+			sawPrompt, sawResponse, sawApproval, sawCommand, sawConnection, sawLifecycle, output)
+	}
+}
+
 func TestConsumeLogsClassifiesCapturedClaudeCodeLifecycleEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	exp, err := newExporter(&Config{
