@@ -199,11 +199,18 @@ type sessionStateStats struct {
 }
 
 func sessionIDsForState(path string, query EventQuery, state string) (map[string]bool, error) {
-	query.SessionState = ""
-	query.sessionStateIDs = nil
+	// Session state is a property of the whole session, not the filtered slice.
+	// Use only time bounds and session/harness scope so content filters
+	// (category, action, search, etc.) do not affect the classification.
+	stateQuery := EventQuery{
+		Since:   query.Since,
+		Until:   query.Until,
+		Harness: query.Harness,
+		Session: query.Session,
+	}
 	stats := map[string]*sessionStateStats{}
 	for _, source := range eventSources(path) {
-		if err := collectSessionStateStats(source, query, stats); err != nil {
+		if err := collectSessionStateStats(source, stateQuery, stats); err != nil {
 			return nil, err
 		}
 	}

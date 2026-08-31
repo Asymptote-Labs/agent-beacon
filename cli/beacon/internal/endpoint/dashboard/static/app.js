@@ -158,6 +158,14 @@ function updateURL(query) {
   } else {
     params.delete("view");
   }
+  const range = $("#range-filter");
+  if (range) {
+    if (range.value && range.value !== "30d") {
+      params.set("range", range.value);
+    } else {
+      params.delete("range");
+    }
+  }
   const nextQuery = params.toString();
   const next = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
   window.history.replaceState(null, "", next);
@@ -1527,9 +1535,20 @@ function attentionItems() {
   return items.filter((item) => item.count > 0);
 }
 
+function restoreRangeFromURL() {
+  const range = $("#range-filter");
+  if (!range) return;
+  const params = new URLSearchParams(window.location.search);
+  const value = params.get("range");
+  if (value && Array.from(range.options).some((opt) => opt.value === value)) {
+    range.value = value;
+  }
+}
+
 function setupSessionFilters() {
   const form = $("#filters");
   if (!form) return;
+  restoreRangeFromURL();
   syncSinceFromRange({ preserveExisting: true });
   syncSessionStateTabs();
   $$("[data-session-state]").forEach((button) => {
@@ -1618,8 +1637,10 @@ function setFilters(filters, { reset = false } = {}) {
 
 function applyFilters(filters, options = {}) {
   if (isOverviewPage) {
-    const query = queryStringFromObject(filters);
-    window.location.href = query ? `/?${query}` : "/";
+    const params = new URLSearchParams(queryStringFromObject(filters));
+    params.set("range", "all");
+    params.set("session_state", "");
+    window.location.href = `/?${params.toString()}`;
     return;
   }
   if (isActivityPage) setActivityView("detailed");
@@ -2251,7 +2272,7 @@ function sessionDetailHTML(sessionId) {
       <div class="detail-head">
         <h3>Session timeline</h3>
         <span class="muted">${escapeHTML(sessionId)} &middot; ${records.length} event${records.length === 1 ? "" : "s"}</span>
-        <a class="text-button" href="/?session=${encodeURIComponent(sessionId)}">Open in Agent Activity Sessions</a>
+        <a class="text-button" href="/?session=${encodeURIComponent(sessionId)}&range=all&session_state=">Open in Agent Activity Sessions</a>
       </div>
       <ol class="session-timeline">${records.map((record) => sessionTimelineRow(record)).join("")}</ol>
     </div>
