@@ -91,6 +91,7 @@ function queryFromFilters() {
   for (const [key, value] of data.entries()) {
     const trimmed = String(value).trim();
     if (trimmed) params.set(key, trimmed);
+    else if (key === "session_state") params.set(key, "");
   }
   return params.toString();
 }
