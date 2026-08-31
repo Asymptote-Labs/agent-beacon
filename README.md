@@ -38,9 +38,7 @@ for AI agents.
 
 Agent activity is fragmented across runtimes and environments, from endpoints and
 CI to browsers and the cloud. Beacon captures that activity and normalizes agent
-telemetry into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema)
-built on the
-[OpenTelemetry GenAI standard](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
+telemetry into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema).
 
 Beacon supports [21+ local agent runtimes](#local-agents) and
 [every major surface agents run on](#supported-surfaces). It ships as a
