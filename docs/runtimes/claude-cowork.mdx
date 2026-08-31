@@ -19,7 +19,16 @@ Before enabling Claude Cowork telemetry, make sure:
 
 ## Collection path
 
-Claude Cowork exports OTLP telemetry from Anthropic's service to a customer-managed collector endpoint. After events reach Asymptote's collector path, Asymptote writes normalized endpoint events to the runtime JSONL log and makes them available in the local dashboard.
+Claude Cowork exports OTLP telemetry from Anthropic's service to a
+customer-managed collector endpoint. After events reach Beacon's collector,
+Beacon applies the shared Claude normalizer, writes canonical endpoint events to
+the runtime JSONL log, and makes them available in the local dashboard.
+
+Cowork can be opened from Claude Desktop while the task itself runs on
+Anthropic's remote infrastructure. When Anthropic reports
+`cowork.surface=remote`, Beacon records `origin=cloud`. The event's endpoint
+hostname and operating system still identify the machine running the Beacon
+collector, not the remote Cowork execution host.
 
 ## Discovery and status
 
@@ -39,8 +48,13 @@ Claude Cowork is not hook-based.
 
 | Area | Support |
 |------|---------|
-| Prompt telemetry | Supported when emitted through Claude Cowork OTLP |
-| Command, tool, and file telemetry | Supported when emitted through Claude Cowork OTLP |
+| Prompt and assistant response telemetry | Retained in canonical GenAI input and output message fields when emitted through Cowork OTLP |
+| Command, tool, and file telemetry | Tool parameters and results normalize into canonical command, tool, and file fields |
+| Approval telemetry | Cowork tool decisions normalize into observed approval requests, allows, and denials |
+| MCP telemetry | MCP connections and tool calls include canonical server and tool names |
+| Model and usage telemetry | Model, token usage, and runtime-reported cost normalize into `gen_ai.usage` |
+| Session and runtime telemetry | Session, API, hook lifecycle, refusal, and error records remain available for investigation |
+| User and origin context | Cowork's source-provided user identifier is preserved; remote Cowork surfaces are marked as cloud execution |
 | Local JSONL and dashboard | Supported after events reach the collector |
 | MDM deployment | Uses a durable customer-managed HTTPS collector endpoint rather than local MDM hook config |
 

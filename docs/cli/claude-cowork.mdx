@@ -62,6 +62,23 @@ Recommended production shape:
 - Forward OTLP HTTP paths such as `/v1/logs`, `/v1/metrics`, and `/v1/traces` to the Collector's local `4318` receiver
 - Treat Cowork telemetry as sensitive because prompt text, tool parameters, file paths, user email addresses, model usage, and errors may be present before Beacon redaction or export
 
+## How Cowork events are represented
+
+Beacon applies the same Claude event normalizer to Claude Cowork and Claude
+Code. When Anthropic emits the relevant attributes, Cowork prompts, assistant
+responses, approvals, commands, files, MCP activity, model usage, token counts,
+and runtime-reported cost use the canonical Beacon fields while the source OTLP
+attributes remain under `raw.attributes`.
+
+The environment describes where the task executes, not which application opened
+it. A task started in Claude Desktop can report `cowork.surface=remote`; Beacon
+records that as `origin=cloud`. Endpoint hostname and operating system fields
+identify the machine running the Beacon collector.
+
+Cowork may provide only an opaque `user.id` rather than an email address. Beacon
+preserves the identifier but does not attempt to reverse it or synthesize a
+display name.
+
 ## Local testing with ngrok
 
 For demos, validation, or local development only, Beacon can create a temporary authenticated ngrok tunnel to the local OTLP HTTP receiver:

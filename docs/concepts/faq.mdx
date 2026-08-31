@@ -189,10 +189,16 @@ surfaces the provider exposes.
 
 Claude Cowork is configured in the Claude organization admin settings. Anthropic's
 service exports OTLP telemetry to a durable collector endpoint, and Asymptote
-normalizes the received events into the shared event model.
+normalizes the received events through the same Claude event pipeline used for
+Claude Code. Supported source attributes become canonical prompts, assistant
+responses, approvals, commands, files, MCP activity, model usage, token counts,
+and runtime-reported cost.
 
 Claude Cowork is not a local hook integration. Production deployments should use
 a durable HTTPS collector endpoint rather than a laptop or temporary tunnel.
+A task can still be marked as cloud execution when it was started from Claude
+Desktop because Cowork runs that task remotely. The event's endpoint fields
+identify the Beacon collector machine.
 
 ### Where should a cloud AI tenant send OTLP telemetry?
 

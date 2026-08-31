@@ -585,6 +585,12 @@ Claude Cowork monitoring is configured in the Claude admin console at
 by Claude Cowork, so use a durable public HTTPS Collector endpoint for ongoing
 monitoring. The `--ngrok` mode is for short-lived local testing and prints an
 authenticated tunnel URL plus the matching `Authorization` header.
+Cowork uses the shared Claude normalizer for prompts, assistant responses,
+approvals, commands, files, MCP activity, session lifecycle, model usage,
+tokens, and runtime-reported cost. A Desktop-started task may still carry
+`origin=cloud` when `cowork.surface=remote`; endpoint hostname and OS identify
+the Beacon collector machine. Cowork may expose only an opaque `user.id`, which
+Beacon preserves without inventing a display identity.
 
 OpenClaw Gateway monitoring is configured in OpenClaw's local Gateway config
 with the `diagnostics-otel` plugin enabled. Beacon prints a local OTLP/HTTP

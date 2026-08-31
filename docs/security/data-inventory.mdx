@@ -22,7 +22,7 @@ Beacon writes normalized endpoint events only when supported runtimes provide te
 | Devin Desktop | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
 | Factory Droid | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
 | Cursor | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
-| Claude Cowork | Admin-configured OTLP | Prompt, command, tool, and file telemetry when emitted through Claude Cowork OTLP |
+| Claude Cowork | Admin-configured OTLP | Prompt and assistant response content; approvals; command, tool, file, and MCP activity; session lifecycle; model and token usage; runtime-reported cost; source user identifier and cloud origin when emitted through Cowork OTLP |
 | OpenClaw Gateway | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
 | [Claude.ai](/runtimes/claude-web) (`claude_web`) | Managed browser extension over local OTLP | Prompt text, assistant response text, request and response model, tool call id/name/arguments/results, token usage, and conversation id from the claude.ai chat stream |
 | [ChatGPT](/runtimes/chatgpt-web) (`chatgpt_web`) | Managed browser extension over local OTLP | Prompt text, assistant response text, model, tool call activity, and conversation id from the chatgpt.com chat stream. ChatGPT web does not report token usage in its stream |

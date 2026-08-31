@@ -11,6 +11,29 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## August 2026
 
+### v1.2.7 · August 31, 2026
+
+- **Claude Cowork uses the shared Claude normalizer** · Cowork OTLP logs now
+  produce the same canonical prompt, assistant response, approval, command,
+  file, MCP, session, model, token, and runtime-reported cost fields as Claude
+  Code when Anthropic emits those attributes. Tool parameters are decoded into
+  structured command and MCP fields instead of remaining only in raw OTLP
+  attributes.
+- **Cowork provenance stays coherent** · Remote Cowork execution is marked
+  `origin=cloud` even when the task was started in Claude Desktop. The source's
+  Cowork user identifier replaces the local collector process identity without
+  mixing a cloud account with a local UID.
+- **Richer retained content** · User prompts and assistant responses are
+  promoted into the canonical GenAI message fields with content hashes and byte
+  counts, while the original OTLP attributes remain available under
+  `raw.attributes`.
+- **Local dashboard refresh** · The loopback dashboard has a clearer navigation
+  and investigation layout, richer runtime identity, session-state filtering,
+  and improved event detail views.
+- **Architecture and positioning updates** · The product overview and
+  architecture guides now describe Beacon around its capture, normalization,
+  storage, detection, and forwarding pipeline stages.
+
 ### v1.2.5 · August 28, 2026
 
 - **Turn-level usage** · Beacon now configures Codex's local trace exporter and
