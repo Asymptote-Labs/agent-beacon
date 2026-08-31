@@ -22,6 +22,7 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const navCollapsedStorageKey = "beacon.dashboard.navCollapsed";
 const isActivityPage = !document.body.dataset.page;
 const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
@@ -47,16 +48,21 @@ const formFields = [
   "policy",
   "wazuh_level",
   "since",
+  "session_state",
   "limit",
   "review",
 ];
 state.activityView = initialActivityView();
 
 const presets = {
+  all: { limit: "500" },
+  destructive: { q: "destructive", limit: "500" },
   review: { review: "true", limit: "500" },
+  "high-risk": { severity: "high", limit: "500" },
   commands: { action: "command.executed", limit: "500" },
+  writes: { action: "file.modified", limit: "500" },
+  mcp: { category: "mcp", limit: "500" },
   files: { action: "file.modified", limit: "500" },
-  mcp: { action: "mcp.tool_invoked", limit: "500" },
   approvals: { category: "approval", limit: "500" },
   failures: { action: "tool.failed", limit: "500" },
   high: { severity: "high", limit: "500" },
@@ -516,7 +522,6 @@ function inventoryCounts(ctx) {
 function renderInventoryFilterOptions(ctx) {
   const userSelect = $("#inventory-user-filter");
   const runtimeSelect = $("#inventory-runtime-filter");
-  const allRows = ["configs", "mcp", "skills", "hooks"].flatMap((view) => inventoryRowsForView(view, ctx));
   if (userSelect) {
     const identity = inventoryIdentity();
     userSelect.innerHTML = `
@@ -525,7 +530,12 @@ function renderInventoryFilterOptions(ctx) {
     `;
   }
   if (runtimeSelect) {
-    const runtimes = uniqueSorted(allRows.map(inventoryRuntimeValue).filter(Boolean), runtimeLabel);
+    const rows = inventoryRowsForView(state.inventoryView, ctx);
+    const runtimes = uniqueSorted(rows.map(inventoryRuntimeValue).filter(Boolean), runtimeLabel);
+    if (state.inventoryRuntime && !runtimes.includes(state.inventoryRuntime)) {
+      state.inventoryRuntime = "";
+      updateInventoryURL();
+    }
     runtimeSelect.innerHTML = `<option value="">All runtimes</option>` + runtimes
       .map((value) => `<option value="${escapeHTML(value)}"${state.inventoryRuntime === value ? " selected" : ""}>${escapeHTML(runtimeLabel(value))}</option>`)
       .join("");
@@ -1396,6 +1406,7 @@ function renderFilterOptions() {
   if (!$("#filters")) return;
   renderHarnessSelect(state.summary?.top_harnesses || []);
   renderModelSelect(state.summary?.top_models || []);
+  renderRepositorySelect(state.summary?.top_repositories || []);
   renderDatalist("action-options", state.summary?.top_actions || []);
 }
 
@@ -1421,6 +1432,27 @@ function renderModelSelect(values) {
   ];
   select.innerHTML = options.join("");
   select.value = values.some((item) => item.name === current) ? current : "";
+}
+
+function renderRepositorySelect(values) {
+  const select = $("#repository-filter");
+  if (!select) return;
+  const current = select.value;
+  const options = [
+    `<option value="">All repositories</option>`,
+    ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(repositoryOptionLabel(item.name))} (${escapeHTML(item.count)})</option>`),
+  ];
+  if (current && !values.some((item) => item.name === current)) {
+    options.push(`<option value="${escapeHTML(current)}">${escapeHTML(repositoryOptionLabel(current))}</option>`);
+  }
+  select.innerHTML = options.join("");
+  select.value = current;
+}
+
+function repositoryOptionLabel(value) {
+  if (!value) return "";
+  const parts = value.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : value;
 }
 
 function renderDatalist(id, values) {
@@ -1475,6 +1507,52 @@ function attentionItems() {
   return items.filter((item) => item.count > 0);
 }
 
+function setupSessionFilters() {
+  const form = $("#filters");
+  if (!form) return;
+  syncSinceFromRange({ preserveExisting: true });
+  syncSessionStateTabs();
+  $$("[data-session-state]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = $("#session-state-filter");
+      if (!input) return;
+      input.value = button.dataset.sessionState === "all" ? "" : button.dataset.sessionState;
+      syncSessionStateTabs();
+      load({ updateLocation: true }).catch(console.error);
+    });
+  });
+  $("#range-filter")?.addEventListener("change", () => {
+    syncSinceFromRange();
+    load({ updateLocation: true }).catch(console.error);
+  });
+  form.addEventListener("change", (event) => {
+    if (event.target?.id === "range-filter") return;
+    if (event.target?.matches("select[name]")) load({ updateLocation: true }).catch(console.error);
+  });
+}
+
+function syncSessionStateTabs() {
+  const current = $("#session-state-filter")?.value || "all";
+  $$("[data-session-state]").forEach((button) => {
+    const active = button.dataset.sessionState === current || (button.dataset.sessionState === "all" && current === "");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function syncSinceFromRange({ preserveExisting = false } = {}) {
+  const range = $("#range-filter");
+  const since = $("#since-filter");
+  if (!range || !since) return;
+  if (preserveExisting && since.value) return;
+  const durations = {
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+  };
+  since.value = durations[range.value] ? new Date(Date.now() - durations[range.value]).toISOString() : "";
+}
+
 function firstCount(values) {
   return values && values.length ? values[0] : null;
 }
@@ -1514,6 +1592,7 @@ function setFilters(filters, { reset = false } = {}) {
     const input = $(`[name="${key}"]`);
     if (input) input.value = value;
   }
+  if (!Object.prototype.hasOwnProperty.call(filters, "since")) syncSinceFromRange();
   load({ updateLocation: true }).catch(console.error);
 }
 
@@ -1546,10 +1625,13 @@ function clearFilter(key) {
 function clearFields(loadAfter = true) {
   if (!$("#filters")) return;
   state.newEventCount = 0;
+  const sessionState = $("#session-state-filter")?.value || "captured";
   for (const field of formFields) {
     const input = $(`[name="${field}"]`);
-    if (input) input.value = field === "limit" ? "500" : "";
+    if (input) input.value = field === "limit" ? "500" : field === "session_state" ? sessionState : "";
   }
+  syncSinceFromRange();
+  syncSessionStateTabs();
   if (loadAfter) load({ updateLocation: true }).catch(console.error);
 }
 
@@ -1570,6 +1652,7 @@ function escapeHTML(value) {
 }
 
 function applyPreset(name) {
+  $$(".quick-filters [data-preset]").forEach((button) => button.classList.toggle("active", button.dataset.preset === name));
   applyFilters(presets[name] || {}, { reset: true });
 }
 
@@ -2210,7 +2293,7 @@ const navIcons = {
 };
 
 function decorateDashboardNav() {
-  $$(".nav-toggle a, .nav-section-title").forEach((item) => {
+  $$(".nav-toggle a, .nav-parent, .nav-section-title").forEach((item) => {
     if (item.querySelector(".nav-icon")) return;
     const label = item.textContent.trim();
     const icon = navIcons[label];
@@ -2219,7 +2302,36 @@ function decorateDashboardNav() {
   });
 }
 
+function setupNavCollapse() {
+  const nav = $(".nav-toggle");
+  if (!nav) return;
+  let button = $(".nav-collapse");
+  if (!button) {
+    button = document.createElement("button");
+    button.type = "button";
+    button.className = "nav-collapse";
+    button.textContent = "\u2039";
+    nav.append(button);
+  }
+
+  const apply = (collapsed) => {
+    document.body.classList.toggle("nav-collapsed", collapsed);
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    button.setAttribute("aria-label", collapsed ? "Expand navigation" : "Collapse navigation");
+    button.setAttribute("title", collapsed ? "Expand navigation" : "Collapse navigation");
+  };
+
+  const initial = localStorage.getItem(navCollapsedStorageKey) === "1";
+  apply(initial);
+  button.addEventListener("click", () => {
+    const collapsed = !document.body.classList.contains("nav-collapsed");
+    localStorage.setItem(navCollapsedStorageKey, collapsed ? "1" : "0");
+    apply(collapsed);
+  });
+}
+
 decorateDashboardNav();
+setupNavCollapse();
 
 $("#min-severity")?.addEventListener("change", (event) => {
   const params = new URLSearchParams(window.location.search);
@@ -2228,10 +2340,6 @@ $("#min-severity")?.addEventListener("change", (event) => {
   window.location.search = params.toString();
 });
 
-$("#refresh")?.addEventListener("click", () => {
-  const loader = isFindingsPage ? loadFindings : isDetectionsPage ? loadDetections : isTokensPage ? loadTokens : isInventoryPage ? loadInventory : load;
-  loader().catch(console.error);
-});
 $("#inventory-show-all")?.addEventListener("change", () => renderInventoryConfigs(state.inventory?.configs || []));
 $("#inventory-runtime-filter")?.addEventListener("change", (event) => {
   state.inventoryRuntime = event.target.value;
@@ -2280,6 +2388,7 @@ if (isDetectionsPage) {
   setInterval(() => loadInventory().catch(console.error), 15000);
 } else {
   hydrateFiltersFromURL();
+  setupSessionFilters();
   load().catch(console.error);
   setInterval(() => load({ mode: "poll" }).catch(console.error), 10000);
 }

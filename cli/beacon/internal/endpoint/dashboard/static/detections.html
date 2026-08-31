@@ -13,13 +13,12 @@
         <h1>Detections</h1>
       </div>
       <nav class="nav-toggle" aria-label="Dashboard navigation">
-        <div class="nav-search" aria-hidden="true">Find...</div>
         <div class="nav-section">
           <div class="nav-section-title">Overview</div>
           <a href="/findings.html">Findings</a>
         </div>
         <div class="nav-section">
-          <div class="nav-section-title">Analytics</div>
+          <div class="nav-parent">Analytics</div>
           <a href="/tokens.html">Token Usage</a>
           <a href="/overview.html">Agent Activity</a>
         </div>
@@ -33,16 +32,14 @@
           <a class="active" aria-current="page" href="/detections.html">Detections</a>
         </div>
       </nav>
-      <button id="refresh">Refresh</button>
     </header>
 
     <main>
+      <div class="detections-page-head">
+        <h1>Detection Rules</h1>
+      </div>
       <section class="panel">
         <div class="section-head overview-head">
-          <div>
-            <h2>Threat Rules</h2>
-            <p class="muted">The active rule set <code>beacon scan</code> runs: the local store when present, otherwise the embedded baseline.</p>
-          </div>
           <div id="detections-meta" class="muted"></div>
         </div>
         <table>

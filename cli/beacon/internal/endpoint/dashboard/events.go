@@ -31,27 +31,29 @@ type EventRecord struct {
 }
 
 type EventQuery struct {
-	Limit      int
-	NoLimit    bool
-	Since      time.Time
-	Until      time.Time
-	Q          string
-	Harness    string
-	Model      string
-	Action     string
-	Severity   string
-	Category   string
-	Repository string
-	Session    string
-	Trace      string
-	File       string
-	Command    string
-	MCP        string
-	Approval   string
-	Decision   string
-	Policy     string
-	Review     string
-	WazuhLevel string
+	Limit           int
+	NoLimit         bool
+	Since           time.Time
+	Until           time.Time
+	Q               string
+	Harness         string
+	Model           string
+	Action          string
+	Severity        string
+	Category        string
+	Repository      string
+	Session         string
+	Trace           string
+	File            string
+	Command         string
+	MCP             string
+	Approval        string
+	Decision        string
+	Policy          string
+	Review          string
+	WazuhLevel      string
+	SessionState    string
+	sessionStateIDs map[string]bool
 }
 
 type EventResult struct {
@@ -67,6 +69,15 @@ type EventResult struct {
 
 func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	limit := normalizeLimit(query.Limit)
+	state := normalizeSessionState(query.SessionState)
+	query.SessionState = state
+	if state != "" {
+		ids, err := sessionIDsForState(path, query, state)
+		if err != nil {
+			return EventResult{}, err
+		}
+		query.sessionStateIDs = ids
+	}
 	result := EventResult{Limit: limit, Query: strings.TrimSpace(query.Q), Filters: activeFilters(query)}
 	for _, source := range eventSources(path) {
 		if err := readEventsFromSource(source, query, &result, limit); err != nil {
@@ -179,6 +190,147 @@ func streamSource(source eventSource, fn func(schema.Event) error) error {
 		}
 	}
 	return scanner.Err()
+}
+
+type sessionStateStats struct {
+	lifecycleEvents    int
+	nonLifecycleEvents int
+	capturedPrompts    int
+}
+
+func sessionIDsForState(path string, query EventQuery, state string) (map[string]bool, error) {
+	query.SessionState = ""
+	query.sessionStateIDs = nil
+	stats := map[string]*sessionStateStats{}
+	for _, source := range eventSources(path) {
+		if err := collectSessionStateStats(source, query, stats); err != nil {
+			return nil, err
+		}
+	}
+	ids := map[string]bool{}
+	for id, stat := range stats {
+		empty := isEmptySession(stat)
+		if (state == "empty" && empty) || (state == "captured" && !empty) {
+			ids[id] = true
+		}
+	}
+	return ids, nil
+}
+
+func collectSessionStateStats(source eventSource, query EventQuery, stats map[string]*sessionStateStats) error {
+	file, err := os.Open(source.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var event schema.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			continue
+		}
+		normalizeDashboardEvent(&event)
+		parsed, _ := asymptoteobserve.ParseTimestamp(event.Timestamp)
+		record := EventRecord{
+			ID:         source.lineID(lineNo),
+			Line:       lineNo,
+			Event:      event,
+			Raw:        append(json.RawMessage(nil), line...),
+			Parsed:     parsed,
+			WazuhLevel: WazuhLevel(event.Event.Action),
+		}
+		if !matchesQuery(record, query) || event.Session == nil || event.Session.ID == "" {
+			continue
+		}
+		stat := stats[event.Session.ID]
+		if stat == nil {
+			stat = &sessionStateStats{}
+			stats[event.Session.ID] = stat
+		}
+		if hasCapturedPromptText(event) {
+			stat.capturedPrompts++
+		}
+		if isLifecycleSessionEvent(event) {
+			stat.lifecycleEvents++
+		} else {
+			stat.nonLifecycleEvents++
+		}
+	}
+	return scanner.Err()
+}
+
+func isEmptySession(stat *sessionStateStats) bool {
+	return stat != nil && stat.capturedPrompts == 0 && stat.lifecycleEvents > 0 && stat.nonLifecycleEvents == 0
+}
+
+func hasCapturedPromptText(event schema.Event) bool {
+	if !isPromptEvent(event) {
+		return false
+	}
+	if event.Prompt != nil && strings.TrimSpace(event.Prompt.Text) != "" {
+		return true
+	}
+	return strings.TrimSpace(rawString(event.Raw, "first_prompt")) != ""
+}
+
+func isPromptEvent(event schema.Event) bool {
+	action := normalizedLifecycleValue(event.Event.Action)
+	return strings.EqualFold(event.Event.Category, "prompt") || strings.Contains(action, "prompt") || event.Prompt != nil
+}
+
+func isLifecycleSessionEvent(event schema.Event) bool {
+	switch normalizedLifecycleValue(event.Event.Action) {
+	case "session started", "agent session started", "session ended", "agent session ended":
+		return true
+	}
+	switch normalizedLifecycleValue(event.Message) {
+	case "session started", "agent session started", "session ended", "agent session ended":
+		return true
+	}
+	return false
+}
+
+func normalizedLifecycleValue(value string) string {
+	replacer := strings.NewReplacer(".", " ", "_", " ", "-", " ")
+	return strings.Join(strings.Fields(strings.ToLower(replacer.Replace(strings.TrimSpace(value)))), " ")
+}
+
+func normalizeSessionState(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "empty":
+		return "empty"
+	case "captured":
+		return "captured"
+	default:
+		return ""
+	}
+}
+
+func rawString(raw map[string]interface{}, key string) string {
+	if raw == nil {
+		return ""
+	}
+	value, ok := raw[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 // SortRecordsAppendOrder orders records oldest-first: by timestamp, then by the
@@ -490,6 +642,11 @@ func matchesQuery(record EventRecord, query EventQuery) bool {
 	if query.WazuhLevel != "" && !strings.EqualFold(strconv.Itoa(record.WazuhLevel), query.WazuhLevel) {
 		return false
 	}
+	if query.SessionState != "" {
+		if event.Session == nil || event.Session.ID == "" || !query.sessionStateIDs[event.Session.ID] {
+			return false
+		}
+	}
 	if query.Q != "" && !matchesFreeText(record, query.Q) {
 		return false
 	}
@@ -654,6 +811,7 @@ func activeFilters(query EventQuery) map[string]string {
 	add("policy", query.Policy)
 	add("review", query.Review)
 	add("wazuh_level", query.WazuhLevel)
+	add("session_state", query.SessionState)
 	if !query.Since.IsZero() {
 		filters["since"] = query.Since.Format(time.RFC3339)
 	}
