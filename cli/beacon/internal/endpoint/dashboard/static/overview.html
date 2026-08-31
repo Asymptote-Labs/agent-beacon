@@ -3,27 +3,49 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Beacon Endpoint Security Analytics</title>
+    <title>Beacon Endpoint Agent Activity</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body data-page="overview">
     <header class="topbar">
       <div>
         <p class="eyebrow">Local-only</p>
-        <h1>Beacon Endpoint Security Analytics</h1>
+        <h1>Agent Activity</h1>
       </div>
       <nav class="nav-toggle" aria-label="Dashboard navigation">
-        <a href="/">Log Search</a>
-        <a class="active" href="/overview.html" aria-current="page">Security Analytics</a>
-        <a href="/findings.html">Findings</a>
-        <a href="/detections.html">Detections</a>
-        <a href="/inventory.html">Agent Inventory</a>
-        <a href="/tokens.html">Token Usage</a>
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <a href="/findings.html">Findings</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-parent">Analytics</div>
+          <a href="/tokens.html">Token Usage</a>
+          <a class="active" aria-current="page" href="/overview.html">Agent Activity</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Observe</div>
+          <a href="/inventory.html">Agent Inventory</a>
+          <a href="/">Agent Activity Sessions</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Control</div>
+          <a href="/detections.html">Detections</a>
+        </div>
       </nav>
-      <button id="refresh">Refresh</button>
     </header>
 
     <main>
+      <section class="dashboard-hero analytics-hero">
+        <div>
+          <h2>Agent activity analytics</h2>
+          <p class="muted">At-a-glance view of local AI agent activity, risk, harnesses, and models.</p>
+        </div>
+        <div class="range-pills" aria-label="Local analytics range">
+          <span class="active">Local log</span>
+          <span>Offline</span>
+        </div>
+      </section>
+
       <section class="panel status-panel">
         <div>
           <h2>Endpoint</h2>
@@ -34,12 +56,33 @@
       <section>
         <div class="section-head overview-head">
           <div>
-            <h2>Security Posture</h2>
-            <p class="muted">At-a-glance view of local AI agent activity, risk, harnesses, and models.</p>
+            <h2>Activity overview</h2>
+            <p class="muted">Current local totals, review pressure, active sessions, top harnesses, and top models.</p>
           </div>
           <div id="last-updated" class="muted"></div>
         </div>
         <div class="cards" id="cards"></div>
+      </section>
+
+      <section class="analytics-grid">
+        <div class="analytics-panel">
+          <div class="panel-title-row">
+            <div>
+              <h2>Agent Sessions by Source</h2>
+              <p class="muted">Local session and event volume grouped by the top observed agent harnesses.</p>
+            </div>
+          </div>
+          <div id="activity-session-chart" class="chart-bars"></div>
+        </div>
+        <div class="analytics-panel">
+          <div class="panel-title-row">
+            <div>
+              <h2>What Needs Attention</h2>
+              <p class="muted">High-risk activity, failures, and blocked or denied actions.</p>
+            </div>
+          </div>
+          <div id="activity-attention" class="attention-list"></div>
+        </div>
       </section>
 
       <section class="insights" id="insights"></section>

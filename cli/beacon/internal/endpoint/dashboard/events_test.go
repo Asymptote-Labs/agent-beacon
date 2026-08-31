@@ -296,6 +296,59 @@ func TestReadEventsFiltersByModel(t *testing.T) {
 	}
 }
 
+func TestReadEventsFiltersBySessionState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "session.started", "session", "repo-a"),
+		testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "agent.session.ended", "session", "repo-a"),
+		testSchemaEvent("2026-05-13T01:02:00Z", "cursor", "session.started", "session", "repo-a"),
+		testSchemaEvent("2026-05-13T01:03:00Z", "cursor", "prompt.submitted", "prompt", "repo-a"),
+		testSchemaEvent("2026-05-13T01:04:00Z", "cursor", "tool.invoked", "tool", "repo-a"),
+	}
+	events[0].Session = &schema.SessionInfo{ID: "empty-session"}
+	events[1].Session = &schema.SessionInfo{ID: "empty-session"}
+	events[1].Message = "agent session ended"
+	events[2].Session = &schema.SessionInfo{ID: "captured-session"}
+	events[3].Session = &schema.SessionInfo{ID: "captured-session"}
+	events[3].Prompt = &schema.PromptInfo{Text: "Investigate the dashboard"}
+	events[4].Session = &schema.SessionInfo{ID: "tool-only-session"}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	empty, err := ReadEvents(path, EventQuery{SessionState: "empty", Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents empty returned error: %v", err)
+	}
+	if empty.TotalMatched != 2 {
+		t.Fatalf("empty matched %d events, want lifecycle-only session's 2 events", empty.TotalMatched)
+	}
+	for _, record := range empty.Events {
+		if record.Event.Session == nil || record.Event.Session.ID != "empty-session" {
+			t.Fatalf("empty result included session %#v, want only empty-session", record.Event.Session)
+		}
+	}
+
+	captured, err := ReadEvents(path, EventQuery{SessionState: "captured", Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents captured returned error: %v", err)
+	}
+	if captured.TotalMatched != 3 {
+		t.Fatalf("captured matched %d events, want non-empty sessions' 3 events", captured.TotalMatched)
+	}
+	for _, record := range captured.Events {
+		if record.Event.Session == nil || record.Event.Session.ID == "empty-session" {
+			t.Fatalf("captured result included empty session event %#v", record.Event.Session)
+		}
+	}
+
+	all, err := ReadEvents(path, EventQuery{SessionState: "all", Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents all returned error: %v", err)
+	}
+	if all.TotalMatched != 5 {
+		t.Fatalf("all matched %d events, want no session-state filter", all.TotalMatched)
+	}
+}
+
 func TestReadEventsFiltersByUntil(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeTestLog(t, path,

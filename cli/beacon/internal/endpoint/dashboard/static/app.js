@@ -13,10 +13,17 @@ const state = {
   findingsRules: null,
   findingsSessions: new Map(),
   findingsExpanded: new Set(),
+  activityView: "summary",
+  inventoryView: "configs",
+  inventoryRuntime: "",
+  inventoryUser: "",
+  inventorySearch: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const navCollapsedStorageKey = "beacon.dashboard.navCollapsed";
+const isActivityPage = !document.body.dataset.page;
 const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
 const isDetectionsPage = document.body.dataset.page === "detections";
@@ -41,15 +48,21 @@ const formFields = [
   "policy",
   "wazuh_level",
   "since",
+  "session_state",
   "limit",
   "review",
 ];
+state.activityView = initialActivityView();
 
 const presets = {
+  all: { limit: "500" },
+  destructive: { q: "destructive", limit: "500" },
   review: { review: "true", limit: "500" },
+  "high-risk": { severity: "high", limit: "500" },
   commands: { action: "command.executed", limit: "500" },
+  writes: { action: "file.modified", limit: "500" },
+  mcp: { category: "mcp", limit: "500" },
   files: { action: "file.modified", limit: "500" },
-  mcp: { action: "mcp.tool_invoked", limit: "500" },
   approvals: { category: "approval", limit: "500" },
   failures: { action: "tool.failed", limit: "500" },
   high: { severity: "high", limit: "500" },
@@ -78,6 +91,7 @@ function queryFromFilters() {
   for (const [key, value] of data.entries()) {
     const trimmed = String(value).trim();
     if (trimmed) params.set(key, trimmed);
+    else if (key === "session_state") params.set(key, "");
   }
   return params.toString();
 }
@@ -95,6 +109,35 @@ function hydrateFiltersFromURL() {
   }
 }
 
+function initialActivityView() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("view") === "detailed") return "detailed";
+  for (const field of formFields) {
+    if (field !== "limit" && params.has(field)) return "detailed";
+  }
+  return "summary";
+}
+
+function renderActivityView() {
+  if (!isActivityPage) return;
+  const summary = $("#activity-summary");
+  const detailed = $("#activity-detailed");
+  if (summary) summary.hidden = state.activityView !== "summary";
+  if (detailed) detailed.hidden = state.activityView !== "detailed";
+  $$("[data-activity-view]").forEach((button) => {
+    const active = button.dataset.activityView === state.activityView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function setActivityView(view, { updateLocation = false } = {}) {
+  if (!isActivityPage) return;
+  state.activityView = view === "detailed" ? "detailed" : "summary";
+  renderActivityView();
+  if (updateLocation) updateURL(queryFromFilters());
+}
+
 // The limit control is a fixed <select>; a URL like ?limit=5 would otherwise
 // silently deselect it and the query would fall back to the server default,
 // so add the requested limit as a selectable option.
@@ -110,7 +153,22 @@ function ensureLimitOption(select, value) {
 }
 
 function updateURL(query) {
-  const next = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+  const params = new URLSearchParams(query);
+  if (isActivityPage && state.activityView === "detailed") {
+    params.set("view", "detailed");
+  } else {
+    params.delete("view");
+  }
+  const range = $("#range-filter");
+  if (range) {
+    if (range.value && range.value !== "30d") {
+      params.set("range", range.value);
+    } else {
+      params.delete("range");
+    }
+  }
+  const nextQuery = params.toString();
+  const next = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
   window.history.replaceState(null, "", next);
 }
 
@@ -152,9 +210,11 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
 function render() {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
   setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
+  renderActivityView();
   renderNewEventsIndicator();
   renderFilterOptions();
   renderCards();
+  renderActivityAnalytics();
   renderInsights();
   renderSearchState();
   renderEvents();
@@ -188,6 +248,68 @@ function renderCards() {
       const card = cards[Number(button.dataset.card)];
       if (card?.filters) applyFilters(card.filters, { reset: true });
     });
+  });
+}
+
+function renderActivityAnalytics() {
+  renderActivitySessionChart();
+  renderActivityAttention();
+}
+
+function renderActivitySessionChart() {
+  const el = $("#activity-session-chart");
+  if (!el) return;
+  const rows = (state.summary?.top_harnesses || []).slice(0, 8);
+  const total = rows.reduce((sum, item) => sum + item.count, 0);
+  const max = Math.max(1, ...rows.map((item) => item.count));
+  if (!rows.length) {
+    el.innerHTML = emptyAnalytics("No agent sessions in this window");
+    return;
+  }
+  el.innerHTML = `
+    <div class="chart-legend">
+      ${rows.slice(0, 6).map((item, index) => `<span><i style="background:${chartColor(index)}"></i>${escapeHTML(harnessLabel(item.name))}</span>`).join("")}
+    </div>
+    <div class="stacked-chart" aria-label="Agent sessions by source">
+      ${rows.map((item, index) => {
+        const height = Math.max(10, Math.round((item.count / max) * 100));
+        return `
+          <button type="button" class="stacked-chart-column" data-activity-harness="${escapeHTML(item.name)}">
+            <span class="stacked-chart-bar" style="height:${height}%; background:${chartColor(index)}"></span>
+            <span class="stacked-chart-value">${escapeHTML(item.count)}</span>
+            <span class="stacked-chart-label">${escapeHTML(truncateMiddle(harnessLabel(item.name), 16))}</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+    <p class="muted analytics-footnote">${escapeHTML(formatTokens(total))} local events across top harnesses</p>
+  `;
+  $$("[data-activity-harness]").forEach((button) => {
+    button.addEventListener("click", () => applyFilters({ harness: button.dataset.activityHarness }, { reset: true }));
+  });
+}
+
+function renderActivityAttention() {
+  const el = $("#activity-attention");
+  if (!el) return;
+  const items = [
+    { label: "Critical events flagged for review", value: state.summary?.critical_severity_events || 0, filters: { severity: "critical" }, tone: "danger" },
+    { label: "High-severity events to triage", value: state.summary?.high_severity_events || 0, filters: { severity: "high" }, tone: "danger" },
+    { label: "Failed tool calls", value: state.summary?.failed_tool_events || 0, filters: { action: "tool.failed" }, tone: "warn" },
+    { label: "Sessions awaiting review", value: state.summary?.needs_review_events || 0, filters: { review: "true" }, tone: "info" },
+    { label: "Denied or blocked actions", value: (state.summary?.denied_approval_events || 0) + (state.summary?.policy_blocked_events || 0), filters: { review: "true" }, tone: "danger" },
+  ];
+  el.innerHTML = items
+    .map((item, index) => `
+      <button type="button" class="attention-card attention-${item.tone}" data-attention-index="${index}">
+        <span>${escapeHTML(item.label)}</span>
+        <strong>${escapeHTML(item.value)}</strong>
+      </button>
+    `)
+    .join("");
+  $$("[data-attention-index]").forEach((button) => {
+    const item = items[Number(button.dataset.attentionIndex)];
+    button.addEventListener("click", () => applyFilters(item.filters, { reset: true }));
   });
 }
 
@@ -262,9 +384,11 @@ function renderSearchState() {
 function renderSummaryOnly() {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
   setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
+  renderActivityView();
   renderNewEventsIndicator();
   renderFilterOptions();
   renderCards();
+  renderActivityAnalytics();
   renderInsights();
   renderSearchState();
 }
@@ -291,11 +415,12 @@ function renderInventory(resp) {
   const configs = resp?.configs || [];
   const servers = resp?.mcp_servers || [];
   const skills = resp?.skills || [];
-  const hooks = resp?.hooks || [];
+  const hooks = normalizeInventoryHooks(resp?.hooks);
   const existingConfigs = configs.filter((config) => config.exists);
   const existingSkills = skills.filter((skill) => skill.exists);
   const hookConfigs = existingConfigs.filter((config) => config.config_kind === "hook_config");
   setText("#inventory-meta", resp?.generated_at ? `Scanned ${formatTime(resp.generated_at)}` : "");
+  renderInventoryWorkspace(resp, { harnesses, configs, servers, skills, hooks, existingConfigs, existingSkills, hookConfigs });
   renderInventoryCards(harnesses, existingConfigs, servers, existingSkills, hookConfigs);
   renderInventoryHarnesses(harnesses);
   renderInventoryConfigs(configs);
@@ -306,6 +431,365 @@ function renderInventory(resp) {
   renderHookTargets(hooks, configs);
   renderHookManifests(hookConfigs);
   renderInventoryScope(resp?.user_scope || {});
+}
+
+const inventoryViewLabels = {
+  configs: "Configurations",
+  mcp: "MCP Servers",
+  skills: "Agent Skills",
+  hooks: "Hooks",
+};
+
+const inventoryRuntimeLogos = {
+  antigravity: "/runtime-logos/antigravity.png",
+  antigravity_cli: "/runtime-logos/antigravity.png",
+  claude: "/runtime-logos/claude-code.png",
+  claude_code: "/runtime-logos/claude-code.png",
+  claude_cowork: "/runtime-logos/claude-code.png",
+  copilot: "/runtime-logos/github-copilot.png",
+  copilot_cli: "/runtime-logos/github-copilot.png",
+  github_copilot_cli: "/runtime-logos/github-copilot.png",
+  cursor: "/runtime-logos/cursor.png",
+  factory: "/runtime-logos/factory.png",
+  factory_droid: "/runtime-logos/factory.png",
+  vscode: "/runtime-logos/visual-studio-code.png",
+};
+
+function normalizeInventoryHooks(hooks) {
+  if (Array.isArray(hooks)) return hooks;
+  if (!hooks || typeof hooks !== "object") return [];
+  return Object.entries(hooks).map(([target, hook]) => ({ target, ...(hook || {}) }));
+}
+
+function hydrateInventoryStateFromURL() {
+  if (!$("#inventory-workspace")) return;
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view");
+  state.inventoryView = inventoryViewLabels[view] ? view : state.inventoryView;
+  state.inventoryRuntime = params.get("runtime") || "";
+  state.inventoryUser = params.get("user") || "";
+  state.inventorySearch = params.get("q") || "";
+  if ($("#inventory-search")) $("#inventory-search").value = state.inventorySearch;
+}
+
+function updateInventoryURL() {
+  const params = new URLSearchParams(window.location.search);
+  params.set("view", state.inventoryView);
+  if (state.inventoryRuntime) params.set("runtime", state.inventoryRuntime);
+  else params.delete("runtime");
+  if (state.inventoryUser) params.set("user", state.inventoryUser);
+  else params.delete("user");
+  params.delete("scope");
+  if (state.inventorySearch) params.set("q", state.inventorySearch);
+  else params.delete("q");
+  const next = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState({}, "", next);
+}
+
+function renderInventoryWorkspace(_resp, ctx) {
+  if (!$("#inventory-workspace")) return;
+  renderInventoryFilterOptions(ctx);
+  renderInventoryViewTabs(ctx);
+  renderInventoryActiveTable(ctx);
+}
+
+function inventoryRowsForView(view, ctx) {
+  switch (view) {
+    case "mcp":
+      return ctx.servers || [];
+    case "skills":
+      return (ctx.skills || []).filter((skill) => skill.exists);
+    case "hooks":
+      if (ctx.hooks?.length) return ctx.hooks;
+      return (ctx.hookConfigs || []).map((config) => ({
+        target: config.runtime,
+        runtime: config.runtime,
+        status: config.exists ? "configured" : "not_installed",
+        installed: config.exists,
+        path: config.path,
+        source_scope: config.scope,
+        beacon_managed: config.beacon_managed,
+        modified_at: config.modified_at,
+        file_sha256: config.file_sha256,
+        path_hash: config.path_hash,
+      }));
+    case "configs":
+    default:
+      return (ctx.configs || []).filter((config) => config.exists);
+  }
+}
+
+function inventoryCounts(ctx) {
+  return {
+    configs: inventoryRowsForView("configs", ctx).length,
+    mcp: inventoryRowsForView("mcp", ctx).length,
+    skills: inventoryRowsForView("skills", ctx).length,
+    hooks: inventoryRowsForView("hooks", ctx).length,
+  };
+}
+
+function renderInventoryFilterOptions(ctx) {
+  const userSelect = $("#inventory-user-filter");
+  const runtimeSelect = $("#inventory-runtime-filter");
+  if (userSelect) {
+    const identity = inventoryIdentity();
+    userSelect.innerHTML = `
+      <option value="">All users</option>
+      <option value="${escapeHTML(identity.user)}"${state.inventoryUser === identity.user ? " selected" : ""}>${escapeHTML(identity.user)}</option>
+    `;
+  }
+  if (runtimeSelect) {
+    const rows = inventoryRowsForView(state.inventoryView, ctx);
+    const runtimes = uniqueSorted(rows.map(inventoryRuntimeValue).filter(Boolean), runtimeLabel);
+    if (state.inventoryRuntime && !runtimes.includes(state.inventoryRuntime)) {
+      state.inventoryRuntime = "";
+      updateInventoryURL();
+    }
+    runtimeSelect.innerHTML = `<option value="">All runtimes</option>` + runtimes
+      .map((value) => `<option value="${escapeHTML(value)}"${state.inventoryRuntime === value ? " selected" : ""}>${escapeHTML(runtimeLabel(value))}</option>`)
+      .join("");
+  }
+}
+
+function renderInventoryViewTabs(ctx) {
+  const el = $("#inventory-view-tabs");
+  if (!el) return;
+  const counts = inventoryCounts(ctx);
+  el.innerHTML = Object.entries(inventoryViewLabels)
+    .map(([view, label]) => `
+      <button type="button" class="${state.inventoryView === view ? "active" : ""}" data-inventory-view="${escapeHTML(view)}">
+        ${escapeHTML(label)} (${escapeHTML(counts[view] || 0)})
+      </button>
+    `)
+    .join("");
+  $$("[data-inventory-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.inventoryView = button.dataset.inventoryView;
+      updateInventoryURL();
+      renderInventoryWorkspace(state.inventory, currentInventoryContext());
+    });
+  });
+}
+
+function renderInventoryActiveTable(ctx) {
+  const table = inventoryTableForView(state.inventoryView, ctx);
+  const head = $("#inventory-active-head");
+  const body = $("#inventory-active-body");
+  if (!head || !body) return;
+  setText("#inventory-active-title", table.title);
+  setText("#inventory-active-description", table.description);
+  if ($("#inventory-search")) $("#inventory-search").placeholder = inventorySearchPlaceholder(state.inventoryView);
+  const rows = inventoryRowsForView(state.inventoryView, ctx)
+    .filter(inventoryRowMatchesFilters)
+    .sort(compareInventoryRows);
+  head.innerHTML = `<tr>${table.columns.map((column) => `<th>${escapeHTML(column.label)}</th>`).join("")}</tr>`;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="${table.columns.length}" class="muted">No matching rows were found in the latest Beacon inventory snapshot.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((row) => `<tr>${table.columns.map((column) => `<td${column.className ? ` class="${column.className}"` : ""}>${column.render(row)}</td>`).join("")}</tr>`)
+    .join("");
+}
+
+function inventorySearchPlaceholder(view) {
+  switch (view) {
+    case "mcp":
+      return "Search MCP servers by name, status, path, or command...";
+    case "skills":
+      return "Search agent skills by name, status, path, or command...";
+    case "hooks":
+      return "Search hooks by name, status, path, or command...";
+    case "configs":
+    default:
+      return "Search configurations by name, status, path, or command...";
+  }
+}
+
+function inventoryIdentityColumns() {
+  return [
+    { label: "User", className: "nowrap", render: () => escapeHTML(inventoryIdentity().user) },
+    { label: "Device", className: "nowrap", render: () => escapeHTML(inventoryIdentity().device) },
+  ];
+}
+
+function inventoryTableForView(view, ctx) {
+  const sourceSHAs = configSHAsByPathHash(ctx.configs || []);
+  switch (view) {
+    case "mcp":
+      return {
+        title: "MCP Servers",
+        description: "Model Context Protocol servers declared across discovered runtime configs. Secret-bearing env keys are filtered out.",
+        columns: [
+          ...inventoryIdentityColumns(),
+          { label: "Agent Runtime", render: (row) => inventoryRuntimeCell(inventoryRuntimeValue(row)) },
+          { label: "Server", render: (row) => escapeHTML(row.server_name || row.server_name_hash || "") },
+          { label: "Scope", render: (row) => badge(row.source_scope || "unknown", "badge-muted") },
+          { label: "Transport", render: (row) => badge(row.transport || "unknown", "badge-muted") },
+          { label: "Command", className: "mono", render: (row) => row.command_present ? escapeHTML(row.command_name || "yes") : `<span class="muted">-</span>` },
+          { label: "Args", render: (row) => escapeHTML(row.args_count ?? 0) },
+          { label: "Env Keys", render: envKeysCell },
+          { label: "Source SHA", className: "mono sha-cell", render: (row) => hashCell(sourceSHAs.get(row.source_path_hash)) },
+          { label: "Definition SHA", className: "mono sha-cell", render: (row) => hashCell(row.definition_hash) },
+          { label: "Source", className: "mono path-cell", render: (row) => escapeHTML(row.source_path || row.source_path_hash || "") },
+        ],
+      };
+    case "skills":
+      return {
+        title: "Agent Skills",
+        description: "Local skill manifests discovered under supported agent skill roots. Skill instruction bodies are not retained.",
+        columns: [
+          ...inventoryIdentityColumns(),
+          { label: "Agent Runtime", render: (row) => inventoryRuntimeCell(inventoryRuntimeValue(row)) },
+          { label: "Skill", render: (row) => escapeHTML(row.skill_name || row.skill_name_hash || "") },
+          { label: "Scope", render: (row) => badge(row.source_scope || "unknown", "badge-muted") },
+          { label: "Status", render: parserBadge },
+          { label: "Modified", className: "nowrap", render: (row) => row.modified_at ? escapeHTML(formatTime(row.modified_at)) : `<span class="muted">-</span>` },
+          { label: "Manifest SHA", className: "mono sha-cell", render: (row) => hashCell(row.file_sha256) },
+          { label: "Manifest", className: "mono path-cell", render: (row) => escapeHTML(row.manifest_path || row.manifest_path_hash || row.root_path || row.root_path_hash || "") },
+        ],
+      };
+    case "hooks":
+      return {
+        title: "Hook Configurations",
+        description: "Hook manifests discovered across supported runtimes. Hook command bodies are not shown here.",
+        columns: [
+          ...inventoryIdentityColumns(),
+          { label: "Agent Runtime", render: (row) => inventoryRuntimeCell(inventoryRuntimeValue(row)) },
+          { label: "Scope", render: (row) => row.source_scope || row.scope ? badge(row.source_scope || row.scope, "badge-muted") : `<span class="muted">-</span>` },
+          { label: "Status", render: (row) => badge(row.status || (row.installed ? "configured" : "not_installed"), row.installed ? "badge-ok" : "badge-muted") },
+          { label: "Beacon Managed", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
+          { label: "Modified", className: "nowrap", render: (row) => row.modified_at ? escapeHTML(formatTime(row.modified_at)) : `<span class="muted">-</span>` },
+          { label: "Manifest SHA", className: "mono sha-cell", render: (row) => hashCell(row.file_sha256 || row.path_hash) },
+          { label: "Manifest", className: "mono path-cell", render: (row) => escapeHTML(row.path || row.path_hash || "") },
+        ],
+      };
+    case "configs":
+    default:
+      return {
+        title: "Agent Runtime Configurations",
+        description: "Config, hook, plugin, and profile files found on this endpoint. Paths and hashes only; file contents are never read into the dashboard.",
+        columns: [
+          ...inventoryIdentityColumns(),
+          { label: "Agent Runtime", render: (row) => inventoryRuntimeCell(inventoryRuntimeValue(row)) },
+          { label: "Scope", render: (row) => badge(row.scope || "unknown", "badge-muted") },
+          { label: "Kind", render: (row) => escapeHTML(configKindLabel(row.config_kind)) },
+          { label: "Parser", render: parserBadge },
+          { label: "MCP", render: (row) => escapeHTML(row.mcp_server_count ?? 0) },
+          { label: "Beacon Managed", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
+          { label: "Modified", className: "nowrap", render: (row) => row.modified_at ? escapeHTML(formatTime(row.modified_at)) : `<span class="muted">-</span>` },
+          { label: "Manifest SHA", className: "mono sha-cell", render: (row) => hashCell(row.file_sha256) },
+          { label: "Path", className: "mono path-cell", render: (row) => escapeHTML(row.path || row.path_hash || "") },
+        ],
+      };
+  }
+}
+
+function inventoryRuntimeCell(value) {
+  if (!value) return `<span class="muted">-</span>`;
+  const label = runtimeLabel(value);
+  const initials = harnessInitials(value);
+  const logo = inventoryRuntimeLogos[String(value).toLowerCase()];
+  return `
+    <span class="inventory-runtime-cell">
+      <span class="inventory-runtime-logo">
+        ${logo ? `<img src="${escapeHTML(logo)}" alt="${escapeHTML(label)} logo" loading="lazy" />` : escapeHTML(initials)}
+      </span>
+      <span>${escapeHTML(label)}</span>
+    </span>
+  `;
+}
+
+function harnessInitials(value) {
+  const label = runtimeLabel(value);
+  const words = label.split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
+function currentInventoryContext() {
+  const inventory = state.inventory || {};
+  const configs = inventory.configs || [];
+  const hooks = normalizeInventoryHooks(inventory.hooks);
+  const existingConfigs = configs.filter((config) => config.exists);
+  return {
+    harnesses: inventory.harnesses || [],
+    configs,
+    servers: inventory.mcp_servers || [],
+    skills: inventory.skills || [],
+    hooks,
+    existingConfigs,
+    existingSkills: (inventory.skills || []).filter((skill) => skill.exists),
+    hookConfigs: existingConfigs.filter((config) => config.config_kind === "hook_config"),
+  };
+}
+
+function inventoryIdentity() {
+  const scope = state.inventory?.user_scope || {};
+  const home = scope.home_path || "";
+  const user = titleCasePathBase(home) || "Local user";
+  return {
+    user,
+    device: "Local endpoint",
+  };
+}
+
+function titleCasePathBase(path) {
+  const base = String(path || "").split("/").filter(Boolean).pop() || "";
+  return base ? base.replace(/[-_.]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()) : "";
+}
+
+function inventoryRuntimeValue(row) {
+  return row.runtime || row.target || row.item_name || "";
+}
+
+function inventoryScopeValue(row) {
+  return row.scope || row.source_scope || "";
+}
+
+function inventoryRowMatchesFilters(row) {
+  if (state.inventoryRuntime && inventoryRuntimeValue(row) !== state.inventoryRuntime) return false;
+  if (state.inventoryUser && state.inventoryUser !== inventoryIdentity().user) return false;
+  const query = state.inventorySearch.trim().toLowerCase();
+  if (!query) return true;
+  return inventorySearchText(row).toLowerCase().includes(query);
+}
+
+function inventorySearchText(row) {
+  return [
+    inventoryRuntimeValue(row),
+    runtimeLabel(inventoryRuntimeValue(row)),
+    inventoryIdentity().user,
+    inventoryIdentity().device,
+    inventoryScopeValue(row),
+    row.config_kind,
+    row.parser_status,
+    row.status,
+    row.path,
+    row.path_hash,
+    row.server_name,
+    row.server_name_hash,
+    row.command_name,
+    row.source_path,
+    row.source_path_hash,
+    row.skill_name,
+    row.skill_name_hash,
+    row.manifest_path,
+    row.manifest_path_hash,
+    row.definition_hash,
+    row.file_sha256,
+  ].filter(Boolean).join(" ");
+}
+
+function compareInventoryRows(a, b) {
+  return runtimeLabel(inventoryRuntimeValue(a)).localeCompare(runtimeLabel(inventoryRuntimeValue(b)), undefined, { numeric: true, sensitivity: "base" })
+    || (inventoryScopeValue(a) || "").localeCompare(inventoryScopeValue(b) || "", undefined, { numeric: true, sensitivity: "base" })
+    || inventorySearchText(a).localeCompare(inventorySearchText(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function uniqueSorted(values, labeler = (value) => value) {
+  return Array.from(new Set(values)).sort((a, b) => labeler(a).localeCompare(labeler(b), undefined, { numeric: true, sensitivity: "base" }));
 }
 
 function renderInventoryCards(harnesses, configs, servers, skills = [], hooks = []) {
@@ -814,7 +1298,27 @@ function tagCell(record) {
 function harnessCell(event) {
   const harness = event.harness || {};
   if (!harness.name) return "";
-  return escapeHTML(harnessLabel(harness.name));
+  const label = harnessLabel(harness.name);
+  const logo = inventoryRuntimeLogos[String(harness.name).toLowerCase()];
+  return `
+    <span class="session-harness-cell">
+      <span class="session-harness-logo">
+        ${logo ? `<img src="${escapeHTML(logo)}" alt="${escapeHTML(label)} logo" loading="lazy" />` : escapeHTML(harnessInitials(harness.name))}
+      </span>
+      <span class="session-harness-name">${escapeHTML(label)}</span>
+      ${harness.collection_method ? `<span class="capture-method-badge">${escapeHTML(captureMethodLabel(harness.collection_method))}</span>` : ""}
+    </span>
+  `;
+}
+
+function captureMethodLabel(value) {
+  const labels = {
+    hook: "Hooks",
+    otlp: "OpenTelemetry",
+    plugin: "Plugin",
+    poll: "Poll",
+  };
+  return labels[String(value).toLowerCase()] || value;
 }
 
 function signalAction(record) {
@@ -931,6 +1435,7 @@ function renderFilterOptions() {
   if (!$("#filters")) return;
   renderHarnessSelect(state.summary?.top_harnesses || []);
   renderModelSelect(state.summary?.top_models || []);
+  renderRepositorySelect(state.summary?.top_repositories || []);
   renderDatalist("action-options", state.summary?.top_actions || []);
 }
 
@@ -956,6 +1461,27 @@ function renderModelSelect(values) {
   ];
   select.innerHTML = options.join("");
   select.value = values.some((item) => item.name === current) ? current : "";
+}
+
+function renderRepositorySelect(values) {
+  const select = $("#repository-filter");
+  if (!select) return;
+  const current = select.value;
+  const options = [
+    `<option value="">All repositories</option>`,
+    ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(repositoryOptionLabel(item.name))} (${escapeHTML(item.count)})</option>`),
+  ];
+  if (current && !values.some((item) => item.name === current)) {
+    options.push(`<option value="${escapeHTML(current)}">${escapeHTML(repositoryOptionLabel(current))}</option>`);
+  }
+  select.innerHTML = options.join("");
+  select.value = current;
+}
+
+function repositoryOptionLabel(value) {
+  if (!value) return "";
+  const parts = value.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : value;
 }
 
 function renderDatalist(id, values) {
@@ -1010,6 +1536,63 @@ function attentionItems() {
   return items.filter((item) => item.count > 0);
 }
 
+function restoreRangeFromURL() {
+  const range = $("#range-filter");
+  if (!range) return;
+  const params = new URLSearchParams(window.location.search);
+  const value = params.get("range");
+  if (value && Array.from(range.options).some((opt) => opt.value === value)) {
+    range.value = value;
+  }
+}
+
+function setupSessionFilters() {
+  const form = $("#filters");
+  if (!form) return;
+  restoreRangeFromURL();
+  syncSinceFromRange({ preserveExisting: true });
+  syncSessionStateTabs();
+  $$("[data-session-state]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = $("#session-state-filter");
+      if (!input) return;
+      input.value = button.dataset.sessionState === "all" ? "" : button.dataset.sessionState;
+      syncSessionStateTabs();
+      load({ updateLocation: true }).catch(console.error);
+    });
+  });
+  $("#range-filter")?.addEventListener("change", () => {
+    syncSinceFromRange();
+    load({ updateLocation: true }).catch(console.error);
+  });
+  form.addEventListener("change", (event) => {
+    if (event.target?.id === "range-filter") return;
+    if (event.target?.matches("select[name]")) load({ updateLocation: true }).catch(console.error);
+  });
+}
+
+function syncSessionStateTabs() {
+  const current = $("#session-state-filter")?.value || "all";
+  $$("[data-session-state]").forEach((button) => {
+    const active = button.dataset.sessionState === current || (button.dataset.sessionState === "all" && current === "");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function syncSinceFromRange({ preserveExisting = false } = {}) {
+  const range = $("#range-filter");
+  const since = $("#since-filter");
+  if (!range || !since) return;
+  if (preserveExisting && since.value) return;
+  const durations = {
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+  };
+  since.value = durations[range.value] ? new Date(Date.now() - durations[range.value]).toISOString() : "";
+}
+
 function firstCount(values) {
   return values && values.length ? values[0] : null;
 }
@@ -1049,15 +1632,19 @@ function setFilters(filters, { reset = false } = {}) {
     const input = $(`[name="${key}"]`);
     if (input) input.value = value;
   }
+  if (!Object.prototype.hasOwnProperty.call(filters, "since")) syncSinceFromRange();
   load({ updateLocation: true }).catch(console.error);
 }
 
 function applyFilters(filters, options = {}) {
   if (isOverviewPage) {
-    const query = queryStringFromObject(filters);
-    window.location.href = query ? `/?${query}` : "/";
+    const params = new URLSearchParams(queryStringFromObject(filters));
+    params.set("range", "all");
+    params.set("session_state", "");
+    window.location.href = `/?${params.toString()}`;
     return;
   }
+  if (isActivityPage) setActivityView("detailed");
   setFilters(filters, options);
 }
 
@@ -1080,10 +1667,13 @@ function clearFilter(key) {
 function clearFields(loadAfter = true) {
   if (!$("#filters")) return;
   state.newEventCount = 0;
+  const sessionState = $("#session-state-filter")?.value || "captured";
   for (const field of formFields) {
     const input = $(`[name="${field}"]`);
-    if (input) input.value = field === "limit" ? "500" : "";
+    if (input) input.value = field === "limit" ? "500" : field === "session_state" ? sessionState : "";
   }
+  syncSinceFromRange();
+  syncSessionStateTabs();
   if (loadAfter) load({ updateLocation: true }).catch(console.error);
 }
 
@@ -1104,6 +1694,7 @@ function escapeHTML(value) {
 }
 
 function applyPreset(name) {
+  $$(".quick-filters [data-preset]").forEach((button) => button.classList.toggle("active", button.dataset.preset === name));
   applyFilters(presets[name] || {}, { reset: true });
 }
 
@@ -1144,6 +1735,9 @@ function renderTokensPage(report, session) {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
   setText("#token-meta", `${report.events_with_usage} of ${report.total_events} events carry usage`);
   renderTokenCards(report.totals || {});
+  renderTokenThroughput(report.series || []);
+  renderTokenSplit(report.totals || {});
+  renderTokenBreakdowns(report);
   renderUtilizationRows(report.utilization || []);
   renderUsageGroupRows("#token-models", report.by_model || [], "model");
   renderUsageGroupRows("#token-sessions", report.by_session || [], "session");
@@ -1153,13 +1747,22 @@ function renderTokensPage(report, session) {
   renderSessionDetail(report.session_detail, session);
 }
 
+function usageTotal(usage = {}) {
+  return (usage.input_tokens || 0) +
+    (usage.output_tokens || 0) +
+    (usage.cache_read_input_tokens || 0) +
+    (usage.cache_creation_input_tokens || 0) +
+    (usage.reasoning_output_tokens || 0);
+}
+
 function renderTokenCards(totals) {
   if (!$("#token-cards")) return;
+  const totalTokens = usageTotal(totals);
   const cards = [
-    { label: "Input Tokens", value: formatTokens(totals.input_tokens) },
-    { label: "Output Tokens", value: formatTokens(totals.output_tokens) },
-    { label: "Cache Read", value: formatTokens(totals.cache_read_input_tokens) },
-    { label: "Cache Creation", value: formatTokens(totals.cache_creation_input_tokens) },
+    { label: "Total Tokens", value: formatTokens(totalTokens), hint: "local captured usage" },
+    { label: "Input Tokens", value: formatTokens((totals.input_tokens || 0) + (totals.cache_read_input_tokens || 0) + (totals.cache_creation_input_tokens || 0)), hint: "fresh + cached" },
+    { label: "Output Tokens", value: formatTokens((totals.output_tokens || 0) + (totals.reasoning_output_tokens || 0)), hint: "completion + reasoning" },
+    { label: "Cached Tokens", value: formatTokens((totals.cache_read_input_tokens || 0) + (totals.cache_creation_input_tokens || 0)) },
     { label: "Reasoning", value: formatTokens(totals.reasoning_output_tokens) },
     { label: "Cost (USD)", value: totals.cost_usd ? totals.cost_usd.toFixed(4) : "-", hint: "runtime-reported only" },
   ];
@@ -1171,6 +1774,177 @@ function renderTokenCards(totals) {
         ${card.hint ? `<span class="muted">${escapeHTML(card.hint)}</span>` : ""}
       </div>
     `)
+    .join("");
+}
+
+function renderTokenSplit(totals) {
+  const el = $("#token-split");
+  if (!el) return;
+  const freshInput = totals.input_tokens || 0;
+  const cached = (totals.cache_read_input_tokens || 0) + (totals.cache_creation_input_tokens || 0);
+  const output = totals.output_tokens || 0;
+  const reasoning = totals.reasoning_output_tokens || 0;
+  const segments = [
+    { name: "Input (fresh)", value: freshInput, color: "#0f7498" },
+    { name: "Cached input", value: cached, color: "#10b981" },
+    { name: "Output", value: output, color: "#7dd3fc" },
+    { name: "Reasoning", value: reasoning, color: "#f59e0b" },
+  ].filter((segment) => segment.value > 0);
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  if (!total) {
+    el.innerHTML = emptyAnalytics("No token split available for this range");
+    return;
+  }
+  let cursor = 0;
+  const stops = segments.map((segment) => {
+    const start = cursor;
+    cursor += (segment.value / total) * 100;
+    return `${segment.color} ${start}% ${cursor}%`;
+  }).join(", ");
+  el.innerHTML = `
+    <div class="token-donut" style="background: conic-gradient(${stops})">
+      <div>
+        <strong>${escapeHTML(formatCompactTokens(total))}</strong>
+        <span>total tokens</span>
+      </div>
+    </div>
+    <div class="token-split-legend">
+      ${segments.map((segment) => `
+        <div>
+          <span><i style="background:${segment.color}"></i>${escapeHTML(segment.name)}</span>
+          <em>${escapeHTML(formatWholePercent(segment.value / total))}</em>
+          <strong>${escapeHTML(formatCompactTokens(segment.value))}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderTokenBreakdowns(report) {
+  const el = $("#token-breakdowns");
+  if (!el) return;
+  const rows = [
+    {
+      title: "Tokens by model",
+      breakdownTitle: "Total tokens by model",
+      items: report.by_model || [],
+      emptyLabel: "No model token attribution for this range.",
+    },
+    {
+      title: "Tokens by harness",
+      breakdownTitle: "Total tokens by harness",
+      items: report.by_harness || [],
+      emptyLabel: "No harness token attribution for this range.",
+      labelFormatter: harnessLabel,
+    },
+    {
+      title: "Tokens by session",
+      breakdownTitle: "Top token sessions",
+      items: report.by_session || [],
+      emptyLabel: "No session token attribution for this range.",
+      sessionLinks: true,
+    },
+  ];
+  el.innerHTML = rows.map((row) => tokenBreakdownRowHTML(row)).join("");
+  $$("[data-token-breakdown-session]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const params = new URLSearchParams(window.location.search);
+      params.set("session", button.dataset.tokenBreakdownSession);
+      window.location.search = params.toString();
+    });
+  });
+}
+
+function tokenBreakdownRowHTML({ title, breakdownTitle, items, emptyLabel, labelFormatter = (value) => value, sessionLinks = false }) {
+  const visibleItems = (items || [])
+    .map((item) => ({ ...item, total: usageTotal(item.usage || {}) }))
+    .filter((item) => item.total > 0 || (item.usage?.cost_usd || 0) > 0)
+    .slice(0, 8);
+  const total = visibleItems.reduce((sum, item) => sum + item.total, 0);
+  const max = Math.max(1, ...visibleItems.map((item) => item.total));
+  return `
+    <div class="token-breakdown-row">
+      <div class="analytics-panel">
+        <div class="panel-title-row">
+          <div>
+            <h2>${escapeHTML(title)}</h2>
+            <p class="muted">Token usage over the local log, stacked by the top observed values.</p>
+          </div>
+        </div>
+        ${visibleItems.length ? `
+          <div class="chart-legend">
+            ${visibleItems.slice(0, 6).map((item, index) => `<span><i style="background:${chartColor(index)}"></i>${escapeHTML(truncateMiddle(labelFormatter(item.key), 20))}</span>`).join("")}
+          </div>
+          <div class="stacked-chart compact">
+            ${visibleItems.map((item, index) => `
+              <div class="stacked-chart-column">
+                <span class="stacked-chart-bar" style="height:${Math.max(8, Math.round((item.total / max) * 100))}%; background:${chartColor(index)}"></span>
+                <span class="stacked-chart-value">${escapeHTML(formatCompactTokens(item.total))}</span>
+                <span class="stacked-chart-label">${escapeHTML(truncateMiddle(labelFormatter(item.key), 14))}</span>
+              </div>
+            `).join("")}
+          </div>
+        ` : emptyAnalytics(emptyLabel)}
+      </div>
+      <div class="analytics-panel">
+        <div class="panel-title-row">
+          <div>
+            <h2>${escapeHTML(breakdownTitle)}</h2>
+            <p class="muted">Total token counts for the selected range.</p>
+          </div>
+          <span class="panel-total">${escapeHTML(formatCompactTokens(total))}</span>
+        </div>
+        ${visibleItems.length ? `
+          <div class="breakdown-list">
+            ${visibleItems.map((item, index) => {
+              const label = labelFormatter(item.key);
+              const ratio = total > 0 ? item.total / total : 0;
+              return `
+                <button type="button" ${sessionLinks ? `data-token-breakdown-session="${escapeHTML(item.key)}"` : ""}>
+                  <span><i style="background:${chartColor(index)}"></i><em>${escapeHTML(truncateMiddle(label, 30))}</em></span>
+                  <small>${escapeHTML(formatWholePercent(ratio))}</small>
+                  <strong>${escapeHTML(formatCompactTokens(item.total))}</strong>
+                  <b style="width:${Math.max(item.total > 0 ? 4 : 0, (item.total / max) * 100)}%; background:${chartColor(index)}"></b>
+                </button>
+              `;
+            }).join("")}
+          </div>
+        ` : emptyAnalytics(emptyLabel)}
+      </div>
+    </div>
+  `;
+}
+
+function renderTokenThroughput(series) {
+  const el = $("#token-throughput");
+  if (!el) return;
+  const rows = series
+    .map((bucket) => ({ ...bucket, total: usageTotal(bucket.usage || {}) }))
+    .filter((bucket) => bucket.total > 0)
+    .slice(-24);
+  if (!rows.length) {
+    el.innerHTML = `<span class="muted">No token throughput captured yet.</span>`;
+    return;
+  }
+  const max = Math.max(...rows.map((bucket) => bucket.total), 1);
+  el.innerHTML = rows
+    .map((bucket) => {
+      const usage = bucket.usage || {};
+      const input = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+      const output = (usage.output_tokens || 0) + (usage.reasoning_output_tokens || 0);
+      const inputWidth = Math.max(0, Math.round((input / max) * 100));
+      const outputWidth = Math.max(0, Math.round((output / max) * 100));
+      return `
+        <div class="throughput-row">
+          <span class="muted">${escapeHTML(formatTime(bucket.start))}</span>
+          <div class="throughput-track" aria-hidden="true">
+            <span class="throughput-input" style="width: ${Math.max(3, inputWidth)}%"></span>
+            <span class="throughput-output" style="width: ${outputWidth}%"></span>
+          </div>
+          <strong>${escapeHTML(formatTokens(bucket.total))}</strong>
+        </div>
+      `;
+    })
     .join("");
 }
 
@@ -1265,6 +2039,31 @@ function usageCells(usage = {}, { events = true } = {}) {
 function formatTokens(value) {
   if (!value) return "0";
   return Number(value).toLocaleString();
+}
+
+function formatCompactTokens(value) {
+  const number = Number(value || 0);
+  if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`;
+  if (number >= 1000) return `${(number / 1000).toFixed(1)}K`;
+  return number.toLocaleString();
+}
+
+function formatWholePercent(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${Math.round(value * 100)}%`;
+}
+
+function chartColor(index) {
+  return ["#0f7498", "#7dd3fc", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b", "#14b8a6"][index % 8];
+}
+
+function emptyAnalytics(label) {
+  return `
+    <div class="empty-chart">
+      <strong>${escapeHTML(label)}</strong>
+      <span>Telemetry will appear here once Agent Beacon events arrive.</span>
+    </div>
+  `;
 }
 
 function formatRatio(ratio, contextWindow) {
@@ -1474,7 +2273,7 @@ function sessionDetailHTML(sessionId) {
       <div class="detail-head">
         <h3>Session timeline</h3>
         <span class="muted">${escapeHTML(sessionId)} &middot; ${records.length} event${records.length === 1 ? "" : "s"}</span>
-        <a class="text-button" href="/?session=${encodeURIComponent(sessionId)}">Open in Log Search</a>
+        <a class="text-button" href="/?session=${encodeURIComponent(sessionId)}&range=all&session_state=">Open in Agent Activity Sessions</a>
       </div>
       <ol class="session-timeline">${records.map((record) => sessionTimelineRow(record)).join("")}</ol>
     </div>
@@ -1525,6 +2324,57 @@ function summarizeFindingEvents(events) {
     .join("");
 }
 
+const navIcons = {
+  "Findings": `<svg viewBox="0 0 24 24"><path d="M21.73 18 13.73 4a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+  "Analytics": `<svg viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>`,
+  "Token Usage": `<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>`,
+  "Agent Activity": `<svg viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
+  "Agent Inventory": `<svg viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>`,
+  "Agent Activity Sessions": `<svg viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>`,
+  "Detections": `<svg viewBox="0 0 24 24"><path d="M19.07 4.93A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></svg>`,
+};
+
+function decorateDashboardNav() {
+  $$(".nav-toggle a, .nav-parent, .nav-section-title").forEach((item) => {
+    if (item.querySelector(".nav-icon")) return;
+    const label = item.textContent.trim();
+    const icon = navIcons[label];
+    if (!icon) return;
+    item.innerHTML = `<span class="nav-icon" aria-hidden="true">${icon}</span><span>${escapeHTML(label)}</span>`;
+  });
+}
+
+function setupNavCollapse() {
+  const nav = $(".nav-toggle");
+  if (!nav) return;
+  let button = $(".nav-collapse");
+  if (!button) {
+    button = document.createElement("button");
+    button.type = "button";
+    button.className = "nav-collapse";
+    button.textContent = "\u2039";
+    nav.append(button);
+  }
+
+  const apply = (collapsed) => {
+    document.body.classList.toggle("nav-collapsed", collapsed);
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    button.setAttribute("aria-label", collapsed ? "Expand navigation" : "Collapse navigation");
+    button.setAttribute("title", collapsed ? "Expand navigation" : "Collapse navigation");
+  };
+
+  const initial = localStorage.getItem(navCollapsedStorageKey) === "1";
+  apply(initial);
+  button.addEventListener("click", () => {
+    const collapsed = !document.body.classList.contains("nav-collapsed");
+    localStorage.setItem(navCollapsedStorageKey, collapsed ? "1" : "0");
+    apply(collapsed);
+  });
+}
+
+decorateDashboardNav();
+setupNavCollapse();
+
 $("#min-severity")?.addEventListener("change", (event) => {
   const params = new URLSearchParams(window.location.search);
   if (event.target.value) params.set("min_severity", event.target.value);
@@ -1532,11 +2382,22 @@ $("#min-severity")?.addEventListener("change", (event) => {
   window.location.search = params.toString();
 });
 
-$("#refresh")?.addEventListener("click", () => {
-  const loader = isFindingsPage ? loadFindings : isDetectionsPage ? loadDetections : isTokensPage ? loadTokens : isInventoryPage ? loadInventory : load;
-  loader().catch(console.error);
-});
 $("#inventory-show-all")?.addEventListener("change", () => renderInventoryConfigs(state.inventory?.configs || []));
+$("#inventory-runtime-filter")?.addEventListener("change", (event) => {
+  state.inventoryRuntime = event.target.value;
+  updateInventoryURL();
+  renderInventoryWorkspace(state.inventory, currentInventoryContext());
+});
+$("#inventory-user-filter")?.addEventListener("change", (event) => {
+  state.inventoryUser = event.target.value;
+  updateInventoryURL();
+  renderInventoryWorkspace(state.inventory, currentInventoryContext());
+});
+$("#inventory-search")?.addEventListener("input", (event) => {
+  state.inventorySearch = event.target.value;
+  updateInventoryURL();
+  renderInventoryActiveTable(currentInventoryContext());
+});
 $("#filters")?.addEventListener("submit", (event) => {
   event.preventDefault();
   load({ updateLocation: true }).catch(console.error);
@@ -1545,6 +2406,11 @@ $("#clear-search")?.addEventListener("click", clearSearch);
 $("#close-drawer")?.addEventListener("click", closeDrawer);
 $("#new-events")?.addEventListener("click", showNewEvents);
 window.addEventListener("hashchange", () => scrollDetectionHashIntoView({ force: true }));
+$$("[data-activity-view]").forEach((button) => {
+  button.addEventListener("click", () => {
+    setActivityView(button.dataset.activityView, { updateLocation: true });
+  });
+});
 $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
@@ -1559,10 +2425,12 @@ if (isDetectionsPage) {
   loadTokens().catch(console.error);
   setInterval(() => loadTokens().catch(console.error), 15000);
 } else if (isInventoryPage) {
+  hydrateInventoryStateFromURL();
   loadInventory().catch(console.error);
   setInterval(() => loadInventory().catch(console.error), 15000);
 } else {
   hydrateFiltersFromURL();
+  setupSessionFilters();
   load().catch(console.error);
   setInterval(() => load({ mode: "poll" }).catch(console.error), 10000);
 }
