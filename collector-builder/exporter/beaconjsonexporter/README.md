@@ -15,7 +15,7 @@ Required behavior:
 - Identify Claude Code and Claude Cowork OTLP resources and map prompts,
   tool/MCP calls, file access, approval decisions, API usage, token counts,
   costs, and errors into Beacon endpoint events.
-- For Claude Code logs, decode JSON-string `tool_input` and `tool_parameters`
+- For Claude Code and Claude Cowork logs, decode JSON-string `tool_input` and `tool_parameters`
   attributes into canonical `command.*` and `file.*` fields. Only actual tool
   results may become tool, command, or file actions; API, assistant, plugin,
   hook, skill, and other lifecycle logs use session actions, while MCP

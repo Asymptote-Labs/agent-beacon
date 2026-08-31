@@ -1231,7 +1231,6 @@ func TestClaudeNormalizerDoesNotAffectOtherHarnesses(t *testing.T) {
 		"github-copilot",
 		"copilot-chat",
 		"cursor",
-		"claude-cowork",
 		"claude_agent_sdk",
 		"claude_web",
 	} {
@@ -1247,6 +1246,101 @@ func TestClaudeNormalizerDoesNotAffectOtherHarnesses(t *testing.T) {
 				t.Fatalf("%s event changed by Claude normalizer: %#v", serviceName, event)
 			}
 		})
+	}
+}
+
+func TestCapturedClaudeCoworkNormalizesThroughClaudeOTelPipeline(t *testing.T) {
+	fixture, events := capturedLogEvents(t, "claude-cowork-2.1.251.json")
+	if len(events) != len(fixture.Records) {
+		t.Fatalf("events = %d, want %d", len(events), len(fixture.Records))
+	}
+	byName := map[string]Event{}
+	for i, record := range fixture.Records {
+		byName[record.Name] = events[i]
+		event := events[i]
+		if event.Harness.Name != "claude_cowork" {
+			t.Fatalf("%s harness = %q, want claude_cowork", record.Name, event.Harness.Name)
+		}
+		if event.Harness.Version != fixture.Version {
+			t.Fatalf("%s harness version = %q, want %q", record.Name, event.Harness.Version, fixture.Version)
+		}
+		if event.Origin != asymptoteobserve.OriginCloud {
+			t.Fatalf("%s origin = %q, want cloud", record.Name, event.Origin)
+		}
+	}
+
+	prompt := byName["user_prompt"]
+	if prompt.Event.Action != "prompt.submitted" || prompt.Event.Category != "prompt" || prompt.Event.Fidelity != asymptoteobserve.FidelityObserved {
+		t.Fatalf("prompt event = %#v, want observed prompt.submitted/prompt", prompt.Event)
+	}
+	if prompt.Prompt == nil || prompt.Prompt.Text != "COWORK_PROMPT_MARKER" {
+		t.Fatalf("prompt = %#v, want retained Cowork prompt", prompt.Prompt)
+	}
+	if prompt.User.Name != "operator@example.com" || prompt.User.UID != "account-fixture" {
+		t.Fatalf("prompt user = %#v, want source account identity", prompt.User)
+	}
+
+	response := byName["assistant_response"]
+	if response.Event.Action != "session.activity" || response.Event.Category != "session" {
+		t.Fatalf("assistant response event = %#v, want session.activity/session", response.Event)
+	}
+	if response.GenAI == nil || response.GenAI.Output == nil || firstPartContent(t, response.GenAI.Output.Messages) != "COWORK_RESPONSE_MARKER" {
+		t.Fatalf("assistant response content = %#v, want promoted output message", response.GenAI)
+	}
+	if response.Content == nil || !response.Content.Included {
+		t.Fatalf("assistant response content marker = %#v, want retained content", response.Content)
+	}
+
+	apiRequest := byName["api_request"]
+	if apiRequest.Event.Action != "session.activity" || apiRequest.GenAI == nil || apiRequest.GenAI.Usage == nil {
+		t.Fatalf("api request = %#v, want normalized session usage", apiRequest)
+	}
+	if apiRequest.GenAI.Usage.InputTokens == nil || *apiRequest.GenAI.Usage.InputTokens != 3 ||
+		apiRequest.GenAI.Usage.OutputTokens == nil || *apiRequest.GenAI.Usage.OutputTokens != 5 {
+		t.Fatalf("api request usage = %#v, want input/output tokens", apiRequest.GenAI.Usage)
+	}
+	if apiRequest.GenAI.Usage.CostUSD == nil || *apiRequest.GenAI.Usage.CostUSD != 0.01 {
+		t.Fatalf("api request cost = %#v, want 0.01", apiRequest.GenAI.Usage.CostUSD)
+	}
+
+	decision := byName["tool_decision"]
+	if decision.Event.Action != "approval.allowed" || decision.Event.Category != "approval" {
+		t.Fatalf("decision event = %#v, want approval.allowed/approval", decision.Event)
+	}
+	if decision.Approval == nil || decision.Approval.Decision != "accept" || decision.Approval.Reason != "user_temporary" {
+		t.Fatalf("decision approval = %#v, want accept/user_temporary", decision.Approval)
+	}
+	if decision.MCP == nil || decision.MCP.Server != "remote-devices" || decision.MCP.Tool != "device_bash" {
+		t.Fatalf("decision MCP = %#v, want remote-devices/device_bash", decision.MCP)
+	}
+
+	result := byName["tool_result"]
+	if result.Event.Action != "command.executed" || result.Event.Category != "command" {
+		t.Fatalf("tool result event = %#v, want command.executed/command", result.Event)
+	}
+	if result.Command == nil || result.Command.Command != "printf COWORK_COMMAND_MARKER" || result.Command.DurationMS != 25 {
+		t.Fatalf("tool result command = %#v, want promoted remote device command", result.Command)
+	}
+	if result.MCP == nil || result.MCP.Server != "remote-devices" || result.MCP.Tool != "device_bash" {
+		t.Fatalf("tool result MCP = %#v, want remote-devices/device_bash", result.MCP)
+	}
+	if toolCallIDOfEvent(result) != "toolu-cowork-command" {
+		t.Fatalf("tool result call ID = %q", toolCallIDOfEvent(result))
+	}
+
+	connection := byName["mcp_server_connection"]
+	if connection.Event.Action != "mcp.connection" || connection.MCP == nil || connection.MCP.Server != "remote-devices" {
+		t.Fatalf("MCP connection = %#v, want mcp.connection with server", connection)
+	}
+	for _, name := range []string{"hook_execution_start", "hook_execution_complete"} {
+		event := byName[name]
+		if event.Event.Action != "session.activity" || event.Event.Category != "session" || event.Event.Fidelity != asymptoteobserve.FidelityObserved {
+			t.Fatalf("%s event = %#v, want observed session activity", name, event.Event)
+		}
+	}
+	retention := byName["retention_sweep"]
+	if retention.Event.Action != "session.activity" || retention.Event.Category != "session" || retention.Event.Fidelity != asymptoteobserve.FidelityInferred {
+		t.Fatalf("retention event = %#v, want inferred session activity", retention.Event)
 	}
 }
 

@@ -1,0 +1,151 @@
+{
+  "runtime": "Claude Cowork",
+  "version": "2.1.251",
+  "records": [
+    {
+      "name": "user_prompt",
+      "body": "claude_code.user_prompt",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "user_prompt",
+        "event.sequence": 1,
+        "session.id": "cowork-session",
+        "prompt.id": "cowork-prompt",
+        "prompt": "COWORK_PROMPT_MARKER",
+        "user.email": "operator@example.com",
+        "user.account_uuid": "account-fixture"
+      }
+    },
+    {
+      "name": "assistant_response",
+      "body": "claude_code.assistant_response",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "assistant_response",
+        "event.sequence": 2,
+        "session.id": "cowork-session",
+        "prompt.id": "cowork-prompt",
+        "model": "claude-sonnet-5",
+        "response": "COWORK_RESPONSE_MARKER",
+        "user.email": "operator@example.com"
+      }
+    },
+    {
+      "name": "api_request",
+      "body": "claude_code.api_request",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "api_request",
+        "event.sequence": 3,
+        "session.id": "cowork-session",
+        "prompt.id": "cowork-prompt",
+        "model": "claude-sonnet-5",
+        "input_tokens": 3,
+        "output_tokens": 5,
+        "cache_read_tokens": 7,
+        "cache_creation_tokens": 11,
+        "cost_usd": 0.01
+      }
+    },
+    {
+      "name": "tool_decision",
+      "body": "claude_code.tool_decision",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "tool_decision",
+        "event.sequence": 4,
+        "session.id": "cowork-session",
+        "prompt.id": "cowork-prompt",
+        "tool_name": "mcp_tool",
+        "tool_use_id": "toolu-cowork-command",
+        "decision": "accept",
+        "source": "user_temporary",
+        "tool_parameters": "{\"mcp_server_name\":\"remote-devices\",\"mcp_tool_name\":\"device_bash\"}"
+      }
+    },
+    {
+      "name": "tool_result",
+      "body": "claude_code.tool_result",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "tool_result",
+        "event.sequence": 5,
+        "session.id": "cowork-session",
+        "prompt.id": "cowork-prompt",
+        "tool_name": "mcp_tool",
+        "tool_use_id": "toolu-cowork-command",
+        "success": "true",
+        "duration_ms": 25,
+        "tool_parameters": "{\"mcp_server_name\":\"remote-devices\",\"mcp_tool_name\":\"device_bash\"}",
+        "tool_input": "{\"command\":\"printf COWORK_COMMAND_MARKER\"}"
+      }
+    },
+    {
+      "name": "mcp_server_connection",
+      "body": "claude_code.mcp_server_connection",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "mcp_server_connection",
+        "event.sequence": 6,
+        "session.id": "cowork-session",
+        "server_name": "remote-devices",
+        "status": "connected",
+        "transport_type": "http"
+      }
+    },
+    {
+      "name": "hook_execution_start",
+      "body": "claude_code.hook_execution_start",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "hook_execution_start",
+        "event.sequence": 7,
+        "session.id": "cowork-session",
+        "hook_event": "Stop",
+        "hook_name": "Stop"
+      }
+    },
+    {
+      "name": "hook_execution_complete",
+      "body": "claude_code.hook_execution_complete",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "hook_execution_complete",
+        "event.sequence": 8,
+        "session.id": "cowork-session",
+        "hook_event": "Stop",
+        "hook_name": "Stop",
+        "num_success": 1
+      }
+    },
+    {
+      "name": "retention_sweep",
+      "body": "claude_code.retention_sweep",
+      "attributes": {
+        "service.name": "claude-cowork",
+        "service.version": "2.1.251",
+        "cowork.surface": "remote",
+        "event.name": "retention_sweep",
+        "event.sequence": 9,
+        "session.id": "cowork-session",
+        "result": "complete"
+      }
+    }
+  ]
+}
