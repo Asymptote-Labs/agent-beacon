@@ -1860,6 +1860,66 @@ body[data-page="sessions"] .search-input {
   font-size: 0.78rem;
 }
 
+body[data-page="sessions"] th:nth-child(8),
+body[data-page="sessions"] td:nth-child(8) {
+  text-align: center;
+}
+
+.session-harness-cell {
+  min-width: 4.75rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.session-harness-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.session-harness-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.18rem;
+}
+
+.session-harness-name {
+  color: #111827;
+  font-size: 0.8rem;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.capture-method-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.35rem;
+  border-radius: 999px;
+  background: #f0f0f4;
+  color: #6b7280;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 0.18rem 0.48rem;
+  text-transform: uppercase;
+}
+
 .section-head,
 .status-panel {
   align-items: flex-start;

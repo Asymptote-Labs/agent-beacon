@@ -1289,7 +1289,27 @@ function tagCell(record) {
 function harnessCell(event) {
   const harness = event.harness || {};
   if (!harness.name) return "";
-  return escapeHTML(harnessLabel(harness.name));
+  const label = harnessLabel(harness.name);
+  const logo = inventoryRuntimeLogos[String(harness.name).toLowerCase()];
+  return `
+    <span class="session-harness-cell">
+      <span class="session-harness-logo">
+        ${logo ? `<img src="${escapeHTML(logo)}" alt="${escapeHTML(label)} logo" loading="lazy" />` : escapeHTML(harnessInitials(harness.name))}
+      </span>
+      <span class="session-harness-name">${escapeHTML(label)}</span>
+      ${harness.collection_method ? `<span class="capture-method-badge">${escapeHTML(captureMethodLabel(harness.collection_method))}</span>` : ""}
+    </span>
+  `;
+}
+
+function captureMethodLabel(value) {
+  const labels = {
+    hook: "Hooks",
+    otlp: "OpenTelemetry",
+    plugin: "Plugin",
+    poll: "Poll",
+  };
+  return labels[String(value).toLowerCase()] || value;
 }
 
 function signalAction(record) {
