@@ -23,6 +23,7 @@ The macOS package includes Beacon binaries, endpoint helper scripts, and Fleet a
 ```text
 /opt/beacon/bin/beacon
 /opt/beacon/bin/beacon-otelcol
+/opt/beacon/bin/vector
 /opt/beacon/scripts/install-endpoint.sh
 /opt/beacon/scripts/uninstall-endpoint.sh
 /opt/beacon/fleet/queries/*.sql
@@ -38,9 +39,22 @@ The package postinstall performs the default system install. That install create
 /var/log/beacon-agent/runtime.jsonl
 ```
 
+## Requirements and caveats
+
+- **Fleet Premium.** Custom software packages are a Premium feature and must be added to a specific team. They cannot be added to All teams.
+- **Apple Silicon only.** The signed, notarized endpoint `.pkg` (`BeaconEndpointAgent-<version>-arm64.pkg`) is arm64. Intel Macs are not covered by that artifact.
+- **Scripts enabled on `fleetd`.** Software install and Fleet scripts require `fleetd --enable-scripts`. Scripts are enabled by default when you use Fleet MDM.
+- **Self-hosted package storage.** If you self-host Fleet, configure an S3 bucket for Fleet to store uploaded installers and raise load-balancer timeouts to at least five minutes for package upload.
+- **Do not put S3 or self-update enablement in the package post-install script.** If a Fleet post-install script exits non-zero, `fleetd` uninstalls the package. Enable self-updates and S3 forwarding with separate Fleet scripts after install.
+- **Self-updates are off by default** and apply only to the Apple Silicon system package install. Endpoints need network access to the GitHub release manifest unless you set `BEACON_UPDATE_MANIFEST_URL`.
+- **S3 forwarding reuses the packaged Vector helper** at `/opt/beacon/jamf/claude/s3/install-forwarder.sh`. There is no separate Fleet-only forwarder binary. Release packages include `/opt/beacon/bin/vector`.
+- **Fleet's default `.pkg` uninstall only removes `.app` bundles.** Beacon lives under `/opt/beacon`, so supply a custom uninstall script that calls the packaged cleanup helper.
+
+For S3 forwarding plus self-updates, follow [Beacon with Fleet and S3](/guides/fleet-s3-mdm).
+
 ## Deploy with Fleet
 
-Upload the signed and notarized `.pkg` as Fleet software and scope it to a pilot team or label. The package postinstall performs the default system install, so no post-install script is required for the common deployment path.
+Upload the signed and notarized `.pkg` as Fleet software and scope it to a pilot team or label. The package postinstall performs the default system install, so no post-install script is required for the common deployment path. See [Deploy software](https://fleetdm.com/guides/deploy-software-packages) for Fleet's package, script, and targeting model.
 
 <Steps>
   <Step title="Upload the Beacon package">
@@ -73,6 +87,11 @@ Upload the signed and notarized `.pkg` as Fleet software and scope it to a pilot
     manifest after package verification and health checks. `check-only` mode
     writes local update status events to `/var/log/beacon-agent/system.jsonl` but
     does not download or apply packages.
+  </Step>
+  <Step title="Optionally configure S3 forwarding">
+    After the package is installed, run a Fleet script that starts Vector
+    forwarding. Do not put that script in the package post-install. See
+    [Beacon with Fleet and S3](/guides/fleet-s3-mdm).
   </Step>
   <Step title="Validate the deployment">
     Run the Fleet validation helper on a managed Mac:
@@ -141,6 +160,9 @@ Available queries:
 - `configured-harnesses.sql`
 - `runtime-log-writable.sql`
 - `splunk-hec-forwarding.sql`
+- `falcon-vector-forwarder-health.sql`
+- `s3-vector-forwarder-health.sql`
+- `s3-vector-forwarding-configured.sql`
 
 Recommended Fleet policies:
 
@@ -150,6 +172,8 @@ Recommended Fleet policies:
 - Endpoint config state is `present`.
 - Runtime log state is `present`.
 - Splunk HEC config state is `configured` when HEC export is required.
+- S3 Vector forwarder health is `running` when S3 forwarding is required.
+- S3 Vector forwarding state is `configured` when S3 forwarding is required.
 
 ## Repair and uninstall
 
@@ -222,11 +246,26 @@ Use `/opt/beacon/fleet/scripts/uninstall.sh` to remove endpoint service files. S
     sudo BEACON_UPDATE_JITTER_SECONDS=0 /opt/beacon/bin/beacon endpoint update --scheduled
     ```
   </Accordion>
+  <Accordion title="S3 Vector forwarder is not running">
+    Confirm the release package includes Vector and that the Fleet S3 script ran after install:
+
+    ```bash
+    ls /opt/beacon/bin/vector
+    ls /opt/beacon/jamf/claude/s3/install-forwarder.sh
+    sudo launchctl print system/com.beacon.endpoint.s3-forwarder
+    sudo tail -n 50 /tmp/com.beacon.endpoint.s3-forwarder.err
+    ```
+
+    If the environment file is missing, rerun `beacon-configure-s3-forwarding.sh` from Fleet. Do not echo AWS secrets in script output. Vector batches uploads for up to five minutes.
+  </Accordion>
 </AccordionGroup>
 
 ## Related
 
 <Columns cols={2}>
+  <Card title="Beacon with Fleet and S3" icon="bucket" href="/guides/fleet-s3-mdm">
+    Upload the package, enable self-updates, and forward runtime plus inventory JSONL to S3.
+  </Card>
   <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
     Review the shared macOS MDM deployment model and package layout.
   </Card>
