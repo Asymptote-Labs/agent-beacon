@@ -554,6 +554,17 @@ sudo launchctl print system/com.beacon.endpoint.collector
 
 Upload the signed/notarized `.pkg` as Fleet software and scope it to a pilot
 team or label. The package postinstall performs the default system install.
+Custom packages require Fleet Premium and a specific team (not All teams).
+The current endpoint `.pkg` is Apple Silicon only.
+
+An admin helper that uploads the latest GitHub release package, enables
+self-updates via a Fleet script, and configures Vector S3 forwarding with
+Fleet secret variables is in
+[`examples/fleet/configure-beacon-macos-s3.sh`](../../examples/fleet/configure-beacon-macos-s3.sh).
+The customer-facing walkthrough is
+[Beacon with Fleet and S3](https://docs.asymptotelabs.ai/guides/fleet-s3-mdm).
+Do not put S3 or self-update enablement in the Fleet package post-install
+script: a non-zero post-install causes Fleet to uninstall the package.
 
 Fleet scripts are installed under `/opt/beacon/fleet/scripts`:
 
@@ -615,6 +626,9 @@ harness configuration, Wazuh validation, and launchd health.
 - `configured-harnesses.sql`
 - `runtime-log-writable.sql`
 - `splunk-hec-forwarding.sql`
+- `falcon-vector-forwarder-health.sql`
+- `s3-vector-forwarder-health.sql`
+- `s3-vector-forwarding-configured.sql`
 
 Recommended Fleet policies:
 
@@ -623,6 +637,7 @@ Recommended Fleet policies:
 - Last runtime event age is less than `86400`
 - Endpoint config state is `present`
 - Runtime log state is `present`
+- S3 Vector forwarder health is `running` when S3 forwarding is required
 
 ## Uninstall And Rollback
 

@@ -472,7 +472,7 @@ gcloud iam service-accounts keys delete "<retired-key-id>" \
   --iam-account "$BEACON_GCS_WRITER_EMAIL"
 ```
 
-For managed fleets, use the dedicated [Jamf S3 guide](/guides/jamf-s3-mdm) or
-[Jamf GCS guide](/guides/jamf-gcs-mdm). Those guides show the optional
-Claude-oriented combined repair wrappers as well as policy parameters and
-managed credential delivery.
+For managed fleets, use the dedicated [Jamf S3 guide](/guides/jamf-s3-mdm),
+[Fleet S3 guide](/guides/fleet-s3-mdm), or [Jamf GCS guide](/guides/jamf-gcs-mdm).
+Those guides cover package install, credential delivery, and the Vector
+LaunchDaemon that tails the local JSONL files.

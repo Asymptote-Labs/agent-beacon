@@ -237,7 +237,13 @@
                       "guides/rippling-gcs-mdm"
                     ]
                   },
-                  "mdm/fleet"
+                  {
+                    "group": "Fleet",
+                    "root": "mdm/fleet",
+                    "pages": [
+                      "guides/fleet-s3-mdm"
+                    ]
+                  }
                 ]
               },
               {
@@ -522,6 +528,13 @@
                 "root": "mdm/rippling",
                 "pages": [
                   "guides/rippling-gcs-mdm"
+                ]
+              },
+              {
+                "group": "Fleet",
+                "root": "mdm/fleet",
+                "pages": [
+                  "guides/fleet-s3-mdm"
                 ]
               }
             ]
