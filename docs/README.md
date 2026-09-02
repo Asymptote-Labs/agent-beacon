@@ -30,7 +30,7 @@ View your local preview at `http://localhost:3000`.
 
 ## Publishing changes
 
-Install our GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app) to propagate changes from your repo to your deployment. Changes are deployed to production automatically after pushing to the default branch.
+Install our GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app) to propagate changes from your repo to your deployment. Changes are deployed to production automatically after pushing to the default branch. The live site is [docs.asymptotelabs.ai](https://docs.asymptotelabs.ai).
 
 ## Need help?
 
