@@ -123,6 +123,27 @@ func NormalizeHarnessName(name string) string {
 		lower == "qwencode" || lower == "qwen_cli" || lower == "qwen-cli" || lower == "qwen cli" ||
 		lower == "qwen_coder" || lower == "qwen-coder" || lower == "qwen coder":
 		return "qwen_code"
+	// Muse Code is Meta's terminal coding agent; Muse Spark is the model it runs. Beacon hooks the
+	// agent, so the harness is muse_code -- the canonical spelling follows claude_code and
+	// qwen_code, because Muse Code is the product's name rather than a CLI suffix.
+	//
+	// Muse Spark spellings are deliberately absent from this set, and that is the whole reason the
+	// case is written as equality against a closed set rather than Contains(lower, "muse"). Every
+	// Muse Spark model id begins with the same four letters the harness does -- muse-spark-1.2,
+	// muse-spark-1.3, muse-spark-1.2-contributor -- so a substring rule would report any event
+	// whose harness attribute happened to carry a model string as a Muse Code session. That is the
+	// Qwen failure exactly (see TestQwenModelNamesAreNotTreatedAsTheHarness), and here it would be
+	// worse: the model and the agent ship under one brand, so a reader seeing "muse_spark" in
+	// harness.name has no way to tell a misattributed model id from a real runtime. Leaving those
+	// spellings unmapped means they fall to the passthrough case below and show up as themselves,
+	// which is visible as an anomaly rather than silently filed under the agent.
+	//
+	// "muse" alone is also an ordinary English word, so the closed set is what keeps a harness
+	// attribute that merely contains it from being claimed. There is no prefix rule for the same
+	// reason: a future runtime named "musey" is not this one.
+	case lower == "muse" || lower == "muse_code" || lower == "muse-code" || lower == "muse code" ||
+		lower == "musecode" || lower == "muse_cli" || lower == "muse-cli" || lower == "muse cli":
+		return "muse_code"
 	// Prime Agent (Prime Intellect) ships the same extension API as Pi, which is why Beacon
 	// observes it the same way -- but it is a separate product, and recording its sessions as
 	// pi_cli would merge two runtimes' activity under one name in every query that groups by

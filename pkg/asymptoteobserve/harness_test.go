@@ -21,6 +21,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"cline":       "cline",
 		"qwen":        "qwen_code",
 		"prime":       "prime_agent",
+		"muse":        "muse_code",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -40,6 +41,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "vercel_fx",
+		"muse_code",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -364,5 +366,59 @@ func TestFxIsNotAttributedToItsModelProviders(t *testing.T) {
 	// Codex CLI, and fx's own events say "fx".
 	if got := NormalizeHarnessName("codex"); got != "codex_cli" {
 		t.Errorf("NormalizeHarnessName(%q) = %q, want codex_cli", "codex", got)
+	}
+}
+
+// Muse Code reaches Beacon under more than one spelling for the same reason every other runtime
+// does: the hook path installs with --platform muse, while anything deriving a name from the
+// runtime's own strings reports what Meta calls the product. Pinning them here is what keeps one
+// Muse Code session from being recorded under two names.
+func TestMuseSpellingsConvergeOnMuseCode(t *testing.T) {
+	for _, in := range []string{
+		"muse", "Muse", "MUSE", " muse ", "muse_code", "muse-code", "Muse Code", "musecode",
+		"muse_cli", "muse-cli", "Muse CLI",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "muse_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "muse_code")
+			}
+		})
+	}
+}
+
+// The reason the Muse case is an equality match rather than a Contains rule, and the sharpest
+// version of it in the whole function: Meta ships the agent (Muse Code) and the model it runs
+// (Muse Spark) under one brand, so every Muse Spark model id begins with the same four letters
+// the harness does. A Contains(lower, "muse") rule would report any event whose harness attribute
+// carried a model string as a Muse Code session -- and unlike the Qwen case, a reader seeing a
+// Muse-prefixed value in harness.name could not tell the misattribution from the real thing.
+//
+// Falling through to the passthrough case is the wanted behavior, not a gap: a model id that has
+// somehow reached harness.name shows up as itself, which is visible as an anomaly, rather than
+// being silently filed under the agent.
+func TestMuseSparkModelNamesAreNotTreatedAsTheHarness(t *testing.T) {
+	for _, name := range []string{
+		"muse-spark", "muse_spark", "muse-spark-1.2", "muse-spark-1.3",
+		"muse-spark-1.2-contributor", "Muse Spark 1.2",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "muse_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a Muse Spark model id must not be "+
+					"reported as the Muse Code harness", name, got)
+			}
+		})
+	}
+}
+
+// "muse" is an ordinary English word and a substring of several others. The closed set is what
+// keeps a harness attribute that merely contains it from being claimed by this case.
+func TestOrdinaryWordsContainingMuseAreNotMuseCode(t *testing.T) {
+	for _, name := range []string{"amuse", "museum", "amusement", "musement", "bemuse"} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "muse_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a word merely containing \"muse\" must "+
+					"not be reported as the Muse Code harness", name, got)
+			}
+		})
 	}
 }
