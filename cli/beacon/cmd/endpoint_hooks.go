@@ -183,6 +183,21 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		if strings.Contains(status.Message, "/hooks-trust") {
 			fmt.Println(status.Message)
 		}
+	case "muse":
+		status, err := endpointhooks.InstallMuse(endpointhooks.MuseOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		// Both paths, because an install is only complete with both and neither is guessable from
+		// the other: Beacon owns the hooks file, while the settings key that makes Muse read it
+		// lives in the user's own settings.json. Anyone verifying the install by hand needs to look
+		// at both files.
+		fmt.Printf("Muse Code hooks installed: %s\n", status.HooksPath)
+		fmt.Printf("Muse Code settings updated: %s\n", status.SettingsPath)
 	case "qwen":
 		status, err := endpointhooks.InstallQwen(endpointhooks.QwenOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -371,6 +386,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "muse":
+		status, err := endpointhooks.UninstallMuse(endpointhooks.MuseOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "qwen":
 		status, err := endpointhooks.UninstallQwen(endpointhooks.QwenOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -493,6 +518,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "muse":
+			statuses["muse"] = endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "qwen":
 			statuses["qwen"] = endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -566,6 +597,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
 			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "muse":
+			status := statuses["muse"].(endpointhooks.MuseStatus)
+			fmt.Printf("Muse Code hooks: installed=%t path=%s settings=%s\n", status.Installed, status.HooksPath, status.SettingsPath)
 			fmt.Println(status.Message)
 		case "qwen":
 			status := statuses["qwen"].(endpointhooks.QwenStatus)
