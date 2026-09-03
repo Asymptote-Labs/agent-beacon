@@ -907,47 +907,40 @@ func TestRunSessionEndRemovesSessionLog(t *testing.T) {
 func setupHookConfigDirs(t *testing.T) {
 	t.Helper()
 	tmp := t.TempDir()
+
+	// Every per-runtime state directory is redirected under one temp root, as a table rather than
+	// as a save/restore pair per runtime.
+	//
+	// It was the latter, and the shape was the problem rather than the length: adding a runtime
+	// meant editing three parallel lists in lockstep -- the saved original, the assignment, and the
+	// restore -- and getting only two of them right leaks a temp path into every test that runs
+	// afterwards, which then fails somewhere else entirely. Here a runtime is one line and cannot
+	// be half-added.
+	for name, target := range map[string]*string{
+		"antigravity": &hookconfig.AntigravityDir,
+		"claude":      &hookconfig.ClaudeDir,
+		"cline":       &hookconfig.ClineDir,
+		"copilot":     &hookconfig.CopilotDir,
+		"cursor":      &hookconfig.CursorDir,
+		"devin":       &hookconfig.DevinDir,
+		"factory":     &hookconfig.FactoryDir,
+		"grok":        &hookconfig.GrokDir,
+		"hermes":      &hookconfig.HermesDir,
+		"muse":        &hookconfig.MuseDir,
+		"opencode":    &hookconfig.OpenCodeDir,
+		"qwen":        &hookconfig.QwenDir,
+		"vscode":      &hookconfig.VSCodeDir,
+	} {
+		orig := *target
+		t.Cleanup(func() { *target = orig })
+		*target = filepath.Join(tmp, name)
+	}
+
 	origBeaconDir := hookconfig.BeaconDir
-	origClaudeDir := hookconfig.ClaudeDir
-	origAntigravityDir := hookconfig.AntigravityDir
-	origCopilotDir := hookconfig.CopilotDir
-	origCursorDir := hookconfig.CursorDir
-	origVSCodeDir := hookconfig.VSCodeDir
-	origDevinDir := hookconfig.DevinDir
-	origFactoryDir := hookconfig.FactoryDir
-	origGrokDir := hookconfig.GrokDir
-	origHermesDir := hookconfig.HermesDir
-	origOpenCodeDir := hookconfig.OpenCodeDir
-	origClineDir := hookconfig.ClineDir
-	origQwenDir := hookconfig.QwenDir
 	origPlatform := platformFlag
 	hookconfig.BeaconDir = tmp
-	hookconfig.ClaudeDir = filepath.Join(tmp, "claude")
-	hookconfig.AntigravityDir = filepath.Join(tmp, "antigravity")
-	hookconfig.CopilotDir = filepath.Join(tmp, "copilot")
-	hookconfig.CursorDir = filepath.Join(tmp, "cursor")
-	hookconfig.VSCodeDir = filepath.Join(tmp, "vscode")
-	hookconfig.DevinDir = filepath.Join(tmp, "devin")
-	hookconfig.FactoryDir = filepath.Join(tmp, "factory")
-	hookconfig.GrokDir = filepath.Join(tmp, "grok")
-	hookconfig.HermesDir = filepath.Join(tmp, "hermes")
-	hookconfig.OpenCodeDir = filepath.Join(tmp, "opencode")
-	hookconfig.ClineDir = filepath.Join(tmp, "cline")
-	hookconfig.QwenDir = filepath.Join(tmp, "qwen")
 	t.Cleanup(func() {
 		hookconfig.BeaconDir = origBeaconDir
-		hookconfig.ClaudeDir = origClaudeDir
-		hookconfig.AntigravityDir = origAntigravityDir
-		hookconfig.CopilotDir = origCopilotDir
-		hookconfig.CursorDir = origCursorDir
-		hookconfig.VSCodeDir = origVSCodeDir
-		hookconfig.DevinDir = origDevinDir
-		hookconfig.FactoryDir = origFactoryDir
-		hookconfig.GrokDir = origGrokDir
-		hookconfig.HermesDir = origHermesDir
-		hookconfig.OpenCodeDir = origOpenCodeDir
-		hookconfig.ClineDir = origClineDir
-		hookconfig.QwenDir = origQwenDir
 		platformFlag = origPlatform
 	})
 }

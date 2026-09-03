@@ -473,6 +473,26 @@ func isFileEditTool(platform, toolName string) bool {
 	if platform == "qwen" {
 		return isQwenFileEditTool(toolName)
 	}
+	// Muse Code's tool names are not published, and the fallback below is Claude Code's PascalCase
+	// set, which a snake_case runtime never matches -- so without a branch here a Muse file edit
+	// would never reach the diff path and never be recorded as file.modified. The names that ARE
+	// confirmed are snake_case (`read_skill`, `subagent_spawn`), which is what makes the generic
+	// substring rule the right shape rather than a guessed literal list: it matches whatever
+	// spelling Meta chose, and a literal list guessed wrong would silently capture nothing.
+	//
+	// Same rule as hermes, antigravity and copilot above, and it is a heuristic in all four cases.
+	// Its false-positive direction is bounded: toolFields only attaches a `file` block when the
+	// tool's own arguments carry a path, so a non-file tool whose name happens to contain "write"
+	// yields file.modified with no path rather than a fabricated edit. None of the six confirmed
+	// subagent_* control tools contain any of these substrings, so the agent's own control loop is
+	// not classified as file activity.
+	if platform == "muse" {
+		lower := strings.ToLower(toolName)
+		return strings.Contains(lower, "edit") ||
+			strings.Contains(lower, "write") ||
+			strings.Contains(lower, "create") ||
+			strings.Contains(lower, "patch")
+	}
 	return toolName == "Write" || toolName == "Edit" || toolName == "MultiEdit"
 }
 

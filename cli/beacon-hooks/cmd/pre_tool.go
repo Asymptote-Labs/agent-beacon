@@ -50,7 +50,13 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" {
+		// Muse Code belongs on the observing side rather than with the runtimes whose pre-tool
+		// notification gets turned into a synthesized approval, and the reason is that it has a
+		// real one. Its PermissionRequest event is a separate hook Beacon also subscribes to, so
+		// deriving an approval.allowed from PreToolUse as well would record two approvals for one
+		// tool call -- one of them inferred and describing nothing an operator did -- and put an
+		// invented decision next to a reported one for the same call.
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -122,7 +128,11 @@ func preToolResponse() map[string]interface{} {
 	// where the hook was installed to watch. An empty object carries no decision, so Qwen's normal
 	// permission flow runs untouched -- which is the only correct answer for a telemetry hook, and
 	// what TestQwenPreToolDoesNotApproveOnBehalfOfTheUser holds in place.
-	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" {
+	// Muse Code requires the empty object for a second reason on top of the one above, and it is
+	// not a preference: its hook runner rejects a stdout object carrying keys it does not know, so
+	// `{"permission":"allow"}` would not read as a permissive answer -- it would fail the hook run
+	// outright. Emitting nothing speculative is the only shape that leaves a Muse turn untouched.
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" {
 		return emptyResponse
 	}
 	return allowResponse
