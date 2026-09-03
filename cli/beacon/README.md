@@ -509,6 +509,9 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint hooks install --harness grok
 ./beacon endpoint hooks status --harness grok
 
+./beacon endpoint hooks install --harness muse
+./beacon endpoint hooks status --harness muse
+
 ./beacon endpoint hooks install --harness hermes
 ./beacon endpoint hooks status --harness hermes
 
@@ -554,6 +557,17 @@ The Grok Build integration writes Beacon's owned local hook file at
 `~/.grok/hooks/beacon-endpoint.json` for user-level installs or `.grok/hooks/beacon-endpoint.json`
 for project-level installs. Project hooks require trusting the project in Grok
 with `/hooks-trust` before they execute.
+
+The Muse Code integration writes Beacon's owned managed hooks file at
+`$XDG_CONFIG_HOME/muse/beacon-endpoint-hooks.json` (or `~/.config/muse/...`) and
+points Muse's own `settings.json` at it with the `managed_hooks_path` key. Both
+halves are required: a hooks file nothing points at is never read, and a
+`managed_hooks_path` with no file behind it registers nothing, so `status` checks
+and prints both. Muse reads exactly one managed hooks file, so install refuses
+rather than replacing a registration that is already somebody else's, and
+uninstall clears the key only while it still names Beacon's file. User scope
+only -- Muse's project `.muse/hooks.json` is ignored by the shipping build, so a
+project install would report success and collect nothing.
 
 The Hermes Agent integration writes shell-hook entries into
 `~/.hermes/config.yaml`. Hermes prompts for first-use consent for each
