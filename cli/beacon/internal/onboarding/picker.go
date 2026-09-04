@@ -96,8 +96,16 @@ func selectOption(in *os.File, out io.Writer, options []choice, color bool) (int
 
 	fmt.Fprint(out, ansiHideCur)
 
+	// Every drawn line is clipped to the terminal width so nothing wraps: the redraw and
+	// the final clear count lines, and a wrapped line would make them eat whatever the
+	// caller printed above the menu.
+	width, _, sizeErr := term.GetSize(fd)
+	if sizeErr != nil {
+		width = 0
+	}
+
 	selected := 0
-	render(out, options, selected, color, true)
+	render(out, options, selected, color, true, width)
 
 	buf := make([]byte, 32)
 	for {
@@ -127,7 +135,7 @@ func selectOption(in *os.File, out io.Writer, options []choice, color bool) (int
 			}
 		}
 		if moved {
-			render(out, options, selected, color, false)
+			render(out, options, selected, color, false, width)
 		}
 	}
 }
@@ -190,8 +198,10 @@ func decodeByte(c byte, total int) (keyEvent, bool) {
 	}
 }
 
-// render draws the option list plus its key hint, overwriting the previous draw.
-func render(out io.Writer, options []choice, selected int, color bool, first bool) {
+// render draws the option list plus its key hint, overwriting the previous draw. width is
+// the terminal width in columns, or 0 when unknown; every line is clipped to it so the
+// draw occupies exactly renderedLines rows.
+func render(out io.Writer, options []choice, selected int, color bool, first bool, width int) {
 	if !first {
 		fmt.Fprintf(out, ansiUp, renderedLines(options))
 	}
@@ -202,17 +212,33 @@ func render(out io.Writer, options []choice, selected int, color bool, first boo
 	for i, option := range options {
 		fmt.Fprint(out, ansiClearLine)
 		if i == selected {
-			fmt.Fprintf(out, "  %s❯ %s%s\r\n", accent, option.Label, clear)
+			fmt.Fprintf(out, "  %s❯ %s%s\r\n", accent, clip(option.Label, width-4), clear)
 		} else {
-			fmt.Fprintf(out, "    %s\r\n", option.Label)
+			fmt.Fprintf(out, "    %s\r\n", clip(option.Label, width-4))
 		}
 		if option.Detail != "" {
 			fmt.Fprint(out, ansiClearLine)
-			fmt.Fprintf(out, "      %s%s%s\r\n", dimmed, option.Detail, clear)
+			fmt.Fprintf(out, "      %s%s%s\r\n", dimmed, clip(option.Detail, width-6), clear)
 		}
 	}
 	fmt.Fprint(out, ansiClearLine)
 	fmt.Fprintf(out, "  %s↑/↓ move · ↵ select · ^C cancel%s\r\n", dimmed, clear)
+}
+
+// clip shortens text to fit in width columns, ending it with an ellipsis. A width of zero
+// or less means the terminal size is unknown and the text is left alone.
+func clip(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= width {
+		return text
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
 }
 
 // clear erases the last n rendered lines and parks the cursor at their start.

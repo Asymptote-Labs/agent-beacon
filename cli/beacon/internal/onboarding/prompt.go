@@ -113,13 +113,15 @@ type destinationChoice struct {
 
 // destinationChoices lists the answers in display order. Local is first so that Enter
 // never forwards anything: sending telemetry off the machine is a choice, never a default.
+// Labels and details are kept short enough to draw unwrapped on an 80-column terminal
+// (a test pins this); the picker clips to the real width as a backstop.
 func destinationChoices(offerAsymptote bool) []destinationChoice {
 	items := []destinationChoice{
-		{DestinationLocal, "Keep it on this machine", "Nothing is sent anywhere. Local JSONL and local dashboard; change it any time."},
+		{DestinationLocal, "Keep it on this machine", "Nothing is sent anywhere. Local JSONL and dashboard; change it any time."},
 		{DestinationOwnInfra, "Forward to your own infrastructure", "SIEM, observability platform, or an S3/GCS bucket you own."},
 	}
 	if offerAsymptote {
-		items = append(items, destinationChoice{DestinationAsymptote, "Forward to Asymptote Managed", "Opens your browser to approve this device; revoke it from the dashboard any time."})
+		items = append(items, destinationChoice{DestinationAsymptote, "Forward to Asymptote Managed", "Approve this device in your browser; revoke from the dashboard any time."})
 	}
 	return items
 }

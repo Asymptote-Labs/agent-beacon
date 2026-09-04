@@ -83,7 +83,7 @@ func assertEvents(t *testing.T, got, want []keyEvent) {
 
 func TestRenderMarksTheSelectedOption(t *testing.T) {
 	var out bytes.Buffer
-	render(&out, choices([]string{"Alpha", "Beta", "Gamma"}), 1, false, true)
+	render(&out, choices([]string{"Alpha", "Beta", "Gamma"}), 1, false, true, 0)
 	got := out.String()
 
 	if !strings.Contains(got, "❯ Beta") {
@@ -101,8 +101,8 @@ func TestRenderMarksTheSelectedOption(t *testing.T) {
 // printed above the menu.
 func TestRenderFirstDrawDoesNotMoveTheCursor(t *testing.T) {
 	var first, redraw bytes.Buffer
-	render(&first, choices([]string{"A", "B"}), 0, false, true)
-	render(&redraw, choices([]string{"A", "B"}), 0, false, false)
+	render(&first, choices([]string{"A", "B"}), 0, false, true, 0)
+	render(&redraw, choices([]string{"A", "B"}), 0, false, false, 0)
 
 	if strings.Contains(first.String(), "\x1b[3A") {
 		t.Fatalf("first draw moved the cursor up:\n%q", first.String())
@@ -114,13 +114,13 @@ func TestRenderFirstDrawDoesNotMoveTheCursor(t *testing.T) {
 
 func TestRenderHonorsColorOff(t *testing.T) {
 	var out bytes.Buffer
-	render(&out, choices([]string{"Alpha", "Beta"}), 0, false, true)
+	render(&out, choices([]string{"Alpha", "Beta"}), 0, false, true, 0)
 	if strings.Contains(out.String(), colorAccnt) || strings.Contains(out.String(), colorDim) {
 		t.Fatalf("colour escapes leaked with colour disabled:\n%q", out.String())
 	}
 
 	out.Reset()
-	render(&out, choices([]string{"Alpha", "Beta"}), 0, true, true)
+	render(&out, choices([]string{"Alpha", "Beta"}), 0, true, true, 0)
 	if !strings.Contains(out.String(), colorAccnt) {
 		t.Fatalf("colour was requested but not emitted:\n%q", out.String())
 	}
@@ -194,7 +194,7 @@ func TestRenderDrawsDetailsAndCountsThem(t *testing.T) {
 		t.Fatalf("renderedLines = %d, want 3 options + 2 details + hint", got)
 	}
 	var out bytes.Buffer
-	render(&out, rows, 0, true, true)
+	render(&out, rows, 0, true, true, 0)
 	got := out.String()
 	if !strings.Contains(got, "      "+colorDim+"first thing"+colorReset) || !strings.Contains(got, colorDim+"third thing") {
 		t.Fatalf("details are not drawn dim under their options:\n%q", got)
@@ -203,8 +203,28 @@ func TestRenderDrawsDetailsAndCountsThem(t *testing.T) {
 		t.Fatalf("detail must sit between its option and the next:\n%s", got)
 	}
 	var redraw bytes.Buffer
-	render(&redraw, rows, 1, false, false)
+	render(&redraw, rows, 1, false, false, 0)
 	if !strings.HasPrefix(redraw.String(), "\x1b[6A") {
 		t.Fatalf("redraw must move up over options, details and hint:\n%q", redraw.String())
+	}
+}
+
+// A line longer than the terminal is clipped, never wrapped: a wrapped line would throw
+// off the line count that the redraw and the final clear rely on.
+func TestRenderClipsToTerminalWidth(t *testing.T) {
+	rows := []choice{{Label: "Alpha", Detail: strings.Repeat("d", 100)}, {Label: strings.Repeat("L", 100)}}
+	var out bytes.Buffer
+	render(&out, rows, 0, false, true, 40)
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\r\n") {
+		visible := strings.NewReplacer(ansiClearLine, "").Replace(line)
+		if n := len([]rune(visible)); n > 40 {
+			t.Fatalf("line is %d columns wide on a 40-column terminal: %q", n, visible)
+		}
+	}
+	if !strings.Contains(out.String(), "…") {
+		t.Fatalf("clipped lines should end with an ellipsis:\n%q", out.String())
+	}
+	if clip("short", 0) != "short" || clip("short", 10) != "short" || clip("abcdef", 4) != "abc…" {
+		t.Fatal("clip: unknown width leaves text alone; otherwise width-1 runes plus an ellipsis")
 	}
 }

@@ -188,7 +188,7 @@ func TestPromptAsksDestinationOnlyWhenRequested(t *testing.T) {
 		"Where should this machine's agent telemetry go?",
 		"Keep it on this machine", "Nothing is sent anywhere.",
 		"Forward to your own infrastructure", "SIEM, observability platform, or an S3/GCS bucket you own.",
-		"Forward to Asymptote Managed", "revoke it from the dashboard",
+		"Forward to Asymptote Managed", "revoke from the dashboard",
 		"Connecting after install.",
 	} {
 		if !strings.Contains(buf.String(), want) {
@@ -259,5 +259,21 @@ func TestAskDestinationAlone(t *testing.T) {
 	}
 	if _, err := AskDestination(strings.NewReader(""), &buf, true); !errors.Is(err, ErrPromptAborted) {
 		t.Fatalf("EOF should abort, got %v", err)
+	}
+}
+
+// Every destination row must draw without wrapping on a standard 80-column terminal, or
+// the picker's line count is off and it eats the lines above it on redraw.
+func TestDestinationRowsFitEightyColumns(t *testing.T) {
+	for _, item := range destinationChoices(true) {
+		if n := 4 + len([]rune(item.label)); n > 80 {
+			t.Fatalf("label %q draws %d columns", item.label, n)
+		}
+		if n := 6 + len([]rune(item.detail)); n > 80 {
+			t.Fatalf("detail %q draws %d columns", item.detail, n)
+		}
+	}
+	if !strings.Contains(destinationChoices(true)[1].detail, "SIEM, observability platform, or an S3/GCS bucket you own.") {
+		t.Fatal("the own-infrastructure wording is part of the product copy")
 	}
 }
