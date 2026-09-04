@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/cloudwatch"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/datadog"
@@ -306,6 +307,31 @@ var siemDestinations = []siemDestination{
 				fmt.Println("Expected GCS fields: vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl")
 				fmt.Println(`Confirm delivery with Google Cloud CLI: gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**"`)
 				fmt.Println(`Inspect an object with Google Cloud CLI: gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"`)
+			},
+		},
+	},
+	{
+		name:  "asymptote",
+		short: "Manage Asymptote managed forwarding content",
+		printConfig: &destPrintConfig{
+			short:  "Print the Vector config that forwards Beacon endpoint events to Asymptote",
+			render: func(cfg endpointconfig.Config) (string, error) { return asymptote.VectorConfig(cfg.LogPath) },
+		},
+		installPack: &destInstallPack{
+			short:            "Write Asymptote managed forwarding content to a directory",
+			defaultOutputDir: asymptote.DefaultOutputDir,
+			successLabel:     "Asymptote managed forwarding content pack written to ",
+			outputFlagHelp:   "Output directory for Asymptote managed forwarding content pack",
+			install:          asymptote.InstallPack,
+		},
+		validate: &destValidate{
+			short:   "Write and describe an Asymptote validation event",
+			mode:    "asymptote_managed_http",
+			message: "Beacon endpoint Asymptote validation event",
+			print: func(cfg endpointconfig.Config) {
+				fmt.Println("Expected Asymptote fields: vendor=beacon product=endpoint-agent destination.type=asymptote destination.mode=asymptote_managed_http")
+				fmt.Println(`Check the device key: curl -sS -o /dev/null -w '%{http_code}\n' "$BEACON_ASYMPTOTE_INGEST_URL/v1/ingest/health" -H "Authorization: Bearer $(sed -n 's/.*\"device_key\": *\"\([^\"]*\)\".*/\1/p' "$BEACON_ASYMPTOTE_SECRETS_FILE")"   # 200 valid, 401 revoked`)
+				fmt.Println("Confirm delivery on the Asymptote dashboard telemetry page by searching for \"Beacon endpoint Asymptote validation event\"; forwarded events appear within a minute or two.")
 			},
 		},
 	},

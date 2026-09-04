@@ -7,7 +7,7 @@ description: "Forward Beacon endpoint events from local JSONL into SIEMs, log ag
 
 Beacon writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) as JSONL. The active [runtime log](/concepts/core-concepts#runtime-jsonl-log) is the handoff point for local review, [customer-managed log pipelines](/concepts/core-concepts#customer-managed-forwarding), log aggregators, object storage exporters, and most SIEM content packs. Beacon can also enable optional collector exporters for [Splunk HTTP Event Collector (HEC)](/concepts/core-concepts#splunk-hec) and [CrowdStrike Falcon LogScale HEC](/concepts/core-concepts#falcon-logscale-hec) during endpoint install or repair.
 
-Use the subpages below by destination category. SIEM pages are for destinations that become investigation or detection systems. Log aggregation pages are for customer-owned pipelines and observability stores that tail local JSONL. Object storage pages are for archival or data lake export. Local pages cover the default runtime log and dashboard source.
+Use the subpages below by destination category. Asymptote Managed is the one path that sends events to an Asymptote-run service; it is opt-in per device and revocable from the Asymptote dashboard. SIEM pages are for destinations that become investigation or detection systems. Log aggregation pages are for customer-owned pipelines and observability stores that tail local JSONL. Object storage pages are for archival or data lake export. Local pages cover the default runtime log and dashboard source.
 
 For [ephemeral CI jobs](/concepts/core-concepts#ci-telemetry), see [CI Telemetry Exports](/log-forwarding/ci-telemetry-exports) for workflow artifacts, S3/GCS upload, and downstream handoff patterns over the completed CI `runtime.jsonl` file.
 
@@ -28,6 +28,19 @@ does not use the persistent endpoint's Vector forwarder.
 Use system mode for MDM deployments so endpoint events land in the shared system log path.
 
 ## Destination categories
+
+### Asymptote Managed
+
+Use this path when Beacon events should appear on the Asymptote dashboard. A device key is issued only after a member of your organization approves the machine in the browser, and revoking it stops ingestion within a minute.
+
+<Columns cols={2}>
+  <Card title="Asymptote Managed" icon="tower-broadcast" href="/log-forwarding/asymptote">
+    Vector `http` forwarder over local JSONL with a per-device key; what leaves the machine, the wire contract, and revocation.
+  </Card>
+  <Card title="beacon endpoint asymptote" icon="terminal" href="/cli/asymptote">
+    Generate the pack, print the config, and write validation events.
+  </Card>
+</Columns>
 
 ### Security information and event management (SIEM)
 
@@ -249,6 +262,18 @@ store it outside Beacon-managed directories, and reference it with
 See [macOS System-Mode Object Storage Forwarding](/guides/macos-object-storage-system)
 for bucket creation, IAM, Vector `0.56` authentication limits, safe credential
 delivery and rotation, and validation.
+
+### Asymptote Managed
+
+For the Asymptote dashboard, generate the Asymptote pack and run Vector with the device key and ingest URL issued by enrollment. `beacon endpoint connect` does this for you as a managed service.
+
+```bash title="Generate the integration pack"
+beacon endpoint asymptote install-pack --system --output ./beacon-asymptote-pack
+```
+
+The generated pack includes setup guidance, a Vector `http` sink template that reads the device key from a `0600` secrets file through Vector's secret backend, a one-shot credential and upload smoke-test script, and sample events. Only the runtime and inventory JSONL lines leave the machine; the ingest service stamps organization and device identity server-side.
+
+See [Asymptote Managed](/log-forwarding/asymptote) for the wire contract, revocation, and offline behavior.
 
 ### Vector log forwarding
 

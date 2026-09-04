@@ -28,16 +28,17 @@ flowchart LR
 | Local storage | Beacon writes one JSON object per line to `runtime.jsonl` | Filesystem permissions and log ownership |
 | Local inspection | The dashboard reads the runtime log over a loopback-only service | Local browser to local dashboard service |
 | Optional forwarding | Wazuh, Elastic/Filebeat, Datadog Agent, Sumo Logic, Rapid7, Microsoft Sentinel, AWS S3, Google Cloud Storage, Splunk HEC, Falcon LogScale HEC, or customer-managed shippers read or receive events | Customer-managed network and SIEM boundary |
+| Asymptote Managed forwarding (opt-in) | A Vector forwarder posts runtime and inventory JSONL over HTTPS to Asymptote's ingest service with a per-device key issued after browser approval | Endpoint to Asymptote-run service; identity derived from the key, revocable from the dashboard |
 
 ## Threat model
 
 | Risk | Design response |
 |------|-----------------|
-| Unintended hosted telemetry | Normal endpoint collection writes local JSONL and does not require a Beacon-hosted account, remote policy fetch, or external network dependency |
+| Unintended hosted telemetry | Normal endpoint collection writes local JSONL and does not require a Beacon-hosted account, remote policy fetch, or external network dependency. Asymptote Managed forwarding starts only after a member of the organization approves the specific device in the browser, forwards only lines written after that approval, and stops within a minute of revocation |
 | Network exposure of collectors | Default OTLP receivers bind to `127.0.0.1` rather than an externally reachable interface |
 | Over-collection of prompt or diff content | Scope supported runtimes and hook deployment deliberately before rollout, and review destination access for retained local telemetry |
 | Secret leakage in retained content | Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields |
-| Destination credential exposure | Persistent endpoint file-based destinations tail local JSONL, so Beacon endpoint configuration does not store Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, AWS, or Google Cloud credentials. Optional Splunk and Falcon tokens live in collector configuration. Self-serve cloud-agent uploads are a separate proof-of-concept path: scoped GCS or AWS credentials are injected into the provider-managed sandbox as runtime secrets and must be rotated and access-reviewed. |
+| Destination credential exposure | Persistent endpoint file-based destinations tail local JSONL, so Beacon endpoint configuration does not store Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, AWS, or Google Cloud credentials. Optional Splunk and Falcon tokens live in collector configuration. The Asymptote Managed device key is a per-machine credential stored in a `0600` secrets file read through Vector's secret backend, never in `config.json`, `vector.toml`, or the process environment; it grants only the right to post events for one device and is revocable from the dashboard. Self-serve cloud-agent uploads are a separate proof-of-concept path: scoped GCS or AWS credentials are injected into the provider-managed sandbox as runtime secrets and must be rotated and access-reviewed. |
 | Removal uncertainty | Endpoint uninstall removes managed service and configuration state, with explicit `--keep-logs` and `--keep-config` exceptions |
 
 ## Current boundaries

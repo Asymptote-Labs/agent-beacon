@@ -694,6 +694,30 @@ func TestEndpointGCSCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestEndpointAsymptoteCommandsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"asymptote", "print-config"},
+		{"asymptote", "install-pack"},
+		{"asymptote", "validate"},
+	} {
+		cmd, _, err := endpointCmd.Find(path)
+		if err != nil {
+			t.Fatalf("Find %v returned error: %v", path, err)
+		}
+		if cmd == nil || cmd.Use != path[len(path)-1] {
+			t.Fatalf("asymptote command %v not registered: %#v", path, cmd)
+		}
+		for _, name := range []string{"user", "system", "log-path"} {
+			if cmd.Flags().Lookup(name) == nil {
+				t.Fatalf("asymptote command %v missing --%s flag", path, name)
+			}
+		}
+	}
+	if findEndpointLeaf("asymptote", "install-pack").Flags().Lookup("output") == nil {
+		t.Fatal("asymptote install-pack command missing --output flag")
+	}
+}
+
 func TestEndpointSentinelCommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
 		{"sentinel", "print-config"},
@@ -1930,6 +1954,14 @@ func TestSyntheticEventDestinations(t *testing.T) {
 	if gcsEvent.Message != "Beacon endpoint GCS validation event" {
 		t.Fatalf("gcs message = %q", gcsEvent.Message)
 	}
+
+	asymptoteEvent := syntheticEvent("asymptote")
+	if asymptoteEvent.Destination.Type != "asymptote" || asymptoteEvent.Destination.Mode != "asymptote_managed_http" {
+		t.Fatalf("asymptote destination = %#v", asymptoteEvent.Destination)
+	}
+	if asymptoteEvent.Message != "Beacon endpoint Asymptote validation event" {
+		t.Fatalf("asymptote message = %q", asymptoteEvent.Message)
+	}
 }
 
 func TestEndpointS3ValidatePrintsAWSCLIInspectionGuidance(t *testing.T) {
@@ -2057,6 +2089,44 @@ func TestEndpointGCSValidatePrintsGoogleCloudCLIInspectionGuidance(t *testing.T)
 	}
 	if strings.Contains(output, "verified delivery") {
 		t.Fatalf("GCS validation output should not claim remote delivery verification: %s", output)
+	}
+}
+
+func TestEndpointAsymptoteValidatePrintsCredentialAndDashboardGuidance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(home, "runtime.jsonl")
+	oldLogPath := endpointOpts.logPath
+	oldUserMode := endpointOpts.userMode
+	oldSystemMode := endpointOpts.systemMode
+	endpointOpts.logPath = logPath
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = false
+	t.Cleanup(func() {
+		endpointOpts.logPath = oldLogPath
+		endpointOpts.userMode = oldUserMode
+		endpointOpts.systemMode = oldSystemMode
+	})
+
+	output, err := runEndpointLeaf(t, "asymptote", "validate")
+	if err != nil {
+		t.Fatalf("asymptote validate returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Validation event written to",
+		"destination.type=asymptote destination.mode=asymptote_managed_http",
+		"/v1/ingest/health",
+		"Beacon endpoint Asymptote validation event",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("Asymptote validation output missing %q: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "verified delivery") {
+		t.Fatalf("Asymptote validation output should not claim remote delivery verification: %s", output)
+	}
+	if strings.Contains(output, "bcn_device_") {
+		t.Fatalf("Asymptote validation output must not print a device key: %s", output)
 	}
 }
 

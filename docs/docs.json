@@ -252,6 +252,12 @@
                 "pages": [
                   "log-forwarding/ci-telemetry-exports",
                   {
+                    "group": "Asymptote Managed",
+                    "pages": [
+                      "log-forwarding/asymptote"
+                    ]
+                  },
+                  {
                     "group": "Security Information and Event Management (SIEM)",
                     "pages": [
                       "log-forwarding/falcon",
@@ -387,6 +393,7 @@
                   "cli/cloudwatch",
                   "cli/s3",
                   "cli/gcs",
+                  "cli/asymptote",
                   "cli/hooks",
                   {
                     "group": "integrations",

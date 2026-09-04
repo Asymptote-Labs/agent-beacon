@@ -1,0 +1,116 @@
+# Beacon Endpoint Agent -> Asymptote managed ingest
+#
+# Vector tails Beacon's local JSONL streams and POSTs them, gzip-compressed and
+# newline-delimited, to the Asymptote ingest service with a per-device key.
+# The key is read from a 0600 JSON file through Vector's secret backend so it
+# appears in neither this config nor the process environment.
+#
+# Required environment:
+#   BEACON_ASYMPTOTE_INGEST_URL    https URL returned by device enrollment
+#   BEACON_ASYMPTOTE_SECRETS_FILE  path to a {"device_key": "<device key>"} file (mode 0600)
+# Optional:
+#   BEACON_ASYMPTOTE_DATA_DIR      Vector data_dir for checkpoints and the disk buffer
+#
+# `beacon endpoint connect` writes this file with the values filled in and runs
+# Vector as a service; this template is for running the same forwarder by hand.
+
+data_dir = "${BEACON_ASYMPTOTE_DATA_DIR:-/var/lib/vector/beacon-asymptote}"
+
+[secret.beacon]
+type = "file"
+path = "${BEACON_ASYMPTOTE_SECRETS_FILE}"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+# Nothing recorded before the device was approved is shipped.
+read_from = "end"
+
+[sources.beacon_inventory]
+type = "file"
+include = ["{{INVENTORY_LOG_PATH}}"]
+read_from = "beginning"
+
+# Each JSONL line is forwarded byte-for-byte as one NDJSON record (codec "text"
+# sends the file source's message field); the ingest service validates and
+# stamps tenant identity server-side, so no remap runs here.
+
+[sinks.asymptote_runtime]
+type = "http"
+inputs = ["beacon_runtime"]
+uri = "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/runtime"
+method = "post"
+compression = "gzip"
+
+[sinks.asymptote_runtime.auth]
+strategy = "bearer"
+token = "SECRET[beacon.device_key]"
+
+[sinks.asymptote_runtime.encoding]
+codec = "text"
+
+[sinks.asymptote_runtime.framing]
+method = "newline_delimited"
+
+[sinks.asymptote_runtime.request.headers]
+Content-Type = "application/x-ndjson"
+
+[sinks.asymptote_runtime.batch]
+# Stays under the ingest service's 8 MiB compressed / 10,000 line limits.
+max_bytes = 5000000
+max_events = 5000
+timeout_secs = 60
+
+[sinks.asymptote_runtime.buffer]
+# Survives offline periods and forwarder restarts; drains on reconnect.
+type = "disk"
+max_size = 536870912
+when_full = "block"
+
+[sinks.asymptote_runtime.request]
+timeout_secs = 30
+retry_initial_backoff_secs = 2
+retry_max_duration_secs = 300
+
+# The healthcheck carries the bearer key, so a revoked or expired device shows up
+# as an unhealthy sink at startup (401) instead of silently dropping batches.
+[sinks.asymptote_runtime.healthcheck]
+uri = "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/health"
+
+[sinks.asymptote_inventory]
+type = "http"
+inputs = ["beacon_inventory"]
+uri = "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/inventory"
+method = "post"
+compression = "gzip"
+
+[sinks.asymptote_inventory.auth]
+strategy = "bearer"
+token = "SECRET[beacon.device_key]"
+
+[sinks.asymptote_inventory.encoding]
+codec = "text"
+
+[sinks.asymptote_inventory.framing]
+method = "newline_delimited"
+
+[sinks.asymptote_inventory.request.headers]
+Content-Type = "application/x-ndjson"
+
+[sinks.asymptote_inventory.batch]
+max_bytes = 5000000
+max_events = 5000
+timeout_secs = 60
+
+[sinks.asymptote_inventory.buffer]
+type = "disk"
+max_size = 268435488
+when_full = "block"
+
+[sinks.asymptote_inventory.request]
+timeout_secs = 30
+retry_initial_backoff_secs = 2
+retry_max_duration_secs = 300
+
+[sinks.asymptote_inventory.healthcheck]
+uri = "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/health"

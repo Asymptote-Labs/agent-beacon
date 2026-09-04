@@ -13,6 +13,14 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Asymptote Managed forwarding pack** · `beacon endpoint asymptote` generates a
+  Vector `http` forwarder that posts the runtime and inventory JSONL to
+  Asymptote's ingest service with a per-device key read from a `0600` secrets
+  file, plus a credential smoke test and sample events. It is the first Beacon
+  destination that sends events to an Asymptote-run service; forwarding is
+  opt-in per device, starts only after browser approval, and is revocable from
+  the dashboard. `beacon endpoint connect` (coming next) runs enrollment and the
+  forwarder as a service using the same template.
 - **Removed `beacon login` and `beacon ingest`** · Neither command was ever
   connected to a server: `beacon ingest endpoint upload` had nothing to upload
   to and `beacon login` saved credentials nothing consumed. `beacon endpoint
