@@ -10,10 +10,10 @@
 package asymptote
 
 import (
+	"embed"
+	"encoding/json"
 	"io/fs"
 	"strings"
-
-	"embed"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
@@ -142,11 +142,9 @@ func tomlString(s string) string {
 // SecretsFileContent returns the JSON document the secrets file must hold for the
 // template's SECRET[beacon.device_key] reference.
 func SecretsFileContent(deviceKey string) string {
-	return `{"` + SecretsKey + `": ` + jsonString(deviceKey) + "}\n"
-}
-
-func jsonString(s string) string {
-	return `"` + siempack.JSONEscapeForString(s) + `"`
+	// json.Marshal on a map cannot fail for string values.
+	encoded, _ := json.Marshal(map[string]string{SecretsKey: deviceKey})
+	return string(encoded) + "\n"
 }
 
 // Sentinel errors returned by RenderVectorConfig.
