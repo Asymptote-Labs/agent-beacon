@@ -112,6 +112,16 @@ func destinationCharCases() []destinationCharCase {
 			},
 		},
 		{
+			group:        "asymptote",
+			installLabel: "Asymptote managed forwarding content pack written to ",
+			validateWant: []string{
+				"Expected Asymptote fields: vendor=beacon product=endpoint-agent destination.type=asymptote destination.mode=asymptote_managed_http",
+				"/v1/ingest/health",
+				"200 valid, 401 revoked",
+				"Beacon endpoint Asymptote validation event",
+			},
+		},
+		{
 			group:        "sentinel",
 			installLabel: "Microsoft Sentinel content pack written to ",
 			validateWant: []string{

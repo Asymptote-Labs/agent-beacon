@@ -1,0 +1,156 @@
+---
+title: "beacon endpoint asymptote"
+description: "Generate the Vector forwarding pack that sends Beacon endpoint events to Asymptote's managed ingest service, and write validation events."
+---
+
+## Forwarding command
+
+Use `beacon endpoint asymptote` to generate the content pack that forwards Beacon endpoint events to Asymptote's managed ingest service. The pack keeps Beacon as a local JSONL producer: Vector tails the runtime and inventory logs and POSTs gzip-compressed NDJSON batches over HTTPS with a per-device key.
+
+This is the one destination that sends telemetry to an Asymptote-run endpoint. It is opt-in and revocable: nothing is forwarded until a member of your Asymptote organization has approved the device in the browser and Vector has been started with the resulting key. `beacon endpoint connect` performs that enrollment and runs the forwarder as a service; the commands on this page generate the same files for running or inspecting the forwarder by hand.
+
+Beacon does not store the device key in its own configuration. The key lives in a `0600` JSON secrets file that Vector reads through its secret backend, so it appears in neither `vector.toml` nor the process environment.
+
+```bash title="Command syntax"
+beacon endpoint asymptote [command]
+```
+
+## Commands
+
+<Columns cols={2}>
+  <Card title="beacon endpoint asymptote print-config" icon="file-lines" href="#beacon-endpoint-asymptote-print-config">
+    Print the Vector forwarding config for the configured runtime log.
+  </Card>
+  <Card title="beacon endpoint asymptote install-pack" icon="box-archive" href="#beacon-endpoint-asymptote-install-pack">
+    Write the forwarding pack to a directory.
+  </Card>
+  <Card title="beacon endpoint asymptote validate" icon="check" href="#beacon-endpoint-asymptote-validate">
+    Write and describe a Beacon Asymptote validation event.
+  </Card>
+</Columns>
+
+## Runtime log paths
+
+| Mode | Path |
+|------|------|
+| User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+
+The inventory log is the sibling `inventory_state.jsonl` in the same directory.
+
+## beacon endpoint asymptote print-config
+
+`beacon endpoint asymptote print-config` prints the Vector configuration that tails the selected Beacon runtime and inventory logs and posts them to the ingest service.
+
+```bash title="Print the configuration"
+beacon endpoint asymptote print-config
+```
+
+The printed config reads three environment variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `BEACON_ASYMPTOTE_INGEST_URL` | The `https://` ingest URL returned by enrollment. Required. |
+| `BEACON_ASYMPTOTE_SECRETS_FILE` | Path to a `{"device_key": "..."}` file with mode `0600`. Required. |
+| `BEACON_ASYMPTOTE_DATA_DIR` | Vector `data_dir` for checkpoints and the disk buffer. Defaults to `/var/lib/vector/beacon-asymptote`. |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint asymptote install-pack
+
+`beacon endpoint asymptote install-pack` writes the forwarding pack to a directory.
+
+```bash title="Generate the pack"
+beacon endpoint asymptote install-pack --output ./beacon-asymptote-pack
+```
+
+The pack includes:
+
+- `README.md` with the wire contract, what leaves the machine, and how to run Vector by hand.
+- `vector.toml`, the forwarder. Its startup healthcheck calls the authenticated `/v1/ingest/health`, so a revoked key is reported when Vector starts.
+- `asymptote-ingest-smoke-test.sh`, a one-shot credential check plus a manual POST of the log tail.
+- `sample-event.jsonl` with Beacon endpoint events in the shape the service accepts.
+
+### Examples
+
+```bash title="Generate a pack for a system-mode deployment"
+sudo /opt/beacon/bin/beacon endpoint asymptote install-pack \
+  --system \
+  --output ./beacon-asymptote-pack
+```
+
+```bash title="Run the forwarder by hand"
+umask 077
+printf '{"device_key": "%s"}\n' "$DEVICE_KEY" > ~/.beacon/endpoint/asymptote/vector-secrets.json
+export BEACON_ASYMPTOTE_INGEST_URL=https://<ingest host returned by enrollment>
+export BEACON_ASYMPTOTE_SECRETS_FILE=~/.beacon/endpoint/asymptote/vector-secrets.json
+export BEACON_ASYMPTOTE_DATA_DIR=~/.beacon/endpoint/asymptote/vector-data
+mkdir -p "$BEACON_ASYMPTOTE_DATA_DIR"
+vector validate ./beacon-asymptote-pack/vector.toml
+vector --config ./beacon-asymptote-pack/vector.toml
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--output <dir>` | Output directory for the pack. Defaults to `beacon-asymptote-pack` |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint asymptote validate
+
+`beacon endpoint asymptote validate` writes a Beacon validation event to the runtime JSONL log and prints the expected fields plus the credential check to run.
+
+```bash title="Run the validation check"
+beacon endpoint asymptote validate
+```
+
+The command writes the local event only. If the forwarder is running, the event reaches the ingest service within its batch window (60 seconds) and appears on the dashboard telemetry page a minute or so later. Search for the message `Beacon endpoint Asymptote validation event`.
+
+Expected validation fields:
+
+```text
+vendor=beacon product=endpoint-agent destination.type=asymptote destination.mode=asymptote_managed_http
+```
+
+Check the device key without sending events:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' "$BEACON_ASYMPTOTE_INGEST_URL/v1/ingest/health" \
+  -H "Authorization: Bearer $(sed -n 's/.*"device_key": *"\([^"]*\)".*/\1/p' "$BEACON_ASYMPTOTE_SECRETS_FILE")"
+```
+
+`200` means the key is valid; `401` means it was revoked, expired, or the approving user is no longer a member of the organization.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and launch daemon |
+| `--log-path <path>` | Runtime JSONL log path |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote managed forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
+    Wire contract, what leaves the machine, revocation, and offline behavior.
+  </Card>
+  <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
+    Review forwarding patterns and validation steps.
+  </Card>
+  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
+    Install and inspect the local endpoint agent.
+  </Card>
+  <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
+    Review normalized Beacon JSONL fields and example events.
+  </Card>
+</Columns>

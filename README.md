@@ -137,7 +137,13 @@ to compare it with the managed path.
 
 Beacon writes endpoint telemetry to local JSONL by default and supports
 customer-controlled forwarding into SIEM, log aggregation, and object storage
-destinations.
+destinations, plus an opt-in managed path to the Asymptote dashboard.
+
+#### Asymptote Managed
+
+| Destination | Support path |
+| --- | --- |
+| [Asymptote Managed](https://docs.asymptotelabs.ai/log-forwarding/asymptote) | Vector `http` forwarder over endpoint JSONL with a per-device key approved in the browser; revocable from the dashboard |
 
 #### Security Information and Event Management (SIEM)
 

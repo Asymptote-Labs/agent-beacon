@@ -1,0 +1,74 @@
+#!/bin/sh
+# One-shot check that a device key can reach the Asymptote ingest service.
+# Posts the tail of the Beacon runtime log the way Vector does (gzip NDJSON,
+# bearer device key) and prints the service's response. Validation only; use
+# vector.toml for continuous forwarding.
+set -eu
+
+BEACON_LOG="${BEACON_LOG:-{{LOG_PATH}}}"
+BEACON_INVENTORY_LOG="${BEACON_INVENTORY_LOG:-{{INVENTORY_LOG_PATH}}}"
+BEACON_SMOKE_LINES="${BEACON_SMOKE_LINES:-100}"
+
+if [ -z "${BEACON_ASYMPTOTE_INGEST_URL:-}" ]; then
+  echo "BEACON_ASYMPTOTE_INGEST_URL is required (the https URL returned by enrollment)." >&2
+  exit 2
+fi
+case "$BEACON_ASYMPTOTE_INGEST_URL" in
+  https://*) ;;
+  *) echo "BEACON_ASYMPTOTE_INGEST_URL must be an https:// URL." >&2; exit 2 ;;
+esac
+if [ -z "${BEACON_ASYMPTOTE_SECRETS_FILE:-}" ] || [ ! -r "$BEACON_ASYMPTOTE_SECRETS_FILE" ]; then
+  echo "BEACON_ASYMPTOTE_SECRETS_FILE must point at a readable {\"device_key\": \"...\"} file." >&2
+  exit 2
+fi
+if [ ! -r "$BEACON_LOG" ]; then
+  echo "Beacon runtime log is not readable: $BEACON_LOG" >&2
+  exit 2
+fi
+for tool in curl gzip; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "$tool is required for this smoke test." >&2; exit 2; }
+done
+
+# The key never touches the command line or the environment of a child process
+# other than curl, which reads it from a header file.
+header_file="$(mktemp)"
+trap 'rm -f "$header_file" "${body_file:-}"' EXIT
+device_key="$(sed -n 's/.*"device_key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BEACON_ASYMPTOTE_SECRETS_FILE" | head -n 1)"
+if [ -z "$device_key" ]; then
+  echo "No device_key found in $BEACON_ASYMPTOTE_SECRETS_FILE" >&2
+  exit 2
+fi
+printf 'Authorization: Bearer %s\n' "$device_key" > "$header_file"
+unset device_key
+
+echo "Credential check: GET ${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/health"
+health="$(curl -sS -o /dev/null -w '%{http_code}' -H @"$header_file" "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/health")"
+case "$health" in
+  200) echo "Device key accepted (HTTP 200)." ;;
+  401) echo "Device key rejected (HTTP 401): it was revoked, expired, or the approving user left the organization." >&2; exit 1 ;;
+  *) echo "Unexpected health response HTTP $health" >&2; exit 1 ;;
+esac
+
+body_file="$(mktemp)"
+tail -n "$BEACON_SMOKE_LINES" "$BEACON_LOG" | gzip -c > "$body_file"
+echo "Posting the last $BEACON_SMOKE_LINES runtime lines to ${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/runtime"
+curl -sS -w '\nHTTP %{http_code}\n' -X POST "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/runtime" \
+  -H @"$header_file" \
+  -H 'Content-Type: application/x-ndjson' \
+  -H 'Content-Encoding: gzip' \
+  --data-binary @"$body_file"
+
+if [ -r "$BEACON_INVENTORY_LOG" ]; then
+  tail -n 5 "$BEACON_INVENTORY_LOG" | gzip -c > "$body_file"
+  echo "Posting the last 5 inventory lines to ${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/inventory"
+  curl -sS -w '\nHTTP %{http_code}\n' -X POST "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/inventory" \
+    -H @"$header_file" \
+    -H 'Content-Type: application/x-ndjson' \
+    -H 'Content-Encoding: gzip' \
+    --data-binary @"$body_file"
+else
+  echo "Beacon inventory log is not readable yet, skipping optional upload: $BEACON_INVENTORY_LOG"
+fi
+
+echo "A 200 response lists accepted and rejected line counts and the object written. Events appear on the dashboard within a minute or two."
+echo "This script is for validation only; use vector.toml for production forwarding."

@@ -18,7 +18,8 @@ Do not recreate or depend on removed `asymptote` mirror trees. Keep new work foc
 ## Product Posture
 
 - Beacon is visibility-first endpoint telemetry for local AI agent runtimes, not a hosted policy service or general endpoint protection product.
-- Preserve the local-only product posture. The public Beacon build should not require a hosted account, remote policy fetch, hosted dashboard, or external network dependency during normal hook execution.
+- Preserve the local-only default. The public Beacon build must not require a hosted account, remote policy fetch, hosted dashboard, or external network dependency during normal hook execution, and hooks themselves never touch the network.
+- Asymptote Managed forwarding (`cli/beacon/internal/endpoint/asymptote`, `beacon endpoint asymptote`) is the one destination that sends telemetry to an Asymptote-run service, and it is an explicit, opt-in, revocable Vector destination shaped like every other pack: Beacon stays the local JSONL producer, Vector does the network, and the per-device key lives in a `0600` secrets file read through Vector's secret backend, never in `config.json`, `vector.toml`, or the process environment. Nothing is forwarded until a member of the organization approves the specific device in the browser; only lines written after that are shipped (`read_from = "end"`); revocation from the dashboard takes effect at the ingest service within a minute. The wire contract (gzip NDJSON to `/v1/ingest/{runtime,inventory}`, bearer `bcn_device_*` key, `/v1/ingest/health` credential check) is owned by the `beacon-ingest` service in beacon-mdr; change both sides together. Do not add a second network channel, and do not let the ingest URL be anything but `https://`.
 - One narrow, deliberate exception to the no-network posture: `beacon endpoint install` asks for an email and work/personal intent once per machine and POSTs that plus install context (OS, arch, version, install method, detected runtime names, a random install ID) to an Asymptote-run signup endpoint. This is intentional product behavior for open-source attribution, not an oversight — do not remove it. It is strictly bounded: interactive TTY only, once per machine, never during hook execution, never on `--system`/root/CI/piped-stdin/`--dry-run` installs, and always skippable with `--no-onboarding` or `BEACON_ONBOARDING=0`. A failed submission never fails an install. No prompt text, telemetry event, file content, or command ever leaves the machine through it. Implementation lives in `cli/beacon/internal/onboarding` and `cli/beacon/cmd/endpoint_onboarding.go`; the README documents the payload field-by-field, so changing the fields means changing that table too.
 - Do not add dependency vulnerability scanning, OSV/GHSA lookups, package remediation, or other vulnerability-enforcement flows to the public hook path.
 - Do not add broad runtime enforcement unless explicitly requested. Current control behavior is limited to hook-native approvals/denials exposed by supported agent runtimes.
@@ -49,7 +50,7 @@ Supported runtime surfaces today:
 Current non-goals unless explicitly requested:
 
 - Kernel/process monitoring, EDR replacement, shell history scraping, cloud audit ingestion, general browser or SaaS activity monitoring beyond the supported chat surfaces, credential-use attribution, and MCP configuration inventory.
-- Direct hosted integrations for Datadog, Snowflake, Chronicle, Panther, or other SIEM destinations beyond explicitly supported local/customer-managed forwarding patterns.
+- Direct hosted integrations for Datadog, Snowflake, Chronicle, Panther, or other SIEM destinations beyond explicitly supported local/customer-managed forwarding patterns and the opt-in Asymptote Managed path.
 - Dependency vulnerability scanning or package security remediation.
 
 ## Common Commands
@@ -143,6 +144,17 @@ Collect fx session telemetry during manual testing:
 cd cli/beacon
 go run . endpoint fx status        # sessions fx has written and how much Beacon has read
 go run . endpoint fx sync --print  # map records to events without writing anything
+```
+
+Run the Asymptote Managed forwarder by hand during manual testing (needs a device key from
+enrollment and Vector on the machine; `/opt/beacon/bin/vector` from the signed package works):
+
+```bash
+cd cli/beacon
+go run . endpoint asymptote install-pack --output /tmp/beacon-asymptote-pack --log-path "$HOME/.beacon/endpoint/logs/runtime.jsonl"
+BEACON_ASYMPTOTE_INGEST_URL=https://<ingest> BEACON_ASYMPTOTE_SECRETS_FILE=/path/to/secrets.json BEACON_ASYMPTOTE_DATA_DIR=/tmp/beacon-asymptote-data \
+  vector validate --skip-healthchecks /tmp/beacon-asymptote-pack/vector.toml
+go run . endpoint asymptote validate   # writes a validation event the forwarder ships
 ```
 
 Run the local dashboard during manual testing:
