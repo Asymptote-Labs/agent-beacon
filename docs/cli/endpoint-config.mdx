@@ -80,6 +80,19 @@ Validate system endpoint config:
 sudo beacon endpoint config validate --system
 ```
 
+## Managed ingest block
+
+When the endpoint is connected to Asymptote managed ingest, `config.json` carries a non-secret `managed_ingest` block:
+
+| Field | Meaning |
+|-------|---------|
+| `enabled` | `true` while the endpoint is connected |
+| `ingest_url` | The `https://` ingest URL returned by enrollment |
+| `device_id` | This device's id in the Asymptote dashboard |
+| `organization_id` | The organization that approved the device |
+
+[`beacon endpoint connect`](/cli/endpoint-connect) writes the block and `beacon endpoint disconnect` clears it. It never holds the device key, which lives only in `asymptote/vector-secrets.json`, and it survives re-running `beacon endpoint install`.
+
 ## Related
 
 <Columns cols={2}>

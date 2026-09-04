@@ -22,11 +22,13 @@ During repair, Beacon removes the existing managed service before reinstalling i
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
-| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` to opt in Gemini CLI telemetry, `vscode` for VS Code Copilot telemetry, `devin-cli` for Devin CLI hooks, or `devin-desktop` for Devin Desktop hooks. Claude Code, Grok Build, Cursor, Factory, OpenCode, Cline, and Qwen Code hook telemetry are managed with `beacon endpoint hooks`. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` for Gemini CLI or `vscode` for VS Code Copilot OTLP telemetry. Hook harnesses can be listed alongside them: `claude-hooks` (Claude Code hooks), `cursor`, `factory`, `opencode`, `cline`, `pi`, `omp`, `grok`, `qwen`, `hermes`, `antigravity`, `devin-cli`, and `devin-desktop`, for example `beacon endpoint repair --harness claude,codex,cursor`. `beacon endpoint hooks install` adds the same hooks to an existing install later, and is the only way to add VS Code hook telemetry. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
+| `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
+| `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
 | `--include-codex-spans` | Include every high-volume Codex OTLP span for troubleshooting. By default, Beacon keeps semantic logs and only the usage-bearing completed turn span |
 | `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |

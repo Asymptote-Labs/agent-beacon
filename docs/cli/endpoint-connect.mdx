@@ -28,19 +28,22 @@ beacon endpoint disconnect [flags]
 4. Renders `asymptote/vector.toml` from the [Asymptote pack](/cli/asymptote) template with the ingest URL returned by enrollment, runs `vector validate`, installs a service unit and starts it.
 5. Records the non-secret enrollment (device id, organization, ingest URL) in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
 
-Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device.
+A connect that fails at `vector validate` or at loading the service saves no enrollment record, so the endpoint is not connected: `beacon endpoint status` says so, the next interactive install offers the destination question again, and `beacon endpoint disconnect` cleans up what was written. After `disconnect --keep-credentials`, status reports not connected and names the kept device id.
+
+Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device. Under launchd the new forwarder is loaded only after the old one has exited (Vector drains in-flight requests first), and if the new instance has not started within the wait, `connect` fails and points at `launchctl print` for the job (v1.3.2).
 
 ## Files and services
 
 | Item | User mode | System mode (macOS) | System mode (Linux) |
 |------|-----------|---------------------|---------------------|
 | Enrollment record | `~/.beacon/endpoint/asymptote/enrollment.json` (0600) | `/Library/Application Support/Beacon/Endpoint/asymptote/enrollment.json` | `/etc/beacon/endpoint/asymptote/enrollment.json` |
+| Install id | `~/.beacon/endpoint/asymptote/install-id` (0600) | `…/Endpoint/asymptote/install-id` | `/etc/beacon/endpoint/asymptote/install-id` |
 | Device key | `~/.beacon/endpoint/asymptote/vector-secrets.json` (0600) | `…/Endpoint/asymptote/vector-secrets.json` | `/etc/beacon/endpoint/asymptote/vector-secrets.json` |
 | Vector config | `~/.beacon/endpoint/asymptote/vector.toml` (0644, no secret) | `…/Endpoint/asymptote/vector.toml` | `/etc/beacon/endpoint/asymptote/vector.toml` |
 | Buffer and checkpoints | `~/.beacon/endpoint/asymptote/vector-data/` | `…/Endpoint/asymptote/vector-data/` | `/etc/beacon/endpoint/asymptote/vector-data/` |
 | Service | `~/Library/LaunchAgents/com.beacon.endpoint.asymptote-forwarder.plist` | `/Library/LaunchDaemons/com.beacon.endpoint.asymptote-forwarder.plist` | `/etc/systemd/system/beacon-asymptote-forwarder.service` (user mode: `~/.config/systemd/user/`) |
 
-The directory is `0700`. The device key appears only in the secrets file, which Vector reads through its `file` secret backend; it is in neither `vector.toml`, `config.json`, nor the forwarder's environment.
+The directory is `0700`. The device key appears only in the secrets file, which Vector reads through its `file` secret backend; it is in neither `vector.toml`, `config.json`, nor the forwarder's environment. `install-id` pins this machine's install id before enrollment starts, so a connect retried after a failure rotates the same device's key instead of registering a second device.
 
 ## Flags
 
@@ -54,7 +57,7 @@ The directory is `0700`. The device key appears only in the secrets file, which 
 | `--log-path <path>` | Runtime JSONL log path |
 | `--json` | Print the result as JSON (the device key is never included) |
 
-`disconnect` accepts the same path flags plus `--keep-credentials`, which keeps the enrollment record and device key so a later `connect` can reuse this device without a new approval.
+`disconnect` accepts the same path flags and `--json` (which prints `disconnected`, `kept_credentials`, and `device_id`), plus `--keep-credentials`, which keeps the enrollment record and device key so a later `connect` can reuse this device without a new approval.
 
 ## Examples
 
@@ -87,7 +90,7 @@ Asymptote managed ingest: connected to Asymptote Test as device 807c6a11-…; fo
 
 ## Revocation and disconnect
 
-Revoke a device, or every device a person approved, from the dashboard's **Beacon Endpoints** page. The ingest service rejects the key within about a minute. `disconnect` is the local half: it stops and removes the forwarder and its config and, unless `--keep-credentials` is given, the enrollment record and device key. `beacon endpoint uninstall` does the same as part of removing the endpoint. Neither revokes the device server-side; the CLI tells you where to do that.
+Revoke a device, or every device a person approved, from the dashboard's **Beacon Endpoints** page. The ingest service rejects the key within about a minute. `disconnect` is the local half: it stops and removes the forwarder and its config and, unless `--keep-credentials` is given, the enrollment record and device key. `beacon endpoint uninstall` removes the forwarder and the `asymptote/` directory as part of removing the endpoint, except that `--keep-config` keeps the enrollment record and device key. Neither revokes the device server-side; the CLI tells you where to do that.
 
 ## Offline behavior
 

@@ -15,10 +15,11 @@ Beacon manages different paths depending on whether you install in user mode or 
 | Rotated runtime archives | `~/.beacon/endpoint/logs/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl.1` through `.5` |
 | Threat rule store | `~/.beacon/endpoint/rules` | `/Library/Application Support/Beacon/Endpoint/rules` | `/etc/beacon/endpoint/rules` | `%ProgramData%\Beacon\Endpoint\rules` |
 | Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` | `/etc/beacon/endpoint/otelcol.yaml` | `%ProgramData%\Beacon\Endpoint\otelcol.yaml` |
-| Managed-ingest state (`beacon endpoint connect`) | `~/.beacon/endpoint/asymptote/` (`enrollment.json`, `vector-secrets.json`, `vector.toml`, `vector-data/`) | `/Library/Application Support/Beacon/Endpoint/asymptote/` | `/etc/beacon/endpoint/asymptote/` | Not yet supported |
+| Managed-ingest state (`beacon endpoint connect`) | `~/.beacon/endpoint/asymptote/` (`enrollment.json`, `install-id`, `vector-secrets.json`, `vector.toml`, `vector-data/`) | `/Library/Application Support/Beacon/Endpoint/asymptote/` | `/etc/beacon/endpoint/asymptote/` | Not yet supported |
 | Installed binaries | None | `/opt/beacon/bin` | `/opt/beacon/bin` | `%ProgramFiles%\Beacon\bin` |
 | OTLP gRPC | `127.0.0.1:4317` | `127.0.0.1:4317` | `127.0.0.1:4317` | `127.0.0.1:4317` |
 | OTLP HTTP | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` |
+| Collector health check | `127.0.0.1:13133` | `127.0.0.1:13133` | `127.0.0.1:13133` | `127.0.0.1:13133` |
 
 On Windows the system log directory sits under the base directory rather than in a separate location, because there is no `/var/log` equivalent. `%ProgramData%` and `%ProgramFiles%` are read from the environment rather than hardcoded, so a relocated or localized install is found rather than missed.
 

@@ -61,7 +61,7 @@ Status includes:
 - Endpoint diagnostics
 - Destination configuration in JSON output, including Splunk HEC or Falcon LogScale HEC endpoint, index, source, and sourcetype when configured
 - Last Beacon event in the runtime log, when present
-- Asymptote managed ingest: whether this endpoint is connected, the organization and device id, forwarder service state, whether the device key is still accepted by the ingest service (`valid`, `revoked`, or `unknown` when offline), and the disk buffer size. In `--json` this is the `managed_ingest` object; the device key itself is never included.
+- Asymptote managed ingest: whether this endpoint is connected, the organization and device id, forwarder service state, whether the device key is still accepted by the ingest service (`valid`, `revoked`, or `unknown` when offline), and the disk buffer size. In `--json` this is the `managed_ingest` object; the device key itself is never included. The line reports the connection for the install mode you asked about (`--user` or `--system`), even when the collector view switches to the system install because it holds the OTLP ports.
 
 When Splunk HEC is configured, `--json` includes a `destinations.splunk_hec` object with `configured: true` and the non-secret destination settings. When Falcon LogScale HEC is configured, `--json` includes `destinations.falcon_hec` with the same non-secret fields. HEC tokens are not printed. File-based destinations such as Wazuh, Elastic, Datadog, Sumo Logic, Rapid7, Microsoft Sentinel, and AWS S3 validate against the configured runtime log path and their generated shipper configuration.
 

@@ -22,11 +22,13 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon. Requires root |
 | `--log-path <path>` | Runtime JSONL log path |
-| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` for Gemini CLI, `vscode` for VS Code Copilot telemetry, `devin-cli` for Devin CLI hooks, or `devin-desktop` for Devin Desktop hooks. Claude Code, Grok Build, Hermes Agent, Cursor, Factory, OpenCode, Cline, Qwen Code, and optional VS Code hook telemetry are managed with `beacon endpoint hooks`. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` for Gemini CLI or `vscode` for VS Code Copilot OTLP telemetry. Hook harnesses can be listed alongside them: `claude-hooks` (Claude Code hooks), `cursor`, `factory`, `opencode`, `cline`, `pi`, `omp`, `grok`, `qwen`, `hermes`, `antigravity`, `devin-cli`, and `devin-desktop`, for example `beacon endpoint install --harness claude,codex,cursor`. `beacon endpoint hooks install` adds the same hooks to an existing install later, and is the only way to add VS Code hook telemetry. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
+| `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
+| `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
 | `--include-codex-spans` | Include every high-volume Codex OTLP span for troubleshooting. By default, Beacon keeps semantic logs and only the usage-bearing completed turn span |
 | `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
@@ -169,7 +171,7 @@ Install Qwen Code hooks at the user level:
 beacon endpoint hooks install --harness qwen
 ```
 
-Qwen Code hooks merge into `~/.qwen/settings.json`. Qwen Code has no OpenTelemetry export to configure, so `beacon endpoint install --harness qwen` fails with a message pointing at `beacon endpoint hooks install` rather than appearing to succeed.
+Qwen Code hooks merge into `~/.qwen/settings.json`. Qwen Code has no OpenTelemetry export to configure, so `qwen` is a hook harness on this command too: `beacon endpoint install --harness qwen` installs the same hooks and writes `~/.qwen/settings.json`.
 
 Project-level Grok Build hooks write `./.grok/hooks/beacon-endpoint.json` and require `/hooks-trust` in Grok before they execute:
 
@@ -180,6 +182,10 @@ beacon endpoint hooks install --harness grok --level project
 <Note>
   System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather than Beacon-managed shell-profile edits.
 </Note>
+
+## Known limitations
+
+A user-mode collector cannot run beside a system-mode one on the same machine. The collector health-check port (`127.0.0.1:13133`) is fixed, so the second collector cannot bind it; the install fails with `Collector ports are not listening` and rolls back the endpoint files it wrote. Either write the user-mode files without starting the service (`beacon endpoint install --user --no-start`) or uninstall the system endpoint first (`sudo beacon endpoint uninstall --system`). Tracked as [GitHub issue #447](https://github.com/Asymptote-Labs/agent-beacon/issues/447).
 
 ## Related
 

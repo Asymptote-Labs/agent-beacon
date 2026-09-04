@@ -118,6 +118,7 @@ Configure provider-managed cloud agent telemetry setup helpers.
 | [`beacon cloud cursor print-setup`](/cli/cloud-cursor-print-setup) | Print a Cursor cloud agent binary setup script. |
 | [`beacon cloud cursor print-hooks`](/cli/cloud-cursor-print-hooks) | Print Cursor project hook settings to commit for cloud agents. |
 | [`beacon cloud gcs setup`](/cli/cloud-gcs-setup) | Create or print GCS setup commands for cloud-agent telemetry. |
+| [`beacon cloud s3 setup`](/cli/cloud-s3-setup) | Create or print S3 setup commands for cloud-agent telemetry. |
 
 ## beacon mcp
 
@@ -153,7 +154,9 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint bundle-diagnostics`](/cli/endpoint-bundle-diagnostics) | Write a redacted local diagnostics bundle for support and troubleshooting. |
 | [`beacon endpoint repair`](/cli/endpoint-repair) | Repair Beacon endpoint service files, telemetry configuration, and optional collector forwarding destinations. |
 | [`beacon endpoint uninstall`](/cli/endpoint-uninstall) | Remove Beacon endpoint service files, with an option to keep local logs. |
+| [`beacon endpoint update`](/cli/upgrade#self-updating-endpoint-packages) | Check for, enable, or apply signed endpoint package updates. |
 | [`beacon endpoint config`](/cli/endpoint-config) | Inspect, validate, and update endpoint configuration. |
+| [`beacon endpoint onboarding`](/cli/endpoint-onboarding) | Show, reset, or resend the one-time onboarding record. |
 | [`beacon endpoint dashboard`](/cli/dashboard#beacon-endpoint-dashboard) | Run the local dashboard over Beacon runtime logs for endpoint inspection. |
 | [`beacon endpoint wazuh`](/cli/wazuh) | Configure Wazuh ingestion for Beacon endpoint events. |
 | [`beacon endpoint elastic`](/cli/elastic) | Generate Elastic content and run a local Elasticsearch, Kibana, and Filebeat validation stack. |
@@ -164,7 +167,9 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint cloudwatch`](/cli/cloudwatch) | Generate AWS CloudWatch Logs forwarding content for Beacon endpoint events. |
 | [`beacon endpoint s3`](/cli/s3) | Generate AWS S3 forwarding content for Beacon endpoint events. |
 | [`beacon endpoint gcs`](/cli/gcs) | Generate Google Cloud Storage forwarding content for Beacon endpoint events. |
+| [`beacon endpoint asymptote`](/cli/asymptote) | Generate the Vector forwarding pack for Asymptote managed ingest and write validation events. |
 | [`beacon endpoint hooks`](/cli/hooks) | Manage supported hook-based endpoint telemetry. |
+| [`beacon endpoint fx`](/cli/endpoint-fx) | Collect endpoint telemetry from fx session records on this machine. |
 | [`beacon endpoint integrations openclaw`](/cli/openclaw) | Set up and validate OpenClaw Gateway OTLP export. |
 | [`beacon endpoint integrations claude-cowork`](/cli/claude-cowork) | Set up and validate Claude Cowork OTLP export. |
 
@@ -307,6 +312,20 @@ Generate Google Cloud Storage forwarding content and validation events for Beaco
 | [`beacon endpoint gcs print-config`](/cli/gcs#beacon-endpoint-gcs-print-config) | Print a Vector Google Cloud Storage forwarding template for Beacon endpoint events. |
 | [`beacon endpoint gcs install-pack`](/cli/gcs#beacon-endpoint-gcs-install-pack) | Generate Google Cloud Storage forwarding content into a directory. |
 | [`beacon endpoint gcs validate`](/cli/gcs#beacon-endpoint-gcs-validate) | Write and describe a known-good Beacon Google Cloud Storage validation event. |
+
+## beacon endpoint asymptote
+
+```bash title="Command syntax"
+beacon endpoint asymptote [command]
+```
+
+Generate the Vector forwarding pack that sends Beacon endpoint events to Asymptote managed ingest, and write validation events.
+
+| Command | Description |
+|---------|-------------|
+| [`beacon endpoint asymptote print-config`](/cli/asymptote#beacon-endpoint-asymptote-print-config) | Print the Vector forwarding config for the configured runtime log. |
+| [`beacon endpoint asymptote install-pack`](/cli/asymptote#beacon-endpoint-asymptote-install-pack) | Write the Asymptote forwarding pack to a directory. |
+| [`beacon endpoint asymptote validate`](/cli/asymptote#beacon-endpoint-asymptote-validate) | Write and describe a known-good Beacon Asymptote validation event. |
 
 ## beacon endpoint hooks
 

@@ -13,6 +13,8 @@ make build
 ```bash
 ./beacon endpoint install
 ./beacon endpoint status --json
+./beacon endpoint connect
+./beacon endpoint disconnect
 ./beacon endpoint discover --json
 ./beacon endpoint repair
 ./beacon endpoint dashboard
@@ -493,6 +495,37 @@ forwarding `runtime.jsonl` through Azure Monitor Agent, a Data Collection Rule,
 and a `BeaconRuntime_CL` custom Log Analytics table. Store Azure workspace,
 DCR, endpoint, and credential details in Azure or customer-managed deployment
 tooling, not in Beacon endpoint configuration.
+
+## Asymptote Managed
+
+```bash
+./beacon endpoint connect
+./beacon endpoint status --json | jq .managed_ingest
+./beacon endpoint disconnect
+```
+
+Asymptote Managed is the one destination that forwards telemetry to an
+Asymptote-run service, and it is opt-in. `beacon endpoint connect` opens the
+Asymptote dashboard so a member of your organization can approve this device,
+stores the per-device key in a `0600` secrets file, and runs Vector as the
+`com.beacon.endpoint.asymptote-forwarder` (launchd) or
+`beacon-asymptote-forwarder.service` (systemd) service. Beacon stays the local
+JSONL producer and Vector does the network. Only lines written after approval
+are shipped, and revoking the device from the dashboard stops ingestion within
+about a minute. Vector 0.56 or newer is required: `/opt/beacon/bin/vector` from
+the signed package, `vector` from Homebrew, or the Linux package from
+vector.dev.
+
+The same pack is available for running Vector by hand:
+
+```bash
+./beacon endpoint asymptote print-config
+./beacon endpoint asymptote install-pack --output ./beacon-asymptote-pack
+./beacon endpoint asymptote validate
+```
+
+See https://docs.asymptotelabs.ai/log-forwarding/asymptote for the wire
+contract, what leaves the machine, and revocation.
 
 ## Optional Integrations
 
