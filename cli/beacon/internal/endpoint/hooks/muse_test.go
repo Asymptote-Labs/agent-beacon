@@ -238,6 +238,23 @@ func TestInstallMuseHooksPointsSettingsAtTheManagedFile(t *testing.T) {
 	}
 }
 
+// writeMuseSettings seeds a settings.json from a value map.
+//
+// Marshalled rather than concatenated into a JSON string literal, because these tests seed the key
+// with a filesystem path and on Windows that path is `C:\Users\...` -- where `\U` is an invalid
+// JSON string escape. Building the file by hand made the settings unreadable on Windows only, so
+// every assertion downstream failed for a reason that had nothing to do with what it was testing.
+func writeMuseSettings(t *testing.T, path string, values map[string]interface{}) {
+	t.Helper()
+	data, err := json.Marshal(values)
+	if err != nil {
+		t.Fatalf("marshal Muse settings: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+}
+
 func readMuseSettingsForTest(t *testing.T, path string) map[string]json.RawMessage {
 	t.Helper()
 	settings, err := readMuseSettings(path)
@@ -284,9 +301,7 @@ func TestInstallMuseHooksRefusesToStealAnExistingRegistration(t *testing.T) {
 	path := museInstallDir(t)
 	settingsPath := museSettingsPathForHooks(path)
 	theirs := filepath.Join(filepath.Dir(path), "their-hooks.json")
-	if err := os.WriteFile(settingsPath, []byte(`{"`+museManagedHooksKey+`":"`+theirs+`"}`), 0600); err != nil {
-		t.Fatalf("seed settings: %v", err)
-	}
+	writeMuseSettings(t, settingsPath, map[string]interface{}{museManagedHooksKey: theirs})
 
 	err := installMuseHooks(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json")
 	if err == nil {
@@ -391,9 +406,7 @@ func TestRemoveMuseHooksDoesNotClearSomebodyElsesRegistration(t *testing.T) {
 		t.Fatalf("installMuseHooks returned error: %v", err)
 	}
 	theirs := filepath.Join(filepath.Dir(path), "their-hooks.json")
-	if err := os.WriteFile(settingsPath, []byte(`{"`+museManagedHooksKey+`":"`+theirs+`"}`), 0600); err != nil {
-		t.Fatalf("reclaim settings: %v", err)
-	}
+	writeMuseSettings(t, settingsPath, map[string]interface{}{museManagedHooksKey: theirs})
 
 	if _, err := removeMuseHooks(path); err != nil {
 		t.Fatalf("removeMuseHooks returned error: %v", err)
@@ -548,5 +561,28 @@ func TestSameFilePathToleratesCosmeticDifferences(t *testing.T) {
 		if sameFilePath(tc.a, tc.b) {
 			t.Errorf("sameFilePath(%q, %q) = true, want false", tc.a, tc.b)
 		}
+	}
+}
+
+// A Windows path survives a round trip through settings.json.
+//
+// This is the regression the seeding helper exists for, pinned on every platform rather than only
+// where it broke. `C:\Users\...` is a perfectly ordinary value for this key, and it is also a string
+// no JSON literal can carry verbatim -- `\U` is not a valid escape. Building the file by hand made
+// settings.json unparseable on Windows alone, so the guard tests downstream failed for a reason that
+// had nothing to do with the guard.
+func TestMuseSettingsRoundTripAWindowsPath(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+	windowsPath := `C:\Users\runneradmin\AppData\Local\muse\beacon-endpoint-hooks.json`
+
+	writeMuseSettings(t, settingsPath, map[string]interface{}{museManagedHooksKey: windowsPath})
+
+	settings, err := readMuseSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("readMuseSettings could not read a settings file holding a Windows path: %v", err)
+	}
+	if got := museManagedHooksPathValue(settings); got != windowsPath {
+		t.Fatalf("%s = %q, want %q", museManagedHooksKey, got, windowsPath)
 	}
 }
