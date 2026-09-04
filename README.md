@@ -290,8 +290,8 @@ for rollout, validation, retention, and SIEM forwarding. For vendor review, see 
 ### For Developers
 
 Install the released CLI with Homebrew, or build from source. The Homebrew formula
-depends on `vector`, so a Homebrew install can connect to Asymptote Managed without a
-second step; on Linux, install the `vector` package from [vector.dev](https://vector.dev)
+depends on the tap's own `vector` formula (Vector is not in homebrew-core), so a Homebrew
+install can connect to Asymptote Managed without a second step; on Linux, install the `vector` package from [vector.dev](https://vector.dev)
 if you want managed forwarding.
 
 ```bash

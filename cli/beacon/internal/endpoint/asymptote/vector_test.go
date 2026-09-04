@@ -40,7 +40,7 @@ func TestFindVectorPrefersExplicitThenEnvAndChecksVersion(t *testing.T) {
 
 func TestFindVectorRejectsTooOldOrUnparsableVersions(t *testing.T) {
 	old := fakeVector(t, "0.44.0", 0)
-	if _, err := FindVector(old); err == nil || !strings.Contains(err.Error(), "0.56.0 or newer") {
+	if _, err := FindVector(old); err == nil || !strings.Contains(err.Error(), "0.50.0 or newer") {
 		t.Fatalf("expected too-old error, got %v", err)
 	}
 	dir := t.TempDir()

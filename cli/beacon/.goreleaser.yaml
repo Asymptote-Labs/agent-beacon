@@ -221,8 +221,11 @@ brews:
     commit_msg_template: "Homebrew formula update for {{ .ProjectName }} version {{ .Tag }}"
     # Vector runs the optional Asymptote managed forwarder (`beacon endpoint connect`);
     # pulling it in here means a Homebrew install can connect without a second step.
+    # Vector is not in homebrew-core (it ships from vectordotdev/brew, and Homebrew no
+    # longer taps third-party dependencies on its own), so the tap carries its own
+    # Formula/vector.rb, mirrored from Vector's release tarballs, and depends on that.
     dependencies:
-      - name: vector
+      - name: asymptote-labs/tap/vector
     install: |
       bin.install "beacon"
       bin.install "beacon-hooks"

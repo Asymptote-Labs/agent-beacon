@@ -207,9 +207,9 @@ func TestConnectStopsBeforeTheBrowserWhenVectorIsMissingOrOld(t *testing.T) {
 	if _, err := Connect(context.Background(), opts); err == nil || (!errors.Is(err, ErrVectorNotFound) && !strings.Contains(err.Error(), "vector")) {
 		t.Fatalf("expected a Vector error, got %v", err)
 	}
-	opts = connectOptions(t, fd, fwd, fakeVector(t, "0.55.9", 0))
+	opts = connectOptions(t, fd, fwd, fakeVector(t, "0.44.9", 0))
 	opts.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
-	if _, err := Connect(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "0.56.0 or newer") {
+	if _, err := Connect(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "0.50.0 or newer") {
 		t.Fatalf("expected a too-old error, got %v", err)
 	}
 	if opened {

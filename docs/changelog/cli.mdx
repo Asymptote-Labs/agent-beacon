@@ -11,6 +11,16 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### Unreleased
+
+- **Homebrew installs Vector again** · `brew install asymptote-labs/tap/beacon` failed
+  with "No available formula with the name vector": Vector is not in homebrew-core and
+  Homebrew no longer taps third-party dependencies on its own. The tap now carries its
+  own `vector` formula, mirrored from Vector's release tarballs (0.58.0 on Apple
+  Silicon, 0.50.0 on Intel, the last x86_64 build Vector published), and the Beacon
+  formula depends on that. The minimum Vector version `connect` accepts drops from
+  0.56 to 0.50, validated against the forwarder template, so Intel Macs can connect.
+
 ### v1.3.2 · September 4, 2026
 
 - **Re-connecting no longer loses the forwarder** · `beacon endpoint connect` on an

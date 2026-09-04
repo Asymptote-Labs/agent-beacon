@@ -35,7 +35,7 @@ and starts a Vector forwarder that ships the runtime and inventory JSONL to
 Asymptote. Nothing recorded before approval is sent. Re-running on a connected
 machine rotates its key in place.
 
-Requires Vector 0.56 or newer: the signed macOS package installs it at
+Requires Vector 0.50 or newer: the signed macOS package installs it at
 /opt/beacon/bin/vector, Homebrew provides it as "vector", and Linux packages are
 at https://vector.dev. Revoke a device from the dashboard's Beacon Endpoints
 page; run "beacon endpoint disconnect" to stop forwarding locally.`,

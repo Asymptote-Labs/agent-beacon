@@ -147,7 +147,7 @@ go run . endpoint fx status        # sessions fx has written and how much Beacon
 go run . endpoint fx sync --print  # map records to events without writing anything
 ```
 
-Connect an endpoint to Asymptote Managed during manual testing (needs Vector 0.56+ on the machine;
+Connect an endpoint to Asymptote Managed during manual testing (needs Vector 0.50+ on the machine;
 `/opt/beacon/bin/vector` from the signed package works, and a browser signed in to an org that has
 managed ingest enabled):
 
