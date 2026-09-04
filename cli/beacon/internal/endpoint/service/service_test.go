@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPlistContainsLaunchdContract(t *testing.T) {
@@ -58,16 +59,42 @@ func TestRunLaunchctlWithContextExplainsBootstrapIOError(t *testing.T) {
 	}
 }
 
+// shrinkLaunchdWaits makes the reload polls deterministic and instant in tests.
+func shrinkLaunchdWaits(t *testing.T) {
+	t.Helper()
+	oldStop, oldStart, oldSleep := launchdStopTimeout, launchdStartTimeout, launchdSleep
+	launchdStopTimeout = 2 * launchdPollInterval
+	launchdStartTimeout = 2 * launchdPollInterval
+	launchdSleep = func(time.Duration) {}
+	t.Cleanup(func() { launchdStopTimeout, launchdStartTimeout, launchdSleep = oldStop, oldStart, oldSleep })
+}
+
+// withoutPrints drops the `print` polls so a test can assert the order of the calls that
+// change state.
+func withoutPrints(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if !strings.HasPrefix(c, "print ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func TestLoadLaunchdJobReloadsAlreadyBootstrappedJob(t *testing.T) {
+	shrinkLaunchdWaits(t)
 	var calls []string
 	oldRun := runLaunchctlCommand
 	runLaunchctlCommand = func(args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
-		switch len(calls) {
-		case 1:
+		switch {
+		case args[0] == "bootstrap" && len(withoutPrints(calls)) == 1:
 			return "Bootstrap failed: 5: already bootstrapped", errors.New("exit status 5")
-		case 2, 3:
+		case args[0] == "bootstrap", args[0] == "bootout":
 			return "", nil
+		case args[0] == "print":
+			// After bootout the old job is gone at once.
+			return "Could not find service", errors.New("exit status 113")
 		default:
 			return "", errors.New("unexpected launchctl call")
 		}
@@ -79,15 +106,18 @@ func TestLoadLaunchdJobReloadsAlreadyBootstrappedJob(t *testing.T) {
 	if err := loadLaunchdJob("gui/501", UserLabel, "/Users/test/Library/LaunchAgents/"+UserLabel+".plist"); err != nil {
 		t.Fatalf("loadLaunchdJob returned error: %v", err)
 	}
-	if len(calls) != 3 {
-		t.Fatalf("launchctl calls = %#v, want bootstrap/bootout/bootstrap", calls)
-	}
-	if !strings.HasPrefix(calls[0], "bootstrap gui/") || !strings.Contains(calls[1], "bootout gui/") || !strings.HasPrefix(calls[2], "bootstrap gui/") {
+	state := withoutPrints(calls)
+	if len(state) != 3 || !strings.HasPrefix(state[0], "bootstrap gui/") || !strings.Contains(state[1], "bootout gui/") || !strings.HasPrefix(state[2], "bootstrap gui/") {
 		t.Fatalf("unexpected launchctl call sequence: %#v", calls)
+	}
+	// The wait between bootout and the second bootstrap must have looked at the job.
+	if len(calls) < 4 || !strings.HasPrefix(calls[2], "print gui/") {
+		t.Fatalf("expected a print poll after bootout: %#v", calls)
 	}
 }
 
 func TestLoadLaunchdJobReloadsBootstrapIOErrorWhenJobPrints(t *testing.T) {
+	shrinkLaunchdWaits(t)
 	var calls []string
 	oldRun := runLaunchctlCommand
 	runLaunchctlCommand = func(args ...string) (string, error) {
@@ -113,12 +143,15 @@ func TestLoadLaunchdJobReloadsBootstrapIOErrorWhenJobPrints(t *testing.T) {
 	if err := loadLaunchdJob("system", SystemLabel, "/Library/LaunchDaemons/"+SystemLabel+".plist"); err != nil {
 		t.Fatalf("loadLaunchdJob returned error: %v", err)
 	}
-	if len(calls) != 4 {
-		t.Fatalf("launchctl calls = %#v, want bootstrap/print/bootout/bootstrap", calls)
+	// print always reports the job running here, so the post-bootout wait polls to its
+	// (shrunken) timeout and the reload proceeds anyway.
+	if state := withoutPrints(calls); len(state) != 3 || state[0] != state[2] || !strings.HasPrefix(state[1], "bootout ") {
+		t.Fatalf("launchctl calls = %#v, want bootstrap/bootout/bootstrap around the polls", calls)
 	}
 }
 
 func TestLoadLaunchdJobTreatsPostBootstrapLoadedStateAsSuccess(t *testing.T) {
+	shrinkLaunchdWaits(t)
 	var calls []string
 	oldRun := runLaunchctlCommand
 	runLaunchctlCommand = func(args ...string) (string, error) {
@@ -141,8 +174,11 @@ func TestLoadLaunchdJobTreatsPostBootstrapLoadedStateAsSuccess(t *testing.T) {
 	if err := loadLaunchdJob("system", SystemLabel, "/Library/LaunchDaemons/"+SystemLabel+".plist"); err != nil {
 		t.Fatalf("loadLaunchdJob returned error: %v", err)
 	}
-	if len(calls) != 5 {
-		t.Fatalf("launchctl calls = %#v, want bootstrap/print/bootout/bootstrap/print", calls)
+	if state := withoutPrints(calls); len(state) != 3 || !strings.HasPrefix(state[1], "bootout ") {
+		t.Fatalf("launchctl calls = %#v, want bootstrap/bootout/bootstrap around the polls", calls)
+	}
+	if !strings.HasPrefix(calls[len(calls)-1], "print ") {
+		t.Fatalf("the loaded-state check after the second bootstrap should be the last call: %#v", calls)
 	}
 }
 

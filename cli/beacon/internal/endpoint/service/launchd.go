@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // launchdBackend manages the collector via macOS launchd.
@@ -20,6 +21,52 @@ var runLaunchctlCommand = func(args ...string) (string, error) {
 	cmd := exec.Command("launchctl", args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// Reloading a job is not atomic in launchd: `bootout` returns as soon as the job is asked to
+// stop, while the process may take its exit timeout (Vector drains in-flight requests for
+// up to a minute) to actually go away, and `bootstrap` of the same label in that window
+// fails with the job still printing as loaded. Both waits below poll `launchctl print`;
+// the counts are derived from the timeouts so tests can shrink them without a clock.
+var (
+	launchdPollInterval = 500 * time.Millisecond
+	launchdStopTimeout  = 75 * time.Second
+	launchdStartTimeout = 10 * time.Second
+	launchdSleep        = time.Sleep
+)
+
+func launchdJobGone(domain, label string) bool {
+	out, err := runLaunchctlCommand("print", domain+"/"+label)
+	return err != nil && launchctlNoSuchProcess(strings.TrimSpace(out))
+}
+
+// waitForLaunchdJobGone returns true once the job is no longer registered, or false when it
+// is still there after launchdStopTimeout.
+func waitForLaunchdJobGone(domain, label string) bool {
+	attempts := int(launchdStopTimeout / launchdPollInterval)
+	for i := 0; i < attempts; i++ {
+		if launchdJobGone(domain, label) {
+			return true
+		}
+		launchdSleep(launchdPollInterval)
+	}
+	return launchdJobGone(domain, label)
+}
+
+// waitForLaunchdJobRunning returns true once the job has a pid, or false after
+// launchdStartTimeout.
+func waitForLaunchdJobRunning(domain, label string) bool {
+	attempts := int(launchdStartTimeout / launchdPollInterval)
+	for i := 0; i <= attempts; i++ {
+		out, err := runLaunchctlCommand("print", domain+"/"+label)
+		if err == nil && strings.Contains(out, "pid =") {
+			return true
+		}
+		if i < attempts {
+			launchdSleep(launchdPollInterval)
+		}
+	}
+	return false
 }
 
 func (launchdBackend) kind() Kind { return KindLaunchd }
@@ -130,6 +177,9 @@ func loadLaunchdJob(domain, label, plistPath string) error {
 	if err := runLaunchctlWithContext(domain, label, "", "bootout", target); err != nil {
 		return err
 	}
+	// The old instance may still be draining; bootstrapping over it would be swallowed
+	// and the job would vanish once it exits.
+	waitForLaunchdJobGone(domain, label)
 	if out, err := runLaunchctlCommand("bootstrap", domain, plistPath); err != nil {
 		text := strings.TrimSpace(out)
 		if launchdJobAppearsLoaded(text, domain, label) {

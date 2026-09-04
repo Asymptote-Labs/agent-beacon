@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -104,5 +106,86 @@ func TestForwarderRefusesSupervisedAndForeignBackends(t *testing.T) {
 		if (ForwarderManager{Kind: KindLaunchd}).Supported() {
 			t.Fatal("launchd must be unsupported off macOS")
 		}
+	}
+}
+
+// Re-enrollment reloads a running forwarder. launchd's bootout returns before the old Vector
+// has exited (it drains in-flight requests for up to a minute), and a bootstrap issued while
+// the old job is still registered is lost when it finally goes; the old pid also satisfies a
+// naive "running" check. Load must wait for the old job to disappear, then prove the new one
+// started. Seen live on 2026-09-04: connect reported running, no forwarder was left.
+func TestForwarderLoadWaitsForTheOldJobAndVerifiesTheNewOne(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd only")
+	}
+	shrinkLaunchdWaits(t)
+	t.Setenv("HOME", t.TempDir())
+	var calls []string
+	printsAfterBootout := 0
+	bootstrapped := false
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		switch args[0] {
+		case "bootout":
+			return "", nil
+		case "print":
+			if bootstrapped {
+				return "state = running\npid = 200\n", nil
+			}
+			printsAfterBootout++
+			if printsAfterBootout <= 2 {
+				return "state = running\npid = 100\n", nil // the old instance, still draining
+			}
+			return "Could not find service", errors.New("exit status 113")
+		case "bootstrap":
+			if printsAfterBootout <= 2 {
+				t.Fatalf("bootstrap issued while the old job was still registered: %#v", calls)
+			}
+			bootstrapped = true
+			return "", nil
+		}
+		return "", fmt.Errorf("unexpected launchctl call: %s", strings.Join(args, " "))
+	}
+	t.Cleanup(func() { runLaunchctlCommand = oldRun })
+
+	m := ForwarderManager{UserMode: true, Kind: KindLaunchd}
+	if err := m.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !bootstrapped || !strings.HasPrefix(calls[0], "bootout ") {
+		t.Fatalf("expected bootout, wait, bootstrap, verify: %#v", calls)
+	}
+}
+
+func TestForwarderLoadFailsWhenTheNewInstanceNeverStarts(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd only")
+	}
+	shrinkLaunchdWaits(t)
+	t.Setenv("HOME", t.TempDir())
+	bootstrapped := false
+	oldRun := runLaunchctlCommand
+	runLaunchctlCommand = func(args ...string) (string, error) {
+		switch args[0] {
+		case "bootout":
+			return "", nil
+		case "bootstrap":
+			bootstrapped = true
+			return "", nil
+		case "print":
+			if !bootstrapped {
+				return "Could not find service", errors.New("exit status 113") // old job gone
+			}
+			return "state = waiting\n", nil // loaded, never gets a pid
+		}
+		return "", fmt.Errorf("unexpected launchctl call: %s", strings.Join(args, " "))
+	}
+	t.Cleanup(func() { runLaunchctlCommand = oldRun })
+
+	m := ForwarderManager{UserMode: true, Kind: KindLaunchd}
+	err := m.Load()
+	if err == nil || !strings.Contains(err.Error(), "has not started") {
+		t.Fatalf("Load should report a forwarder that never started, got %v", err)
 	}
 }
