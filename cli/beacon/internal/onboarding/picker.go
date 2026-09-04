@@ -199,8 +199,9 @@ func decodeByte(c byte, total int) (keyEvent, bool) {
 }
 
 // render draws the option list plus its key hint, overwriting the previous draw. width is
-// the terminal width in columns, or 0 when unknown; every line is clipped to it so the
-// draw occupies exactly renderedLines rows.
+// the terminal width in columns, or 0 when unknown; every line is clipped to one column
+// less than that, so the draw occupies exactly renderedLines rows even on terminals that
+// wrap eagerly at the last column.
 func render(out io.Writer, options []choice, selected int, color bool, first bool, width int) {
 	if !first {
 		fmt.Fprintf(out, ansiUp, renderedLines(options))
@@ -212,13 +213,13 @@ func render(out io.Writer, options []choice, selected int, color bool, first boo
 	for i, option := range options {
 		fmt.Fprint(out, ansiClearLine)
 		if i == selected {
-			fmt.Fprintf(out, "  %s❯ %s%s\r\n", accent, clip(option.Label, width-4), clear)
+			fmt.Fprintf(out, "  %s❯ %s%s\r\n", accent, clip(option.Label, width-5), clear)
 		} else {
-			fmt.Fprintf(out, "    %s\r\n", clip(option.Label, width-4))
+			fmt.Fprintf(out, "    %s\r\n", clip(option.Label, width-5))
 		}
 		if option.Detail != "" {
 			fmt.Fprint(out, ansiClearLine)
-			fmt.Fprintf(out, "      %s%s%s\r\n", dimmed, clip(option.Detail, width-6), clear)
+			fmt.Fprintf(out, "      %s%s%s\r\n", dimmed, clip(option.Detail, width-7), clear)
 		}
 	}
 	fmt.Fprint(out, ansiClearLine)

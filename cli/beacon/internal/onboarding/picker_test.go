@@ -217,8 +217,8 @@ func TestRenderClipsToTerminalWidth(t *testing.T) {
 	render(&out, rows, 0, false, true, 40)
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\r\n") {
 		visible := strings.NewReplacer(ansiClearLine, "").Replace(line)
-		if n := len([]rune(visible)); n > 40 {
-			t.Fatalf("line is %d columns wide on a 40-column terminal: %q", n, visible)
+		if n := len([]rune(visible)); n >= 40 {
+			t.Fatalf("line is %d columns wide on a 40-column terminal; must leave the last column free: %q", n, visible)
 		}
 	}
 	if !strings.Contains(out.String(), "…") {

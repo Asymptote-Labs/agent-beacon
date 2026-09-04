@@ -262,14 +262,15 @@ func TestAskDestinationAlone(t *testing.T) {
 	}
 }
 
-// Every destination row must draw without wrapping on a standard 80-column terminal, or
-// the picker's line count is off and it eats the lines above it on redraw.
+// Every destination row must draw without wrapping on a standard 80-column terminal, with
+// the last column left free for terminals that wrap eagerly, or the picker's line count
+// is off and it eats the lines above it on redraw.
 func TestDestinationRowsFitEightyColumns(t *testing.T) {
 	for _, item := range destinationChoices(true) {
-		if n := 4 + len([]rune(item.label)); n > 80 {
+		if n := 4 + len([]rune(item.label)); n >= 80 {
 			t.Fatalf("label %q draws %d columns", item.label, n)
 		}
-		if n := 6 + len([]rune(item.detail)); n > 80 {
+		if n := 6 + len([]rune(item.detail)); n >= 80 {
 			t.Fatalf("detail %q draws %d columns", item.detail, n)
 		}
 	}
