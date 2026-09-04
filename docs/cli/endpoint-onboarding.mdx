@@ -13,7 +13,9 @@ beacon endpoint onboarding [flags]
 ```
 
 The record lives in `~/.beacon/profile.json`. It survives uninstall, so reinstalling
-Beacon does not ask again.
+Beacon never asks the email and usage questions again. The destination question is
+asked again on the next interactive install until a destination is recorded; an
+Asymptote answer is recorded only once the connect succeeds.
 
 ## First-run onboarding
 
@@ -37,7 +39,9 @@ not an ongoing channel.
 
 The prompt never appears non-interactively. Package postinstall scripts, MDM
 deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
-skip it silently.
+skip it silently. The destination question is also skipped on an endpoint already
+connected to Asymptote. A machine onboarded before the question existed is asked it
+once, on its next interactive install.
 
 ## Flags
 
@@ -81,6 +85,15 @@ connected machine):
 ```bash title="Show the onboarding record"
 beacon endpoint onboarding
 ```
+
+The answer is stored as `onboarding.destination` in `~/.beacon/profile.json` and takes
+one of three values; `--json` exposes it as `destination`:
+
+| Value | Printed as |
+|-------|------------|
+| `local` | local only (nothing forwarded) |
+| `own_infra` | own infrastructure (forwarding pack) |
+| `asymptote` | Asymptote Managed |
 
 Clear it so the next install asks again:
 

@@ -431,7 +431,7 @@ If Hermes telemetry is missing, confirm `~/.hermes/config.yaml` contains command
 
 Beacon merges its hooks into Qwen Code's own `settings.json`: `~/.qwen/settings.json` for user-level installs, `./.qwen/settings.json` for project-level installs. Unrelated top-level keys and non-Beacon hooks in the same event group are preserved, and a re-install replaces Beacon's own entries instead of adding a second copy. Beacon identifies its entries by the `--platform qwen` argument in the hook command, since it has no file of its own in `~/.qwen` to stamp.
 
-Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so hooks are the only collection path for this runtime. `beacon endpoint install --harness qwen` fails with a message pointing here rather than appearing to succeed.
+Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so hooks are the only collection path for this runtime. `beacon endpoint install --harness qwen` installs these same hooks and writes `~/.qwen/settings.json`.
 
 Two Qwen-specific details are worth knowing before hand-editing the file:
 
