@@ -9,6 +9,18 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
+## September 2026
+
+### Unreleased
+
+- **Removed `beacon login` and `beacon ingest`** · Neither command was ever
+  connected to a server: `beacon ingest endpoint upload` had nothing to upload
+  to and `beacon login` saved credentials nothing consumed. `beacon endpoint
+  status` no longer prints an "Endpoint ingest" line and its JSON output drops
+  `managed_upload`; a `managed_upload` block in `config.json` is ignored.
+  Forwarding to Asymptote returns as an explicit, revocable Vector destination
+  set up by `beacon endpoint connect` in an upcoming release.
+
 ## August 2026
 
 ### v1.2.7 · August 31, 2026

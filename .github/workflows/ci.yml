@@ -391,7 +391,6 @@ jobs:
             ./internal/endpoint/service/... `
             ./internal/endpoint/wazuh/... `
             ./internal/endpoint/writer/... `
-            ./internal/ingest/... `
             ./internal/mcpserver/... `
             ./internal/tokens/... `
             ./internal/updatecheck/... `
