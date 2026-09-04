@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,15 +52,20 @@ func TestForwarderSystemdUnitRestartsAlwaysAndScopesByMode(t *testing.T) {
 }
 
 func TestForwarderUnitPathFollowsBackendAndMode(t *testing.T) {
-	t.Setenv("HOME", "/home/tester")
+	// os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows, so derive the
+	// expectation from it rather than pinning an environment variable.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory available")
+	}
 	cases := []struct {
 		kind     Kind
 		userMode bool
 		want     string
 	}{
-		{KindLaunchd, true, filepath.Join("/home/tester", "Library", "LaunchAgents", ForwarderLabel+".plist")},
+		{KindLaunchd, true, filepath.Join(home, "Library", "LaunchAgents", ForwarderLabel+".plist")},
 		{KindLaunchd, false, filepath.Join("/Library/LaunchDaemons", ForwarderLabel+".plist")},
-		{KindSystemd, true, filepath.Join("/home/tester", ".config", "systemd", "user", ForwarderSystemdUnit)},
+		{KindSystemd, true, filepath.Join(home, ".config", "systemd", "user", ForwarderSystemdUnit)},
 		{KindSystemd, false, filepath.Join("/etc/systemd/system", ForwarderSystemdUnit)},
 	}
 	for _, c := range cases {
