@@ -260,7 +260,7 @@ Answering yes runs `beacon endpoint connect` after the install: your browser ope
 Asymptote dashboard, a member of your organization approves this specific device, and a
 Vector forwarder starts shipping the runtime and inventory JSONL with a per-device key.
 Nothing recorded before the approval is sent, and the device can be revoked from the
-dashboard at any time. `beacon endpoint install --connect` forces the same flow,
+dashboard at any time. `beacon endpoint install --connect` forces the same flow without asking,
 `BEACON_MANAGED_INGEST=0` silences the question. A no is recorded and never asked again;
 a yes is recorded once the machine is connected, so a failed install or connection is
 asked again on the next interactive install. See [`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect)

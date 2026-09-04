@@ -47,7 +47,7 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 
 ## Managed ingest offer
 
-On a first interactive install where Vector is available, the [onboarding prompt](/cli/endpoint-onboarding) ends with one more question: whether to forward this machine's agent telemetry to Asymptote Managed now. The default is no. Answering yes runs the connect flow after the install completes; a failed connect is reported with the retry command and never fails the install. `BEACON_MANAGED_INGEST=0` suppresses the question and it is never shown non-interactively. A no is recorded at once and the question is not asked again. A yes is recorded only once the machine is connected, so if the install or the connection fails, the next interactive install asks again.
+On a first interactive install where Vector is available, the [onboarding prompt](/cli/endpoint-onboarding) ends with one more question: whether to forward this machine's agent telemetry to Asymptote Managed now. The default is no. Answering yes runs the connect flow after the install completes; a failed connect is reported with the retry command and never fails the install. `--connect` is already the answer, so it skips the question. `BEACON_MANAGED_INGEST=0` suppresses the question and it is never shown non-interactively. A no is recorded at once and the question is not asked again. A yes is recorded only once the machine is connected, so if the install or the connection fails, the next interactive install asks again.
 
 ## Examples
 
