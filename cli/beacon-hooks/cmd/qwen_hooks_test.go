@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	hookconfig "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
 
 // Qwen Code's hook payloads are the Claude Code shape: snake_case base fields, `tool_name` /
@@ -119,7 +120,7 @@ func TestQwenPolicyDenyUsesQwensPermissionDecisionShape(t *testing.T) {
 	t.Cleanup(func() { platformFlag = origPlatform })
 	platformFlag = "qwen"
 
-	deny := policyDenyResponse("Security policy blocks database writes")
+	deny := policyDenyResponse("Security policy blocks database writes", policycontract.PhasePreTool)
 	if deny == nil {
 		t.Fatal("policyDenyResponse(qwen) = nil; a provider deny would be silently dropped and the tool would run")
 	}
@@ -147,12 +148,12 @@ func TestQwenIsNotTreatedAsAnUnknownPlatform(t *testing.T) {
 	t.Cleanup(func() { platformFlag = origPlatform })
 
 	platformFlag = "qwen-code"
-	if deny := policyDenyResponse("blocked"); deny != nil {
+	if deny := policyDenyResponse("blocked", policycontract.PhasePreTool); deny != nil {
 		t.Fatalf("policyDenyResponse(qwen-code) = %#v; only the installed --platform spelling (qwen) is wired", deny)
 	}
 
 	platformFlag = "qwen"
-	if deny := policyDenyResponse("blocked"); deny == nil {
+	if deny := policyDenyResponse("blocked", policycontract.PhasePreTool); deny == nil {
 		t.Fatal("policyDenyResponse(qwen) = nil, want Qwen's deny shape")
 	}
 }

@@ -37,32 +37,42 @@ func emitInferredHookEvent(logger *logging.Logger, action, category, severity, m
 	emitHookEventWithFidelity(logger, action, category, severity, message, asymptoteobserve.FidelityInferred, input, fields)
 }
 
+// rawPayloadKeys names the runtimes whose whole hook payload is kept under `raw.<key>`, and the
+// key each one uses.
+//
+// These runtimes carry real signal with no endpoint-schema field of its own -- Qwen's
+// `permission_mode` on every tool event, its `source` on SessionStart and the `context_usage` /
+// `context_limit` / `input_tokens` trio on Stop; Muse Code's `turn_id`, which is the only per-turn
+// boundary anything in its payload offers. Keeping the payload preserves them without inventing
+// schema fields for one runtime. It is the whole event's own path through SanitizeMap, so raw is
+// secret-redacted and string-limited like every other field, and it is the first thing dropped when
+// an event exceeds the 64 KiB ceiling.
+//
+// A table rather than one `if` per runtime. The branches were identical apart from the key, so each
+// new runtime copied the same three lines and the only thing distinguishing them was a string --
+// which is data, and belongs in one. The Cascade entry is why this is keyed on the --platform value
+// rather than derived from it: `devin-desktop` writes under `cascade`, so the key is not always the
+// flag.
+var rawPayloadKeys = map[string]string{
+	"grok":          "grok",
+	"hermes":        "hermes",
+	"qwen":          "qwen",
+	"vscode":        "vscode",
+	"muse":          "muse",
+	"devin-desktop": "cascade",
+}
+
+func rawPayloadKey(platform string) string {
+	return rawPayloadKeys[platform]
+}
+
 func emitHookEventWithFidelity(logger *logging.Logger, action, category, severity, message, fidelity string, input map[string]interface{}, fields map[string]interface{}) {
 	if fields == nil {
 		fields = map[string]interface{}{}
 	}
 	seedCursorCloudRunID(input)
-	if platformFlag == "grok" {
-		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"grok": input})
-	}
-	if platformFlag == "hermes" {
-		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"hermes": input})
-	}
-	// Qwen carries real signal with no endpoint-schema field of its own: `permission_mode` on every
-	// tool event, `source` on SessionStart, `stop_hook_active` and the `context_usage` /
-	// `context_limit` / `input_tokens` trio on Stop, and the verbatim `tool_use_id` whose promoted
-	// form is the join key applyToolCallID writes just below. Keeping the payload under `raw.qwen`
-	// preserves it without inventing schema fields for one runtime. It is the whole event's own path
-	// through SanitizeMap, so raw is secret-redacted and string-limited like every other field, and
-	// it is the first thing dropped when an event exceeds the 64 KiB ceiling.
-	if platformFlag == "qwen" {
-		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
-	}
-	if platformFlag == "vscode" {
-		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"vscode": input})
-	}
-	if isCascadePlatform(platformFlag) {
-		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"cascade": input})
+	if key := rawPayloadKey(platformFlag); key != "" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{key: input})
 	}
 	applyToolCallID(fields, input)
 	if model := getFirstStr(input, "model"); model != "" {
