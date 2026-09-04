@@ -11,6 +11,15 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### v1.3.1 · September 4, 2026
+
+- **`beacon endpoint status --user` reports the user-mode connection** · On a
+  machine whose system collector holds the OTLP ports, status switches its
+  collector view to the system install; it also read the system install's
+  managed-ingest record, which is root-only, and printed "not connected
+  (permission denied)" for a connected user-mode endpoint. The managed-ingest
+  line now follows the install mode you asked about.
+
 ### v1.3.0 · September 4, 2026
 
 - **Onboarding asks where telemetry should go** · The first-run prompt ends with
