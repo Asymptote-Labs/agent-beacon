@@ -17,7 +17,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   first-run prompt asks one more question, whether to forward this machine's
   telemetry to Asymptote Managed (default no); yes runs `beacon endpoint connect`
   after the install. `beacon endpoint install --connect` forces it,
-  `BEACON_MANAGED_INGEST=0` silences it, the answer is recorded once per machine
+  `BEACON_MANAGED_INGEST=0` silences it, a no is recorded once per machine and a yes once the machine is connected
   and shown by `beacon endpoint onboarding`. The Homebrew formula now depends on
   `vector` so a Homebrew install can connect without a second step.
 - **`beacon endpoint connect` and `disconnect`** · Connect an endpoint to

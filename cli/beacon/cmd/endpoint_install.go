@@ -104,11 +104,11 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
-	connectAfterInstall, err := maybeRunOnboarding(cmd)
+	acceptedOffer, err := maybeRunOnboarding(cmd)
 	if err != nil {
 		return err
 	}
-	connectAfterInstall = connectAfterInstall || endpointOpts.connect
+	connectAfterInstall := acceptedOffer || endpointOpts.connect
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -141,6 +141,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout())
 		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
+		} else if acceptedOffer {
+			recordManagedIngestAccepted(cmd)
 		}
 	}
 	return nil

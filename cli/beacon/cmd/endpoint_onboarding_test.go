@@ -546,8 +546,8 @@ func TestMaybeRunOnboardingOffersManagedIngestOnlyWhenOfferable(t *testing.T) {
 	if !h.offered[0].OfferManagedIngest {
 		t.Fatal("prompt should have been asked to offer managed ingest")
 	}
-	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestAccepted {
-		t.Fatalf("recorded choice = %q", got)
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != "" {
+		t.Fatalf("a yes is recorded only once the install has connected the machine, got %q", got)
 	}
 
 	h = newOnboardingHarness(t)
@@ -589,7 +589,19 @@ func TestManagedIngestOfferedOnceToPreviouslyOnboardedMachine(t *testing.T) {
 	if !h.standaloneAsked {
 		t.Fatal("the forwarding question should be asked once on an already-onboarded machine")
 	}
-	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestAccepted {
+	if len(h.saved) != 0 {
+		t.Fatalf("a yes must not be recorded before the connect succeeds: %+v", h.saved)
+	}
+
+	// A no is recorded at once.
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	h.standaloneAnswer = false
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || !h.standaloneAsked {
+		t.Fatalf("connect=%t asked=%t", connect, h.standaloneAsked)
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestDeclined {
 		t.Fatalf("recorded choice = %q", got)
 	}
 
@@ -615,6 +627,53 @@ func TestManagedIngestOfferedOnceToPreviouslyOnboardedMachine(t *testing.T) {
 	t.Setenv("CI", "1")
 	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
 		t.Fatal("CI never sees the question")
+	}
+}
+
+// A yes whose install or connect failed must be asked again, not remembered as done: the
+// record is written only by recordManagedIngestAccepted, after the machine is connected.
+func TestManagedIngestAcceptedIsRecordedAfterConnect(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.offerable = true
+	h.answers.ManagedIngestOffered = true
+	h.answers.ManagedIngest = true
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || !connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	afterPrompt := h.saved[len(h.saved)-1]
+	if afterPrompt.Onboarding.ManagedIngest != "" {
+		t.Fatalf("recorded before connect: %q", afterPrompt.Onboarding.ManagedIngest)
+	}
+
+	// The install failed before connecting: the next interactive install asks again.
+	h2 := newOnboardingHarness(t)
+	h2.offerable = true
+	h2.loaded = afterPrompt
+	h2.standaloneAnswer = true
+	if connect, err := maybeRunOnboarding(h2.cmd); err != nil || !connect || !h2.standaloneAsked || h2.asked {
+		t.Fatalf("connect=%t err=%v standaloneAsked=%t signupAsked=%t", connect, err, h2.standaloneAsked, h2.asked)
+	}
+
+	// The install connected: the yes is recorded and the question retires.
+	h3 := newOnboardingHarness(t)
+	h3.offerable = true
+	h3.loaded = afterPrompt
+	recordManagedIngestAccepted(h3.cmd)
+	if got := h3.saved[len(h3.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestAccepted {
+		t.Fatalf("recorded choice = %q", got)
+	}
+	h4 := newOnboardingHarness(t)
+	h4.offerable = true
+	h4.loaded = h3.saved[len(h3.saved)-1]
+	if connect, _ := maybeRunOnboarding(h4.cmd); connect || h4.standaloneAsked {
+		t.Fatalf("a recorded yes must not be asked again: connect=%t asked=%t", connect, h4.standaloneAsked)
+	}
+
+	// Never written for a machine that was not onboarded (root, CI, --connect without a prompt).
+	h5 := newOnboardingHarness(t)
+	recordManagedIngestAccepted(h5.cmd)
+	if len(h5.saved) != 0 {
+		t.Fatalf("no profile should be written without a completed onboarding: %+v", h5.saved)
 	}
 }
 

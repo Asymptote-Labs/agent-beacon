@@ -261,8 +261,9 @@ Asymptote dashboard, a member of your organization approves this specific device
 Vector forwarder starts shipping the runtime and inventory JSONL with a per-device key.
 Nothing recorded before the approval is sent, and the device can be revoked from the
 dashboard at any time. `beacon endpoint install --connect` forces the same flow,
-`BEACON_MANAGED_INGEST=0` silences the question, and the question is asked at most once
-per machine. See [`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect)
+`BEACON_MANAGED_INGEST=0` silences the question. A no is recorded and never asked again;
+a yes is recorded once the machine is connected, so a failed install or connection is
+asked again on the next interactive install. See [`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect)
 and [Asymptote Managed forwarding](https://docs.asymptotelabs.ai/log-forwarding/asymptote).
 
 See the [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)

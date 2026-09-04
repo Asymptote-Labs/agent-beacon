@@ -94,7 +94,7 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 
 	// A headless rollout that supplied answers is recorded without a terminal.
 	if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
-		completeOnboarding(cmd, &profile, email, usage, nil, nil)
+		completeOnboarding(cmd, &profile, email, usage, nil, "")
 		return false, nil
 	}
 
@@ -111,11 +111,16 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	var choice *bool
-	if answers.ManagedIngestOffered {
-		choice = &answers.ManagedIngest
+	// A no is final and recorded now. A yes is recorded by the install once the machine
+	// is actually connected (recordManagedIngestAccepted): if the install or the connect
+	// fails first, the record stays empty and the next interactive install asks again,
+	// instead of a stored "accepted" silencing the question on a machine that never
+	// forwarded anything.
+	record := ""
+	if answers.ManagedIngestOffered && !answers.ManagedIngest {
+		record = onboarding.ManagedIngestDeclined
 	}
-	completeOnboarding(cmd, &profile, answers.Email, answers.Usage, probe, choice)
+	completeOnboarding(cmd, &profile, answers.Email, answers.Usage, probe, record)
 	return answers.ManagedIngestOffered && answers.ManagedIngest, nil
 }
 
@@ -133,11 +138,29 @@ func maybeOfferManagedIngest(cmd *cobra.Command, profile *onboarding.Profile) (b
 	if err != nil {
 		return false, err
 	}
-	profile.Onboarding.ManagedIngest = managedIngestChoice(connect)
+	if connect {
+		// Recorded by recordManagedIngestAccepted once the connect has succeeded.
+		return true, nil
+	}
+	profile.Onboarding.ManagedIngest = onboarding.ManagedIngestDeclined
 	if err := onboardingSave(*profile); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: could not record onboarding: %v\n", err)
 	}
-	return connect, nil
+	return false, nil
+}
+
+// recordManagedIngestAccepted stores the yes answer after `endpoint install` has connected
+// the machine. Until then the offer is unrecorded on purpose, so a failed install or
+// connect is retried by asking again rather than remembered as done.
+func recordManagedIngestAccepted(cmd *cobra.Command) {
+	profile := onboardingLoad()
+	if !profile.Prompted() {
+		return
+	}
+	profile.Onboarding.ManagedIngest = onboarding.ManagedIngestAccepted
+	if err := onboardingSave(profile); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: could not record onboarding: %v\n", err)
+	}
 }
 
 // managedIngestSkipReason mirrors onboardingSkipReason for the forwarding question, with
@@ -183,13 +206,6 @@ func defaultManagedIngestOfferable() bool {
 	}
 	_, err := asymptote.FindVector("")
 	return err == nil
-}
-
-func managedIngestChoice(connect bool) string {
-	if connect {
-		return onboarding.ManagedIngestAccepted
-	}
-	return onboarding.ManagedIngestDeclined
 }
 
 // onboardingSkipReason reports whether the prompt should stay silent, and why.
@@ -265,7 +281,11 @@ func onboardingAnswersFromEnv(stderr io.Writer) (string, string, bool) {
 //
 // It never returns an error. Once the user has answered, the install belongs to them;
 // a signup endpoint being unreachable is our problem, not theirs.
-func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, usage string, probe *onboarding.RuntimeProbe, managedIngest *bool) {
+//
+// managedIngest is the forwarding record to store alongside the answers: declined, or ""
+// when the question was not asked or was accepted (accepted is stored by the install
+// after the connect succeeds).
+func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, usage string, probe *onboarding.RuntimeProbe, managedIngest string) {
 	installID, err := onboarding.EnsureInstallID(profile)
 	if err != nil {
 		// Without an install ID there is no dedupe key, so there is nothing sensible
@@ -297,9 +317,7 @@ func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, 
 		Usage:         usage,
 		BeaconVersion: version.GetVersion(),
 	}
-	if managedIngest != nil {
-		profile.Onboarding.ManagedIngest = managedIngestChoice(*managedIngest)
-	}
+	profile.Onboarding.ManagedIngest = managedIngest
 	// Keep the payload only when resending could still work. A rejected submission is
 	// terminal, and holding the address on disk past that point serves nobody.
 	if outcome == onboarding.OutcomePending {
