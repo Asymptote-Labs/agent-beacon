@@ -55,6 +55,17 @@ func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
 		}
 		return status
 	}
+	if !Connected(userMode) {
+		// disconnect --keep-credentials leaves the record and key for a later connect.
+		return ManagedIngestStatus{
+			Enabled:          false,
+			DeviceID:         enrollment.DeviceID,
+			KeyPrefix:        enrollment.KeyPrefix,
+			OrganizationID:   enrollment.OrganizationID,
+			OrganizationName: enrollment.OrganizationName,
+			Message:          fmt.Sprintf("disconnected; credentials for device %s kept, run `beacon endpoint connect` to reuse them", enrollment.DeviceID),
+		}
+	}
 	status := ManagedIngestStatus{
 		Enabled:          true,
 		IngestURL:        enrollment.IngestURL,

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 )
@@ -47,13 +48,13 @@ type ConnectOptions struct {
 
 // ConnectResult reports what Connect wrote and where telemetry now goes.
 type ConnectResult struct {
-	Enrollment     Enrollment `json:"enrollment"`
-	VectorConfig   string     `json:"vector_config"`
-	SecretsFile    string     `json:"secrets_file"`
-	UnitPath       string     `json:"unit_path"`
-	Forwarder      string     `json:"forwarder"`
-	ReEnrolled     bool       `json:"re_enrolled"`
-	ForwarderState service.Status
+	Enrollment     Enrollment     `json:"enrollment"`
+	VectorConfig   string         `json:"vector_config"`
+	SecretsFile    string         `json:"secrets_file"`
+	UnitPath       string         `json:"unit_path"`
+	Forwarder      string         `json:"forwarder"`
+	ReEnrolled     bool           `json:"re_enrolled"`
+	ForwarderState service.Status `json:"forwarder_state"`
 }
 
 // Connect enrolls this machine and starts the forwarder.
@@ -95,10 +96,18 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		installID = previous.InstallID
 	}
 	if installID == "" {
+		installID = ReadInstallID(opts.UserMode)
+	}
+	if installID == "" {
 		installID, err = newInstallID()
 		if err != nil {
 			return nil, err
 		}
+	}
+	// Pin the id before the dashboard learns it, so a failure after approval retries as
+	// the same device.
+	if err := WriteInstallID(opts.UserMode, installID); err != nil {
+		return nil, err
 	}
 	enrollOpts := opts.Enroll
 	enrollOpts.Device.InstallID = installID
@@ -155,7 +164,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	enrollment := Enrollment{
 		InstallID:        installID,
 		IngestURL:        result.IngestURL,
-		DashboardURL:     enrollDashboardURL(enrollOpts.DashboardURL),
+		DashboardURL:     auth.ResolveDashboardURL(enrollOpts.DashboardURL),
 		DeviceID:         result.DeviceID,
 		KeyPrefix:        result.KeyPrefix,
 		OrganizationID:   result.OrganizationID,
@@ -261,17 +270,6 @@ func displayOrg(r *EnrollResult) string {
 		return r.OrganizationName
 	}
 	return r.OrganizationID
-}
-
-func enrollDashboardURL(flag string) string {
-	// Mirrors auth.ResolveDashboardURL without importing it here again.
-	if flag != "" {
-		return flag
-	}
-	if env := os.Getenv("BEACON_DASHBOARD_URL"); env != "" {
-		return env
-	}
-	return "https://asymptotelabs.ai"
 }
 
 // newInstallID mints a random 128-bit identifier for this machine.

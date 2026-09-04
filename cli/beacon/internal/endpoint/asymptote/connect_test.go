@@ -305,6 +305,14 @@ func TestStatusReportsCredentialState(t *testing.T) {
 	if err := WriteSecrets(true, "bcn_device_abcdefgh_"+strings.Repeat("k", 43)); err != nil {
 		t.Fatal(err)
 	}
+	// Credentials alone (what disconnect --keep-credentials leaves) are not a connection.
+	kept := Status(true, StatusOptions{SkipCredentialCheck: true})
+	if kept.Enabled || kept.DeviceID != "dev-1" || !strings.Contains(kept.Message, "credentials for device dev-1 kept") {
+		t.Fatalf("credentials-only status = %+v", kept)
+	}
+	if err := os.WriteFile(VectorConfigPath(true), []byte("# rendered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for status, want := range map[int]string{http.StatusOK: "valid", http.StatusNoContent: "valid", http.StatusUnauthorized: "revoked", http.StatusForbidden: "revoked", http.StatusBadGateway: "unknown"} {
 		answer = status
 		got := Status(true, StatusOptions{HTTPClient: ingest.Client()})
@@ -336,4 +344,92 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestConnectPinsInstallIDBeforeEnrollmentSoRetriesReuseIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+
+	// First attempt fails after approval (vector validate rejects the config).
+	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 1))); err == nil {
+		t.Fatal("expected validate failure")
+	}
+	fd.mu.Lock()
+	firstID := fd.init["device"].(map[string]any)["install_id"].(string)
+	fd.mu.Unlock()
+	if pinned := ReadInstallID(true); pinned == "" || pinned != firstID {
+		t.Fatalf("install id must be pinned before enrollment: file=%q sent=%q", pinned, firstID)
+	}
+	if _, err := LoadEnrollment(true); !errors.Is(err, ErrNotEnrolled) {
+		t.Fatal("no enrollment record may exist after a failed connect")
+	}
+
+	// The retry sends the same id, so the server rotates the device instead of adding one.
+	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0))); err != nil {
+		t.Fatal(err)
+	}
+	fd.mu.Lock()
+	defer fd.mu.Unlock()
+	if got := fd.init["device"].(map[string]any)["install_id"]; got != firstID {
+		t.Fatalf("retry sent install_id %v, want %q", got, firstID)
+	}
+}
+
+func TestConnectResultJSONUsesSnakeCaseAndNormalizedDashboardURL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	opts := connectOptions(t, fd, &fakeForwarder{supported: true}, fakeVector(t, "0.56.0", 0))
+	opts.Enroll.DashboardURL = fd.server.URL + "/"
+	result, err := Connect(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Enrollment.DashboardURL != fd.server.URL {
+		t.Fatalf("dashboard URL must be normalized without a trailing slash: %q", result.Enrollment.DashboardURL)
+	}
+	var encoded map[string]any
+	if err := json.Unmarshal(mustJSON(t, result), &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := encoded["forwarder_state"]; !ok {
+		t.Fatalf("connect --json must expose forwarder_state: %v", encoded)
+	}
+	if _, ok := encoded["ForwarderState"]; ok {
+		t.Fatal("PascalCase field leaked into JSON")
+	}
+}
+
+func TestLoopbackIngestURLIsAcceptedEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fd.ingestURL = "http://127.0.0.1:9999"
+	result, err := Connect(context.Background(), connectOptions(t, fd, &fakeForwarder{supported: true}, fakeVector(t, "0.56.0", 0)))
+	if err != nil {
+		t.Fatalf("a loopback development ingest URL must work end to end: %v", err)
+	}
+	if result.Enrollment.IngestURL != "http://127.0.0.1:9999" {
+		t.Fatalf("ingest url = %q", result.Enrollment.IngestURL)
+	}
+	for _, c := range []struct {
+		url  string
+		want bool
+	}{
+		{"https://ingest.example.test", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://localhost", true},
+		{"http://ingest.example.test", false},
+		{"ftp://127.0.0.1", false},
+		{"", false},
+	} {
+		if got := IsSecureURL(c.url); got != c.want {
+			t.Errorf("IsSecureURL(%q) = %t, want %t", c.url, got, c.want)
+		}
+	}
 }

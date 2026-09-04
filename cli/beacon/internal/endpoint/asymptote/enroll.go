@@ -82,7 +82,7 @@ type enrollExchangeRequest struct {
 // one-time code is exchanged together with the PKCE verifier that never left this process.
 func Enroll(ctx context.Context, opts EnrollOptions) (*EnrollResult, error) {
 	dashboardURL := auth.ResolveDashboardURL(opts.DashboardURL)
-	if !strings.HasPrefix(strings.ToLower(dashboardURL), "https://") && !isLoopback(dashboardURL) {
+	if !IsSecureURL(dashboardURL) {
 		return nil, fmt.Errorf("dashboard URL must use https://: %s", dashboardURL)
 	}
 	if opts.Device.InstallID == "" {
@@ -175,7 +175,7 @@ func validateEnrollResult(r *EnrollResult) error {
 		return errors.New("exchange response did not include a device key")
 	case r.DeviceID == "" || r.OrganizationID == "":
 		return errors.New("exchange response is missing the device or organization id")
-	case !strings.HasPrefix(strings.ToLower(r.IngestURL), "https://") && !isLoopback(r.IngestURL):
+	case !IsSecureURL(r.IngestURL):
 		return fmt.Errorf("exchange response ingest URL must use https://: %q", r.IngestURL)
 	}
 	r.IngestURL = strings.TrimRight(r.IngestURL, "/")
@@ -194,12 +194,22 @@ func buildEnrollURL(dashboardURL, state string, port int) string {
 	return u.String()
 }
 
-// isLoopback allows plain http only for local development servers.
-func isLoopback(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
+// IsSecureURL is the one rule for where a device key may be sent: https anywhere, or
+// plain http only to a loopback address for local development. Enrollment, the exchange
+// response and the rendered forwarder config all apply it, so a URL that passes enrollment
+// can never be refused when the config is written.
+func IsSecureURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
 		return false
 	}
-	host := u.Hostname()
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	default:
+		return false
+	}
 }

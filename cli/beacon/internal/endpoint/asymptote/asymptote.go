@@ -103,10 +103,10 @@ type RenderOptions struct {
 
 // RenderVectorConfig returns vector.toml with every environment reference replaced
 // by a literal value, for a forwarder unit that must not depend on its
-// environment. It refuses non-https ingest URLs so a downgraded endpoint can never
-// receive a device key.
+// environment. It applies IsSecureURL, so a downgraded endpoint can never receive
+// a device key while a loopback development server still works.
 func RenderVectorConfig(opts RenderOptions) (string, error) {
-	if !strings.HasPrefix(strings.ToLower(opts.IngestURL), "https://") {
+	if !IsSecureURL(opts.IngestURL) {
 		return "", ErrInsecureIngestURL
 	}
 	if opts.SecretsFile == "" || opts.DataDir == "" {
@@ -153,6 +153,6 @@ type renderError string
 func (e renderError) Error() string { return string(e) }
 
 const (
-	ErrInsecureIngestURL renderError = "asymptote ingest URL must use https://"
+	ErrInsecureIngestURL renderError = "asymptote ingest URL must use https:// (plain http is allowed only for a loopback development server)"
 	ErrIncompleteRender  renderError = "asymptote forwarder render needs ingest URL, secrets file and data dir"
 )

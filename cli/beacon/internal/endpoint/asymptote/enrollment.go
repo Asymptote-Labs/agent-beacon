@@ -17,9 +17,13 @@ import (
 const (
 	DirName            = "asymptote"
 	EnrollmentFileName = "enrollment.json"
-	SecretsFileName    = "vector-secrets.json"
-	VectorConfigName   = "vector.toml"
-	DataDirName        = "vector-data"
+	// InstallIDFileName pins this machine's install id before enrollment starts, so a
+	// connect that fails after approval (validate, unit, load) retries with the same id and
+	// the server rotates the device's key instead of registering a second device.
+	InstallIDFileName = "install-id"
+	SecretsFileName   = "vector-secrets.json"
+	VectorConfigName  = "vector.toml"
+	DataDirName       = "vector-data"
 )
 
 // Dir is the managed-ingest state directory for the selected endpoint mode.
@@ -30,6 +34,31 @@ func EnrollmentPath(userMode bool) string   { return filepath.Join(Dir(userMode)
 func SecretsPath(userMode bool) string      { return filepath.Join(Dir(userMode), SecretsFileName) }
 func VectorConfigPath(userMode bool) string { return filepath.Join(Dir(userMode), VectorConfigName) }
 func DataDir(userMode bool) string          { return filepath.Join(Dir(userMode), DataDirName) }
+func InstallIDPath(userMode bool) string    { return filepath.Join(Dir(userMode), InstallIDFileName) }
+
+// ReadInstallID returns the pinned install id, or "" when none has been written.
+func ReadInstallID(userMode bool) string {
+	data, err := os.ReadFile(InstallIDPath(userMode))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// WriteInstallID pins the install id for this machine.
+func WriteInstallID(userMode bool, installID string) error {
+	if err := ensureDir(userMode); err != nil {
+		return err
+	}
+	return writeFileAtomic(InstallIDPath(userMode), []byte(installID+"\n"), 0o600)
+}
+
+// Connected reports whether a forwarder is installed for this endpoint: an enrollment
+// record alone is not a connection, because disconnect --keep-credentials leaves it behind.
+func Connected(userMode bool) bool {
+	_, err := os.Stat(VectorConfigPath(userMode))
+	return err == nil
+}
 
 // Enrollment is the non-secret record of a device's enrollment. Everything `beacon endpoint
 // status` prints comes from here; the device key itself is only in the secrets file.
