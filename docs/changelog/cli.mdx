@@ -11,6 +11,16 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### Unreleased
+
+- **Re-connecting no longer loses the forwarder** · `beacon endpoint connect` on an
+  already-connected macOS endpoint stops the old Vector and starts a new one under
+  the same launchd label. launchd reports the stop before the old process has
+  exited (Vector drains in-flight requests for up to a minute), so the new
+  bootstrap could be swallowed and the status check saw the old pid as "running",
+  leaving no forwarder at all. The load now waits for the old job to disappear,
+  then confirms the new instance has a pid, and fails loudly otherwise.
+
 ### v1.3.1 · September 4, 2026
 
 - **`beacon endpoint status --user` reports the user-mode connection** · On a

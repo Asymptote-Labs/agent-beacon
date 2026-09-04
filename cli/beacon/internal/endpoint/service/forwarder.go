@@ -149,9 +149,22 @@ func (m ForwarderManager) Load() error {
 		return err
 	}
 	domain := serviceDomain(m.UserMode)
-	// bootout first so a config rewrite (re-enrollment rotates the key) restarts Vector.
-	_ = runLaunchctlWithContext(domain, ForwarderLabel, "", "bootout", domain+"/"+ForwarderLabel)
-	return loadLaunchdJob(domain, ForwarderLabel, path)
+	target := domain + "/" + ForwarderLabel
+	// bootout first so a config rewrite (re-enrollment rotates the key) restarts Vector, then
+	// wait for the old instance to be gone: it drains in-flight requests for up to a minute,
+	// and a bootstrap issued while it is still registered is silently lost with it. Finally
+	// confirm the new instance is actually running rather than trusting the old pid.
+	_ = runLaunchctlWithContext(domain, ForwarderLabel, "", "bootout", target)
+	if !waitForLaunchdJobGone(domain, ForwarderLabel) {
+		return fmt.Errorf("the previous forwarder did not stop within %s; check `launchctl print %s`", launchdStopTimeout, target)
+	}
+	if err := loadLaunchdJob(domain, ForwarderLabel, path); err != nil {
+		return err
+	}
+	if !waitForLaunchdJobRunning(domain, ForwarderLabel) {
+		return fmt.Errorf("the forwarder was loaded but has not started within %s; check `launchctl print %s` and Vector's log", launchdStartTimeout, target)
+	}
+	return nil
 }
 
 // Unload stops and deregisters the forwarder. A missing unit is not an error.
