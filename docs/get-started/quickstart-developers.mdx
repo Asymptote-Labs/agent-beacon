@@ -1,19 +1,20 @@
 ---
 title: "For Individual Developers"
-description: "Validate a local Beacon setup and inspect AI agent activity on your own machine"
+description: "Install Beacon on your machine, see what your AI coding agents are doing, and, if your team uses Asymptote, forward that telemetry to your team's dashboard in one step"
 ---
 
-Use this path when you want to try Asymptote Open Source on your own machine before a team rollout.
+Ten minutes, no admin rights. Beacon installs a small local collector under your user account,
+records what Claude Code, Codex, Cursor and other supported agents do into a JSONL log on your
+machine, and shows it to you in a local dashboard. If your team uses Asymptote Managed, the same
+setup connects your machine to the team dashboard after a one-click approval in your browser.
 
-The developer setup uses per-user paths and writes endpoint events to `~/.beacon/endpoint/logs/runtime.jsonl`.
+Nothing leaves your machine unless you choose to forward it; see [what leaves your machine](#what-leaves-your-machine).
 
 ## 1. Install Beacon
 
 <CodeGroup>
 ```bash title="macOS"
-brew tap asymptote-labs/tap
-brew install beacon
-beacon endpoint install
+brew install asymptote-labs/tap/beacon
 ```
 
 ```bash title="Linux"
@@ -35,78 +36,124 @@ grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
 
 tar -xzf "${ARCHIVE}"
 mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
-beacon endpoint install
 ```
 </CodeGroup>
 
+Homebrew also installs [Vector](https://vector.dev), which Beacon uses to forward telemetry when you
+ask it to. On Linux, install Vector 0.56 or newer from vector.dev if you plan to forward.
+
 <Note>
-  The Linux tab uses the tarball on purpose. This page is a per-user setup, and the `.deb`/`.rpm`
-  packages install a **system-mode** endpoint managed by systemd, which writes to
-  `/var/log/beacon-agent/runtime.jsonl` instead, so every command below would report on the wrong
-  log. If you want the system-mode package, follow [Linux](/platforms/linux) instead of this page.
+  The Linux tab uses the tarball on purpose. This page is a per-user setup; the `.deb`/`.rpm`
+  packages install a **system-mode** endpoint managed by systemd that writes to
+  `/var/log/beacon-agent/runtime.jsonl`, so the commands below would report on the wrong log. For
+  the system-mode package, follow [Linux](/platforms/linux) instead.
 </Note>
 
-The Linux commands resolve the current release rather than a version you have to edit in, map
-`x86_64` and `aarch64` to the archive names Beacon actually publishes, and stop before downloading
-anything on an architecture with no published archive. The checksum step names the one archive
-about to be extracted, so it verifies that file rather than whatever else the directory happens to
-hold.
-
-See [Asymptote Open Source](/deployment/open-source) for install details and runtime-specific notes,
-or [macOS](/platforms/macos), [Linux](/platforms/linux), or [Windows](/platforms/windows) for the
-platform detail.
-
-## 2. Confirm collection health
+## 2. Set up the endpoint
 
 ```bash
-beacon endpoint status
-beacon endpoint discover
+beacon endpoint install --harness claude,codex,cursor
 ```
 
-`status` confirms the local collector is running. `discover` shows the supported [agent harnesses](/runtimes) Beacon can see on your machine.
+This starts the local collector, points Claude Code and Codex at it, and installs the Cursor hooks.
+Drop `cursor` from the list if you do not use it; add other hook runtimes the same way (see
+[Runtime hooks](/cli/hooks) for the names).
 
-## 3. Inspect local activity
+The first install asks three questions in the terminal:
 
-Open the dashboard to review runtime inventory, timelines, filters, and event details from local Beacon logs.
+1. **How are you using Beacon?** Work, personal, or evaluating.
+2. **Your email.** Used once, for attribution, so we know which agent runtimes to support next.
+3. **Where should this machine's agent telemetry go?** Pick with the arrow keys:
+
+| Choice | What happens |
+|--------|--------------|
+| **Keep it on this machine** (default) | Nothing is sent anywhere. You get the local log and the local dashboard. Change your mind any time with `beacon endpoint connect` or a forwarding pack. |
+| **Forward to your own infrastructure** | A SIEM, observability platform, or an S3/GCS bucket you own. Beacon prints the [log forwarding](/log-forwarding) guide and the pack commands; the install stays local until you set one up. |
+| **Forward to Asymptote Managed** | Your browser opens the Asymptote dashboard; a member of your organization approves this device; a Vector forwarder starts shipping the log to your team's dashboard. Only events recorded after the approval are sent. |
+
+The answers stay on your machine and are asked once per machine. The one exception: if you chose
+Asymptote Managed and the connection did not finish, the destination question comes back next time.
+
+## 3. If you chose Asymptote Managed
+
+You need to be a member of your organization in Asymptote; ask an admin for an invite if signing in
+shows no organization. After the install finishes:
+
+1. The browser opens `asymptotelabs.ai/cli/enroll`. Sign in if asked.
+2. The page shows your machine's name, OS and Beacon version. Click **Approve this device**.
+3. Back in the terminal you see `Connected to Asymptote as device … for <your org>` and
+   `Forwarder: … running=true`. The per-device key is stored in a file only you can read; it is
+   never printed.
+
+Skipped the question or your browser did not open? Run it any time:
 
 ```bash
-beacon endpoint dashboard --open
+beacon endpoint connect
 ```
 
-Beacon writes supported prompt, tool, command, file, approval, and runtime context when source runtimes emit it. See [Endpoint event schema](/telemetry-schema/event-schema) for event fields and examples.
+## 4. See your first events
 
-## 4. Add hooks if needed
-
-Some runtimes need user- or project-scoped hooks for richer telemetry.
+Start a new Claude Code or Codex session, or restart Cursor so it loads the hooks, and do a few
+turns. Then:
 
 ```bash
-beacon endpoint hooks install --harness cursor
-beacon endpoint hooks status --harness cursor
+beacon endpoint status              # collector running, each harness telemetry=enabled
+beacon endpoint dashboard --open    # local dashboard over your own log
 ```
 
-Restart the selected runtime after installing or removing hooks. See [Runtime hooks](/cli/hooks) for supported harnesses, setup, status checks, and uninstall steps.
+If you connected to Asymptote Managed, your machine appears on the team dashboard's **Endpoints**
+page within a minute or two, and the session shows up under **Telemetry**. The `status` output
+also has an `Asymptote managed ingest` line with the connection, the forwarder state, and whether
+the device key is still accepted.
 
-## 5. Clean up
+## Everyday commands
 
-Remove endpoint service files when you are done testing. Use `--keep-logs` if you want to preserve local runtime logs.
+| Task | Command |
+|------|---------|
+| Check health and the managed connection | `beacon endpoint status` |
+| Local dashboard | `beacon endpoint dashboard --open` |
+| Connect to Asymptote Managed later, or re-connect after a revoke | `beacon endpoint connect` |
+| Stop forwarding and remove the local key | `beacon endpoint disconnect`, then revoke the device on the dashboard |
+| See what you answered at setup | `beacon endpoint onboarding` |
+| Hook status for a runtime | `beacon endpoint hooks status --harness cursor` |
+| Upgrade | `brew upgrade beacon && beacon endpoint install --harness claude,codex,cursor` (the forwarder keeps running) |
+| Remove everything, keep your logs | `beacon endpoint uninstall --keep-logs` |
 
-```bash
-beacon endpoint uninstall --keep-logs
-```
+## What leaves your machine
+
+- **By default, nothing.** Hooks and the collector never touch the network.
+- **Once, at setup:** your email, your work/personal answer, and install context (OS, architecture,
+  Beacon version, install method, detected runtime names, a random install id). Never prompt text,
+  commands, file contents, or events. `BEACON_ONBOARDING=0` skips it entirely.
+- **Only if you connected to Asymptote Managed:** the runtime and inventory logs, exactly as written
+  locally, sent by Vector with your device key. Revoking the device on the dashboard stops it within
+  about a minute; `beacon endpoint disconnect` stops it locally.
+
+## If something looks off
+
+- **No events after a session:** Claude Code and Codex read their telemetry settings at startup, and
+  Cursor loads hooks at startup, so start a fresh session or restart the app.
+- **`status` says the credential is revoked:** someone revoked this device, or you left the
+  organization. `beacon endpoint connect` re-enrolls.
+- **The approval page says "not provisioned" or "not enabled":** you are not yet a member of an
+  organization that has managed ingest, or none is enabled. Ask your admin.
+- **`Collector ports are not listening` during install:** a system-mode Beacon is already installed on
+  this machine (`/opt/beacon`); the two cannot run together. Use that install instead, or remove it
+  first. See [troubleshooting](/support/troubleshooting).
 
 ## Related
 
 <Columns cols={2}>
-  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
-    Install Beacon and understand the files it manages.
+  <Card title="beacon endpoint connect" icon="link" href="/cli/endpoint-connect">
+    Everything about connecting, disconnecting, and what the forwarder stores.
   </Card>
-  <Card title="Endpoint agent" icon="desktop" href="/cli/endpoint">
-    Install, repair, inspect, and uninstall the local endpoint agent.
+  <Card title="Asymptote Managed forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
+    The wire contract, what is sent, and how revocation works.
   </Card>
   <Card title="Runtime hooks" icon="plug" href="/cli/hooks">
-    Install, check, and remove supported hook-based endpoint telemetry.
+    Install, check, and remove hook-based telemetry for each runtime.
   </Card>
-  <Card title="Local testing" icon="flask-vial" href="/guides/local-testing">
-    Validate endpoint health, events, dashboard access, MCP access, and logs.
+  <Card title="Log forwarding" icon="share-nodes" href="/log-forwarding">
+    Send the local log to your own SIEM, observability platform, or bucket.
   </Card>
 </Columns>

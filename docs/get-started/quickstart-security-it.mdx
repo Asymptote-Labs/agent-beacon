@@ -59,7 +59,7 @@ Use [Log Forwarding](/log-forwarding) for Wazuh, Splunk HEC, Falcon LogScale HEC
 
 Use [`beacon scan`](/cli/scan) and [`beacon rules`](/cli/rules) when you want local threat-detection checks over endpoint telemetry before or alongside downstream forwarding.
 
-Move to [Asymptote Managed](/deployment/managed) when you need centralized retention, search, detections, fleet-wide visibility, governance, investigations, SSO/RBAC, audit trails, or rollout support.
+Move to [Asymptote Managed](/deployment/managed) when you need centralized retention, search, detections, fleet-wide visibility, governance, investigations, SSO/RBAC, audit trails, or rollout support. Once your organization is provisioned, endpoints join it one at a time: a developer runs [`beacon endpoint connect`](/cli/endpoint-connect) (or picks Asymptote Managed during the first install) and approves the device in the browser; on package or MDM installs an admin runs `sudo beacon endpoint connect --system` on the machine. Headless enrollment for fleets is a planned follow-up.
 
 [Contact us](https://asymptotelabs.ai/contact) if you want Managed or Private Deployment guidance.
 
