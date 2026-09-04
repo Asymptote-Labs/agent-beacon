@@ -20,6 +20,7 @@ import (
 
 type fakeForwarder struct {
 	supported bool
+	unitPath  string
 	written   []string
 	loads     int
 	unloads   int
@@ -30,13 +31,24 @@ type fakeForwarder struct {
 func (f *fakeForwarder) Supported() bool           { return f.supported }
 func (f *fakeForwarder) UnsupportedReason() string { return "fake forwarder unsupported" }
 func (f *fakeForwarder) Label() string             { return "fake.forwarder" }
+func (f *fakeForwarder) UnitPath() (string, error) { return f.unitPath, nil }
 func (f *fakeForwarder) WriteUnit(vectorBin, configPath string) (string, error) {
 	f.written = append(f.written, vectorBin+" --config "+configPath)
-	return "/tmp/fake.unit", nil
+	if f.unitPath != "" {
+		if err := os.WriteFile(f.unitPath, []byte("unit"), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return f.unitPath, nil
 }
 func (f *fakeForwarder) Load() error   { f.loads++; return f.loadErr }
 func (f *fakeForwarder) Unload() error { f.unloads++; return nil }
-func (f *fakeForwarder) RemoveUnits()  { f.removed++ }
+func (f *fakeForwarder) RemoveUnits() {
+	f.removed++
+	if f.unitPath != "" {
+		_ = os.Remove(f.unitPath)
+	}
+}
 func (f *fakeForwarder) Status() service.Status {
 	return service.Status{Label: "fake.forwarder", Loaded: f.loads > 0, Running: f.loads > 0}
 }
@@ -436,5 +448,36 @@ func TestLoopbackIngestURLIsAcceptedEndToEnd(t *testing.T) {
 		if got := IsSecureURL(c.url); got != c.want {
 			t.Errorf("IsSecureURL(%q) = %t, want %t", c.url, got, c.want)
 		}
+	}
+}
+
+func TestDisconnectIgnoresALeftoverInstallIDFromACancelledConnect(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A connect that was cancelled after pinning the id leaves only asymptote/install-id.
+	if err := WriteInstallID(true, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	fwd := &fakeForwarder{supported: true}
+	if err := Disconnect(DisconnectOptions{UserMode: true, Forwarder: fwd}); err != nil {
+		t.Fatal(err)
+	}
+	if fwd.unloads != 0 || fwd.removed != 0 {
+		t.Fatalf("a pinned install id alone must not touch the service manager: unloads=%d removed=%d", fwd.unloads, fwd.removed)
+	}
+	if _, err := os.Stat(Dir(true)); !os.IsNotExist(err) {
+		t.Fatal("the leftover directory should still be cleaned up")
+	}
+
+	// A unit file on disk, with nothing else, is still a forwarder to stop.
+	fwd = &fakeForwarder{supported: true, unitPath: filepath.Join(t.TempDir(), "forwarder.plist")}
+	if err := os.WriteFile(fwd.unitPath, []byte("unit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Disconnect(DisconnectOptions{UserMode: true, Forwarder: fwd}); err != nil {
+		t.Fatal(err)
+	}
+	if fwd.unloads != 1 {
+		t.Fatalf("an installed unit must be unloaded, unloads=%d", fwd.unloads)
 	}
 }

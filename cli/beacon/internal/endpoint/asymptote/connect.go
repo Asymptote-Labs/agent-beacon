@@ -20,6 +20,7 @@ type Forwarder interface {
 	Supported() bool
 	UnsupportedReason() string
 	Label() string
+	UnitPath() (string, error)
 	WriteUnit(vectorBin, configPath string) (string, error)
 	Load() error
 	Unload() error
@@ -218,11 +219,12 @@ func Disconnect(opts DisconnectOptions) error {
 		manager = service.ForwarderManager{UserMode: opts.UserMode}
 	}
 	var problems []error
-	// Only touch the service manager when this endpoint has managed-ingest state. Uninstall
+	// Only touch the service manager when a forwarder was actually installed here. Uninstall
 	// calls Disconnect unconditionally, and a bootout against the live launchd domain from
 	// an endpoint that was never connected would stop a forwarder belonging to a different
-	// install (or to the developer running the test suite).
-	if hasManagedState(opts.UserMode) {
+	// install (or to the developer running the test suite). A directory holding only the
+	// pinned install id from a cancelled connect is not a forwarder.
+	if forwarderInstalled(opts.UserMode, manager) {
 		if err := manager.Unload(); err != nil {
 			problems = append(problems, fmt.Errorf("stop forwarder: %w", err))
 		}
@@ -237,10 +239,21 @@ func Disconnect(opts DisconnectOptions) error {
 	return errors.Join(problems...)
 }
 
-// hasManagedState reports whether anything under the asymptote directory exists.
-func hasManagedState(userMode bool) bool {
-	_, err := os.Stat(Dir(userMode))
-	return err == nil
+// forwarderInstalled reports whether Connect got as far as installing a forwarder: the
+// rendered config, an enrollment record, or the service unit itself exists.
+func forwarderInstalled(userMode bool, manager Forwarder) bool {
+	if Connected(userMode) {
+		return true
+	}
+	if _, err := os.Stat(EnrollmentPath(userMode)); err == nil {
+		return true
+	}
+	if path, err := manager.UnitPath(); err == nil && path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // updateConfig records (or clears) the non-secret managed_ingest block in config.json. A
