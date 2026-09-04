@@ -250,11 +250,11 @@ func (cs *CallbackServer) sendResponse(w http.ResponseWriter, success bool, erro
 	}
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
-<head><title>Beacon Login Failed</title></head>
+<head><title>Beacon Authentication Failed</title></head>
 <body>
   <h1>Authentication Failed</h1>
   <p>%s</p>
-  <p>Please return to the terminal and try <code>beacon login</code> again.</p>
+  <p>Please return to the terminal and run the command again.</p>
 </body>
 </html>`, html.EscapeString(errorMsg))
 }

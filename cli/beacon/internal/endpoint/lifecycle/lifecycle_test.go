@@ -4,15 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
-	beaconauth "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -177,47 +174,6 @@ func TestConfigureHarnessesRejectsUnsupportedHarness(t *testing.T) {
 	cfg := endpointconfig.Config{Harnesses: []string{"unknown"}}
 	if _, err := configureHarnesses(cfg); err == nil || !strings.Contains(err.Error(), "unsupported harness") {
 		t.Fatalf("configureHarnesses error = %v, want unsupported harness", err)
-	}
-}
-
-func TestGetStatusDoesNotUploadManagedTelemetry(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	logPath := filepath.Join(home, "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{\"event\":\"ok\"}\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		http.Error(w, "status should not upload", http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	_, err := endpointconfig.Save(endpointconfig.Config{
-		UserMode:  true,
-		LogPath:   logPath,
-		Harnesses: []string{},
-		ManagedUpload: &endpointconfig.ManagedUpload{
-			Enabled:   true,
-			Managed:   true,
-			IngestURL: server.URL,
-			SourceID:  "source-1",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := beaconauth.SaveCredentials(&beaconauth.Credentials{Token: "token", UserID: "user"}); err != nil {
-		t.Fatal(err)
-	}
-
-	status := GetStatus(true, logPath)
-	if !status.ManagedUpload.Enabled || !status.ManagedUpload.Managed || !status.ManagedUpload.LoggedIn {
-		t.Fatalf("unexpected endpoint ingest status: %#v", status.ManagedUpload)
-	}
-	if called {
-		t.Fatal("GetStatus performed an ingest upload network call")
 	}
 }
 

@@ -37,9 +37,7 @@ Top-level Agent Beacon CLI commands.
 | [`beacon cloud`](/cli/cloud) | Configure provider-managed cloud agent telemetry setup helpers. |
 | [`beacon doctor`](/cli/endpoint-doctor) | Alias for `beacon endpoint doctor`. |
 | [`beacon endpoint`](/cli/endpoint) | Manage local endpoint telemetry, runtime logs, and integrations. |
-| [`beacon ingest`](/cli/ingest) | Upload Beacon telemetry to configured ingest destinations. |
 | [`beacon inventory`](/cli/endpoint-inventory) | Alias for `beacon endpoint inventory`. |
-| [`beacon login`](/cli/login) | Log in to the Asymptote dashboard from the Beacon CLI. |
 | [`beacon mcp`](/cli/mcp) | Expose local Beacon activity to MCP clients. |
 | [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
 | [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
@@ -133,20 +131,6 @@ Expose local Beacon runtime activity through MCP.
 |---------|-------------|
 | [`beacon mcp serve`](/cli/mcp-serve) | Run the local Beacon MCP server over stdio or loopback HTTP JSON-RPC. |
 | [`beacon mcp doctor`](/cli/mcp-doctor) | Validate local Beacon MCP setup and print client configuration. |
-
-## beacon ingest
-
-```bash title="Command syntax"
-beacon ingest [command]
-```
-
-Upload Beacon telemetry to configured ingest destinations.
-
-| Command | Description |
-|---------|-------------|
-| [`beacon ingest status`](/cli/ingest#beacon-ingest-status) | Show configured ingest status. |
-| [`beacon ingest endpoint status`](/cli/ingest-endpoint#beacon-ingest-endpoint-status) | Show endpoint telemetry upload status. |
-| [`beacon ingest endpoint upload`](/cli/ingest-endpoint#beacon-ingest-endpoint-upload) | Upload endpoint telemetry to managed ingest. |
 
 ## beacon endpoint
 

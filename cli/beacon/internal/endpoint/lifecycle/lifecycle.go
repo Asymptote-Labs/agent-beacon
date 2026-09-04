@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	beaconauth "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
@@ -17,8 +16,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/ingest"
-	endpointingest "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/ingest/endpoint"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
@@ -76,17 +73,16 @@ type InstallResult struct {
 }
 
 type Status struct {
-	Version       string                   `json:"version"`
-	ConfigPath    string                   `json:"config_path"`
-	LogPath       string                   `json:"log_path"`
-	RuntimeLog    RuntimeLogSource         `json:"runtime_log"`
-	Collector     endpointcollector.Status `json:"collector"`
-	Service       service.Status           `json:"service"`
-	Harnesses     []harness.Harness        `json:"harnesses"`
-	Diagnostics   []diagnostics.Check      `json:"diagnostics"`
-	LastEvent     string                   `json:"last_event,omitempty"`
-	Destinations  DestinationStatus        `json:"destinations"`
-	ManagedUpload ingest.State             `json:"managed_upload"`
+	Version      string                   `json:"version"`
+	ConfigPath   string                   `json:"config_path"`
+	LogPath      string                   `json:"log_path"`
+	RuntimeLog   RuntimeLogSource         `json:"runtime_log"`
+	Collector    endpointcollector.Status `json:"collector"`
+	Service      service.Status           `json:"service"`
+	Harnesses    []harness.Harness        `json:"harnesses"`
+	Diagnostics  []diagnostics.Check      `json:"diagnostics"`
+	LastEvent    string                   `json:"last_event,omitempty"`
+	Destinations DestinationStatus        `json:"destinations"`
 }
 
 type DestinationStatus struct {
@@ -566,24 +562,17 @@ func GetStatus(userMode bool, logPath string) Status {
 			Message:  runtimeLog.Warning,
 		})
 	}
-	creds, _ := beaconauth.LoadCredentials()
-	managedUpload := ingest.Status(
-		endpointingest.Settings(effectiveCfg, effectiveCfg.LogPath, effectiveCfg.UserMode),
-		endpointingest.Store(effectiveCfg.UserMode),
-		creds,
-	)
 	return Status{
-		Version:       version.GetVersion(),
-		ConfigPath:    endpointconfig.ConfigPath(effectiveCfg.UserMode),
-		LogPath:       effectiveCfg.LogPath,
-		RuntimeLog:    runtimeLog,
-		Collector:     endpointcollector.CheckStatus(effectiveCfg),
-		Service:       service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
-		Harnesses:     harness.DiscoverAll(),
-		Diagnostics:   checks,
-		LastEvent:     last,
-		Destinations:  destinationStatus(effectiveCfg),
-		ManagedUpload: managedUpload,
+		Version:      version.GetVersion(),
+		ConfigPath:   endpointconfig.ConfigPath(effectiveCfg.UserMode),
+		LogPath:      effectiveCfg.LogPath,
+		RuntimeLog:   runtimeLog,
+		Collector:    endpointcollector.CheckStatus(effectiveCfg),
+		Service:      service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
+		Harnesses:    harness.DiscoverAll(),
+		Diagnostics:  checks,
+		LastEvent:    last,
+		Destinations: destinationStatus(effectiveCfg),
 	}
 }
 

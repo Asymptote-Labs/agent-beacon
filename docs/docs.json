@@ -399,15 +399,6 @@
                 ]
               },
               {
-                "group": "beacon ingest",
-                "root": "cli/ingest",
-                "tag": "Enterprise",
-                "pages": [
-                  "cli/ingest-endpoint"
-                ]
-              },
-              "cli/login",
-              {
                 "group": "beacon mcp",
                 "root": "cli/mcp",
                 "pages": [
