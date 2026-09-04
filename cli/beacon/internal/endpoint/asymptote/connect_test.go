@@ -277,9 +277,14 @@ func TestDisconnectRemovesForwarderAndOptionallyKeepsCredentials(t *testing.T) {
 	if _, err := os.Stat(Dir(true)); !os.IsNotExist(err) {
 		t.Fatal("asymptote dir should be removed entirely")
 	}
-	// Disconnecting an endpoint that was never connected is not an error.
+	// Disconnecting an endpoint that was never connected is not an error and must not
+	// touch the service manager: uninstall runs this on every endpoint.
+	before := fwd.unloads
 	if err := Disconnect(DisconnectOptions{UserMode: true, Forwarder: fwd}); err != nil {
 		t.Fatalf("second disconnect should be a no-op, got %v", err)
+	}
+	if fwd.unloads != before {
+		t.Fatal("disconnect without managed state must not unload the forwarder")
 	}
 }
 

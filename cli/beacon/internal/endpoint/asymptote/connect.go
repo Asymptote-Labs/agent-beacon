@@ -218,10 +218,16 @@ func Disconnect(opts DisconnectOptions) error {
 		manager = service.ForwarderManager{UserMode: opts.UserMode}
 	}
 	var problems []error
-	if err := manager.Unload(); err != nil {
-		problems = append(problems, fmt.Errorf("stop forwarder: %w", err))
+	// Only touch the service manager when this endpoint has managed-ingest state. Uninstall
+	// calls Disconnect unconditionally, and a bootout against the live launchd domain from
+	// an endpoint that was never connected would stop a forwarder belonging to a different
+	// install (or to the developer running the test suite).
+	if hasManagedState(opts.UserMode) {
+		if err := manager.Unload(); err != nil {
+			problems = append(problems, fmt.Errorf("stop forwarder: %w", err))
+		}
+		manager.RemoveUnits()
 	}
-	manager.RemoveUnits()
 	if err := RemoveState(opts.UserMode, opts.KeepCredentials); err != nil {
 		problems = append(problems, fmt.Errorf("remove %s: %w", Dir(opts.UserMode), err))
 	}
@@ -229,6 +235,12 @@ func Disconnect(opts DisconnectOptions) error {
 		problems = append(problems, fmt.Errorf("update endpoint config: %w", err))
 	}
 	return errors.Join(problems...)
+}
+
+// hasManagedState reports whether anything under the asymptote directory exists.
+func hasManagedState(userMode bool) bool {
+	_, err := os.Stat(Dir(userMode))
+	return err == nil
 }
 
 // updateConfig records (or clears) the non-secret managed_ingest block in config.json. A
