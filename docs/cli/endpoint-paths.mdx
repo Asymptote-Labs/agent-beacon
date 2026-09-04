@@ -15,6 +15,7 @@ Beacon manages different paths depending on whether you install in user mode or 
 | Rotated runtime archives | `~/.beacon/endpoint/logs/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl.1` through `.5` |
 | Threat rule store | `~/.beacon/endpoint/rules` | `/Library/Application Support/Beacon/Endpoint/rules` | `/etc/beacon/endpoint/rules` | `%ProgramData%\Beacon\Endpoint\rules` |
 | Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` | `/etc/beacon/endpoint/otelcol.yaml` | `%ProgramData%\Beacon\Endpoint\otelcol.yaml` |
+| Managed-ingest state (`beacon endpoint connect`) | `~/.beacon/endpoint/asymptote/` (`enrollment.json`, `vector-secrets.json`, `vector.toml`, `vector-data/`) | `/Library/Application Support/Beacon/Endpoint/asymptote/` | `/etc/beacon/endpoint/asymptote/` | Not yet supported |
 | Installed binaries | None | `/opt/beacon/bin` | `/opt/beacon/bin` | `%ProgramFiles%\Beacon\bin` |
 | OTLP gRPC | `127.0.0.1:4317` | `127.0.0.1:4317` | `127.0.0.1:4317` | `127.0.0.1:4317` |
 | OTLP HTTP | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` |
@@ -31,6 +32,8 @@ The collector runs under whichever service manager the host provides. On Linux, 
 | Linux | systemd | `/etc/systemd/system/beacon-collector.service` | `~/.config/systemd/user/beacon-collector.service` |
 | Windows | Service Control Manager | `BeaconCollector` service, defined at `HKLM\SYSTEM\CurrentControlSet\Services\BeaconCollector` | Supervised, because Windows has no per-user service manager |
 | Containers, no init | supervised | `/etc/beacon/endpoint/collector.pid` | `~/.beacon/endpoint/collector.pid` |
+
+The Asymptote forwarder started by `beacon endpoint connect` is a second, resident service that runs Vector: `/Library/LaunchDaemons/com.beacon.endpoint.asymptote-forwarder.plist` or `~/Library/LaunchAgents/com.beacon.endpoint.asymptote-forwarder.plist` on macOS, `/etc/systemd/system/beacon-asymptote-forwarder.service` or `~/.config/systemd/user/beacon-asymptote-forwarder.service` on Linux. It is not offered in supervised mode, because nothing would restart it; run the [Asymptote pack](/cli/asymptote) under your own supervisor there.
 
 Windows has no unit file to point at: the service definition lives in the registry, so that is what `beacon endpoint status` reports where the other platforms report a path. And there is no counterpart to `systemctl --user` or launchd's per-user domain, so a Windows user-mode install always gets the supervised collector. See [Windows install](/platforms/windows#user-mode-install).
 

@@ -1,15 +1,11 @@
 package auth
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
-	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -20,34 +16,21 @@ const (
 	callbackWriteTimeoutSlack = 5 * time.Second
 )
 
+// ExchangeFunc redeems the one-time code the dashboard delivered to the callback.
+// It runs inside the callback request, so the browser sees the outcome; the
+// caller keeps whatever the exchange returned in its own closure.
+type ExchangeFunc func(ctx context.Context, exchangeCode, state, codeVerifier string) error
+
+// CallbackResult is what Wait returns: the state that completed the flow, or the
+// error that ended it.
 type CallbackResult struct {
-	Token       string
-	TokenPrefix string
-	ExpiresAt   string
-	UserID      string
-	Email       string
-	OrgID       string
-	OrgName     string
-	State       string
-	Error       string
+	State string
+	Error string
 }
 
-type exchangeCodeRequest struct {
-	ExchangeCode string `json:"exchange_code"`
-	State        string `json:"state"`
-	CodeVerifier string `json:"code_verifier"`
-}
-
-type exchangeCodeResponse struct {
-	Token       string  `json:"token"`
-	TokenPrefix string  `json:"token_prefix"`
-	ExpiresAt   *string `json:"expires_at"`
-	UserID      string  `json:"user_id"`
-	Email       string  `json:"email"`
-	OrgID       string  `json:"org_id"`
-	OrgName     string  `json:"org_name"`
-}
-
+// CallbackServer is the loopback HTTP server the dashboard redirects to with the
+// exchange code. It listens on an ephemeral 127.0.0.1 port, accepts exactly one
+// valid callback, and runs the ExchangeFunc before answering the browser.
 type CallbackServer struct {
 	port         int
 	listener     net.Listener
@@ -57,17 +40,24 @@ type CallbackServer struct {
 	completed    bool
 	state        string
 	codeVerifier string
-	dashboardURL string
-	httpClient   *http.Client
+	exchange     ExchangeFunc
+	successTitle string
+	successBody  string
 }
 
-func NewCallbackServer(expectedState, codeVerifier, dashboardURL string, httpClient *http.Client) (*CallbackServer, error) {
+// NewCallbackServer binds the loopback listener. exchangeTimeout should match the
+// timeout of the HTTP client the ExchangeFunc uses so the browser response is not
+// cut off before the exchange finishes; zero uses a 30 s default.
+func NewCallbackServer(expectedState, codeVerifier string, exchange ExchangeFunc, exchangeTimeout time.Duration) (*CallbackServer, error) {
+	if exchange == nil {
+		return nil, fmt.Errorf("callback server needs an exchange function")
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: defaultExchangeTimeout}
+	if exchangeTimeout <= 0 {
+		exchangeTimeout = defaultExchangeTimeout
 	}
 	cs := &CallbackServer{
 		port:         listener.Addr().(*net.TCPAddr).Port,
@@ -75,8 +65,9 @@ func NewCallbackServer(expectedState, codeVerifier, dashboardURL string, httpCli
 		resultCh:     make(chan *CallbackResult, 1),
 		state:        expectedState,
 		codeVerifier: codeVerifier,
-		dashboardURL: normalizeDashboardURL(dashboardURL),
-		httpClient:   httpClient,
+		exchange:     exchange,
+		successTitle: "Beacon Authentication Complete",
+		successBody:  "You can close this window and return to the terminal.",
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", cs.handleCallback)
@@ -84,23 +75,27 @@ func NewCallbackServer(expectedState, codeVerifier, dashboardURL string, httpCli
 		Handler:           mux,
 		ReadHeaderTimeout: callbackReadTimeout,
 		ReadTimeout:       callbackReadTimeout,
-		WriteTimeout:      callbackWriteTimeout(httpClient),
+		WriteTimeout:      exchangeTimeout + callbackWriteTimeoutSlack,
 	}
 	return cs, nil
 }
 
-func callbackWriteTimeout(httpClient *http.Client) time.Duration {
-	exchangeTimeout := defaultExchangeTimeout
-	if httpClient != nil && httpClient.Timeout > exchangeTimeout {
-		exchangeTimeout = httpClient.Timeout
+// SetSuccessPage customizes what the browser shows after a successful exchange.
+func (cs *CallbackServer) SetSuccessPage(title, body string) {
+	if title != "" {
+		cs.successTitle = title
 	}
-	return exchangeTimeout + callbackWriteTimeoutSlack
+	if body != "" {
+		cs.successBody = body
+	}
 }
 
+// Port is the ephemeral loopback port the dashboard must redirect to.
 func (cs *CallbackServer) Port() int {
 	return cs.port
 }
 
+// Start serves in the background until Shutdown.
 func (cs *CallbackServer) Start() {
 	go func() {
 		if err := cs.server.Serve(cs.listener); err != nil && err != http.ErrServerClosed {
@@ -109,15 +104,17 @@ func (cs *CallbackServer) Start() {
 	}()
 }
 
+// Wait blocks for the first completed callback or the timeout.
 func (cs *CallbackServer) Wait(timeout time.Duration) (*CallbackResult, error) {
 	select {
 	case result := <-cs.resultCh:
 		return result, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for authentication callback")
+		return nil, fmt.Errorf("timeout waiting for the browser to finish")
 	}
 }
 
+// Shutdown stops the listener.
 func (cs *CallbackServer) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -141,35 +138,22 @@ func (cs *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !cs.reserveCompletion() {
-		cs.sendResponse(w, false, "Authentication callback already handled")
+		cs.sendResponse(w, false, "Callback already handled")
 		return
 	}
-	tokenResp, err := cs.exchangeCodeForToken(r.Context(), exchangeCode, state, cs.codeVerifier)
-	if err != nil {
+	if err := cs.exchange(r.Context(), exchangeCode, state, cs.codeVerifier); err != nil {
 		message := fmt.Sprintf("failed to exchange code: %v", err)
 		cs.resultCh <- &CallbackResult{Error: message}
 		cs.sendResponse(w, false, message)
 		return
 	}
-	result := &CallbackResult{
-		Token:       tokenResp.Token,
-		TokenPrefix: tokenResp.TokenPrefix,
-		UserID:      tokenResp.UserID,
-		Email:       tokenResp.Email,
-		OrgID:       tokenResp.OrgID,
-		OrgName:     tokenResp.OrgName,
-		State:       state,
-	}
-	if tokenResp.ExpiresAt != nil {
-		result.ExpiresAt = *tokenResp.ExpiresAt
-	}
-	cs.resultCh <- result
+	cs.resultCh <- &CallbackResult{State: state}
 	cs.sendResponse(w, true, "")
 }
 
 func (cs *CallbackServer) finishCallback(w http.ResponseWriter, result *CallbackResult, success bool, errorMsg string) {
 	if !cs.reserveCompletion() {
-		cs.sendResponse(w, false, "Authentication callback already handled")
+		cs.sendResponse(w, false, "Callback already handled")
 		return
 	}
 	cs.resultCh <- result
@@ -186,66 +170,18 @@ func (cs *CallbackServer) reserveCompletion() bool {
 	return true
 }
 
-func (cs *CallbackServer) exchangeCodeForToken(ctx context.Context, exchangeCode, state, codeVerifier string) (*exchangeCodeResponse, error) {
-	bodyBytes, err := json.Marshal(exchangeCodeRequest{
-		ExchangeCode: exchangeCode,
-		State:        state,
-		CodeVerifier: codeVerifier,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cs.dashboardURL+"/api/cli/auth/exchange", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create exchange request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "beacon-cli")
-
-	resp, err := cs.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call exchange endpoint: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read exchange response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Detail string `json:"detail"`
-			Error  string `json:"error"`
-		}
-		if json.Unmarshal(respBody, &errResp) == nil {
-			if errResp.Detail != "" {
-				return nil, fmt.Errorf("%s", errResp.Detail)
-			}
-			if errResp.Error != "" {
-				return nil, fmt.Errorf("%s", errResp.Error)
-			}
-		}
-		return nil, fmt.Errorf("exchange failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
-	var tokenResp exchangeCodeResponse
-	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to parse exchange response: %w", err)
-	}
-	return &tokenResp, nil
-}
-
 func (cs *CallbackServer) sendResponse(w http.ResponseWriter, success bool, errorMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if success {
-		_, _ = w.Write([]byte(`<!DOCTYPE html>
+		_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
-<head><title>Beacon Login Complete</title></head>
+<head><title>%s</title></head>
 <body>
-  <h1>Authentication Successful</h1>
-  <p>You can close this window and return to the terminal.</p>
+  <h1>%s</h1>
+  <p>%s</p>
 </body>
-</html>`))
+</html>`, html.EscapeString(cs.successTitle), html.EscapeString(cs.successTitle), html.EscapeString(cs.successBody))
 		return
 	}
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>

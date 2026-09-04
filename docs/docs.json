@@ -372,6 +372,7 @@
                 "root": "cli/endpoint",
                 "pages": [
                   "cli/endpoint-install",
+                  "cli/endpoint-connect",
                   "cli/endpoint-status",
                   "cli/endpoint-doctor",
                   "cli/endpoint-inventory",

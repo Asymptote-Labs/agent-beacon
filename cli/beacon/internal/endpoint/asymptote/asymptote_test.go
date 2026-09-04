@@ -192,6 +192,9 @@ func TestRenderVectorConfigRefusesInsecureOrIncompleteInput(t *testing.T) {
 	if _, err := RenderVectorConfig(RenderOptions{LogPath: "/tmp/r.jsonl", IngestURL: "http://ingest.example.test", SecretsFile: "/s", DataDir: "/d"}); !errors.Is(err, ErrInsecureIngestURL) {
 		t.Fatalf("expected ErrInsecureIngestURL, got %v", err)
 	}
+	if _, err := RenderVectorConfig(RenderOptions{LogPath: "/tmp/r.jsonl", IngestURL: "http://127.0.0.1:8080", SecretsFile: "/s", DataDir: "/d"}); err != nil {
+		t.Fatalf("loopback http must be allowed for local development, got %v", err)
+	}
 	if _, err := RenderVectorConfig(RenderOptions{LogPath: "/tmp/r.jsonl", IngestURL: "https://ingest.example.test"}); !errors.Is(err, ErrIncompleteRender) {
 		t.Fatalf("expected ErrIncompleteRender, got %v", err)
 	}

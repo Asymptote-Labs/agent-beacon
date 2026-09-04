@@ -19,6 +19,16 @@ Use this architecture when agent activity needs to be visible across teams, endp
 4. **Governance layer:** Policy controls, identity mapping, approvals, SSO, RBAC, and audit trails connect runtime activity to users, teams, and security workflows.
 5. **Investigation workflows:** Timelines and case workflows organize prompts, tool calls, file access, command execution, and related context for review.
 
+## How endpoint telemetry reaches Asymptote
+
+Beacon on the endpoint stays a local JSONL producer. `beacon endpoint connect` adds the managed path:
+
+1. **Approval.** The CLI registers the machine's hostname, OS and Beacon version and opens the dashboard's approval page. A member of the organization signs in with Clerk, picks the organization, and clicks Approve. Only organizations Asymptote has enabled for managed ingest can approve devices.
+2. **Device key.** The CLI redeems a one-time code with a PKCE verifier and receives a key for this one device. The key is stored in a `0600` secrets file and read only by Vector; it is never in Beacon's config or the process environment. Revoking the device, or removing the approving user from the organization, invalidates it within about a minute.
+3. **Forwarding.** A Vector service tails `runtime.jsonl` (from the point of approval) and `inventory_state.jsonl` and POSTs gzip NDJSON batches to Asymptote's ingest service with the device key. A disk buffer covers offline periods.
+4. **Ingest.** The service verifies the key, the approver's membership and the organization's enablement, validates each line, stamps a `tenant` block (organization, device, approving user, receive time) server-side, and writes one object per batch under `orgs/<organization>/<stream>/date=…/` in Asymptote's bucket.
+5. **Per-organization tables.** Each object triggers a notification; the organization's own ClickPipe loads it into that organization's ClickHouse tables. The dashboard resolves an organization to its tables through a mapping row, so tenant isolation is a table boundary, and duplicates from retried batches collapse on Beacon's deterministic event id.
+
 ## Managed capabilities
 
 | Capability | Purpose |

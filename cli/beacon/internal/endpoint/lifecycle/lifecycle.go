@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
@@ -73,16 +74,17 @@ type InstallResult struct {
 }
 
 type Status struct {
-	Version      string                   `json:"version"`
-	ConfigPath   string                   `json:"config_path"`
-	LogPath      string                   `json:"log_path"`
-	RuntimeLog   RuntimeLogSource         `json:"runtime_log"`
-	Collector    endpointcollector.Status `json:"collector"`
-	Service      service.Status           `json:"service"`
-	Harnesses    []harness.Harness        `json:"harnesses"`
-	Diagnostics  []diagnostics.Check      `json:"diagnostics"`
-	LastEvent    string                   `json:"last_event,omitempty"`
-	Destinations DestinationStatus        `json:"destinations"`
+	Version       string                        `json:"version"`
+	ConfigPath    string                        `json:"config_path"`
+	LogPath       string                        `json:"log_path"`
+	RuntimeLog    RuntimeLogSource              `json:"runtime_log"`
+	Collector     endpointcollector.Status      `json:"collector"`
+	Service       service.Status                `json:"service"`
+	Harnesses     []harness.Harness             `json:"harnesses"`
+	Diagnostics   []diagnostics.Check           `json:"diagnostics"`
+	LastEvent     string                        `json:"last_event,omitempty"`
+	Destinations  DestinationStatus             `json:"destinations"`
+	ManagedIngest asymptote.ManagedIngestStatus `json:"managed_ingest"`
 }
 
 type DestinationStatus struct {
@@ -404,6 +406,13 @@ func Uninstall(opts UninstallOptions) error {
 	if !cfg.UserMode && !opts.KeepUpdater {
 		removeUpdaterJob()
 	}
+	// The managed-ingest forwarder and its credentials go with the endpoint; server-side the
+	// device stays registered until it is revoked from the dashboard.
+	fail("disconnect managed ingest", asymptote.Disconnect(asymptote.DisconnectOptions{
+		UserMode:        cfg.UserMode,
+		LogPath:         cfg.LogPath,
+		KeepCredentials: opts.KeepConfig,
+	}))
 	manifest, _ := ReadManifest(cfg.UserMode)
 	if !opts.KeepConfig {
 		restoreBackups(manifest.Backups)
@@ -563,16 +572,17 @@ func GetStatus(userMode bool, logPath string) Status {
 		})
 	}
 	return Status{
-		Version:      version.GetVersion(),
-		ConfigPath:   endpointconfig.ConfigPath(effectiveCfg.UserMode),
-		LogPath:      effectiveCfg.LogPath,
-		RuntimeLog:   runtimeLog,
-		Collector:    endpointcollector.CheckStatus(effectiveCfg),
-		Service:      service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
-		Harnesses:    harness.DiscoverAll(),
-		Diagnostics:  checks,
-		LastEvent:    last,
-		Destinations: destinationStatus(effectiveCfg),
+		Version:       version.GetVersion(),
+		ConfigPath:    endpointconfig.ConfigPath(effectiveCfg.UserMode),
+		LogPath:       effectiveCfg.LogPath,
+		RuntimeLog:    runtimeLog,
+		Collector:     endpointcollector.CheckStatus(effectiveCfg),
+		Service:       service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
+		Harnesses:     harness.DiscoverAll(),
+		Diagnostics:   checks,
+		LastEvent:     last,
+		Destinations:  destinationStatus(effectiveCfg),
+		ManagedIngest: asymptote.Status(effectiveCfg.UserMode, asymptote.StatusOptions{}),
 	}
 }
 

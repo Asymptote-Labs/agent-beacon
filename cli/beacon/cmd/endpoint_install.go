@@ -172,6 +172,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Println("Last event: present")
 	}
+	fmt.Println(managedIngestStatusLine(status.ManagedIngest))
 	return nil
 }
 
