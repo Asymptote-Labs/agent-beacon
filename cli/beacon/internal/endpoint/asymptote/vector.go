@@ -14,7 +14,7 @@ import (
 
 // MinVectorVersion is the oldest Vector the forwarder template is validated against; the
 // `secret` file backend and the http sink options it uses exist from here on.
-const MinVectorVersion = "0.56.0"
+const MinVectorVersion = "0.50.0"
 
 // VectorBinEnv names an explicit Vector binary, ahead of every search location.
 const VectorBinEnv = "BEACON_VECTOR_BIN"

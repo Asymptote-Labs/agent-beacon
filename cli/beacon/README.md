@@ -512,7 +512,7 @@ stores the per-device key in a `0600` secrets file, and runs Vector as the
 `beacon-asymptote-forwarder.service` (systemd) service. Beacon stays the local
 JSONL producer and Vector does the network. Only lines written after approval
 are shipped, and revoking the device from the dashboard stops ingestion within
-about a minute. Vector 0.56 or newer is required: `/opt/beacon/bin/vector` from
+about a minute. Vector 0.50 or newer is required: `/opt/beacon/bin/vector` from
 the signed package, `vector` from Homebrew, or the Linux package from
 vector.dev.
 

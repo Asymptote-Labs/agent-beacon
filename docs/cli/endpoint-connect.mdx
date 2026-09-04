@@ -17,7 +17,7 @@ beacon endpoint disconnect [flags]
 ## Prerequisites
 
 - Beacon endpoint installed (`beacon endpoint install`) and writing local JSONL.
-- Vector 0.56 or newer on the machine. The signed macOS package installs it at `/opt/beacon/bin/vector`; Homebrew provides it as `vector` (the Beacon formula depends on it); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found.
+- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; Homebrew installs it with Beacon (the `asymptote-labs/tap/beacon` formula depends on the tap's own `vector` formula, since Vector is not in homebrew-core); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found.
 - A browser where you can sign in to the Asymptote dashboard as a member of an organization that has managed ingest enabled.
 
 ## What connect does
