@@ -108,6 +108,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// --connect skips the question inside maybeRunOnboarding; either source of yes is
+	// recorded in the profile only after the connect below succeeds.
 	connectAfterInstall := acceptedOffer || endpointOpts.connect
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
@@ -141,7 +143,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout())
 		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
-		} else if acceptedOffer {
+		} else {
 			recordManagedIngestAccepted(cmd)
 		}
 	}

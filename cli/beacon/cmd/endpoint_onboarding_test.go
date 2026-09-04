@@ -675,6 +675,46 @@ func TestManagedIngestAcceptedIsRecordedAfterConnect(t *testing.T) {
 	if len(h5.saved) != 0 {
 		t.Fatalf("no profile should be written without a completed onboarding: %+v", h5.saved)
 	}
+
+	// A recorded no stays a no even when an operator connects with --connect.
+	h6 := newOnboardingHarness(t)
+	h6.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", ManagedIngest: onboarding.ManagedIngestDeclined}}
+	recordManagedIngestAccepted(h6.cmd)
+	if len(h6.saved) != 0 {
+		t.Fatalf("a declined answer must not be rewritten: %+v", h6.saved)
+	}
+}
+
+// --connect is already the answer: the question is not asked on either the first-run
+// prompt or an already-onboarded machine, so a default Enter can never record "declined"
+// on a machine the same command then connects.
+func TestInstallConnectFlagSkipsManagedIngestQuestion(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.offerable = true
+	endpointOpts.connect = true
+	t.Cleanup(func() { endpointOpts.connect = false })
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if len(h.offered) != 1 || h.offered[0].OfferManagedIngest {
+		t.Fatalf("--connect must not add the question to the first-run prompt: %+v", h.offered)
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != "" {
+		t.Fatalf("recorded %q before the connect ran", got)
+	}
+
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect || h.standaloneAsked {
+		t.Fatalf("connect=%t err=%v asked=%t", connect, err, h.standaloneAsked)
+	}
+
+	// After the connect the install records the yes, exactly as for an answered question.
+	recordManagedIngestAccepted(h.cmd)
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestAccepted {
+		t.Fatalf("recorded choice = %q", got)
+	}
 }
 
 func TestInstallHasConnectFlag(t *testing.T) {

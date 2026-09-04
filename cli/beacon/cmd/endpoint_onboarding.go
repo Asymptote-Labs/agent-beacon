@@ -102,11 +102,14 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 		return false, nil
 	}
 
+	// `install --connect` is already the answer to the forwarding question, so the prompt
+	// does not ask it; the install records the yes once the connect succeeds.
+	offer := !endpointOpts.connect && managedIngestOfferableNow()
+
 	// Discovery shells out to every installed runtime, so start it now and collect it
 	// after the questions. The latency disappears behind the user reading and typing.
 	probe := onboardingProbeFn()
 
-	offer := managedIngestOfferableNow()
 	answers, err := onboardingAskWith(onboardingStdin, cmd.OutOrStdout(), onboarding.PromptOptions{OfferManagedIngest: offer})
 	if err != nil {
 		return false, err
@@ -127,7 +130,7 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 // maybeOfferManagedIngest asks the forwarding question alone, once, on an interactive
 // install of a machine that was onboarded before the question existed.
 func maybeOfferManagedIngest(cmd *cobra.Command, profile *onboarding.Profile) (bool, error) {
-	if profile.Onboarding.ManagedIngest != "" {
+	if profile.Onboarding.ManagedIngest != "" || endpointOpts.connect {
 		return false, nil
 	}
 	if reason, skipped := managedIngestSkipReason(*profile); skipped {
@@ -149,12 +152,14 @@ func maybeOfferManagedIngest(cmd *cobra.Command, profile *onboarding.Profile) (b
 	return false, nil
 }
 
-// recordManagedIngestAccepted stores the yes answer after `endpoint install` has connected
-// the machine. Until then the offer is unrecorded on purpose, so a failed install or
-// connect is retried by asking again rather than remembered as done.
+// recordManagedIngestAccepted stores the yes after `endpoint install` has connected the
+// machine, whether the yes came from the question or from --connect. Until then the offer
+// is unrecorded on purpose, so a failed install or connect is retried by asking again
+// rather than remembered as done. A recorded no is not overwritten: --connect on a machine
+// whose owner declined is an operator's action, not a change of the owner's answer.
 func recordManagedIngestAccepted(cmd *cobra.Command) {
 	profile := onboardingLoad()
-	if !profile.Prompted() {
+	if !profile.Prompted() || profile.Onboarding.ManagedIngest != "" {
 		return
 	}
 	profile.Onboarding.ManagedIngest = onboarding.ManagedIngestAccepted
