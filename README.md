@@ -193,7 +193,10 @@ archives remain available for CLI installs.
 
 The macOS package also ships
 [GCS forwarder helpers](https://docs.asymptotelabs.ai/mdm/jamf/claude) under
-`/opt/beacon/jamf/claude/gcs/` that run bundled Vector as a launchd job.
+`/opt/beacon/jamf/claude/gcs/` that run bundled Vector as a launchd job. Connecting a
+system-mode endpoint to Asymptote Managed is interactive today: an admin runs
+`sudo beacon endpoint connect --system` on the machine and approves it in the console
+user's browser. Headless enrollment tokens for MDM fleets are planned as a follow-up.
 
 ## Dashboard and Local Detection
 
@@ -234,8 +237,8 @@ email and whether this is work or personal use, and sends that to Asymptote once
 Knowing who runs Beacon is how we decide which runtimes and integrations to build
 next. It happens once per machine and never runs non-interactively: MDM deployments,
 package postinstall scripts, `--system` installs, CI, `--dry-run`, and piped stdin all
-skip it silently, and `--no-onboarding` or `BEACON_ONBOARDING=0` turns it off. Exactly
-what is sent, and nothing else:
+skip it silently, and `BEACON_ONBOARDING=0` turns it off. Exactly what is sent, and
+nothing else:
 
 | Field | Example |
 | --- | --- |
@@ -248,7 +251,30 @@ what is sent, and nothing else:
 
 **Never sent:** prompts, file contents, commands, telemetry events, repository names,
 or anything else Beacon captures. The endpoint agent itself stays local-only; this is
-one HTTP request at install time, not an ongoing channel.
+one HTTP request at install time, not an ongoing channel, unless you connect the
+machine to Asymptote Managed.
+
+The same first-run prompt ends with one more question, **where should this machine's
+agent telemetry go?**, answered with the arrow keys:
+
+- **Keep it on this machine** (the default, so Enter never forwards anything). Local
+  JSONL and local dashboard.
+- **Forward to your own infrastructure**: a SIEM, observability platform, or an S3/GCS
+  bucket you own. Beacon points you at the [log forwarding docs](https://docs.asymptotelabs.ai/log-forwarding)
+  and the install stays local until you set up a pack.
+- **Forward to Asymptote Managed**: runs `beacon endpoint connect` after the install. Your
+  browser opens the Asymptote dashboard, a member of your organization approves this
+  specific device, and a Vector forwarder starts shipping the runtime and inventory JSONL
+  with a per-device key. Nothing recorded before the approval is sent, and the device can
+  be revoked from the dashboard at any time.
+
+The answer stays on the machine and is never sent. Local and own-infrastructure answers
+are recorded at once and the question is not asked again; the Asymptote answer is
+recorded once the machine is connected, so a failed install or connection is asked again
+on the next interactive install. `beacon endpoint install --connect` skips the question
+and connects; `BEACON_MANAGED_INGEST=0` hides the Asymptote option. See
+[`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect) and
+[Asymptote Managed forwarding](https://docs.asymptotelabs.ai/log-forwarding/asymptote).
 
 See the [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
 for fleet attribution without a terminal, inspecting or clearing the record, and
@@ -263,7 +289,10 @@ for rollout, validation, retention, and SIEM forwarding. For vendor review, see 
 
 ### For Developers
 
-Install the released CLI with Homebrew, or build from source:
+Install the released CLI with Homebrew, or build from source. The Homebrew formula
+depends on `vector`, so a Homebrew install can connect to Asymptote Managed without a
+second step; on Linux, install the `vector` package from [vector.dev](https://vector.dev)
+if you want managed forwarding.
 
 ```bash
 brew tap asymptote-labs/tap

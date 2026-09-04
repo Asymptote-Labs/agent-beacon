@@ -27,6 +27,8 @@ Asymptote Managed includes the open-source capture and forwarding paths, then ad
 
 Managed ingest turns endpoint and cloud-agent telemetry into searchable fleet-wide visibility. Security teams can review which agents are running, which tools they use, and what sensitive files or data are involved in agent activity.
 
+Endpoints join with [`beacon endpoint connect`](/cli/endpoint-connect): the CLI opens the dashboard, a member of the organization approves the specific device, and a Vector forwarder ships the machine's runtime and inventory JSONL with a per-device key that the dashboard's Beacon Endpoints page can revoke at any time. The first interactive `beacon endpoint install` offers the same step. Enrollment is interactive per device today; headless enrollment for MDM fleets is a planned follow-up.
+
 For provider-managed cloud agents, Managed avoids proof-of-concept patterns such
 as placing storage service-account keys directly into cloud sandbox environment
 variables. Asymptote can operate the secure ingest and retention layer for you,

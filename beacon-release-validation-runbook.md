@@ -108,6 +108,20 @@ Acceptance criteria:
 - `which beacon` resolves to the Homebrew-installed binary.
 - Help output includes `endpoint`, `endpoint hooks`, and `endpoint elastic` command groups.
 
+## Managed Ingest Connect Smoke
+
+Needs a browser signed in to the Asymptote dashboard as a member of an org with managed
+ingest enabled (Asymptote Test), and Vector on the machine (`brew install beacon` pulls it).
+
+- [ ] `beacon endpoint connect --no-browser` prints an approval URL; approve it, and the
+      command ends with "Connected to Asymptote as device …" and a running forwarder.
+- [ ] `beacon endpoint status` shows `Asymptote managed ingest: connected … credential valid`
+      and `~/.beacon/endpoint/asymptote/vector.toml` contains no `bcn_device` string.
+- [ ] Run a short agent session; within two minutes it appears on `/dashboard/telemetry`
+      and the machine on `/dashboard/endpoints`.
+- [ ] Revoke the device on the dashboard; within a minute `status` says `credential revoked`.
+- [ ] `beacon endpoint disconnect` removes the forwarder and the `asymptote/` directory.
+
 ## Endpoint Quickstart Validation
 Follow the quickstart exactly:
 

@@ -11,8 +11,19 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
-### Unreleased
+### v1.2.8 · September 4, 2026
 
+- **Onboarding asks where telemetry should go** · The first-run prompt ends with
+  an arrow-key question: keep telemetry on this machine (default), forward it to
+  your own infrastructure (a SIEM, observability platform, or an S3/GCS bucket you
+  own, with a pointer to the log forwarding docs), or forward it to Asymptote
+  Managed, which runs `beacon endpoint connect` after the install. Question titles
+  and the selected row use the Beacon purple. `beacon endpoint install --connect`
+  skips the question and connects, `BEACON_MANAGED_INGEST=0` hides the Asymptote
+  answer, the answer stays local and is shown by `beacon endpoint onboarding`; the
+  Asymptote answer is recorded only once the machine is connected. The Homebrew
+  formula now depends on `vector` so a Homebrew install can connect without a
+  second step.
 - **`beacon endpoint connect` and `disconnect`** · Connect an endpoint to
   Asymptote managed ingest from the CLI: it finds Vector (0.56+), opens the
   dashboard's device approval page, receives a per-device key through a

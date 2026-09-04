@@ -43,6 +43,19 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+| `--connect` | After a successful install, connect this endpoint to Asymptote managed ingest: opens the dashboard to approve the device and starts the Vector forwarder. Same as running [`beacon endpoint connect`](/cli/endpoint-connect) afterwards |
+
+## Telemetry destination question
+
+On a first interactive install the [onboarding prompt](/cli/endpoint-onboarding) ends with one more question, where this machine's agent telemetry should go, as an arrow-key menu with three answers:
+
+| Answer | What happens |
+|--------|--------------|
+| Keep it on this machine (default) | Nothing is forwarded. Enter picks this, so forwarding is never a side effect. |
+| Forward to your own infrastructure | A SIEM, observability platform, or an S3/GCS bucket you own. The prompt prints the [log forwarding docs](/log-forwarding) and the pack commands; the install stays local until you set one up. |
+| Forward to Asymptote Managed | Runs the [connect flow](/cli/endpoint-connect) after the install completes. A failed connect is reported with the retry command and never fails the install. |
+
+`--connect` is already the answer, so it skips the question. `BEACON_MANAGED_INGEST=0` hides the Asymptote answer; the question is never shown non-interactively. The answer is stored in the local onboarding profile and never sent. Local and own-infrastructure answers are recorded at once and the question is not asked again. The Asymptote answer is recorded only once the machine is connected, so if the install or the connection fails, the next interactive install asks again.
 
 ## Examples
 

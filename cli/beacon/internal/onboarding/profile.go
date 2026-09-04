@@ -57,7 +57,19 @@ type Onboarding struct {
 	Email         string `json:"email,omitempty"`
 	Usage         string `json:"usage,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
+	// Destination records where the user chose to send this machine's telemetry:
+	// local, own_infra or asymptote. Empty means the question has not been answered on
+	// this machine, so a later interactive install may ask once. asymptote is written
+	// only after the connect succeeds, so a failed connect is asked again.
+	Destination string `json:"destination,omitempty"`
 }
+
+// Answers to the telemetry destination question.
+const (
+	DestinationLocal     = "local"
+	DestinationOwnInfra  = "own_infra"
+	DestinationAsymptote = "asymptote"
+)
 
 // Prompted reports whether this machine has already been through onboarding.
 // It is the single gate that makes the prompt fire once and only once.

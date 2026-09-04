@@ -104,9 +104,13 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
-	if err := maybeRunOnboarding(cmd); err != nil {
+	chooseAsymptote, err := maybeRunOnboarding(cmd)
+	if err != nil {
 		return err
 	}
+	// --connect skips the destination question inside maybeRunOnboarding; either way the
+	// Asymptote answer is recorded in the profile only after the connect below succeeds.
+	connectAfterInstall := chooseAsymptote || endpointOpts.connect
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -132,6 +136,16 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	printLingerGap(cmd.ErrOrStderr(), result)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
 		return fmt.Errorf("endpoint install completed, but hook installation failed: %w", err)
+	}
+	if connectAfterInstall {
+		// The install is complete and stands on its own; a failed connect is reported
+		// with the retry command rather than turning a working install into an error.
+		fmt.Fprintln(cmd.OutOrStdout())
+		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
+		} else {
+			recordDestinationAsymptote(cmd)
+		}
 	}
 	return nil
 }

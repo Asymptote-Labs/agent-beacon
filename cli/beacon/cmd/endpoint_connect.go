@@ -13,7 +13,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -74,7 +73,13 @@ func runEndpointConnect(cmd *cobra.Command, args []string) error {
 	if !userMode && !lifecycle.HasSystemPrivileges() {
 		return fmt.Errorf("connecting a system endpoint needs root: rerun with sudo, or pass --user for a per-user install")
 	}
-	cfg := loadOrDefaultConfig()
+	return connectEndpoint(cmd, userMode, loadOrDefaultConfig().LogPath)
+}
+
+// connectEndpoint runs the enrollment and forwarder setup for the given mode and log
+// path, printing the outcome. `endpoint install --connect` and the onboarding offer
+// call it after a successful install; `endpoint connect` calls it directly.
+func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	hostname, _ := os.Hostname()
 	out := cmd.OutOrStdout()
 	if endpointOpts.jsonOutput {
@@ -82,7 +87,7 @@ func runEndpointConnect(cmd *cobra.Command, args []string) error {
 	}
 	result, err := asymptote.Connect(context.Background(), asymptote.ConnectOptions{
 		UserMode:  userMode,
-		LogPath:   cfg.LogPath,
+		LogPath:   logPath,
 		VectorBin: connectOpts.vectorBin,
 		Out:       out,
 		Enroll: asymptote.EnrollOptions{
@@ -227,10 +232,4 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
-// managedIngestFromConfig reports whether config.json says this endpoint is connected, for
-// callers that must not touch the network or the secrets file.
-func managedIngestFromConfig(cfg endpointconfig.Config) bool {
-	return cfg.ManagedIngest != nil && cfg.ManagedIngest.Enabled
 }

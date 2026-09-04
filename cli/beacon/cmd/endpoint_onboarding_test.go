@@ -29,6 +29,13 @@ type onboardingHarness struct {
 	outcome   string
 	sendErr   error
 	probeRuns int
+	// offered records the PromptOptions the prompt was invoked with; askable and
+	// standaloneAnswer drive the destination question.
+	offered           []onboarding.PromptOptions
+	askable           bool
+	standaloneAsked   bool
+	standaloneOffered bool
+	standaloneAnswer  string
 }
 
 func newOnboardingHarness(t *testing.T) *onboardingHarness {
@@ -62,18 +69,27 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 	t.Setenv(onboardingEnvUsage, "")
 	t.Setenv("HOME", t.TempDir())
 
-	prevLoad, prevSave, prevAsk, prevSend := onboardingLoad, onboardingSave, onboardingAsk, onboardingSend
+	prevLoad, prevSave, prevAsk, prevSend := onboardingLoad, onboardingSave, onboardingAskWith, onboardingSend
 	prevTTY, prevRoot, prevProbe := onboardingIsTTY, onboardingIsRoot, onboardingProbeFn
+	prevStandalone, prevAskable := onboardingAskDestination, destinationAskable
+	t.Setenv(managedIngestEnvEnabled, "")
 
 	onboardingLoad = func() onboarding.Profile { return h.loaded }
 	onboardingSave = func(p onboarding.Profile) error {
 		h.saved = append(h.saved, p)
 		return nil
 	}
-	onboardingAsk = func(io.Reader, io.Writer) (onboarding.Answers, error) {
+	onboardingAskWith = func(_ io.Reader, _ io.Writer, opts onboarding.PromptOptions) (onboarding.Answers, error) {
 		h.asked = true
+		h.offered = append(h.offered, opts)
 		return h.answers, h.askErr
 	}
+	onboardingAskDestination = func(_ io.Reader, _ io.Writer, offerAsymptote bool) (string, error) {
+		h.standaloneAsked = true
+		h.standaloneOffered = offerAsymptote
+		return h.standaloneAnswer, nil
+	}
+	destinationAskable = func() bool { return h.askable }
 	onboardingSend = func(_ context.Context, s onboarding.Submission) (string, error) {
 		h.sent = append(h.sent, s)
 		return h.outcome, h.sendErr
@@ -87,8 +103,9 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 
 	t.Cleanup(func() {
 		endpointOpts = prevOpts
-		onboardingLoad, onboardingSave, onboardingAsk, onboardingSend = prevLoad, prevSave, prevAsk, prevSend
+		onboardingLoad, onboardingSave, onboardingAskWith, onboardingSend = prevLoad, prevSave, prevAsk, prevSend
 		onboardingIsTTY, onboardingIsRoot, onboardingProbeFn = prevTTY, prevRoot, prevProbe
+		onboardingAskDestination, destinationAskable = prevStandalone, prevAskable
 	})
 	return h
 }
@@ -96,7 +113,7 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 func TestMaybeRunOnboardingPromptsOnInteractiveInstall(t *testing.T) {
 	h := newOnboardingHarness(t)
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if !h.asked {
@@ -184,7 +201,7 @@ func TestMaybeRunOnboardingStaysSilentWhenGated(t *testing.T) {
 				t.Fatalf("skip reason = %q, want %q", reason, tc.wantReason)
 			}
 
-			if err := maybeRunOnboarding(h.cmd); err != nil {
+			if _, err := maybeRunOnboarding(h.cmd); err != nil {
 				t.Fatalf("maybeRunOnboarding returned error: %v", err)
 			}
 			if h.asked {
@@ -205,7 +222,7 @@ func TestMaybeRunOnboardingPropagatesPromptFailure(t *testing.T) {
 	h := newOnboardingHarness(t)
 	h.askErr = onboarding.ErrTooManyAttempts
 
-	err := maybeRunOnboarding(h.cmd)
+	_, err := maybeRunOnboarding(h.cmd)
 	if err == nil {
 		t.Fatalf("maybeRunOnboarding returned nil, want the prompt failure to stop the install")
 	}
@@ -223,7 +240,7 @@ func TestMaybeRunOnboardingSurvivesSubmissionFailure(t *testing.T) {
 	h.outcome = onboarding.OutcomePending
 	h.sendErr = errors.New("connection refused")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.saved) != 1 {
@@ -247,7 +264,7 @@ func TestMaybeRunOnboardingDropsPayloadWhenRejected(t *testing.T) {
 	h.outcome = onboarding.OutcomeRejected
 	h.sendErr = errors.New("signup endpoint returned 429 Too Many Requests")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if h.saved[0].Pending != nil {
@@ -267,7 +284,7 @@ func TestMaybeRunOnboardingResendsPendingSubmission(t *testing.T) {
 		Pending:    &pending,
 	}
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if h.asked {
@@ -290,7 +307,7 @@ func TestMaybeRunOnboardingKeepsPendingWhenResendFails(t *testing.T) {
 		Pending:    &pending,
 	}
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.saved) != 0 {
@@ -305,7 +322,7 @@ func TestMaybeRunOnboardingAcceptsEnvironmentAnswersHeadless(t *testing.T) {
 	t.Setenv(onboardingEnvEmail, "  Ops@AsymptoteLabs.AI ")
 	t.Setenv(onboardingEnvUsage, "work")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if h.asked {
@@ -326,7 +343,7 @@ func TestMaybeRunOnboardingIgnoresInvalidEnvironmentAnswers(t *testing.T) {
 	t.Setenv(onboardingEnvEmail, "not-an-email")
 	t.Setenv(onboardingEnvUsage, "work")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.sent) != 0 || h.asked {
@@ -343,7 +360,7 @@ func TestMaybeRunOnboardingEnvironmentAnswersRespectOptOut(t *testing.T) {
 	t.Setenv(onboardingEnvEmail, "ops@asymptotelabs.ai")
 	t.Setenv(onboardingEnvUsage, "work")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.sent) != 0 {
@@ -504,5 +521,254 @@ func TestRetryPendingOnboardingIsSilentWithNothingQueued(t *testing.T) {
 				t.Fatalf("repair touched the network or disk: sent=%d saved=%d", len(h.sent), len(h.saved))
 			}
 		})
+	}
+}
+
+func TestMaybeRunOnboardingAsksDestinationOnlyWhenAskable(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.askable = false
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if len(h.offered) != 1 || h.offered[0].AskDestination {
+		t.Fatalf("the destination question must not be asked on a connected endpoint: %+v", h.offered)
+	}
+	if h.saved[len(h.saved)-1].Onboarding.Destination != "" {
+		t.Fatal("a question that was not asked must not be recorded")
+	}
+
+	h = newOnboardingHarness(t)
+	h.askable = true
+	h.answers.DestinationAsked = true
+	h.answers.Destination = onboarding.DestinationAsymptote
+	connect, err := maybeRunOnboarding(h.cmd)
+	if err != nil || !connect {
+		t.Fatalf("the Asymptote answer should request a connect: connect=%t err=%v", connect, err)
+	}
+	if !h.offered[0].AskDestination || !h.offered[0].OfferAsymptote {
+		t.Fatalf("prompt should have been asked to offer all three destinations: %+v", h.offered[0])
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.Destination; got != "" {
+		t.Fatalf("asymptote is recorded only once the install has connected the machine, got %q", got)
+	}
+
+	for _, answer := range []string{onboarding.DestinationLocal, onboarding.DestinationOwnInfra} {
+		h = newOnboardingHarness(t)
+		h.askable = true
+		h.answers.DestinationAsked = true
+		h.answers.Destination = answer
+		if connect, _ := maybeRunOnboarding(h.cmd); connect {
+			t.Fatalf("%s must not connect", answer)
+		}
+		if got := h.saved[len(h.saved)-1].Onboarding.Destination; got != answer {
+			t.Fatalf("recorded destination = %q, want %q", got, answer)
+		}
+	}
+}
+
+// BEACON_MANAGED_INGEST=0 hides the Asymptote row but the question is still asked.
+func TestDestinationQuestionHidesAsymptoteWhenOptedOut(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.askable = true
+	t.Setenv(managedIngestEnvEnabled, "0")
+	h.answers.DestinationAsked = true
+	h.answers.Destination = onboarding.DestinationLocal
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if len(h.offered) != 1 || !h.offered[0].AskDestination || h.offered[0].OfferAsymptote {
+		t.Fatalf("BEACON_MANAGED_INGEST=0 must hide only the Asymptote row: %+v", h.offered)
+	}
+
+	h = newOnboardingHarness(t)
+	h.askable = true
+	t.Setenv(managedIngestEnvEnabled, "0")
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	h.standaloneAnswer = onboarding.DestinationOwnInfra
+	if _, err := maybeRunOnboarding(h.cmd); err != nil || !h.standaloneAsked || h.standaloneOffered {
+		t.Fatalf("standalone question should be asked without the Asymptote row: err=%v asked=%t offered=%t", err, h.standaloneAsked, h.standaloneOffered)
+	}
+}
+
+func TestDestinationAskedOnceToPreviouslyOnboardedMachine(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.askable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted, Email: "shukan@asymptotelabs.ai", Usage: onboarding.UsageWork}}
+	h.standaloneAnswer = onboarding.DestinationAsymptote
+	connect, err := maybeRunOnboarding(h.cmd)
+	if err != nil || !connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if h.asked {
+		t.Fatal("the signup questions must not be asked again")
+	}
+	if !h.standaloneAsked || !h.standaloneOffered {
+		t.Fatalf("the destination question should be asked once, with the Asymptote row: asked=%t offered=%t", h.standaloneAsked, h.standaloneOffered)
+	}
+	if len(h.saved) != 0 {
+		t.Fatalf("asymptote must not be recorded before the connect succeeds: %+v", h.saved)
+	}
+
+	// Local and own infrastructure are recorded at once.
+	for _, answer := range []string{onboarding.DestinationLocal, onboarding.DestinationOwnInfra} {
+		h = newOnboardingHarness(t)
+		h.askable = true
+		h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+		h.standaloneAnswer = answer
+		if connect, _ := maybeRunOnboarding(h.cmd); connect || !h.standaloneAsked {
+			t.Fatalf("connect=%t asked=%t", connect, h.standaloneAsked)
+		}
+		if got := h.saved[len(h.saved)-1].Onboarding.Destination; got != answer {
+			t.Fatalf("recorded destination = %q, want %q", got, answer)
+		}
+	}
+
+	// Once recorded, it is never asked again.
+	h = newOnboardingHarness(t)
+	h.askable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Destination: onboarding.DestinationLocal}}
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatalf("a recorded destination must not be asked again: connect=%t asked=%t", connect, h.standaloneAsked)
+	}
+
+	// Non-interactive paths never see it either.
+	h = newOnboardingHarness(t)
+	h.askable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	onboardingIsTTY = func() bool { return false }
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatal("no terminal, no question")
+	}
+	h = newOnboardingHarness(t)
+	h.askable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	t.Setenv("CI", "1")
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatal("CI never sees the question")
+	}
+	// A connected endpoint has answered by doing.
+	h = newOnboardingHarness(t)
+	h.askable = false
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatal("a connected endpoint is not asked")
+	}
+}
+
+// An Asymptote answer whose install or connect failed must be asked again, not remembered
+// as done: the record is written only by recordDestinationAsymptote, after the connect.
+func TestAsymptoteDestinationIsRecordedAfterConnect(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.askable = true
+	h.answers.DestinationAsked = true
+	h.answers.Destination = onboarding.DestinationAsymptote
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || !connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	afterPrompt := h.saved[len(h.saved)-1]
+	if afterPrompt.Onboarding.Destination != "" {
+		t.Fatalf("recorded before connect: %q", afterPrompt.Onboarding.Destination)
+	}
+
+	// The install failed before connecting: the next interactive install asks again.
+	h2 := newOnboardingHarness(t)
+	h2.askable = true
+	h2.loaded = afterPrompt
+	h2.standaloneAnswer = onboarding.DestinationAsymptote
+	if connect, err := maybeRunOnboarding(h2.cmd); err != nil || !connect || !h2.standaloneAsked || h2.asked {
+		t.Fatalf("connect=%t err=%v standaloneAsked=%t signupAsked=%t", connect, err, h2.standaloneAsked, h2.asked)
+	}
+
+	// The install connected: the answer is recorded and the question retires.
+	h3 := newOnboardingHarness(t)
+	h3.askable = true
+	h3.loaded = afterPrompt
+	recordDestinationAsymptote(h3.cmd)
+	if got := h3.saved[len(h3.saved)-1].Onboarding.Destination; got != onboarding.DestinationAsymptote {
+		t.Fatalf("recorded destination = %q", got)
+	}
+	h4 := newOnboardingHarness(t)
+	h4.askable = true
+	h4.loaded = h3.saved[len(h3.saved)-1]
+	if connect, _ := maybeRunOnboarding(h4.cmd); connect || h4.standaloneAsked {
+		t.Fatalf("a recorded destination must not be asked again: connect=%t asked=%t", connect, h4.standaloneAsked)
+	}
+
+	// Never written for a machine that was not onboarded (root, CI, --connect without a prompt).
+	h5 := newOnboardingHarness(t)
+	recordDestinationAsymptote(h5.cmd)
+	if len(h5.saved) != 0 {
+		t.Fatalf("no profile should be written without a completed onboarding: %+v", h5.saved)
+	}
+
+	// A recorded local answer stays local even when an operator connects with --connect.
+	h6 := newOnboardingHarness(t)
+	h6.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Destination: onboarding.DestinationLocal}}
+	recordDestinationAsymptote(h6.cmd)
+	if len(h6.saved) != 0 {
+		t.Fatalf("an owner's answer must not be rewritten: %+v", h6.saved)
+	}
+}
+
+// --connect is already the answer: the question is not asked on either the first-run
+// prompt or an already-onboarded machine, so Enter can never record "local" on a machine
+// the same command then connects.
+func TestInstallConnectFlagSkipsDestinationQuestion(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.askable = true
+	endpointOpts.connect = true
+	t.Cleanup(func() { endpointOpts.connect = false })
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if len(h.offered) != 1 || h.offered[0].AskDestination {
+		t.Fatalf("--connect must not add the question to the first-run prompt: %+v", h.offered)
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.Destination; got != "" {
+		t.Fatalf("recorded %q before the connect ran", got)
+	}
+
+	h = newOnboardingHarness(t)
+	h.askable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect || h.standaloneAsked {
+		t.Fatalf("connect=%t err=%v asked=%t", connect, err, h.standaloneAsked)
+	}
+
+	// After the connect the install records the answer, exactly as for an asked question.
+	recordDestinationAsymptote(h.cmd)
+	if got := h.saved[len(h.saved)-1].Onboarding.Destination; got != onboarding.DestinationAsymptote {
+		t.Fatalf("recorded destination = %q", got)
+	}
+}
+
+func TestInstallHasConnectFlag(t *testing.T) {
+	if endpointInstallCmd.Flags().Lookup("connect") == nil {
+		t.Fatal("endpoint install should expose --connect")
+	}
+}
+
+func TestEndpointOnboardingShowsDestination(t *testing.T) {
+	for value, want := range map[string]string{
+		onboarding.DestinationLocal:     "Telemetry destination: local only",
+		onboarding.DestinationOwnInfra:  "Telemetry destination: own infrastructure",
+		onboarding.DestinationAsymptote: "Telemetry destination: Asymptote Managed",
+	} {
+		h := newOnboardingHarness(t)
+		h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted, Email: "shukan@asymptotelabs.ai", Usage: onboarding.UsageWork, Destination: value}}
+		if err := runEndpointOnboarding(h.cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(h.stdout.String(), want) {
+			t.Fatalf("output = %s", h.stdout.String())
+		}
+	}
+	h := newOnboardingHarness(t)
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted}}
+	if err := runEndpointOnboarding(h.cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.stdout.String(), "Telemetry destination") {
+		t.Fatalf("no destination line before the question is answered:\n%s", h.stdout.String())
 	}
 }

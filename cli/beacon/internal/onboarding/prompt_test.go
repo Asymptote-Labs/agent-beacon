@@ -166,3 +166,115 @@ func TestPromptDoesNotNoteFreeMailboxForPersonalUse(t *testing.T) {
 		t.Fatalf("personal use should not trigger the mailbox note:\n%s", out)
 	}
 }
+
+func TestPromptAsksDestinationOnlyWhenRequested(t *testing.T) {
+	answers, out, err := runPrompt(t, "1\nshukan@asymptotelabs.ai\n")
+	if err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+	if answers.DestinationAsked || strings.Contains(out, "Where should") {
+		t.Fatalf("default prompt must not ask the destination question: %+v\n%s", answers, out)
+	}
+
+	var buf bytes.Buffer
+	answers, err = PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n3\n"), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true})
+	if err != nil {
+		t.Fatalf("PromptWith returned error: %v", err)
+	}
+	if !answers.DestinationAsked || answers.Destination != DestinationAsymptote {
+		t.Fatalf("expected the Asymptote answer, got %+v", answers)
+	}
+	for _, want := range []string{
+		"Where should this machine's agent telemetry go?",
+		"Keep it on this machine", "Nothing is sent anywhere.",
+		"Forward to your own infrastructure", "SIEM, observability platform, or an S3/GCS bucket you own.",
+		"Forward to Asymptote Managed", "revoke from the dashboard",
+		"Connecting after install.",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("destination output missing %q:\n%s", want, buf.String())
+		}
+	}
+}
+
+// Enter (an empty answer in the typed menu) keeps telemetry local: forwarding is a choice.
+func TestDestinationDefaultsToLocal(t *testing.T) {
+	for _, input := range []string{"\n", "1\n", "local\n", "KEEP\n"} {
+		var buf bytes.Buffer
+		answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n"+input), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true})
+		if err != nil {
+			t.Fatalf("input %q: %v", input, err)
+		}
+		if answers.Destination != DestinationLocal {
+			t.Fatalf("input %q should keep telemetry local, got %+v", input, answers)
+		}
+		if !strings.Contains(buf.String(), "beacon endpoint connect") || !strings.Contains(buf.String(), ForwardingDocsURL) {
+			t.Fatalf("the local answer should say how to forward later:\n%s", buf.String())
+		}
+	}
+	var buf bytes.Buffer
+	if _, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\nmaybe\n9\nhuh\n?\n!\n"), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true}); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("expected ErrTooManyAttempts after repeated bad answers, got %v", err)
+	}
+}
+
+func TestDestinationOwnInfrastructurePointsAtTheDocs(t *testing.T) {
+	for _, input := range []string{"2\n", "own\n", "siem\n", "own_infra\n"} {
+		var buf bytes.Buffer
+		answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n"+input), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true})
+		if err != nil || answers.Destination != DestinationOwnInfra {
+			t.Fatalf("input %q: destination=%q err=%v", input, answers.Destination, err)
+		}
+		for _, want := range []string{ForwardingDocsURL, "beacon endpoint datadog", "Vector pack"} {
+			if !strings.Contains(buf.String(), want) {
+				t.Fatalf("own-infrastructure answer missing %q:\n%s", want, buf.String())
+			}
+		}
+	}
+}
+
+// BEACON_MANAGED_INGEST=0 hides the Asymptote row; the question is still asked.
+func TestDestinationHidesAsymptoteWhenNotOffered(t *testing.T) {
+	var buf bytes.Buffer
+	answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n3\nasymptote\n2\n"), &buf, PromptOptions{AskDestination: true, OfferAsymptote: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answers.Destination != DestinationOwnInfra {
+		t.Fatalf("with two rows, 3 and asymptote must be rejected and 2 accepted, got %+v", answers)
+	}
+	if strings.Contains(buf.String(), "Asymptote Managed") {
+		t.Fatalf("Asymptote row must be hidden:\n%s", buf.String())
+	}
+	if strings.Count(buf.String(), "enter a number from 1 to 2") != 2 {
+		t.Fatalf("expected two rejections:\n%s", buf.String())
+	}
+}
+
+func TestAskDestinationAlone(t *testing.T) {
+	var buf bytes.Buffer
+	destination, err := AskDestination(strings.NewReader("3\n"), &buf, true)
+	if err != nil || destination != DestinationAsymptote {
+		t.Fatalf("AskDestination = %q, %v", destination, err)
+	}
+	if _, err := AskDestination(strings.NewReader(""), &buf, true); !errors.Is(err, ErrPromptAborted) {
+		t.Fatalf("EOF should abort, got %v", err)
+	}
+}
+
+// Every destination row must draw without wrapping on a standard 80-column terminal, with
+// the last column left free for terminals that wrap eagerly, or the picker's line count
+// is off and it eats the lines above it on redraw.
+func TestDestinationRowsFitEightyColumns(t *testing.T) {
+	for _, item := range destinationChoices(true) {
+		if n := 4 + len([]rune(item.label)); n >= 80 {
+			t.Fatalf("label %q draws %d columns", item.label, n)
+		}
+		if n := 6 + len([]rune(item.detail)); n >= 80 {
+			t.Fatalf("detail %q draws %d columns", item.detail, n)
+		}
+	}
+	if !strings.Contains(destinationChoices(true)[1].detail, "SIEM, observability platform, or an S3/GCS bucket you own.") {
+		t.Fatal("the own-infrastructure wording is part of the product copy")
+	}
+}

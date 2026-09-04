@@ -219,6 +219,10 @@ brews:
       name: asymptote-bot
       email: bot@asymptotelabs.ai
     commit_msg_template: "Homebrew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    # Vector runs the optional Asymptote managed forwarder (`beacon endpoint connect`);
+    # pulling it in here means a Homebrew install can connect without a second step.
+    dependencies:
+      - name: vector
     install: |
       bin.install "beacon"
       bin.install "beacon-hooks"
@@ -226,6 +230,8 @@ brews:
     caveats: |
       To configure local endpoint telemetry, run:
         beacon endpoint install
+      To forward telemetry to the Asymptote dashboard (opt-in, revocable), run:
+        beacon endpoint connect
     test: |
       system "#{bin}/beacon", "version"
 

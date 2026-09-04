@@ -58,6 +58,8 @@ off by default.
   </Step>
 </Steps>
 
+Connecting packaged endpoints to Asymptote Managed is a separate, interactive step today: an admin runs `sudo /opt/beacon/bin/beacon endpoint connect --system` on the machine and the approval page opens in the console user's browser. The package never enrolls a device on its own, and there is no headless enrollment for MDM fleets yet; it is a planned follow-up. See [`beacon endpoint connect`](/cli/endpoint-connect).
+
 Environment variables take precedence over MDM script parameters:
 
 | Environment variable | Default |

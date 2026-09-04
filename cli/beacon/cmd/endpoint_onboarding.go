@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/spf13/cobra"
@@ -25,6 +26,11 @@ const (
 	// they just have no terminal to type it into.
 	onboardingEnvEmail = "BEACON_ONBOARDING_EMAIL"
 	onboardingEnvUsage = "BEACON_ONBOARDING_USAGE"
+	// managedIngestEnvEnabled set to a false-ish value hides the Asymptote Managed row
+	// from the telemetry destination question; the question itself (local or your own
+	// infrastructure) is still asked. The explicit --connect flag is unaffected: the
+	// variable hides an offer, it does not override an operator's request.
+	managedIngestEnvEnabled = "BEACON_MANAGED_INGEST"
 )
 
 // Reasons the prompt did not run. Surfaced by `endpoint onboarding --show` so support
@@ -40,14 +46,19 @@ const (
 // Indirection points so the gate and the flow can be tested without a terminal, a
 // network, or a real home directory.
 var (
-	onboardingLoad              = onboarding.Load
-	onboardingSave              = onboarding.Save
-	onboardingAsk               = onboarding.Prompt
-	onboardingSend              = onboarding.Submit
-	onboardingStdin   io.Reader = os.Stdin
-	onboardingIsTTY             = defaultOnboardingIsTTY
-	onboardingIsRoot            = func() bool { return os.Geteuid() == 0 }
-	onboardingProbeFn           = onboarding.StartRuntimeProbe
+	onboardingLoad                     = onboarding.Load
+	onboardingSave                     = onboarding.Save
+	onboardingAsk                      = onboarding.Prompt
+	onboardingSend                     = onboarding.Submit
+	onboardingStdin          io.Reader = os.Stdin
+	onboardingIsTTY                    = defaultOnboardingIsTTY
+	onboardingIsRoot                   = func() bool { return os.Geteuid() == 0 }
+	onboardingProbeFn                  = onboarding.StartRuntimeProbe
+	onboardingAskWith                  = onboarding.PromptWith
+	onboardingAskDestination           = onboarding.AskDestination
+	// destinationAskable reports whether the destination question makes sense here: an
+	// endpoint already connected to Asymptote has answered it by doing.
+	destinationAskable = defaultDestinationAskable
 )
 
 // runtimeProbeBudget bounds how long submission waits on background runtime
@@ -63,41 +74,149 @@ func defaultOnboardingIsTTY() bool {
 	return isCharDevice(os.Stdin) && isCharDevice(os.Stdout)
 }
 
-// maybeRunOnboarding runs the one-time signup prompt if this install should ask.
+// maybeRunOnboarding runs the one-time signup prompt if this install should ask, and
+// reports whether the user chose Asymptote Managed as the telemetry destination, which
+// the install carries out with a connect once it has finished.
 //
 // It is called from `endpoint install` after the --dry-run early return, so a dry run
 // never prompts. An error returned here does stop the install: the prompt is a
 // required step on an interactive terminal, and every refusal path names the opt-out.
-func maybeRunOnboarding(cmd *cobra.Command) error {
+func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 	profile := onboardingLoad()
 
 	// Someone who already answered is never asked again, but a submission that failed
-	// on a flaky network still deserves a quiet retry.
+	// on a flaky network still deserves a quiet retry. The destination question is newer
+	// than the signup prompt, so a machine onboarded before it existed gets it once.
 	if profile.Prompted() {
 		resendPendingOnboarding(&profile)
-		return nil
+		return maybeAskDestination(cmd, &profile)
 	}
 
 	// A headless rollout that supplied answers is recorded without a terminal.
 	if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
-		completeOnboarding(cmd, &profile, email, usage, nil)
-		return nil
+		completeOnboarding(cmd, &profile, email, usage, nil, "")
+		return false, nil
 	}
 
 	if _, skipped := onboardingSkipReason(profile); skipped {
-		return nil
+		return false, nil
 	}
+
+	// `install --connect` is already the answer to the destination question, so the
+	// prompt does not ask it; the install records asymptote once the connect succeeds.
+	ask := !endpointOpts.connect && destinationAskable()
 
 	// Discovery shells out to every installed runtime, so start it now and collect it
 	// after the questions. The latency disappears behind the user reading and typing.
 	probe := onboardingProbeFn()
 
-	answers, err := onboardingAsk(onboardingStdin, cmd.OutOrStdout())
+	answers, err := onboardingAskWith(onboardingStdin, cmd.OutOrStdout(), onboarding.PromptOptions{AskDestination: ask, OfferAsymptote: managedIngestEnabledByEnv()})
 	if err != nil {
-		return err
+		return false, err
 	}
-	completeOnboarding(cmd, &profile, answers.Email, answers.Usage, probe)
-	return nil
+	// Local and own-infrastructure answers are final and recorded now. Asymptote is
+	// recorded by the install once the machine is actually connected
+	// (recordDestinationAsymptote): if the install or the connect fails first, the record
+	// stays empty and the next interactive install asks again, instead of a stored
+	// answer silencing the question on a machine that never forwarded anything.
+	chooseAsymptote := answers.DestinationAsked && answers.Destination == onboarding.DestinationAsymptote
+	record := answers.Destination
+	if chooseAsymptote {
+		record = ""
+	}
+	completeOnboarding(cmd, &profile, answers.Email, answers.Usage, probe, record)
+	return chooseAsymptote, nil
+}
+
+// maybeAskDestination asks the destination question alone, once, on an interactive
+// install of a machine that was onboarded before the question existed.
+func maybeAskDestination(cmd *cobra.Command, profile *onboarding.Profile) (bool, error) {
+	if profile.Onboarding.Destination != "" || endpointOpts.connect {
+		return false, nil
+	}
+	if _, skipped := destinationSkipReason(*profile); skipped {
+		return false, nil
+	}
+	destination, err := onboardingAskDestination(onboardingStdin, cmd.OutOrStdout(), managedIngestEnabledByEnv())
+	if err != nil {
+		return false, err
+	}
+	if destination == onboarding.DestinationAsymptote {
+		// Recorded by recordDestinationAsymptote once the connect has succeeded.
+		return true, nil
+	}
+	profile.Onboarding.Destination = destination
+	if err := onboardingSave(*profile); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: could not record onboarding: %v\n", err)
+	}
+	return false, nil
+}
+
+// recordDestinationAsymptote stores the Asymptote answer after `endpoint install` has
+// connected the machine, whether the answer came from the question or from --connect.
+// Until then it is unrecorded on purpose, so a failed install or connect is retried by
+// asking again rather than remembered as done. A recorded local or own-infrastructure
+// answer is not overwritten: --connect on such a machine is an operator's action, not a
+// change of the owner's answer.
+func recordDestinationAsymptote(cmd *cobra.Command) {
+	profile := onboardingLoad()
+	if !profile.Prompted() || profile.Onboarding.Destination != "" {
+		return
+	}
+	profile.Onboarding.Destination = onboarding.DestinationAsymptote
+	if err := onboardingSave(profile); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: could not record onboarding: %v\n", err)
+	}
+}
+
+// destinationSkipReason mirrors onboardingSkipReason for the destination question, plus
+// one condition of its own: an endpoint already connected to Asymptote is not asked.
+func destinationSkipReason(profile onboarding.Profile) (string, bool) {
+	switch {
+	case profile.Onboarding.Destination != "":
+		return onboardingSkipCompleted, true
+	case !endpointUserMode(), onboardingIsRoot():
+		return onboardingSkipSystemInstall, true
+	case isCIEnvironment():
+		return onboardingSkipCI, true
+	case !onboardingIsTTY():
+		return onboardingSkipNotAterminal, true
+	case !destinationAskable():
+		return "already_connected", true
+	default:
+		return "", false
+	}
+}
+
+// managedIngestEnabledByEnv reports whether BEACON_MANAGED_INGEST permits the Asymptote
+// Managed row.
+func managedIngestEnabledByEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(managedIngestEnvEnabled))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+// defaultDestinationAskable is false once this endpoint is connected to Asymptote: the
+// machine has a destination, and the record is written when the connect succeeds.
+func defaultDestinationAskable() bool {
+	return !asymptote.Connected(endpointUserMode())
+}
+
+// destinationLabel is the human wording for a recorded destination value.
+func destinationLabel(value string) string {
+	switch value {
+	case onboarding.DestinationLocal:
+		return "local only (nothing forwarded)"
+	case onboarding.DestinationOwnInfra:
+		return "own infrastructure (forwarding pack)"
+	case onboarding.DestinationAsymptote:
+		return "Asymptote Managed"
+	default:
+		return value
+	}
 }
 
 // onboardingSkipReason reports whether the prompt should stay silent, and why.
@@ -173,7 +292,11 @@ func onboardingAnswersFromEnv(stderr io.Writer) (string, string, bool) {
 //
 // It never returns an error. Once the user has answered, the install belongs to them;
 // a signup endpoint being unreachable is our problem, not theirs.
-func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, usage string, probe *onboarding.RuntimeProbe) {
+//
+// destination is the telemetry destination to record alongside the answers: local or
+// own_infra, or "" when the question was not asked or the answer was Asymptote (stored
+// by the install after the connect succeeds). It is never sent anywhere.
+func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, usage string, probe *onboarding.RuntimeProbe, destination string) {
 	installID, err := onboarding.EnsureInstallID(profile)
 	if err != nil {
 		// Without an install ID there is no dedupe key, so there is nothing sensible
@@ -205,6 +328,7 @@ func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, 
 		Usage:         usage,
 		BeaconVersion: version.GetVersion(),
 	}
+	profile.Onboarding.Destination = destination
 	// Keep the payload only when resending could still work. A rejected submission is
 	// terminal, and holding the address on disk past that point serves nobody.
 	if outcome == onboarding.OutcomePending {
@@ -268,6 +392,7 @@ type endpointOnboardingStatus struct {
 	Usage         string `json:"usage,omitempty"`
 	InstallID     string `json:"install_id,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
+	Destination   string `json:"destination,omitempty"`
 	Pending       bool   `json:"pending_submission"`
 	SkipReason    string `json:"skip_reason,omitempty"`
 	ProfilePath   string `json:"profile_path"`
@@ -306,6 +431,7 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 		Usage:         profile.Onboarding.Usage,
 		InstallID:     profile.InstallID,
 		BeaconVersion: profile.Onboarding.BeaconVersion,
+		Destination:   profile.Onboarding.Destination,
 		Pending:       profile.Pending != nil,
 		SkipReason:    reason,
 		ProfilePath:   onboarding.Path(),
@@ -325,6 +451,9 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Onboarding: completed %s (%s)\n", status.CompletedAt, status.Outcome)
 		fmt.Fprintf(out, "Email: %s\n", status.Email)
 		fmt.Fprintf(out, "Usage: %s\n", status.Usage)
+	}
+	if status.Destination != "" {
+		fmt.Fprintf(out, "Telemetry destination: %s\n", destinationLabel(status.Destination))
 	}
 	fmt.Fprintf(out, "Install ID: %s\n", status.InstallID)
 	fmt.Fprintf(out, "Profile: %s\n", status.ProfilePath)
