@@ -13,6 +13,16 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **`beacon endpoint connect` and `disconnect`** · Connect an endpoint to
+  Asymptote managed ingest from the CLI: it finds Vector (0.56+), opens the
+  dashboard's device approval page, receives a per-device key through a
+  loopback PKCE exchange, stores it in a `0600` secrets file, renders and
+  validates the forwarder config, and starts `com.beacon.endpoint.asymptote-forwarder`
+  (launchd) or `beacon-asymptote-forwarder.service` (systemd) in user or system
+  mode. `beacon endpoint status` gains an "Asymptote managed ingest" line and a
+  `managed_ingest` JSON object with forwarder state and a live credential check;
+  `config.json` gains a non-secret `managed_ingest` block; uninstall removes the
+  forwarder and credentials. Re-running connect rotates the key in place.
 - **Asymptote Managed forwarding pack** · `beacon endpoint asymptote` generates a
   Vector `http` forwarder that posts the runtime and inventory JSONL to
   Asymptote's ingest service with a per-device key read from a `0600` secrets

@@ -1,0 +1,111 @@
+---
+title: "beacon endpoint connect"
+description: "Connect a Beacon endpoint to Asymptote managed ingest, or disconnect it, and understand what the forwarder stores and sends."
+---
+
+## Command overview
+
+`beacon endpoint connect` forwards this endpoint's telemetry to Asymptote so it appears on the Asymptote dashboard. It opens the dashboard in your browser, where a member of your organization approves this specific device; the CLI then receives a key for this device, stores it in a private secrets file, and starts a Vector forwarder that ships the runtime and inventory JSONL over HTTPS.
+
+Forwarding is opt-in and revocable. Beacon's default stays local-only, nothing recorded before the approval is sent, and revoking the device from the dashboard stops ingestion within about a minute. `beacon endpoint disconnect` stops the forwarder and removes the local credentials.
+
+```bash title="Command syntax"
+beacon endpoint connect [flags]
+beacon endpoint disconnect [flags]
+```
+
+## Prerequisites
+
+- Beacon endpoint installed (`beacon endpoint install`) and writing local JSONL.
+- Vector 0.56 or newer on the machine. The signed macOS package installs it at `/opt/beacon/bin/vector`; Homebrew provides it as `vector` (the Beacon formula depends on it); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found.
+- A browser where you can sign in to the Asymptote dashboard as a member of an organization that has managed ingest enabled.
+
+## What connect does
+
+1. Locates Vector: `--vector-bin`, then `BEACON_VECTOR_BIN`, then `/opt/beacon/bin/vector`, the Homebrew prefixes, then `PATH`.
+2. Registers this machine's hostname, operating system, architecture, Beacon version and install mode with the dashboard, and opens `/cli/enroll` in your browser. The approval page shows those details; nothing is minted until someone clicks **Approve this device**.
+3. Receives the device key through a loopback callback and a PKCE exchange. The key is written once to `asymptote/vector-secrets.json` with mode `0600` and is never printed.
+4. Renders `asymptote/vector.toml` from the [Asymptote pack](/cli/asymptote) template with the ingest URL returned by enrollment, runs `vector validate`, installs a service unit and starts it.
+5. Records the non-secret enrollment (device id, organization, ingest URL) in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
+
+Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device.
+
+## Files and services
+
+| Item | User mode | System mode (macOS) | System mode (Linux) |
+|------|-----------|---------------------|---------------------|
+| Enrollment record | `~/.beacon/endpoint/asymptote/enrollment.json` (0600) | `/Library/Application Support/Beacon/Endpoint/asymptote/enrollment.json` | `/etc/beacon/endpoint/asymptote/enrollment.json` |
+| Device key | `~/.beacon/endpoint/asymptote/vector-secrets.json` (0600) | `…/Endpoint/asymptote/vector-secrets.json` | `/etc/beacon/endpoint/asymptote/vector-secrets.json` |
+| Vector config | `~/.beacon/endpoint/asymptote/vector.toml` (0644, no secret) | `…/Endpoint/asymptote/vector.toml` | `/etc/beacon/endpoint/asymptote/vector.toml` |
+| Buffer and checkpoints | `~/.beacon/endpoint/asymptote/vector-data/` | `…/Endpoint/asymptote/vector-data/` | `/etc/beacon/endpoint/asymptote/vector-data/` |
+| Service | `~/Library/LaunchAgents/com.beacon.endpoint.asymptote-forwarder.plist` | `/Library/LaunchDaemons/com.beacon.endpoint.asymptote-forwarder.plist` | `/etc/systemd/system/beacon-asymptote-forwarder.service` (user mode: `~/.config/systemd/user/`) |
+
+The directory is `0700`. The device key appears only in the secrets file, which Vector reads through its `file` secret backend; it is in neither `vector.toml`, `config.json`, nor the forwarder's environment.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dashboard-url <url>` | Asymptote dashboard URL. Defaults to `https://asymptotelabs.ai` or `BEACON_DASHBOARD_URL`. Must be `https://` |
+| `--no-browser` | Print the approval URL instead of opening a browser |
+| `--vector-bin <path>` | Vector binary to run |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths and a LaunchDaemon or system unit. Requires root; the browser opens as the active console user |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--json` | Print the result as JSON (the device key is never included) |
+
+`disconnect` accepts the same path flags plus `--keep-credentials`, which keeps the enrollment record and device key so a later `connect` can reuse this device without a new approval.
+
+## Examples
+
+```bash title="Connect the default per-user install"
+beacon endpoint connect
+```
+
+```bash title="Connect a system-mode install from the signed package"
+sudo /opt/beacon/bin/beacon endpoint connect --system
+```
+
+```bash title="Connect from a machine without a browser"
+beacon endpoint connect --no-browser
+# open the printed URL in a browser where you are signed in
+```
+
+```bash title="Stop forwarding and remove the local credentials"
+beacon endpoint disconnect
+```
+
+## Checking the connection
+
+`beacon endpoint status` prints one line for managed ingest: whether this endpoint is connected, to which organization, the device id, whether the forwarder service is loaded and running, whether the credential is still valid (it asks the ingest service, with a 3-second timeout), and the size of the disk buffer. `--json` exposes the same under `managed_ingest`.
+
+```text
+Asymptote managed ingest: connected to Asymptote Test as device 807c6a11-…; forwarder loaded=true running=true; credential valid
+```
+
+`credential revoked` means the key was revoked or expired, or the approving user is no longer a member of the organization; Vector is logging 401s and dropping batches. Run `beacon endpoint connect` again to re-enroll.
+
+## Revocation and disconnect
+
+Revoke a device, or every device a person approved, from the dashboard's **Beacon Endpoints** page. The ingest service rejects the key within about a minute. `disconnect` is the local half: it stops and removes the forwarder and its config and, unless `--keep-credentials` is given, the enrollment record and device key. `beacon endpoint uninstall` does the same as part of removing the endpoint. Neither revokes the device server-side; the CLI tells you where to do that.
+
+## Offline behavior
+
+Vector keeps reading into an on-disk buffer (512 MiB for runtime, 256 MiB for inventory) while the network is unavailable and drains it when connectivity returns. The ingest service accepts old timestamps and the dashboard collapses re-sent duplicates on Beacon's deterministic event id, so a laptop that was asleep or offline catches up without loss or double counting, up to the buffer size.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Asymptote Managed forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
+    Wire contract, what leaves the machine, revocation, and offline behavior.
+  </Card>
+  <Card title="beacon endpoint asymptote" icon="terminal" href="/cli/asymptote">
+    The forwarder pack, for running Vector by hand.
+  </Card>
+  <Card title="Endpoint status" icon="heart-pulse" href="/cli/endpoint-status">
+    Inspect the forwarder and credential state.
+  </Card>
+  <Card title="Endpoint paths" icon="folder-tree" href="/cli/endpoint-paths">
+    Every file and service Beacon writes.
+  </Card>
+</Columns>

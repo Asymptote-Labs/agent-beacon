@@ -75,7 +75,10 @@ and customer-managed shippers read the resulting local JSONL. Supported cloud
 agents upload a compressed snapshot of their sandbox-local JSONL directly to
 customer-managed GCS or S3. Splunk HEC and Falcon LogScale HEC forwarding
 receive the same normalized collector output according to the configured
-endpoint pipeline.
+endpoint pipeline. Asymptote managed ingest, when a device has been connected,
+forwards the runtime and inventory JSONL lines written after approval exactly as
+stored locally, so the same retention and redaction settings govern what
+reaches the Asymptote dashboard.
 
 Review runtime scope, artifact access, destination permissions, and downstream retention before rollout so retained content matches your approved telemetry policy.
 

@@ -40,6 +40,7 @@ Supported runtime surfaces today:
 - Claude Cowork admin-configured OpenTelemetry setup guidance and local validation.
 - Browser chat telemetry through an optional Chrome MV3 extension (`browser-extension/`) covering claude.ai and chatgpt.com. A main-world interceptor tees the streamed response, a per-site adapter parses it into a normalized turn, and the service worker POSTs OTLP GenAI logs to the local collector on `127.0.0.1:4318`; the extension never writes files and never contacts a remote endpoint. `harness.name` resolves to `claude_web` or `chatgpt_web` (already handled by `NormalizeHarnessName` in `pkg/asymptoteobserve/harness.go`, where the browser cases must stay above the generic `claude` rule) and `harness.collection_method` is `otlp`. Scope is deliberately narrow: only those origins' chat streams, never other tabs or general browsing. Retention defaults to `full`, so prompt and response text is retained by default; this is documented rather than defaulted down, because browser chat telemetry without content has no investigative value. Treat the adapters as experimental, since both sites' stream formats are private and undocumented.
 - `beaconjson` OpenTelemetry Collector exporter that converts OTLP logs, traces, metrics, and resource attributes into Beacon endpoint JSONL.
+- Asymptote Managed forwarding, the one opt-in network channel for telemetry: `beacon endpoint connect` (`cli/beacon/cmd/endpoint_connect.go`, `cli/beacon/internal/endpoint/asymptote`) runs a browser PKCE approval against the dashboard's `/cli/enroll` page, stores the per-device key in `<BaseDir>/asymptote/vector-secrets.json` (0600, 0700 dir), renders the `asymptote` pack into `vector.toml`, validates it, and runs Vector as `com.beacon.endpoint.asymptote-forwarder` / `beacon-asymptote-forwarder.service` through `service.ForwarderManager` (user or system mode; refused in supervised mode). `enrollment.json` and `config.json`'s `managed_ingest` block carry only non-secret identity; `beacon endpoint status` reports forwarder state and a live credential check (`GET /v1/ingest/health`, 3 s timeout); `disconnect` and `uninstall` remove the forwarder and credentials but never revoke server-side.
 - Asymptote Observe TypeScript SDK instrumentation for cloud applications, starting from OpenTelemetry/OpenLLMetry patterns and `observe()` wrappers.
 - Elasticsearch/Filebeat content pack generation for forwarding local Beacon JSONL into customer-managed Elastic deployments or the bundled loopback-only development stack.
 - A local-only dashboard served by `beacon endpoint dashboard`, bound to loopback by default and backed by the runtime JSONL log.
@@ -146,8 +147,19 @@ go run . endpoint fx status        # sessions fx has written and how much Beacon
 go run . endpoint fx sync --print  # map records to events without writing anything
 ```
 
-Run the Asymptote Managed forwarder by hand during manual testing (needs a device key from
-enrollment and Vector on the machine; `/opt/beacon/bin/vector` from the signed package works):
+Connect an endpoint to Asymptote Managed during manual testing (needs Vector 0.56+ on the machine;
+`/opt/beacon/bin/vector` from the signed package works, and a browser signed in to an org that has
+managed ingest enabled):
+
+```bash
+cd cli/beacon
+go run . endpoint connect            # browser approval → device key → forwarder service
+go run . endpoint status --json | jq .managed_ingest
+go run . endpoint disconnect         # stop the forwarder and remove the local key
+```
+
+Run the Asymptote Managed forwarder by hand instead (a device key from `beacon-ingest/scripts/mint_test_device.py`
+or a previous connect):
 
 ```bash
 cd cli/beacon
@@ -445,6 +457,7 @@ unpacked through Chrome's developer mode.
 - Keep `gen_ai.usage` as the single canonical token-usage representation: normalize all runtime token telemetry (span attributes, metric datapoints, legacy `llm.usage.*` aliases) into it, mirror OTel GenAI semconv JSON names exactly, and never add parallel or per-harness token fields. `gen_ai.usage.cost_usd` carries runtime-reported cost only; do not derive cost from local pricing tables.
 - When adding a new signal, include stable identifiers/counts/hashes alongside any retained raw content, and route raw fields through redaction, sanitization, truncation, and event-size controls.
 - Keep the dashboard read-only. It should inspect local status and JSONL events but must not mutate endpoint configuration or telemetry.
+- The Asymptote device key has exactly one home, `<BaseDir>/asymptote/vector-secrets.json`, read by Vector's `secret` file backend. Never copy it into `config.json`, `vector.toml`, a service unit, an environment variable, a log line, or a `--json` result; `HasSecretDestinations` is unchanged because the key is not in `config.json`. `internal/auth` is flow-agnostic (PKCE, loopback callback server with an injected exchange function, browser opener, `PostJSON`); new browser flows reuse it rather than adding a second callback server. `connect` must fail before opening a browser when Vector or a service manager is missing, so no key is minted that cannot be used.
 - Keep the release readiness guidance in `README.md` up to date when install, packaging, collector, or dashboard behavior changes.
 
 ## CI Expectations

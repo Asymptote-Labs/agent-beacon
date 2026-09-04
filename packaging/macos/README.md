@@ -37,6 +37,15 @@ The endpoint install creates system configuration and runtime state:
 /var/log/beacon-agent/runtime.jsonl
 ```
 
+Connecting a system-mode endpoint to Asymptote managed ingest
+(`sudo /opt/beacon/bin/beacon endpoint connect --system`) opens the approval page
+in the active console user's browser and then adds a second resident service,
+`com.beacon.endpoint.asymptote-forwarder` (`/Library/LaunchDaemons/…plist`),
+running the bundled `/opt/beacon/bin/vector` with the config, disk buffer,
+enrollment record and `0600` device key below
+`/Library/Application Support/Beacon/Endpoint/asymptote/`. `beacon endpoint
+disconnect --system` and `beacon endpoint uninstall --system` remove it.
+
 The package postinstall also repairs endpoint user configuration for the active
 console user when one is logged in. This user-context step points Claude Code and
 Codex native OTLP settings at the system collector and refreshes supported user

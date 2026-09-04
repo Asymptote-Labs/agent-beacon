@@ -143,7 +143,9 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | Command | Description |
 |---------|-------------|
 | [`beacon endpoint install`](/cli/endpoint-install) | Install or update the local endpoint collector, runtime telemetry configuration, and optional Splunk HEC or Falcon LogScale HEC forwarding. |
-| [`beacon endpoint status`](/cli/endpoint-status) | Inspect collector health, runtime log state, configured harnesses, diagnostics, and forwarding readiness. |
+| [`beacon endpoint status`](/cli/endpoint-status) | Inspect collector health, runtime log state, configured harnesses, diagnostics, forwarding readiness, and the Asymptote managed-ingest connection. |
+| [`beacon endpoint connect`](/cli/endpoint-connect) | Approve this device in the Asymptote dashboard and start the Vector forwarder to managed ingest. |
+| [`beacon endpoint disconnect`](/cli/endpoint-connect) | Stop the Asymptote forwarder and remove the local device key. |
 | [`beacon endpoint doctor`](/cli/endpoint-doctor) | Run local endpoint health checks with pass/fail exit behavior and optional safe remediation. |
 | [`beacon endpoint inventory`](/cli/endpoint-inventory) | Show configured, detected, hook, and observed endpoint inventory. |
 | [`beacon endpoint discover`](/cli/endpoint-discover) | Discover supported local [agent harnesses](/runtimes) and their telemetry configuration state. |

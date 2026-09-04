@@ -95,14 +95,25 @@ const (
 )
 
 type Config struct {
-	UserMode        bool          `json:"user_mode"`
-	LogPath         string        `json:"log_path"`
-	Collector       Collector     `json:"collector"`
-	Harnesses       []string      `json:"harnesses"`
-	EventCategories []string      `json:"event_categories,omitempty"`
-	Inventory       *Inventory    `json:"inventory_heartbeat,omitempty"`
-	Destinations    *Destinations `json:"destinations,omitempty"`
-	AutoUpdate      *AutoUpdate   `json:"auto_update,omitempty"`
+	UserMode        bool           `json:"user_mode"`
+	LogPath         string         `json:"log_path"`
+	Collector       Collector      `json:"collector"`
+	Harnesses       []string       `json:"harnesses"`
+	EventCategories []string       `json:"event_categories,omitempty"`
+	Inventory       *Inventory     `json:"inventory_heartbeat,omitempty"`
+	Destinations    *Destinations  `json:"destinations,omitempty"`
+	ManagedIngest   *ManagedIngest `json:"managed_ingest,omitempty"`
+	AutoUpdate      *AutoUpdate    `json:"auto_update,omitempty"`
+}
+
+// ManagedIngest records that this endpoint forwards to Asymptote managed ingest. It holds
+// only non-secret identity so status and diagnostics never need the device key, which lives
+// in the 0600 secrets file under the asymptote/ directory and is read only by Vector.
+type ManagedIngest struct {
+	Enabled        bool   `json:"enabled"`
+	IngestURL      string `json:"ingest_url,omitempty"`
+	DeviceID       string `json:"device_id,omitempty"`
+	OrganizationID string `json:"organization_id,omitempty"`
 }
 
 // AutoUpdate controls Beacon's endpoint update checker. Phase 1 supports
