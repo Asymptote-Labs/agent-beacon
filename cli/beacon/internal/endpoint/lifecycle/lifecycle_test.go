@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -903,6 +904,30 @@ func TestDestinationStatusAndInstallDestinationReportEnabledHEC(t *testing.T) {
 	localOnly := installDestination(endpointconfig.Config{})
 	if localOnly.Type != "local_jsonl" {
 		t.Fatalf("installDestination with no HEC = %q, want local_jsonl", localOnly.Type)
+	}
+}
+
+// `status --user` on a machine whose system collector holds the OTLP ports switches the
+// runtime-log view to the system install, but the managed-ingest connection it reports must
+// still be the user's: each mode has its own enrollment, and the system one is root-only.
+func TestStatusReportsManagedIngestForRequestedMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := asymptote.SaveEnrollment(true, asymptote.Enrollment{InstallID: "i", IngestURL: "https://ingest.example", DeviceID: "user-device", OrganizationID: "org", OrganizationName: "Org"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(asymptote.VectorConfigPath(true), []byte("# rendered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	systemCfg := endpointconfig.Default(false, filepath.Join(home, "system", "runtime.jsonl"))
+	runtimeLog := RuntimeLogSource{RequestedUserMode: true, EffectiveUserMode: false, EffectiveLogPath: systemCfg.LogPath}
+
+	status := buildStatus(true, systemCfg, runtimeLog, asymptote.StatusOptions{SkipCredentialCheck: true})
+	if !status.ManagedIngest.Enabled || status.ManagedIngest.DeviceID != "user-device" {
+		t.Fatalf("status --user must report the user-mode connection, got %+v", status.ManagedIngest)
+	}
+	if status.LogPath != systemCfg.LogPath {
+		t.Fatalf("runtime log view should still follow the effective (system) config, got %q", status.LogPath)
 	}
 }
 

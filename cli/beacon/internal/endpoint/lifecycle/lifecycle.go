@@ -561,6 +561,16 @@ func GetStatus(userMode bool, logPath string) Status {
 		effectiveCfg = loadOrDefault(runtimeLog.EffectiveUserMode, runtimeLog.EffectiveLogPath)
 	}
 	effectiveCfg.LogPath = runtimeLog.EffectiveLogPath
+	return buildStatus(userMode, effectiveCfg, runtimeLog, asymptote.StatusOptions{})
+}
+
+// buildStatus assembles the status from the effective collector configuration. Everything
+// about the collector and the runtime log follows effectiveCfg, which may have switched to
+// the system install when its collector holds the OTLP ports. Managed ingest does not: a
+// connection belongs to the install the caller asked about (`--user` or `--system`), each
+// mode keeps its own enrollment and forwarder, and the system record is unreadable
+// without root anyway.
+func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, runtimeLog RuntimeLogSource, managedOpts asymptote.StatusOptions) Status {
 	last, _ := writer.LastLine(effectiveCfg.LogPath)
 	checks := diagnostics.Run(effectiveCfg)
 	if runtimeLog.Warning != "" {
@@ -582,7 +592,7 @@ func GetStatus(userMode bool, logPath string) Status {
 		Diagnostics:   checks,
 		LastEvent:     last,
 		Destinations:  destinationStatus(effectiveCfg),
-		ManagedIngest: asymptote.Status(effectiveCfg.UserMode, asymptote.StatusOptions{}),
+		ManagedIngest: asymptote.Status(requestedUserMode, managedOpts),
 	}
 }
 
