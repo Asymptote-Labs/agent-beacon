@@ -249,6 +249,45 @@ func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 	if _, err := LoadEnrollment(true); !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("enrollment must not be recorded after a failed connect, got %v", err)
 	}
+	// The rendered config is left behind for inspection, but the machine is not connected:
+	// status says so, the onboarding offer is made again, and disconnect can clean it up.
+	if Connected(true) {
+		t.Fatal("a connect that failed at validate must not count as connected")
+	}
+	if !forwarderInstalled(true, fwd) {
+		t.Fatal("disconnect must see the config a failed connect left behind")
+	}
+	if err := Disconnect(DisconnectOptions{UserMode: true, Forwarder: fwd}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(Dir(true)); !os.IsNotExist(err) {
+		t.Fatal("disconnect should remove the state a failed connect left behind")
+	}
+}
+
+func TestConnectedNeedsEnrollmentAndForwarderConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if Connected(true) {
+		t.Fatal("fresh machine")
+	}
+	if err := SaveEnrollment(true, Enrollment{InstallID: "i", DeviceID: "d", OrganizationID: "o"}); err != nil {
+		t.Fatal(err)
+	}
+	if Connected(true) {
+		t.Fatal("an enrollment record alone (disconnect --keep-credentials) is not a connection")
+	}
+	if err := os.WriteFile(VectorConfigPath(true), []byte("# rendered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !Connected(true) {
+		t.Fatal("record plus forwarder config is connected")
+	}
+	if err := os.Remove(EnrollmentPath(true)); err != nil {
+		t.Fatal(err)
+	}
+	if Connected(true) {
+		t.Fatal("a forwarder config alone (connect failed before recording) is not a connection")
+	}
 }
 
 func TestDisconnectRemovesForwarderAndOptionallyKeepsCredentials(t *testing.T) {

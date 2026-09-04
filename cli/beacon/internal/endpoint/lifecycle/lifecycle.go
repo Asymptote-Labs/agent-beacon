@@ -632,6 +632,11 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	if mode, err := autoUpdateModeFromConfigFile(endpointconfig.ConfigPath(opts.UserMode)); err == nil && mode != "" {
 		cfg.AutoUpdate = &endpointconfig.AutoUpdate{Mode: mode}
 	}
+	// A re-install (upgrades run one) must not disconnect the machine on paper: the
+	// managed_ingest block is owned by connect/disconnect, so carry the existing one over.
+	if existing, err := endpointconfig.Load(opts.UserMode); err == nil && existing.ManagedIngest != nil {
+		cfg.ManagedIngest = existing.ManagedIngest
+	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
 	}

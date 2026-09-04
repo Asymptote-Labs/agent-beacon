@@ -13,7 +13,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -233,10 +232,4 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
-// managedIngestFromConfig reports whether config.json says this endpoint is connected, for
-// callers that must not touch the network or the secrets file.
-func managedIngestFromConfig(cfg endpointconfig.Config) bool {
-	return cfg.ManagedIngest != nil && cfg.ManagedIngest.Enabled
 }

@@ -53,10 +53,16 @@ func WriteInstallID(userMode bool, installID string) error {
 	return writeFileAtomic(InstallIDPath(userMode), []byte(installID+"\n"), 0o600)
 }
 
-// Connected reports whether a forwarder is installed for this endpoint: an enrollment
-// record alone is not a connection, because disconnect --keep-credentials leaves it behind.
+// Connected reports whether this endpoint is enrolled and has its forwarder configured: both
+// enrollment.json and vector.toml exist. Either alone is not a connection. disconnect
+// --keep-credentials leaves the record behind without a config, and a connect that failed at
+// vector validate or at loading the service leaves the config behind without a record; a
+// machine in either state must be offered connect again and reported as not connected.
 func Connected(userMode bool) bool {
-	_, err := os.Stat(VectorConfigPath(userMode))
+	if _, err := os.Stat(VectorConfigPath(userMode)); err != nil {
+		return false
+	}
+	_, err := os.Stat(EnrollmentPath(userMode))
 	return err == nil
 }
 

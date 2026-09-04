@@ -542,6 +542,51 @@ func TestInstallUserModeWithoutStartingService(t *testing.T) {
 	}
 }
 
+// Upgrades re-run install. The managed_ingest block belongs to connect/disconnect, so a
+// re-install must carry it over instead of silently disconnecting the machine on paper.
+func TestInstallPreservesManagedIngestBlock(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
+	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(collectorPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	opts := InstallOptions{UserMode: true, LogPath: logPath, Harnesses: []string{}, GRPCPort: freePort(t), HTTPPort: freePort(t), CollectorPath: collectorPath, StartService: false}
+	if _, err := Install(opts); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	cfg, err := endpointconfig.Load(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ManagedIngest != nil {
+		t.Fatalf("a fresh install must not invent a managed_ingest block: %+v", cfg.ManagedIngest)
+	}
+	managed := &endpointconfig.ManagedIngest{Enabled: true, IngestURL: "https://ingest.example", DeviceID: "dev-1", OrganizationID: "org-1"}
+	cfg.ManagedIngest = managed
+	if _, err := endpointconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Install(opts); err != nil {
+		t.Fatalf("re-install: %v", err)
+	}
+	after, err := endpointconfig.Load(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ManagedIngest == nil || *after.ManagedIngest != *managed {
+		t.Fatalf("re-install dropped or changed managed_ingest: %+v", after.ManagedIngest)
+	}
+}
+
 func TestInstallFailsBeforeWritingArtifactsWhenCollectorMissing(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("install preflight is macOS-only")

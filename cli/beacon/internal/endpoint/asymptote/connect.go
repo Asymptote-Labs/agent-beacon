@@ -245,8 +245,12 @@ func forwarderInstalled(userMode bool, manager Forwarder) bool {
 	if Connected(userMode) {
 		return true
 	}
-	if _, err := os.Stat(EnrollmentPath(userMode)); err == nil {
-		return true
+	// Either file alone is still state to clean up: a kept enrollment record, or the config
+	// a connect wrote before failing at validate or load.
+	for _, path := range []string{EnrollmentPath(userMode), VectorConfigPath(userMode)} {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
 	}
 	if path, err := manager.UnitPath(); err == nil && path != "" {
 		if _, err := os.Stat(path); err == nil {
