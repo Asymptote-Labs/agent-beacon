@@ -105,6 +105,13 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		"hermes":        CollectionMethodHook,
 		"factory":       CollectionMethodHook,
 		"copilot":       CollectionMethodHook,
+		// Muse Code is hook-shaped even though Beacon writes the whole hooks file rather than
+		// merging into one the vendor already has. The distinction this field draws is about what
+		// Beacon ships, not who owns the file: the events are Meta's own lifecycle events and the
+		// payloads are Meta's to change, so a coverage gap is the vendor's to expose. Grok is the
+		// same shape for the same reason. A `plugin` here would claim Beacon ships and versions
+		// source the runtime loads, which for Muse Code it does not.
+		"muse": CollectionMethodHook,
 		// vscode is the case that justifies keying on --platform rather than on the normalized
 		// harness name: its hook and OTLP telemetry both normalize to vscode_copilot, so the
 		// harness name cannot distinguish them and only the flag can.
