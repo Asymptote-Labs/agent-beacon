@@ -167,57 +167,97 @@ func TestPromptDoesNotNoteFreeMailboxForPersonalUse(t *testing.T) {
 	}
 }
 
-func TestPromptOffersManagedIngestOnlyWhenAsked(t *testing.T) {
+func TestPromptAsksDestinationOnlyWhenRequested(t *testing.T) {
 	answers, out, err := runPrompt(t, "1\nshukan@asymptotelabs.ai\n")
 	if err != nil {
 		t.Fatalf("Prompt returned error: %v", err)
 	}
-	if answers.ManagedIngestOffered || strings.Contains(out, "Asymptote Managed") {
-		t.Fatalf("default prompt must not offer managed ingest: %+v\n%s", answers, out)
+	if answers.DestinationAsked || strings.Contains(out, "Where should") {
+		t.Fatalf("default prompt must not ask the destination question: %+v\n%s", answers, out)
 	}
 
 	var buf bytes.Buffer
-	answers, err = PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\ny\n"), &buf, PromptOptions{OfferManagedIngest: true})
+	answers, err = PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n3\n"), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true})
 	if err != nil {
 		t.Fatalf("PromptWith returned error: %v", err)
 	}
-	if !answers.ManagedIngestOffered || !answers.ManagedIngest {
-		t.Fatalf("expected an accepted offer, got %+v", answers)
+	if !answers.DestinationAsked || answers.Destination != DestinationAsymptote {
+		t.Fatalf("expected the Asymptote answer, got %+v", answers)
 	}
-	for _, want := range []string{"Forward this machine's agent telemetry to Asymptote Managed?", "revoke it", "Nothing recorded before approval is sent", "Connect now? [y/N]", "Connecting after install."} {
+	for _, want := range []string{
+		"Where should this machine's agent telemetry go?",
+		"Keep it on this machine", "Nothing is sent anywhere.",
+		"Forward to your own infrastructure", "SIEM, observability platform, or an S3/GCS bucket you own.",
+		"Forward to Asymptote Managed", "revoke it from the dashboard",
+		"Connecting after install.",
+	} {
 		if !strings.Contains(buf.String(), want) {
-			t.Fatalf("offer output missing %q:\n%s", want, buf.String())
+			t.Fatalf("destination output missing %q:\n%s", want, buf.String())
 		}
 	}
 }
 
-func TestManagedIngestOfferDefaultsToNo(t *testing.T) {
-	for _, input := range []string{"\n", "n\n", "NO\n"} {
+// Enter (an empty answer in the typed menu) keeps telemetry local: forwarding is a choice.
+func TestDestinationDefaultsToLocal(t *testing.T) {
+	for _, input := range []string{"\n", "1\n", "local\n", "KEEP\n"} {
 		var buf bytes.Buffer
-		answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n"+input), &buf, PromptOptions{OfferManagedIngest: true})
+		answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n"+input), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true})
 		if err != nil {
 			t.Fatalf("input %q: %v", input, err)
 		}
-		if !answers.ManagedIngestOffered || answers.ManagedIngest {
-			t.Fatalf("input %q should decline, got %+v", input, answers)
+		if answers.Destination != DestinationLocal {
+			t.Fatalf("input %q should keep telemetry local, got %+v", input, answers)
 		}
-		if !strings.Contains(buf.String(), "beacon endpoint connect") {
-			t.Fatalf("declining should name the command to run later:\n%s", buf.String())
+		if !strings.Contains(buf.String(), "beacon endpoint connect") || !strings.Contains(buf.String(), ForwardingDocsURL) {
+			t.Fatalf("the local answer should say how to forward later:\n%s", buf.String())
 		}
 	}
 	var buf bytes.Buffer
-	if _, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\nmaybe\nwhat\nhuh\n?\n!\n"), &buf, PromptOptions{OfferManagedIngest: true}); !errors.Is(err, ErrTooManyAttempts) {
+	if _, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\nmaybe\n9\nhuh\n?\n!\n"), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true}); !errors.Is(err, ErrTooManyAttempts) {
 		t.Fatalf("expected ErrTooManyAttempts after repeated bad answers, got %v", err)
 	}
 }
 
-func TestAskManagedIngestAlone(t *testing.T) {
-	var buf bytes.Buffer
-	yes, err := AskManagedIngest(strings.NewReader("yes\n"), &buf)
-	if err != nil || !yes {
-		t.Fatalf("AskManagedIngest = %t, %v", yes, err)
+func TestDestinationOwnInfrastructurePointsAtTheDocs(t *testing.T) {
+	for _, input := range []string{"2\n", "own\n", "siem\n", "own_infra\n"} {
+		var buf bytes.Buffer
+		answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n"+input), &buf, PromptOptions{AskDestination: true, OfferAsymptote: true})
+		if err != nil || answers.Destination != DestinationOwnInfra {
+			t.Fatalf("input %q: destination=%q err=%v", input, answers.Destination, err)
+		}
+		for _, want := range []string{ForwardingDocsURL, "beacon endpoint datadog", "Vector pack"} {
+			if !strings.Contains(buf.String(), want) {
+				t.Fatalf("own-infrastructure answer missing %q:\n%s", want, buf.String())
+			}
+		}
 	}
-	if _, err := AskManagedIngest(strings.NewReader(""), &buf); !errors.Is(err, ErrPromptAborted) {
+}
+
+// BEACON_MANAGED_INGEST=0 hides the Asymptote row; the question is still asked.
+func TestDestinationHidesAsymptoteWhenNotOffered(t *testing.T) {
+	var buf bytes.Buffer
+	answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n3\nasymptote\n2\n"), &buf, PromptOptions{AskDestination: true, OfferAsymptote: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answers.Destination != DestinationOwnInfra {
+		t.Fatalf("with two rows, 3 and asymptote must be rejected and 2 accepted, got %+v", answers)
+	}
+	if strings.Contains(buf.String(), "Asymptote Managed") {
+		t.Fatalf("Asymptote row must be hidden:\n%s", buf.String())
+	}
+	if strings.Count(buf.String(), "enter a number from 1 to 2") != 2 {
+		t.Fatalf("expected two rejections:\n%s", buf.String())
+	}
+}
+
+func TestAskDestinationAlone(t *testing.T) {
+	var buf bytes.Buffer
+	destination, err := AskDestination(strings.NewReader("3\n"), &buf, true)
+	if err != nil || destination != DestinationAsymptote {
+		t.Fatalf("AskDestination = %q, %v", destination, err)
+	}
+	if _, err := AskDestination(strings.NewReader(""), &buf, true); !errors.Is(err, ErrPromptAborted) {
 		t.Fatalf("EOF should abort, got %v", err)
 	}
 }

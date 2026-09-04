@@ -26,9 +26,10 @@ const (
 	// they just have no terminal to type it into.
 	onboardingEnvEmail = "BEACON_ONBOARDING_EMAIL"
 	onboardingEnvUsage = "BEACON_ONBOARDING_USAGE"
-	// managedIngestEnvEnabled set to a false-ish value suppresses the offer to connect
-	// this machine to Asymptote managed ingest. The explicit --connect flag is unaffected:
-	// the variable silences a question, it does not override an operator's request.
+	// managedIngestEnvEnabled set to a false-ish value hides the Asymptote Managed row
+	// from the telemetry destination question; the question itself (local or your own
+	// infrastructure) is still asked. The explicit --connect flag is unaffected: the
+	// variable hides an offer, it does not override an operator's request.
 	managedIngestEnvEnabled = "BEACON_MANAGED_INGEST"
 )
 
@@ -45,20 +46,19 @@ const (
 // Indirection points so the gate and the flow can be tested without a terminal, a
 // network, or a real home directory.
 var (
-	onboardingLoad                       = onboarding.Load
-	onboardingSave                       = onboarding.Save
-	onboardingAsk                        = onboarding.Prompt
-	onboardingSend                       = onboarding.Submit
-	onboardingStdin            io.Reader = os.Stdin
-	onboardingIsTTY                      = defaultOnboardingIsTTY
-	onboardingIsRoot                     = func() bool { return os.Geteuid() == 0 }
-	onboardingProbeFn                    = onboarding.StartRuntimeProbe
-	onboardingAskWith                    = onboarding.PromptWith
-	onboardingAskManagedIngest           = onboarding.AskManagedIngest
-	// managedIngestOfferable reports whether connect could succeed here: Vector is present
-	// and this endpoint is not already connected. Offering a question whose "yes" would
-	// fail is worse than not asking.
-	managedIngestOfferable = defaultManagedIngestOfferable
+	onboardingLoad                     = onboarding.Load
+	onboardingSave                     = onboarding.Save
+	onboardingAsk                      = onboarding.Prompt
+	onboardingSend                     = onboarding.Submit
+	onboardingStdin          io.Reader = os.Stdin
+	onboardingIsTTY                    = defaultOnboardingIsTTY
+	onboardingIsRoot                   = func() bool { return os.Geteuid() == 0 }
+	onboardingProbeFn                  = onboarding.StartRuntimeProbe
+	onboardingAskWith                  = onboarding.PromptWith
+	onboardingAskDestination           = onboarding.AskDestination
+	// destinationAskable reports whether the destination question makes sense here: an
+	// endpoint already connected to Asymptote has answered it by doing.
+	destinationAskable = defaultDestinationAskable
 )
 
 // runtimeProbeBudget bounds how long submission waits on background runtime
@@ -75,8 +75,8 @@ func defaultOnboardingIsTTY() bool {
 }
 
 // maybeRunOnboarding runs the one-time signup prompt if this install should ask, and
-// reports whether the user asked to connect this machine to Asymptote managed ingest
-// once the install has finished.
+// reports whether the user chose Asymptote Managed as the telemetry destination, which
+// the install carries out with a connect once it has finished.
 //
 // It is called from `endpoint install` after the --dry-run early return, so a dry run
 // never prompts. An error returned here does stop the install: the prompt is a
@@ -85,11 +85,11 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 	profile := onboardingLoad()
 
 	// Someone who already answered is never asked again, but a submission that failed
-	// on a flaky network still deserves a quiet retry. The forwarding question is newer
+	// on a flaky network still deserves a quiet retry. The destination question is newer
 	// than the signup prompt, so a machine onboarded before it existed gets it once.
 	if profile.Prompted() {
 		resendPendingOnboarding(&profile)
-		return maybeOfferManagedIngest(cmd, &profile)
+		return maybeAskDestination(cmd, &profile)
 	}
 
 	// A headless rollout that supplied answers is recorded without a terminal.
@@ -102,100 +102,94 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 		return false, nil
 	}
 
-	// `install --connect` is already the answer to the forwarding question, so the prompt
-	// does not ask it; the install records the yes once the connect succeeds.
-	offer := !endpointOpts.connect && managedIngestOfferableNow()
+	// `install --connect` is already the answer to the destination question, so the
+	// prompt does not ask it; the install records asymptote once the connect succeeds.
+	ask := !endpointOpts.connect && destinationAskable()
 
 	// Discovery shells out to every installed runtime, so start it now and collect it
 	// after the questions. The latency disappears behind the user reading and typing.
 	probe := onboardingProbeFn()
 
-	answers, err := onboardingAskWith(onboardingStdin, cmd.OutOrStdout(), onboarding.PromptOptions{OfferManagedIngest: offer})
+	answers, err := onboardingAskWith(onboardingStdin, cmd.OutOrStdout(), onboarding.PromptOptions{AskDestination: ask, OfferAsymptote: managedIngestEnabledByEnv()})
 	if err != nil {
 		return false, err
 	}
-	// A no is final and recorded now. A yes is recorded by the install once the machine
-	// is actually connected (recordManagedIngestAccepted): if the install or the connect
-	// fails first, the record stays empty and the next interactive install asks again,
-	// instead of a stored "accepted" silencing the question on a machine that never
-	// forwarded anything.
-	record := ""
-	if answers.ManagedIngestOffered && !answers.ManagedIngest {
-		record = onboarding.ManagedIngestDeclined
+	// Local and own-infrastructure answers are final and recorded now. Asymptote is
+	// recorded by the install once the machine is actually connected
+	// (recordDestinationAsymptote): if the install or the connect fails first, the record
+	// stays empty and the next interactive install asks again, instead of a stored
+	// answer silencing the question on a machine that never forwarded anything.
+	chooseAsymptote := answers.DestinationAsked && answers.Destination == onboarding.DestinationAsymptote
+	record := answers.Destination
+	if chooseAsymptote {
+		record = ""
 	}
 	completeOnboarding(cmd, &profile, answers.Email, answers.Usage, probe, record)
-	return answers.ManagedIngestOffered && answers.ManagedIngest, nil
+	return chooseAsymptote, nil
 }
 
-// maybeOfferManagedIngest asks the forwarding question alone, once, on an interactive
+// maybeAskDestination asks the destination question alone, once, on an interactive
 // install of a machine that was onboarded before the question existed.
-func maybeOfferManagedIngest(cmd *cobra.Command, profile *onboarding.Profile) (bool, error) {
-	if profile.Onboarding.ManagedIngest != "" || endpointOpts.connect {
+func maybeAskDestination(cmd *cobra.Command, profile *onboarding.Profile) (bool, error) {
+	if profile.Onboarding.Destination != "" || endpointOpts.connect {
 		return false, nil
 	}
-	if reason, skipped := managedIngestSkipReason(*profile); skipped {
-		_ = reason
+	if _, skipped := destinationSkipReason(*profile); skipped {
 		return false, nil
 	}
-	connect, err := onboardingAskManagedIngest(onboardingStdin, cmd.OutOrStdout())
+	destination, err := onboardingAskDestination(onboardingStdin, cmd.OutOrStdout(), managedIngestEnabledByEnv())
 	if err != nil {
 		return false, err
 	}
-	if connect {
-		// Recorded by recordManagedIngestAccepted once the connect has succeeded.
+	if destination == onboarding.DestinationAsymptote {
+		// Recorded by recordDestinationAsymptote once the connect has succeeded.
 		return true, nil
 	}
-	profile.Onboarding.ManagedIngest = onboarding.ManagedIngestDeclined
+	profile.Onboarding.Destination = destination
 	if err := onboardingSave(*profile); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: could not record onboarding: %v\n", err)
 	}
 	return false, nil
 }
 
-// recordManagedIngestAccepted stores the yes after `endpoint install` has connected the
-// machine, whether the yes came from the question or from --connect. Until then the offer
-// is unrecorded on purpose, so a failed install or connect is retried by asking again
-// rather than remembered as done. A recorded no is not overwritten: --connect on a machine
-// whose owner declined is an operator's action, not a change of the owner's answer.
-func recordManagedIngestAccepted(cmd *cobra.Command) {
+// recordDestinationAsymptote stores the Asymptote answer after `endpoint install` has
+// connected the machine, whether the answer came from the question or from --connect.
+// Until then it is unrecorded on purpose, so a failed install or connect is retried by
+// asking again rather than remembered as done. A recorded local or own-infrastructure
+// answer is not overwritten: --connect on such a machine is an operator's action, not a
+// change of the owner's answer.
+func recordDestinationAsymptote(cmd *cobra.Command) {
 	profile := onboardingLoad()
-	if !profile.Prompted() || profile.Onboarding.ManagedIngest != "" {
+	if !profile.Prompted() || profile.Onboarding.Destination != "" {
 		return
 	}
-	profile.Onboarding.ManagedIngest = onboarding.ManagedIngestAccepted
+	profile.Onboarding.Destination = onboarding.DestinationAsymptote
 	if err := onboardingSave(profile); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: could not record onboarding: %v\n", err)
 	}
 }
 
-// managedIngestSkipReason mirrors onboardingSkipReason for the forwarding question, with
-// two extra conditions: the variable that silences it and whether connect could succeed.
-func managedIngestSkipReason(profile onboarding.Profile) (string, bool) {
+// destinationSkipReason mirrors onboardingSkipReason for the destination question, plus
+// one condition of its own: an endpoint already connected to Asymptote is not asked.
+func destinationSkipReason(profile onboarding.Profile) (string, bool) {
 	switch {
-	case profile.Onboarding.ManagedIngest != "":
+	case profile.Onboarding.Destination != "":
 		return onboardingSkipCompleted, true
-	case !managedIngestEnabledByEnv():
-		return onboardingSkipOptedOut, true
 	case !endpointUserMode(), onboardingIsRoot():
 		return onboardingSkipSystemInstall, true
 	case isCIEnvironment():
 		return onboardingSkipCI, true
 	case !onboardingIsTTY():
 		return onboardingSkipNotAterminal, true
-	case !managedIngestOfferable():
-		return "not_offerable", true
+	case !destinationAskable():
+		return "already_connected", true
 	default:
 		return "", false
 	}
 }
 
-// managedIngestOfferableNow is the gate for adding the question to a first-run prompt
-// that is already going to be shown.
-func managedIngestOfferableNow() bool {
-	return managedIngestEnabledByEnv() && managedIngestOfferable()
-}
-
-// managedIngestEnabledByEnv reports whether BEACON_MANAGED_INGEST permits the offer.
+// managedIngestEnabledByEnv reports whether BEACON_MANAGED_INGEST permits the Asymptote
+// Managed row.
 func managedIngestEnabledByEnv() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(managedIngestEnvEnabled))) {
 	case "0", "false", "no", "off":
@@ -205,12 +199,24 @@ func managedIngestEnabledByEnv() bool {
 	}
 }
 
-func defaultManagedIngestOfferable() bool {
-	if asymptote.Connected(endpointUserMode()) {
-		return false
+// defaultDestinationAskable is false once this endpoint is connected to Asymptote: the
+// machine has a destination, and the record is written when the connect succeeds.
+func defaultDestinationAskable() bool {
+	return !asymptote.Connected(endpointUserMode())
+}
+
+// destinationLabel is the human wording for a recorded destination value.
+func destinationLabel(value string) string {
+	switch value {
+	case onboarding.DestinationLocal:
+		return "local only (nothing forwarded)"
+	case onboarding.DestinationOwnInfra:
+		return "own infrastructure (forwarding pack)"
+	case onboarding.DestinationAsymptote:
+		return "Asymptote Managed"
+	default:
+		return value
 	}
-	_, err := asymptote.FindVector("")
-	return err == nil
 }
 
 // onboardingSkipReason reports whether the prompt should stay silent, and why.
@@ -287,10 +293,10 @@ func onboardingAnswersFromEnv(stderr io.Writer) (string, string, bool) {
 // It never returns an error. Once the user has answered, the install belongs to them;
 // a signup endpoint being unreachable is our problem, not theirs.
 //
-// managedIngest is the forwarding record to store alongside the answers: declined, or ""
-// when the question was not asked or was accepted (accepted is stored by the install
-// after the connect succeeds).
-func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, usage string, probe *onboarding.RuntimeProbe, managedIngest string) {
+// destination is the telemetry destination to record alongside the answers: local or
+// own_infra, or "" when the question was not asked or the answer was Asymptote (stored
+// by the install after the connect succeeds). It is never sent anywhere.
+func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, usage string, probe *onboarding.RuntimeProbe, destination string) {
 	installID, err := onboarding.EnsureInstallID(profile)
 	if err != nil {
 		// Without an install ID there is no dedupe key, so there is nothing sensible
@@ -322,7 +328,7 @@ func completeOnboarding(cmd *cobra.Command, profile *onboarding.Profile, email, 
 		Usage:         usage,
 		BeaconVersion: version.GetVersion(),
 	}
-	profile.Onboarding.ManagedIngest = managedIngest
+	profile.Onboarding.Destination = destination
 	// Keep the payload only when resending could still work. A rejected submission is
 	// terminal, and holding the address on disk past that point serves nobody.
 	if outcome == onboarding.OutcomePending {
@@ -386,7 +392,7 @@ type endpointOnboardingStatus struct {
 	Usage         string `json:"usage,omitempty"`
 	InstallID     string `json:"install_id,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
-	ManagedIngest string `json:"managed_ingest,omitempty"`
+	Destination   string `json:"destination,omitempty"`
 	Pending       bool   `json:"pending_submission"`
 	SkipReason    string `json:"skip_reason,omitempty"`
 	ProfilePath   string `json:"profile_path"`
@@ -425,7 +431,7 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 		Usage:         profile.Onboarding.Usage,
 		InstallID:     profile.InstallID,
 		BeaconVersion: profile.Onboarding.BeaconVersion,
-		ManagedIngest: profile.Onboarding.ManagedIngest,
+		Destination:   profile.Onboarding.Destination,
 		Pending:       profile.Pending != nil,
 		SkipReason:    reason,
 		ProfilePath:   onboarding.Path(),
@@ -446,8 +452,8 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Email: %s\n", status.Email)
 		fmt.Fprintf(out, "Usage: %s\n", status.Usage)
 	}
-	if status.ManagedIngest != "" {
-		fmt.Fprintf(out, "Managed ingest offer: %s\n", status.ManagedIngest)
+	if status.Destination != "" {
+		fmt.Fprintf(out, "Telemetry destination: %s\n", destinationLabel(status.Destination))
 	}
 	fmt.Fprintf(out, "Install ID: %s\n", status.InstallID)
 	fmt.Fprintf(out, "Profile: %s\n", status.ProfilePath)

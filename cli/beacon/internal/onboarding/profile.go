@@ -57,16 +57,18 @@ type Onboarding struct {
 	Email         string `json:"email,omitempty"`
 	Usage         string `json:"usage,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
-	// ManagedIngest records the answer to the managed-forwarding offer: accepted or
-	// declined. Empty means it has not been offered on this machine yet, so a later
-	// interactive install may ask once.
-	ManagedIngest string `json:"managed_ingest,omitempty"`
+	// Destination records where the user chose to send this machine's telemetry:
+	// local, own_infra or asymptote. Empty means the question has not been answered on
+	// this machine, so a later interactive install may ask once. asymptote is written
+	// only after the connect succeeds, so a failed connect is asked again.
+	Destination string `json:"destination,omitempty"`
 }
 
-// Answers to the managed-forwarding offer.
+// Answers to the telemetry destination question.
 const (
-	ManagedIngestAccepted = "accepted"
-	ManagedIngestDeclined = "declined"
+	DestinationLocal     = "local"
+	DestinationOwnInfra  = "own_infra"
+	DestinationAsymptote = "asymptote"
 )
 
 // Prompted reports whether this machine has already been through onboarding.

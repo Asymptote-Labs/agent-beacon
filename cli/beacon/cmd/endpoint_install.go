@@ -104,13 +104,13 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
-	acceptedOffer, err := maybeRunOnboarding(cmd)
+	chooseAsymptote, err := maybeRunOnboarding(cmd)
 	if err != nil {
 		return err
 	}
-	// --connect skips the question inside maybeRunOnboarding; either source of yes is
-	// recorded in the profile only after the connect below succeeds.
-	connectAfterInstall := acceptedOffer || endpointOpts.connect
+	// --connect skips the destination question inside maybeRunOnboarding; either way the
+	// Asymptote answer is recorded in the profile only after the connect below succeeds.
+	connectAfterInstall := chooseAsymptote || endpointOpts.connect
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -144,7 +144,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
 		} else {
-			recordManagedIngestAccepted(cmd)
+			recordDestinationAsymptote(cmd)
 		}
 	}
 	return nil

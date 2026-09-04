@@ -254,17 +254,27 @@ or anything else Beacon captures. The endpoint agent itself stays local-only; th
 one HTTP request at install time, not an ongoing channel, unless you connect the
 machine to Asymptote Managed.
 
-When Vector is available, the same first-run prompt also asks whether to
-**forward this machine's agent telemetry to Asymptote Managed now** (default no).
-Answering yes runs `beacon endpoint connect` after the install: your browser opens the
-Asymptote dashboard, a member of your organization approves this specific device, and a
-Vector forwarder starts shipping the runtime and inventory JSONL with a per-device key.
-Nothing recorded before the approval is sent, and the device can be revoked from the
-dashboard at any time. `beacon endpoint install --connect` forces the same flow without asking,
-`BEACON_MANAGED_INGEST=0` silences the question. A no is recorded and never asked again;
-a yes is recorded once the machine is connected, so a failed install or connection is
-asked again on the next interactive install. See [`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect)
-and [Asymptote Managed forwarding](https://docs.asymptotelabs.ai/log-forwarding/asymptote).
+The same first-run prompt ends with one more question, **where should this machine's
+agent telemetry go?**, answered with the arrow keys:
+
+- **Keep it on this machine** (the default, so Enter never forwards anything). Local
+  JSONL and local dashboard.
+- **Forward to your own infrastructure**: a SIEM, observability platform, or an S3/GCS
+  bucket you own. Beacon points you at the [log forwarding docs](https://docs.asymptotelabs.ai/log-forwarding)
+  and the install stays local until you set up a pack.
+- **Forward to Asymptote Managed**: runs `beacon endpoint connect` after the install. Your
+  browser opens the Asymptote dashboard, a member of your organization approves this
+  specific device, and a Vector forwarder starts shipping the runtime and inventory JSONL
+  with a per-device key. Nothing recorded before the approval is sent, and the device can
+  be revoked from the dashboard at any time.
+
+The answer stays on the machine and is never sent. Local and own-infrastructure answers
+are recorded at once and the question is not asked again; the Asymptote answer is
+recorded once the machine is connected, so a failed install or connection is asked again
+on the next interactive install. `beacon endpoint install --connect` skips the question
+and connects; `BEACON_MANAGED_INGEST=0` hides the Asymptote option. See
+[`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect) and
+[Asymptote Managed forwarding](https://docs.asymptotelabs.ai/log-forwarding/asymptote).
 
 See the [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
 for fleet attribution without a terminal, inspecting or clearing the record, and

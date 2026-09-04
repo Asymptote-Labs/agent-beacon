@@ -28,9 +28,38 @@ const (
 const (
 	colorReset = "\x1b[0m"
 	colorDim   = "\x1b[2m"
-	colorAccnt = "\x1b[38;5;141m" // the Beacon purple used by the root splash
+	colorAccnt = "\x1b[38;5;141m"   // the Beacon purple used by the root splash
+	colorTitle = "\x1b[1;38;5;141m" // bold purple: every question title, so the prompt reads as one piece
 	colorGreen = "\x1b[32m"
 )
+
+// choice is one row of a picker: a label and an optional one-line detail drawn dim
+// beneath it, for questions whose options need a sentence of explanation.
+type choice struct {
+	Label  string
+	Detail string
+}
+
+func choices(labels []string) []choice {
+	rows := make([]choice, len(labels))
+	for i, label := range labels {
+		rows[i] = choice{Label: label}
+	}
+	return rows
+}
+
+// renderedLines is how many terminal lines a picker draws: one per option, one per
+// detail, and the key hint.
+func renderedLines(options []choice) int {
+	n := 1
+	for _, option := range options {
+		n++
+		if option.Detail != "" {
+			n++
+		}
+	}
+	return n
+}
 
 // keyAction is what a keypress means to the picker.
 type keyAction int
@@ -54,7 +83,7 @@ type keyEvent struct {
 // The terminal is restored on every exit path, including Ctrl-C: raw mode disables
 // the interrupt signal, so leaving without restoring would hand the user back a shell
 // with no echo.
-func selectOption(in *os.File, out io.Writer, options []string, color bool) (int, error) {
+func selectOption(in *os.File, out io.Writer, options []choice, color bool) (int, error) {
 	fd := int(in.Fd())
 	state, err := term.MakeRaw(fd)
 	if err != nil {
@@ -74,7 +103,7 @@ func selectOption(in *os.File, out io.Writer, options []string, color bool) (int
 	for {
 		n, err := in.Read(buf)
 		if err != nil || n == 0 {
-			clear(out, len(options)+1)
+			clear(out, renderedLines(options))
 			return 0, ErrPromptAborted
 		}
 		moved := false
@@ -87,13 +116,13 @@ func selectOption(in *os.File, out io.Writer, options []string, color bool) (int
 				selected = (selected + 1) % len(options)
 				moved = true
 			case keySelect:
-				clear(out, len(options)+1)
+				clear(out, renderedLines(options))
 				return selected, nil
 			case keyPick:
-				clear(out, len(options)+1)
+				clear(out, renderedLines(options))
 				return event.index, nil
 			case keyAbort:
-				clear(out, len(options)+1)
+				clear(out, renderedLines(options))
 				return 0, ErrPromptAborted
 			}
 		}
@@ -162,9 +191,9 @@ func decodeByte(c byte, total int) (keyEvent, bool) {
 }
 
 // render draws the option list plus its key hint, overwriting the previous draw.
-func render(out io.Writer, options []string, selected int, color bool, first bool) {
+func render(out io.Writer, options []choice, selected int, color bool, first bool) {
 	if !first {
-		fmt.Fprintf(out, ansiUp, len(options)+1)
+		fmt.Fprintf(out, ansiUp, renderedLines(options))
 	}
 	accent, dimmed, clear := "", "", ""
 	if color {
@@ -173,9 +202,13 @@ func render(out io.Writer, options []string, selected int, color bool, first boo
 	for i, option := range options {
 		fmt.Fprint(out, ansiClearLine)
 		if i == selected {
-			fmt.Fprintf(out, "  %s❯ %s%s\r\n", accent, option, clear)
+			fmt.Fprintf(out, "  %s❯ %s%s\r\n", accent, option.Label, clear)
 		} else {
-			fmt.Fprintf(out, "    %s\r\n", option)
+			fmt.Fprintf(out, "    %s\r\n", option.Label)
+		}
+		if option.Detail != "" {
+			fmt.Fprint(out, ansiClearLine)
+			fmt.Fprintf(out, "      %s%s%s\r\n", dimmed, option.Detail, clear)
 		}
 	}
 	fmt.Fprint(out, ansiClearLine)

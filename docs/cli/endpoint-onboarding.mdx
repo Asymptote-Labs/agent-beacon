@@ -18,7 +18,7 @@ Beacon does not ask again.
 ## First-run onboarding
 
 The first interactive `beacon endpoint install` asks two questions, how you are using Beacon and your email, then sends the answers to Asymptote once. This is how we decide
-which agent runtimes and integrations to build next. When Vector is available on the machine it asks a third question, whether to forward this machine's telemetry to Asymptote Managed now; that answer stays local and, if yes, runs [`beacon endpoint connect`](/cli/endpoint-connect) after the install.
+which agent runtimes and integrations to build next. It then asks a third question, where this machine's telemetry should go: keep it on the machine, forward it to your own infrastructure (a SIEM, observability platform, or an S3/GCS bucket you own, with a pointer to the [log forwarding docs](/log-forwarding)), or forward it to Asymptote Managed, which runs [`beacon endpoint connect`](/cli/endpoint-connect) after the install. That answer stays local and is never sent.
 
 What is sent, and nothing else:
 
@@ -53,8 +53,8 @@ skip it silently.
 
 Set `BEACON_ONBOARDING=0` to suppress the prompt on an install that would otherwise be
 interactive. There is no CLI flag for this: it exists for unattended CI and MDM
-workflows. `BEACON_MANAGED_INGEST=0` suppresses only the managed-forwarding question;
-`beacon endpoint install --connect` still connects when asked explicitly.
+workflows. `BEACON_MANAGED_INGEST=0` hides only the Asymptote Managed answer from the
+destination question; `beacon endpoint install --connect` still connects when asked explicitly.
 
 ```bash title="Suppress the prompt"
 BEACON_ONBOARDING=0 beacon endpoint install
@@ -73,9 +73,10 @@ is reported on stderr and ignored rather than failing the install.
 
 ## Examples
 
-Show what was recorded, including the answer to the managed-forwarding question
-(`Managed ingest offer: accepted` or `declined`; absent when it has not been asked, or when
-a yes has not yet been carried through to a connected machine):
+Show what was recorded, including the answer to the destination question
+(`Telemetry destination: local only …`, `own infrastructure …` or `Asymptote Managed`; absent
+when it has not been asked, or when an Asymptote answer has not yet been carried through to a
+connected machine):
 
 ```bash title="Show the onboarding record"
 beacon endpoint onboarding

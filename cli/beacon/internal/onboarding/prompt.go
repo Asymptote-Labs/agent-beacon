@@ -26,18 +26,25 @@ var ErrTooManyAttempts = errors.New("too many invalid answers")
 type Answers struct {
 	Email string
 	Usage string
-	// ManagedIngestOffered is true when the forwarding question was asked;
-	// ManagedIngest is the answer.
-	ManagedIngestOffered bool
-	ManagedIngest        bool
+	// DestinationAsked is true when the telemetry destination question was asked;
+	// Destination is the answer (DestinationLocal, DestinationOwnInfra or
+	// DestinationAsymptote).
+	DestinationAsked bool
+	Destination      string
 }
 
 // PromptOptions tunes the one-time prompt.
 type PromptOptions struct {
-	// OfferManagedIngest adds the "forward to Asymptote Managed now?" question. The
-	// caller decides whether it is offerable (Vector present, not already connected).
-	OfferManagedIngest bool
+	// AskDestination adds the "where should this machine's telemetry go?" question. The
+	// caller decides whether to ask (not already connected, not forced by --connect).
+	AskDestination bool
+	// OfferAsymptote includes the Asymptote Managed row; BEACON_MANAGED_INGEST=0 hides it.
+	OfferAsymptote bool
 }
+
+// ForwardingDocsURL is where the own-infrastructure answer points: the pack-by-pack
+// guide for shipping the local JSONL to a SIEM, observability platform or bucket.
+const ForwardingDocsURL = "https://docs.asymptotelabs.ai/log-forwarding"
 
 // Prompt runs the one-time onboarding questions.
 //
@@ -54,7 +61,7 @@ func PromptWith(in io.Reader, out io.Writer, opts PromptOptions) (Answers, error
 	reader := bufio.NewReader(in)
 
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "  %sBeacon is free and open source.%s Sharing your email helps us\n", bold(color), reset(color))
+	fmt.Fprintf(out, "  %sBeacon is free and open source.%s Sharing your email helps us\n", title(color), reset(color))
 	fmt.Fprintln(out, "  prioritize which agent runtimes to support next.")
 	fmt.Fprintln(out)
 
@@ -75,60 +82,137 @@ func PromptWith(in io.Reader, out io.Writer, opts PromptOptions) (Answers, error
 	}
 
 	answers := Answers{Email: email, Usage: usage}
-	if opts.OfferManagedIngest {
+	if opts.AskDestination {
 		fmt.Fprintln(out)
-		connect, err := askManagedIngest(reader, out, color)
+		destination, err := askDestination(reader, in, out, color, opts.OfferAsymptote)
 		if err != nil {
 			return Answers{}, err
 		}
-		answers.ManagedIngestOffered = true
-		answers.ManagedIngest = connect
+		answers.DestinationAsked = true
+		answers.Destination = destination
 	}
 
 	fmt.Fprintln(out)
 	return answers, nil
 }
 
-// AskManagedIngest asks only the forwarding question, for a machine that went through
+// AskDestination asks only the destination question, for a machine that went through
 // onboarding before the question existed.
-func AskManagedIngest(in io.Reader, out io.Writer) (bool, error) {
+func AskDestination(in io.Reader, out io.Writer, offerAsymptote bool) (string, error) {
 	color := supportsColor(out)
 	fmt.Fprintln(out)
-	answer, err := askManagedIngest(bufio.NewReader(in), out, color)
+	answer, err := askDestination(bufio.NewReader(in), in, out, color, offerAsymptote)
 	fmt.Fprintln(out)
 	return answer, err
 }
 
-// askManagedIngest offers to connect this machine to Asymptote Managed. Default is no:
-// forwarding telemetry off the machine is a choice, never a side effect of Enter.
-func askManagedIngest(reader *bufio.Reader, out io.Writer, color bool) (bool, error) {
-	fmt.Fprintf(out, "  %sForward this machine's agent telemetry to Asymptote Managed?%s\n", bold(color), reset(color))
-	fmt.Fprintln(out, "  This opens your browser to sign in and approve this device; you can revoke it")
-	fmt.Fprintln(out, "  from the dashboard at any time. Nothing recorded before approval is sent.")
+// destinationChoice is one answer to the destination question.
+type destinationChoice struct {
+	value, label, detail string
+}
+
+// destinationChoices lists the answers in display order. Local is first so that Enter
+// never forwards anything: sending telemetry off the machine is a choice, never a default.
+func destinationChoices(offerAsymptote bool) []destinationChoice {
+	items := []destinationChoice{
+		{DestinationLocal, "Keep it on this machine", "Nothing is sent anywhere. Local JSONL and local dashboard; change it any time."},
+		{DestinationOwnInfra, "Forward to your own infrastructure", "SIEM, observability platform, or an S3/GCS bucket you own."},
+	}
+	if offerAsymptote {
+		items = append(items, destinationChoice{DestinationAsymptote, "Forward to Asymptote Managed", "Opens your browser to approve this device; revoke it from the dashboard any time."})
+	}
+	return items
+}
+
+// askDestination asks where this machine's telemetry should go. On a terminal it is the
+// same arrow-key picker as the usage question, with a line of detail under each row;
+// elsewhere it degrades to the numbered menu, where an empty answer means the first row.
+func askDestination(reader *bufio.Reader, in io.Reader, out io.Writer, color bool, offerAsymptote bool) (string, error) {
+	items := destinationChoices(offerAsymptote)
+	fmt.Fprintf(out, "  %sWhere should this machine's agent telemetry go?%s\n\n", title(color), reset(color))
+
+	if tty, ok := terminalFile(in); ok {
+		rows := make([]choice, len(items))
+		for i, item := range items {
+			rows[i] = choice{Label: item.label, Detail: item.detail}
+		}
+		index, err := selectOption(tty, out, rows, color)
+		if err == nil {
+			printDestination(out, items[index], color)
+			return items[index].value, nil
+		}
+		if !errors.Is(err, errRawUnavailable) {
+			return "", ErrPromptAborted
+		}
+	}
+
+	for i, item := range items {
+		fmt.Fprintf(out, "    %d) %s\n", i+1, item.label)
+		fmt.Fprintf(out, "       %s%s%s\n", dim(color), item.detail, reset(color))
+	}
 	fmt.Fprintln(out)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		line, err := readLine(reader, out, "  Connect now? [y/N] ")
+		line, err := readLine(reader, out, fmt.Sprintf("  Choice [1-%d] ", len(items)))
 		if err != nil {
-			return false, err
+			return "", err
 		}
-		switch strings.ToLower(strings.TrimSpace(line)) {
-		case "", "n", "no":
-			printChoice(out, "Not now. Run `beacon endpoint connect` whenever you are ready.", color)
-			return false, nil
-		case "y", "yes":
-			printChoice(out, "Connecting after install.", color)
-			return true, nil
+		if index, ok := parseDestination(line, items); ok {
+			printDestination(out, items[index], color)
+			return items[index].value, nil
 		}
-		fmt.Fprintf(out, "  %s✗ answer y or n%s\n", warn(color), reset(color))
+		fmt.Fprintf(out, "  %s✗ enter a number from 1 to %d%s\n", warn(color), len(items), reset(color))
 	}
-	return false, ErrTooManyAttempts
+	return "", ErrTooManyAttempts
+}
+
+// parseDestination accepts the row number, the stored value, or a plain word for it.
+// An empty answer is the first row, matching what Enter does in the picker.
+func parseDestination(line string, items []destinationChoice) (int, bool) {
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer == "" {
+		return 0, true
+	}
+	for i, item := range items {
+		if answer == fmt.Sprint(i+1) || answer == item.value {
+			return i, true
+		}
+	}
+	aliases := map[string]string{
+		"local": DestinationLocal, "keep": DestinationLocal, "none": DestinationLocal,
+		"own": DestinationOwnInfra, "self": DestinationOwnInfra, "siem": DestinationOwnInfra,
+		"asymptote": DestinationAsymptote, "managed": DestinationAsymptote,
+	}
+	if value, ok := aliases[answer]; ok {
+		for i, item := range items {
+			if item.value == value {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// printDestination confirms the choice and says what happens next.
+func printDestination(out io.Writer, item destinationChoice, color bool) {
+	fmt.Fprintf(out, "  %s✓%s %s\n", ok(color), reset(color), item.label)
+	switch item.value {
+	case DestinationLocal:
+		fmt.Fprintf(out, "  %sTo forward later: a forwarding pack (%s) or `beacon endpoint connect`.%s\n", dim(color), ForwardingDocsURL, reset(color))
+	case DestinationOwnInfra:
+		fmt.Fprintln(out, "  Beacon keeps writing JSONL locally; a Vector pack ships it to your destination.")
+		fmt.Fprintf(out, "  Set one up: %s%s%s\n", accent(color), ForwardingDocsURL, reset(color))
+		fmt.Fprintf(out, "  %sPacks: beacon endpoint datadog | elastic | falcon | s3 | gcs | wazuh | sentinel … (--help lists them all)%s\n", dim(color), reset(color))
+	case DestinationAsymptote:
+		fmt.Fprintf(out, "  %sConnecting after install.%s\n", dim(color), reset(color))
+	}
+	fmt.Fprintln(out)
 }
 
 func askUsage(reader *bufio.Reader, in io.Reader, out io.Writer, color bool) (string, error) {
-	fmt.Fprintf(out, "  %sHow are you using Beacon?%s\n\n", bold(color), reset(color))
+	fmt.Fprintf(out, "  %sHow are you using Beacon?%s\n\n", title(color), reset(color))
 
 	if tty, ok := terminalFile(in); ok {
-		index, err := selectOption(tty, out, UsageLabels, color)
+		index, err := selectOption(tty, out, choices(UsageLabels), color)
 		if err == nil {
 			printChoice(out, UsageLabels[index], color)
 			return ValidUsages[index], nil
@@ -165,7 +249,7 @@ func askUsage(reader *bufio.Reader, in io.Reader, out io.Writer, color bool) (st
 
 func askEmail(reader *bufio.Reader, out io.Writer, color bool) (string, error) {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		line, err := readLine(reader, out, fmt.Sprintf("  %sEmail%s › ", bold(color), reset(color)))
+		line, err := readLine(reader, out, fmt.Sprintf("  %sEmail%s › ", title(color), reset(color)))
 		if err != nil {
 			return "", err
 		}
@@ -199,9 +283,16 @@ func readLine(reader *bufio.Reader, out io.Writer, prompt string) (string, error
 
 // Colour helpers return empty strings when colour is off, so every format string can
 // use them unconditionally.
-func bold(c bool) string {
+func title(c bool) string {
 	if c {
-		return "\x1b[1m"
+		return colorTitle
+	}
+	return ""
+}
+
+func accent(c bool) string {
+	if c {
+		return colorAccnt
 	}
 	return ""
 }
