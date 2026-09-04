@@ -166,3 +166,58 @@ func TestPromptDoesNotNoteFreeMailboxForPersonalUse(t *testing.T) {
 		t.Fatalf("personal use should not trigger the mailbox note:\n%s", out)
 	}
 }
+
+func TestPromptOffersManagedIngestOnlyWhenAsked(t *testing.T) {
+	answers, out, err := runPrompt(t, "1\nshukan@asymptotelabs.ai\n")
+	if err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+	if answers.ManagedIngestOffered || strings.Contains(out, "Asymptote Managed") {
+		t.Fatalf("default prompt must not offer managed ingest: %+v\n%s", answers, out)
+	}
+
+	var buf bytes.Buffer
+	answers, err = PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\ny\n"), &buf, PromptOptions{OfferManagedIngest: true})
+	if err != nil {
+		t.Fatalf("PromptWith returned error: %v", err)
+	}
+	if !answers.ManagedIngestOffered || !answers.ManagedIngest {
+		t.Fatalf("expected an accepted offer, got %+v", answers)
+	}
+	for _, want := range []string{"Forward this machine's agent telemetry to Asymptote Managed?", "revoke it", "Nothing recorded before approval is sent", "Connect now? [y/N]", "Connecting after install."} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("offer output missing %q:\n%s", want, buf.String())
+		}
+	}
+}
+
+func TestManagedIngestOfferDefaultsToNo(t *testing.T) {
+	for _, input := range []string{"\n", "n\n", "NO\n"} {
+		var buf bytes.Buffer
+		answers, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\n"+input), &buf, PromptOptions{OfferManagedIngest: true})
+		if err != nil {
+			t.Fatalf("input %q: %v", input, err)
+		}
+		if !answers.ManagedIngestOffered || answers.ManagedIngest {
+			t.Fatalf("input %q should decline, got %+v", input, answers)
+		}
+		if !strings.Contains(buf.String(), "beacon endpoint connect") {
+			t.Fatalf("declining should name the command to run later:\n%s", buf.String())
+		}
+	}
+	var buf bytes.Buffer
+	if _, err := PromptWith(strings.NewReader("1\nshukan@asymptotelabs.ai\nmaybe\nwhat\nhuh\n?\n!\n"), &buf, PromptOptions{OfferManagedIngest: true}); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("expected ErrTooManyAttempts after repeated bad answers, got %v", err)
+	}
+}
+
+func TestAskManagedIngestAlone(t *testing.T) {
+	var buf bytes.Buffer
+	yes, err := AskManagedIngest(strings.NewReader("yes\n"), &buf)
+	if err != nil || !yes {
+		t.Fatalf("AskManagedIngest = %t, %v", yes, err)
+	}
+	if _, err := AskManagedIngest(strings.NewReader(""), &buf); !errors.Is(err, ErrPromptAborted) {
+		t.Fatalf("EOF should abort, got %v", err)
+	}
+}

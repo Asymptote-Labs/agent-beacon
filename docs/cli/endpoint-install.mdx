@@ -43,6 +43,11 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+| `--connect` | After a successful install, connect this endpoint to Asymptote managed ingest: opens the dashboard to approve the device and starts the Vector forwarder. Same as running [`beacon endpoint connect`](/cli/endpoint-connect) afterwards |
+
+## Managed ingest offer
+
+On a first interactive install where Vector is available, the [onboarding prompt](/cli/endpoint-onboarding) ends with one more question: whether to forward this machine's agent telemetry to Asymptote Managed now. The default is no. Answering yes runs the connect flow after the install completes; a failed connect is reported with the retry command and never fails the install. `BEACON_MANAGED_INGEST=0` suppresses the question, the question is never shown non-interactively, and it is asked at most once per machine.
 
 ## Examples
 

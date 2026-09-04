@@ -18,7 +18,7 @@ Beacon does not ask again.
 ## First-run onboarding
 
 The first interactive `beacon endpoint install` asks two questions, how you are using Beacon and your email, then sends the answers to Asymptote once. This is how we decide
-which agent runtimes and integrations to build next.
+which agent runtimes and integrations to build next. When Vector is available on the machine it asks a third question, whether to forward this machine's telemetry to Asymptote Managed now; that answer stays local and, if yes, runs [`beacon endpoint connect`](/cli/endpoint-connect) after the install.
 
 What is sent, and nothing else:
 
@@ -53,7 +53,8 @@ skip it silently.
 
 Set `BEACON_ONBOARDING=0` to suppress the prompt on an install that would otherwise be
 interactive. There is no CLI flag for this: it exists for unattended CI and MDM
-workflows.
+workflows. `BEACON_MANAGED_INGEST=0` suppresses only the managed-forwarding question;
+`beacon endpoint install --connect` still connects when asked explicitly.
 
 ```bash title="Suppress the prompt"
 BEACON_ONBOARDING=0 beacon endpoint install
@@ -72,7 +73,8 @@ is reported on stderr and ignored rather than failing the install.
 
 ## Examples
 
-Show what was recorded:
+Show what was recorded, including the answer to the managed-forwarding question
+(`Managed ingest offer: accepted` or `declined`; absent when it has not been asked):
 
 ```bash title="Show the onboarding record"
 beacon endpoint onboarding

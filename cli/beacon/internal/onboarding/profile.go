@@ -57,7 +57,17 @@ type Onboarding struct {
 	Email         string `json:"email,omitempty"`
 	Usage         string `json:"usage,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
+	// ManagedIngest records the answer to the managed-forwarding offer: accepted or
+	// declined. Empty means it has not been offered on this machine yet, so a later
+	// interactive install may ask once.
+	ManagedIngest string `json:"managed_ingest,omitempty"`
 }
+
+// Answers to the managed-forwarding offer.
+const (
+	ManagedIngestAccepted = "accepted"
+	ManagedIngestDeclined = "declined"
+)
 
 // Prompted reports whether this machine has already been through onboarding.
 // It is the single gate that makes the prompt fire once and only once.

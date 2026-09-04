@@ -29,6 +29,12 @@ type onboardingHarness struct {
 	outcome   string
 	sendErr   error
 	probeRuns int
+	// offered records the PromptOptions the prompt was invoked with; offerable and
+	// standaloneAnswer drive the managed-ingest question.
+	offered          []onboarding.PromptOptions
+	offerable        bool
+	standaloneAsked  bool
+	standaloneAnswer bool
 }
 
 func newOnboardingHarness(t *testing.T) *onboardingHarness {
@@ -62,18 +68,26 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 	t.Setenv(onboardingEnvUsage, "")
 	t.Setenv("HOME", t.TempDir())
 
-	prevLoad, prevSave, prevAsk, prevSend := onboardingLoad, onboardingSave, onboardingAsk, onboardingSend
+	prevLoad, prevSave, prevAsk, prevSend := onboardingLoad, onboardingSave, onboardingAskWith, onboardingSend
 	prevTTY, prevRoot, prevProbe := onboardingIsTTY, onboardingIsRoot, onboardingProbeFn
+	prevStandalone, prevOfferable := onboardingAskManagedIngest, managedIngestOfferable
+	t.Setenv(managedIngestEnvEnabled, "")
 
 	onboardingLoad = func() onboarding.Profile { return h.loaded }
 	onboardingSave = func(p onboarding.Profile) error {
 		h.saved = append(h.saved, p)
 		return nil
 	}
-	onboardingAsk = func(io.Reader, io.Writer) (onboarding.Answers, error) {
+	onboardingAskWith = func(_ io.Reader, _ io.Writer, opts onboarding.PromptOptions) (onboarding.Answers, error) {
 		h.asked = true
+		h.offered = append(h.offered, opts)
 		return h.answers, h.askErr
 	}
+	onboardingAskManagedIngest = func(io.Reader, io.Writer) (bool, error) {
+		h.standaloneAsked = true
+		return h.standaloneAnswer, nil
+	}
+	managedIngestOfferable = func() bool { return h.offerable }
 	onboardingSend = func(_ context.Context, s onboarding.Submission) (string, error) {
 		h.sent = append(h.sent, s)
 		return h.outcome, h.sendErr
@@ -87,8 +101,9 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 
 	t.Cleanup(func() {
 		endpointOpts = prevOpts
-		onboardingLoad, onboardingSave, onboardingAsk, onboardingSend = prevLoad, prevSave, prevAsk, prevSend
+		onboardingLoad, onboardingSave, onboardingAskWith, onboardingSend = prevLoad, prevSave, prevAsk, prevSend
 		onboardingIsTTY, onboardingIsRoot, onboardingProbeFn = prevTTY, prevRoot, prevProbe
+		onboardingAskManagedIngest, managedIngestOfferable = prevStandalone, prevOfferable
 	})
 	return h
 }
@@ -96,7 +111,7 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 func TestMaybeRunOnboardingPromptsOnInteractiveInstall(t *testing.T) {
 	h := newOnboardingHarness(t)
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if !h.asked {
@@ -184,7 +199,7 @@ func TestMaybeRunOnboardingStaysSilentWhenGated(t *testing.T) {
 				t.Fatalf("skip reason = %q, want %q", reason, tc.wantReason)
 			}
 
-			if err := maybeRunOnboarding(h.cmd); err != nil {
+			if _, err := maybeRunOnboarding(h.cmd); err != nil {
 				t.Fatalf("maybeRunOnboarding returned error: %v", err)
 			}
 			if h.asked {
@@ -205,7 +220,7 @@ func TestMaybeRunOnboardingPropagatesPromptFailure(t *testing.T) {
 	h := newOnboardingHarness(t)
 	h.askErr = onboarding.ErrTooManyAttempts
 
-	err := maybeRunOnboarding(h.cmd)
+	_, err := maybeRunOnboarding(h.cmd)
 	if err == nil {
 		t.Fatalf("maybeRunOnboarding returned nil, want the prompt failure to stop the install")
 	}
@@ -223,7 +238,7 @@ func TestMaybeRunOnboardingSurvivesSubmissionFailure(t *testing.T) {
 	h.outcome = onboarding.OutcomePending
 	h.sendErr = errors.New("connection refused")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.saved) != 1 {
@@ -247,7 +262,7 @@ func TestMaybeRunOnboardingDropsPayloadWhenRejected(t *testing.T) {
 	h.outcome = onboarding.OutcomeRejected
 	h.sendErr = errors.New("signup endpoint returned 429 Too Many Requests")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if h.saved[0].Pending != nil {
@@ -267,7 +282,7 @@ func TestMaybeRunOnboardingResendsPendingSubmission(t *testing.T) {
 		Pending:    &pending,
 	}
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if h.asked {
@@ -290,7 +305,7 @@ func TestMaybeRunOnboardingKeepsPendingWhenResendFails(t *testing.T) {
 		Pending:    &pending,
 	}
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.saved) != 0 {
@@ -305,7 +320,7 @@ func TestMaybeRunOnboardingAcceptsEnvironmentAnswersHeadless(t *testing.T) {
 	t.Setenv(onboardingEnvEmail, "  Ops@AsymptoteLabs.AI ")
 	t.Setenv(onboardingEnvUsage, "work")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if h.asked {
@@ -326,7 +341,7 @@ func TestMaybeRunOnboardingIgnoresInvalidEnvironmentAnswers(t *testing.T) {
 	t.Setenv(onboardingEnvEmail, "not-an-email")
 	t.Setenv(onboardingEnvUsage, "work")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.sent) != 0 || h.asked {
@@ -343,7 +358,7 @@ func TestMaybeRunOnboardingEnvironmentAnswersRespectOptOut(t *testing.T) {
 	t.Setenv(onboardingEnvEmail, "ops@asymptotelabs.ai")
 	t.Setenv(onboardingEnvUsage, "work")
 
-	if err := maybeRunOnboarding(h.cmd); err != nil {
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
 		t.Fatalf("maybeRunOnboarding returned error: %v", err)
 	}
 	if len(h.sent) != 0 {
@@ -504,5 +519,118 @@ func TestRetryPendingOnboardingIsSilentWithNothingQueued(t *testing.T) {
 				t.Fatalf("repair touched the network or disk: sent=%d saved=%d", len(h.sent), len(h.saved))
 			}
 		})
+	}
+}
+
+func TestMaybeRunOnboardingOffersManagedIngestOnlyWhenOfferable(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.offerable = false
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if len(h.offered) != 1 || h.offered[0].OfferManagedIngest {
+		t.Fatalf("offer must not be made when Vector is missing or already connected: %+v", h.offered)
+	}
+	if h.saved[len(h.saved)-1].Onboarding.ManagedIngest != "" {
+		t.Fatal("an offer that was not made must not be recorded as declined")
+	}
+
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.answers.ManagedIngestOffered = true
+	h.answers.ManagedIngest = true
+	connect, err := maybeRunOnboarding(h.cmd)
+	if err != nil || !connect {
+		t.Fatalf("accepted offer should request a connect: connect=%t err=%v", connect, err)
+	}
+	if !h.offered[0].OfferManagedIngest {
+		t.Fatal("prompt should have been asked to offer managed ingest")
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestAccepted {
+		t.Fatalf("recorded choice = %q", got)
+	}
+
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.answers.ManagedIngestOffered = true
+	h.answers.ManagedIngest = false
+	if connect, _ := maybeRunOnboarding(h.cmd); connect {
+		t.Fatal("declined offer must not connect")
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestDeclined {
+		t.Fatalf("recorded choice = %q", got)
+	}
+}
+
+func TestManagedIngestOfferRespectsOptOut(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.offerable = true
+	t.Setenv(managedIngestEnvEnabled, "0")
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if len(h.offered) != 1 || h.offered[0].OfferManagedIngest {
+		t.Fatalf("BEACON_MANAGED_INGEST=0 must suppress the offer: %+v", h.offered)
+	}
+}
+
+func TestManagedIngestOfferedOnceToPreviouslyOnboardedMachine(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.offerable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted, Email: "shukan@asymptotelabs.ai", Usage: onboarding.UsageWork}}
+	h.standaloneAnswer = true
+	connect, err := maybeRunOnboarding(h.cmd)
+	if err != nil || !connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if h.asked {
+		t.Fatal("the signup questions must not be asked again")
+	}
+	if !h.standaloneAsked {
+		t.Fatal("the forwarding question should be asked once on an already-onboarded machine")
+	}
+	if got := h.saved[len(h.saved)-1].Onboarding.ManagedIngest; got != onboarding.ManagedIngestAccepted {
+		t.Fatalf("recorded choice = %q", got)
+	}
+
+	// Once recorded, it is never asked again.
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", ManagedIngest: onboarding.ManagedIngestDeclined}}
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatalf("a recorded choice must not be asked again: connect=%t asked=%t", connect, h.standaloneAsked)
+	}
+
+	// Non-interactive paths never see it either.
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	onboardingIsTTY = func() bool { return false }
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatal("no terminal, no question")
+	}
+	h = newOnboardingHarness(t)
+	h.offerable = true
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
+	t.Setenv("CI", "1")
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
+		t.Fatal("CI never sees the question")
+	}
+}
+
+func TestInstallHasConnectFlag(t *testing.T) {
+	if endpointInstallCmd.Flags().Lookup("connect") == nil {
+		t.Fatal("endpoint install should expose --connect")
+	}
+}
+
+func TestEndpointOnboardingShowsManagedIngestChoice(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted, Email: "shukan@asymptotelabs.ai", Usage: onboarding.UsageWork, ManagedIngest: onboarding.ManagedIngestAccepted}}
+	if err := runEndpointOnboarding(h.cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stdout.String(), "Managed ingest offer: accepted") {
+		t.Fatalf("output = %s", h.stdout.String())
 	}
 }

@@ -74,7 +74,13 @@ func runEndpointConnect(cmd *cobra.Command, args []string) error {
 	if !userMode && !lifecycle.HasSystemPrivileges() {
 		return fmt.Errorf("connecting a system endpoint needs root: rerun with sudo, or pass --user for a per-user install")
 	}
-	cfg := loadOrDefaultConfig()
+	return connectEndpoint(cmd, userMode, loadOrDefaultConfig().LogPath)
+}
+
+// connectEndpoint runs the enrollment and forwarder setup for the given mode and log
+// path, printing the outcome. `endpoint install --connect` and the onboarding offer
+// call it after a successful install; `endpoint connect` calls it directly.
+func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	hostname, _ := os.Hostname()
 	out := cmd.OutOrStdout()
 	if endpointOpts.jsonOutput {
@@ -82,7 +88,7 @@ func runEndpointConnect(cmd *cobra.Command, args []string) error {
 	}
 	result, err := asymptote.Connect(context.Background(), asymptote.ConnectOptions{
 		UserMode:  userMode,
-		LogPath:   cfg.LogPath,
+		LogPath:   logPath,
 		VectorBin: connectOpts.vectorBin,
 		Out:       out,
 		Enroll: asymptote.EnrollOptions{

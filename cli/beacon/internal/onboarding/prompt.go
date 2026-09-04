@@ -26,6 +26,17 @@ var ErrTooManyAttempts = errors.New("too many invalid answers")
 type Answers struct {
 	Email string
 	Usage string
+	// ManagedIngestOffered is true when the forwarding question was asked;
+	// ManagedIngest is the answer.
+	ManagedIngestOffered bool
+	ManagedIngest        bool
+}
+
+// PromptOptions tunes the one-time prompt.
+type PromptOptions struct {
+	// OfferManagedIngest adds the "forward to Asymptote Managed now?" question. The
+	// caller decides whether it is offerable (Vector present, not already connected).
+	OfferManagedIngest bool
 }
 
 // Prompt runs the one-time onboarding questions.
@@ -34,6 +45,11 @@ type Answers struct {
 // buffer in tests, a terminal that will not enter raw mode -- it degrades to a typed
 // numbered menu, so no environment loses the ability to answer.
 func Prompt(in io.Reader, out io.Writer) (Answers, error) {
+	return PromptWith(in, out, PromptOptions{})
+}
+
+// PromptWith is Prompt with options.
+func PromptWith(in io.Reader, out io.Writer, opts PromptOptions) (Answers, error) {
 	color := supportsColor(out)
 	reader := bufio.NewReader(in)
 
@@ -58,8 +74,54 @@ func Prompt(in io.Reader, out io.Writer) (Answers, error) {
 		fmt.Fprintf(out, "  %s%s is a personal mailbox — using it anyway.%s\n", dim(color), EmailDomain(email), reset(color))
 	}
 
+	answers := Answers{Email: email, Usage: usage}
+	if opts.OfferManagedIngest {
+		fmt.Fprintln(out)
+		connect, err := askManagedIngest(reader, out, color)
+		if err != nil {
+			return Answers{}, err
+		}
+		answers.ManagedIngestOffered = true
+		answers.ManagedIngest = connect
+	}
+
 	fmt.Fprintln(out)
-	return Answers{Email: email, Usage: usage}, nil
+	return answers, nil
+}
+
+// AskManagedIngest asks only the forwarding question, for a machine that went through
+// onboarding before the question existed.
+func AskManagedIngest(in io.Reader, out io.Writer) (bool, error) {
+	color := supportsColor(out)
+	fmt.Fprintln(out)
+	answer, err := askManagedIngest(bufio.NewReader(in), out, color)
+	fmt.Fprintln(out)
+	return answer, err
+}
+
+// askManagedIngest offers to connect this machine to Asymptote Managed. Default is no:
+// forwarding telemetry off the machine is a choice, never a side effect of Enter.
+func askManagedIngest(reader *bufio.Reader, out io.Writer, color bool) (bool, error) {
+	fmt.Fprintf(out, "  %sForward this machine's agent telemetry to Asymptote Managed?%s\n", bold(color), reset(color))
+	fmt.Fprintln(out, "  This opens your browser to sign in and approve this device; you can revoke it")
+	fmt.Fprintln(out, "  from the dashboard at any time. Nothing recorded before approval is sent.")
+	fmt.Fprintln(out)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		line, err := readLine(reader, out, "  Connect now? [y/N] ")
+		if err != nil {
+			return false, err
+		}
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "", "n", "no":
+			printChoice(out, "Not now. Run `beacon endpoint connect` whenever you are ready.", color)
+			return false, nil
+		case "y", "yes":
+			printChoice(out, "Connecting after install.", color)
+			return true, nil
+		}
+		fmt.Fprintf(out, "  %s✗ answer y or n%s\n", warn(color), reset(color))
+	}
+	return false, ErrTooManyAttempts
 }
 
 func askUsage(reader *bufio.Reader, in io.Reader, out io.Writer, color bool) (string, error) {
