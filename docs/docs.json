@@ -151,6 +151,7 @@
                       "runtimes/muse-code",
                       "runtimes/oh-my-pi",
                       "runtimes/opencode",
+                      "runtimes/openhands",
                       "runtimes/pi",
                       "runtimes/prime-agent",
                       "runtimes/qwen-code",

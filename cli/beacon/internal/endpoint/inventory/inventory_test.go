@@ -368,6 +368,12 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// installer refuses it and there is no project path to find.
 		{runtime: "muse_code", path: filepath.Join(museConfigDir(home), "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "muse_code", path: filepath.Join(museConfigDir(home), "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		// OpenHands is one file per scope, and both are reported because the runtime reads the
+		// first it finds rather than merging them: a repository with its own hooks.json shadows the
+		// user one entirely, so an inventory showing only the user file would report a working
+		// install for a machine where Beacon's hooks never run.
+		{runtime: "openhands", path: filepath.Join(openHandsUserDir(home), "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "openhands", path: filepath.Join(work, ".openhands", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.
