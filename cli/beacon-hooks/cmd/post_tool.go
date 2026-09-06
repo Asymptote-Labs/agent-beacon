@@ -67,6 +67,22 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		}
 		// afterFileEdit exposes file-edit metadata and diffs; retention controls raw diff inclusion.
 		params = parseCursorInput(input, logger)
+	} else if platformFlag == openHandsPlatform {
+		// OpenHands is the one runtime whose single post-tool payload can describe several file
+		// edits: one apply_patch call commits a change per file and reports them together, keyed
+		// by path. The shared evaluationParams describes one file, so this branch records each
+		// edit itself rather than returning a params the loop below would flatten to the first.
+		//
+		// An empty result means this payload is not a file edit -- a view, a shell command, a tool
+		// whose observation reports no content change -- and it falls through to
+		// emitPostToolObserved with params still nil, which is where the tool call is recorded.
+		if edits := parseOpenHandsEdits(input, logger); len(edits) > 0 {
+			for _, edit := range edits {
+				recordLocalEdit(edit, input, logger)
+			}
+			outputJSON(emptyResponse)
+			return
+		}
 	} else {
 		params = parseClaudeCopilotInput(input, logger)
 	}
@@ -369,7 +385,18 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
-	action := actionForTool(hookEvent, toolName)
+	// OpenHands reports a failure nowhere near the two places checked above: there is no failure
+	// event name and no top-level `error`, only `is_error` on the observation. Same predicate the
+	// diff path uses, called rather than restated, so the two cannot drift the way the Qwen pair
+	// once did.
+	if platformFlag == openHandsPlatform {
+		applyOpenHandsToolResult(fields, toolName, toolInput, toolResponse)
+		if openHandsToolFailed(toolResponse) {
+			emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
+			return
+		}
+	}
+	action := actionForTool(hookEvent, toolName, toolInput, toolResponse)
 	category := "tool"
 	if strings.HasPrefix(action, "file.") {
 		category = "file"

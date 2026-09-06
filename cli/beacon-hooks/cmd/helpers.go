@@ -272,6 +272,9 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 		}
 		return firstWorkspaceRoot(input, "workspaceRoots", "workspace_roots")
 	}
+	if platform == openHandsPlatform {
+		return openHandsWorkingDir(input)
+	}
 	if isDevinLikePlatform(platform) {
 		if cwd := getFirstStr(input, "cwd", "project_dir", "projectDir"); cwd != "" {
 			return cwd

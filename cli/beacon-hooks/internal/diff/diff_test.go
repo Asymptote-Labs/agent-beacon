@@ -185,3 +185,71 @@ func TestFromToolResponseResolvesAbsolutePathParameter(t *testing.T) {
 		t.Fatalf("diff = %q, want the absolute_path target and its content", got)
 	}
 }
+
+// FromContentChange is the one constructor here that is given the answer rather than asked to
+// infer it, so these cases pin the three shapes an observation can report: a modification, a
+// creation, and a deletion.
+func TestFromContentChangeBuildsAReplacementDiff(t *testing.T) {
+	got := FromContentChange("/workspace/main.go", "package main\n\nfunc old() {}\n", "package main\n\nfunc new() {}\n")
+	for _, want := range []string{"--- a/main.go", "+++ b/main.go", "-func old() {}", "+func new() {}"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FromContentChange missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFromContentChangeBuildsANewFileDiff(t *testing.T) {
+	got := FromContentChange("/workspace/new.py", "", "print('hi')\n")
+	if !strings.Contains(got, "@@ -0,0 +1,") {
+		t.Errorf("FromContentChange = %q, want a new-file hunk header", got)
+	}
+	if !strings.Contains(got, "+print('hi')") {
+		t.Errorf("FromContentChange = %q, want the added line", got)
+	}
+	if removed := diffBodyLines(got, "-"); len(removed) != 0 {
+		t.Errorf("FromContentChange = %q, want no removed lines for a new file, got %v", got, removed)
+	}
+}
+
+// diffBodyLines returns the diff's content lines starting with prefix, skipping the ---/+++ file
+// headers so that a "+++ b/x" header is not mistaken for an added line.
+func diffBodyLines(diff, prefix string) []string {
+	var out []string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "@@") {
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func TestFromContentChangeBuildsADeletionDiff(t *testing.T) {
+	got := FromContentChange("/workspace/gone.go", "package main\n", "")
+	if !strings.Contains(got, "-package main") {
+		t.Errorf("FromContentChange = %q, want the removed line", got)
+	}
+	if added := diffBodyLines(got, "+"); len(added) != 0 {
+		t.Errorf("FromContentChange = %q, want no added lines for a deletion, got %v", got, added)
+	}
+}
+
+// An unchanged file is not an edit. Returning a header with an empty hunk would record that a file
+// changed when it did not -- which is the failure this constructor exists to avoid, because a
+// runtime that reports before and after can legitimately report them equal (an undo that restores
+// identical content, a patch entry whose two sides match).
+func TestFromContentChangeReturnsNothingWhenTheContentIsUnchanged(t *testing.T) {
+	for _, tc := range []struct{ name, path, oldContent, newContent string }{
+		{"identical", "/workspace/main.go", "same\n", "same\n"},
+		{"both empty", "/workspace/main.go", "", ""},
+		{"no path", "", "a\n", "b\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FromContentChange(tc.path, tc.oldContent, tc.newContent); got != "" {
+				t.Errorf("FromContentChange = %q, want empty", got)
+			}
+		})
+	}
+}

@@ -103,7 +103,10 @@ func cascadeEventClassification(actionName, toolName string) (action, category, 
 	if strings.Contains(strings.ToLower(toolName), "mcp") {
 		return "mcp.tool_invoked", "mcp", "MCP tool invocation observed"
 	}
-	return actionForTool(actionName, toolName), "tool", "Tool execution observed"
+	// nil arguments: this classifier is reached only after the Cascade-specific action names above
+	// have been ruled out, and it has nothing but the tool name at that point. The nil path is the
+	// generic name-only behavior actionForTool has always had.
+	return actionForTool(actionName, toolName, nil, nil), "tool", "Tool execution observed"
 }
 
 func parseCascadeWriteInput(input map[string]interface{}, logger *logging.Logger) *evaluationParams {
