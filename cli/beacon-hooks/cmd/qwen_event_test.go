@@ -80,7 +80,7 @@ func TestQwenBuiltInToolsMapOntoTheRightAction(t *testing.T) {
 		"skill":       "tool.invoked",
 	} {
 		t.Run(toolName, func(t *testing.T) {
-			if got := actionForTool("PostToolUse", toolName); got != want {
+			if got := actionForTool("PostToolUse", toolName, nil, nil); got != want {
 				t.Errorf("actionForTool(PostToolUse, %q) = %q, want %q", toolName, got, want)
 			}
 		})
@@ -98,7 +98,7 @@ func TestQwenTaxonomyDoesNotClaimMCPTools(t *testing.T) {
 	for _, toolName := range []string{
 		"mcp__notion__edit", "mcp__fs__glob", "mcp__github__read_file", "mcp__shell__run_shell_command",
 	} {
-		if got := actionForTool("PostToolUse", toolName); got != "mcp.tool_invoked" {
+		if got := actionForTool("PostToolUse", toolName, nil, nil); got != "mcp.tool_invoked" {
 			t.Errorf("actionForTool(%q) = %q, want mcp.tool_invoked", toolName, got)
 		}
 		if isFileEditTool("qwen", toolName) {
@@ -115,7 +115,7 @@ func TestQwenTaxonomyIsScopedToTheQwenPlatform(t *testing.T) {
 	t.Cleanup(func() { platformFlag = origPlatform })
 
 	platformFlag = "claude"
-	if got := actionForTool("PostToolUse", "list_directory"); got != "tool.invoked" {
+	if got := actionForTool("PostToolUse", "list_directory", nil, nil); got != "tool.invoked" {
 		t.Errorf("actionForTool(claude, list_directory) = %q, want the claude classification unchanged", got)
 	}
 	if isFileEditTool("claude", "replace") {

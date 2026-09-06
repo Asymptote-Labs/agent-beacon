@@ -41,7 +41,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "vercel_fx",
-		"muse_code",
+		"muse_code", "grok_bot",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -491,5 +491,59 @@ func TestOpenHandsCanonicalNameIsStableUnderRenormalization(t *testing.T) {
 	once := NormalizeHarnessName("openhands-cli")
 	if got := NormalizeHarnessName(once); got != once {
 		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
+	}
+}
+
+// Grok Bot reaches Beacon under the spelling Cursor's server-side OpenTelemetry export writes for
+// its surface (grok_bot) and under whatever a reader types for the product's name. Pinning them
+// here is what keeps one Bot's actions from being recorded under two names.
+func TestGrokBotSpellingsConvergeOnGrokBot(t *testing.T) {
+	for _, in := range []string{
+		"grok_bot", "Grok_Bot", "GROK_BOT", " grok_bot ", "grok-bot", "Grok Bot", "grokbot",
+		"grok_bot_desktop", "grok-bot-desktop", "cursor.grok_bot", "cursor/grok_bot",
+		"xai_grok_bot", "xai-grok-bot",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "grok_bot" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "grok_bot")
+			}
+		})
+	}
+}
+
+// Grok Build is the sibling product: xAI's terminal coding agent, hooked by Beacon under the
+// `grok` harness, running on the endpoint under the operator's account. Grok Bot runs on a
+// Cursor-hosted cloud computer. The two must never normalize into each other -- in either
+// direction -- because a query grouping by harness.name would then file cloud-computer shell
+// commands under a local CLI, or the reverse. `grok` stays on the passthrough path as itself,
+// which is the name Grok Build's hook installer already uses.
+func TestGrokBuildIsNotGrokBot(t *testing.T) {
+	for _, name := range []string{"grok", "Grok", "grok_build", "grok-build", "Grok Build", "grok_cli", "grok-cli"} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "grok_bot" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; Grok Build must not be reported as the "+
+					"Grok Bot harness", name, got)
+			}
+		})
+	}
+	if got := NormalizeHarnessName("grok"); got != "grok" {
+		t.Errorf("NormalizeHarnessName(%q) = %q, want the passthrough value the Grok Build hook "+
+			"installer already records", "grok", got)
+	}
+}
+
+// Every Grok model id begins with the same four letters as both products, which is the reason
+// the case is a closed set rather than Contains(lower, "grok"). A model string that somehow
+// reaches harness.name shows up as itself rather than being filed under the cloud agent.
+func TestGrokModelNamesAreNotTreatedAsGrokBot(t *testing.T) {
+	for _, name := range []string{
+		"grok-4", "grok-4.6", "grok-4-fast", "grok-code-fast-1", "grok_4", "Grok 4.6", "xai", "x.ai",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "grok_bot" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a Grok model id must not be reported as "+
+					"the Grok Bot harness", name, got)
+			}
+		})
 	}
 }

@@ -347,6 +347,8 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	add("hermes", hermes.Installed, hermes.ConfigPath, hermes.BinaryPath, hermes.Message)
 	opencode := endpointhooks.OpenCodeHookStatus(endpointhooks.OpenCodeOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("opencode", opencode.Installed, opencode.PluginPath, opencode.BinaryPath, opencode.Message)
+	openhands := endpointhooks.OpenHandsHookStatus(endpointhooks.OpenHandsOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("openhands", openhands.Installed, openhands.HooksPath, openhands.BinaryPath, openhands.Message)
 	muse := endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("muse", muse.Installed, muse.HooksPath, muse.BinaryPath, muse.Message)
 	qwen := endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{Level: level, LogPath: logPath, UserMode: userMode})

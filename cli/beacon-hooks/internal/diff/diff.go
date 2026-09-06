@@ -343,3 +343,29 @@ func getIntFromMap(m map[string]interface{}, key string, defaultVal int) int {
 	}
 	return defaultVal
 }
+
+// FromContentChange builds a unified diff from an observation that reports a file's whole content
+// before and after an edit, rather than the edit instruction the model wrote.
+//
+// This is the accurate direction. Every other constructor in this file reconstructs a diff from
+// what the model *asked* for -- an old_string/new_string pair, a patch body, a full-file write --
+// which is a statement of intent, and the reconstruction is only as right as the assumption that
+// the tool did exactly what it was told. A runtime that reports the file's before and after has
+// already answered the question, so nothing has to be inferred: an insert at line 40 and a
+// str_replace of one occurrence both come back as the same two strings and produce a diff that
+// matches what is on disk.
+//
+// OpenHands is the runtime that exposes it. Its file_editor, write_file and edit observations all
+// carry old_content/new_content, and its five editor commands (create, str_replace, insert,
+// undo_edit, view) are multiplexed on one tool name, so a name-keyed reconstruction could not tell
+// an insert from a replace in the first place.
+//
+// An unchanged file yields no diff. undo_edit that restores identical content, and a patch entry
+// whose two sides match, both arrive here and are not edits; returning a header with an empty hunk
+// would record that a file changed when it did not.
+func FromContentChange(filePath, oldContent, newContent string) string {
+	if filePath == "" || oldContent == newContent {
+		return ""
+	}
+	return fromWriteTool(filePath, newContent, oldContent)
+}

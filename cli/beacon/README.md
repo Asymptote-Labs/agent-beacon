@@ -545,6 +545,9 @@ contract, what leaves the machine, and revocation.
 ./beacon endpoint hooks install --harness muse
 ./beacon endpoint hooks status --harness muse
 
+./beacon endpoint hooks install --harness openhands --level project
+./beacon endpoint hooks status --harness openhands --level project
+
 ./beacon endpoint hooks install --harness hermes
 ./beacon endpoint hooks status --harness hermes
 
@@ -601,6 +604,19 @@ rather than replacing a registration that is already somebody else's, and
 uninstall clears the key only while it still names Beacon's file. User scope
 only -- Muse's project `.muse/hooks.json` is ignored by the shipping build, so a
 project install would report success and collect nothing.
+
+The OpenHands integration merges Beacon's six hook commands into the
+`.openhands/hooks.json` the runtime already reads, at `<repo>/.openhands/hooks.json`
+for project-level installs or `$OH_PERSISTENCE_DIR`/`~/.openhands/hooks.json` for
+user-level ones. Hooks you already have are preserved, including their matchers,
+timeouts, and fields Beacon has no model for. Project scope is the one every host
+reads: OpenHands takes the first hooks file it finds rather than merging the two,
+so a repository file shadows the user-level one entirely, and the agent server
+behind the CLI and the GUI never consults the user-level file at all. The file has
+a closed schema that fails silently -- an unknown top-level key, a second spelling
+of one event, or a top-level event added beside a legacy `{"hooks": {...}}` wrapper
+all end with hooks not running and no error -- so install refuses a file that
+already breaks one of those rather than reporting a success that collects nothing.
 
 The Hermes Agent integration writes shell-hook entries into
 `~/.hermes/config.yaml`. Hermes prompts for first-use consent for each
