@@ -83,6 +83,10 @@ var usageExpectation = map[string]struct {
 	"factory":          {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"factory_droid":    {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"openclaw_gateway": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	// Grok Bot runs on a Cursor-hosted cloud computer and reaches Beacon only through Cursor's
+	// server-side OpenTelemetry export, so whether usage arrives depends on whether that export
+	// carries the semconv names -- the generic-OTLP case exactly, not a runtime Beacon reads.
+	"grok_bot": {ExpectGenericOTLP, "only if Cursor's server-side OTel export carries GenAI semconv usage"},
 
 	"cursor":          {ExpectNone, "Cursor hook payloads carry no token counts"},
 	"antigravity_cli": {ExpectNone, "hook payloads carry no token counts"},

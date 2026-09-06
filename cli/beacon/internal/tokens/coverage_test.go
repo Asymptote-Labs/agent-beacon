@@ -212,7 +212,7 @@ func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
 	scanned := []string{
 		"antigravity_cli", "claude_code", "cline", "codex_cli", "copilot_cli", "cursor",
 		"devin-cli", "devin-desktop", "factory", "gemini_cli", "grok", "hermes",
-		"muse_code", "omp", "opencode", "pi_cli", "qwen_code", "vscode",
+		"muse_code", "omp", "opencode", "openhands", "pi_cli", "qwen_code", "vscode",
 	}
 	for _, runtime := range scanned {
 		harness := normalizedHarnessForTest(runtime)
@@ -234,5 +234,31 @@ func TestCoverageDoesNotFlagAnyDevinSpelling(t *testing.T) {
 		if report.Silent != 0 {
 			t.Errorf("%s produced silent=%d, want 0", harness, report.Silent)
 		}
+	}
+}
+
+// The two harnesses added to main while this branch was open, pinned so neither becomes a
+// standing false alarm.
+//
+// They land in different categories for a reason that is the whole point of the distinction:
+// OpenHands is hooked on the endpoint and none of its six hook payloads carries token counts, so
+// its silence is a fact about the runtime. Grok Bot runs on a Cursor-hosted cloud computer and
+// reaches Beacon only through Cursor's server-side OpenTelemetry export, so its silence depends
+// on what that export carries -- unknown, not established.
+func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
+	openhands := lineFor(t, Coverage([]schema.Event{plainEvent("openhands")}, []string{"openhands"}), "openhands")
+	if openhands.Status != CoverageNotInstrumented || openhands.Expectation != ExpectNone {
+		t.Errorf("openhands = %+v, want not_instrumented/none -- no OpenHands hook payload carries token counts", openhands)
+	}
+
+	grokBot := lineFor(t, Coverage([]schema.Event{plainEvent("grok_bot")}, nil), "grok_bot")
+	if grokBot.Expectation != ExpectGenericOTLP {
+		t.Errorf("grok_bot expectation = %q, want generic_otlp -- it arrives only via Cursor's OTel export", grokBot.Expectation)
+	}
+
+	// Grok Bot and Grok Build are separate products and must not share a row.
+	both := Coverage([]schema.Event{plainEvent("grok"), plainEvent("grok_bot")}, nil)
+	if len(both.Runtimes) != 2 {
+		t.Fatalf("got %d rows, want grok and grok_bot kept apart: %+v", len(both.Runtimes), both.Runtimes)
 	}
 }
