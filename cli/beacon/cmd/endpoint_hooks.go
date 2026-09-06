@@ -183,6 +183,26 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		if strings.Contains(status.Message, "/hooks-trust") {
 			fmt.Println(status.Message)
 		}
+	case "openhands":
+		status, err := endpointhooks.InstallOpenHands(endpointhooks.OpenHandsOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("OpenHands hooks installed: %s\n", status.HooksPath)
+		// Said at user scope only, because it is the case where a successful install still collects
+		// nothing. OpenHands reads the first hooks.json it finds rather than merging the two, and
+		// the agent server behind the CLI and the GUI reads only the project file -- so a
+		// user-scope install is right for someone driving the SDK directly and silently inert for
+		// everyone else. Better to say it here than to have somebody discover it from an empty log.
+		if endpointhooks.Level(endpointOpts.hookLevel) != endpointhooks.LevelProject {
+			fmt.Println("OpenHands reads a repository's own .openhands/hooks.json in preference to this one, " +
+				"and its agent server (used by the CLI and the GUI) reads only the repository file. " +
+				"Run the install again with --level project inside a repository to cover those.")
+		}
 	case "muse":
 		status, err := endpointhooks.InstallMuse(endpointhooks.MuseOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -386,6 +406,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "openhands":
+		status, err := endpointhooks.UninstallOpenHands(endpointhooks.OpenHandsOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "muse":
 		status, err := endpointhooks.UninstallMuse(endpointhooks.MuseOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -518,6 +548,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "openhands":
+			statuses["openhands"] = endpointhooks.OpenHandsHookStatus(endpointhooks.OpenHandsOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "muse":
 			statuses["muse"] = endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -597,6 +633,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
 			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "openhands":
+			status := statuses["openhands"].(endpointhooks.OpenHandsStatus)
+			fmt.Printf("OpenHands hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
 		case "muse":
 			status := statuses["muse"].(endpointhooks.MuseStatus)
