@@ -332,3 +332,35 @@ func TestInstalledRuntimesDeduplicatesAndNeedsOnlyOneManagedRow(t *testing.T) {
 		t.Fatalf("InstalledRuntimes = %v, want [claude_code vscode]", got)
 	}
 }
+
+// The interaction between the two halves of this series. gen_ai.context events reach the shared
+// collector -- that is how the utilization report sees them -- so coverage would otherwise count
+// one as proof a runtime is reporting its spend. Qwen Code is the live case: it reports how full
+// its window was and never what a turn cost, so it must stay not_instrumented with zero usage
+// events. Counting occupancy as coverage would mark the one runtime whose spend Beacon cannot
+// read as fully covered, which is worse than saying nothing.
+func TestCoverageDoesNotCountContextOnlyEventsAsUsage(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "qwen_code", "s1", "qwen3-coder-plus", func(e *schema.Event) {
+			e.GenAI.Usage = nil
+			e.GenAI.Context = &schema.GenAIContextInfo{
+				UsedTokens:  int64Ptr(110100),
+				LimitTokens: int64Ptr(262144),
+			}
+		}),
+	}
+	report := Coverage(events, []string{"qwen_code"})
+	line := lineFor(t, report, "qwen_code")
+	if line.Status != CoverageNotInstrumented {
+		t.Errorf("status = %q, want not_instrumented", line.Status)
+	}
+	if line.UsageEvents != 0 {
+		t.Errorf("usage events = %d, want 0 -- context occupancy is not spend", line.UsageEvents)
+	}
+	if line.Tokens != 0 {
+		t.Errorf("tokens = %d, want 0", line.Tokens)
+	}
+	if report.Covered != 0 {
+		t.Errorf("covered = %d, want 0", report.Covered)
+	}
+}

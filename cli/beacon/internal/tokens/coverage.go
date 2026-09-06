@@ -228,6 +228,14 @@ func Coverage(events []schema.Event, installed []string) CoverageReport {
 		get(name).events++
 	}
 	for _, ue := range usageEvents {
+		if ue.contextOnly {
+			// The collector also yields events that reported only context occupancy. Those are
+			// not spend, so counting one here would mark a runtime covered on the strength of a
+			// number that never enters a total -- the precise false reassurance this report
+			// exists to prevent. Qwen Code is the live case: it reports how full its window was
+			// and never what a turn cost.
+			continue
+		}
 		name := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(ue.harness))
 		if name == "" {
 			continue

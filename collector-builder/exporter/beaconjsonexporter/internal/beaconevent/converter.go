@@ -1256,6 +1256,9 @@ func GenAIFromAttrs(attrs map[string]interface{}) *GenAIInfo {
 	if usage := GenAIUsageFromAttrs(attrs); usage != nil {
 		genai.Usage = usage
 	}
+	if context := GenAIContextFromAttrs(attrs); context != nil {
+		genai.Context = context
+	}
 	if name := FirstString(attrs, "gen_ai.workflow.name"); name != "" {
 		genai.Workflow = &GenAIWorkflowInfo{Name: name}
 	}
@@ -1375,6 +1378,24 @@ func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 		return nil
 	}
 	return usage
+}
+
+// GenAIContextFromAttrs reads a reported context size off OTLP attributes.
+//
+// Both halves are required, which is the rule the shared alias lists set: the used-token key is
+// also the ecosystem's name for an additive usage count, and a reported limit beside it is what
+// says this payload describes how full the window was rather than what a call spent. See
+// asymptoteobserve.ContextUsedKeys.
+func GenAIContextFromAttrs(attrs map[string]interface{}) *GenAIContextInfo {
+	limit, ok := Int64Attr(attrs, asymptoteobserve.ContextLimitKeys...)
+	if !ok || limit <= 0 {
+		return nil
+	}
+	used, ok := Int64Attr(attrs, asymptoteobserve.ContextUsedKeys...)
+	if !ok || used <= 0 {
+		return nil
+	}
+	return &GenAIContextInfo{UsedTokens: &used, LimitTokens: &limit}
 }
 
 func MCPFromAttrs(attrs map[string]interface{}) *MCPInfo {

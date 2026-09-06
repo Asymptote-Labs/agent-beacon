@@ -126,7 +126,7 @@ A project-level install reports that Qwen Code runs project hooks only in a trus
 | Subagents | Supported through `SubagentStart` and `SubagentStop` |
 | Approval decisions | Supported. Observed from `PermissionRequest`, not synthesized from pre-tool |
 | Tool call identity | Supported. Qwen's `tool_use_id` / `tool_call_id` is promoted to `gen_ai.tool.call.id` and joins pre-tool and post-tool events |
-| Token usage and cost | Not normalized. See [Known gaps](#known-gaps) |
+| Token usage and cost | Not collected. Context utilization is, through `gen_ai.context`. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Qwen hooks are installed separately in the logged-in user's context or project context |
 
@@ -170,7 +170,8 @@ Qwen carries signal with no endpoint-schema field of its own: `permission_mode` 
 ## Known gaps
 
 - **No OTLP path.** Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so there is no collector endpoint to configure. Hooks are the only collection path, and `beacon endpoint install --harness qwen` says so rather than appearing to succeed.
-- **Token usage is not normalized.** Qwen's `Stop` payload carries `context_usage`, `context_limit`, and `input_tokens`, which are session-level context counters rather than per-call usage. They are preserved under `raw.qwen` but not normalized into `gen_ai.usage`, so Qwen Code activity does not appear in `beacon token-usage` reports or the dashboard token view.
+- **Token spend is not collected, and cannot be.** Qwen's `Stop` payload carries no per-call token counts. Its `input_tokens` is the prompt for that turn, which in a multi-turn session already contains every prior turn, so summing it into `gen_ai.usage` would inflate a session's total by roughly the square of its length. Qwen Code therefore contributes no rows to the spend totals in `beacon token-usage`.
+- **Context utilization is collected.** The same numbers describe how full the window was, which is a level rather than an amount, so they normalize into `gen_ai.context` instead: `input_tokens` becomes `gen_ai.context.used_tokens` and `context_limit` becomes `gen_ai.context.limit_tokens`. Qwen Code appears in the context utilization section of `beacon token-usage`, measured against the window it reported rather than a static model table. `context_usage` is the ratio of the two and stays in `raw.qwen` rather than being stored a second time in different units.
 - **A policy deny is honored in one of two phases.** The seam runs in both the `pre-tool` and `permission-request` hooks, and Asymptote returns Claude Code's deny shape, which Qwen's `PreToolUse` contract honors. Qwen's `PermissionRequest` event reads a differently shaped `hookSpecificOutput.decision` object, so a deny raised from that phase is not honored. Because the seam fails open, the cost is a deny that does not take effect on one phase, never a tool call blocked for the wrong reason.
 - **Assistant text is not collected.** `MessageDisplay` is not registered, so Asymptote records no assistant output or reasoning for Qwen Code. See [Events that are not collected](#events-that-are-not-collected).
 - **Project-level installs need a trusted folder.** Qwen gates project hooks behind trusted-folder status, so a user-level install is the one that works without further interaction. Grok Build has the same caveat.

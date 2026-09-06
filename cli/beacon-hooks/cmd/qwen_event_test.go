@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -398,6 +399,54 @@ func TestQwenStopContextFieldsAreNotNormalizedIntoTokenUsage(t *testing.T) {
 	}
 }
 
+// The other half of the same decision: the context measure IS normalized, into gen_ai.context
+// rather than gen_ai.usage.
+//
+// The reason they were withheld was never that the numbers are wrong -- they are exact -- but that
+// gen_ai.usage is additive and these are a level at one moment, so summing them inflates a session
+// by roughly the square of its length. A block that nothing sums is the right home, and it makes
+// Qwen's context utilization readable without making its spend wrong.
+//
+// input_tokens is the used-token count: the fixture's 110100 over a 262144 window is the 0.42 its
+// sibling context_usage reports, so context_usage is their ratio and stays in raw rather than being
+// stored a second time in different units.
+func TestQwenStopContextIsNormalizedIntoGenAIContext(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	input := readQwenFixture(t, "stop.json")
+	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
+	logger := newHookLogger("stop", platformFlag, sessionID)
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+
+	event := lastEndpointEvent(t, logPath)
+	genAI, ok := event["gen_ai"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no gen_ai block: %#v", event)
+	}
+	context, ok := genAI["context"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("gen_ai has no context block: %#v", genAI)
+	}
+	raw := event["raw"].(map[string]interface{})["qwen"].(map[string]interface{})
+	for _, pair := range []struct{ normalized, source string }{
+		{"used_tokens", "input_tokens"},
+		{"limit_tokens", "context_limit"},
+	} {
+		got, want := context[pair.normalized], raw[pair.source]
+		if got == nil {
+			t.Errorf("gen_ai.context.%s missing, want the value of raw.qwen.%s (%v)", pair.normalized, pair.source, want)
+			continue
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("gen_ai.context.%s = %v, want raw.qwen.%s = %v", pair.normalized, got, pair.source, want)
+		}
+	}
+	// The additive block stays empty: this is the guarantee the sibling test above protects.
+	if usage, ok := genAI["usage"]; ok {
+		t.Fatalf("gen_ai.usage = %#v; context size must never land in the block reports sum", usage)
+	}
+}
+
 // The lifecycle events a session is reconstructed from. Prompt text and the session model are what
 // make a Qwen session legible in the dashboard rather than a list of anonymous tool calls.
 func TestQwenSessionLifecycleIsRecorded(t *testing.T) {
@@ -574,5 +623,31 @@ func TestQwenNotebookEditRecordsThePathWithoutClaimingADiff(t *testing.T) {
 	if diff, ok := file["diff"]; ok {
 		t.Fatalf("file.diff = %v; a notebook edit has no diff to build, so claiming one would be "+
 			"asserting content Beacon never saw", diff)
+	}
+}
+
+// Why the model for Qwen occupancy has to be resolved when the log is read rather than when it is
+// written. Qwen names its model on session start and never again: the Stop payload -- the only one
+// carrying the context trio -- has no model field, so the emitted event has none either. Anything
+// keyed on the model, the token-usage utilization report included, has to recover it from the
+// session. Recording that here means a future change to this hook cannot quietly remove the reason
+// the reader does that work.
+func TestQwenStopEventCarriesNoModel(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	input := readQwenFixture(t, "stop.json")
+	if _, ok := input["model"]; ok {
+		t.Fatalf("stop fixture now has a model; the reader-side session lookup may no longer be needed: %#v", input)
+	}
+	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
+	logger := newHookLogger("stop", platformFlag, sessionID)
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+
+	event := lastEndpointEvent(t, logPath)
+	if model, ok := event["model"]; ok && fmt.Sprint(model) != "" {
+		t.Errorf("event.model = %v, want absent -- Qwen's Stop payload has no model to read", model)
+	}
+	if session, ok := event["session"].(map[string]interface{}); !ok || fmt.Sprint(session["id"]) == "" {
+		t.Errorf("event has no session id (%#v); without one the reader cannot recover the model", event["session"])
 	}
 }

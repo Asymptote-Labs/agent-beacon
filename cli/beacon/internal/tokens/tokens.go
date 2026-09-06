@@ -130,6 +130,12 @@ type usageEvent struct {
 	spanID       string
 	parentSpanID string
 	usage        Usage
+	// contextOnly marks an event that reached the collector only because it reported context
+	// occupancy. It feeds the utilization report and nothing else: it is not spend, so it must
+	// not appear in a total, a group, a time bucket, or the count of usage-bearing events.
+	contextOnly  bool
+	contextUsed  int64
+	contextLimit int64
 	cumulative   bool
 	metricName   string
 	rawSource    string
@@ -170,7 +176,14 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 	byRepository := map[string]*Usage{}
 	byRun := map[string]*Usage{}
 	buckets := map[time.Time]*Usage{}
+	eventsWithUsage := 0
 	for _, ue := range usageEvents {
+		if ue.contextOnly {
+			// Context occupancy is not spend. Counting these would put zero-token rows under
+			// every grouping and report a runtime that spends nothing as usage-bearing -- which
+			// the coverage report reads as "this runtime is reporting its spend".
+			continue
+		}
 		report.Totals.add(ue.usage)
 		addGroup(byModel, ue.model, ue.usage)
 		addGroup(bySession, ue.session, ue.usage)
@@ -185,8 +198,9 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 			}
 			buckets[start].add(ue.usage)
 		}
+		eventsWithUsage++
 	}
-	report.EventsWithUsage = len(usageEvents)
+	report.EventsWithUsage = eventsWithUsage
 	report.ByModel = sortedGroups(byModel, opts.TopLimit)
 	report.BySession = sortedGroups(bySession, opts.TopLimit)
 	report.ByUser = sortedGroups(byUser, opts.TopLimit)
@@ -344,13 +358,64 @@ func userKey(user schema.UserInfo) string {
 	}
 }
 
+// modelDeclaration is one point at which a session named its model, kept with the position it was
+// seen at so a later lookup can ask what was in force rather than what was in force last.
+type modelDeclaration struct {
+	order int
+	model string
+}
+
+// sessionModelIndex records every model a session named, in event order. Qwen Code is why it
+// exists: it declares its model on session start and never again, so its Stop payload -- the only
+// event carrying gen_ai.context -- has a session id and no model. Utilization keys its rows on the
+// model, so without this the occupancy Beacon just learned how to record is dropped before the
+// report that wanted it.
+type sessionModelIndex map[sessionContextKey][]modelDeclaration
+
+func sessionModelDeclarations(events []schema.Event) sessionModelIndex {
+	index := sessionModelIndex{}
+	for i, event := range events {
+		model := strings.TrimSpace(event.Model)
+		if model == "" || event.Session == nil || strings.TrimSpace(event.Session.ID) == "" {
+			continue
+		}
+		key := sessionKey(event)
+		if declarations := index[key]; len(declarations) > 0 && declarations[len(declarations)-1].model == model {
+			continue
+		}
+		index[key] = append(index[key], modelDeclaration{order: i, model: model})
+	}
+	return index
+}
+
+// modelAt returns the model the session had named by the given position. Scanning back to the last
+// declaration at or before the event, rather than taking the session's newest one, keeps a session
+// that switched models from having its earlier occupancy attributed to the later one.
+func (index sessionModelIndex) modelAt(key sessionContextKey, order int) string {
+	declarations := index[key]
+	for i := len(declarations) - 1; i >= 0; i-- {
+		if declarations[i].order <= order {
+			return declarations[i].model
+		}
+	}
+	return ""
+}
+
 func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []*usageEvent {
+	sessionModels := sessionModelDeclarations(events)
 	var out []*usageEvent
 	for i, event := range events {
-		if event.GenAI == nil || event.GenAI.Usage == nil {
+		// Context-only events count too. A runtime can report how full the window was without
+		// reporting spend -- Qwen Code does exactly that -- and those events carry the whole of
+		// its context utilization. Gating on usage alone dropped them before they reached the
+		// utilization report, which is the one place they belong.
+		if event.GenAI == nil || (event.GenAI.Usage == nil && event.GenAI.Context == nil) {
 			continue
 		}
 		usage := event.GenAI.Usage
+		if usage == nil {
+			usage = &schema.GenAIUsageInfo{}
+		}
 		ue := &usageEvent{
 			order:      i,
 			action:     event.Event.Action,
@@ -410,8 +475,33 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 		if usage.CostUSD != nil {
 			ue.usage.CostUSD = *usage.CostUSD
 		}
+		if context := event.GenAI.Context; context != nil {
+			if context.UsedTokens != nil {
+				ue.contextUsed = *context.UsedTokens
+			}
+			if context.LimitTokens != nil {
+				ue.contextLimit = *context.LimitTokens
+			}
+		}
 		if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 {
-			continue
+			if ue.contextUsed == 0 {
+				continue
+			}
+			// Kept for utilization, excluded from everything additive. A runtime that reports
+			// both context and usage is not context-only and counts normally.
+			//
+			// Events is zeroed as well as the event being skipped, so the struct cannot be
+			// added to a total by some later path that does not know to check the flag.
+			ue.contextOnly = true
+			ue.usage.Events = 0
+			if ue.model == "" && event.Session != nil {
+				// Attribution only, and only here. An event reporting real spend without a model
+				// of its own stays unattributed as it always has: relabelling that would move
+				// other runtimes' spend between models on the strength of a guess. Occupancy has
+				// no such risk -- it is never summed -- and without a model it is not reportable
+				// at all.
+				ue.model = sessionModels.modelAt(sessionKey(event), i)
+			}
 		}
 		if event.Raw != nil {
 			if temporality, _ := event.Raw["metric_temporality"].(string); strings.EqualFold(temporality, "cumulative") {
@@ -681,11 +771,20 @@ func sortedBuckets(buckets map[time.Time]*Usage) []TimeBucket {
 func buildUtilization(events []*usageEvent, nearLimitRatio float64) []ModelUtilization {
 	type sample struct{ inputTotal int64 }
 	samples := map[string]map[string]*sample{}
+	reportedWindow := map[string]int64{}
 	for _, ue := range events {
 		if ue.model == "" {
 			continue
 		}
-		inputTotal := ue.usage.InputTokens + ue.usage.CacheReadInputTokens + ue.usage.CacheCreationInputTokens
+		// A reported context size is the measurement; summing the usage fields only approximates
+		// it. Prefer the runtime's own number when it gave one, and take its window with it -- a
+		// reported limit reflects the tier actually in force, which a static model table cannot.
+		inputTotal := ue.contextUsed
+		if inputTotal <= 0 {
+			inputTotal = ue.usage.InputTokens + ue.usage.CacheReadInputTokens + ue.usage.CacheCreationInputTokens
+		} else if ue.contextLimit > 0 && ue.contextLimit > reportedWindow[ue.model] {
+			reportedWindow[ue.model] = ue.contextLimit
+		}
 		if inputTotal <= 0 {
 			continue
 		}
@@ -702,6 +801,11 @@ func buildUtilization(events []*usageEvent, nearLimitRatio float64) []ModelUtili
 	for model, calls := range samples {
 		utilization := ModelUtilization{Model: model, Calls: len(calls)}
 		window, known := ContextWindow(model)
+		// A window the runtime reported beats the static table, which is a best-effort snapshot
+		// and cannot know which tier a call actually ran under.
+		if reported := reportedWindow[model]; reported > 0 {
+			window, known = reported, true
+		}
 		if known {
 			utilization.ContextWindow = window
 		}
@@ -756,7 +860,7 @@ func buildSessionDetail(events []*usageEvent, sessionID string) *SessionDetail {
 	for _, ue := range events {
 		// Match case-insensitively to stay consistent with the case-insensitive
 		// session query the token callers use to select events.
-		if !strings.EqualFold(ue.session, sessionID) {
+		if !strings.EqualFold(ue.session, sessionID) || ue.contextOnly {
 			continue
 		}
 		detail.Usage.add(ue.usage)
