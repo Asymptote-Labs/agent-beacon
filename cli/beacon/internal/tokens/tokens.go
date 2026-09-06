@@ -358,7 +358,51 @@ func userKey(user schema.UserInfo) string {
 	}
 }
 
+// modelDeclaration is one point at which a session named its model, kept with the position it was
+// seen at so a later lookup can ask what was in force rather than what was in force last.
+type modelDeclaration struct {
+	order int
+	model string
+}
+
+// sessionModelIndex records every model a session named, in event order. Qwen Code is why it
+// exists: it declares its model on session start and never again, so its Stop payload -- the only
+// event carrying gen_ai.context -- has a session id and no model. Utilization keys its rows on the
+// model, so without this the occupancy Beacon just learned how to record is dropped before the
+// report that wanted it.
+type sessionModelIndex map[sessionContextKey][]modelDeclaration
+
+func sessionModelDeclarations(events []schema.Event) sessionModelIndex {
+	index := sessionModelIndex{}
+	for i, event := range events {
+		model := strings.TrimSpace(event.Model)
+		if model == "" || event.Session == nil || strings.TrimSpace(event.Session.ID) == "" {
+			continue
+		}
+		key := sessionKey(event)
+		if declarations := index[key]; len(declarations) > 0 && declarations[len(declarations)-1].model == model {
+			continue
+		}
+		index[key] = append(index[key], modelDeclaration{order: i, model: model})
+	}
+	return index
+}
+
+// modelAt returns the model the session had named by the given position. Scanning back to the last
+// declaration at or before the event, rather than taking the session's newest one, keeps a session
+// that switched models from having its earlier occupancy attributed to the later one.
+func (index sessionModelIndex) modelAt(key sessionContextKey, order int) string {
+	declarations := index[key]
+	for i := len(declarations) - 1; i >= 0; i-- {
+		if declarations[i].order <= order {
+			return declarations[i].model
+		}
+	}
+	return ""
+}
+
 func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []*usageEvent {
+	sessionModels := sessionModelDeclarations(events)
 	var out []*usageEvent
 	for i, event := range events {
 		// Context-only events count too. A runtime can report how full the window was without
@@ -450,6 +494,14 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			// added to a total by some later path that does not know to check the flag.
 			ue.contextOnly = true
 			ue.usage.Events = 0
+			if ue.model == "" && event.Session != nil {
+				// Attribution only, and only here. An event reporting real spend without a model
+				// of its own stays unattributed as it always has: relabelling that would move
+				// other runtimes' spend between models on the strength of a guess. Occupancy has
+				// no such risk -- it is never summed -- and without a model it is not reportable
+				// at all.
+				ue.model = sessionModels.modelAt(sessionKey(event), i)
+			}
 		}
 		if event.Raw != nil {
 			if temporality, _ := event.Raw["metric_temporality"].(string); strings.EqualFold(temporality, "cumulative") {

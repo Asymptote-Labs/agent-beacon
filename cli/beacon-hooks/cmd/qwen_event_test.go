@@ -625,3 +625,29 @@ func TestQwenNotebookEditRecordsThePathWithoutClaimingADiff(t *testing.T) {
 			"asserting content Beacon never saw", diff)
 	}
 }
+
+// Why the model for Qwen occupancy has to be resolved when the log is read rather than when it is
+// written. Qwen names its model on session start and never again: the Stop payload -- the only one
+// carrying the context trio -- has no model field, so the emitted event has none either. Anything
+// keyed on the model, the token-usage utilization report included, has to recover it from the
+// session. Recording that here means a future change to this hook cannot quietly remove the reason
+// the reader does that work.
+func TestQwenStopEventCarriesNoModel(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	input := readQwenFixture(t, "stop.json")
+	if _, ok := input["model"]; ok {
+		t.Fatalf("stop fixture now has a model; the reader-side session lookup may no longer be needed: %#v", input)
+	}
+	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
+	logger := newHookLogger("stop", platformFlag, sessionID)
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+
+	event := lastEndpointEvent(t, logPath)
+	if model, ok := event["model"]; ok && fmt.Sprint(model) != "" {
+		t.Errorf("event.model = %v, want absent -- Qwen's Stop payload has no model to read", model)
+	}
+	if session, ok := event["session"].(map[string]interface{}); !ok || fmt.Sprint(session["id"]) == "" {
+		t.Errorf("event has no session id (%#v); without one the reader cannot recover the model", event["session"])
+	}
+}

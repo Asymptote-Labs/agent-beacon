@@ -567,3 +567,80 @@ func TestUtilizationStillInfersWhenNoContextIsReported(t *testing.T) {
 		t.Fatalf("utilization = %+v, want the summed 1500", report.Utilization)
 	}
 }
+
+// The real Qwen payload, not the fixture shape the other utilization tests use. Qwen declares its
+// model on session start and never again: its Stop hook -- the only producer of gen_ai.context --
+// carries session_id, context_usage, context_limit and input_tokens, and no model at all. Since
+// buildUtilization keys rows on the model and skips events without one, occupancy was recorded on
+// the event and then dropped before reaching the report this change exists to fill. The session's
+// model is the right attribution because the events belong to one session that declared it.
+func TestUtilizationAttributesContextToTheSessionModelWhenTheEventCarriesNone(t *testing.T) {
+	events := []schema.Event{
+		{
+			Timestamp: "2026-06-11T10:00:00Z",
+			Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.start", Category: "session"},
+			Harness:   schema.HarnessInfo{Name: "qwen_code"},
+			Session:   &schema.SessionInfo{ID: "qwen-8f21c4a0"},
+			Model:     "qwen3-coder-plus",
+		},
+		{
+			Timestamp: "2026-06-11T10:01:00Z",
+			Event:     schema.EventInfo{Kind: "agent_runtime", Action: "tool.completed", Category: "tool"},
+			Harness:   schema.HarnessInfo{Name: "qwen_code"},
+			Session:   &schema.SessionInfo{ID: "qwen-8f21c4a0"},
+			GenAI: &schema.GenAIInfo{Context: &schema.GenAIContextInfo{
+				UsedTokens:  int64Ptr(110100),
+				LimitTokens: int64Ptr(262144),
+			}},
+		},
+	}
+	report := Aggregate(events, Options{})
+	if len(report.Utilization) != 1 {
+		t.Fatalf("utilization = %+v, want one row attributed to the session model", report.Utilization)
+	}
+	row := report.Utilization[0]
+	if row.Model != "qwen3-coder-plus" {
+		t.Errorf("model = %q, want the model the session declared", row.Model)
+	}
+	if row.MaxInputTokens != 110100 {
+		t.Errorf("max input tokens = %d, want the reported 110100", row.MaxInputTokens)
+	}
+	if row.ContextWindow != 262144 {
+		t.Errorf("context window = %d, want the reported 262144", row.ContextWindow)
+	}
+	// The carry-forward is for attribution only. Nothing about it makes occupancy spend.
+	if report.Totals.TotalTokens() != 0 {
+		t.Errorf("totals = %d, want 0", report.Totals.TotalTokens())
+	}
+	if report.EventsWithUsage != 0 {
+		t.Errorf("events with usage = %d, want 0", report.EventsWithUsage)
+	}
+}
+
+// The carry-forward must not reach spend. An event reporting real usage with no model of its own
+// is attributed as it always was -- summed into the totals, absent from the per-model rows -- and
+// changing that would silently move other runtimes' spend between models.
+func TestSessionModelCarryForwardDoesNotRelabelSpend(t *testing.T) {
+	events := []schema.Event{
+		{
+			Timestamp: "2026-06-11T10:00:00Z",
+			Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.start", Category: "session"},
+			Harness:   schema.HarnessInfo{Name: "claude_code"},
+			Session:   &schema.SessionInfo{ID: "s1"},
+			Model:     "claude-opus-5",
+		},
+		usageEventFixture("2026-06-11T10:01:00Z", "claude_code", "s1", "", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(100)
+			e.GenAI.Usage.OutputTokens = int64Ptr(20)
+		}),
+	}
+	report := Aggregate(events, Options{})
+	if report.Totals.TotalTokens() != 120 {
+		t.Fatalf("totals = %d, want 120", report.Totals.TotalTokens())
+	}
+	for _, group := range report.ByModel {
+		if group.Key == "claude-opus-5" {
+			t.Errorf("by-model has a claude-opus-5 row (%+v); spend with no model of its own must not be relabelled", group)
+		}
+	}
+}
