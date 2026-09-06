@@ -8,8 +8,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
+	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type tokenUsageOptions struct {
@@ -26,6 +28,7 @@ type tokenUsageOptions struct {
 	runID      string
 	bucket     string
 	top        int
+	coverage   bool
 }
 
 var tokenUsageOpts tokenUsageOptions
@@ -63,6 +66,9 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 		}
 		query.Until = parsed
 	}
+	if tokenUsageOpts.coverage {
+		return runTokenCoverage(cmd, runtimeLog.EffectiveLogPath, query)
+	}
 	events, contexts, err := dashboard.ReadTokenEventsAppendOrder(runtimeLog.EffectiveLogPath, query)
 	if err != nil {
 		return err
@@ -89,6 +95,81 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runTokenCoverage answers "is this total all of it", which the usage report itself cannot: a
+// runtime whose telemetry never arrives is indistinguishable from one nobody used, since both are
+// simply absent from every rollup.
+//
+// It deliberately drops the session, model, repository and run filters and keeps only the time
+// window and the harness scope. Those filters select usage-bearing events almost by definition --
+// an event carries no model unless it carried a model call -- so a coverage report computed over
+// them would find every runtime covered and prove nothing. The window is what a reader is
+// actually asking about.
+func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQuery) error {
+	// The harness scope is applied here rather than handed to the event reader, so that both
+	// halves of the join -- the events and the installed list below -- are filtered on the
+	// canonical name by the same code.
+	//
+	// matchesQuery now normalizes too, so passing the scope through would also work. Keeping it
+	// explicit is deliberate: this join is only correct while both sides agree on what a harness
+	// name is, and an asymmetry between them is what reported a runtime that had spent tokens as
+	// inactive. That should not rest on the filter semantics of a function shared with the
+	// dashboard API, which can reasonably change for its own reasons.
+	events, _, err := dashboard.ReadTokenEventsAppendOrder(logPath, dashboard.EventQuery{
+		Since: query.Since,
+		Until: query.Until,
+	})
+	if err != nil {
+		return err
+	}
+	want := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(query.Harness))
+	if want != "" {
+		scopedEvents := events[:0]
+		for _, event := range events {
+			if strings.EqualFold(asymptoteobserve.NormalizeHarnessName(event.Harness.Name), want) {
+				scopedEvents = append(scopedEvents, event)
+			}
+		}
+		events = scopedEvents
+	}
+	// Installed runtimes come from the config scanner rather than from the log, because the whole
+	// question is which configured runtime is missing from the log. tokens.InstalledRuntimes keeps
+	// only the rows Beacon itself wired up; the scanner reports files a runtime might read, which
+	// is a different and much larger set.
+	configs := make([]tokens.InstalledConfig, 0)
+	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
+		configs = append(configs, tokens.InstalledConfig{
+			Runtime:       config.Runtime,
+			Path:          config.Path,
+			Kind:          config.ConfigKind,
+			BeaconManaged: config.BeaconManaged,
+			Exists:        config.Exists,
+		})
+	}
+	installed := tokens.InstalledRuntimes(configs)
+	// A harness scope narrows the events, so it has to narrow the installed list with them.
+	// Otherwise every other installed runtime has no events in the filtered set and is reported
+	// inactive -- which reads as "installed but unused this window" when the truth is only that
+	// the reader asked about a different runtime.
+	if want != "" {
+		kept := installed[:0]
+		for _, name := range installed {
+			if strings.EqualFold(asymptoteobserve.NormalizeHarnessName(name), want) {
+				kept = append(kept, name)
+			}
+		}
+		installed = kept
+	}
+	report := tokens.Coverage(events, installed)
+	out := cmd.OutOrStdout()
+	if tokenUsageOpts.jsonOutput {
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	tokens.RenderCoverageText(out, report)
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(tokenUsageCmd)
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.userMode, "user", true, "Use per-user endpoint paths")
@@ -104,4 +185,5 @@ func init() {
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.runID, "run-id", "", "Filter by CI run id")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.bucket, "bucket", "", "Time-series bucket size (for example 1h or 15m)")
 	tokenUsageCmd.Flags().IntVar(&tokenUsageOpts.top, "top", 0, "Limit each grouping to the top N entries (0 keeps all)")
+	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.coverage, "coverage", false, "Report which runtimes contributed token telemetry instead of the usage totals")
 }

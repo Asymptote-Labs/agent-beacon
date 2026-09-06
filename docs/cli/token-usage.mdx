@@ -80,6 +80,41 @@ Legacy metric-only Codex rows written before the turn trace existed remain visib
 
 Beacon does not turn Codex token counts into `cost_usd`. A future report may show a separately labeled estimate with the pricing source, effective date, model, and service tier. Unknown models must remain unknown rather than reading as zero cost, and reasoning tokens must not be charged a second time because they are already included in output.
 
+## Checking coverage
+
+A usage report answers "what did I spend". It cannot answer "is this all of it", and that is the question to settle before treating a number as a bill. A runtime whose telemetry never arrives looks exactly like a runtime nobody used: both are simply absent from every rollup, so a total can omit an entire agent and still look complete.
+
+```bash title="Check which runtimes are contributing token telemetry"
+beacon token-usage --coverage
+```
+
+```
+Token coverage over 4812 events: 3 runtime(s) reporting usage, 1 silent
+
+RUNTIME      STATUS            INSTALLED  EVENTS  USAGE EVENTS  TOKENS   NOTE
+codex_cli    silent            yes        412     0             0        per-turn usage trace; Codex emits no cost
+claude_code  covered           yes        3106    288           4271883  OTLP token and cost telemetry
+cline        covered           yes        190     12            283740   plugin reports usage once per task
+cursor       not_instrumented  yes        1104    0             0        Cursor hook payloads carry no token counts
+```
+
+The status column is the report:
+
+| Status | Meaning |
+|--------|---------|
+| `covered` | The runtime reported usage in the window. Nothing to do |
+| `silent` | The runtime produced events but no usage, and Beacon is built to read usage from it. **This is the one to investigate** — a stale runtime build, a hook that stopped firing, or an OTLP export that is no longer configured |
+| `inactive` | Asymptote configured this runtime, but it produced no events at all in the window. Usually means it was not used; can also mean its hooks or OTLP export stopped firing |
+| `not_instrumented` | The runtime ran, and Beacon cannot read token usage from it. Expected, not a fault. The note column says why |
+
+The `not_instrumented` distinction is what makes the report worth reading. Without it Cursor would appear as a problem on every run, and a column that always shows a problem is a column people stop reading.
+
+The `INSTALLED` column means "Asymptote configured this runtime", not "this product is on the machine". Only configuration Asymptote wrote counts — a hook command, a managed plugin marker, or a local OTLP endpoint it set. That is the population where silence is informative: Asymptote wired it up, so it should be reporting. A runtime present but configured by hand would not be reporting through Asymptote either way, so it appears only if it actually emits events.
+
+Coverage applies the `--since`, `--until` and `--harness` scopes, and deliberately ignores `--session`, `--model`, `--repository` and `--run-id`. Those filters select usage-bearing events almost by definition — an event carries no model unless it carried a model call — so a coverage report computed over them would find every runtime covered and prove nothing.
+
+Add `--json` for the machine-readable form, which carries the same per-runtime rows plus `silent`, `covered` and `total_events` counts. A `silent` count above zero is the alertable condition.
+
 ## Examples
 
 Show token usage from the default per-user endpoint log:
