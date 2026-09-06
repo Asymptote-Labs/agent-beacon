@@ -30,12 +30,49 @@ A few rules shape how the numbers read:
 
 ### Per-runtime coverage
 
+Token coverage is not uniform, and the reason is almost always the runtime rather than Beacon: most agent runtimes do not report usage on the surface Beacon collects from. A turn with no token attribution is a turn whose runtime never reported any.
+
+**Collected and verified against captured payloads:**
+
 | Runtime | Tokens | Cost | Per-session | Per-user |
 |---------|--------|------|-------------|----------|
 | Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | When local user context is present |
 | Codex CLI | input, output, cache read, cache creation, reasoning | Not emitted by Codex | Yes, from the turn trace | Yes, from matching SessionStart context |
+| Claude Cowork | input, output, cache read, cache creation | Reported when Cowork emits it | Yes | When the OTLP stream carries it |
+| Cline | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes, per task | Yes |
+| OpenCode | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Oh My Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 
-`cost_usd` remains empty for Codex because the attributable turn trace does not emit cost. Legacy metric-only Codex rows remain visible in historical totals but cannot be assigned to a session or user. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
+Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason.
+
+**Collected through the generic OpenTelemetry path, not yet verified against captured payloads:**
+
+| Runtime | Status |
+|---------|--------|
+| Gemini CLI | Usage is captured when the runtime emits the OTel GenAI semconv names (`gen_ai.usage.*` attributes, or a `gen_ai.client.token.usage` metric split by `token_type`). The generic path is tested; these runtimes' own payloads have not been captured and pinned. |
+| GitHub Copilot CLI | As above |
+| VS Code Copilot | As above |
+| Factory Droid | As above |
+| OpenClaw Gateway | As above |
+
+This table records what Beacon is built to read, not what your machine actually produced. A runtime can be listed here and still contribute nothing, because it was never run, or because its build reports no usage.
+
+**Not collected:**
+
+| Runtime | Why |
+|---------|-----|
+| Cursor | Cursor's hook payloads carry no token counts |
+| Antigravity CLI, Grok Build, Hermes Agent, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
+| Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
+| Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Preserved under `raw.qwen` rather than normalized. See [Qwen Code](/runtimes/qwen-code) |
+| Prime Agent | No managed extension ships yet, so nothing is collected |
+| Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
+| ChatGPT | The chat stream reports no token counts |
+| Devin Cloud | Devin bills ACUs rather than tokens. The count is preserved in the Devin raw block; there is no token or USD equivalent to normalize it into |
+
+Legacy metric-only Codex rows written before the turn trace existed remain visible in historical totals, but cannot be assigned to a session or user. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
 
 ### Cost estimates are separate
 
