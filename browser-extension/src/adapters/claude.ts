@@ -2,11 +2,11 @@
 //
 // claude.ai streams Server-Sent Events whose `data:` payloads are Anthropic
 // streaming objects keyed by `type`:
-//   message_start { message: { model, usage:{input_tokens} } }
+//   message_start { message: { model, usage:{input_tokens, cache_creation_input_tokens, cache_read_input_tokens} } }
 //   content_block_start { index, content_block:{ type:'text'|'tool_use', id?, name? } }
 //   content_block_delta { index, delta:{ type:'text_delta', text } | { type:'input_json_delta', partial_json } }
 //   content_block_stop { index }
-//   message_delta { delta:{ stop_reason }, usage:{ output_tokens } }
+//   message_delta { delta:{ stop_reason }, usage:{ output_tokens, ...possibly the input counts again } }
 //   message_stop
 // A legacy shape ({ completion: "…delta" }) is also tolerated.
 //
@@ -28,6 +28,8 @@ class ClaudeParser implements TurnParser {
   private responseText = '';
   private inputTokens?: number;
   private outputTokens?: number;
+  private cacheCreationInputTokens?: number;
+  private cacheReadInputTokens?: number;
   private startedAt = Date.now();
   private completedAt?: number;
   private reqId: number;
@@ -91,7 +93,7 @@ class ClaudeParser implements TurnParser {
         // the URL/request body; using message.id would mis-correlate turns).
         if (typeof m.uuid === 'string') this.messageId = m.uuid;
         else if (typeof m.id === 'string') this.messageId = m.id;
-        if (typeof m.usage?.input_tokens === 'number') this.inputTokens = m.usage.input_tokens;
+        this.readUsage(m.usage);
         break;
       }
       case 'content_block_start': {
@@ -118,7 +120,12 @@ class ClaudeParser implements TurnParser {
         break;
       }
       case 'message_delta': {
+        // output_tokens is read only here. message_start carries a placeholder
+        // of 1 rather than a count, so reading it there would report 1 output
+        // token for any stream that aborts before message_delta -- worse than
+        // the honest "unknown" that leaving it undefined gives.
         if (typeof obj.usage?.output_tokens === 'number') this.outputTokens = obj.usage.output_tokens;
+        this.readUsage(obj.usage);
         break;
       }
       case 'message_stop': {
@@ -126,6 +133,29 @@ class ClaudeParser implements TurnParser {
         break;
       }
     }
+  }
+
+  /** Merge the input-side counts of an Anthropic `usage` object into the turn.
+   *
+   *  Read from both `message_start` and `message_delta` because which of the two
+   *  carries them has moved between API versions: they have always been on
+   *  `message_start`, and newer streams repeat them on `message_delta`. Each
+   *  field is taken independently and only when numeric, so a payload carrying
+   *  one of them never clears the others.
+   *
+   *  The three input counts are disjoint in Anthropic's usage object --
+   *  `input_tokens` excludes both cached reads and cache writes -- which is
+   *  already the disjointness `gen_ai.usage` requires, so nothing is subtracted
+   *  here the way the Codex turn span needs.
+   *
+   *  output_tokens is deliberately not read here; see the message_delta case. */
+  private readUsage(u: any): void {
+    if (!u) return;
+    if (typeof u.input_tokens === 'number') this.inputTokens = u.input_tokens;
+    if (typeof u.cache_creation_input_tokens === 'number')
+      this.cacheCreationInputTokens = u.cache_creation_input_tokens;
+    if (typeof u.cache_read_input_tokens === 'number')
+      this.cacheReadInputTokens = u.cache_read_input_tokens;
   }
 
   getTurn(): ChatTurn | null {
@@ -159,7 +189,12 @@ class ClaudeParser implements TurnParser {
       outputMessages: [{ role: 'assistant', text: this.responseText }],
       responseText: this.responseText,
       toolCalls,
-      usage: { inputTokens: this.inputTokens, outputTokens: this.outputTokens },
+      usage: {
+        inputTokens: this.inputTokens,
+        outputTokens: this.outputTokens,
+        cacheCreationInputTokens: this.cacheCreationInputTokens,
+        cacheReadInputTokens: this.cacheReadInputTokens,
+      },
       startedAt: this.startedAt,
       completedAt: this.completedAt,
       captureMode: 'sse',
