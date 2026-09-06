@@ -117,7 +117,7 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 	// whole question is which installed runtime is missing from the log.
 	installed := []string{}
 	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
-		if config.Exists {
+		if config.Exists && (config.ConfigKind != endpointinventory.KindProfile || config.BeaconManaged) {
 			installed = append(installed, config.Runtime)
 		}
 	}
