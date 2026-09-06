@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
@@ -224,16 +223,6 @@ func TestTokenUsageCoverageDoesNotTreatAShellProfileAsAnInstall(t *testing.T) {
 		if runtime.Installed && (runtime.Harness == "copilot_cli" || runtime.Harness == "factory") {
 			t.Errorf("%s reported as installed on the strength of a shell profile alone", runtime.Harness)
 		}
-	}
-}
-
-// tokens.ConfigKindProfile duplicates inventory.KindProfile so the tokens package stays
-// independent of the scanner. Pinned here, where both are importable, because a silent drift
-// would stop excluding shell profiles and quietly refill the report with false installs.
-func TestTokenCoverageProfileKindConstantMatchesInventory(t *testing.T) {
-	if tokens.ConfigKindProfile != endpointinventory.KindProfile {
-		t.Fatalf("tokens.ConfigKindProfile = %q, inventory.KindProfile = %q; they must agree",
-			tokens.ConfigKindProfile, endpointinventory.KindProfile)
 	}
 }
 

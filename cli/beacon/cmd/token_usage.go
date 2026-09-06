@@ -131,10 +131,10 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 		}
 		events = scopedEvents
 	}
-	// Installed runtimes come from the config scanner rather than from the log, because the
-	// whole question is which installed runtime is missing from the log. tokens.InstalledRuntimes
-	// decides which scanner rows are real evidence of an install; the scanner reports files a
-	// runtime might read, which is not the same thing.
+	// Installed runtimes come from the config scanner rather than from the log, because the whole
+	// question is which configured runtime is missing from the log. tokens.InstalledRuntimes keeps
+	// only the rows Beacon itself wired up; the scanner reports files a runtime might read, which
+	// is a different and much larger set.
 	configs := make([]tokens.InstalledConfig, 0)
 	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
 		configs = append(configs, tokens.InstalledConfig{

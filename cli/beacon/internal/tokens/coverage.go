@@ -1,7 +1,6 @@
 package tokens
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -109,21 +108,6 @@ var usageExpectation = map[string]struct {
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
 }
 
-// ConfigKindProfile mirrors inventory.KindProfile. It is duplicated rather than imported to keep
-// this package independent of the scanner; cmd pins the two equal in a test.
-const ConfigKindProfile = "profile"
-
-// sharedConfigBasenames are config files that more than one runtime reads, which the scanner
-// nonetheless attributes to a single runtime.
-//
-// `.mcp.json` is the case: a workspace MCP server list that Claude Code, fx and others all read,
-// which the scanner files under fx alone -- deliberately, because attributing one file to several
-// runtimes would report one server several times. That is right for an inventory of MCP servers
-// and wrong as evidence of an install: a repository whose .mcp.json exists for Claude Code would
-// otherwise report fx as installed, and fx would sit in every coverage report as a permanently
-// inactive runtime nobody has.
-var sharedConfigBasenames = map[string]bool{".mcp.json": true}
-
 // InstalledConfig is the part of a config-scanner row that install detection reads.
 type InstalledConfig struct {
 	Runtime       string
@@ -133,34 +117,34 @@ type InstalledConfig struct {
 	Exists        bool
 }
 
-// InstalledRuntimes selects the scanner rows that are real evidence a runtime is installed.
+// InstalledRuntimes selects the scanner rows that are evidence a runtime is wired up to report.
 //
-// The scanner answers "which config files exist that some runtime might read", which is a
-// different question from "is this runtime installed", and the gap between them is all
-// false positives -- each one a permanently inactive row for a product nobody has. A status that
-// is wrong on most machines is one people learn to skip, which costs more than the rows are worth.
+// Only rows Beacon itself configured count. Everything else -- a config file that merely exists --
+// is not evidence of anything this report can use, and three rounds of review found three separate
+// ways it lies: a shell profile exists on every machine with a shell, the workspace .mcp.json is
+// read by several runtimes but filed under one, and VS Code's settings.json exists wherever VS Code
+// does, Copilot Chat or not. Each produced a permanently inactive row for a product nobody had.
+// Excluding them one at a time was losing; the shape of the mistake was using the scanner to answer
+// a question it does not answer.
 //
-// A row counts when Beacon itself wired the runtime up, since that is unambiguous whatever file it
-// lives in. Otherwise the file has to be one only that runtime reads: not a shell profile, which
-// exists on nearly every machine, and not a config shared between runtimes.
+// The scanner reports which config files exist that some runtime might read. Coverage needs to know
+// which runtimes Beacon set up to send telemetry, because that is the only population where silence
+// is informative: Beacon wired it, so it should be reporting, so nothing arriving is worth a look.
+// A runtime present on the machine but never configured by Beacon would not be reporting either
+// way, and saying so every week is noise rather than coverage.
 //
-// Two exclusions today, both found in review rather than by design, which is why the rule is
-// written as a rule with a named list instead of a condition per file. A third shared path is
-// likelier than not.
+// beacon_managed is exactly that signal. It is set when a file carries Beacon's hook command, its
+// managed-plugin marker, or an OTLP endpoint pointing at the local collector -- in each case
+// because Beacon put it there.
+//
+// A runtime configured by hand, outside Beacon, is not counted. If it emits events it still appears
+// in the report through the log; if it emits nothing, Beacon has no grounds to claim it should have.
 func InstalledRuntimes(configs []InstalledConfig) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, config := range configs {
-		if !config.Exists {
+		if !config.Exists || !config.BeaconManaged {
 			continue
-		}
-		if !config.BeaconManaged {
-			if config.Kind == ConfigKindProfile {
-				continue
-			}
-			if sharedConfigBasenames[strings.ToLower(filepath.Base(config.Path))] {
-				continue
-			}
 		}
 		name := strings.TrimSpace(config.Runtime)
 		if name == "" || seen[name] {

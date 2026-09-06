@@ -263,48 +263,50 @@ func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
 	}
 }
 
-// Install detection reads the config scanner, which answers "which config files exist that some
-// runtime might read" -- a different question from "is this runtime installed". Every row where
-// those two diverge is a permanently inactive line for a product nobody has, and a status that is
-// wrong on most machines is one people stop reading.
-func TestInstalledRuntimesRequiresEvidenceThatIsActuallyTheRuntimes(t *testing.T) {
+// Only rows Beacon itself configured count as evidence a runtime is wired up to report.
+//
+// Three rounds of review found three different files that exist for reasons other than the runtime
+// the scanner files them under -- a shell profile, the shared workspace .mcp.json, VS Code's
+// settings.json -- each producing a permanently inactive row for a product nobody had. The rule is
+// no longer "exclude the known liars" but "only count what Beacon put there".
+func TestInstalledRuntimesCountsOnlyWhatBeaconConfigured(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		config InstalledConfig
 		want   bool
 	}{
 		{
-			name:   "a runtime-exclusive config counts",
-			config: InstalledConfig{Runtime: "claude_code", Path: "/home/u/.claude/settings.json", Kind: "native_config", Exists: true},
+			name:   "a config Beacon wired up counts",
+			config: InstalledConfig{Runtime: "claude_code", Path: "/home/u/.claude/settings.json", Kind: "native_config", BeaconManaged: true, Exists: true},
 			want:   true,
 		},
 		{
-			// ~/.zshrc exists on nearly every machine whether or not the product does.
-			name:   "a shell profile alone does not",
-			config: InstalledConfig{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: ConfigKindProfile, Exists: true},
+			// The case that started this: ~/.zshrc exists on every machine with a shell.
+			name:   "a shell profile Beacon did not touch does not",
+			config: InstalledConfig{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: "profile", Exists: true},
 			want:   false,
 		},
 		{
-			// Beacon writing the runtime's OTLP export into the profile is unambiguous.
-			name:   "a shell profile Beacon wired up does",
-			config: InstalledConfig{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: ConfigKindProfile, BeaconManaged: true, Exists: true},
-			want:   true,
-		},
-		{
-			// The scanner files the workspace .mcp.json under fx alone, though Claude Code and
-			// others read it too. Right for an MCP inventory, wrong as proof fx is installed.
+			// Read by several runtimes, filed by the scanner under fx alone.
 			name:   "a config shared between runtimes does not",
 			config: InstalledConfig{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
 			want:   false,
 		},
 		{
-			name:   "fx's own MCP file does",
-			config: InstalledConfig{Runtime: "vercel_fx", Path: "/home/u/.fx/mcp.json", Kind: "native_config", Exists: true},
+			// Exists wherever VS Code does, Copilot Chat installed or not.
+			name:   "VS Code settings alone does not",
+			config: InstalledConfig{Runtime: "vscode", Path: "/home/u/.config/Code/User/settings.json", Kind: "native_config", Exists: true},
+			want:   false,
+		},
+		{
+			// The same file once Beacon has written the local OTLP endpoint into it.
+			name:   "VS Code settings Beacon wired up does",
+			config: InstalledConfig{Runtime: "vscode", Path: "/home/u/.config/Code/User/settings.json", Kind: "native_config", BeaconManaged: true, Exists: true},
 			want:   true,
 		},
 		{
-			name:   "a config that does not exist does not",
-			config: InstalledConfig{Runtime: "cline", Path: "/home/u/.cline/config.json", Kind: "native_config", Exists: false},
+			name:   "a managed config that does not exist does not",
+			config: InstalledConfig{Runtime: "cline", Path: "/home/u/.cline/config.json", Kind: "native_config", BeaconManaged: true, Exists: false},
 			want:   false,
 		},
 	} {
@@ -317,32 +319,16 @@ func TestInstalledRuntimesRequiresEvidenceThatIsActuallyTheRuntimes(t *testing.T
 	}
 }
 
-// A runtime with several scanner rows is one runtime.
-func TestInstalledRuntimesDeduplicates(t *testing.T) {
+// A runtime with several managed rows is one runtime, and one managed row is enough among many
+// unmanaged ones.
+func TestInstalledRuntimesDeduplicatesAndNeedsOnlyOneManagedRow(t *testing.T) {
 	got := InstalledRuntimes([]InstalledConfig{
-		{Runtime: "claude_code", Path: "/home/u/.claude/settings.json", Kind: "native_config", Exists: true},
-		{Runtime: "claude_code", Path: "/home/u/.claude.json", Kind: "native_config", Exists: true},
+		{Runtime: "claude_code", Path: "/home/u/.claude/settings.json", Kind: "native_config", BeaconManaged: true, Exists: true},
+		{Runtime: "claude_code", Path: "/home/u/.claude.json", Kind: "native_config", BeaconManaged: true, Exists: true},
+		{Runtime: "vscode", Path: "/home/u/.config/Code/User/settings.json", Kind: "native_config", Exists: true},
+		{Runtime: "vscode", Path: "/home/u/.copilot/hooks/beacon.json", Kind: "hook_config", BeaconManaged: true, Exists: true},
 	})
-	if len(got) != 1 || got[0] != "claude_code" {
-		t.Fatalf("InstalledRuntimes = %v, want [claude_code]", got)
-	}
-}
-
-// One weak row must not be rescued by another weak row for the same runtime, and a strong row
-// must still count when a weak one is present.
-func TestInstalledRuntimesMixesWeakAndStrongRowsCorrectly(t *testing.T) {
-	onlyWeak := InstalledRuntimes([]InstalledConfig{
-		{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
-		{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: ConfigKindProfile, Exists: true},
-	})
-	if len(onlyWeak) != 0 {
-		t.Fatalf("InstalledRuntimes = %v, want none -- both rows are shared files", onlyWeak)
-	}
-	withStrong := InstalledRuntimes([]InstalledConfig{
-		{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
-		{Runtime: "vercel_fx", Path: "/home/u/.fx/settings.json", Kind: "native_config", Exists: true},
-	})
-	if len(withStrong) != 1 {
-		t.Fatalf("InstalledRuntimes = %v, want vercel_fx counted on its own settings file", withStrong)
+	if len(got) != 2 || got[0] != "claude_code" || got[1] != "vscode" {
+		t.Fatalf("InstalledRuntimes = %v, want [claude_code vscode]", got)
 	}
 }
