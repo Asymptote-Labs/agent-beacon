@@ -644,3 +644,66 @@ func TestSessionModelCarryForwardDoesNotRelabelSpend(t *testing.T) {
 		}
 	}
 }
+
+// Every path that writes an event now canonicalizes the model name, so a log Beacon wrote after
+// that landed cannot split. This is about the logs where that does not hold: everything written
+// before the rule existed, which the runtime log retains and a --since window spans, and any JSONL
+// Beacon reads without having written -- a customer's own file, or events forwarded in from a
+// producer with its own conventions.
+//
+// Reading is where a report can still be made whole for those, and grouping is the only place it
+// matters: three spellings of one model are three rows, each holding a third of the bill, with
+// nothing on the report saying so. A split row is not obviously wrong to a reader, which is what
+// makes it worth closing rather than tolerating.
+func TestAggregateGroupsOneModelReportedUnderSeveralSpellings(t *testing.T) {
+	mk := func(model string) schema.Event {
+		return usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", model, func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(10)
+		})
+	}
+	report := Aggregate([]schema.Event{
+		mk("claude-opus-5"),
+		mk("anthropic/claude-opus-5"),
+		mk("Claude-Opus-5"),
+		mk("  openrouter/anthropic/Claude-Opus-5  "),
+	}, Options{})
+
+	if len(report.ByModel) != 1 {
+		keys := make([]string, 0, len(report.ByModel))
+		for _, group := range report.ByModel {
+			keys = append(keys, group.Key)
+		}
+		t.Fatalf("by-model rows = %v, want one row for one model", keys)
+	}
+	row := report.ByModel[0]
+	if row.Key != "claude-opus-5" {
+		t.Errorf("by-model key = %q, want the canonical spelling", row.Key)
+	}
+	if row.Usage.TotalTokens() != 40 {
+		t.Errorf("by-model tokens = %d, want all 40 under the one row", row.Usage.TotalTokens())
+	}
+	if len(report.Utilization) != 1 {
+		t.Errorf("utilization rows = %d, want one -- it keys on the model too", len(report.Utilization))
+	}
+	// The totals never split, so they are the control: they were right before this change and must
+	// be unchanged by it.
+	if report.Totals.TotalTokens() != 40 {
+		t.Errorf("totals = %d, want 40", report.Totals.TotalTokens())
+	}
+}
+
+// The normalization is the shared one, so what it declines to do it declines to do here. Folding
+// the dot in "claude-sonnet-4.6" would merge it with Anthropic's "claude-sonnet-4-6", and the same
+// rule turns "gpt-4.1" into a model that exists under no name. A visible split beats an invented
+// id, so these stay two rows.
+func TestAggregateDoesNotMergeModelsThatOnlyLookAlike(t *testing.T) {
+	mk := func(model string) schema.Event {
+		return usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", model, func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(10)
+		})
+	}
+	report := Aggregate([]schema.Event{mk("claude-sonnet-4.6"), mk("claude-sonnet-4-6")}, Options{})
+	if len(report.ByModel) != 2 {
+		t.Fatalf("by-model rows = %d, want 2 -- these are different ids and merging them needs a catalog", len(report.ByModel))
+	}
+}
