@@ -587,7 +587,7 @@ func matchesQuery(record EventRecord, query EventQuery) bool {
 			return false
 		}
 	}
-	if query.Harness != "" && !strings.EqualFold(event.Harness.Name, query.Harness) {
+	if query.Harness != "" && !strings.EqualFold(asymptoteobserve.NormalizeHarnessName(event.Harness.Name), asymptoteobserve.NormalizeHarnessName(query.Harness)) {
 		return false
 	}
 	if query.Model != "" && !containsFold(event.Model, query.Model) {

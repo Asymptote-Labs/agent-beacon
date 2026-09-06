@@ -265,18 +265,22 @@ func TestTokenUsageCoverageHarnessScopeDoesNotStrandOtherRuntimes(t *testing.T) 
 		}
 	}
 
-	output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json", "--harness", "claude_code")
-	var report tokens.CoverageReport
-	if err := json.Unmarshal([]byte(output), &report); err != nil {
-		t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
-	}
-	for _, runtime := range report.Runtimes {
-		if runtime.Harness != "claude_code" {
-			t.Errorf("scoping to claude_code still reported %q as %q", runtime.Harness, runtime.Status)
-		}
-	}
-	if len(report.Runtimes) != 1 || report.Runtimes[0].Status != tokens.CoverageCovered {
-		t.Fatalf("want exactly the scoped runtime, covered; got %+v", report.Runtimes)
+	for _, alias := range []string{"claude_code", "claude"} {
+		t.Run("harness="+alias, func(t *testing.T) {
+			output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json", "--harness", alias)
+			var report tokens.CoverageReport
+			if err := json.Unmarshal([]byte(output), &report); err != nil {
+				t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
+			}
+			for _, runtime := range report.Runtimes {
+				if runtime.Harness != "claude_code" {
+					t.Errorf("scoping to %q still reported %q as %q", alias, runtime.Harness, runtime.Status)
+				}
+			}
+			if len(report.Runtimes) != 1 || report.Runtimes[0].Status != tokens.CoverageCovered {
+				t.Fatalf("want exactly the scoped runtime, covered; got %+v", report.Runtimes)
+			}
+		})
 	}
 }
 
