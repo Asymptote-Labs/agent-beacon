@@ -71,7 +71,11 @@ func newPolicyCandidate(input map[string]interface{}, sessionID string) policyCa
 		}
 	}
 
-	action := actionForTool(hookEvent, toolName)
+	// The candidate describes a call that has not run yet, so there is no result to pass. On a
+	// runtime whose MCP calls are only identifiable from their result, an MCP tool therefore
+	// reaches the provider as the action its name implies -- stated rather than hidden, and the
+	// same limit the telemetry path has on PreToolUse.
+	action := actionForTool(hookEvent, toolName, toolInput, nil)
 	// A command-bearing call with no more specific action is a command execution.
 	if action == "tool.invoked" {
 		if _, ok := fields["command"]; ok {
@@ -170,6 +174,17 @@ func policyDenyResponse(reason string, phase policycontract.Phase) map[string]in
 		return map[string]interface{}{"decision": "reject"}
 	case platformFlag == "antigravity" || platformFlag == "grok":
 		return map[string]interface{}{"decision": "deny"}
+	// OpenHands reads the same `decision` key, and also a `reason` that antigravity and grok have
+	// no field for. The reason is worth sending: OpenHands surfaces it in the conversation as the
+	// explanation for the block and hands it to the agent as the tool's failure, so without it the
+	// operator and the model both see a call refused with no account of why.
+	//
+	// Exit code 2 is the documented alternative to this object, not a requirement alongside it:
+	// the executor parses stdout first and a parsed `decision: deny` sets blocked regardless of the
+	// code. Beacon exits 0 on every hook path, so saying it in the object is the only shape that
+	// works without changing that.
+	case platformFlag == openHandsPlatform:
+		return map[string]interface{}{"decision": "deny", "reason": reason}
 	// Qwen Code shares Claude Code's deny shape exactly: `hookSpecificOutput.permissionDecision`
 	// with a `permissionDecisionReason`, both required by its PreToolUse contract. The
 	// `hookEventName` stays "PreToolUse" in both phases the seam runs in, matching the existing
