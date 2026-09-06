@@ -17,6 +17,21 @@ The prefix is not discarded. It is recorded as `gen_ai.provider.name`, so a prov
 
 Model ids themselves are never rewritten. Date suffixes, dots and vendor spellings are preserved as the runtime reported them, because a rule that folds `claude-sonnet-4.6` into `claude-sonnet-4-6` also turns `gpt-4.1` into `gpt-4-1`, which is not a model under any name. A split row is visible to a reader; an invented id is not.
 
+## Context size is not usage
+
+`gen_ai.usage` is additive: every report sums it to answer what a session spent. `gen_ai.context` is a level at one moment -- how full the model's window was on a call -- and summing it answers nothing.
+
+Qwen Code is the runtime that forced the split. Its `Stop` hook reports the prompt token count for a turn, which in a multi-turn session already contains every prior turn; added up, a session's total grows with roughly the square of its length. Read as context occupancy the same number is exact, so it is recorded in a block nothing sums:
+
+| Source signal | Normalized field |
+|---------------|------------------|
+| `input_tokens` alongside a reported limit, `gen_ai.context.used_tokens` | `gen_ai.context.used_tokens` |
+| `context_limit`, `gen_ai.context.limit_tokens` | `gen_ai.context.limit_tokens` |
+
+Both halves are required before either is recorded. `input_tokens` is also the ecosystem's usual name for a genuine additive usage count, so a reported limit beside it is what distinguishes a payload describing window occupancy from one reporting spend. Without that pairing the rule would reclassify other runtimes' spend as context.
+
+A reported `limit_tokens` also takes precedence over Asymptote's static context-window table when computing utilization, because it reflects the tier the call actually ran under rather than the default for a model name.
+
 ## Source mapping
 
 | Source signal | Normalized field or action |

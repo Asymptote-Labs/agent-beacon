@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -395,6 +396,54 @@ func TestQwenStopContextFieldsAreNotNormalizedIntoTokenUsage(t *testing.T) {
 		if payload[key] == nil {
 			t.Errorf("raw.qwen is missing %s, which is the only place it is preserved: %#v", key, payload)
 		}
+	}
+}
+
+// The other half of the same decision: the context measure IS normalized, into gen_ai.context
+// rather than gen_ai.usage.
+//
+// The reason they were withheld was never that the numbers are wrong -- they are exact -- but that
+// gen_ai.usage is additive and these are a level at one moment, so summing them inflates a session
+// by roughly the square of its length. A block that nothing sums is the right home, and it makes
+// Qwen's context utilization readable without making its spend wrong.
+//
+// input_tokens is the used-token count: the fixture's 110100 over a 262144 window is the 0.42 its
+// sibling context_usage reports, so context_usage is their ratio and stays in raw rather than being
+// stored a second time in different units.
+func TestQwenStopContextIsNormalizedIntoGenAIContext(t *testing.T) {
+	logPath := setupQwenHook(t)
+
+	input := readQwenFixture(t, "stop.json")
+	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
+	logger := newHookLogger("stop", platformFlag, sessionID)
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+
+	event := lastEndpointEvent(t, logPath)
+	genAI, ok := event["gen_ai"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no gen_ai block: %#v", event)
+	}
+	context, ok := genAI["context"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("gen_ai has no context block: %#v", genAI)
+	}
+	raw := event["raw"].(map[string]interface{})["qwen"].(map[string]interface{})
+	for _, pair := range []struct{ normalized, source string }{
+		{"used_tokens", "input_tokens"},
+		{"limit_tokens", "context_limit"},
+	} {
+		got, want := context[pair.normalized], raw[pair.source]
+		if got == nil {
+			t.Errorf("gen_ai.context.%s missing, want the value of raw.qwen.%s (%v)", pair.normalized, pair.source, want)
+			continue
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("gen_ai.context.%s = %v, want raw.qwen.%s = %v", pair.normalized, got, pair.source, want)
+		}
+	}
+	// The additive block stays empty: this is the guarantee the sibling test above protects.
+	if usage, ok := genAI["usage"]; ok {
+		t.Fatalf("gen_ai.usage = %#v; context size must never land in the block reports sum", usage)
 	}
 }
 

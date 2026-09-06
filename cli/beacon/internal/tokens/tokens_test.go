@@ -441,3 +441,73 @@ func TestAggregateTopLimitCapsGroups(t *testing.T) {
 		t.Fatalf("by_model = %#v", report.ByModel)
 	}
 }
+
+// A runtime that reports its own context size and window is measured against those, not against
+// the static model table and not against a sum of usage fields.
+//
+// Both substitutions matter. Summing input + cache read + cache creation approximates occupancy and
+// is all Beacon has for runtimes that report nothing; a reported number is the measurement itself.
+// And a reported window reflects the tier the call actually ran under, which a table keyed on a
+// model name cannot know.
+func TestUtilizationPrefersReportedContextOverInference(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "qwen_code", "s1", "qwen3-coder-plus", func(e *schema.Event) {
+			e.GenAI.Usage = nil
+			e.GenAI.Context = &schema.GenAIContextInfo{
+				UsedTokens:  int64Ptr(110100),
+				LimitTokens: int64Ptr(262144),
+			}
+		}),
+	}
+	report := Aggregate(events, Options{})
+	if len(report.Utilization) != 1 {
+		t.Fatalf("utilization = %+v, want one row for a context-only event", report.Utilization)
+	}
+	row := report.Utilization[0]
+	if row.ContextWindow != 262144 {
+		t.Errorf("context window = %d, want the runtime's reported 262144", row.ContextWindow)
+	}
+	if row.MaxInputTokens != 110100 {
+		t.Errorf("max input = %d, want the runtime's reported 110100", row.MaxInputTokens)
+	}
+	// 110100 / 262144 is the 0.42 Qwen reports as context_usage, which is how the fixture's three
+	// fields are known to describe one measurement.
+	if row.MaxRatio < 0.419 || row.MaxRatio > 0.421 {
+		t.Errorf("max ratio = %v, want ~0.42", row.MaxRatio)
+	}
+}
+
+// Context is a level, not spend. A context-only event must not add anything to the totals a report
+// sums, or a Qwen session's cost would grow with the square of its length.
+func TestContextOnlyEventsAddNothingToTotals(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "qwen_code", "s1", "qwen3-coder-plus", func(e *schema.Event) {
+			e.GenAI.Usage = nil
+			e.GenAI.Context = &schema.GenAIContextInfo{
+				UsedTokens:  int64Ptr(110100),
+				LimitTokens: int64Ptr(262144),
+			}
+		}),
+	}
+	report := Aggregate(events, Options{})
+	if got := report.Totals.TotalTokens(); got != 0 {
+		t.Fatalf("totals = %d tokens, want 0 -- context occupancy is not spend", got)
+	}
+	if report.Totals.CostUSD != 0 {
+		t.Fatalf("totals cost = %v, want 0", report.Totals.CostUSD)
+	}
+}
+
+// A runtime that reports no context keeps the inferred behaviour and the static window.
+func TestUtilizationStillInfersWhenNoContextIsReported(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", "claude-opus-5", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(1000)
+			e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(500)}
+		}),
+	}
+	report := Aggregate(events, Options{})
+	if len(report.Utilization) != 1 || report.Utilization[0].MaxInputTokens != 1500 {
+		t.Fatalf("utilization = %+v, want the summed 1500", report.Utilization)
+	}
+}

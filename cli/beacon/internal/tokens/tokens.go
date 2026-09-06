@@ -130,6 +130,8 @@ type usageEvent struct {
 	spanID       string
 	parentSpanID string
 	usage        Usage
+	contextUsed  int64
+	contextLimit int64
 	cumulative   bool
 	metricName   string
 	rawSource    string
@@ -347,10 +349,17 @@ func userKey(user schema.UserInfo) string {
 func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []*usageEvent {
 	var out []*usageEvent
 	for i, event := range events {
-		if event.GenAI == nil || event.GenAI.Usage == nil {
+		// Context-only events count too. A runtime can report how full the window was without
+		// reporting spend -- Qwen Code does exactly that -- and those events carry the whole of
+		// its context utilization. Gating on usage alone dropped them before they reached the
+		// utilization report, which is the one place they belong.
+		if event.GenAI == nil || (event.GenAI.Usage == nil && event.GenAI.Context == nil) {
 			continue
 		}
 		usage := event.GenAI.Usage
+		if usage == nil {
+			usage = &schema.GenAIUsageInfo{}
+		}
 		ue := &usageEvent{
 			order:      i,
 			action:     event.Event.Action,
@@ -410,7 +419,15 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 		if usage.CostUSD != nil {
 			ue.usage.CostUSD = *usage.CostUSD
 		}
-		if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 {
+		if context := event.GenAI.Context; context != nil {
+			if context.UsedTokens != nil {
+				ue.contextUsed = *context.UsedTokens
+			}
+			if context.LimitTokens != nil {
+				ue.contextLimit = *context.LimitTokens
+			}
+		}
+		if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 && ue.contextUsed == 0 {
 			continue
 		}
 		if event.Raw != nil {
@@ -681,11 +698,20 @@ func sortedBuckets(buckets map[time.Time]*Usage) []TimeBucket {
 func buildUtilization(events []*usageEvent, nearLimitRatio float64) []ModelUtilization {
 	type sample struct{ inputTotal int64 }
 	samples := map[string]map[string]*sample{}
+	reportedWindow := map[string]int64{}
 	for _, ue := range events {
 		if ue.model == "" {
 			continue
 		}
-		inputTotal := ue.usage.InputTokens + ue.usage.CacheReadInputTokens + ue.usage.CacheCreationInputTokens
+		// A reported context size is the measurement; summing the usage fields only approximates
+		// it. Prefer the runtime's own number when it gave one, and take its window with it -- a
+		// reported limit reflects the tier actually in force, which a static model table cannot.
+		inputTotal := ue.contextUsed
+		if inputTotal <= 0 {
+			inputTotal = ue.usage.InputTokens + ue.usage.CacheReadInputTokens + ue.usage.CacheCreationInputTokens
+		} else if ue.contextLimit > 0 && ue.contextLimit > reportedWindow[ue.model] {
+			reportedWindow[ue.model] = ue.contextLimit
+		}
 		if inputTotal <= 0 {
 			continue
 		}
@@ -702,6 +728,11 @@ func buildUtilization(events []*usageEvent, nearLimitRatio float64) []ModelUtili
 	for model, calls := range samples {
 		utilization := ModelUtilization{Model: model, Calls: len(calls)}
 		window, known := ContextWindow(model)
+		// A window the runtime reported beats the static table, which is a best-effort snapshot
+		// and cannot know which tier a call actually ran under.
+		if reported := reportedWindow[model]; reported > 0 {
+			window, known = reported, true
+		}
 		if known {
 			utilization.ContextWindow = window
 		}

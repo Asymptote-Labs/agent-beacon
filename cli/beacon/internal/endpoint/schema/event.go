@@ -98,6 +98,7 @@ type HealthInfo = asymptoteobserve.HealthInfo
 type ServerInfo = asymptoteobserve.ServerInfo
 type GenAIInfo = asymptoteobserve.GenAIInfo
 type GenAIAgentInfo = asymptoteobserve.GenAIAgentInfo
+type GenAIContextInfo = asymptoteobserve.GenAIContextInfo
 type GenAIConversationInfo = asymptoteobserve.GenAIConversationInfo
 type GenAIDataSourceInfo = asymptoteobserve.GenAIDataSourceInfo
 type GenAIEmbeddingsInfo = asymptoteobserve.GenAIEmbeddingsInfo

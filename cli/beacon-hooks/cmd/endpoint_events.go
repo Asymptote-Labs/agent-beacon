@@ -66,6 +66,38 @@ func rawPayloadKey(platform string) string {
 	return rawPayloadKeys[platform]
 }
 
+// applyContextSize promotes a runtime's reported context size into gen_ai.context.
+//
+// Separate from usage on purpose. gen_ai.usage is additive and every report sums it; context size
+// is a level at one moment, and Qwen Code -- the first runtime to report one -- is exactly where
+// summing goes wrong: its Stop payload's input_tokens is the prompt for that turn, which already
+// contains every prior turn, so a session's total would grow with the square of its length. Read as
+// context occupancy the same number is exact and worth having.
+//
+// Both halves are required before either is written. "input_tokens" is Qwen's name for the context
+// measure and also the ecosystem's name for an additive usage count, so a reported limit beside it
+// is what says which one this payload means. Promoting a bare input_tokens here would reclassify
+// other runtimes' spend as context.
+//
+// Read from the shared alias lists rather than a per-runtime branch, the way tool call ids are, so
+// a second runtime reporting the same thing needs a spelling added and nothing else.
+func applyContextSize(fields, input map[string]interface{}) {
+	if fields == nil || input == nil {
+		return
+	}
+	limit, ok := firstToolIntAcross([]map[string]interface{}{input}, asymptoteobserve.ContextLimitKeys...)
+	if !ok || limit <= 0 {
+		return
+	}
+	used, ok := firstToolIntAcross([]map[string]interface{}{input}, asymptoteobserve.ContextUsedKeys...)
+	if !ok || used <= 0 {
+		return
+	}
+	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
+		"context": map[string]interface{}{"used_tokens": used, "limit_tokens": limit},
+	})
+}
+
 func emitHookEventWithFidelity(logger *logging.Logger, action, category, severity, message, fidelity string, input map[string]interface{}, fields map[string]interface{}) {
 	if fields == nil {
 		fields = map[string]interface{}{}
@@ -75,6 +107,7 @@ func emitHookEventWithFidelity(logger *logging.Logger, action, category, severit
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{key: input})
 	}
 	applyToolCallID(fields, input)
+	applyContextSize(fields, input)
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model
 	}

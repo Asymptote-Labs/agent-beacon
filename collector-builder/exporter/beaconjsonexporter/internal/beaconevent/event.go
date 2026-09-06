@@ -58,6 +58,7 @@ type GenAIRetrievalInfo = asymptoteobserve.GenAIRetrievalInfo
 type GenAITokenInfo = asymptoteobserve.GenAITokenInfo
 type GenAIToolInfo = asymptoteobserve.GenAIToolInfo
 type GenAIToolCallInfo = asymptoteobserve.GenAIToolCallInfo
+type GenAIContextInfo = asymptoteobserve.GenAIContextInfo
 type GenAIUsageInfo = asymptoteobserve.GenAIUsageInfo
 type GenAIUsageCacheCreationInfo = asymptoteobserve.GenAIUsageCacheCreationInfo
 type GenAIUsageCacheReadInfo = asymptoteobserve.GenAIUsageCacheReadInfo

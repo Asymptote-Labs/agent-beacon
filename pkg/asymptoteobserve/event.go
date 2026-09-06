@@ -353,6 +353,28 @@ type GenAIUsageReasoningInfo struct {
 	OutputTokens *int64 `json:"output_tokens,omitempty"`
 }
 
+// GenAIContextInfo records how full the model's context was, which is a level rather than an
+// amount and therefore does not belong in GenAIUsageInfo.
+//
+// Everything in gen_ai.usage is additive: a report sums it across events to answer "what did this
+// session spend". Context size is the opposite -- it is a measurement at one moment, and summing it
+// answers nothing. Qwen Code is the case that forced the distinction: its Stop hook reports the
+// prompt token count for the turn, which in a multi-turn session already contains every prior turn,
+// so adding those up inflates a session's total by roughly the square of its length. The number is
+// exact and useful; it just is not spend.
+//
+// Keeping it in its own block means a consumer cannot reach it by accident. A rule or dashboard
+// that sums gen_ai.usage still gets only additive fields, and one that wants context utilization
+// asks for it by name.
+//
+// UsedTokens is how much of the window the request occupied. LimitTokens is the window the runtime
+// reported for that call, which is better than a local model table when present because it reflects
+// the tier actually in force. Neither has an OpenTelemetry GenAI semconv equivalent.
+type GenAIContextInfo struct {
+	UsedTokens  *int64 `json:"used_tokens,omitempty"`
+	LimitTokens *int64 `json:"limit_tokens,omitempty"`
+}
+
 // GenAIUsageInfo mirrors the OpenTelemetry GenAI semconv usage attribute
 // names. Token counts are int64 to match OTLP integer values. CostUSD has no
 // semconv equivalent; it carries runtime-reported USD cost only (for example
@@ -372,6 +394,7 @@ type GenAIWorkflowInfo struct {
 
 type GenAIInfo struct {
 	Agent              *GenAIAgentInfo        `json:"agent,omitempty"`
+	Context            *GenAIContextInfo      `json:"context,omitempty"`
 	Conversation       *GenAIConversationInfo `json:"conversation,omitempty"`
 	DataSource         *GenAIDataSourceInfo   `json:"data_source,omitempty"`
 	Embeddings         *GenAIEmbeddingsInfo   `json:"embeddings,omitempty"`
