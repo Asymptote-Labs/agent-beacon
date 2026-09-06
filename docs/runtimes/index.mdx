@@ -32,6 +32,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
+| [Muse Code](/runtimes/muse-code) | Native hooks through a managed hooks file | Session start, prompt, pre-tool, post-tool, permission request, subagent, context compaction, stop, command, and file telemetry |
 | [Oh My Pi](/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle, operator approval decisions, commands including operator `!` and `$` commands, file reads and edits with the unified patch, MCP tool activity, agent reasoning, and token usage |
 | [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |
 | [Pi](/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle, commands including operator `!` commands, file reads and edits with the unified patch, agent reasoning, and token usage |
@@ -112,7 +113,7 @@ MDM assets, meaning Jamf Pro Extension Attributes, Fleet osquery queries, and Ri
 | Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
 | OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
 
-Install hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, Oh My Pi, OpenCode, Pi, Qwen Code, and the optional VS Code hooks. fx is the exception with no hooks to install: schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) instead.
+Install hooks separately in the logged-in user's context when you need richer hook telemetry or inventory heartbeat triggers. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI inventory hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, Muse Code, Oh My Pi, OpenCode, Pi, Qwen Code, and the optional VS Code hooks. fx is the exception with no hooks to install: schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) instead.
 
 If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
 

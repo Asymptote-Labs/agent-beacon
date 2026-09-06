@@ -215,6 +215,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
 	items = append(items, qwenCandidates(home, wd)...)
+	items = append(items, museCandidates(home)...)
 	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
@@ -377,6 +378,43 @@ func qwenCandidates(home, wd string) []candidate {
 		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 	}
+}
+
+// Muse Code is two files: the managed hooks file Beacon owns outright, and Muse's own settings.json,
+// which Beacon edits by exactly one key. Both are reported, because either one alone is a broken
+// install and Muse says nothing about either -- a hooks file nothing points at is never read, and a
+// managed_hooks_path with no file behind it registers nothing. An inventory that showed only the
+// file Beacon wrote would report a half-install as a whole one.
+//
+// User scope only, with no project entry: Muse's project .muse/hooks.json is ignored by the
+// shipping build, so the installer refuses that scope and there is no project path to find.
+//
+// XDG_CONFIG_HOME is read here rather than assumed away, for the same reason the installer reads
+// it: on a machine that sets it, ~/.config/muse is not where Muse looks, and an inventory scanning
+// the wrong directory reports "not installed" for a working install.
+func museCandidates(home string) []candidate {
+	dir := museConfigDir(home)
+	return []candidate{
+		{runtime: "muse_code", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "muse_code", path: filepath.Join(dir, "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// museConfigDir resolves the directory Muse Code keeps settings.json in, mirroring the installer.
+//
+// XDG_CONFIG_HOME is read from the process environment, the same way vscodeUserSettingsPath does
+// it: on a machine that sets it, ~/.config/muse is not where Muse looks, and scanning the wrong
+// directory reports "not installed" for a working install. Exported to the test as a function
+// rather than restated there as a literal path, so the expected-candidate list stays correct on a
+// developer machine that happens to set the variable.
+//
+// No GOOS switch, unlike VS Code's: Muse Code ships for macOS and Linux only, and uses the same
+// ~/.config location on both rather than a Library path on macOS.
+func museConfigDir(home string) string {
+	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
+		return filepath.Join(base, "muse")
+	}
+	return filepath.Join(home, ".config", "muse")
 }
 
 // fx keeps no Beacon-written file, so every entry here is fx's own configuration rather than
@@ -735,6 +773,14 @@ func beaconManaged(item candidate, data []byte) bool {
 	// installer writes and what uninstall keys on, so it is the same string in all three places.
 	case "qwen_code":
 		return strings.Contains(text, "--platform qwen") || strings.Contains(text, "--platform=qwen")
+	// Two files with two different tells, both matched by one case because both are Muse Code's.
+	// The managed hooks file carries Beacon's marker, since Beacon owns it outright; settings.json
+	// does not, because Beacon edits one key of a file the user also edits, so it is recognized by
+	// the path that key names. Matching either is what lets the inventory report a half-install --
+	// which on Muse is the failure that looks most like success.
+	case "muse_code":
+		return strings.Contains(text, "beacon-managed-muse-hooks:v1") ||
+			strings.Contains(text, "beacon-endpoint-hooks.json")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {

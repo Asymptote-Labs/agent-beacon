@@ -41,7 +41,7 @@ func enforcePolicy(logger *logging.Logger, input map[string]interface{}, session
 	if reason == "" {
 		reason = "Tool call denied by policy provider"
 	}
-	deny := policyDenyResponse(reason)
+	deny := policyDenyResponse(reason, phase)
 	if deny == nil {
 		// Platform has no deny shape: honor "unknown platform -> allow".
 		return nil, false
@@ -162,7 +162,7 @@ func emitPolicyDenied(logger *logging.Logger, input map[string]interface{}, c po
 // caller allows (unknown platform -> allow). It is phase-independent: a platform
 // with a confirmed deny shape honors a deny in every phase the seam runs in, so a
 // provider deny is never silently dropped for a platform we enforce on.
-func policyDenyResponse(reason string) map[string]interface{} {
+func policyDenyResponse(reason string, phase policycontract.Phase) map[string]interface{} {
 	switch {
 	case platformFlag == "cursor":
 		return map[string]interface{}{"permission": "deny"}
@@ -185,7 +185,56 @@ func policyDenyResponse(reason string) map[string]interface{} {
 				"permissionDecisionReason": reason,
 			},
 		}
+	// Muse Code's deny contract is split between what has been measured and what has only been
+	// read out of the binary, and this returns the half that has not been measured -- stated here
+	// rather than left for a reader to discover.
+	//
+	// Measured, on a live hook: the host is fail-open on everything except `{"decision":"block"}`
+	// and exit code 2. Every other shape, this one included, was ignored and the turn proceeded.
+	// But that measurement was taken on UserPromptSubmit, whose deny cancels the whole turn --
+	// which is not what a per-call policy deny means, and emitting it from a tool phase would
+	// escalate "do not run this command" into "abandon what the user asked for". So the turn-family
+	// shape is deliberately not used here.
+	//
+	// The tool-family shape below comes from the binary's own validation strings, which require
+	// hookSpecificOutput to carry a hookEventName matching the firing event alongside
+	// permissionDecision / permissionDecisionReason. Strong evidence, not measurement: the account
+	// used for the measurement hit a billing error before any tool call, so no tool-side deny was
+	// ever exercised.
+	//
+	// The cost of that being wrong is bounded and is the direction to be wrong in. Sending the
+	// wrong family's shape was measured to be ignored silently, so an incorrect guess degrades to
+	// exactly what returning nil does -- the deny does not take effect and the tool runs -- rather
+	// than blocking a call for the wrong reason. Returning nil would give up the case where the
+	// inference is right for no safety gain.
+	//
+	// hookEventName is derived from the phase rather than hardcoded, unlike the claude/qwen branch
+	// above, because Muse requires it to match the firing event and Beacon binds each phase to a
+	// distinct Muse event in the hooks file it writes. That is what lets a deny raised from the
+	// PermissionRequest phase be honored here, where on Qwen it cannot be.
+	case platformFlag == "muse":
+		return map[string]interface{}{
+			"hookSpecificOutput": map[string]interface{}{
+				"hookEventName":            museHookEventNameForPhase(phase),
+				"permissionDecision":       "deny",
+				"permissionDecisionReason": reason,
+			},
+		}
 	default:
 		return nil
 	}
+}
+
+// museHookEventNameForPhase names the Muse Code event the policy seam is answering.
+//
+// Muse validates that a hook's hookSpecificOutput echoes the event that fired it, so this must
+// track the binding in the managed hooks file Beacon writes: PreToolUse for the pre-tool phase,
+// PermissionRequest for the permission phase. PreToolUse is the fallback because it is the phase
+// the seam runs in on every runtime, so an unrecognized phase degrades to the common case rather
+// than to an event name Muse would reject.
+func museHookEventNameForPhase(phase policycontract.Phase) string {
+	if phase == policycontract.PhasePermissionRequest {
+		return "PermissionRequest"
+	}
+	return "PreToolUse"
 }

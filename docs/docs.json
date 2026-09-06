@@ -148,6 +148,7 @@
                       "runtimes/gemini-cli",
                       "runtimes/github-copilot-cli",
                       "runtimes/grok-build",
+                      "runtimes/muse-code",
                       "runtimes/oh-my-pi",
                       "runtimes/opencode",
                       "runtimes/pi",

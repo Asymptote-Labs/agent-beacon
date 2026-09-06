@@ -362,6 +362,12 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		{runtime: "grok", path: filepath.Join(work, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(work, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		// Muse Code is two files and no project entry. Both halves are reported because either one
+		// alone is a broken install that Muse says nothing about; the project scope is absent
+		// because Muse's project .muse/hooks.json is ignored by the shipping build, so the
+		// installer refuses it and there is no project path to find.
+		{runtime: "muse_code", path: filepath.Join(museConfigDir(home), "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "muse_code", path: filepath.Join(museConfigDir(home), "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.
