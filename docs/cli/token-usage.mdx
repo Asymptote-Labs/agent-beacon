@@ -56,6 +56,7 @@ Cline reports usage once per task rather than per model call, because Beacon's r
 | VS Code Copilot | As above |
 | Factory Droid | As above |
 | OpenClaw Gateway | As above |
+| Grok Bot | Reaches Asymptote only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
 
 This table records what Beacon is built to read, not what your machine actually produced. A runtime can be listed here and still contribute nothing, because it was never run, or because its build reports no usage.
 
@@ -67,6 +68,7 @@ This table records what Beacon is built to read, not what your machine actually 
 | Antigravity CLI, Grok Build, Hermes Agent, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
 | Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
 | Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Preserved under `raw.qwen` rather than normalized. See [Qwen Code](/runtimes/qwen-code) |
+| OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
 | Prime Agent | No managed extension ships yet, so nothing is collected |
 | Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
 | ChatGPT | The chat stream reports no token counts |
