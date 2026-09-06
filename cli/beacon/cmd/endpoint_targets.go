@@ -56,6 +56,13 @@ var harnessTargets = []harnessTarget{
 	// for the other's. "oh-my-pi" is accepted because it is the repository name people reach for;
 	// "omp" is the binary, and the canonical harness name events are written under.
 	{name: "omp", endpointKind: endpointTargetHook, endpointAliases: []string{"omp", "oh-my-pi", "ohmypi"}, hookAliases: []string{"omp", "oh-my-pi", "ohmypi"}},
+	// OpenHands. "open-hands" is accepted because the product is written as two words as often as
+	// one, and normalizeHarnessKey folds "open_hands" onto it. "openhands" is also the canonical
+	// harness name events are written under, so a row read out of the runtime log and passed back
+	// to --harness resolves to the runtime it names. "openhands-lm" is deliberately not an alias:
+	// that is All Hands' model family, and accepting it would let someone ask to install hooks for
+	// a model.
+	{name: "openhands", endpointKind: endpointTargetHook, endpointAliases: []string{"openhands", "open-hands"}, hookAliases: []string{"openhands", "open-hands"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen

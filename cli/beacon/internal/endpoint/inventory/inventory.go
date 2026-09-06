@@ -216,6 +216,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, grokCandidates(home, wd)...)
 	items = append(items, qwenCandidates(home, wd)...)
 	items = append(items, museCandidates(home)...)
+	items = append(items, openHandsCandidates(home, wd)...)
 	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
@@ -398,6 +399,36 @@ func museCandidates(home string) []candidate {
 		{runtime: "muse_code", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "muse_code", path: filepath.Join(dir, "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 	}
+}
+
+// OpenHands keeps hooks in .openhands/hooks.json, which the user also edits, so this is a native
+// config file Beacon merges into rather than one it owns -- KindHookConfig, detected by the hook
+// command it contains, because there is no marker to write into a file with a closed schema.
+//
+// Both scopes are reported, and reporting both is the point rather than thoroughness. OpenHands
+// reads the first hooks.json it finds instead of merging the two, so a project file shadows the
+// user one entirely; an inventory that showed only the user file would report a working install
+// for a repository whose own hooks.json means Beacon's never runs.
+//
+// OH_PERSISTENCE_DIR is read here rather than assumed away, for the same reason the installer
+// reads it: on a machine that sets it, ~/.openhands is not where OpenHands looks, and an inventory
+// scanning the wrong directory reports "not installed" for a working install.
+func openHandsCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "openhands", path: filepath.Join(openHandsUserDir(home), "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "openhands", path: filepath.Join(wd, ".openhands", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// openHandsUserDir resolves the user-level OpenHands state directory, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set the variable.
+func openHandsUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("OH_PERSISTENCE_DIR")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".openhands")
 }
 
 // museConfigDir resolves the directory Muse Code keeps settings.json in, mirroring the installer.
@@ -781,6 +812,13 @@ func beaconManaged(item candidate, data []byte) bool {
 	case "muse_code":
 		return strings.Contains(text, "beacon-managed-muse-hooks:v1") ||
 			strings.Contains(text, "beacon-endpoint-hooks.json")
+	// Matched on the hook command, like Qwen Code above and for a stronger version of the same
+	// reason: OpenHands' hooks.json forbids top-level fields it does not know, so a Beacon marker
+	// would not merely be untidy -- it would fail validation and take every hook in the file down.
+	// `--platform openhands` is what the installer writes and what uninstall keys on, so it is the
+	// same string in all three places.
+	case "openhands":
+		return strings.Contains(text, "--platform openhands") || strings.Contains(text, "--platform=openhands")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {
