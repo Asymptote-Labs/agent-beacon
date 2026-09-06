@@ -42,6 +42,9 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 	if isCascadePlatform(platformFlag) {
 		prompt = cascadePrompt(input)
 	}
+	if platformFlag == openHandsPlatform {
+		prompt = openHandsPrompt(input)
+	}
 	hasPrompt := prompt != ""
 	if hasPrompt {
 		fields["prompt"] = map[string]interface{}{"text": prompt}
