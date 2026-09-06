@@ -176,11 +176,9 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 	byRepository := map[string]*Usage{}
 	byRun := map[string]*Usage{}
 	buckets := map[time.Time]*Usage{}
+	eventsWithUsage := 0
 	for _, ue := range usageEvents {
 		if ue.contextOnly {
-			// Context occupancy is not spend. Counting these would put zero-token rows under
-			// every grouping and report a runtime that spends nothing as usage-bearing -- which
-			// the coverage report reads as "this runtime is reporting its spend".
 			continue
 		}
 		report.Totals.add(ue.usage)
@@ -197,12 +195,9 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 			}
 			buckets[start].add(ue.usage)
 		}
+		eventsWithUsage++
 	}
-	for _, ue := range usageEvents {
-		if !ue.contextOnly {
-			report.EventsWithUsage++
-		}
-	}
+	report.EventsWithUsage = eventsWithUsage
 	report.ByModel = sortedGroups(byModel, opts.TopLimit)
 	report.BySession = sortedGroups(bySession, opts.TopLimit)
 	report.ByUser = sortedGroups(byUser, opts.TopLimit)
@@ -445,9 +440,8 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			if ue.contextUsed == 0 {
 				continue
 			}
-			// Kept for utilization, excluded from everything additive. A runtime that reports
-			// both context and usage is not context-only and counts normally.
 			ue.contextOnly = true
+			ue.usage.Events = 0
 		}
 		if event.Raw != nil {
 			if temporality, _ := event.Raw["metric_temporality"].(string); strings.EqualFold(temporality, "cumulative") {
