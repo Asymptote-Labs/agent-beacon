@@ -105,14 +105,29 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 // them would find every runtime covered and prove nothing. The window is what a reader is
 // actually asking about.
 func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQuery) error {
-	scoped := dashboard.EventQuery{
-		Since:   query.Since,
-		Until:   query.Until,
-		Harness: query.Harness,
-	}
-	events, _, err := dashboard.ReadTokenEventsAppendOrder(logPath, scoped)
+	// The harness scope is deliberately NOT handed to the event reader. Its filter compares the
+	// flag to harness.name with case-insensitive equality on the raw string, while events carry
+	// the canonical name written by NormalizeHarnessName -- so `--harness vscode` matches nothing,
+	// every vscode_copilot event being named vscode_copilot. Applied here that asymmetry is worse
+	// than a plain miss: the installed list below canonicalizes, so the runtime stays in the
+	// report while its events vanish, and a runtime that spent tokens is labelled inactive.
+	// Both sides are canonicalized here instead.
+	events, _, err := dashboard.ReadTokenEventsAppendOrder(logPath, dashboard.EventQuery{
+		Since: query.Since,
+		Until: query.Until,
+	})
 	if err != nil {
 		return err
+	}
+	want := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(query.Harness))
+	if want != "" {
+		scopedEvents := events[:0]
+		for _, event := range events {
+			if asymptoteobserve.NormalizeHarnessName(event.Harness.Name) == want {
+				scopedEvents = append(scopedEvents, event)
+			}
+		}
+		events = scopedEvents
 	}
 	// Installed runtimes come from the config scanner rather than from the log, because the
 	// whole question is which installed runtime is missing from the log. tokens.InstalledRuntimes
@@ -133,8 +148,7 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 	// Otherwise every other installed runtime has no events in the filtered set and is reported
 	// inactive -- which reads as "installed but unused this window" when the truth is only that
 	// the reader asked about a different runtime.
-	if harness := strings.TrimSpace(scoped.Harness); harness != "" {
-		want := asymptoteobserve.NormalizeHarnessName(harness)
+	if want != "" {
 		kept := installed[:0]
 		for _, name := range installed {
 			if asymptoteobserve.NormalizeHarnessName(name) == want {

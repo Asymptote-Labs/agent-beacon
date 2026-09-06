@@ -279,3 +279,34 @@ func TestTokenUsageCoverageHarnessScopeDoesNotStrandOtherRuntimes(t *testing.T) 
 		t.Fatalf("want exactly the scoped runtime, covered; got %+v", report.Runtimes)
 	}
 }
+
+// An alias in --harness must select the same runtime on both sides of the join.
+//
+// The event reader compares the flag to harness.name with case-insensitive equality on the raw
+// string, while events carry the canonical name. So `--harness vscode` matches no event, every
+// VS Code event being named vscode_copilot. On its own that is a plain miss; combined with an
+// installed list that canonicalizes, it is worse -- the runtime stays in the report while its
+// events vanish, and a runtime that spent tokens is reported inactive.
+func TestTokenUsageCoverageHarnessScopeAcceptsAliases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"vscode_copilot"},"model":"gpt-4o","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":42}},"message":"usage"}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	// "vscode" is the spelling the hook installer uses; the log carries "vscode_copilot".
+	output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json", "--harness", "vscode")
+	var report tokens.CoverageReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
+	}
+	if len(report.Runtimes) != 1 {
+		t.Fatalf("want one row for the aliased runtime, got %+v", report.Runtimes)
+	}
+	line0 := report.Runtimes[0]
+	if line0.Harness != "vscode_copilot" || line0.Status != tokens.CoverageCovered || line0.Tokens != 42 {
+		t.Fatalf("row = %+v, want vscode_copilot covered with 42 tokens", line0)
+	}
+}
