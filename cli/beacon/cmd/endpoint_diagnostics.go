@@ -1256,6 +1256,14 @@ func harnessCheck(h harness.Harness, logPath string, effectiveUserMode bool) dia
 	if !h.Detected {
 		return diagnostics.Check{Name: "harness", Target: h.Name, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: "not installed", Evidence: "not_installed"}
 	}
+	// A runtime whose only collection path is a vendor-side export configured somewhere other than
+	// this machine cannot be "misconfigured" here, and warning about it would send the operator
+	// looking for a local fix that does not exist. Grok Bot is the case: the app is a client to a
+	// Cursor-hosted computer, and its actions reach a collector only through Cursor Enterprise
+	// OpenTelemetry Export. Presence is worth reporting; the check is informational.
+	if h.Capability == harness.GrokBotCapability {
+		return diagnostics.Check{Name: "harness", Target: h.Name, Status: diagnostics.StatusOK, Severity: diagnostics.SeverityInfo, Message: h.Message, Evidence: "cloud_export_only"}
+	}
 	if h.TelemetryStatus == harness.TelemetryEnabled {
 		if !harnessEventObserved(logPath, h.Name) {
 			return diagnostics.Check{Name: "harness_observed", Target: h.Name, Status: diagnostics.StatusWarn, Severity: diagnostics.SeverityLow, Message: "telemetry is configured but no matching event has been observed yet", Evidence: "configured_not_observed", Action: "run " + h.DisplayName + " or beacon endpoint test-event"}
@@ -1314,6 +1322,11 @@ func harnessAction(h harness.Harness, effectiveUserMode bool) string {
 	// succeed for this harness.
 	case "session_log":
 		return "beacon endpoint fx sync"
+	// Grok Bot's export is configured in Cursor Team Settings, not on this machine, so there is
+	// no local command to name. harnessCheck never reaches here for it, but the case documents
+	// the absence rather than leaving it to the default.
+	case harness.GrokBotCapability:
+		return ""
 	}
 	return ""
 }
