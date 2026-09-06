@@ -11,6 +11,7 @@ import (
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type tokenUsageOptions struct {
@@ -114,25 +115,33 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 		return err
 	}
 	// Installed runtimes come from the config scanner rather than from the log, because the
-	// whole question is which installed runtime is missing from the log.
-	//
-	// Shell-profile rows are skipped. The scanner lists a runtime's shell profile as one way to
-	// detect it -- it is where Copilot CLI's and Factory Droid's launch environment is
-	// configured -- but the file it looks at is the user's ~/.zshrc, which exists on nearly
-	// every machine whether or not the product does. Counting it as evidence of an install put
-	// a permanent inactive row for Copilot CLI on every endpoint that has a shell. A profile is
-	// evidence of a shell, not of a runtime.
-	//
-	// Unless Beacon put the runtime there: a profile row is only BeaconManaged when the
-	// runtime's own OTLP export is configured in it -- OTEL_TELEMETRY_ENDPOINT for Factory
-	// Droid, COPILOT_OTEL_ENABLED for Copilot CLI -- which is real evidence the runtime is set
-	// up and expected to report. Skipping those too would hide a configured Copilot CLI that
-	// stopped reporting, which is exactly the case this report exists to surface.
-	installed := []string{}
+	// whole question is which installed runtime is missing from the log. tokens.InstalledRuntimes
+	// decides which scanner rows are real evidence of an install; the scanner reports files a
+	// runtime might read, which is not the same thing.
+	configs := make([]tokens.InstalledConfig, 0)
 	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
-		if config.Exists && (config.ConfigKind != endpointinventory.KindProfile || config.BeaconManaged) {
-			installed = append(installed, config.Runtime)
+		configs = append(configs, tokens.InstalledConfig{
+			Runtime:       config.Runtime,
+			Path:          config.Path,
+			Kind:          config.ConfigKind,
+			BeaconManaged: config.BeaconManaged,
+			Exists:        config.Exists,
+		})
+	}
+	installed := tokens.InstalledRuntimes(configs)
+	// A harness scope narrows the events, so it has to narrow the installed list with them.
+	// Otherwise every other installed runtime has no events in the filtered set and is reported
+	// inactive -- which reads as "installed but unused this window" when the truth is only that
+	// the reader asked about a different runtime.
+	if harness := strings.TrimSpace(scoped.Harness); harness != "" {
+		want := asymptoteobserve.NormalizeHarnessName(harness)
+		kept := installed[:0]
+		for _, name := range installed {
+			if asymptoteobserve.NormalizeHarnessName(name) == want {
+				kept = append(kept, name)
+			}
 		}
+		installed = kept
 	}
 	report := tokens.Coverage(events, installed)
 	out := cmd.OutOrStdout()

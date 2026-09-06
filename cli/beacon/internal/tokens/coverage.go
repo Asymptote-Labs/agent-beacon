@@ -1,6 +1,7 @@
 package tokens
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -106,6 +107,70 @@ var usageExpectation = map[string]struct {
 	"claude_web":    {ExpectNone, "no recorded claude.ai stream has carried a usage object"},
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
+}
+
+// ConfigKindProfile mirrors inventory.KindProfile. It is duplicated rather than imported to keep
+// this package independent of the scanner; cmd pins the two equal in a test.
+const ConfigKindProfile = "profile"
+
+// sharedConfigBasenames are config files that more than one runtime reads, which the scanner
+// nonetheless attributes to a single runtime.
+//
+// `.mcp.json` is the case: a workspace MCP server list that Claude Code, fx and others all read,
+// which the scanner files under fx alone -- deliberately, because attributing one file to several
+// runtimes would report one server several times. That is right for an inventory of MCP servers
+// and wrong as evidence of an install: a repository whose .mcp.json exists for Claude Code would
+// otherwise report fx as installed, and fx would sit in every coverage report as a permanently
+// inactive runtime nobody has.
+var sharedConfigBasenames = map[string]bool{".mcp.json": true}
+
+// InstalledConfig is the part of a config-scanner row that install detection reads.
+type InstalledConfig struct {
+	Runtime       string
+	Path          string
+	Kind          string
+	BeaconManaged bool
+	Exists        bool
+}
+
+// InstalledRuntimes selects the scanner rows that are real evidence a runtime is installed.
+//
+// The scanner answers "which config files exist that some runtime might read", which is a
+// different question from "is this runtime installed", and the gap between them is all
+// false positives -- each one a permanently inactive row for a product nobody has. A status that
+// is wrong on most machines is one people learn to skip, which costs more than the rows are worth.
+//
+// A row counts when Beacon itself wired the runtime up, since that is unambiguous whatever file it
+// lives in. Otherwise the file has to be one only that runtime reads: not a shell profile, which
+// exists on nearly every machine, and not a config shared between runtimes.
+//
+// Two exclusions today, both found in review rather than by design, which is why the rule is
+// written as a rule with a named list instead of a condition per file. A third shared path is
+// likelier than not.
+func InstalledRuntimes(configs []InstalledConfig) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, config := range configs {
+		if !config.Exists {
+			continue
+		}
+		if !config.BeaconManaged {
+			if config.Kind == ConfigKindProfile {
+				continue
+			}
+			if sharedConfigBasenames[strings.ToLower(filepath.Base(config.Path))] {
+				continue
+			}
+		}
+		name := strings.TrimSpace(config.Runtime)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // RuntimeCoverage is one runtime's line in the coverage report.

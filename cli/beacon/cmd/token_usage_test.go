@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
@@ -223,5 +224,58 @@ func TestTokenUsageCoverageDoesNotTreatAShellProfileAsAnInstall(t *testing.T) {
 		if runtime.Installed && (runtime.Harness == "copilot_cli" || runtime.Harness == "factory") {
 			t.Errorf("%s reported as installed on the strength of a shell profile alone", runtime.Harness)
 		}
+	}
+}
+
+// tokens.ConfigKindProfile duplicates inventory.KindProfile so the tokens package stays
+// independent of the scanner. Pinned here, where both are importable, because a silent drift
+// would stop excluding shell profiles and quietly refill the report with false installs.
+func TestTokenCoverageProfileKindConstantMatchesInventory(t *testing.T) {
+	if tokens.ConfigKindProfile != endpointinventory.KindProfile {
+		t.Fatalf("tokens.ConfigKindProfile = %q, inventory.KindProfile = %q; they must agree",
+			tokens.ConfigKindProfile, endpointinventory.KindProfile)
+	}
+}
+
+// A harness scope narrows the events, so it has to narrow the installed list with them. Without
+// that, every other installed runtime has no events in the filtered set and is reported inactive
+// -- which reads as "installed but unused this window" when the truth is only that the reader
+// asked about a different runtime.
+func TestTokenUsageCoverageHarnessScopeDoesNotStrandOtherRuntimes(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"claude_code"},"model":"claude-opus-5","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":10}},"message":"usage"}`,
+		`{"timestamp":"2026-06-11T10:01:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"codex_cli"},"session":{"id":"s2"},"message":"ls"}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	// Hermetic: two runtimes installed, so scoping to one has something to strand. Reading the
+	// real HOME here would make the test pass or fail on what the machine happens to have.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, rel := range []string{".claude/settings.json", ".codex/config.toml"} {
+		path := filepath.Join(home, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json", "--harness", "claude_code")
+	var report tokens.CoverageReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
+	}
+	for _, runtime := range report.Runtimes {
+		if runtime.Harness != "claude_code" {
+			t.Errorf("scoping to claude_code still reported %q as %q", runtime.Harness, runtime.Status)
+		}
+	}
+	if len(report.Runtimes) != 1 || report.Runtimes[0].Status != tokens.CoverageCovered {
+		t.Fatalf("want exactly the scoped runtime, covered; got %+v", report.Runtimes)
 	}
 }

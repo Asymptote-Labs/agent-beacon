@@ -262,3 +262,87 @@ func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
 		t.Fatalf("got %d rows, want grok and grok_bot kept apart: %+v", len(both.Runtimes), both.Runtimes)
 	}
 }
+
+// Install detection reads the config scanner, which answers "which config files exist that some
+// runtime might read" -- a different question from "is this runtime installed". Every row where
+// those two diverge is a permanently inactive line for a product nobody has, and a status that is
+// wrong on most machines is one people stop reading.
+func TestInstalledRuntimesRequiresEvidenceThatIsActuallyTheRuntimes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config InstalledConfig
+		want   bool
+	}{
+		{
+			name:   "a runtime-exclusive config counts",
+			config: InstalledConfig{Runtime: "claude_code", Path: "/home/u/.claude/settings.json", Kind: "native_config", Exists: true},
+			want:   true,
+		},
+		{
+			// ~/.zshrc exists on nearly every machine whether or not the product does.
+			name:   "a shell profile alone does not",
+			config: InstalledConfig{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: ConfigKindProfile, Exists: true},
+			want:   false,
+		},
+		{
+			// Beacon writing the runtime's OTLP export into the profile is unambiguous.
+			name:   "a shell profile Beacon wired up does",
+			config: InstalledConfig{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: ConfigKindProfile, BeaconManaged: true, Exists: true},
+			want:   true,
+		},
+		{
+			// The scanner files the workspace .mcp.json under fx alone, though Claude Code and
+			// others read it too. Right for an MCP inventory, wrong as proof fx is installed.
+			name:   "a config shared between runtimes does not",
+			config: InstalledConfig{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
+			want:   false,
+		},
+		{
+			name:   "fx's own MCP file does",
+			config: InstalledConfig{Runtime: "vercel_fx", Path: "/home/u/.fx/mcp.json", Kind: "native_config", Exists: true},
+			want:   true,
+		},
+		{
+			name:   "a config that does not exist does not",
+			config: InstalledConfig{Runtime: "cline", Path: "/home/u/.cline/config.json", Kind: "native_config", Exists: false},
+			want:   false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := len(InstalledRuntimes([]InstalledConfig{tc.config})) == 1
+			if got != tc.want {
+				t.Fatalf("InstalledRuntimes(%+v) counted=%v, want %v", tc.config, got, tc.want)
+			}
+		})
+	}
+}
+
+// A runtime with several scanner rows is one runtime.
+func TestInstalledRuntimesDeduplicates(t *testing.T) {
+	got := InstalledRuntimes([]InstalledConfig{
+		{Runtime: "claude_code", Path: "/home/u/.claude/settings.json", Kind: "native_config", Exists: true},
+		{Runtime: "claude_code", Path: "/home/u/.claude.json", Kind: "native_config", Exists: true},
+	})
+	if len(got) != 1 || got[0] != "claude_code" {
+		t.Fatalf("InstalledRuntimes = %v, want [claude_code]", got)
+	}
+}
+
+// One weak row must not be rescued by another weak row for the same runtime, and a strong row
+// must still count when a weak one is present.
+func TestInstalledRuntimesMixesWeakAndStrongRowsCorrectly(t *testing.T) {
+	onlyWeak := InstalledRuntimes([]InstalledConfig{
+		{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
+		{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: ConfigKindProfile, Exists: true},
+	})
+	if len(onlyWeak) != 0 {
+		t.Fatalf("InstalledRuntimes = %v, want none -- both rows are shared files", onlyWeak)
+	}
+	withStrong := InstalledRuntimes([]InstalledConfig{
+		{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
+		{Runtime: "vercel_fx", Path: "/home/u/.fx/settings.json", Kind: "native_config", Exists: true},
+	})
+	if len(withStrong) != 1 {
+		t.Fatalf("InstalledRuntimes = %v, want vercel_fx counted on its own settings file", withStrong)
+	}
+}
