@@ -299,7 +299,7 @@ func TestProviderSurvivesTheRestOfTheGenAIBlock(t *testing.T) {
 		if ev.GenAI == nil || ev.GenAI.Provider == nil || ev.GenAI.Provider.Name != "gateway" {
 			t.Errorf("%s: gen_ai.provider = %+v, want gateway", ev.Event.Action, ev.GenAI)
 		}
-		if ev.Model != "anthropic/claude-opus-4" {
+		if ev.Model != "claude-opus-4" {
 			t.Errorf("%s: model = %q", ev.Event.Action, ev.Model)
 		}
 	}
@@ -508,8 +508,9 @@ func TestAlreadyCollectedEventsBuildStateWithoutBeingEmittedAgain(t *testing.T) 
 	if got := *usage.GenAI.Usage.CostUSD; got < 0.2499 || got > 0.2501 {
 		t.Errorf("cost = %v, want the 0.25 delta from the checkpoint the sweep skipped", got)
 	}
-	// The model was set by the session_started the sweep also skipped.
-	if usage.Model != "anthropic/claude-opus-4" {
+	// The model was set by the session_started the sweep also skipped, canonicalized on the
+	// way in (fx reports it as "anthropic/claude-opus-4").
+	if usage.Model != "claude-opus-4" {
 		t.Errorf("model = %q, want the one the skipped session_started set", usage.Model)
 	}
 }
@@ -524,7 +525,7 @@ func TestSessionStartCanBeSuppressedForAnAlreadyStartedSession(t *testing.T) {
 	}
 	// Suppressing the event must not suppress the state it carries.
 	prompt := find(t, mapped, "prompt.submitted")
-	if prompt.Model != "anthropic/claude-opus-4" || prompt.Session.WorkingDirectory != "/repo" {
+	if prompt.Model != "claude-opus-4" || prompt.Session.WorkingDirectory != "/repo" {
 		t.Errorf("state from the suppressed session_started was lost: model %q dir %q",
 			prompt.Model, prompt.Session.WorkingDirectory)
 	}
@@ -737,5 +738,24 @@ func TestATurnSummaryIsPreferredOverTheCumulativeFallback(t *testing.T) {
 	}
 	if got := *usage.GenAI.Usage.InputTokens; got != 1200 {
 		t.Errorf("input tokens = %d, want the summary's 1200 rather than the record's 4200 total", got)
+	}
+}
+
+// fx reports its model with a vendor prefix ("anthropic/claude-opus-4") and its provider
+// separately ("gateway"). Canonicalizing the model is what lets an fx turn group with the same
+// model reported by a hook or OTLP runtime, which spell it "claude-opus-4".
+//
+// The provider is deliberately not derived from the stripped prefix here. fx already names its
+// provider, and on this fixture the two disagree on purpose: the prefix is the model's vendor
+// while the provider is the gateway routing the call. Deriving one from the other would overwrite
+// a reported fact with a parsed guess.
+func TestFxModelIsCanonicalizedWithoutDisturbingTheReportedProvider(t *testing.T) {
+	mapped := mapFixture(t, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)}, MapOptions{})
+	prompt := find(t, mapped, "prompt.submitted")
+	if prompt.Model != "claude-opus-4" {
+		t.Errorf("model = %q, want the vendor prefix stripped", prompt.Model)
+	}
+	if prompt.GenAI == nil || prompt.GenAI.Provider == nil || prompt.GenAI.Provider.Name != "gateway" {
+		t.Errorf("provider = %+v, want fx's own reported provider left untouched", prompt.GenAI)
 	}
 }

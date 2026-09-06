@@ -377,8 +377,13 @@ func TestOmpEventNormalizesTokenUsage(t *testing.T) {
 	if _, ok := usage["total_tokens"]; ok {
 		t.Fatalf("gen_ai.usage carries a total: %v", usage)
 	}
-	if model := event["model"]; model != "anthropic/claude-opus-4" {
-		t.Fatalf("model = %v, want the responding model", model)
+	// Provider and model are recorded in separate fields; the mapper's provider/model composite
+	// is split at write time.
+	if model := event["model"]; model != "claude-opus-4" {
+		t.Fatalf("model = %v, want the bare responding model", model)
+	}
+	if got := nested(t, nested(t, event, "gen_ai"), "provider")["name"]; got != "anthropic" {
+		t.Fatalf("gen_ai.provider.name = %v, want the provider the composite carried", got)
 	}
 }
 

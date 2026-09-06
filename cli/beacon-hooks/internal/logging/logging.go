@@ -127,11 +127,51 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 		}
 		event[key] = value
 	}
+	normalizeEventModel(event)
 	if err := writeEndpointJSON(path, event); err != nil {
 		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
 		return err
 	}
 	return nil
+}
+
+// normalizeEventModel canonicalizes event["model"] in place, the way the harness name is
+// canonicalized in baseEndpointEvent and for the same reason: every token report groups by this
+// field, so one model reported under two spellings is two rows in the BY MODEL rollup.
+//
+// It runs after the caller's fields are merged rather than inside each mapper because every hook
+// platform sets fields["model"] from its own payload -- Cline reads modelId, OpenCode reads a
+// nested model object, the shared path reads "model" -- and normalizing in one place is what
+// keeps a new mapper from quietly reintroducing the split.
+//
+// The provider prefix that normalizing removes is not dropped: it is recorded as
+// gen_ai.provider.name when the runtime did not already report one, so "anthropic/claude-..."
+// loses nothing by being canonicalized. An existing provider always wins, since the runtime
+// naming its own provider is a better source than a prefix parsed out of a model string.
+func normalizeEventModel(event map[string]interface{}) {
+	raw, ok := event["model"].(string)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return
+	}
+	name, provider := asymptoteobserve.SplitModelProvider(raw)
+	event["model"] = name
+	if provider == "" {
+		return
+	}
+	genAI, _ := event["gen_ai"].(map[string]interface{})
+	if genAI == nil {
+		genAI = map[string]interface{}{}
+	}
+	providerBlock, _ := genAI["provider"].(map[string]interface{})
+	if providerBlock == nil {
+		providerBlock = map[string]interface{}{}
+	}
+	if existing, _ := providerBlock["name"].(string); strings.TrimSpace(existing) != "" {
+		return
+	}
+	providerBlock["name"] = provider
+	genAI["provider"] = providerBlock
+	event["gen_ai"] = genAI
 }
 
 func (l *Logger) baseEndpointEvent(action, category, severity, message, fidelity string) map[string]interface{} {

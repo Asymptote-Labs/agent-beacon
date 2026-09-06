@@ -7,11 +7,21 @@ description: "How Beacon maps OTLP attributes and hook payloads into normalized 
 
 Beacon normalizes [OTLP](/concepts/core-concepts#otlp) attributes and [hook](/concepts/core-concepts#hooks) payloads into the same event contract. The collector exporter looks for common runtime fields, while hook telemetry builds those fields directly from hook payloads.
 
+## Model names
+
+`model` is canonicalized at the point of writing, on both capture paths, the same way `harness.name` is. The value is trimmed and lowercased, and a provider prefix is removed: `Anthropic/Claude-Sonnet-4-5`, `anthropic/claude-sonnet-4-5` and `claude-sonnet-4-5` all record as `claude-sonnet-4-5`.
+
+This matters because every token report groups by this field. Before canonicalization, one model reached through two runtimes -- an OTLP runtime reporting the bare id, a plugin runtime reporting a provider-qualified one -- produced two rows in the `BY MODEL` rollup, with a reader having no way to tell that from two genuinely different models.
+
+The prefix is not discarded. It is recorded as `gen_ai.provider.name`, so a provider stays queryable in its own field rather than packed into a model string. A provider the runtime reported itself always wins: a prefix parsed out of a model name is only used when the runtime named no provider of its own.
+
+Model ids themselves are never rewritten. Date suffixes, dots and vendor spellings are preserved as the runtime reported them, because a rule that folds `claude-sonnet-4.6` into `claude-sonnet-4-6` also turns `gpt-4.1` into `gpt-4-1`, which is not a model under any name. A split row is visible to a reader; an invented id is not.
+
 ## Source mapping
 
 | Source signal | Normalized field or action |
 |---------------|----------------------------|
-| `gen_ai.request.model`, `gen_ai.response.model`, `model`, `ai.model` | `model` |
+| `gen_ai.request.model`, `gen_ai.response.model`, `model`, `ai.model` | `model`, canonicalized, plus `gen_ai.provider.name` from any provider prefix |
 | `gen_ai.tool.name`, `tool.name`, `beacon.tool.name`, `function_name`, `tool_name` | `tool.name` and `gen_ai.tool.name` |
 | `gen_ai.tool.call.arguments`, `function_args`, `arguments` | `tool.command` when command-like, plus `gen_ai.tool.call.arguments` |
 | `gen_ai.tool.call.id`, `tool_use_id`, `call_id`, `tool_call_id`, `callId` | `gen_ai.tool.call.id` |
