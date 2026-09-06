@@ -882,7 +882,7 @@ func allHookTargetsForLevel() []string {
 	}
 	filtered := all[:0:0]
 	for _, t := range all {
-		if t == "hermes" {
+		if t == "hermes" || t == "muse" {
 			continue
 		}
 		filtered = append(filtered, t)
