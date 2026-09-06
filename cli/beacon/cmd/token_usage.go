@@ -123,7 +123,7 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 	if want != "" {
 		scopedEvents := events[:0]
 		for _, event := range events {
-			if asymptoteobserve.NormalizeHarnessName(event.Harness.Name) == want {
+			if strings.EqualFold(asymptoteobserve.NormalizeHarnessName(event.Harness.Name), want) {
 				scopedEvents = append(scopedEvents, event)
 			}
 		}
@@ -151,7 +151,7 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 	if want != "" {
 		kept := installed[:0]
 		for _, name := range installed {
-			if asymptoteobserve.NormalizeHarnessName(name) == want {
+			if strings.EqualFold(asymptoteobserve.NormalizeHarnessName(name), want) {
 				kept = append(kept, name)
 			}
 		}
