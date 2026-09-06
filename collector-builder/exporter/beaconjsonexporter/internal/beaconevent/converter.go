@@ -867,6 +867,32 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 // datapoint values, such as Claude Code's claude_code.token.usage counter or
 // the semconv gen_ai.client.token.usage histogram. Matching is deliberately
 // tight so unrelated metrics keep the generic metric.observed conversion.
+// applyModel writes the canonical model name onto the event and keeps the provider prefix that
+// canonicalizing removes.
+//
+// Model is normalized here for the same reason harness.name is (see NormalizeHarnessName): both
+// capture paths write this field, every token report groups by it, and an OTLP runtime reporting
+// "anthropic/claude-sonnet-4-5" against a hook path reporting "claude-sonnet-4-5" splits one
+// model's spend across two rows in the BY MODEL rollup.
+//
+// The stripped prefix becomes gen_ai.provider.name only when the runtime did not report one
+// itself. A runtime naming its own provider is the better source; a prefix parsed out of a model
+// string is a fallback, and must never overwrite the real thing.
+func applyModel(event *Event, raw string) {
+	name, provider := asymptoteobserve.SplitModelProvider(raw)
+	event.Model = name
+	if provider == "" {
+		return
+	}
+	if event.GenAI == nil {
+		event.GenAI = &GenAIInfo{}
+	}
+	if event.GenAI.Provider != nil && strings.TrimSpace(event.GenAI.Provider.Name) != "" {
+		return
+	}
+	event.GenAI.Provider = &GenAIProviderInfo{Name: provider}
+}
+
 func IsTokenUsageMetric(name string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	return normalized == "gen_ai.client.token.usage" ||
@@ -1087,7 +1113,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	if version := FirstString(attrs, "service.version"); version != "" {
 		event.Harness.Version = version
 	}
-	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
+	applyModel(event, FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model"))
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
 	if id := FirstString(attrs, "gen_ai.conversation.id", "beacon.session.id", "copilot_chat.session_id", "copilot_chat.chat_session_id", "conversation.id", "conversation_id", "session.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
