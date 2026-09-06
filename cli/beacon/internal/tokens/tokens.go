@@ -179,6 +179,9 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 	eventsWithUsage := 0
 	for _, ue := range usageEvents {
 		if ue.contextOnly {
+			// Context occupancy is not spend. Counting these would put zero-token rows under
+			// every grouping and report a runtime that spends nothing as usage-bearing -- which
+			// the coverage report reads as "this runtime is reporting its spend".
 			continue
 		}
 		report.Totals.add(ue.usage)
@@ -440,6 +443,11 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			if ue.contextUsed == 0 {
 				continue
 			}
+			// Kept for utilization, excluded from everything additive. A runtime that reports
+			// both context and usage is not context-only and counts normally.
+			//
+			// Events is zeroed as well as the event being skipped, so the struct cannot be
+			// added to a total by some later path that does not know to check the flag.
 			ue.contextOnly = true
 			ue.usage.Events = 0
 		}
