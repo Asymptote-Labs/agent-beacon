@@ -50,13 +50,20 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform {
 		// Muse Code belongs on the observing side rather than with the runtimes whose pre-tool
 		// notification gets turned into a synthesized approval, and the reason is that it has a
 		// real one. Its PermissionRequest event is a separate hook Beacon also subscribes to, so
 		// deriving an approval.allowed from PreToolUse as well would record two approvals for one
 		// tool call -- one of them inferred and describing nothing an operator did -- and put an
 		// invented decision next to a reported one for the same call.
+		//
+		// OpenHands is on the same side for the opposite reason: it exposes no approval hook at
+		// all. PreToolUse is the only pre-tool signal it sends, and it announces a tool call the
+		// agent is about to make, not a question anybody was asked -- its own confirmation mode is
+		// not surfaced to hooks. Synthesizing approval.allowed from it would put an operator
+		// decision in the log that no operator made, which is the call Cline, Pi and fx already
+		// settled the same way.
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -132,7 +139,14 @@ func preToolResponse() map[string]interface{} {
 	// not a preference: its hook runner rejects a stdout object carrying keys it does not know, so
 	// `{"permission":"allow"}` would not read as a permissive answer -- it would fail the hook run
 	// outright. Emitting nothing speculative is the only shape that leaves a Muse turn untouched.
-	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" {
+	// OpenHands is here for the Qwen reason rather than the Muse one. It parses a hook's stdout as
+	// JSON and acts on `decision`, `reason`, `additionalContext` and `continue`; a `permission` key
+	// is not among them, so `{"permission":"allow"}` is inert on today's build. It is still the
+	// wrong thing to send. The string is stored verbatim on the HookExecutionEvent OpenHands shows
+	// in the conversation, so it puts a decision Beacon did not make in front of the user -- and if
+	// OpenHands ever reads that key, an observing hook would begin approving tool calls on the
+	// user's behalf without a line of Beacon changing. An empty object asserts nothing either way.
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform {
 		return emptyResponse
 	}
 	return allowResponse

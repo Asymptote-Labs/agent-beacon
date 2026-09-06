@@ -1,0 +1,208 @@
+---
+title: "OpenHands"
+description: "Asymptote support details for OpenHands endpoint telemetry"
+---
+
+## Runtime overview
+
+Asymptote supports OpenHands — the open-source coding agent from All Hands — through its native [hooks](https://docs.openhands.dev/openhands/usage/customization/hooks), sent to `beacon-hooks`.
+
+```bash
+beacon endpoint hooks install --harness openhands --level project
+```
+
+`--harness open-hands` is also accepted.
+
+OpenHands runs the same agent in three places — Cloud, the CLI, and the local GUI — and all three read hooks from the same `.openhands/hooks.json`. There is one integration rather than three.
+
+<Note>
+**OpenHands LM is the model family; OpenHands is the agent.** Asymptote hooks the agent, so the harness name is `openhands`. OpenHands LM spellings are deliberately **not** accepted as harness aliases and are **not** mapped to the harness name: every one of those model ids begins with the same word the harness does, so a substring rule would file any event carrying one under the agent, and a reader could not tell that from a real session.
+</Note>
+
+## Prerequisites
+
+Before enabling OpenHands telemetry, make sure:
+
+- OpenHands is installed and available as the `openhands` executable, or you are running the SDK directly.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- OpenHands is restarted after hook install or removal so new conversations load the updated registration.
+
+## Collection path
+
+OpenHands registers hooks in **one JSON file that you also own**, so Asymptote merges its commands into it rather than writing a file of its own. Hooks you already have are preserved exactly, including their matchers, timeouts, and any fields Asymptote has no model for.
+
+| Scope | File | Read by |
+|-------|------|---------|
+| Project | `<repo>/.openhands/hooks.json` | Cloud, the CLI, the local GUI, and the SDK |
+| User | `~/.openhands/hooks.json` | The SDK's own loader only |
+
+`$OH_PERSISTENCE_DIR` replaces `~/.openhands` when it is set, matching how OpenHands resolves the directory itself. Sandboxed and containerized setups use it to move state onto a volume.
+
+<Warning>
+**Project scope is the one that works everywhere.** OpenHands reads the **first** hooks file it finds rather than merging the two, so a repository with its own `.openhands/hooks.json` shadows the user-level file entirely. The agent server behind the CLI and the GUI does not consult the user file at all. Install at `--level project` inside each repository you want covered; a user-scope install is right for someone driving the SDK directly and silently inert for everyone else.
+</Warning>
+
+`beacon endpoint inventory` reports both scopes, so a user-level install shadowed by a repository file is visible as that rather than as a working one.
+
+### Registered events
+
+OpenHands exposes six lifecycle events and Asymptote registers all six. Nothing is left out — this is the runtime's whole hook surface.
+
+| OpenHands event | Adapter subcommand | Matcher | Timeout |
+|-----------------|--------------------|---------|---------|
+| `session_start` | `session-start` | `*` | 10 s |
+| `user_prompt_submit` | `prompt-submit` | `*` | 30 s |
+| `pre_tool_use` | `pre-tool` | `*` | 10 s |
+| `post_tool_use` | `post-tool` | `*` | 10 s |
+| `stop` | `stop` | `*` | 45 s |
+| `session_end` | `session-end` | `*` | 45 s |
+
+<Warning>
+**OpenHands hook timeouts are seconds, not milliseconds.** The same `timeout` field is milliseconds on [Qwen Code](/runtimes/qwen-code), in a hooks file that looks similar. OpenHands' own default is 60 seconds; Asymptote writes explicit lower values, because 60 seconds is a long time to hold an agent turn for a hook that finishes in milliseconds. These are ceilings on a hang, not budgets.
+</Warning>
+
+Hooks are registered synchronously rather than with `"async": true`. An async hook is fire-and-forget with its stdout discarded, which would make the [policy seam](#approvals-and-enforcement) unable to deny on the one event that can block.
+
+### The file format fails silently
+
+`hooks.json` has a closed schema, and every way of getting it wrong ends with hooks silently not running rather than with an error you see. Asymptote's installer is shaped around that, and each of these is covered by a test:
+
+- **The top level is the event map itself, and unknown keys are fatal.** One unrecognized top-level key fails validation and the whole file loads as nothing. That is why Asymptote writes no marker key here, unlike the files it owns on other runtimes: an install is recognized by the hook command it contains.
+- **A legacy `{"hooks": {...}}` wrapper is accepted, and the loader unwraps it by replacing the whole document.** Adding a top-level event beside an existing wrapper therefore does not merge — it discards the added hooks. Asymptote writes **inside** the wrapper when it finds one.
+- **Event names may be snake_case or Claude Code's PascalCase, and naming one event both ways is fatal to the entire file.** Asymptote writes under whichever spelling the file already uses for an event and never introduces a second one, so a `hooks.json` shared with Claude Code keeps its PascalCase names.
+
+A file that already breaks one of these is **refused** with an error naming the problem, rather than written into. Asymptote cannot fix it, and installing would report success while OpenHands went on loading nothing.
+
+### The hook environment
+
+OpenHands runs hook commands through a shell with the conversation's working directory as the cwd, and exports `OPENHANDS_EVENT_TYPE`, `OPENHANDS_TOOL_NAME`, `OPENHANDS_PROJECT_DIR`, and `OPENHANDS_SESSION_ID`.
+
+Asymptote passes the endpoint log and config locations to `beacon-hooks` as `--log` and `--config` flags rather than through the environment, so a hook finds them wherever it runs. `OPENHANDS_PROJECT_DIR` is read as a fallback for the workspace path, because the payload's `working_dir` is optional and null when the SDK was given no working directory.
+
+## Discovery and status
+
+```bash title="Show OpenHands hook status"
+beacon endpoint hooks status --harness openhands --level project
+```
+
+OpenHands reports as the `openhands` harness with capability `hooks`, and every event carries `harness.collection_method=hook`: the events, the payload shapes, and the `hooks.json` contract are all the vendor's, and Asymptote ships no plugin source of its own for this runtime.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. OpenHands hooks are installed separately, because they live in a repository or a user config directory rather than in collector service configuration:
+
+```bash
+beacon endpoint hooks install --harness openhands --level project    # inside the repository
+beacon endpoint hooks status --harness openhands --level project
+beacon endpoint hooks uninstall --harness openhands --level project
+```
+
+Commit `.openhands/hooks.json` if you want the hooks to apply to everyone working in the repository, the same way the OpenHands documentation describes for hooks you write yourself.
+
+Re-running the install replaces Asymptote's own hooks rather than adding a second copy, so a repair does not end with the binary firing twice per event. Uninstall removes what Asymptote added and nothing else; a file that still holds your own hooks is rewritten without Asymptote's, and a file left with nothing in it is removed rather than left behind as an empty stub.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through `.openhands/hooks.json` at both scopes |
+| Harness attribution | Supported. `openhands`, `open_hands`, `open-hands`, `open hands`, `openhands_cli`, `openhands-cli`, `openhands cli`, `openhands_agent`, `openhands-agent`, `openhands agent`, and `openhands.dev` normalize to `openhands` |
+| Hook install, status, uninstall, and repair | Supported |
+| Session lifecycle | Supported. `session.started` and `session.ended` from `session_start` and `session_end`, plus `tool.completed` from `stop` |
+| Prompts | Supported. `prompt.submitted` from `user_prompt_submit`, read from the payload's `message` field |
+| Tool use | Supported for pre-tool and post-tool activity |
+| Commands | Supported. `command.executed` with the command, its exit code, and its output |
+| File activity | Supported. `file.read` and `file.modified` with paths, operations, and exact diffs |
+| MCP activity | Supported on post-tool, recognized from the tool result. See [Known gaps](#known-gaps) for pre-tool |
+| Failed tools | Supported. `tool.failed` at high severity when the tool result reports an error |
+| Approval decisions | Not collected. See [Known gaps](#known-gaps) |
+| Token usage and cost | Not collected. See [Known gaps](#known-gaps) |
+| Tool call identity | Not collected. See [Known gaps](#known-gaps) |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent. OpenHands hooks are installed per repository or in the logged-in user's context |
+
+### Tool taxonomy
+
+OpenHands sends the Claude Code payload *shape* but its own tool names, and one of them cannot be classified by name at all:
+
+| Tool | Recorded as |
+|------|-------------|
+| `terminal` | `command.executed`, with `command.exit_code` and `command.output` |
+| `file_editor`, `planning_file_editor` | `file.read` for `command=view`; `file.modified` for `create`, `str_replace`, `insert`, and `undo_edit` |
+| `apply_patch` | One `file.modified` per file the patch committed |
+| `read_file`, `list_directory`, `glob`, `grep` | `file.read` |
+| `write_file`, `edit` | `file.modified` |
+| MCP tools | `mcp.tool_invoked`, recognized from the tool result |
+| `think`, `finish`, `task_tracker`, the browser set, and everything else | `tool.invoked` |
+
+`file_editor` is the reason this table exists. It multiplexes five operations onto one tool name and selects between them with a `command` argument, so a classifier that only sees the name is wrong on one of `view`/`str_replace` whichever way it answers — and that is misclassification rather than absence, which is the worse failure: the event is there, the action is wrong, and nothing looks broken. A `file_editor` call whose `command` did not arrive is recorded as `tool.invoked`, which says a tool ran and nothing about what it did to the file.
+
+### Diffs come from the file, not from the request
+
+Every other runtime's diff is reconstructed from what the model *asked* for — an `old_string`/`new_string` pair, a patch body, a full-file write — and the reconstruction is only as right as the assumption that the tool did exactly what it was told.
+
+OpenHands reports the file's whole content before and after on the observation, so nothing has to be inferred. An insert at line 40 and a single-occurrence replace both come back as the same two strings and produce a diff that matches what is on disk. An `apply_patch` that applied with fuzz records what landed, not what was requested.
+
+Diffs are captured for the file types Asymptote scans, subject to the usual retention, redaction, and size controls. An edit to a file outside that set is still recorded as `file.modified` with its path — it simply carries no diff.
+
+A failed edit is never recorded as an edit. The editor reports a failed `str_replace` with the same tool name and the same arguments as a successful one, so without that guard a diff would be built from a write that never landed and the log would assert a file changed when it did not.
+
+## Approvals and enforcement
+
+**Asymptote records no approval decisions for OpenHands, and does not synthesize any.** OpenHands exposes no approval hook: `pre_tool_use` announces a tool call the agent is about to make, not a question anybody was asked, and its own confirmation mode is not surfaced to hooks. Recording an `approval.allowed` from it would put an operator decision in the log that no operator made — the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), and [fx](/runtimes/vercel-fx).
+
+Asymptote's `pre_tool_use` hook answers with an empty object. OpenHands reads `decision`, `reason`, `additionalContext`, and `continue` from a hook's stdout; a speculative `allow` carries none of those and is inert today, but the raw string is shown in the conversation as a decision Asymptote did not make, and would begin taking effect if OpenHands ever read that key.
+
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. OpenHands is one of the runtimes where a provider deny does take effect: `pre_tool_use` can block, and Asymptote answers a deny with `{"decision": "deny", "reason": "..."}`. The reason is sent because OpenHands surfaces it in the conversation as the explanation for the block and hands it to the agent as the tool's failure — without it, the operator and the model both see a call refused with no account of why.
+
+## Data handling
+
+OpenHands content is handled like every other runtime. Prompts, tool arguments, commands, command output, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+
+Unlike [Qwen Code](/runtimes/qwen-code) and [Muse Code](/runtimes/muse-code), Asymptote does **not** preserve the verbatim OpenHands payload under a `raw` key. The payload's only field with no schema home is `metadata`, which is empty on five of the six events and carries a constant `reason` on `stop`. Keeping the payload would cost the whole `tool_input` and `tool_response` on every event — file contents included, twice over on an edit — to preserve a value that never varies.
+
+Image parts in a tool result are skipped rather than described: they carry base64 data URLs, often megabytes of them, and writing one into an event field would be worse than recording nothing.
+
+## Known gaps
+
+- **No approval decisions.** OpenHands has no approval or permission hook, and Asymptote does not synthesize one from `pre_tool_use`. Approval rules and dashboards will show nothing for this runtime.
+- **No token usage or cost.** None of the six hook payloads carries token counts or cost, and OpenHands exposes no other hook that would. OpenHands activity therefore does not appear in `beacon token-usage` reports or the dashboard token view.
+- **No tool call identity.** The hook payload carries no per-call identifier, so `gen_ai.tool.call.id` is absent and a pre-tool event cannot be joined to its post-tool event by id. The `HookEvent` model has no field for it; the id exists on the conversation's action event, which hooks are not given.
+- **MCP calls are only identifiable after the fact.** OpenHands calls an MCP tool by whatever name its server gave it, with no prefix and no `mcp_*` argument, so the only thing that says a call went to an MCP server is the result it came back with. A `pre_tool_use` event for an MCP tool is recorded under the action its name implies. The MCP server name is not exposed on the result at all, so `mcp.server` is empty.
+- **No transcript path.** Conversation state lives in the OpenHands persistence directory and no payload field points at it, so nothing on this path reads it.
+- **No compaction or subagent events.** OpenHands emits neither on a hook. Its `Stop` hook is a turn boundary, not a session end; the session-end event is separate and Asymptote registers both.
+- **A user-scope install is shadowed by a repository's own hooks file, and invisible to the agent server.** See the warning under [Collection path](#collection-path). This is OpenHands' loader behaviour, not something Asymptote can work around.
+- **Assistant response text is not collected.** No hook payload carries it.
+
+## Deployment notes
+
+Hooks are loaded when a conversation starts, so an install taken while OpenHands is running takes effect on the next conversation. Restart OpenHands, or start a new conversation, after installing or removing hooks.
+
+Confirm status, then generate one OpenHands event and check the log:
+
+```bash
+beacon endpoint hooks status --harness openhands --level project
+beacon endpoint doctor --system
+grep '"name":"openhands"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+If OpenHands telemetry is missing:
+
+- Confirm you installed at the scope the runtime reads. The CLI, the GUI, and Cloud read only `<repo>/.openhands/hooks.json`.
+- Confirm no *other* `.openhands/hooks.json` is shadowing the one you installed. OpenHands takes the first it finds and does not merge.
+- Confirm the file contains commands with `--platform openhands`.
+- Check `$OH_PERSISTENCE_DIR`: if it is set, the user-scope file is under that directory, not `~/.openhands`.
+- Confirm hook timeouts are second values, not milliseconds.
+- In the CLI, run `/skills` to see the skills, hooks, and MCPs loaded for the current session.
+- Start a new conversation so the updated registration is loaded.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures each runtime.
+  </Card>
+</Columns>

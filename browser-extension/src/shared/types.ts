@@ -21,8 +21,13 @@ export interface ToolCall {
 }
 
 export interface Usage {
+  /** Uncached prompt tokens. Disjoint from the two cache counts below. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Prompt tokens written to the cache on this turn. */
+  cacheCreationInputTokens?: number;
+  /** Prompt tokens served from the cache on this turn. */
+  cacheReadInputTokens?: number;
 }
 
 /**

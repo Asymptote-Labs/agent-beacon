@@ -277,17 +277,26 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 		fields["tool"] = map[string]interface{}{"name": toolName}
 	}
 	if command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine"); command != "" {
-		fields["command"] = map[string]interface{}{"command": command}
-		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
+		// OpenHands file editors multiplex operations onto one tool name via a `command` argument
+		// that names the editor operation (view, str_replace, create), not a shell command.
+		// Promoting it into command.command would store an editor operation as shell execution and
+		// let the policy seam upgrade tool.invoked to command.executed.
+		if !(platformFlag == openHandsPlatform && openHandsFileEditorTools[strings.ToLower(strings.TrimSpace(toolName))]) {
+			fields["command"] = map[string]interface{}{"command": command}
+			fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
+		}
 	}
 	// `absolute_path` and `notebook_path` are the snake_case siblings of `AbsolutePath` already in
 	// this list: the first is Gemini CLI's (and so early Qwen Code's) `read_file` parameter, the
 	// second is what `notebook_edit` names its target on both Qwen and Claude. Both are unambiguous
 	// file paths, so reading them costs nothing and their absence costs a `file` field.
-	if path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "absolute_path", "notebook_path", "DirectoryPath", "SearchPath", "searchPath"); path != "" {
+	// `dir_path` is the snake_case sibling of `DirectoryPath` already in this list: it is what
+	// OpenHands' list_directory names its target. Unambiguous, so reading it costs nothing and its
+	// absence costs a `file` field on every directory listing.
+	if path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "absolute_path", "notebook_path", "DirectoryPath", "dir_path", "SearchPath", "searchPath"); path != "" {
 		fields["file"] = map[string]interface{}{
 			"path":      path,
-			"operation": fileOperation(toolName),
+			"operation": fileOperation(toolName, toolInput),
 			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
 		}
 		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"path": path})
@@ -392,6 +401,13 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 	mcpResource := firstToolStringAcross(maps, "mcp.resource.uri", "mcp_resource_uri")
 	mcpSession := firstToolStringAcross(maps, "mcp.session.id", "mcp_session_id")
 	hasCascadeServerToolPair := isCascadePlatform(platformFlag) && firstToolStringAcross(maps, "server_name") != "" && firstToolStringAcross(maps, "tool_name") != ""
+	// OpenHands calls an MCP tool by whatever name its server gave it, with no prefix and no
+	// mcp_* argument, so every signal above misses it and the call would be recorded as an
+	// ordinary tool.invoked. Its result says so instead: tool observations are pydantic dumps
+	// carrying a `kind` discriminator, and an MCP call returns MCPToolObservation. Keyed on the
+	// platform like the Cascade pair above, because `kind` is a key other runtimes use for other
+	// things.
+	hasOpenHandsMCPObservation := platformFlag == openHandsPlatform && openHandsIsMCPToolCall(toolResponse)
 
 	server := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "server", "server_name", "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
 	tool := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "tool", "tool_name", "function_name", "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name", "gen_ai.tool.name")
@@ -410,7 +426,7 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 		}
 	}
 
-	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || strings.Contains(strings.ToLower(toolName), "mcp")
+	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || strings.Contains(strings.ToLower(toolName), "mcp")
 	if !isMCP {
 		return nil
 	}
@@ -661,9 +677,22 @@ func normalizeToolString(value interface{}) string {
 	return strings.Trim(strings.TrimSpace(str), `"`)
 }
 
-func fileOperation(toolName string) string {
+// fileOperation classifies what a tool did to the file it named.
+//
+// toolInput is part of the question rather than extra context: a runtime is free to multiplex
+// several operations onto one tool name and select between them with an argument, and OpenHands
+// does exactly that -- `file_editor` is a read with command="view" and a write with
+// command="str_replace". A classifier that only sees the name is wrong on one of those two
+// whichever way it answers, so the arguments have to be in reach. Callers with nothing to pass
+// give nil.
+func fileOperation(toolName string, toolInput map[string]interface{}) string {
 	if platformFlag == "qwen" {
 		if operation := qwenFileOperation(toolName); operation != "" {
+			return operation
+		}
+	}
+	if platformFlag == openHandsPlatform {
+		if operation := openHandsFileOperation(toolName, toolInput, nil); operation != "" {
 			return operation
 		}
 	}
@@ -680,8 +709,18 @@ func fileOperation(toolName string) string {
 	}
 }
 
-func actionForTool(hookEvent, toolName string) string {
+// actionForTool classifies a tool call as an endpoint event action.
+//
+// toolInput and toolResponse are read for the same reason fileOperation reads the arguments, and
+// for one more: on a runtime that does not decorate MCP tool names, the only thing that says a
+// call went to an MCP server is the result it came back with. Callers with neither give nil.
+func actionForTool(hookEvent, toolName string, toolInput, toolResponse map[string]interface{}) string {
 	lower := strings.ToLower(toolName)
+	if platformFlag == openHandsPlatform {
+		if action := openHandsToolAction(toolName, toolInput, toolResponse); action != "" {
+			return action
+		}
+	}
 	if platformFlag == "grok" {
 		if hookEvent == "post_tool_use_failure" {
 			return "tool.failed"
