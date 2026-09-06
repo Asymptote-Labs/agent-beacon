@@ -111,7 +111,8 @@ Acceptance criteria:
 ## Managed Ingest Connect Smoke
 
 Needs a browser signed in to the Asymptote dashboard as a member of an org with managed
-ingest enabled (Asymptote Test), and Vector on the machine (`brew install beacon` pulls it).
+ingest enabled (Asymptote Test), and Vector 0.50+ on the machine (`brew install beacon`
+pulls in the `beacon-vector` keg on macOS; otherwise the signed `.pkg` or vector.dev).
 
 - [ ] `beacon endpoint connect --no-browser` prints an approval URL; approve it, and the
       command ends with "Connected to Asymptote as device …" and a running forwarder.

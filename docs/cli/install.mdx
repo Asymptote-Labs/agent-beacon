@@ -26,7 +26,9 @@ brew install beacon
 beacon version
 ```
 
-The formula depends on the tap's own `vector` formula (`asymptote-labs/tap/vector`, mirrored from Vector's releases because Vector is not in homebrew-core), which runs the optional [Asymptote Managed forwarder](/cli/endpoint-connect); Homebrew installs it alongside Beacon.
+On macOS the formula also depends on `asymptote-labs/tap/beacon-vector`, the tap's mirror of Vector's releases (Vector is not in homebrew-core), which runs the optional [Asymptote Managed forwarder](/cli/endpoint-connect); Homebrew installs it alongside Beacon so no second step is needed.
+
+The mirror is named `beacon-vector` rather than `vector` on purpose. Homebrew allows exactly one keg named `vector` no matter which tap it came from, so a mirror by that name could not be installed at all on a machine that already had Vector from `vectordotdev/brew`. Under its own name it coexists with any Vector you already run, and because it keeps its binary in `libexec` — which Homebrew never links — it stays off your PATH and never shadows one. Beacon finds it by path; you do not need to configure anything.
 
 <Accordion title="Example output">
 ```bash title="beacon version output"

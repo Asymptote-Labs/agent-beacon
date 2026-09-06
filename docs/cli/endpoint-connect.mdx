@@ -17,12 +17,12 @@ beacon endpoint disconnect [flags]
 ## Prerequisites
 
 - Beacon endpoint installed (`beacon endpoint install`) and writing local JSONL.
-- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; Homebrew installs it with Beacon (the `asymptote-labs/tap/beacon` formula depends on the tap's own `vector` formula, since Vector is not in homebrew-core); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found.
+- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; on macOS Homebrew installs it with Beacon, as the tap's `beacon-vector` keg (named that rather than `vector` so it coexists with a Vector from `vectordotdev/brew`, and kept in `libexec` so it stays off your PATH); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found.
 - A browser where you can sign in to the Asymptote dashboard as a member of an organization that has managed ingest enabled.
 
 ## What connect does
 
-1. Locates Vector: `--vector-bin`, then `BEACON_VECTOR_BIN`, then `/opt/beacon/bin/vector`, the Homebrew prefixes, then `PATH`.
+1. Locates Vector: `--vector-bin`, then `BEACON_VECTOR_BIN`, then `/opt/beacon/bin/vector`, the `beacon-vector` keg in each Homebrew prefix, a linked `vector` in each Homebrew prefix, then `PATH`. The `beacon-vector` keg is tried ahead of any other Homebrew Vector because it is the copy the tap pins at a supported version.
 2. Registers this machine's hostname, operating system, architecture, Beacon version and install mode with the dashboard, and opens `/cli/enroll` in your browser. The approval page shows those details; nothing is minted until someone clicks **Approve this device**.
 3. Receives the device key through a loopback callback and a PKCE exchange. The key is written once to `asymptote/vector-secrets.json` with mode `0600` and is never printed.
 4. Renders `asymptote/vector.toml` from the [Asymptote pack](/cli/asymptote) template with the ingest URL returned by enrollment, runs `vector validate`, installs a service unit and starts it.
