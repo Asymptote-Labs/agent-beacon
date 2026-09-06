@@ -112,6 +112,12 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		// same shape for the same reason. A `plugin` here would claim Beacon ships and versions
 		// source the runtime loads, which for Muse Code it does not.
 		"muse": CollectionMethodHook,
+		// OpenHands is hook-shaped: the events, the payload shapes and the .openhands/hooks.json
+		// contract are all the vendor's, and Beacon only registers commands in a file the runtime
+		// already reads. A `plugin` here would claim Beacon ships and versions source OpenHands
+		// loads, which it does not -- and would send someone to fix Beacon for a field OpenHands
+		// never sent.
+		"openhands": CollectionMethodHook,
 		// vscode is the case that justifies keying on --platform rather than on the normalized
 		// harness name: its hook and OTLP telemetry both normalize to vscode_copilot, so the
 		// harness name cannot distinguish them and only the flag can.
