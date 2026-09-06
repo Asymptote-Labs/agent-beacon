@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
+	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
@@ -26,6 +27,7 @@ type tokenUsageOptions struct {
 	runID      string
 	bucket     string
 	top        int
+	coverage   bool
 }
 
 var tokenUsageOpts tokenUsageOptions
@@ -63,6 +65,9 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 		}
 		query.Until = parsed
 	}
+	if tokenUsageOpts.coverage {
+		return runTokenCoverage(cmd, runtimeLog.EffectiveLogPath, query)
+	}
 	events, contexts, err := dashboard.ReadTokenEventsAppendOrder(runtimeLog.EffectiveLogPath, query)
 	if err != nil {
 		return err
@@ -89,6 +94,44 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runTokenCoverage answers "is this total all of it", which the usage report itself cannot: a
+// runtime whose telemetry never arrives is indistinguishable from one nobody used, since both are
+// simply absent from every rollup.
+//
+// It deliberately drops the session, model, repository and run filters and keeps only the time
+// window and the harness scope. Those filters select usage-bearing events almost by definition --
+// an event carries no model unless it carried a model call -- so a coverage report computed over
+// them would find every runtime covered and prove nothing. The window is what a reader is
+// actually asking about.
+func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQuery) error {
+	scoped := dashboard.EventQuery{
+		Since:   query.Since,
+		Until:   query.Until,
+		Harness: query.Harness,
+	}
+	events, _, err := dashboard.ReadTokenEventsAppendOrder(logPath, scoped)
+	if err != nil {
+		return err
+	}
+	// Installed runtimes come from the config scanner rather than from the log, because the
+	// whole question is which installed runtime is missing from the log.
+	installed := []string{}
+	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
+		if config.Exists {
+			installed = append(installed, config.Runtime)
+		}
+	}
+	report := tokens.Coverage(events, installed)
+	out := cmd.OutOrStdout()
+	if tokenUsageOpts.jsonOutput {
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	tokens.RenderCoverageText(out, report)
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(tokenUsageCmd)
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.userMode, "user", true, "Use per-user endpoint paths")
@@ -104,4 +147,5 @@ func init() {
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.runID, "run-id", "", "Filter by CI run id")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.bucket, "bucket", "", "Time-series bucket size (for example 1h or 15m)")
 	tokenUsageCmd.Flags().IntVar(&tokenUsageOpts.top, "top", 0, "Limit each grouping to the top N entries (0 keeps all)")
+	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.coverage, "coverage", false, "Report which runtimes contributed token telemetry instead of the usage totals")
 }

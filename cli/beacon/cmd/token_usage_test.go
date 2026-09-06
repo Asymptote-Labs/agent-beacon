@@ -19,7 +19,7 @@ func TestTokenUsageCommandRegistered(t *testing.T) {
 	if cmd == nil || cmd.Use != "token-usage" {
 		t.Fatalf("token-usage command not registered: %#v", cmd)
 	}
-	for _, flag := range []string{"log-path", "json", "since", "until", "session", "model", "harness", "repository", "run-id", "bucket", "top"} {
+	for _, flag := range []string{"log-path", "json", "since", "until", "session", "model", "harness", "repository", "run-id", "bucket", "top", "coverage"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("token-usage command missing --%s flag", flag)
 		}
@@ -138,5 +138,56 @@ func TestTokenUsageEmptyLogSucceeds(t *testing.T) {
 	output := runTokenUsageCommand(t, "--log-path", logPath)
 	if !strings.Contains(output, "0 of 0 events carry usage") {
 		t.Fatalf("empty report = %q", output)
+	}
+}
+
+func TestTokenUsageCoverageReportsSilentAndNotInstrumentedRuntimes(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	lines := []string{
+		// Reported usage: covered.
+		`{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"claude_code"},"model":"claude-opus-5","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":1200,"output_tokens":340}},"message":"usage"}`,
+		// Ran but reported nothing, and Beacon is built to read usage from it: silent.
+		`{"timestamp":"2026-06-11T10:02:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"codex_cli"},"session":{"id":"s3"},"message":"ls"}`,
+		// Ran and cannot report usage at all: expected, not a fault.
+		`{"timestamp":"2026-06-11T10:01:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"cursor"},"session":{"id":"s2"},"message":"ls"}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json")
+	var report tokens.CoverageReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
+	}
+
+	status := map[string]string{}
+	for _, runtime := range report.Runtimes {
+		status[runtime.Harness] = runtime.Status
+	}
+	if status["claude_code"] != tokens.CoverageCovered {
+		t.Errorf("claude_code = %q, want covered", status["claude_code"])
+	}
+	if status["codex_cli"] != tokens.CoverageSilent {
+		t.Errorf("codex_cli = %q, want silent", status["codex_cli"])
+	}
+	if status["cursor"] != tokens.CoverageNotInstrumented {
+		t.Errorf("cursor = %q, want not_instrumented -- Cursor cannot report usage", status["cursor"])
+	}
+	if report.Silent != 1 {
+		t.Errorf("silent = %d, want 1", report.Silent)
+	}
+}
+
+// A model or session filter selects usage-bearing events almost by definition, so applying one to
+// a coverage report would find every runtime covered and prove nothing. Coverage keeps only the
+// time window and the harness scope.
+func TestTokenUsageCoverageIgnoresFiltersThatWouldHideSilentRuntimes(t *testing.T) {
+	logPath := writeTokensFixtureLog(t)
+	unfiltered := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json")
+	filtered := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json", "--model", "claude-sonnet-4-5")
+	if unfiltered != filtered {
+		t.Fatalf("--model changed the coverage report:\nwithout:\n%s\nwith:\n%s", unfiltered, filtered)
 	}
 }
