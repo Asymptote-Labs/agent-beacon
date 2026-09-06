@@ -263,6 +263,12 @@ func clineTextParts(value interface{}) string {
 // Provider-qualified because a bare model id is ambiguous once a runtime can reach the same model
 // through more than one provider, and because opencode already writes provider/model -- one shape
 // for this field across runtimes is worth more than matching each runtime's own spelling.
+//
+// The composite is the transport, not the stored shape. The logging layer splits it back apart on
+// the way out (see normalizeEventModel), writing the bare id to `model` and the prefix to
+// gen_ai.provider.name. Both facts survive, and they survive in separate fields: packing them
+// into one string is what made a Cline turn and an OTLP turn on the same model two different rows
+// in the BY MODEL rollup, since the OTLP path never built a composite.
 func clineModel(input map[string]interface{}) string {
 	model := getFirstStr(input, "model", "modelId", "model_id")
 	provider := getFirstStr(input, "apiProvider", "api_provider", "provider", "providerId", "provider_id")

@@ -460,3 +460,94 @@ func TestMinimalEndpointEventKeepsProvenance(t *testing.T) {
 		t.Fatalf("compacted harness.collection_method = %q (present=%v), want hook", method, ok)
 	}
 }
+
+// Model is canonicalized on the way out for the same reason harness.name is: both capture paths
+// write it, `beacon token-usage` groups its BY MODEL rollup on the raw string, and one model
+// reported under two spellings is two rows that no reader can tell apart from two models.
+func TestEndpointEventCanonicalizesModelName(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "test")
+	if err := logger.EndpointEvent("tool.completed", "tool", "info", "done", map[string]interface{}{
+		"model": "Anthropic/Claude-Sonnet-4-5",
+	}); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	events := readEndpointEvents(t, logPath)
+	if len(events) != 1 {
+		t.Fatalf("wrote %d events, want 1", len(events))
+	}
+	if got, _ := events[0]["model"].(string); got != "claude-sonnet-4-5" {
+		t.Fatalf("model = %q, want the canonical spelling", got)
+	}
+}
+
+// The provider prefix that canonicalizing removes is kept rather than dropped: it moves to
+// gen_ai.provider.name, where a provider belongs and stays queryable.
+func TestEndpointEventKeepsTheStrippedProviderPrefix(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "test")
+	if err := logger.EndpointEvent("tool.completed", "tool", "info", "done", map[string]interface{}{
+		"model": "openrouter/anthropic/claude-sonnet-4-5",
+	}); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	events := readEndpointEvents(t, logPath)
+	genAI, _ := events[0]["gen_ai"].(map[string]interface{})
+	provider, _ := genAI["provider"].(map[string]interface{})
+	if got, _ := provider["name"].(string); got != "openrouter/anthropic" {
+		t.Fatalf("gen_ai.provider.name = %q, want the whole stripped prefix", got)
+	}
+}
+
+// A runtime that names its own provider is the better source; a prefix parsed out of a model
+// string must never overwrite it.
+func TestEndpointEventDoesNotOverwriteAReportedProvider(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "test")
+	if err := logger.EndpointEvent("tool.completed", "tool", "info", "done", map[string]interface{}{
+		"model": "anthropic/claude-sonnet-4-5",
+		"gen_ai": map[string]interface{}{
+			"provider": map[string]interface{}{"name": "gateway"},
+		},
+	}); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	events := readEndpointEvents(t, logPath)
+	genAI, _ := events[0]["gen_ai"].(map[string]interface{})
+	provider, _ := genAI["provider"].(map[string]interface{})
+	if got, _ := provider["name"].(string); got != "gateway" {
+		t.Fatalf("gen_ai.provider.name = %q, want the runtime's own reported provider", got)
+	}
+	if got, _ := events[0]["model"].(string); got != "claude-sonnet-4-5" {
+		t.Fatalf("model = %q, want it canonicalized regardless", got)
+	}
+}
+
+// An event with no model must not gain an empty one, and must not gain a gen_ai block it had no
+// reason to have.
+func TestEndpointEventWithoutAModelIsUntouched(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "test")
+	if err := logger.EndpointEvent("command.executed", "command", "info", "ls", nil); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	events := readEndpointEvents(t, logPath)
+	if _, ok := events[0]["model"]; ok {
+		t.Fatal("an event with no model gained one")
+	}
+	if _, ok := events[0]["gen_ai"]; ok {
+		t.Fatal("an event with no model gained a gen_ai block")
+	}
+}
