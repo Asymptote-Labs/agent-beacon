@@ -277,8 +277,14 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 		fields["tool"] = map[string]interface{}{"name": toolName}
 	}
 	if command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine"); command != "" {
-		fields["command"] = map[string]interface{}{"command": command}
-		fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
+		// OpenHands file editors multiplex operations onto one tool name via a `command` argument
+		// that names the editor operation (view, str_replace, create), not a shell command.
+		// Promoting it into command.command would store an editor operation as shell execution and
+		// let the policy seam upgrade tool.invoked to command.executed.
+		if !(platformFlag == openHandsPlatform && openHandsFileEditorTools[strings.ToLower(strings.TrimSpace(toolName))]) {
+			fields["command"] = map[string]interface{}{"command": command}
+			fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
+		}
 	}
 	// `absolute_path` and `notebook_path` are the snake_case siblings of `AbsolutePath` already in
 	// this list: the first is Gemini CLI's (and so early Qwen Code's) `read_file` parameter, the

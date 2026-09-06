@@ -249,6 +249,58 @@ func TestOpenHandsPreToolObservesWithoutSynthesizingAnApproval(t *testing.T) {
 	}
 }
 
+// file_editor's `command` argument (view, str_replace, create) is the editor operation, not a
+// shell command. Promoting it into command.command would store an editor operation as shell
+// execution and let the policy seam upgrade tool.invoked to command.executed.
+func TestOpenHandsPreToolFileEditorDoesNotCarryAShellCommandBlock(t *testing.T) {
+	logPath := openHandsTestSetup(t)
+
+	runHookWithInput(t, runPreTool, map[string]interface{}{
+		"event_type":  "PreToolUse",
+		"session_id":  "oh-session-1",
+		"working_dir": "/workspace/project",
+		"tool_name":   "file_editor",
+		"tool_input": map[string]interface{}{
+			"kind": "FileEditorAction", "command": "view", "path": "/workspace/project/main.go",
+		},
+		"metadata": map[string]interface{}{},
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := leaf(event, "event", "action"); got != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", got)
+	}
+	if got := leaf(event, "command", "command"); got != "" {
+		t.Fatalf("command.command = %q, want empty -- the editor operation is not a shell command", got)
+	}
+}
+
+// The policy seam must not reclassify a file_editor call as command.executed. The upgrade from
+// tool.invoked to command.executed fires when fields carry a command block, so the fix is to not
+// set that block for editor tools whose `command` argument names an operation, not a shell command.
+func TestOpenHandsPolicyCandidateDoesNotUpgradeFileEditorToCommand(t *testing.T) {
+	origPlatform := platformFlag
+	t.Cleanup(func() { platformFlag = origPlatform })
+	platformFlag = openHandsPlatform
+
+	input := map[string]interface{}{
+		"event_type":  "PreToolUse",
+		"session_id":  "oh-session-1",
+		"working_dir": "/workspace/project",
+		"tool_name":   "file_editor",
+		"tool_input": map[string]interface{}{
+			"kind": "FileEditorAction", "command": "view", "path": "/workspace/project/main.go",
+		},
+	}
+	candidate := newPolicyCandidate(input, "oh-session-1")
+	if candidate.action == "command.executed" {
+		t.Fatalf("policy candidate action = command.executed; file_editor view is not a shell command")
+	}
+	if _, ok := candidate.fields["command"]; ok {
+		t.Fatalf("policy candidate carried a command block: %#v", candidate.fields["command"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Terminal
 // ---------------------------------------------------------------------------
@@ -411,6 +463,9 @@ func TestOpenHandsFileEditorViewIsARead(t *testing.T) {
 	if got := leaf(event, "file", "diff"); got != "" {
 		t.Fatalf("file.diff = %q, want no diff for a read", got)
 	}
+	if got := leaf(event, "command", "command"); got != "" {
+		t.Fatalf("command.command = %q, want empty -- the editor operation is not a shell command", got)
+	}
 }
 
 func TestOpenHandsFileEditorEditRecordsAnExactDiff(t *testing.T) {
@@ -450,6 +505,9 @@ func TestOpenHandsFileEditorEditRecordsAnExactDiff(t *testing.T) {
 	}
 	if got := leaf(event, "harness", "name"); got != "openhands" {
 		t.Fatalf("harness.name = %q, want openhands", got)
+	}
+	if got := leaf(event, "command", "command"); got != "" {
+		t.Fatalf("command.command = %q, want empty -- str_replace is an editor operation, not a shell command", got)
 	}
 }
 
