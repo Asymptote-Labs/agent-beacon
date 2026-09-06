@@ -644,3 +644,46 @@ func TestSessionModelCarryForwardDoesNotRelabelSpend(t *testing.T) {
 		}
 	}
 }
+
+// When the session start falls outside the query window (e.g. --since/--until excludes it),
+// the model declaration must still reach utilization through the context events that
+// AggregateScopedWithContexts keeps for exactly this kind of out-of-window attribution.
+func TestModelCarryForwardWorksWhenSessionStartOutsideQueryWindow(t *testing.T) {
+	sessionStart := schema.Event{
+		Timestamp: "2026-06-11T09:00:00Z",
+		Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.start", Category: "session"},
+		Harness:   schema.HarnessInfo{Name: "qwen_code"},
+		Endpoint:  schema.EndpointInfo{Hostname: "dev"},
+		Session:   &schema.SessionInfo{ID: "qwen-abc"},
+		Model:     "qwen3-coder-plus",
+	}
+	contextEvent := schema.Event{
+		Timestamp: "2026-06-11T10:01:00Z",
+		Event:     schema.EventInfo{Kind: "agent_runtime", Action: "tool.completed", Category: "tool"},
+		Harness:   schema.HarnessInfo{Name: "qwen_code"},
+		Endpoint:  schema.EndpointInfo{Hostname: "dev"},
+		Session:   &schema.SessionInfo{ID: "qwen-abc"},
+		GenAI: &schema.GenAIInfo{Context: &schema.GenAIContextInfo{
+			UsedTokens:  int64Ptr(95000),
+			LimitTokens: int64Ptr(131072),
+		}},
+	}
+	// The filtered events only contain the context-occupancy event; the session start
+	// is outside the window. The context events include the session start.
+	filtered := []schema.Event{contextEvent}
+	contexts := []schema.Event{sessionStart, contextEvent}
+
+	report := AggregateScopedWithContexts(filtered, contexts, "", Options{})
+	if len(report.Utilization) != 1 {
+		t.Fatalf("utilization = %+v, want one row; session model from context must still attribute it", report.Utilization)
+	}
+	if report.Utilization[0].Model != "qwen3-coder-plus" {
+		t.Errorf("model = %q, want qwen3-coder-plus", report.Utilization[0].Model)
+	}
+	if report.Utilization[0].MaxInputTokens != 95000 {
+		t.Errorf("max input tokens = %d, want 95000", report.Utilization[0].MaxInputTokens)
+	}
+	if report.Totals.TotalTokens() != 0 {
+		t.Errorf("totals = %d, want 0 (context-only event is not spend)", report.Totals.TotalTokens())
+	}
+}

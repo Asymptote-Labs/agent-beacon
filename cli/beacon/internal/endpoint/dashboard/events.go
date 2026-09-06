@@ -117,9 +117,10 @@ func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error
 }
 
 // ReadTokenEventsAppendOrder returns query-matched events plus every
-// session.context event in one pass over the log. Session context is kept
+// session lifecycle event in one pass over the log. Session context is kept
 // separate so token totals and TotalEvents still describe only the requested
-// time/model/session slice while user attribution can reach back to SessionStart.
+// time/model/session slice while user attribution can reach back to SessionStart
+// and model attribution can reach back to the session's model declaration.
 func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, []schema.Event, error) {
 	result, err := ReadEvents(path, EventQuery{NoLimit: true})
 	if err != nil {
@@ -129,7 +130,7 @@ func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, 
 	events := make([]schema.Event, 0, len(result.Events))
 	contexts := make([]schema.Event, 0)
 	for _, record := range result.Events {
-		if record.Event.Event.Action == "session.context" {
+		if strings.HasPrefix(record.Event.Event.Action, "session.") {
 			contexts = append(contexts, record.Event)
 		}
 		if matchesQuery(record, query) {

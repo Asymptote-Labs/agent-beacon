@@ -156,15 +156,15 @@ type usageEvent struct {
 // slice order to recover the emission sequence. Passing events newest-first
 // makes each cumulative step-down look like a counter reset and inflates totals.
 func Aggregate(events []schema.Event, opts Options) Report {
-	return aggregate(events, opts, sessionUserContexts(events))
+	return aggregate(events, opts, sessionUserContexts(events), nil)
 }
 
-func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserIndex) Report {
+func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserIndex, contextModels sessionModelIndex) Report {
 	if opts.NearLimitRatio <= 0 {
 		opts.NearLimitRatio = defaultNearLimitRatio
 	}
 	report := Report{TotalEvents: len(events)}
-	usageEvents := collectUsageEvents(events, sessionUsers)
+	usageEvents := collectUsageEvents(events, sessionUsers, contextModels)
 	usageEvents = preferCodexTurnSpans(usageEvents)
 	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
@@ -229,15 +229,17 @@ func AggregateScoped(events []schema.Event, runID string, opts Options) Report {
 }
 
 // AggregateScopedWithContexts applies report filters to events while resolving
-// user attribution from an unfiltered set of session context events. Callers
-// that filter by time, model, or session before aggregation should use this
-// form so a SessionStart outside the selected window can still identify usage.
+// user and model attribution from an unfiltered set of session context events.
+// Callers that filter by time, model, or session before aggregation should use
+// this form so a SessionStart outside the selected window can still identify
+// usage and supply the session's model for context-only utilization events.
 func AggregateScopedWithContexts(events, contextEvents []schema.Event, runID string, opts Options) Report {
 	session := strings.TrimSpace(opts.SessionID)
 	runID = strings.TrimSpace(runID)
 	sessionUsers := sessionUserContexts(contextEvents)
+	contextModels := sessionModelDeclarations(contextEvents)
 	if session == "" && runID == "" {
-		return aggregate(events, opts, sessionUsers)
+		return aggregate(events, opts, sessionUsers, contextModels)
 	}
 	filtered := make([]schema.Event, 0, len(events))
 	for _, event := range events {
@@ -252,7 +254,7 @@ func AggregateScopedWithContexts(events, contextEvents []schema.Event, runID str
 		}
 		filtered = append(filtered, event)
 	}
-	return aggregate(filtered, opts, sessionUsers)
+	return aggregate(filtered, opts, sessionUsers, contextModels)
 }
 
 type sessionContextKey struct {
@@ -388,6 +390,18 @@ func sessionModelDeclarations(events []schema.Event) sessionModelIndex {
 	return index
 }
 
+// lastModel returns the most recent model a session declared, ignoring position. It is the
+// fallback when the positional index cannot help — typically because the declaration lives in
+// context events outside the current query window and positional ordering across slices is
+// undefined.
+func (index sessionModelIndex) lastModel(key sessionContextKey) string {
+	declarations := index[key]
+	if len(declarations) == 0 {
+		return ""
+	}
+	return declarations[len(declarations)-1].model
+}
+
 // modelAt returns the model the session had named by the given position. Scanning back to the last
 // declaration at or before the event, rather than taking the session's newest one, keeps a session
 // that switched models from having its earlier occupancy attributed to the later one.
@@ -401,7 +415,7 @@ func (index sessionModelIndex) modelAt(key sessionContextKey, order int) string 
 	return ""
 }
 
-func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []*usageEvent {
+func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex, contextModels sessionModelIndex) []*usageEvent {
 	sessionModels := sessionModelDeclarations(events)
 	var out []*usageEvent
 	for i, event := range events {
@@ -501,6 +515,9 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 				// no such risk -- it is never summed -- and without a model it is not reportable
 				// at all.
 				ue.model = sessionModels.modelAt(sessionKey(event), i)
+				if ue.model == "" && contextModels != nil {
+					ue.model = contextModels.lastModel(sessionKey(event))
+				}
 			}
 		}
 		if event.Raw != nil {
