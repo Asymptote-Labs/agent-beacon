@@ -70,9 +70,9 @@ func TestCoverageFlagsARuntimeThatShouldHaveReportedUsage(t *testing.T) {
 // Cursor contributing nothing is correct behavior. Reporting it as silent every week would train
 // a reader to ignore the column that matters.
 func TestCoverageDoesNotFlagRuntimesThatCannotReportUsage(t *testing.T) {
-	events := []schema.Event{plainEvent("cursor"), plainEvent("qwen_code"), plainEvent("muse_code")}
-	report := Coverage(events, []string{"cursor", "qwen_code", "muse_code"})
-	for _, harness := range []string{"cursor", "qwen_code", "muse_code"} {
+	events := []schema.Event{plainEvent("cursor"), plainEvent("qwen_code"), plainEvent("muse_code"), plainEvent("devin-cli"), plainEvent("devin-desktop")}
+	report := Coverage(events, []string{"cursor", "qwen_code", "muse_code", "devin-cli", "devin-desktop"})
+	for _, harness := range []string{"cursor", "qwen_code", "muse_code", "devin-cli", "devin-desktop"} {
 		line := lineFor(t, report, harness)
 		if line.Status != CoverageNotInstrumented {
 			t.Errorf("%s status = %q, want not_instrumented", harness, line.Status)

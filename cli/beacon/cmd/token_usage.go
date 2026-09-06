@@ -122,9 +122,15 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 	// every machine whether or not the product does. Counting it as evidence of an install put
 	// a permanent inactive row for Copilot CLI on every endpoint that has a shell. A profile is
 	// evidence of a shell, not of a runtime.
+	//
+	// Unless Beacon put the runtime there: a profile row is only BeaconManaged when the
+	// runtime's own OTLP export is configured in it -- OTEL_TELEMETRY_ENDPOINT for Factory
+	// Droid, COPILOT_OTEL_ENABLED for Copilot CLI -- which is real evidence the runtime is set
+	// up and expected to report. Skipping those too would hide a configured Copilot CLI that
+	// stopped reporting, which is exactly the case this report exists to surface.
 	installed := []string{}
 	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
-		if config.Exists && config.ConfigKind != endpointinventory.KindProfile {
+		if config.Exists && (config.ConfigKind != endpointinventory.KindProfile || config.BeaconManaged) {
 			installed = append(installed, config.Runtime)
 		}
 	}
