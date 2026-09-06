@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -266,6 +267,53 @@ func TestRunCursorEventEmitsPreCompact(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if action := event["event"].(map[string]interface{})["action"]; action != "session.compacting" {
 		t.Fatalf("event.action = %q, want session.compacting", action)
+	}
+}
+
+// Cursor is the second runtime to report context occupancy, and the first to prove the alias-list
+// design pays off: its preCompact payload names the same measurement Qwen does under different
+// keys, and reading it took two list entries and no change to this mapper.
+//
+// The payload is Cursor's documented preCompact shape. context_tokens over context_window_size is
+// the context_usage_percent beside them, which stays in raw rather than being stored twice in
+// different units -- the same call made for Qwen's context_usage.
+func TestRunCursorEventNormalizesPreCompactContextSize(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "cursor"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runCursorEvent, map[string]interface{}{
+		"conversation_id":       "conv-compact",
+		"hook_event_name":       "preCompact",
+		"cwd":                   "/repo",
+		"model":                 "claude-opus-5",
+		"trigger":               "auto",
+		"context_usage_percent": 92.5,
+		"context_tokens":        185000,
+		"context_window_size":   200000,
+		"message_count":         64,
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	genAI, ok := event["gen_ai"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no gen_ai block: %#v", event)
+	}
+	context, ok := genAI["context"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("gen_ai has no context block: %#v", genAI)
+	}
+	if got := fmt.Sprint(context["used_tokens"]); got != "185000" {
+		t.Errorf("gen_ai.context.used_tokens = %s, want 185000", got)
+	}
+	if got := fmt.Sprint(context["limit_tokens"]); got != "200000" {
+		t.Errorf("gen_ai.context.limit_tokens = %s, want 200000", got)
+	}
+	// Occupancy is not spend. Cursor reports no per-call usage at all, and a compaction notice is
+	// the least likely place for one to appear.
+	if usage, ok := genAI["usage"]; ok {
+		t.Errorf("gen_ai.usage = %#v, want absent -- Cursor reports no token usage", usage)
 	}
 }
 
