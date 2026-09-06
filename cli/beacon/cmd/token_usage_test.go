@@ -314,3 +314,31 @@ func TestTokenUsageCoverageHarnessScopeAcceptsAliases(t *testing.T) {
 		t.Fatalf("row = %+v, want vscode_copilot covered with 42 tokens", line0)
 	}
 }
+
+// Comparing two normalized names still needs a case-insensitive compare, which is not obvious.
+//
+// NormalizeHarnessName lowercases every runtime it recognizes, but its passthrough case returns
+// the name unchanged -- deliberately, so a new harness shows up in the log as itself rather than
+// as "unknown". So for a runtime Beacon has never heard of, two spellings normalize to two
+// differently-cased strings, and an == comparison drops the events while keeping the runtime in
+// the installed list: the inactive-despite-usage failure again, on exactly the runtimes nobody
+// has classified yet.
+func TestTokenUsageCoverageHarnessScopeIsCaseInsensitiveForUnknownRuntimes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	// An unrecognized harness, so NormalizeHarnessName passes the spelling through untouched.
+	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"NewAgent"},"model":"some-model","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":7}},"message":"usage"}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json", "--harness", "newagent")
+	var report tokens.CoverageReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
+	}
+	if len(report.Runtimes) != 1 || report.Runtimes[0].Status != tokens.CoverageCovered || report.Runtimes[0].Tokens != 7 {
+		t.Fatalf("report = %+v, want the unknown runtime matched case-insensitively and covered", report.Runtimes)
+	}
+}
