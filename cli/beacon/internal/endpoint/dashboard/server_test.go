@@ -121,7 +121,7 @@ func TestStatusUsesRequestedRuntimeLogSource(t *testing.T) {
 // TestSummaryEndpointAggregatesAllMatchedEvents guards /api/summary against
 // truncated aggregation: total_events comes from the full match count, so the
 // breakdown counts must be computed over the same full set even when the
-	// request carries a small ?limit= from the Agent Activity Sessions view.
+// request carries a small ?limit= from the Agent Activity Sessions view.
 func TestSummaryEndpointAggregatesAllMatchedEvents(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	mk := func(minute int) string {
