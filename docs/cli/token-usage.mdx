@@ -131,6 +131,8 @@ Coverage applies the `--since`, `--until` and `--harness` scopes, and deliberate
 
 Add `--json` for the machine-readable form, which carries the same per-runtime rows plus `silent`, `covered` and `total_events` counts. A `silent` count above zero is the alertable condition.
 
+The local dashboard serves the same report at `GET /api/tokens/coverage`, with the same body as `--coverage --json`. It honors `since`, `until` and `harness` and ignores the rest, for the reason the command does. Both read one join and one expectation table, so the two cannot reach different conclusions about the same log.
+
 ## Examples
 
 Show token usage from the default per-user endpoint log:
