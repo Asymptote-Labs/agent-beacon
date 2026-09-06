@@ -151,6 +151,10 @@ var ContextUsedKeys = []string{
 	// Qwen Code's Stop payload. Its sibling context_usage is this value divided by the limit, so
 	// it is derivable and stays in raw rather than being stored twice in different units.
 	"input_tokens",
+	// Cursor's preCompact payload. Unambiguous on its own -- unlike input_tokens, nothing in the
+	// ecosystem uses this name for an additive count -- but it still only promotes alongside a
+	// limit, because the pairing rule is a property of the list rather than of any one key.
+	"context_tokens",
 }
 
 // ContextLimitKeys names the context window a runtime reported for a call. A reported window beats
@@ -162,4 +166,7 @@ var ContextLimitKeys = []string{
 	"beacon.gen_ai.context.limit_tokens",
 	// Qwen Code's Stop payload.
 	"context_limit",
+	// Cursor's preCompact payload. Its context_usage_percent is this over the used count, so it
+	// stays in raw for the reason Qwen's context_usage does.
+	"context_window_size",
 }

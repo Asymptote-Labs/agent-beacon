@@ -88,7 +88,7 @@ var usageExpectation = map[string]struct {
 	// carries the semconv names -- the generic-OTLP case exactly, not a runtime Beacon reads.
 	"grok_bot": {ExpectGenericOTLP, "only if Cursor's server-side OTel export carries GenAI semconv usage"},
 
-	"cursor":          {ExpectNone, "Cursor hook payloads carry no token counts"},
+	"cursor":          {ExpectNone, "no usage on any hook payload; preCompact reports context only"},
 	"antigravity_cli": {ExpectNone, "hook payloads carry no token counts"},
 	"grok":            {ExpectNone, "hook payloads carry no token counts"},
 	"hermes":          {ExpectNone, "hook payloads carry no token counts"},
@@ -101,7 +101,7 @@ var usageExpectation = map[string]struct {
 	"devin-cli":     {ExpectNone, "hook payloads carry no token counts"},
 	"devin-desktop": {ExpectNone, "Cascade/Windsurf hook payloads carry no token counts"},
 	"muse_code":     {ExpectNone, "usage arrives on PostLLMCall, which Beacon does not subscribe to"},
-	"qwen_code":     {ExpectNone, "Stop carries session context counters, not per-call usage"},
+	"qwen_code":     {ExpectNone, "Stop reports context occupancy, not per-call usage"},
 	"prime_agent":   {ExpectNone, "no managed extension ships yet"},
 	"claude_web":    {ExpectNone, "no recorded claude.ai stream has carried a usage object"},
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
