@@ -187,7 +187,8 @@
                 "pages": [
                   "runtimes/claude-code-cloud-agents",
                   "runtimes/cursor-cloud-agents",
-                  "runtimes/devin-cloud-agents"
+                  "runtimes/devin-cloud-agents",
+                  "runtimes/grok-bot"
                 ]
               },
               {

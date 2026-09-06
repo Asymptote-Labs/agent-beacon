@@ -68,6 +68,7 @@ func DiscoverAll() []Harness {
 		DiscoverDevin(),
 		DiscoverDevinDesktop(),
 		DiscoverClaudeCowork(),
+		DiscoverGrokBot(),
 	}
 }
 

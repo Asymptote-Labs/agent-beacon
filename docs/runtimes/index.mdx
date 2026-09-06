@@ -72,6 +72,7 @@ Both sites are collected by one optional Chrome extension. Browser chat resolves
 |---------------|-----------------|--------------------|
 | [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle telemetry where Claude Code cloud hook payloads expose it |
 | [Cursor Cloud Agents](/runtimes/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction telemetry after project hooks become active |
+| [Grok Bot](/runtimes/grok-bot) | Cursor Enterprise OpenTelemetry Export received by a customer-run Beacon collector | Shell commands with the shell-policy decision, MCP tool calls, browser navigation, computer-use sessions, model requests with token usage, and reported cost; no prompt text, tool arguments, or file activity |
 | [Anthropic](/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported Anthropic model call spans, errors, and OpenTelemetry attributes |
 | [Claude Agent SDK](/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
 | [OpenAI](/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | Supported OpenAI model call spans, errors, and OpenTelemetry attributes |
