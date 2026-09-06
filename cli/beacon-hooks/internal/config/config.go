@@ -22,6 +22,7 @@ var (
 	HermesDir      = filepath.Join(BeaconDir, "hermes")
 	OpenCodeDir    = filepath.Join(BeaconDir, "opencode")
 	QwenDir        = filepath.Join(BeaconDir, "qwen")
+	MuseDir        = filepath.Join(BeaconDir, "muse")
 	ClineDir       = filepath.Join(BeaconDir, "cline")
 )
 
@@ -103,6 +104,8 @@ func GetStateDir(platform string) string {
 		return OpenCodeDir
 	case "qwen":
 		return QwenDir
+	case "muse":
+		return MuseDir
 	case "cline":
 		return ClineDir
 	default:

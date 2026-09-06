@@ -875,14 +875,26 @@ func hookTargets() ([]string, error) {
 	return canonicalHookTargets(splitCSV(endpointOpts.hookHarnesses))
 }
 
+// userScopeOnlyHookTargets are the targets whose installers refuse LevelProject outright, because
+// the runtime registers hooks only from a user-level config: Hermes has no project config at all,
+// and Muse's project .muse/hooks.json is ignored by the shipping build.
+//
+// They are filtered out of the project-level --all list rather than left in to fail. Install and
+// uninstall both return on the first target error, so one refusing target does not just report
+// itself -- it aborts the sweep and silently skips every target after it in the list.
+var userScopeOnlyHookTargets = map[string]bool{
+	"hermes": true,
+	"muse":   true,
+}
+
 func allHookTargetsForLevel() []string {
-	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "cline", "pi", "omp", "grok", "qwen", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "cline", "pi", "omp", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 	if endpointOpts.hookLevel != "project" {
 		return all
 	}
 	filtered := all[:0:0]
 	for _, t := range all {
-		if t == "hermes" {
+		if userScopeOnlyHookTargets[t] {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -935,6 +947,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ExtensionPath, Raw: status}
 		case "grok":
 			status := endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
+		case "muse":
+			status := endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
 		case "qwen":
 			status := endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})

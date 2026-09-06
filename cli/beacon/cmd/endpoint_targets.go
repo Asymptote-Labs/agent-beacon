@@ -61,6 +61,13 @@ var harnessTargets = []harnessTarget{
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen
 	// Code, and an alias nobody uses is an alias to keep working.
 	{name: "qwen", endpointKind: endpointTargetHook, endpointAliases: []string{"qwen", "qwen-code"}, hookAliases: []string{"qwen", "qwen-code"}},
+	// Muse Code, Meta's terminal agent. "muse-code" and "muse_code" both normalize to "muse-code"
+	// through normalizeHarnessKey, so the two spellings need one alias between them; it is accepted
+	// because muse_code is the canonical harness name events are written under, so a row read out
+	// of the runtime log and passed back to --harness resolves to the runtime it names. "spark" is
+	// deliberately not an alias: Muse Spark is the model, and accepting it here would let someone
+	// ask to install hooks for a model.
+	{name: "muse", endpointKind: endpointTargetHook, endpointAliases: []string{"muse", "muse-code"}, hookAliases: []string{"muse", "muse-code"}},
 	{name: "hermes", endpointKind: endpointTargetHook, endpointAliases: []string{"hermes", "hermes-agent"}, hookAliases: []string{"hermes", "hermes-agent"}},
 	{name: "antigravity", endpointKind: endpointTargetHook, endpointAliases: []string{"antigravity", "antigravity-cli"}, hookAliases: []string{"antigravity", "antigravity-cli"}},
 	{name: "devin-cli", endpointKind: endpointTargetHook, endpointAliases: []string{"devin", "devin-cli"}, hookAliases: []string{"devin", "devin-cli"}},

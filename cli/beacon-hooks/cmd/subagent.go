@@ -61,7 +61,26 @@ func runSubagentLifecycle(action, message string) {
 			})
 		}
 	}
+	// Muse Code names the child session on the subagent event, and the parent nowhere.
+	//
+	// Its SubagentStart carries `subagent_id` and `child_session_id`, and -- measured rather than
+	// assumed -- the event's own `session_id` is the CHILD's, not the parent's. So session.id on a
+	// Muse subagent event identifies the subagent's session, and no field in the payload recovers
+	// which session spawned it. Recording child_session_id explicitly is what makes that legible
+	// instead of leaving a reader to assume session.id means the parent, as it does on every other
+	// runtime here.
+	//
+	// The gap is left as a gap. Muse's own session log nests a child under its parent's directory
+	// and carries parent_session_id, so the correlation exists on disk -- but reading it is a poll
+	// path, not this one, and inventing a parent id from a hook payload that does not carry one
+	// would be a fabricated join key in a security log.
+	if platformFlag == "muse" {
+		subagent = mergeNested(subagent, map[string]interface{}{
+			"child_session_id": getFirstStr(input, "child_session_id", "childSessionId"),
+		})
+	}
 	fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"subagent": map[string]interface{}{
+		"child_session_id":    subagent["child_session_id"],
 		"id":                  subagent["id"],
 		"type":                subagent["type"],
 		"role":                subagent["role"],
