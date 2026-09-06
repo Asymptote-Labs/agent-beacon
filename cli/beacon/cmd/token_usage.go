@@ -105,13 +105,15 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 // them would find every runtime covered and prove nothing. The window is what a reader is
 // actually asking about.
 func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQuery) error {
-	// The harness scope is deliberately NOT handed to the event reader. Its filter compares the
-	// flag to harness.name with case-insensitive equality on the raw string, while events carry
-	// the canonical name written by NormalizeHarnessName -- so `--harness vscode` matches nothing,
-	// every vscode_copilot event being named vscode_copilot. Applied here that asymmetry is worse
-	// than a plain miss: the installed list below canonicalizes, so the runtime stays in the
-	// report while its events vanish, and a runtime that spent tokens is labelled inactive.
-	// Both sides are canonicalized here instead.
+	// The harness scope is applied here rather than handed to the event reader, so that both
+	// halves of the join -- the events and the installed list below -- are filtered on the
+	// canonical name by the same code.
+	//
+	// matchesQuery now normalizes too, so passing the scope through would also work. Keeping it
+	// explicit is deliberate: this join is only correct while both sides agree on what a harness
+	// name is, and an asymmetry between them is what reported a runtime that had spent tokens as
+	// inactive. That should not rest on the filter semantics of a function shared with the
+	// dashboard API, which can reasonably change for its own reasons.
 	events, _, err := dashboard.ReadTokenEventsAppendOrder(logPath, dashboard.EventQuery{
 		Since: query.Since,
 		Until: query.Until,
