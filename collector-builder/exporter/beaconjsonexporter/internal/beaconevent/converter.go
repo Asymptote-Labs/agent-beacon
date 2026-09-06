@@ -327,6 +327,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	})
 	c.NormalizeCodexLogEvent(&event, attrs)
 	c.NormalizeClaudeLogEvent(&event, attrs, body)
+	c.NormalizeCursorGrokBotLogEvent(&event, attrs, body)
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
@@ -1023,8 +1024,9 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 		}
 		event.GenAI.Usage.CostUSD = &cost
 	} else {
-		ApplyTokenUsage(&event, FirstString(attrs, "type", "token_type", "gen_ai.token.type"), int64(math.Round(value)))
+		ApplyTokenUsage(&event, FirstString(attrs, "type", "token_type", "gen_ai.token.type", "cursor.token.type"), int64(math.Round(value)))
 	}
+	applyCursorGrokBotContext(&event, attrs)
 	rawExtra := map[string]interface{}{
 		"otel_signal":        "metrics",
 		"metric_name":        metric.Name(),
@@ -1087,7 +1089,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	if version := FirstString(attrs, "service.version"); version != "" {
 		event.Harness.Version = version
 	}
-	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model")
+	event.Model = FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model", "cursor.model.name")
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
 	if id := FirstString(attrs, "gen_ai.conversation.id", "beacon.session.id", "copilot_chat.session_id", "copilot_chat.chat_session_id", "conversation.id", "conversation_id", "session.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
@@ -1881,6 +1883,12 @@ func HarnessName(attrs map[string]interface{}, hints ...string) string {
 	name := FirstString(attrs, "beacon.harness.name", "harness.name", "service.name", "telemetry.sdk.name")
 	if explicit := FirstString(attrs, "beacon.harness.name", "harness.name"); explicit != "" {
 		return NormalizeHarnessName(explicit)
+	}
+	// Cursor's server-side export reports service.name=cursor for every surface it carries, so
+	// the service name alone would file a Grok Bot's cloud-computer shell commands under the
+	// Cursor IDE harness. The surface attribute is the only thing that tells them apart.
+	if IsCursorGrokBotSurface(attrs) {
+		return "grok_bot"
 	}
 	candidates := append([]string{name}, hints...)
 	for _, candidate := range candidates {
