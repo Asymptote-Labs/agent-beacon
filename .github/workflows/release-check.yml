@@ -29,6 +29,7 @@ jobs:
           modules: |
             cli/beacon
             cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
       - uses: goreleaser/goreleaser-action@v6
         with:
           # Keep formulas working until we intentionally migrate the tap to casks.

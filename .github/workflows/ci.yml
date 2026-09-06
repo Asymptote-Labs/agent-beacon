@@ -446,6 +446,7 @@ jobs:
           modules: |
             cli/beacon
             cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
       - name: Build Linux beacon binary
         working-directory: cli/beacon
         run: make build-linux-amd64
@@ -476,6 +477,7 @@ jobs:
           modules: |
             cli/beacon
             cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
       - name: Build collector for Linux
         run: |
           go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
@@ -559,6 +561,7 @@ jobs:
           modules: |
             cli/beacon
             cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
 
       # Cheap, and it runs before anything is built: a syntax error in a packaging script would
       # otherwise surface inside an MSI custom action, where what the user sees is a rollback.
