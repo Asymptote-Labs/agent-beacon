@@ -115,3 +115,47 @@ func TestMuseSparkIsNotAHarnessAlias(t *testing.T) {
 		})
 	}
 }
+
+// The project-level --all sweep must not carry a target whose installer refuses project scope.
+//
+// Install and uninstall both return on the first target error, so leaving such a target in the
+// list does not merely fail that one row -- it aborts the sweep and silently skips every target
+// ordered after it. Muse is the second target with this property after Hermes, and it sits ahead
+// of devin-cli, devin-desktop and antigravity in the list, so a regression here costs those three
+// their install with no message naming them.
+func TestAllHookTargetsForLevelSkipsUserScopeOnlyTargetsAtProjectLevel(t *testing.T) {
+	origLevel := endpointOpts.hookLevel
+	t.Cleanup(func() { endpointOpts.hookLevel = origLevel })
+
+	endpointOpts.hookLevel = "user"
+	user := allHookTargetsForLevel()
+	for name := range userScopeOnlyHookTargets {
+		if !containsTarget(user, name) {
+			t.Fatalf("user-level --all dropped %q; it is user scope only, so it belongs there:\n%v", name, user)
+		}
+	}
+
+	endpointOpts.hookLevel = "project"
+	project := allHookTargetsForLevel()
+	for name := range userScopeOnlyHookTargets {
+		if containsTarget(project, name) {
+			t.Fatalf("project-level --all still carries %q, whose installer refuses project scope:\n%v", name, project)
+		}
+	}
+
+	// The targets ordered after muse and hermes are the ones a first-error abort would swallow.
+	for _, name := range []string{"devin-cli", "devin-desktop", "antigravity"} {
+		if !containsTarget(project, name) {
+			t.Fatalf("project-level --all is missing %q:\n%v", name, project)
+		}
+	}
+}
+
+func containsTarget(targets []string, name string) bool {
+	for _, t := range targets {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
