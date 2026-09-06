@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const defaultNearLimitRatio = 0.8
@@ -375,7 +376,7 @@ type sessionModelIndex map[sessionContextKey][]modelDeclaration
 func sessionModelDeclarations(events []schema.Event) sessionModelIndex {
 	index := sessionModelIndex{}
 	for i, event := range events {
-		model := strings.TrimSpace(event.Model)
+		model := asymptoteobserve.NormalizeModelName(event.Model)
 		if model == "" || event.Session == nil || strings.TrimSpace(event.Session.ID) == "" {
 			continue
 		}
@@ -417,13 +418,25 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			usage = &schema.GenAIUsageInfo{}
 		}
 		ue := &usageEvent{
-			order:      i,
-			action:     event.Event.Action,
-			name:       event.Message,
-			endpoint:   event.Endpoint.Hostname,
-			harness:    event.Harness.Name,
-			user:       userKey(event.User),
-			model:      event.Model,
+			order:    i,
+			action:   event.Event.Action,
+			name:     event.Message,
+			endpoint: event.Endpoint.Hostname,
+			harness:  event.Harness.Name,
+			user:     userKey(event.User),
+			// Canonicalized on the way in, so every consumer downstream -- the by-model rollup,
+			// utilization, the coverage join, the Codex span preference that keys on model --
+			// agrees about what one model is called, from one place.
+			//
+			// Every write path already does this (see normalizeEventModel in the hook logger and
+			// SplitModelProvider in the collector exporter), so a log Beacon wrote recently is
+			// already canonical and this is a no-op on it. It is here for the logs where that does
+			// not hold: those written before that rule existed, which the runtime log retains and
+			// a --since window spans, and any JSONL Beacon reads without having written it.
+			//
+			// Grouping only. The stored event is untouched, and the raw spelling a runtime used
+			// stays in the log where an investigator can still see it.
+			model:      asymptoteobserve.NormalizeModelName(event.Model),
 			repository: event.Repository,
 			usage:      Usage{Events: 1},
 		}

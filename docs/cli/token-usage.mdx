@@ -60,14 +60,30 @@ Cline reports usage once per task rather than per model call, because Beacon's r
 
 This table records what Beacon is built to read, not what your machine actually produced. A runtime can be listed here and still contribute nothing, because it was never run, or because its build reports no usage.
 
+## Context occupancy
+
+Some runtimes report how full the model's context window was without reporting what a turn cost. That is a different measurement from spend, and it is recorded in a different place: `gen_ai.context`, holding `used_tokens` and `limit_tokens`.
+
+The distinction is not cosmetic. Everything in `gen_ai.usage` is **additive** -- every total on this page sums it. Occupancy is a level at one moment: a session whose window was 92% full ten times did not spend ten windows. So context is never summed, never added to a total, and never counted as a runtime reporting its spend. It feeds the utilization view, where a reported window also replaces the model table's default, because a reported limit reflects the tier a call actually ran under.
+
+| Runtime | Reported on | Fields read |
+|---------|-------------|-------------|
+| Cursor | `preCompact` | `context_tokens`, `context_window_size` |
+| Qwen Code | `Stop` | `input_tokens`, `context_limit` |
+
+Both runtimes also report the ratio of the two (`context_usage_percent`, `context_usage`). It is derivable from the pair, so it stays in `raw` rather than being stored a second time in different units.
+
+A runtime that reports occupancy and no spend still shows as `not_instrumented` in the coverage report below. That is deliberate: it has not told Beacon what it cost.
+
+
 **Not collected:**
 
 | Runtime | Why |
 |---------|-----|
-| Cursor | Cursor's hook payloads carry no token counts |
+| Cursor | No hook payload carries a token count. Cursor does report context occupancy on `preCompact`, which is recorded separately -- see [Context occupancy](#context-occupancy) below |
 | Antigravity CLI, Grok Build, Hermes Agent, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
 | Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
-| Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Preserved under `raw.qwen` rather than normalized. See [Qwen Code](/runtimes/qwen-code) |
+| Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
 | OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
 | Prime Agent | No managed extension ships yet, so nothing is collected |
 | Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
