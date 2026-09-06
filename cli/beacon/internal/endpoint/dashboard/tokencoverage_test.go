@@ -129,3 +129,26 @@ func TestTokensCoverageRouteScopesBothSidesByHarness(t *testing.T) {
 		t.Errorf("claude_code status = %q, want covered", got.Status)
 	}
 }
+
+// The scoped-installed filter compares against a canonical name, so it has to canonicalize what it
+// compares. InstalledRuntimes returns runtime identifiers exactly as the scanner spells them --
+// normalization happens inside Coverage, not before it -- so filtering them with a raw comparison
+// drops every runtime whose scanner name differs from its harness name.
+//
+// vscode is that case: it normalizes to vscode_copilot, so a raw match found nothing and the
+// runtime vanished from a scoped report rather than appearing as its own row. The first version of
+// this test used claude_code, where the two spellings are identical, and passed against the bug.
+// This is the third time in this series that a raw-versus-canonical asymmetry has produced a wrong
+// row, so the test now uses a name where the two actually differ.
+func TestTokensCoverageRouteScopesInstalledByCanonicalName(t *testing.T) {
+	stubInventory(t, "vscode")
+	report := getCoverage(t, writeCoverageLog(t, claudeUsageLine), "harness=vscode")
+
+	line := lineFor(t, report, "vscode_copilot")
+	if !line.Installed {
+		t.Errorf("vscode_copilot installed = false, want true; the scanner spells it %q", "vscode")
+	}
+	if line.Status != tokens.CoverageInactive {
+		t.Errorf("status = %q, want inactive -- it is installed and produced no events in scope", line.Status)
+	}
+}
