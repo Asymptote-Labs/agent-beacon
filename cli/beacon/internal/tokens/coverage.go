@@ -88,13 +88,20 @@ var usageExpectation = map[string]struct {
 	"antigravity_cli": {ExpectNone, "hook payloads carry no token counts"},
 	"grok":            {ExpectNone, "hook payloads carry no token counts"},
 	"hermes":          {ExpectNone, "hook payloads carry no token counts"},
-	"devin":           {ExpectNone, "hook payloads carry no token counts"},
-	"muse_code":       {ExpectNone, "usage arrives on PostLLMCall, which Beacon does not subscribe to"},
-	"qwen_code":       {ExpectNone, "Stop carries session context counters, not per-call usage"},
-	"prime_agent":     {ExpectNone, "no managed extension ships yet"},
-	"claude_web":      {ExpectNone, "no recorded claude.ai stream has carried a usage object"},
-	"chatgpt_web":     {ExpectNone, "the chat stream reports no token counts"},
-	"openhands":       {ExpectNone, "hook payloads carry no token counts"},
+	// Devin reaches the log under three names, and all three need an entry. The hook installer
+	// writes --platform devin-cli and devin-desktop, an older install still writes plain devin,
+	// and NormalizeHarnessName passes all three through unchanged. Keying only "devin" left the
+	// other two unrecognized, which classified a Devin session that correctly reported no tokens
+	// as silent -- the one status this table exists to keep clean.
+	"devin":         {ExpectNone, "hook payloads carry no token counts"},
+	"devin-cli":     {ExpectNone, "hook payloads carry no token counts"},
+	"devin-desktop": {ExpectNone, "Cascade/Windsurf hook payloads carry no token counts"},
+	"muse_code":     {ExpectNone, "usage arrives on PostLLMCall, which Beacon does not subscribe to"},
+	"qwen_code":     {ExpectNone, "Stop carries session context counters, not per-call usage"},
+	"prime_agent":   {ExpectNone, "no managed extension ships yet"},
+	"claude_web":    {ExpectNone, "no recorded claude.ai stream has carried a usage object"},
+	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
+	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
 }
 
 // RuntimeCoverage is one runtime's line in the coverage report.

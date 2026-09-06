@@ -115,9 +115,16 @@ func runTokenCoverage(cmd *cobra.Command, logPath string, query dashboard.EventQ
 	}
 	// Installed runtimes come from the config scanner rather than from the log, because the
 	// whole question is which installed runtime is missing from the log.
+	//
+	// Shell-profile rows are skipped. The scanner lists a runtime's shell profile as one way to
+	// detect it -- it is where Copilot CLI's and Factory Droid's launch environment is
+	// configured -- but the file it looks at is the user's ~/.zshrc, which exists on nearly
+	// every machine whether or not the product does. Counting it as evidence of an install put
+	// a permanent inactive row for Copilot CLI on every endpoint that has a shell. A profile is
+	// evidence of a shell, not of a runtime.
 	installed := []string{}
 	for _, config := range endpointinventory.Scan(endpointinventory.Options{}).Configs {
-		if config.Exists {
+		if config.Exists && config.ConfigKind != endpointinventory.KindProfile {
 			installed = append(installed, config.Runtime)
 		}
 	}

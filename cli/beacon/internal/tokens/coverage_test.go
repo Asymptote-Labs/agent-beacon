@@ -196,3 +196,43 @@ func TestUsageExpectationKeysAreCanonicalHarnessNames(t *testing.T) {
 		}
 	}
 }
+
+// Every runtime the config scanner can report must resolve to an expectation entry.
+//
+// This is the invariant the Devin bug broke: the scanner reports "devin-cli" and
+// "devin-desktop", NormalizeHarnessName passes both through unchanged, and the table keyed only
+// "devin" -- so a Devin session that correctly reported no tokens fell to the unrecognized
+// default and was classified silent, which is the one status this table exists to keep clean.
+//
+// The list is duplicated from the inventory scanner rather than imported, deliberately: importing
+// it would make the test track a rename automatically and prove nothing, while a literal list
+// fails and makes someone look. Add a runtime to the scanner, add it here and to usageExpectation.
+func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
+	// Mirrors the runtime identifiers in internal/endpoint/inventory/inventory.go.
+	scanned := []string{
+		"antigravity_cli", "claude_code", "cline", "codex_cli", "copilot_cli", "cursor",
+		"devin-cli", "devin-desktop", "factory", "gemini_cli", "grok", "hermes",
+		"muse_code", "omp", "opencode", "pi_cli", "qwen_code", "vscode",
+	}
+	for _, runtime := range scanned {
+		harness := normalizedHarnessForTest(runtime)
+		if _, ok := usageExpectation[harness]; !ok {
+			t.Errorf("scanner runtime %q normalizes to %q, which has no usageExpectation entry; "+
+				"a session from it that reports no tokens would be classified silent", runtime, harness)
+		}
+	}
+}
+
+// The Devin regression in report form: a Devin CLI or Devin Desktop session that reports no
+// tokens must not be alerted on.
+func TestCoverageDoesNotFlagAnyDevinSpelling(t *testing.T) {
+	for _, harness := range []string{"devin", "devin-cli", "devin-desktop"} {
+		report := Coverage([]schema.Event{plainEvent(harness)}, []string{harness})
+		if got := lineFor(t, report, harness).Status; got != CoverageNotInstrumented {
+			t.Errorf("%s status = %q, want not_instrumented -- Devin reports no token counts", harness, got)
+		}
+		if report.Silent != 0 {
+			t.Errorf("%s produced silent=%d, want 0", harness, report.Silent)
+		}
+	}
+}

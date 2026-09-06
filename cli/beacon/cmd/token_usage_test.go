@@ -191,3 +191,37 @@ func TestTokenUsageCoverageIgnoresFiltersThatWouldHideSilentRuntimes(t *testing.
 		t.Fatalf("--model changed the coverage report:\nwithout:\n%s\nwith:\n%s", unfiltered, filtered)
 	}
 }
+
+// A shell profile is evidence of a shell, not of a runtime.
+//
+// The config scanner lists ~/.zshrc as one way to detect Copilot CLI and Factory, because that is
+// where their launch environment is configured -- but that file exists on nearly every machine
+// whether or not the product does. Counting it as an install put a permanent `inactive` row for
+// Copilot CLI on every endpoint with a shell, which is noise in the one report whose value
+// depends on every row meaning something.
+func TestTokenUsageCoverageDoesNotTreatAShellProfileAsAnInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	// The only runtime evidence on this machine: a shell profile. No product configs at all.
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export PATH=$PATH\n"), 0o600); err != nil {
+		t.Fatalf("write shell profile: %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"claude_code"},"model":"claude-opus-5","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":10}},"message":"usage"}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	output := runTokenUsageCommand(t, "--log-path", logPath, "--coverage", "--json")
+	var report tokens.CoverageReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("unmarshal coverage report: %v\n%s", err, output)
+	}
+	for _, runtime := range report.Runtimes {
+		if runtime.Installed && (runtime.Harness == "copilot_cli" || runtime.Harness == "factory") {
+			t.Errorf("%s reported as installed on the strength of a shell profile alone", runtime.Harness)
+		}
+	}
+}
