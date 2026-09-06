@@ -26,9 +26,15 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-go
         with:
+          # The exporter is listed because builder.yaml compiles it into the
+          # collector this job builds. Its go.sum both keys this job's module
+          # cache apart from the CLI-only jobs -- which otherwise win the same
+          # key and leave the collector tree uncached -- and prefetches the
+          # collector core with retries before the builder runs.
           modules: |
             cli/beacon
             cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
       - uses: goreleaser/goreleaser-action@v6
         with:
           # Keep formulas working until we intentionally migrate the tap to casks.
