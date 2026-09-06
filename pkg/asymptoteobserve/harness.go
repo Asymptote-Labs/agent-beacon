@@ -177,6 +177,27 @@ func NormalizeHarnessName(name string) string {
 		lower == "fx.sh" || lower == "vercel_fx" || lower == "vercel-fx" || lower == "vercel fx" ||
 		lower == "vercel fx cli" || lower == "fx_agent" || lower == "fx-agent":
 		return "vercel_fx"
+	// OpenHands (formerly All Hands AI) is matched by equality against a closed set for the same
+	// reason Qwen Code and Muse Code are, and it is the Muse case exactly: the same organization
+	// ships the agent and a model family under one name, so every OpenHands LM model id begins
+	// with the letters the harness does -- openhands-lm-32b-v0.1, openhands-lm-7b-v0.1. A
+	// Contains(lower, "openhands") rule would report any event whose harness attribute happened to
+	// carry one of those model strings as an OpenHands session, and a reader could not tell the
+	// misattribution from the real thing because both start with the same word.
+	//
+	// Model spellings are therefore deliberately left out of the set: they fall to the passthrough
+	// case and show up as themselves, which is visible as an anomaly rather than silently filed
+	// under the agent.
+	//
+	// The canonical spelling is plain `openhands` rather than `openhands_cli`, because OpenHands
+	// is one product that runs the same agent in Cloud, the CLI and the local GUI -- Beacon hooks
+	// all three through the same `.openhands/hooks.json`, so a CLI suffix would name only one of
+	// the places the events come from. It follows `cline` and `omp`, not `codex_cli`.
+	case lower == "openhands" || lower == "open_hands" || lower == "open-hands" || lower == "open hands" ||
+		lower == "openhands_cli" || lower == "openhands-cli" || lower == "openhands cli" ||
+		lower == "openhands_agent" || lower == "openhands-agent" || lower == "openhands agent" ||
+		lower == "openhands.dev":
+		return "openhands"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".

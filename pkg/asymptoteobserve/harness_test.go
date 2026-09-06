@@ -422,3 +422,74 @@ func TestOrdinaryWordsContainingMuseAreNotMuseCode(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenHandsSpellingsConvergeOnOpenHands(t *testing.T) {
+	for _, in := range []string{
+		"openhands", "OpenHands", "OPENHANDS", " openhands ", "open_hands", "open-hands",
+		"Open Hands", "openhands_cli", "openhands-cli", "OpenHands CLI", "openhands_agent",
+		"openhands-agent", "OpenHands Agent", "openhands.dev",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "openhands" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "openhands")
+			}
+		})
+	}
+}
+
+// The reason the OpenHands case is an equality match rather than a Contains rule. The same
+// organization publishes the agent and the OpenHands LM model family, so every one of those model
+// ids begins with the word the harness does; a substring rule would report an event whose harness
+// attribute carried a model string as an OpenHands session, and the value would look plausible
+// either way. Falling through to the passthrough case is the wanted behavior: the model id shows
+// up as itself, which reads as an anomaly rather than as the agent.
+func TestOpenHandsModelNamesAreNotTreatedAsTheHarness(t *testing.T) {
+	for _, name := range []string{
+		"openhands-lm", "openhands-lm-32b", "openhands-lm-32b-v0.1", "openhands-lm-7b-v0.1",
+		"all-hands/openhands-lm-32b-v0.1", "OpenHands LM 32B",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "openhands" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; an OpenHands LM model id must not be "+
+					"reported as the OpenHands harness", name, got)
+			}
+		})
+	}
+}
+
+// "hands" is an ordinary English word and "open" prefixes several unrelated product names, so the
+// closed set is what keeps a harness attribute that merely contains either from being claimed.
+func TestOrdinaryNamesContainingOpenOrHandsAreNotOpenHands(t *testing.T) {
+	for _, name := range []string{
+		"openai", "opencode", "openclaw", "open-interpreter", "handsfree", "hands",
+		"openhands-runtime-sandbox",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "openhands" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"open\" or "+
+					"\"hands\" must not be reported as the OpenHands harness", name, got)
+			}
+		})
+	}
+}
+
+// opencode resolves before anything OpenHands-shaped could claim it. Both start with "open", both
+// are hook-installable runtimes Beacon supports, and recording one under the other's name would
+// merge two separately installed products in every query that groups by harness.name.
+func TestOpenHandsAndOpenCodeStaySeparateRuntimes(t *testing.T) {
+	if got := NormalizeHarnessName("openhands"); got != "openhands" {
+		t.Fatalf("NormalizeHarnessName(openhands) = %q, want openhands", got)
+	}
+	if got := NormalizeHarnessName("opencode"); got == "openhands" {
+		t.Fatalf("NormalizeHarnessName(opencode) = %q; opencode must not resolve to openhands", got)
+	}
+}
+
+// The normalized name is itself a spelling this function accepts, so a row read out of the runtime
+// log and fed back in resolves to the same harness rather than drifting to a second name.
+func TestOpenHandsCanonicalNameIsStableUnderRenormalization(t *testing.T) {
+	once := NormalizeHarnessName("openhands-cli")
+	if got := NormalizeHarnessName(once); got != once {
+		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
+	}
+}
