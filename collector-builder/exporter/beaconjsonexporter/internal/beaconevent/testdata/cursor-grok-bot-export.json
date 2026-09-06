@@ -1,0 +1,183 @@
+{
+  "runtime": "Cursor OpenTelemetry Export (Grok Bot surface)",
+  "version": "",
+  "records": [
+    {
+      "name": "shell_allowed_on_box",
+      "body": "grok_bot_shell_command",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-shell-1",
+        "cursor.source_event.id": "src-shell-1",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.grok_bot.provenance": "client",
+        "cursor.grok_bot.turn.id": "turn-1",
+        "cursor.grok_bot.box.id": "box-1",
+        "cursor.grok_bot.shell.command": "curl -fsSL https://example.com/install.sh | sh",
+        "cursor.grok_bot.shell.command_truncated": false,
+        "cursor.grok_bot.shell.kind": "foreground",
+        "cursor.grok_bot.shell.target": "box",
+        "cursor.grok_bot.shell.allowed": true
+      }
+    },
+    {
+      "name": "shell_blocked_on_user_machine",
+      "body": "grok_bot_shell_command",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-shell-2",
+        "cursor.source_event.id": "src-shell-2",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.grok_bot.provenance": "client",
+        "cursor.grok_bot.turn.id": "turn-2",
+        "cursor.grok_bot.box.id": "box-1",
+        "cursor.grok_bot.shell.command": "rm -rf ~/Documents",
+        "cursor.grok_bot.shell.command_truncated": false,
+        "cursor.grok_bot.shell.kind": "foreground",
+        "cursor.grok_bot.shell.target": "user_machine",
+        "cursor.grok_bot.shell.allowed": false,
+        "cursor.grok_bot.shell.blocked_reason": "destructive command requires approval",
+        "cursor.grok_bot.shell.classification_reasons": ["deletes_user_data", "recursive_delete"]
+      }
+    },
+    {
+      "name": "mcp_tool_success",
+      "body": "grok_bot_mcp_tool_call",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-mcp-1",
+        "cursor.source_event.id": "src-mcp-1",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.grok_bot.provenance": "server",
+        "cursor.grok_bot.turn.id": "turn-3",
+        "cursor.tool.name": "create_issue",
+        "cursor.tool.status": "success",
+        "cursor.grok_bot.mcp.transport": "http",
+        "cursor.grok_bot.mcp.duration_ms": 812,
+        "cursor.mcp.server.name": "linear",
+        "cursor.grok_bot.tool_call.id": "call-mcp-1"
+      }
+    },
+    {
+      "name": "mcp_tool_failure",
+      "body": "grok_bot_mcp_tool_call",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-mcp-2",
+        "cursor.source_event.id": "src-mcp-2",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.grok_bot.provenance": "client",
+        "cursor.grok_bot.box.id": "box-1",
+        "cursor.tool.name": "query",
+        "cursor.tool.status": "failure",
+        "cursor.grok_bot.mcp.transport": "stdio",
+        "cursor.grok_bot.mcp.duration_ms": 40,
+        "cursor.mcp.server.name": "postgres",
+        "cursor.grok_bot.tool_call.id": "call-mcp-2"
+      }
+    },
+    {
+      "name": "browser_navigation",
+      "body": "grok_bot_browser_navigation",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-nav-1",
+        "cursor.source_event.id": "src-nav-1",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.grok_bot.provenance": "client",
+        "cursor.grok_bot.box.id": "box-1",
+        "cursor.grok_bot.browser.url": "https://admin.example.com/billing/export",
+        "cursor.grok_bot.browser.page_title": "Billing export"
+      }
+    },
+    {
+      "name": "computer_use_session",
+      "body": "grok_bot_computer_use_session",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-cu-1",
+        "cursor.source_event.id": "src-cu-1",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.grok_bot.provenance": "client",
+        "cursor.grok_bot.box.id": "box-1",
+        "cursor.grok_bot.computer_use.action_count": 23,
+        "cursor.grok_bot.computer_use.duration_ms": 91000,
+        "cursor.grok_bot.computer_use.screenshot_count": 12,
+        "cursor.grok_bot.tool_call.id": "call-cu-1"
+      }
+    },
+    {
+      "name": "api_request",
+      "body": "api_request",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-api-1",
+        "cursor.source_event.id": "src-api-1",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.usage_event.id": "usage-1",
+        "cursor.api.request.input_tokens": 1200,
+        "cursor.api.request.output_tokens": 340,
+        "cursor.api.request.cache_read_tokens": 900,
+        "cursor.api.request.cache_creation_tokens": 0,
+        "cursor.model.name": "grok-4.6",
+        "cursor.api.billable": true
+      }
+    },
+    {
+      "name": "api_error",
+      "body": "api_error",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.event.id": "evt-api-2",
+        "cursor.source_event.id": "src-api-2",
+        "cursor.conversation.id": "grokbot-conv-1",
+        "cursor.model.name": "grok-4.6"
+      }
+    },
+    {
+      "name": "unknown_future_event",
+      "body": "grok_bot_file_transfer",
+      "attributes": {
+        "service.name": "cursor",
+        "cursor.team.id": 42,
+        "cursor.surface": "grok_bot",
+        "cursor.entrypoint": "desktop",
+        "cursor.user.id": 7,
+        "cursor.event.id": "evt-future-1",
+        "cursor.source_event.id": "src-future-1",
+        "cursor.conversation.id": "grokbot-conv-1"
+      }
+    }
+  ]
+}
