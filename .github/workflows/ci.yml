@@ -156,9 +156,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
+            pkg/asymptoteobserve
       - name: Check OpenCode plugin
         working-directory: plugins/opencode-beacon
         run: bun run check && bun test
@@ -219,9 +223,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
           go-version-file: beacon-sandbox/go.mod
+          modules: |
+            beacon-sandbox
       # These tests are hermetic: no Modal account, no Anthropic key, no sandbox, and no
       # paid resources. (Go module downloads still happen, as in every other job here.)
       # They gate because they are what makes a green verification run mean
@@ -258,9 +264,11 @@ jobs:
             make_target: build-windows-amd64
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
       - name: Build Beacon for ${{ matrix.goos }}/${{ matrix.goarch }}
         working-directory: cli/beacon
         run: make ${{ matrix.make_target }}
@@ -305,9 +313,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
+            pkg/asymptoteobserve
       # The embedded hooks binary must match the platform under test: the CLI validates its
       # architecture at runtime, so a macOS placeholder fails hook installation on Linux.
       - name: Build platform-matched hooks binary
@@ -345,9 +357,14 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
+            collector-builder/exporter/beaconjsonexporter
+            pkg/asymptoteobserve
+            beacon-sandbox
       # The embedded hooks binary must match the platform under test: the CLI validates its
       # architecture at runtime, so a placeholder fails hook installation on Windows.
       - name: Build platform-matched hooks binary
@@ -424,9 +441,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
       - name: Build Linux beacon binary
         working-directory: cli/beacon
         run: make build-linux-amd64
@@ -452,9 +471,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
       - name: Build collector for Linux
         run: |
           go install go.opentelemetry.io/collector/cmd/builder@v0.121.0
@@ -493,9 +514,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
       - name: Validate packaging scripts
         run: |
           test -x packaging/macos/install-endpoint.sh
@@ -531,9 +554,11 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: cli/beacon/go.mod
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
 
       # Cheap, and it runs before anything is built: a syntax error in a packaging script would
       # otherwise surface inside an MSI custom action, where what the user sees is a rollback.
