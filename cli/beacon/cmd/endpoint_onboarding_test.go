@@ -234,6 +234,29 @@ func TestMaybeRunOnboardingPropagatesPromptFailure(t *testing.T) {
 	}
 }
 
+// An address the local checks cannot parse is still an answer: it is recorded and sent
+// like any other, with the domain reported as unknown rather than counted as a company.
+func TestMaybeRunOnboardingKeepsUnvalidatedEmail(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.answers = onboarding.Answers{Email: "shukan@nodot", Usage: onboarding.UsageWork}
+
+	if _, err := maybeRunOnboarding(h.cmd); err != nil {
+		t.Fatalf("maybeRunOnboarding returned error: %v", err)
+	}
+	if len(h.saved) != 1 || h.saved[0].Onboarding.Email != "shukan@nodot" {
+		t.Fatalf("saved = %+v, want the typed address recorded", h.saved)
+	}
+	if !h.saved[0].Prompted() {
+		t.Fatalf("saved profile is not marked prompted: %+v", h.saved[0])
+	}
+	if len(h.sent) != 1 || h.sent[0].Email != "shukan@nodot" {
+		t.Fatalf("sent = %+v, want the typed address submitted", h.sent)
+	}
+	if h.sent[0].EmailDomainKind != onboarding.DomainUnknown {
+		t.Fatalf("email_domain_kind = %q, want %q", h.sent[0].EmailDomainKind, onboarding.DomainUnknown)
+	}
+}
+
 // The user answered; the network did not cooperate. That is our problem, not theirs.
 func TestMaybeRunOnboardingSurvivesSubmissionFailure(t *testing.T) {
 	h := newOnboardingHarness(t)

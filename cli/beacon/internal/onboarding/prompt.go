@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// maxAttempts bounds the email question so someone who cannot produce an address ends
-// with a clear message instead of looping.
+// maxAttempts bounds every question so someone who answers nothing usable ends with a
+// clear message instead of looping. For the email question that now means an empty
+// line, since any typed answer is accepted on the first try.
 const maxAttempts = 5
 
 // ErrPromptAborted means the user ended input (Ctrl-C or Ctrl-D) without answering.
@@ -249,17 +250,34 @@ func askUsage(reader *bufio.Reader, in io.Reader, out io.Writer, color bool) (st
 	return "", ErrTooManyAttempts
 }
 
+// askEmail asks for the address once and keeps whatever comes back.
+//
+// A malformed address is pointed out but not rejected: the local checks cannot tell a
+// typo from an address they simply do not understand, and re-asking until the answer
+// parses means the people who cannot satisfy them leave with nothing recorded at all --
+// no address, no usage answer, and a failed install to show for it. The note is there
+// so someone who mistyped can fix it on the spot; anyone who meant what they typed is
+// taken at their word, and the signup endpoint decides whether the mailbox is real.
+//
+// The loop remains for the answers that carry nothing to keep: an empty line, and a
+// paste longer than any address can be.
 func askEmail(reader *bufio.Reader, out io.Writer, color bool) (string, error) {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		line, err := readLine(reader, out, fmt.Sprintf("  %sEmail%s › ", title(color), reset(color)))
 		if err != nil {
 			return "", err
 		}
-		email, invalid := NormalizeEmail(line)
-		if invalid == nil {
+		email, invalid := AcceptEmail(line)
+		switch {
+		case invalid == nil:
+			return email, nil
+		case errors.Is(invalid, ErrEmailEmpty), errors.Is(invalid, ErrEmailTooLong):
+			// Nothing to keep from either one, so these are the answers still asked again.
+			fmt.Fprintf(out, "  %s✗ %s%s\n", warn(color), invalid, reset(color))
+		default:
+			fmt.Fprintf(out, "  %s! %s — using it anyway.%s\n", warn(color), invalid, reset(color))
 			return email, nil
 		}
-		fmt.Fprintf(out, "  %s✗ %s%s\n", warn(color), invalid, reset(color))
 	}
 	return "", ErrTooManyAttempts
 }
