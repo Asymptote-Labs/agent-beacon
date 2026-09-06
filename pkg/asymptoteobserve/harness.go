@@ -198,6 +198,28 @@ func NormalizeHarnessName(name string) string {
 		lower == "openhands_agent" || lower == "openhands-agent" || lower == "openhands agent" ||
 		lower == "openhands.dev":
 		return "openhands"
+	// Grok Bot is xAI's always-on agent product: each Bot runs on a Cursor-hosted cloud computer
+	// and the desktop app is a client to it. It is a different product from Grok Build, the xAI
+	// terminal coding agent Beacon hooks under the `grok` harness, and the two must never share a
+	// name: one runs on the endpoint under the operator's own account, the other runs in a vendor
+	// cloud and reaches Beacon only through Cursor's server-side OpenTelemetry export (resource
+	// attribute cursor.surface=grok_bot). A query grouping by harness.name that merged them would
+	// file cloud-computer shell commands under a local CLI.
+	//
+	// Equality against a closed set, and deliberately narrower than every other xAI spelling.
+	// "grok" alone is Grok Build and stays on the passthrough path as itself; "grok-4", "grok-4.6"
+	// and the other model ids also begin with the same four letters, so a Contains(lower, "grok")
+	// rule would claim both the sibling product and any event whose harness attribute carried a
+	// model string. Those fall through and show up as themselves, which is the visible anomaly a
+	// reader can act on rather than a silent misattribution.
+	//
+	// The canonical spelling is grok_bot because that is what the product is called and what
+	// Cursor's own export writes for the surface; it follows claude_code and muse_code, not a CLI
+	// suffix, because there is no CLI.
+	case lower == "grok_bot" || lower == "grok-bot" || lower == "grok bot" || lower == "grokbot" ||
+		lower == "grok_bot_desktop" || lower == "grok-bot-desktop" || lower == "cursor.grok_bot" ||
+		lower == "cursor/grok_bot" || lower == "xai_grok_bot" || lower == "xai-grok-bot":
+		return "grok_bot"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
