@@ -112,3 +112,16 @@ func TestEventIDForLineIgnoresProvenanceMarkers(t *testing.T) {
 		t.Fatalf("provenance markers split one call into two IDs: %s and %s", hook, collector)
 	}
 }
+
+// Cursor's export is the only path that carries a Grok Bot tool-call id, and it carries it under
+// a vendor-prefixed key no other runtime writes. The alias belongs in this list rather than in
+// the exporter's Grok Bot normalizer so that gen_ai.tool.call.id is promoted the same way on
+// every capture path, which is the property the list exists for.
+func TestToolCallIDKeysIncludeCursorGrokBotSpelling(t *testing.T) {
+	for _, key := range ToolCallIDKeys {
+		if key == "cursor.grok_bot.tool_call.id" {
+			return
+		}
+	}
+	t.Fatal("ToolCallIDKeys does not include cursor.grok_bot.tool_call.id")
+}

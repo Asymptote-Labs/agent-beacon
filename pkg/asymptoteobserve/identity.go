@@ -33,6 +33,10 @@ var ToolCallIDKeys = []string{
 	"call_id",
 	"callId",
 	"callID",
+	// Cursor's server-side OpenTelemetry export names a Grok Bot MCP tool call and computer-use
+	// session by this key. It is the only place Beacon learns the id, because Grok Bot runs on
+	// a Cursor-hosted computer and has no hook path that would carry a runtime-native spelling.
+	"cursor.grok_bot.tool_call.id",
 }
 
 // eventIDNamespace is the fixed UUID namespace every Beacon event ID is derived
