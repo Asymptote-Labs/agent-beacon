@@ -137,6 +137,15 @@ export function normalizeTurn(turn: ChatTurn, retention: Retention): NormalizedT
     respAttrs.push(int('gen_ai.usage.input_tokens', turn.usage.inputTokens));
   if (turn.usage?.outputTokens != null)
     respAttrs.push(int('gen_ai.usage.output_tokens', turn.usage.outputTokens));
+  // Cache counts use the dotted spelling the collector reads first
+  // (GenAIUsageFromAttrs), and are disjoint from input_tokens, so a total is
+  // input + output + cache_read + cache_creation with nothing double-counted.
+  if (turn.usage?.cacheCreationInputTokens != null)
+    respAttrs.push(
+      int('gen_ai.usage.cache_creation.input_tokens', turn.usage.cacheCreationInputTokens),
+    );
+  if (turn.usage?.cacheReadInputTokens != null)
+    respAttrs.push(int('gen_ai.usage.cache_read.input_tokens', turn.usage.cacheReadInputTokens));
 
   let respTrunc = false;
   const outputMsgs = shapeText(JSON.stringify(turn.outputMessages), retention);

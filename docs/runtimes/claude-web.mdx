@@ -53,7 +53,7 @@ Turns from one conversation share a session id, so a conversation reads as a ses
 | Assistant response telemetry | Supported, including the response text and the model reported by the stream |
 | Tool telemetry | Supported. Tool call id, name, and arguments are captured from `tool_use` blocks |
 | Tool results | Not available. The chat stream carries the tool call, not the result Anthropic computed for it |
-| Token usage | Supported. Input and output token counts are normalized into `gen_ai.usage` |
+| Token usage | Parsed when the stream carries it, which recorded traffic so far does not. See [Limits](#limits) |
 | Cost | Not available. claude.ai does not report per-turn cost to the page |
 | Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
 | Approval telemetry | Not available. claude.ai does not expose approval decisions to a page script |
@@ -84,6 +84,7 @@ If nothing arrives, work through the [troubleshooting steps](/runtimes/browser-e
 - **The stream format is private.** The adapter is written defensively and degrades to a partial turn rather than failing, but a site change can still stop capture until the adapter is updated.
 - **Only the chat stream is read.** Attachments, artifacts rendered outside the stream, and project files are not captured.
 - **Prompt text comes from the request body.** A turn sent through a path the adapter does not recognize arrives with the response but without the prompt.
+- **Token counts are usually absent.** The adapter reads uncached input, cache creation, cache read, and output counts from the `message_start` and `message_delta` usage objects, but no claude.ai capture on hand has carried a `usage` object at all. Turns therefore normally reach `beacon token-usage` with no token attribution, and Asymptote does not estimate counts it was not given. If the site starts sending them, they land in `gen_ai.usage` with no extension change.
 - **Retention defaults to `full`.** Prompt and response text is retained unless you change the mode in the extension's popup. See [retained content](/runtimes/browser-extension#retained-content).
 
 ## Related
