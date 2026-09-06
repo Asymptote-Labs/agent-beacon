@@ -85,6 +85,27 @@ describe('normalizeTurn — full retention, simple completed turn', () => {
     expect(r['gen_ai.usage.output_tokens']).toBe(2);
   });
 
+  it('emits cache counts under the dotted names the collector reads', () => {
+    // GenAIUsageFromAttrs in the beaconjson exporter reads
+    // gen_ai.usage.cache_creation.input_tokens first and the flat
+    // gen_ai.usage.cache_creation_input_tokens only as an alias, so the dotted
+    // spelling is the one to emit.
+    const records = normalize(
+      baseTurn({
+        usage: { inputTokens: 37, outputTokens: 214, cacheCreationInputTokens: 1024, cacheReadInputTokens: 18500 },
+      }),
+    ).logRecords;
+    const r = flat(byAction(records, 'agent.response.completed')!.attributes);
+    expect(r['gen_ai.usage.cache_creation.input_tokens']).toBe(1024);
+    expect(r['gen_ai.usage.cache_read.input_tokens']).toBe(18500);
+  });
+
+  it('omits cache attributes entirely when the stream reported none', () => {
+    const r = flat(respRec.attributes);
+    expect(r['gen_ai.usage.cache_creation.input_tokens']).toBeUndefined();
+    expect(r['gen_ai.usage.cache_read.input_tokens']).toBeUndefined();
+  });
+
   it('does NOT set fields the exporter fills', () => {
     for (const rec of logRecords) {
       const a = flat(rec.attributes);
