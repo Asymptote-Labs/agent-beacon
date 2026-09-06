@@ -123,3 +123,50 @@ func eventUUID(kind, name string) string {
 	hex.Encode(out, id[:])
 	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
 }
+
+// ContextUsedKeys and ContextLimitKeys are the names a runtime uses for how full the model's
+// context was on a call, and for the window it was measured against.
+//
+// Promoted to gen_ai.context on every capture path from these lists, for the reason ToolCallIDKeys
+// exists: a promotion list holding only a canonical name no runtime writes drops every real value
+// into raw. A new runtime adds its spelling here rather than growing a branch in a mapper.
+//
+// Both must be present before either is promoted, which is not the usual alias-list rule and is
+// deliberate. "input_tokens" is the name Qwen Code gives the context measure, and it is also the
+// name half the ecosystem gives a genuine additive usage count -- so the key alone cannot say which
+// it is. A reported context limit alongside it is what distinguishes a payload describing how full
+// the window is from one reporting what a call spent. Without that pairing this list would quietly
+// reclassify other runtimes' spend as context.
+//
+// The distinction matters because gen_ai.usage is additive and every report sums it, while context
+// size is a level at one moment. Qwen is the case that proves it: its Stop payload's input_tokens
+// is the prompt for that turn, which already contains every prior turn, so summing inflates a
+// session by roughly the square of its length. The same number read as context occupancy is exact
+// and useful -- 110100 of a 262144 window.
+//
+// Canonical names first, so an explicitly mapped value beats a runtime-native one.
+var ContextUsedKeys = []string{
+	"gen_ai.context.used_tokens",
+	"beacon.gen_ai.context.used_tokens",
+	// Qwen Code's Stop payload. Its sibling context_usage is this value divided by the limit, so
+	// it is derivable and stays in raw rather than being stored twice in different units.
+	"input_tokens",
+	// Cursor's preCompact payload. Unambiguous on its own -- unlike input_tokens, nothing in the
+	// ecosystem uses this name for an additive count -- but it still only promotes alongside a
+	// limit, because the pairing rule is a property of the list rather than of any one key.
+	"context_tokens",
+}
+
+// ContextLimitKeys names the context window a runtime reported for a call. A reported window beats
+// the local model table in cli/beacon/internal/tokens, because it reflects the tier actually in
+// force rather than the default for the model name. Its presence is also what licenses reading a
+// used-token count from an ambiguous key; see ContextUsedKeys.
+var ContextLimitKeys = []string{
+	"gen_ai.context.limit_tokens",
+	"beacon.gen_ai.context.limit_tokens",
+	// Qwen Code's Stop payload.
+	"context_limit",
+	// Cursor's preCompact payload. Its context_usage_percent is this over the used count, so it
+	// stays in raw for the reason Qwen's context_usage does.
+	"context_window_size",
+}

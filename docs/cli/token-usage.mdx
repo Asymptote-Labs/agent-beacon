@@ -30,16 +30,108 @@ A few rules shape how the numbers read:
 
 ### Per-runtime coverage
 
+Token coverage is not uniform, and the reason is almost always the runtime rather than Beacon: most agent runtimes do not report usage on the surface Beacon collects from. A turn with no token attribution is a turn whose runtime never reported any.
+
+**Collected and verified against captured payloads:**
+
 | Runtime | Tokens | Cost | Per-session | Per-user |
 |---------|--------|------|-------------|----------|
 | Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | When local user context is present |
 | Codex CLI | input, output, cache read, cache creation, reasoning | Not emitted by Codex | Yes, from the turn trace | Yes, from matching SessionStart context |
+| Claude Cowork | input, output, cache read, cache creation | Reported when Cowork emits it | Yes | When the OTLP stream carries it |
+| Cline | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes, per task | Yes |
+| OpenCode | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Oh My Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 
-`cost_usd` remains empty for Codex because the attributable turn trace does not emit cost. Legacy metric-only Codex rows remain visible in historical totals but cannot be assigned to a session or user. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
+Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason.
+
+**Collected through the generic OpenTelemetry path, not yet verified against captured payloads:**
+
+| Runtime | Status |
+|---------|--------|
+| Gemini CLI | Usage is captured when the runtime emits the OTel GenAI semconv names (`gen_ai.usage.*` attributes, or a `gen_ai.client.token.usage` metric split by `token_type`). The generic path is tested; these runtimes' own payloads have not been captured and pinned. |
+| GitHub Copilot CLI | As above |
+| VS Code Copilot | As above |
+| Factory Droid | As above |
+| OpenClaw Gateway | As above |
+| Grok Bot | Reaches Asymptote only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
+
+This table records what Beacon is built to read, not what your machine actually produced. A runtime can be listed here and still contribute nothing, because it was never run, or because its build reports no usage.
+
+## Context occupancy
+
+Some runtimes report how full the model's context window was without reporting what a turn cost. That is a different measurement from spend, and it is recorded in a different place: `gen_ai.context`, holding `used_tokens` and `limit_tokens`.
+
+The distinction is not cosmetic. Everything in `gen_ai.usage` is **additive** -- every total on this page sums it. Occupancy is a level at one moment: a session whose window was 92% full ten times did not spend ten windows. So context is never summed, never added to a total, and never counted as a runtime reporting its spend. It feeds the utilization view, where a reported window also replaces the model table's default, because a reported limit reflects the tier a call actually ran under.
+
+| Runtime | Reported on | Fields read |
+|---------|-------------|-------------|
+| Cursor | `preCompact` | `context_tokens`, `context_window_size` |
+| Qwen Code | `Stop` | `input_tokens`, `context_limit` |
+
+Both runtimes also report the ratio of the two (`context_usage_percent`, `context_usage`). It is derivable from the pair, so it stays in `raw` rather than being stored a second time in different units.
+
+A runtime that reports occupancy and no spend still shows as `not_instrumented` in the coverage report below. That is deliberate: it has not told Beacon what it cost.
+
+
+**Not collected:**
+
+| Runtime | Why |
+|---------|-----|
+| Cursor | No hook payload carries a token count. Cursor does report context occupancy on `preCompact`, which is recorded separately -- see [Context occupancy](#context-occupancy) below |
+| Antigravity CLI, Grok Build, Hermes Agent, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
+| Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
+| Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
+| OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
+| Prime Agent | No managed extension ships yet, so nothing is collected |
+| Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
+| ChatGPT | The chat stream reports no token counts |
+| Devin Cloud | Devin bills ACUs rather than tokens. The count is preserved in the Devin raw block; there is no token or USD equivalent to normalize it into |
+
+Legacy metric-only Codex rows written before the turn trace existed remain visible in historical totals, but cannot be assigned to a session or user. See the [Codex CLI](/runtimes/codex-cli#token-usage-and-cost) and [Claude Code](/runtimes/claude-code) runtime pages for details.
 
 ### Cost estimates are separate
 
 Beacon does not turn Codex token counts into `cost_usd`. A future report may show a separately labeled estimate with the pricing source, effective date, model, and service tier. Unknown models must remain unknown rather than reading as zero cost, and reasoning tokens must not be charged a second time because they are already included in output.
+
+## Checking coverage
+
+A usage report answers "what did I spend". It cannot answer "is this all of it", and that is the question to settle before treating a number as a bill. A runtime whose telemetry never arrives looks exactly like a runtime nobody used: both are simply absent from every rollup, so a total can omit an entire agent and still look complete.
+
+```bash title="Check which runtimes are contributing token telemetry"
+beacon token-usage --coverage
+```
+
+```
+Token coverage over 4812 events: 3 runtime(s) reporting usage, 1 silent
+
+RUNTIME      STATUS            INSTALLED  EVENTS  USAGE EVENTS  TOKENS   NOTE
+codex_cli    silent            yes        412     0             0        per-turn usage trace; Codex emits no cost
+claude_code  covered           yes        3106    288           4271883  OTLP token and cost telemetry
+cline        covered           yes        190     12            283740   plugin reports usage once per task
+cursor       not_instrumented  yes        1104    0             0        Cursor hook payloads carry no token counts
+```
+
+The status column is the report:
+
+| Status | Meaning |
+|--------|---------|
+| `covered` | The runtime reported usage in the window. Nothing to do |
+| `silent` | The runtime produced events but no usage, and Beacon is built to read usage from it. **This is the one to investigate** — a stale runtime build, a hook that stopped firing, or an OTLP export that is no longer configured |
+| `inactive` | Asymptote configured this runtime, but it produced no events at all in the window. Usually means it was not used; can also mean its hooks or OTLP export stopped firing |
+| `not_instrumented` | The runtime ran, and Beacon cannot read token usage from it. Expected, not a fault. The note column says why |
+
+The `not_instrumented` distinction is what makes the report worth reading. Without it Cursor would appear as a problem on every run, and a column that always shows a problem is a column people stop reading.
+
+The `INSTALLED` column means "Asymptote configured this runtime", not "this product is on the machine". Only configuration Asymptote wrote counts — a hook command, a managed plugin marker, or a local OTLP endpoint it set. That is the population where silence is informative: Asymptote wired it up, so it should be reporting. A runtime present but configured by hand would not be reporting through Asymptote either way, so it appears only if it actually emits events.
+
+Coverage applies the `--since`, `--until` and `--harness` scopes, and deliberately ignores `--session`, `--model`, `--repository` and `--run-id`. Those filters select usage-bearing events almost by definition — an event carries no model unless it carried a model call — so a coverage report computed over them would find every runtime covered and prove nothing.
+
+Add `--json` for the machine-readable form, which carries the same per-runtime rows plus `silent`, `covered` and `total_events` counts. A `silent` count above zero is the alertable condition.
+
+The local dashboard serves the same report at `GET /api/tokens/coverage`, with the same body as `--coverage --json`. It honors `since`, `until` and `harness` and ignores the rest, for the reason the command does. Both read one join and one expectation table, so the two cannot reach different conclusions about the same log.
 
 ## Examples
 

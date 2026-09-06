@@ -119,3 +119,37 @@ func formatCost(cost float64) string {
 	}
 	return fmt.Sprintf("%.4f", cost)
 }
+
+// RenderCoverageText writes the token coverage report: which runtimes contributed token telemetry
+// in the window and which did not.
+//
+// Silent rows are the point of the report, so the summary line leads with them and the table is
+// sorted to put them first. A reader who only reads one line should learn whether anything needs
+// investigating.
+func RenderCoverageText(w io.Writer, report CoverageReport) {
+	fmt.Fprintf(w, "Token coverage over %d events: %d runtime(s) reporting usage, %d silent\n",
+		report.TotalEvents, report.Covered, report.Silent)
+	if report.TotalEvents == 0 {
+		fmt.Fprintln(w, "\nNo events in this window, so coverage cannot be judged. Widen --since/--until.")
+		return
+	}
+	fmt.Fprintln(w)
+	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "RUNTIME\tSTATUS\tINSTALLED\tEVENTS\tUSAGE EVENTS\tTOKENS\tNOTE")
+	for _, runtime := range report.Runtimes {
+		installed := "no"
+		if runtime.Installed {
+			installed = "yes"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%s\n",
+			runtime.Harness, runtime.Status, installed, runtime.Events,
+			runtime.UsageEvents, runtime.Tokens, runtime.Reason)
+	}
+	tw.Flush()
+
+	if report.Silent > 0 {
+		fmt.Fprintln(w, "\nSilent runtimes produced events but no token usage, and Beacon is built to read")
+		fmt.Fprintln(w, "usage from them. Check that the runtime is current and its hooks or OTLP export")
+		fmt.Fprintln(w, "are still configured: beacon endpoint status, beacon endpoint diagnostics.")
+	}
+}

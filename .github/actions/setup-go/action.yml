@@ -1,0 +1,81 @@
+name: Set up Go
+description: >
+  actions/setup-go plus the two things this repository needs on top of it: a
+  module cache that actually restores, and a module download that survives a
+  transient proxy timeout.
+
+inputs:
+  go-version-file:
+    description: The go.mod whose toolchain line picks the Go version.
+    required: false
+    default: cli/beacon/go.mod
+  modules:
+    description: >
+      Module directories this job builds or tests, one per line. Their go.sum
+      files key the module cache, and their dependencies are downloaded up
+      front so a slow proxy fails a step that retries rather than a test step
+      that does not.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # actions/setup-go looks for go.sum in the working directory and walks up.
+    # This repository keeps five modules in subdirectories and none at the
+    # root, so the default lookup finds nothing, logs "Restore cache failed:
+    # Dependencies file is not found", and every job re-downloads every module
+    # from proxy.golang.org on every run. Naming the go.sum files explicitly is
+    # what turns the module cache on at all.
+    #
+    # The list is per-job rather than all five everywhere on purpose: it is
+    # hashed into the cache key, so a job that needs the collector's OTel tree
+    # gets an entry of its own instead of restoring -- and then never
+    # re-saving over -- the smaller entry written by a job that only builds the
+    # CLI.
+    - id: sums
+      shell: bash
+      env:
+        MODULES: ${{ inputs.modules }}
+      run: |
+        set -euo pipefail
+        {
+          echo 'paths<<SUMS_EOF'
+          while read -r dir; do
+            dir="${dir%/}"
+            [ -n "$dir" ] || continue
+            test -f "$dir/go.sum" || { echo "no go.sum in $dir" >&2; exit 1; }
+            echo "$dir/go.sum"
+          done <<< "$MODULES"
+          echo 'SUMS_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache-dependency-path: ${{ steps.sums.outputs.paths }}
+
+    # A cache hit makes this a no-op. On a miss it is where the download
+    # happens, and it retries: `go test` and `go build` fetch modules inline
+    # and give up on the first network error, which is how a proxy timeout
+    # reads as a failed test run rather than as a failed download.
+    - name: Download Go modules
+      shell: bash
+      env:
+        MODULES: ${{ inputs.modules }}
+      run: |
+        set -uo pipefail
+        while read -r dir; do
+          dir="${dir%/}"
+          [ -n "$dir" ] || continue
+          attempt=1
+          until (cd "$dir" && go mod download); do
+            if [ "$attempt" -ge 4 ]; then
+              echo "::error::go mod download failed in $dir after $attempt attempts"
+              exit 1
+            fi
+            delay=$((attempt * attempt * 2))
+            echo "go mod download failed in $dir; retrying in ${delay}s" >&2
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
+        done <<< "$MODULES"

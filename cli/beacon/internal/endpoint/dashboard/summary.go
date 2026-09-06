@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type Count struct {
@@ -90,8 +91,12 @@ func BuildSummary(result EventResult) Summary {
 		if event.Repository != "" {
 			summary.CountsByRepository[event.Repository]++
 		}
-		if event.Model != "" {
-			summary.CountsByModel[event.Model]++
+		// Counted under the canonical name for the reason the token rollups group on it: an event
+		// count keyed on the raw spelling splits one model across several rows, and this summary
+		// sits on the same page as a spend rollup that does not. One page disagreeing with itself
+		// about how many models ran is worse than either answer alone.
+		if model := asymptoteobserve.NormalizeModelName(event.Model); model != "" {
+			summary.CountsByModel[model]++
 		}
 		if event.MCP != nil && event.MCP.Server != "" {
 			summary.CountsByMCPServer[event.MCP.Server]++

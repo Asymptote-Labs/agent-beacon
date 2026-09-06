@@ -194,8 +194,8 @@ func TestDashboardAPIsSurfaceVSCodeEvents(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal events: %v", err)
 	}
-	if result.TotalMatched != 2 {
-		t.Fatalf("vscode filtered events = %d, want 2", result.TotalMatched)
+	if result.TotalMatched != 3 {
+		t.Fatalf("vscode filtered events = %d, want 3", result.TotalMatched)
 	}
 }
 

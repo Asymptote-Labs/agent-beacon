@@ -42,8 +42,14 @@ func TestOpenCodeEventRecordsPrompt(t *testing.T) {
 	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
 		t.Fatalf("prompt.text = %q, want redacted prompt", got)
 	}
-	if got := event["model"]; got != "anthropic/claude-sonnet-4" {
-		t.Fatalf("model = %q, want opencode model", got)
+	// opencode reports provider and model separately and the mapper joins them; the logging
+	// layer splits them back into `model` and gen_ai.provider.name so the bare id groups with
+	// the same model seen on any other runtime.
+	if got := event["model"]; got != "claude-sonnet-4" {
+		t.Fatalf("model = %q, want the bare opencode model id", got)
+	}
+	if got := nested(t, nested(t, event, "gen_ai"), "provider")["name"]; got != "anthropic" {
+		t.Fatalf("gen_ai.provider.name = %q, want the provider opencode reported", got)
 	}
 }
 

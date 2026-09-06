@@ -175,7 +175,12 @@ func (m *mapper) applyPreferences(prefs *Preferences) {
 		return
 	}
 	if prefs.Model != "" {
-		m.model = prefs.Model
+		// Canonicalized on the way in, like the harness name, so fx's spelling of a model
+		// groups with the same model reported by a hook or OTLP runtime in the BY MODEL
+		// rollup. Only the name is normalized here: fx reports its provider separately
+		// below, and a runtime naming its own provider beats one parsed out of a model
+		// string, so nothing is derived from a prefix on this path.
+		m.model = asymptoteobserve.NormalizeModelName(prefs.Model)
 	}
 	if prefs.Provider != "" {
 		m.provider = prefs.Provider

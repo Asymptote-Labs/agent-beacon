@@ -50,7 +50,7 @@ beacon endpoint hooks install --harness cline
 | Command telemetry | `execute_command` with command text, output, exit code, and duration |
 | File telemetry | `read_file`, `list_files`, `search_files`, and `list_code_definition_names` reads; `write_to_file` and `replace_in_file` modifications with diff hash and byte count |
 | MCP telemetry | `use_mcp_tool` and `access_mcp_resource` normalized as MCP tool activity |
-| Model and usage | Provider-qualified model, token counts, cache reads, and runtime-reported cost, recorded once per task |
+| Model and usage | Model and provider (recorded as `model` and `gen_ai.provider.name`), token counts, cache reads, and runtime-reported cost, recorded once per task |
 | Approval telemetry | Not supported. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Cline plugins are installed separately in the logged-in user's context |

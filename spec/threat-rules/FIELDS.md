@@ -45,6 +45,8 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.gen_ai.agent.id` | string |
 | `e.gen_ai.agent.name` | string |
 | `e.gen_ai.agent.version` | string |
+| `e.gen_ai.context.limit_tokens` | int |
+| `e.gen_ai.context.used_tokens` | int |
 | `e.gen_ai.conversation.id` | string |
 | `e.gen_ai.data_source.id` | string |
 | `e.gen_ai.embeddings.dimension_count` | int |

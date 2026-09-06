@@ -161,6 +161,31 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		writeJSON(w, tokens.AggregateScopedWithContexts(events, contexts, "", tokenOptions(r)))
 	})
+	// Coverage answers a different question from the rollup above -- "is this all of it" rather
+	// than "what did it cost" -- so it gets its own route rather than a flag on /api/tokens. A
+	// caller asking for spend and a caller asking whether spend is complete want different
+	// filters, and the answers have no fields in common.
+	mux.HandleFunc("/api/tokens/coverage", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		// Only the time window and the harness scope are honored, matching the CLI. The other
+		// filters select usage-bearing events almost by definition -- an event carries no model
+		// unless it carried a model call -- so coverage computed over them would find every
+		// runtime covered and prove nothing. Silence is what this route exists to show, and a
+		// filter that hides the silent rows defeats it.
+		query := parseQuery(r, maxEventLimit)
+		events, _, err := ReadTokenEventsAppendOrder(opts.LogPath, EventQuery{
+			Since: query.Since,
+			Until: query.Until,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, buildTokenCoverage(events, query.Harness))
+	})
 	mux.HandleFunc("/api/detections", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
