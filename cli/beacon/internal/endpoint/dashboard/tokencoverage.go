@@ -52,7 +52,7 @@ func buildTokenCoverage(events []schema.Event, harness string) tokens.CoverageRe
 		// about a different runtime.
 		scoped := make([]string, 0, 1)
 		for _, name := range installed {
-			if strings.EqualFold(name, want) {
+			if strings.EqualFold(asymptoteobserve.NormalizeHarnessName(name), want) {
 				scoped = append(scoped, name)
 			}
 		}
