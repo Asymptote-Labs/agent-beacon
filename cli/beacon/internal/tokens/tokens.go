@@ -130,6 +130,10 @@ type usageEvent struct {
 	spanID       string
 	parentSpanID string
 	usage        Usage
+	// contextOnly marks an event that reached the collector only because it reported context
+	// occupancy. It feeds the utilization report and nothing else: it is not spend, so it must
+	// not appear in a total, a group, a time bucket, or the count of usage-bearing events.
+	contextOnly  bool
 	contextUsed  int64
 	contextLimit int64
 	cumulative   bool
@@ -173,6 +177,12 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 	byRun := map[string]*Usage{}
 	buckets := map[time.Time]*Usage{}
 	for _, ue := range usageEvents {
+		if ue.contextOnly {
+			// Context occupancy is not spend. Counting these would put zero-token rows under
+			// every grouping and report a runtime that spends nothing as usage-bearing -- which
+			// the coverage report reads as "this runtime is reporting its spend".
+			continue
+		}
 		report.Totals.add(ue.usage)
 		addGroup(byModel, ue.model, ue.usage)
 		addGroup(bySession, ue.session, ue.usage)
@@ -188,7 +198,11 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 			buckets[start].add(ue.usage)
 		}
 	}
-	report.EventsWithUsage = len(usageEvents)
+	for _, ue := range usageEvents {
+		if !ue.contextOnly {
+			report.EventsWithUsage++
+		}
+	}
 	report.ByModel = sortedGroups(byModel, opts.TopLimit)
 	report.BySession = sortedGroups(bySession, opts.TopLimit)
 	report.ByUser = sortedGroups(byUser, opts.TopLimit)
@@ -427,8 +441,13 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 				ue.contextLimit = *context.LimitTokens
 			}
 		}
-		if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 && ue.contextUsed == 0 {
-			continue
+		if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 {
+			if ue.contextUsed == 0 {
+				continue
+			}
+			// Kept for utilization, excluded from everything additive. A runtime that reports
+			// both context and usage is not context-only and counts normally.
+			ue.contextOnly = true
 		}
 		if event.Raw != nil {
 			if temporality, _ := event.Raw["metric_temporality"].(string); strings.EqualFold(temporality, "cumulative") {
@@ -787,7 +806,7 @@ func buildSessionDetail(events []*usageEvent, sessionID string) *SessionDetail {
 	for _, ue := range events {
 		// Match case-insensitively to stay consistent with the case-insensitive
 		// session query the token callers use to select events.
-		if !strings.EqualFold(ue.session, sessionID) {
+		if !strings.EqualFold(ue.session, sessionID) || ue.contextOnly {
 			continue
 		}
 		detail.Usage.add(ue.usage)

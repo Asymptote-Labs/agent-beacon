@@ -477,8 +477,14 @@ func TestUtilizationPrefersReportedContextOverInference(t *testing.T) {
 	}
 }
 
-// Context is a level, not spend. A context-only event must not add anything to the totals a report
-// sums, or a Qwen session's cost would grow with the square of its length.
+// Context is a level, not spend. A context-only event must not add anything a report sums, or a
+// Qwen session's cost would grow with the square of its length.
+//
+// "Anything" is the whole shape, not just the token and cost fields. An earlier version of this
+// test checked only those two and passed while the event was still incrementing the event counts
+// and creating zero-token rows under every grouping -- which reads as a runtime that spent nothing
+// but was nonetheless active in a spend report, and which the coverage report in beacon
+// token-usage --coverage would have read as "this runtime is reporting its spend".
 func TestContextOnlyEventsAddNothingToTotals(t *testing.T) {
 	events := []schema.Event{
 		usageEventFixture("2026-06-11T10:00:00Z", "qwen_code", "s1", "qwen3-coder-plus", func(e *schema.Event) {
@@ -489,12 +495,62 @@ func TestContextOnlyEventsAddNothingToTotals(t *testing.T) {
 			}
 		}),
 	}
-	report := Aggregate(events, Options{})
+	report := Aggregate(events, Options{BucketSize: time.Hour, SessionID: "s1"})
 	if got := report.Totals.TotalTokens(); got != 0 {
-		t.Fatalf("totals = %d tokens, want 0 -- context occupancy is not spend", got)
+		t.Errorf("totals = %d tokens, want 0 -- context occupancy is not spend", got)
 	}
 	if report.Totals.CostUSD != 0 {
-		t.Fatalf("totals cost = %v, want 0", report.Totals.CostUSD)
+		t.Errorf("totals cost = %v, want 0", report.Totals.CostUSD)
+	}
+	if report.Totals.Events != 0 {
+		t.Errorf("totals events = %d, want 0 -- the event carries no usage to have counted", report.Totals.Events)
+	}
+	if report.EventsWithUsage != 0 {
+		t.Errorf("events_with_usage = %d, want 0", report.EventsWithUsage)
+	}
+	for name, group := range map[string][]Group{
+		"by_model": report.ByModel, "by_session": report.BySession,
+		"by_harness": report.ByHarness, "by_user": report.ByUser,
+		"by_repository": report.ByRepository, "by_run": report.ByRun,
+	} {
+		if len(group) != 0 {
+			t.Errorf("%s = %+v, want no rows -- a zero-token row reads as a runtime that spent nothing but was active", name, group)
+		}
+	}
+	if len(report.Series) != 0 {
+		t.Errorf("series = %+v, want no buckets", report.Series)
+	}
+	if report.SessionDetail != nil && len(report.SessionDetail.Steps) != 0 {
+		t.Errorf("session steps = %+v, want none", report.SessionDetail.Steps)
+	}
+	// The one thing it must still do.
+	if len(report.Utilization) != 1 {
+		t.Fatalf("utilization = %+v, want the context-only event to still be measured", report.Utilization)
+	}
+}
+
+// An event reporting both spend and context is not context-only: its usage counts normally and its
+// context still feeds utilization.
+func TestEventsWithBothUsageAndContextCountAsSpend(t *testing.T) {
+	events := []schema.Event{
+		usageEventFixture("2026-06-11T10:00:00Z", "some_runtime", "s1", "some-model", func(e *schema.Event) {
+			e.GenAI.Usage.InputTokens = int64Ptr(900)
+			e.GenAI.Usage.OutputTokens = int64Ptr(100)
+			e.GenAI.Context = &schema.GenAIContextInfo{
+				UsedTokens:  int64Ptr(50000),
+				LimitTokens: int64Ptr(200000),
+			}
+		}),
+	}
+	report := Aggregate(events, Options{})
+	if got := report.Totals.TotalTokens(); got != 1000 {
+		t.Errorf("totals = %d, want the reported 1000 spend tokens", got)
+	}
+	if report.EventsWithUsage != 1 {
+		t.Errorf("events_with_usage = %d, want 1", report.EventsWithUsage)
+	}
+	if len(report.Utilization) != 1 || report.Utilization[0].MaxInputTokens != 50000 {
+		t.Errorf("utilization = %+v, want the reported 50000 occupancy, not the 900 input", report.Utilization)
 	}
 }
 
