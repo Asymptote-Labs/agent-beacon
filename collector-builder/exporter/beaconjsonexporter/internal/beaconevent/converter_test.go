@@ -1657,3 +1657,69 @@ func TestInferActionMatchesWithFidelityVariant(t *testing.T) {
 		}
 	}
 }
+
+// Model is canonicalized on the OTLP path for the same reason harness.name is: the hook path
+// writes the same field, `beacon token-usage` groups its BY MODEL rollup on the raw string, and a
+// runtime reporting "anthropic/claude-sonnet-4-5" against a hook path reporting
+// "claude-sonnet-4-5" splits one model's spend across two rows.
+func TestEventsFromTracesCanonicalizesModelName(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("agent.plan")
+	span.Attributes().PutStr("gen_ai.request.model", "Anthropic/Claude-Sonnet-4-5")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Model != "claude-sonnet-4-5" {
+		t.Fatalf("model = %q, want the canonical spelling", events[0].Model)
+	}
+}
+
+// The stripped prefix is kept as gen_ai.provider.name rather than discarded, so canonicalizing
+// loses nothing.
+func TestEventsFromTracesKeepsTheStrippedProviderPrefix(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("agent.plan")
+	span.Attributes().PutStr("gen_ai.request.model", "openrouter/anthropic/claude-sonnet-4-5")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	event := events[0]
+	if event.GenAI == nil || event.GenAI.Provider == nil {
+		t.Fatal("no provider recorded for a prefixed model name")
+	}
+	if event.GenAI.Provider.Name != "openrouter/anthropic" {
+		t.Fatalf("provider = %q, want the whole stripped prefix", event.GenAI.Provider.Name)
+	}
+}
+
+// A provider the runtime reported itself is a better source than one parsed out of a model
+// string, and must survive.
+func TestEventsFromTracesDoesNotOverwriteAReportedProvider(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("agent.plan")
+	attrs := span.Attributes()
+	attrs.PutStr("gen_ai.provider.name", "gateway")
+	attrs.PutStr("gen_ai.request.model", "anthropic/claude-sonnet-4-5")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	event := events[0]
+	if event.GenAI.Provider.Name != "gateway" {
+		t.Fatalf("provider = %q, want the runtime's own reported provider", event.GenAI.Provider.Name)
+	}
+	if event.Model != "claude-sonnet-4-5" {
+		t.Fatalf("model = %q, want it canonicalized regardless", event.Model)
+	}
+}
+
+// An event with no model must not gain a gen_ai block, which would otherwise appear on every
+// command and file event that never had one.
+func TestEventsFromTracesWithoutAModelGainsNoGenAIBlock(t *testing.T) {
+	span, traces := newObserveSDKTraceSpan("agent.plan")
+	span.Attributes().PutStr("beacon.event.action", "command.executed")
+
+	events := NewConverter(Options{}).EventsFromTraces(traces)
+	if events[0].Model != "" {
+		t.Fatalf("model = %q, want empty", events[0].Model)
+	}
+	if events[0].GenAI != nil && events[0].GenAI.Provider != nil {
+		t.Fatalf("gained a provider from nothing: %+v", events[0].GenAI.Provider)
+	}
+}

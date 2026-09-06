@@ -98,8 +98,14 @@ func TestClineEventTaskStartRecordsSessionAndPrompt(t *testing.T) {
 	if got := nested(t, event, "prompt")["text"]; got != "ship it token=[REDACTED]" {
 		t.Errorf("prompt.text = %q, want the redacted prompt", got)
 	}
-	if got := event["model"]; got != "anthropic/claude-sonnet-4" {
-		t.Errorf("model = %q, want the provider-qualified model", got)
+	// The mapper builds a provider/model composite; the logging layer splits it back apart so
+	// the bare id groups with the same model reported by an OTLP runtime, and the provider
+	// lands in its own field instead of being packed into a string.
+	if got := event["model"]; got != "claude-sonnet-4" {
+		t.Errorf("model = %q, want the bare canonical model id", got)
+	}
+	if got := nested(t, nested(t, event, "gen_ai"), "provider")["name"]; got != "anthropic" {
+		t.Errorf("gen_ai.provider.name = %q, want the provider the composite carried", got)
 	}
 	if got := nested(t, event, "session")["working_directory"]; got != "/tmp/project" {
 		t.Errorf("session.working_directory = %q, want the workspace root", got)
