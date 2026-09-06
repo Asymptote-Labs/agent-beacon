@@ -376,7 +376,7 @@ type sessionModelIndex map[sessionContextKey][]modelDeclaration
 func sessionModelDeclarations(events []schema.Event) sessionModelIndex {
 	index := sessionModelIndex{}
 	for i, event := range events {
-		model := strings.TrimSpace(event.Model)
+		model := asymptoteobserve.NormalizeModelName(event.Model)
 		if model == "" || event.Session == nil || strings.TrimSpace(event.Session.ID) == "" {
 			continue
 		}
