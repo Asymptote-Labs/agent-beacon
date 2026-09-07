@@ -373,7 +373,7 @@ function renderSearchState() {
   const chips = [];
   for (const [key, value] of params.entries()) {
     if (key === "limit") continue;
-    chips.push(`<button type="button" class="chip" data-clear-filter="${escapeHTML(key)}"><strong>${escapeHTML(labelForParam(key))}</strong>${escapeHTML(value)}<span aria-hidden="true">x</span></button>`);
+    chips.push(`<button type="button" class="chip" data-clear-filter="${escapeHTML(key)}"><strong>${escapeHTML(labelForParam(key))}</strong>${escapeHTML(displayFilterValue(key, value))}<span aria-hidden="true">x</span></button>`);
   }
   $("#active-filters").innerHTML = chips.join("");
   $$("[data-clear-filter]").forEach((button) => {
@@ -1186,11 +1186,11 @@ function renderEvents() {
     return;
   }
   if (state.error) {
-    $("#events").innerHTML = `<tr><td colspan="10">Failed to load dashboard: ${escapeHTML(state.error.message)}</td></tr>`;
+    $("#events").innerHTML = `<tr><td colspan="8">Failed to load dashboard: ${escapeHTML(state.error.message)}</td></tr>`;
     return;
   }
   if (!state.events.length) {
-    $("#events").innerHTML = `<tr><td colspan="10">No events match this search. Clear filters or broaden the query.</td></tr>`;
+    $("#events").innerHTML = `<tr><td colspan="8">No events match this search. Clear filters or broaden the query.</td></tr>`;
     return;
   }
   $("#events").innerHTML = state.events
@@ -1204,14 +1204,12 @@ function eventRowHTML(record) {
   const session = event.session || {};
   return `
     <tr data-id="${escapeHTML(record.id)}">
-      <td class="nowrap col-timestamp">${escapeHTML(formatTime(event.timestamp))}</td>
-      <td class="mono">${escapeHTML(session.id || "")}</td>
-      <td>${escapeHTML(repositoryShortLabel(event))}</td>
-      <td>${tagCell(record)}</td>
+      <td class="mono">${escapeHTML(formatSessionID(session.id))}</td>
       <td>${badge(event.severity || "unknown", `severity-${event.severity || "unknown"}`)}</td>
-      <td>${retentionCell(record)}</td>
-      <td>${signalCell(record)}</td>
+      <td class="col-timestamp timestamp-cell">${timestampCellHTML(event.timestamp)}</td>
       <td>${harnessCell(event)}</td>
+      <td>${escapeHTML(repositoryShortLabel(event))}</td>
+      <td>${signalCell(record)}</td>
       <td class="col-artifact">${artifactCell(event)}</td>
       <td class="col-message">${escapeHTML(event.message || "")}</td>
     </tr>
@@ -1319,7 +1317,7 @@ function closeDrawer() {
 
 function renderLoading() {
   setText("#result-meta", "Loading...");
-  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="10">Loading events...</td></tr>`;
+  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="8">Loading events...</td></tr>`;
 }
 
 function signalCell(record) {
@@ -1330,14 +1328,6 @@ function signalCell(record) {
     `<span class="muted">${escapeHTML(info.category || "uncategorized")}${event.model ? ` · ${escapeHTML(event.model)}` : ""}</span>`,
   ].filter(Boolean);
   return parts.join("<br />");
-}
-
-function tagCell(record) {
-  const event = record.event || {};
-  return filterButtons([
-    ["action", signalAction(record)],
-    ["model", event.model],
-  ]);
 }
 
 function harnessCell(event) {
@@ -1403,15 +1393,6 @@ function artifactCell(event) {
   `;
 }
 
-function retentionCell(record) {
-  const event = record.event || {};
-  const labels = [];
-  if (event.content?.retention) labels.push(badge(event.content.retention, "badge-muted"));
-  if (event.field_truncated || event.content?.truncated) labels.push(badge("truncated", "badge-warn"));
-  if (event.content?.redacted) labels.push(badge("redacted", "badge-warn"));
-  return labels.join(" ") || badge("default", "badge-muted");
-}
-
 function detailSummary(record) {
   const event = record.event || {};
   const info = event.event || {};
@@ -1433,10 +1414,11 @@ function detailSummary(record) {
   return rows
     .map(([label, value]) => {
       const key = detailFilterKey(label);
+      const displayValue = label === "Session" ? formatSessionID(value) : value;
       return `
         <div>
           <span class="muted">${escapeHTML(label)}</span>
-          <strong>${escapeHTML(value)}</strong>
+          <strong>${escapeHTML(displayValue)}</strong>
           ${key ? `<button type="button" class="text-button" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(value)}">Filter by this</button>` : ""}
         </div>
       `;
@@ -1456,6 +1438,17 @@ function repositoryShortLabel(event) {
   return [label, event.branch].filter(Boolean).join(" @ ");
 }
 
+function formatSessionID(value, fallback = "") {
+  const sessionID = String(value || "").trim();
+  if (!sessionID) return fallback;
+  return sessionID.slice(-4);
+}
+
+function displayFilterValue(key, value) {
+  if (key === "session") return formatSessionID(value);
+  return value;
+}
+
 function badge(value, className) {
   return `<span class="badge ${escapeHTML(className)}">${escapeHTML(value)}</span>`;
 }
@@ -1465,6 +1458,13 @@ function formatTime(timestamp) {
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.getTime())) return timestamp;
   return parsed.toLocaleString();
+}
+
+function timestampCellHTML(timestamp) {
+  if (!timestamp) return "";
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return escapeHTML(timestamp);
+  return `<span class="timestamp-date">${escapeHTML(parsed.toLocaleDateString())}</span><span class="timestamp-time">${escapeHTML(parsed.toLocaleTimeString())}</span>`;
 }
 
 function labelForParam(key) {
@@ -1641,13 +1641,6 @@ function syncSinceFromRange({ preserveExisting = false } = {}) {
 
 function firstCount(values) {
   return values && values.length ? values[0] : null;
-}
-
-function filterButtons(values) {
-  return values
-    .filter(([, value]) => value)
-    .map(([key, value]) => `<button type="button" class="mini-filter" data-apply-filter="${escapeHTML(key)}" data-value="${escapeHTML(value)}">${escapeHTML(labelForParam(key))}</button>`)
-    .join(" ");
 }
 
 function detailFilterKey(label) {
@@ -1888,6 +1881,7 @@ function renderTokenBreakdowns(report) {
       breakdownTitle: "Top token sessions",
       items: report.by_session || [],
       emptyLabel: "No session token attribution for this range.",
+      labelFormatter: formatSessionID,
       sessionLinks: true,
     },
   ];
@@ -2026,7 +2020,7 @@ function renderUsageGroupRows(selector, groups, filterKey) {
   tbody.innerHTML = groups
     .map((group) => `
       <tr ${filterKey === "session" ? `class="row-link" data-token-session="${escapeHTML(group.key)}"` : ""}>
-        <td class="mono">${escapeHTML(group.key)}</td>
+        <td class="mono">${escapeHTML(filterKey === "session" ? formatSessionID(group.key) : group.key)}</td>
         ${usageCells(group.usage)}
       </tr>
     `)
@@ -2048,7 +2042,7 @@ function renderSessionDetail(detail, session) {
     return;
   }
   panel.hidden = false;
-  setText("#token-session-title", `Session ${detail.session_id}`);
+  setText("#token-session-title", `Session ${formatSessionID(detail.session_id)}`);
   const rows = [];
   const walk = (steps, depth) => {
     for (const step of steps || []) {
@@ -2204,7 +2198,7 @@ function renderFindings(resp) {
       <tr class="finding-row row-link" data-finding-row="${i}" aria-expanded="false">
         <td>${badge(f.severity || "unknown", `severity-${f.severity || "unknown"}`)}</td>
         <td><span class="cell-link mono"><span class="cell-link-caret" aria-hidden="true">&#9656;</span>${escapeHTML(f.rule_id)}</span><br /><span class="muted">${escapeHTML(f.title || "")}</span></td>
-        <td><span class="cell-link mono">${escapeHTML(f.session_id || "-")}</span></td>
+        <td><span class="cell-link mono">${escapeHTML(formatSessionID(f.session_id, "-"))}</span></td>
         <td>${escapeHTML(f.reason || "")}</td>
         <td>${summarizeFindingEvents(f.events)}</td>
       </tr>
@@ -2312,13 +2306,13 @@ function sessionDetailHTML(sessionId) {
   }
   const records = state.findingsSessions.get(sessionId);
   if (!records.length) {
-    return `<div class="detail-section"><h3>Session timeline</h3><p class="muted">No events found for session <span class="mono">${escapeHTML(sessionId)}</span>.</p></div>`;
+    return `<div class="detail-section"><h3>Session timeline</h3><p class="muted">No events found for session <span class="mono">${escapeHTML(formatSessionID(sessionId))}</span>.</p></div>`;
   }
   return `
     <div class="detail-section">
       <div class="detail-head">
         <h3>Session timeline</h3>
-        <span class="muted">${escapeHTML(sessionId)} &middot; ${records.length} event${records.length === 1 ? "" : "s"}</span>
+        <span class="muted">${escapeHTML(formatSessionID(sessionId))} &middot; ${records.length} event${records.length === 1 ? "" : "s"}</span>
         <a class="text-button" href="/?session=${encodeURIComponent(sessionId)}&range=all&session_state=">Open in Agent Activity Sessions</a>
       </div>
       <ol class="session-timeline">${records.map((record) => sessionTimelineRow(record)).join("")}</ol>
