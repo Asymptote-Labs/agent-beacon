@@ -26,11 +26,24 @@ func init() {
 
 // evaluationParams holds the platform-independent fields needed for local hook handling.
 type evaluationParams struct {
-	sessionID   string
-	toolName    string
-	filePath    string
-	diffStr     string
-	extraFields map[string]interface{}
+	sessionID string
+	toolName  string
+	filePath  string
+	diffStr   string
+	// fileOperation overrides the operation recordLocalEdit would otherwise write.
+	//
+	// That default is the literal string "modify", from diffFields, which is right for the
+	// majority of calls that reach this path and wrong for a creation: a file that did not exist
+	// before is recorded as a modification, so a rule matching file.operation == "create" never
+	// fires and a log reader cannot tell a new file from an edited one. It went unnoticed because
+	// most runtimes' create and edit tools both land here and neither told this function which it
+	// was.
+	//
+	// Empty means "leave the default alone", so no existing runtime's recorded shape changes: a
+	// runtime opts in by having its parser answer the question, which is where the answer is
+	// already known.
+	fileOperation string
+	extraFields   map[string]interface{}
 }
 
 func runPostTool(cmd *cobra.Command, args []string) {
@@ -256,6 +269,12 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 	}
 	for key, value := range diffFields(params.filePath, params.diffStr) {
 		fields[key] = value
+	}
+	// Applied after diffFields, which is what wrote the default this replaces.
+	if params.fileOperation != "" {
+		if file, ok := fields["file"].(map[string]interface{}); ok {
+			file["operation"] = params.fileOperation
+		}
 	}
 	fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": params.toolName, "path": params.filePath})
 	if params.sessionID != "" {

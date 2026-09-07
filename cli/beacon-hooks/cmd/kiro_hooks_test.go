@@ -674,6 +674,12 @@ func TestKiroCreateProducesAWholeFileDiff(t *testing.T) {
 	if got := leaf(event, "event", "action"); got != "file.modified" {
 		t.Fatalf("event.action = %q, want file.modified", got)
 	}
+	// The shared diff path writes "modify" unless the runtime's parser says otherwise, which
+	// would record a file that did not exist a moment ago as an edit -- and a rule matching
+	// file.operation == "create" would never fire for Kiro.
+	if got := leaf(event, "file", "operation"); got != "create" {
+		t.Fatalf("file.operation = %q, want create", got)
+	}
 	diff := leaf(event, "file", "diff")
 	if diff == "" {
 		t.Fatal("no diff recorded for a create")
@@ -723,7 +729,11 @@ func TestKiroStrReplaceProducesAnEditDiff(t *testing.T) {
 		"tool_response": kiroResult(true, "Edited /repo/app.go"),
 	})
 
-	diff := leaf(lastEndpointEvent(t, logPath), "file", "diff")
+	event := lastEndpointEvent(t, logPath)
+	if got := leaf(event, "file", "operation"); got != "modify" {
+		t.Fatalf("file.operation = %q, want modify", got)
+	}
+	diff := leaf(event, "file", "diff")
 	if !containsLine(diff, "-return nil") || !containsLine(diff, "+return err") {
 		t.Fatalf("edit diff did not describe the replacement:\n%s", diff)
 	}
@@ -1088,4 +1098,30 @@ func runKiroPolicyDeny(t *testing.T, input map[string]interface{}) (code int, st
 		t.Fatalf("the hook returned normally; a Kiro deny must not fall through to the observing path")
 	}
 	return code, stderr, stdout
+}
+
+// The override is opt-in, so no runtime that does not set it changes shape. Claude Code's Write
+// tool creates a file and has always been recorded as "modify" on this path; that is a separate
+// question from Kiro's, and answering it here would change a recorded shape with no fixture to say
+// what it should become.
+func TestFileOperationOverrideIsOptIn(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_MODE", "1")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_DISABLE_GIT_METADATA", "1")
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"hook_event_name": "PostToolUse",
+		"session_id":      "claude-write",
+		"cwd":             "/repo",
+		"tool_name":       "Write",
+		"tool_input":      map[string]interface{}{"file_path": "/repo/new.go", "content": "package main\n"},
+		"tool_response":   map[string]interface{}{"success": true},
+	})
+
+	if got := leaf(lastEndpointEvent(t, logPath), "file", "operation"); got != "modify" {
+		t.Fatalf("file.operation = %q, want the unchanged default modify", got)
+	}
 }
