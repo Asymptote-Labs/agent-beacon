@@ -217,6 +217,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, qwenCandidates(home, wd)...)
 	items = append(items, museCandidates(home)...)
 	items = append(items, openHandsCandidates(home, wd)...)
+	items = append(items, kiroCandidates(home, wd)...)
 	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
@@ -418,6 +419,37 @@ func openHandsCandidates(home, wd string) []candidate {
 		{runtime: "openhands", path: filepath.Join(openHandsUserDir(home), "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "openhands", path: filepath.Join(wd, ".openhands", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 	}
+}
+
+// Kiro keeps hooks as standalone files in a directory it scans, and Beacon writes one of its own
+// there -- so unlike OpenHands' hooks.json this is a file Beacon owns outright, and unlike Muse
+// Code's managed file there is no second file that has to point at it. One path per scope, and
+// finding it is the whole answer.
+//
+// Both scopes are reported, and here that is coverage rather than the shadowing problem OpenHands
+// has: Kiro merges hook files across scopes instead of taking the first it finds, so a user-scope
+// and a project-scope install are both live and an inventory showing one would understate what is
+// installed rather than overstate it.
+//
+// KIRO_HOME is read here rather than assumed away, for the same reason the installer reads it: on
+// a machine that sets it, ~/.kiro is not where Kiro looks, and an inventory scanning the wrong
+// directory reports "not installed" for a working install.
+func kiroCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "kiro", path: filepath.Join(kiroUserDir(home), "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "kiro", path: filepath.Join(wd, ".kiro", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// kiroUserDir resolves the global Kiro directory, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set the variable.
+func kiroUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("KIRO_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".kiro")
 }
 
 // openHandsUserDir resolves the user-level OpenHands state directory, mirroring the installer.
@@ -819,6 +851,13 @@ func beaconManaged(item candidate, data []byte) bool {
 	// same string in all three places.
 	case "openhands":
 		return strings.Contains(text, "--platform openhands") || strings.Contains(text, "--platform=openhands")
+	// Matched on the hook command rather than on a marker, even though Beacon owns this whole
+	// file. Kiro's v1 schema publishes exactly two top-level keys and says nothing about what it
+	// does with a third, so a marker would be a guess about a loader that fails silently -- and
+	// the command is stronger evidence anyway: it is what the installer writes, what uninstall
+	// keys on, and what survives someone renaming the hooks inside the file.
+	case "kiro":
+		return strings.Contains(text, "--platform kiro") || strings.Contains(text, "--platform=kiro")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {

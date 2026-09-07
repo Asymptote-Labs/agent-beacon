@@ -374,6 +374,11 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// install for a machine where Beacon's hooks never run.
 		{runtime: "openhands", path: filepath.Join(openHandsUserDir(home), "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "openhands", path: filepath.Join(work, ".openhands", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		// Kiro is one Beacon-owned file per scope, and both are reported because Kiro merges hook
+		// files across scopes rather than taking the first it finds -- the opposite of OpenHands
+		// above. Both can be live at once, so showing one would understate the install.
+		{runtime: "kiro", path: filepath.Join(kiroUserDir(home), "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "kiro", path: filepath.Join(work, ".kiro", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.

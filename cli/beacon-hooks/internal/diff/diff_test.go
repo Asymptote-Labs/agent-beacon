@@ -253,3 +253,107 @@ func TestFromContentChangeReturnsNothingWhenTheContentIsUnchanged(t *testing.T) 
 		})
 	}
 }
+
+// FromKiroWrite is the one diff builder written against a tool whose arguments the vendor does not
+// publish, so its safety property is worth stating as a test rather than as a comment: an
+// unrecognized shape must produce no diff, never a wrong one. Every case below is a shape Kiro
+// could plausibly send, and each either resolves exactly or returns "".
+func TestFromKiroWriteReadsBothArgumentSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		operation string
+		toolName  string
+		input     map[string]interface{}
+		wantLines []string
+	}{
+		{
+			name:      "create with the Amazon Q spelling",
+			operation: "create",
+			toolName:  "fs_write",
+			input:     map[string]interface{}{"path": "/repo/a.go", "file_text": "package main\n"},
+			wantLines: []string{"+++ b/a.go", "+package main"},
+		},
+		{
+			name:      "create with the ecosystem spelling",
+			operation: "",
+			toolName:  "write",
+			input:     map[string]interface{}{"path": "/repo/a.go", "content": "package main\n"},
+			wantLines: []string{"+++ b/a.go", "+package main"},
+		},
+		{
+			name:      "replacement with the Amazon Q spelling",
+			operation: "str_replace",
+			toolName:  "fs_write",
+			input:     map[string]interface{}{"path": "/repo/a.go", "old_str": "one", "new_str": "two"},
+			wantLines: []string{"-one", "+two"},
+		},
+		{
+			name:      "replacement with the ecosystem spelling",
+			operation: "",
+			toolName:  "str_replace",
+			input:     map[string]interface{}{"path": "/repo/a.go", "old_string": "one", "new_string": "two"},
+			wantLines: []string{"-one", "+two"},
+		},
+		{
+			name:      "append adds and removes nothing",
+			operation: "",
+			toolName:  "fs_append",
+			input:     map[string]interface{}{"path": "/repo/a.go", "new_str": "// tail\n"},
+			wantLines: []string{"+// tail"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FromKiroWrite(tc.operation, tc.toolName, tc.input, nil)
+			for _, want := range tc.wantLines {
+				if !hasExactLine(got, want) {
+					t.Fatalf("diff missing %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+// The safety property itself. A shape this build cannot read yields nothing, which records the
+// file event without a diff -- rather than a diff built from a value that was not the content.
+func TestFromKiroWriteReturnsNothingRatherThanGuessing(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		operation string
+		toolName  string
+		input     map[string]interface{}
+	}{
+		{"no path", "create", "fs_write", map[string]interface{}{"file_text": "x"}},
+		{"no content", "create", "fs_write", map[string]interface{}{"path": "/repo/a.go"}},
+		{"unreadable arguments", "", "fs_write", map[string]interface{}{"path": "/repo/a.go", "payload": "?"}},
+		{"a delete has no content on either side", "delete", "delete_file", map[string]interface{}{"path": "/repo/a.go"}},
+		{"an unknown tool", "", "some_future_tool", map[string]interface{}{"path": "/repo/a.go", "content": "x"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FromKiroWrite(tc.operation, tc.toolName, tc.input, nil); got != "" {
+				t.Fatalf("FromKiroWrite = %q, want empty", got)
+			}
+		})
+	}
+}
+
+// A create that reports the file's previous contents is an overwrite, and rendering it as a new
+// file would hide what was replaced.
+func TestFromKiroWriteRendersAnOverwriteAsAReplacement(t *testing.T) {
+	got := FromKiroWrite("create", "fs_write", map[string]interface{}{
+		"path":          "/repo/a.go",
+		"file_text":     "new\n",
+		"original_file": "old\n",
+	}, nil)
+	if !hasExactLine(got, "-old") || !hasExactLine(got, "+new") {
+		t.Fatalf("overwrite was not rendered as a replacement:\n%s", got)
+	}
+}
+
+func hasExactLine(diff, want string) bool {
+	for _, line := range strings.Split(diff, "\n") {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}

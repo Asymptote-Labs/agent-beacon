@@ -63,6 +63,14 @@ var harnessTargets = []harnessTarget{
 	// that is All Hands' model family, and accepting it would let someone ask to install hooks for
 	// a model.
 	{name: "openhands", endpointKind: endpointTargetHook, endpointAliases: []string{"openhands", "open-hands"}, hookAliases: []string{"openhands", "open-hands"}},
+	// Kiro. One row for the IDE and the CLI together, because they are one harness reading one
+	// hooks directory -- so "kiro-ide" and "kiro-cli" are aliases of the same install rather than
+	// two targets, and asking for either gets the one that covers both. "kiro" is also the
+	// canonical harness name events are written under, so a row read out of the runtime log and
+	// passed back to --harness resolves to the runtime it names. "kiro-code" is accepted because
+	// people say it; Kiro's own documentation does not, which is why it is an alias and not the
+	// name.
+	{name: "kiro", endpointKind: endpointTargetHook, endpointAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}, hookAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen

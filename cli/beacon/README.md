@@ -548,6 +548,9 @@ contract, what leaves the machine, and revocation.
 ./beacon endpoint hooks install --harness openhands --level project
 ./beacon endpoint hooks status --harness openhands --level project
 
+./beacon endpoint hooks install --harness kiro
+./beacon endpoint hooks status --harness kiro
+
 ./beacon endpoint hooks install --harness hermes
 ./beacon endpoint hooks status --harness hermes
 
@@ -617,6 +620,23 @@ a closed schema that fails silently -- an unknown top-level key, a second spelli
 of one event, or a top-level event added beside a legacy `{"hooks": {...}}` wrapper
 all end with hooks not running and no error -- so install refuses a file that
 already breaks one of those rather than reporting a success that collects nothing.
+
+The Kiro integration writes one hook file of Beacon's own,
+`beacon-endpoint.json`, into the `.kiro/hooks/` directory Kiro scans -- at
+`<repo>/.kiro/hooks/` for project-level installs or `$KIRO_HOME`/`~/.kiro/hooks/`
+for user-level ones. Kiro loads every `.json` file in that directory, so the
+install is additive by construction: your own hook files are never read,
+rewritten or deleted, and uninstall removes only the file Beacon wrote. Beacon
+does claim that one filename -- a file at it holding a hook Beacon did not write
+is refused rather than overwritten, with an error naming the hook. Both scopes
+are live at once, because Kiro merges hook files across scopes rather than taking
+the first it finds, so one install covers the Kiro IDE and the Kiro CLI and a
+user-scope install keeps working inside a repository with hooks of its own.
+Kiro's hook contract is exit codes rather than response objects, so Beacon writes
+nothing to stdout there: on `SessionStart` and `UserPromptSubmit` Kiro adds a
+hook's stdout to the model's context, and an observing hook has nothing to say to
+the model. The one exception is the optional policy seam, whose deny is exit code
+2 with the reason on stderr -- Kiro's documented way to block a tool call.
 
 The Hermes Agent integration writes shell-hook entries into
 `~/.hermes/config.yaml`. Hermes prompts for first-use consent for each
