@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
@@ -19,14 +21,61 @@ type policyCandidate struct {
 	fields   map[string]interface{}
 }
 
+// policyDenial is one runtime's way of saying "do not run this call".
+//
+// A struct rather than the response map this used to be, because the map could only express one of
+// the two shapes runtimes actually use. Every runtime supported before Kiro answers a hook with a
+// JSON object on stdout and a deny is a key in it. Kiro's hook contract has no response object at
+// all: a block is exit code 2 with the reason on stderr, and stdout is either ignored or fed to
+// the model. A function that could only return a map had exactly one option there -- return nil,
+// which means "unknown platform, allow" -- so a provider deny would have been dropped silently on
+// a runtime that does support blocking.
+//
+// The two are not exclusive by construction. A runtime that reads a stdout object *and* honors an
+// exit code can carry both, which is the honest description of OpenHands even though only the
+// object is used there today.
+type policyDenial struct {
+	// response is the object written to stdout, or nil when the runtime has no such shape.
+	response map[string]interface{}
+	// exitCode is the status the process exits with, or 0 to return normally.
+	exitCode int
+	// stderr is the message written to standard error. On an exit-code runtime this is not a log
+	// line -- it is the text handed to the agent as the reason the call was refused, so without it
+	// the model and the operator both see a call blocked with no account of why.
+	stderr string
+}
+
+// policyExit is os.Exit, indirected so a test can observe the status without ending the run.
+//
+// Same reason runInventoryHeartbeatCommand is a variable: the behavior under test is a side effect
+// on the process, and there is no way to assert on it otherwise.
+var policyExit = os.Exit
+
+// emit writes the denial in whatever shape the runtime reads, and does not return when that shape
+// is an exit status.
+//
+// Order matters. stdout and stderr are written before the exit, because os.Exit runs no deferred
+// work and skips any buffering a writer might be doing.
+func (d policyDenial) emit() {
+	if d.response != nil {
+		outputJSON(d.response)
+	}
+	if d.stderr != "" {
+		fmt.Fprintln(os.Stderr, d.stderr)
+	}
+	if d.exitCode != 0 {
+		policyExit(d.exitCode)
+	}
+}
+
 // enforcePolicy consults the configured policy provider for the imminent tool
-// call. If the provider denies and the current platform has a deny response
-// shape, it records denial telemetry and returns that response plus true.
-// Otherwise it returns nil, false and the caller proceeds with the normal allow
-// flow. It is a no-op (nil, false) when no provider is configured.
-func enforcePolicy(logger *logging.Logger, input map[string]interface{}, sessionID string, phase policycontract.Phase) (map[string]interface{}, bool) {
+// call. If the provider denies and the current platform has a deny shape, it
+// records denial telemetry and returns that denial. Otherwise it returns nil and
+// the caller proceeds with the normal allow flow. It is a no-op (nil) when no
+// provider is configured.
+func enforcePolicy(logger *logging.Logger, input map[string]interface{}, sessionID string, phase policycontract.Phase) *policyDenial {
 	if !policy.Enabled() {
-		return nil, false
+		return nil
 	}
 	candidate := newPolicyCandidate(input, sessionID)
 	resp := policy.Evaluate(context.Background(), policy.Request{
@@ -35,19 +84,19 @@ func enforcePolicy(logger *logging.Logger, input map[string]interface{}, session
 		Event:    candidate.event(),
 	})
 	if !resp.Denied() {
-		return nil, false
+		return nil
 	}
 	reason := strings.TrimSpace(resp.Reason)
 	if reason == "" {
 		reason = "Tool call denied by policy provider"
 	}
-	deny := policyDenyResponse(reason, phase)
+	deny := policyDenyFor(reason, phase)
 	if deny == nil {
 		// Platform has no deny shape: honor "unknown platform -> allow".
-		return nil, false
+		return nil
 	}
 	emitPolicyDenied(logger, input, candidate, resp, reason)
-	return deny, true
+	return deny
 }
 
 // newPolicyCandidate builds the candidate from hook input the same way the
@@ -161,11 +210,37 @@ func emitPolicyDenied(logger *logging.Logger, input map[string]interface{}, c po
 	emitHookEvent(logger, "approval.denied", "approval", severity, reason, input, fields)
 }
 
-// policyDenyResponse returns the runtime-specific hook response that denies the
-// tool call. A nil return means the platform has no confirmed deny shape, so the
-// caller allows (unknown platform -> allow). It is phase-independent: a platform
-// with a confirmed deny shape honors a deny in every phase the seam runs in, so a
-// provider deny is never silently dropped for a platform we enforce on.
+// policyDenyFor returns the runtime-specific denial. A nil return means the
+// platform has no confirmed deny shape, so the caller allows (unknown platform ->
+// allow).
+//
+// Kiro is the one runtime whose denial is not a stdout object, and it is the
+// reason this function exists beside policyDenyResponse rather than being it.
+// Kiro's hooks answer with exit codes: a `command` action that exits 2 blocks the
+// triggering event, the reason on stderr is what the agent is told, and any other
+// non-zero code is an error rather than a block. There is no key to set on
+// stdout, and writing one would be worse than useless -- on the two events whose
+// stdout Kiro reads at all, it is pasted into the model's context.
+//
+// Exit code 2 blocks only PreToolUse, UserPromptSubmit and PreTaskExec. The seam
+// runs in the pre-tool and permission-request phases, and Beacon registers no
+// permission-request hook on Kiro because Kiro exposes no such event -- so the
+// only phase that can reach this on Kiro is the one where the code takes effect.
+func policyDenyFor(reason string, phase policycontract.Phase) *policyDenial {
+	if platformFlag == kiroPlatform {
+		return &policyDenial{exitCode: kiroBlockExitCode, stderr: reason}
+	}
+	if response := policyDenyResponse(reason, phase); response != nil {
+		return &policyDenial{response: response}
+	}
+	return nil
+}
+
+// policyDenyResponse returns the runtime-specific hook response object that
+// denies the tool call. A nil return means the platform has no confirmed
+// object-shaped deny. It is phase-independent: a platform with a confirmed deny
+// shape honors a deny in every phase the seam runs in, so a provider deny is
+// never silently dropped for a platform we enforce on.
 func policyDenyResponse(reason string, phase policycontract.Phase) map[string]interface{} {
 	switch {
 	case platformFlag == "cursor":
