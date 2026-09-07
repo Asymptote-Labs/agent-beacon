@@ -547,3 +547,72 @@ func TestGrokModelNamesAreNotTreatedAsGrokBot(t *testing.T) {
 		})
 	}
 }
+
+func TestKiroSpellingsConvergeOnKiro(t *testing.T) {
+	for _, in := range []string{
+		"kiro", "Kiro", "KIRO", " kiro ", "kiro_ide", "kiro-ide", "Kiro IDE",
+		"kiro_cli", "kiro-cli", "Kiro CLI", "kirocli", "kiro_code", "kiro-code",
+		"Kiro Code", "kirocode", "kiro_agent", "kiro-agent", "Kiro Agent", "kiro.dev",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "kiro" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "kiro")
+			}
+		})
+	}
+}
+
+// The reason the Kiro case is an equality match rather than a Contains rule. Kiro stamps its own
+// name on paths and configuration keys that legitimately turn up in other fields -- .kiro/hooks,
+// .kiroignore, KIRO_HOME, kiro_powers -- so a substring rule would report a harness attribute that
+// merely mentioned one of them as a Kiro session. Falling through to the passthrough case is the
+// wanted behavior: the value shows up as itself, which reads as an anomaly.
+func TestNamesMerelyContainingKiroAreNotTheKiroHarness(t *testing.T) {
+	for _, name := range []string{
+		".kiro/hooks", ".kiroignore", "kiro_powers", "kiro-runtime-sandbox", "kirosaki",
+		"kiro-lm-7b", "amazonq",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "kiro" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"kiro\" must "+
+					"not be reported as the Kiro harness", name, got)
+			}
+		})
+	}
+}
+
+// Kiro runs third-party models rather than a family of its own, so the risk Qwen Code, Muse Code
+// and OpenHands guard against -- a model id beginning with the same letters as the harness -- has
+// no instance here today. This pins the guard anyway: a model whose id merely starts with "kiro"
+// must not be filed as the runtime if one ever ships.
+func TestKiroModelSpellingsAreNotTheHarness(t *testing.T) {
+	for _, name := range []string{"kiro-spark-1", "kiro-coder-32b", "aws/kiro-lm-32b-v0.1"} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "kiro" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a model id must not be reported as the "+
+					"Kiro harness", name, got)
+			}
+		})
+	}
+}
+
+// Kiro's IDE and CLI are one harness deliberately: both load the same .kiro/hooks/*.json, so one
+// Beacon install covers both and a suffix would name only one of the places the events come from.
+// Splitting them later would break every query grouping by harness.name, so the merge is pinned.
+func TestKiroIDEAndCLIResolveToOneHarness(t *testing.T) {
+	ide := NormalizeHarnessName("kiro-ide")
+	cli := NormalizeHarnessName("kiro-cli")
+	if ide != cli {
+		t.Fatalf("NormalizeHarnessName(kiro-ide) = %q and NormalizeHarnessName(kiro-cli) = %q; "+
+			"Kiro's surfaces share one hooks directory and must share one harness name", ide, cli)
+	}
+}
+
+// The normalized name is itself a spelling this function accepts, so a row read out of the runtime
+// log and fed back in resolves to the same harness rather than drifting to a second name.
+func TestKiroCanonicalNameIsStableUnderRenormalization(t *testing.T) {
+	once := NormalizeHarnessName("kiro-cli")
+	if got := NormalizeHarnessName(once); got != once {
+		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
+	}
+}
