@@ -624,3 +624,12 @@ func kiroEditPath(toolInput, toolResponse map[string]interface{}) string {
 	}
 	return kiroToolPath(toolInput)
 }
+
+// kiroBlockExitCode is the status a Kiro hook exits with to block the event that fired it.
+//
+// Two, and only two. Kiro documents exit 0 as success and exit 2 as a block on the three
+// blockable triggers -- PreToolUse, UserPromptSubmit, PreTaskExec -- with STDERR returned to the
+// agent as the reason. Every other non-zero code is an error: the operator sees a warning and the
+// call proceeds. So a hook that failed and a hook that denied are distinguished by this number
+// alone, which is why Beacon exits 0 on every path except a policy deny.
+const kiroBlockExitCode = 2

@@ -41,8 +41,12 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	logger := newHookLogger("pre-tool", platformFlag, sessionID)
 
 	logger.Debug("Pre-tool observed")
-	if deny, denied := enforcePolicy(logger, input, sessionID, policycontract.PhasePreTool); denied {
-		outputJSON(deny)
+	if denial := enforcePolicy(logger, input, sessionID, policycontract.PhasePreTool); denial != nil {
+		// emit does not return on a runtime that blocks by exit status, so nothing after this line
+		// runs there -- which is correct: the telemetry for the denial has already been written by
+		// enforcePolicy, and the observing event below would describe a call that is not going to
+		// happen.
+		denial.emit()
 		return
 	}
 	if platformFlag == "cursor" && emitCursorPreHook(logger, input, sessionID) {
