@@ -118,6 +118,13 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		// loads, which it does not -- and would send someone to fix Beacon for a field OpenHands
 		// never sent.
 		"openhands": CollectionMethodHook,
+		// Kiro is hook-shaped. The events, the payload shapes and the `.kiro/hooks/*.json` v1
+		// schema are all AWS's, and Beacon only adds a hook file of its own to a directory the
+		// runtime already scans -- owning that one file is a question of who wrote it, not of who
+		// defines the contract. A `plugin` here would claim Beacon ships and versions source Kiro
+		// loads and executes, which it does not: Kiro runs a command, and the command is the same
+		// beacon-hooks binary every other hook runtime runs.
+		"kiro": CollectionMethodHook,
 		// vscode is the case that justifies keying on --platform rather than on the normalized
 		// harness name: its hook and OTLP telemetry both normalize to vscode_copilot, so the
 		// harness name cannot distinguish them and only the flag can.

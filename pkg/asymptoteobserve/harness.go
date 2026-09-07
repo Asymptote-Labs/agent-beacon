@@ -220,6 +220,35 @@ func NormalizeHarnessName(name string) string {
 		lower == "grok_bot_desktop" || lower == "grok-bot-desktop" || lower == "cursor.grok_bot" ||
 		lower == "cursor/grok_bot" || lower == "xai_grok_bot" || lower == "xai-grok-bot":
 		return "grok_bot"
+	// Kiro is AWS's coding agent. One agent harness runs it in the Kiro IDE, the Kiro CLI
+	// (`kiro-cli`), Kiro Web, Mobile and Crew, and every local surface loads the same
+	// `.kiro/hooks/*.json` files -- so Beacon hooks all of them at once and there is one runtime
+	// to name, not two. The canonical spelling is plain `kiro` for that reason: it follows `cline`
+	// and `openhands`, not `codex_cli`, because a CLI suffix would name one of the surfaces the
+	// events come from and not the others.
+	//
+	// `kiro_code` is accepted as an input spelling but is deliberately not the canonical one.
+	// Kiro's own documentation never uses it -- the product is "Kiro", the IDE is "Kiro IDE" and
+	// the terminal client is "Kiro CLI" -- and choosing a name the vendor does not use would make
+	// harness.name harder to match against anything else a reader has seen.
+	//
+	// Equality against a closed set rather than Contains(lower, "kiro"), for the reason Pi and Oh
+	// My Pi already carry in a sharper form: "kiro" is four characters and Kiro stamps them on
+	// paths and configuration names that legitimately appear in other fields -- `.kiro/hooks`,
+	// `.kiroignore`, `KIRO_HOME`, `kiro_powers`. A substring rule would claim a harness attribute
+	// that merely mentioned one of those. There is no prefix rule for the same reason: a future
+	// runtime named "kirosaki" is not this one.
+	//
+	// Unlike Qwen Code, Muse Code and OpenHands, there is no model family to keep out of the set:
+	// Kiro runs third-party models under their own names and ships none called kiro. The closed
+	// set still holds, because that is a fact about today's model catalog rather than a property
+	// of the name, and a `kiro-*` model id appearing later would otherwise be filed as the agent.
+	case lower == "kiro" || lower == "kiro_ide" || lower == "kiro-ide" || lower == "kiro ide" ||
+		lower == "kiro_cli" || lower == "kiro-cli" || lower == "kiro cli" || lower == "kirocli" ||
+		lower == "kiro_code" || lower == "kiro-code" || lower == "kiro code" || lower == "kirocode" ||
+		lower == "kiro_agent" || lower == "kiro-agent" || lower == "kiro agent" ||
+		lower == "kiro.dev":
+		return "kiro"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
