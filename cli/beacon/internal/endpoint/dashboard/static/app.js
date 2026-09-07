@@ -1301,7 +1301,7 @@ async function showEvent(id) {
   if (!$("#drawer")) return;
   const record = await getJSON(`/api/event?id=${encodeURIComponent(id)}`);
   $("#event-summary").innerHTML = detailSummary(record);
-  $("#event-json").textContent = JSON.stringify(displayEventForJSON(record.event), null, 2);
+  $("#event-json").textContent = JSON.stringify(record.event, null, 2);
   $$("#event-summary [data-apply-filter]").forEach((button) => {
     button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
   });
@@ -1447,12 +1447,6 @@ function formatSessionID(value, fallback = "") {
 function displayFilterValue(key, value) {
   if (key === "session") return formatSessionID(value);
   return value;
-}
-
-function displayEventForJSON(event) {
-  const copy = JSON.parse(JSON.stringify(event || {}));
-  if (copy.session?.id) copy.session.id = formatSessionID(copy.session.id);
-  return copy;
 }
 
 function badge(value, className) {
