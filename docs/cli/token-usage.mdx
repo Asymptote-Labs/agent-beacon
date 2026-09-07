@@ -85,6 +85,7 @@ A runtime that reports occupancy and no spend still shows as `not_instrumented` 
 | Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
 | Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
 | OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
+| Kiro | No Kiro hook payload carries token counts. See [Kiro](/runtimes/kiro) |
 | Prime Agent | No managed extension ships yet, so nothing is collected |
 | Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
 | ChatGPT | The chat stream reports no token counts |
