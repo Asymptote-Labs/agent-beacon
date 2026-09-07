@@ -513,8 +513,12 @@ stores the per-device key in a `0600` secrets file, and runs Vector as the
 JSONL producer and Vector does the network. Only lines written after approval
 are shipped, and revoking the device from the dashboard stops ingestion within
 about a minute. Vector 0.50 or newer is required: `/opt/beacon/bin/vector` from
-the signed package, `vector` from Homebrew, or the Linux package from
-vector.dev.
+the signed package, the `beacon-vector` keg that `brew install beacon` pulls in on
+macOS, any other Vector 0.50+ already on the machine, or the Linux package from
+vector.dev. The Homebrew mirror is named `beacon-vector` rather than `vector`, and
+keeps its binary in `libexec`, because Homebrew allows a single keg named `vector`
+and a single `bin/vector` symlink: under its own name it installs alongside a Vector
+from `vectordotdev/brew` instead of refusing to install at all.
 
 The same pack is available for running Vector by hand:
 

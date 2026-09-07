@@ -222,10 +222,27 @@ brews:
     # Vector runs the optional Asymptote managed forwarder (`beacon endpoint connect`);
     # pulling it in here means a Homebrew install can connect without a second step.
     # Vector is not in homebrew-core (it ships from vectordotdev/brew, and Homebrew no
-    # longer taps third-party dependencies on its own), so the tap carries its own
-    # Formula/vector.rb, mirrored from Vector's release tarballs, and depends on that.
+    # longer taps third-party dependencies on its own), so the tap mirrors Vector's
+    # release tarballs itself.
+    #
+    # The mirror is named `beacon-vector`, NOT `vector`, and that name is load-bearing.
+    # Homebrew allows exactly one keg named `vector` no matter which tap it came from,
+    # so depending on a tap formula by that name made `brew install/upgrade beacon` fail
+    # outright for everyone who already had Vector from vectordotdev/brew -- the upstream
+    # tap, and the one vector.dev points at:
+    #   Error: vector is already installed from vectordotdev/brew!
+    #   Please `brew uninstall vector` first.
+    # No spelling of a `vector` dependency can be satisfied by both taps. Under its own
+    # name the keg coexists with any other Vector, and it keeps its binary in libexec --
+    # which Homebrew never links into the prefix -- so it cannot collide on a bin/vector
+    # symlink either. FindVector looks there first; see internal/endpoint/asymptote.
+    #
+    # os: mac because the mirror only carries Vector's macOS tarballs; renders as
+    # `depends_on "..." if OS.mac?`. Homebrew-on-Linux installs Beacon with no
+    # dependency and uses the vector.dev package, as the docs say.
     dependencies:
-      - name: asymptote-labs/tap/vector
+      - name: asymptote-labs/tap/beacon-vector
+        os: mac
     install: |
       bin.install "beacon"
       bin.install "beacon-hooks"
@@ -233,8 +250,12 @@ brews:
     caveats: |
       To configure local endpoint telemetry, run:
         beacon endpoint install
+
       To forward telemetry to the Asymptote dashboard (opt-in, revocable), run:
         beacon endpoint connect
+      On macOS that needs no extra step: this formula installs its own Vector as
+      beacon-vector, kept out of PATH so it never collides with a Vector you
+      already have. On Linux, install Vector 0.50 or newer from https://vector.dev.
     test: |
       system "#{bin}/beacon", "version"
 

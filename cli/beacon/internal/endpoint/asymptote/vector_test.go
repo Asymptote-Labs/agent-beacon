@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -113,5 +114,64 @@ func TestEnrollmentStoreUsesPrivatePermissionsAndAtomicWrites(t *testing.T) {
 	}
 	if _, err := os.Stat(Dir(true)); !os.IsNotExist(err) {
 		t.Fatal("RemoveState should delete the directory")
+	}
+}
+
+// TestDefaultVectorSearchPathsPrefersTheBeaconVectorKeg pins where a Homebrew-installed
+// Vector is looked for. The tap mirrors Vector as the beacon-vector keg rather than as a
+// formula named `vector`, because Homebrew allows one keg by that name and a `vector`
+// dependency broke `brew upgrade beacon` for anyone already running vectordotdev/brew's.
+// That keg keeps its binary in libexec, which Homebrew never links, so nothing finds it
+// except this path -- and it is tried ahead of any linked vector because it is the copy
+// whose version the tap pins, and FindVector treats a too-old binary as an error rather
+// than a reason to keep looking.
+func TestDefaultVectorSearchPathsPrefersTheBeaconVectorKeg(t *testing.T) {
+	t.Setenv("HOMEBREW_PREFIX", filepath.Join("/fake", "brew"))
+	paths := defaultVectorSearchPaths()
+
+	if len(paths) == 0 || paths[0] != PackagedVectorPath {
+		t.Fatalf("defaultVectorSearchPaths() = %q, want the packaged Vector first", paths)
+	}
+	keg := filepath.Join("/fake", "brew", "opt", TapVectorFormula, "libexec", "vector")
+	if !slices.Contains(paths, keg) {
+		t.Fatalf("defaultVectorSearchPaths() = %q, want it to include the beacon-vector keg %q", paths, keg)
+	}
+	if linked := filepath.Join("/fake", "brew", "bin", "vector"); !slices.Contains(paths, linked) {
+		t.Fatalf("defaultVectorSearchPaths() = %q, want it to include a linked Vector %q", paths, linked)
+	}
+
+	lastKeg, firstLinked := -1, len(paths)
+	for i, path := range paths {
+		switch {
+		case strings.Contains(path, filepath.Join("opt", TapVectorFormula)):
+			lastKeg = i
+		case path != PackagedVectorPath && strings.HasSuffix(path, filepath.Join("bin", "vector")):
+			firstLinked = min(firstLinked, i)
+		}
+	}
+	if lastKeg > firstLinked {
+		t.Errorf("defaultVectorSearchPaths() = %q, want every beacon-vector keg before every linked Vector; "+
+			"interleaving lets an old linked Vector in one prefix mask the pinned keg in the next", paths)
+	}
+}
+
+// TestHomebrewPrefixesDeduplicates covers HOMEBREW_PREFIX being set to the platform default,
+// which would otherwise search the same prefix twice.
+func TestHomebrewPrefixesDeduplicates(t *testing.T) {
+	prefixes := homebrewPrefixes()
+	if len(prefixes) == 0 {
+		t.Skip("no Homebrew prefixes on this platform")
+	}
+	t.Setenv("HOMEBREW_PREFIX", prefixes[0])
+	got := homebrewPrefixes()
+	seen := make(map[string]bool, len(got))
+	for _, prefix := range got {
+		if seen[prefix] {
+			t.Fatalf("homebrewPrefixes() = %q, want no duplicates", got)
+		}
+		seen[prefix] = true
+	}
+	if len(got) != len(prefixes) {
+		t.Errorf("homebrewPrefixes() = %q, want the same %d prefixes as the unset default %q", got, len(prefixes), prefixes)
 	}
 }
