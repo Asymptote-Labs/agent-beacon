@@ -606,6 +606,9 @@ func parseKiroEdit(input map[string]interface{}, logger *logging.Logger) *evalua
 		toolName:  toolName,
 		filePath:  filePath,
 		diffStr:   diffStr,
+		// The taxonomy already answered this, and the shared diff path would otherwise write
+		// "modify" for a file that did not exist a moment ago.
+		fileOperation: kiroFileOperation(toolName, toolInput, toolResponse),
 	}
 }
 
