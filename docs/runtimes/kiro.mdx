@@ -1,0 +1,227 @@
+---
+title: "Kiro"
+description: "Asymptote support details for Kiro endpoint telemetry"
+---
+
+## Runtime overview
+
+Asymptote supports Kiro — the AI coding agent from AWS — through its native [hooks](https://kiro.dev/docs/hooks/), sent to `beacon-hooks`.
+
+```bash
+beacon endpoint hooks install --harness kiro
+```
+
+`--harness kiro-ide`, `--harness kiro-cli`, and `--harness kiro-code` are also accepted, and all four install the same thing.
+
+Kiro runs one agent harness behind the Kiro IDE, the Kiro CLI (`kiro-cli`), Kiro Web, Mobile, and Crew, and every local surface loads hooks from the same `.kiro/hooks/` directory. There is one integration rather than one per surface, and one harness name — `kiro` — rather than a name per surface.
+
+<Note>
+**Kiro Web and Mobile read project configuration only.** Kiro Web loads `.kiro/hooks/` committed to a repository; neither Web nor Mobile reads the machine's `~/.kiro/`, because neither has a local filesystem. Hooks committed at project scope therefore reach Kiro Web; a user-scope install does not.
+</Note>
+
+## Prerequisites
+
+Before enabling Kiro telemetry, make sure:
+
+- Kiro IDE 1.0 or later, or Kiro CLI 3.0 or later, is installed. The `.kiro/hooks/*.json` format was introduced in those releases; earlier versions use the `.kiro.hook` format and the embedded agent-config format, which Asymptote does not write.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Kiro is restarted, or a new session started, after hook install or removal — hooks are loaded when a session begins.
+
+## Collection path
+
+Kiro loads **every** `.json` file in its hooks directory, so Asymptote writes **one file of its own** and never reads, rewrites, or deletes anything you put beside it.
+
+| Scope | File | Read by |
+|-------|------|---------|
+| User | `~/.kiro/hooks/beacon-endpoint.json` | The IDE and the CLI, in every project on the machine |
+| Project | `<repo>/.kiro/hooks/beacon-endpoint.json` | The IDE, the CLI, and Kiro Web |
+
+`$KIRO_HOME` replaces `~/.kiro` when it is set, matching how Kiro resolves the global directory itself. It exists so one machine can hold separate Kiro profiles.
+
+<Note>
+**Both scopes are live at once.** Kiro *merges* hooks across scopes rather than resolving them by precedence, so a user-scope install keeps working inside a repository that has hooks of its own, and installing at both scopes is not a conflict. This is the opposite of [OpenHands](/runtimes/openhands), where a project file shadows the user one entirely — so unlike OpenHands, there is no scope here that leaves a successful install silently collecting nothing. Pick user scope to cover every project on the machine; pick project scope to commit the hook with the repository and reach Kiro Web.
+</Note>
+
+`beacon endpoint inventory` reports both scopes, so an install at either is visible.
+
+### Registered events
+
+Kiro exposes eleven triggers. Asymptote registers five of them, and the six it leaves out are covered under [Known gaps](#known-gaps).
+
+| Kiro trigger | Adapter subcommand | Timeout |
+|--------------|--------------------|---------|
+| `SessionStart` | `session-start` | 10 s |
+| `UserPromptSubmit` | `prompt-submit` | 30 s |
+| `PreToolUse` | `pre-tool` | 10 s |
+| `PostToolUse` | `post-tool` | 10 s |
+| `Stop` | `stop` | 45 s |
+
+<Warning>
+**Kiro hook timeouts are seconds, not milliseconds.** The same `timeout` field is milliseconds on [Qwen Code](/runtimes/qwen-code), in a hooks file that looks similar. Kiro's own default is 60 seconds; Asymptote writes explicit lower values, because 60 seconds is a long time to hold an agent turn for a hook that finishes in milliseconds. These are ceilings on a hang, not budgets. `0` is never written: on Kiro it means *no timeout at all*, not "the default".
+</Warning>
+
+Asymptote's hooks carry no `matcher`. The field is a regex whose subject depends on the trigger — a tool name on `PreToolUse` and `PostToolUse`, the prompt text on `UserPromptSubmit`, nothing at all on `SessionStart` and `Stop` — and omitting it means always-match, which is what a telemetry hook wants on all five. The `*` that means "all tools" in the IDE's tool-name field is a different thing here and is not a valid regex.
+
+### Asymptote owns one filename and nothing else
+
+Because Kiro loads every file in the directory, an install is additive by construction: your `lint-on-save.json` keeps working, untouched, and Asymptote never parses it.
+
+The one thing Asymptote does claim is the name `beacon-endpoint.json`. If a file with that name already exists and holds a hook Asymptote did not write, both install and uninstall **refuse** with an error naming the hook, rather than overwriting or deleting it — move that hook into another file in the same directory and run the install again. A file at that name that Kiro itself could not parse is overwritten, since there are no live hooks in it to protect.
+
+Re-running the install rewrites the file rather than appending to it, so a repair does not end with each trigger registered twice.
+
+### The hook environment
+
+Kiro runs a `command` action as a shell command in the project root and sends the hook event as JSON on stdin. On `UserPromptSubmit` the IDE also exports the prompt as `USER_PROMPT`; Asymptote reads the payload's `prompt` field instead, which both surfaces send.
+
+Asymptote passes the endpoint log and config locations to `beacon-hooks` as `--log` and `--config` flags rather than through the environment, so a hook finds them wherever it runs.
+
+<Warning>
+**On Kiro, a hook's stdout is model context, not a response.** Kiro's hook contract is exit codes: on exit 0 a hook's stdout is *added to the agent's context* for `SessionStart` and `UserPromptSubmit`, and ignored for everything else. Asymptote therefore writes **nothing** to stdout on Kiro — an observing hook that emitted its usual no-op JSON object would be putting unexplained text in front of the model at the start of every session and before every prompt. Silence is a complete answer under an exit-code contract.
+</Warning>
+
+## Discovery and status
+
+```bash title="Show Kiro hook status"
+beacon endpoint hooks status --harness kiro
+```
+
+Kiro reports as the `kiro` harness with capability `hooks`, and every event carries `harness.collection_method=hook`: the events, the payload shapes, and the v1 hook schema are all AWS's. Asymptote owning the file it writes is a question of who authored it, not of who defines the contract — it ships no plugin source Kiro loads and executes.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. Kiro hooks are installed separately, because they live in a user config directory or a repository rather than in collector service configuration:
+
+```bash
+beacon endpoint hooks install --harness kiro                      # ~/.kiro/hooks/
+beacon endpoint hooks install --harness kiro --level project      # <repo>/.kiro/hooks/
+beacon endpoint hooks status --harness kiro
+beacon endpoint hooks uninstall --harness kiro
+```
+
+Commit `.kiro/hooks/beacon-endpoint.json` if you want the hooks to apply to everyone working in the repository, and to Kiro Web sessions on it.
+
+Uninstall removes the file Asymptote wrote and nothing else. Your own hook files in the same directory are never touched.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through `.kiro/hooks/beacon-endpoint.json` at both scopes |
+| Harness attribution | Supported. `kiro`, `kiro_ide`, `kiro-ide`, `kiro ide`, `kiro_cli`, `kiro-cli`, `kiro cli`, `kirocli`, `kiro_code`, `kiro-code`, `kiro code`, `kirocode`, `kiro_agent`, `kiro-agent`, `kiro agent`, and `kiro.dev` normalize to `kiro` |
+| Hook install, status, uninstall, and repair | Supported |
+| Session lifecycle | Supported. `session.started` from `SessionStart`, and `tool.completed` from `Stop` |
+| Prompts | Supported. `prompt.submitted` from `UserPromptSubmit` |
+| Tool use | Supported for pre-tool and post-tool activity |
+| Commands | Supported. `command.executed` with the command and its output |
+| File activity | Supported. `file.read` and `file.modified` with paths, operations, and diffs where the argument shape resolves |
+| MCP activity | Supported. Recognized from Kiro's `@server/tool` naming, with the server and tool split out |
+| Agent responses | Supported. `agent.message` from the `Stop` payload's `assistant_response` |
+| Failed tools | Supported. `tool.failed` at high severity when the tool result reports `success: false` |
+| Approval decisions | Not collected. See [Known gaps](#known-gaps) |
+| Token usage and cost | Not collected. See [Known gaps](#known-gaps) |
+| Spec task lifecycle | Not collected. See [Known gaps](#known-gaps) |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent. Kiro hooks are installed per repository or in the logged-in user's context |
+
+### Tool taxonomy
+
+Kiro publishes its tool **names** and not its tool **argument schemas**, so Asymptote classifies on names alone, from a table covering Kiro's whole published catalog and its aliases:
+
+| Tool | Recorded as |
+|------|-------------|
+| `read` / `fs_read` / `fsRead`, `read_file`, `read_files`, `list_directory` | `file.read` |
+| `file_search` / `glob`, `grep_search` / `grep`, `code`, `read_code` | `file.read`, against the path or directory searched |
+| `write` / `fs_write` / `fsWrite` | `file.modified`, operation `create` |
+| `fs_append`, `str_replace` | `file.modified`, operation `modify` |
+| `delete_file` | `file.modified`, operation `delete` |
+| `shell` / `execute_bash` / `execute_cmd`, `control_bash_process` | `command.executed`, with `command.output` |
+| `@server/tool` | `mcp.tool_invoked`, with `mcp.server` and `mcp.tool` |
+| `aws` / `use_aws`, `web_search`, `web_fetch`, `invoke_subagent`, `get_process_output`, `list_processes`, and the rest | `tool.invoked` |
+
+Two entries in that table are there because the generic classifier every runtime shares gets them wrong. `execute_bash` contains none of the words that classifier looks for, so Kiro's shell tool would otherwise be an unclassified `tool.invoked` — a shell execution missing from every query that looks for one. And `list_processes` and `get_process_output` read process state rather than run anything, so they are recorded as plain tool calls rather than as command executions.
+
+`aws` / `use_aws` is deliberately **not** `command.executed`. It does run the AWS CLI, but its arguments are a service, an operation, and a parameter map rather than a command string, so classifying it as a command would produce a command event with no command in it. It is recorded as the tool call it is, with the tool name intact.
+
+### The read tool's path lives in an array
+
+Kiro's most frequent tool takes an `operations` array rather than a `path`:
+
+```json
+{"hook_event_name": "preToolUse", "tool_name": "read",
+ "tool_input": {"operations": [{"mode": "Line", "path": "/repo/docs/hooks.md"}]}}
+```
+
+Asymptote reads it, so a read event carries a file. A call naming several files records the first — the endpoint schema's `file.path` is one string, and joining them would produce a value no rule matching on `file.path` could use.
+
+### Diffs, and what Asymptote will not guess
+
+Kiro does not publish its write tool's arguments, so the diff builder reads **both** plausible spellings of each field: `file_text`, `old_str`, and `new_str` from the Amazon Q Developer CLI lineage Kiro CLI descends from, and `content`, `old_string`, and `new_string` from the ecosystem convention.
+
+That is deliberately not guessing. A shape Asymptote cannot read produces **no diff**, never a wrong one — the event still records `file.modified` with the path and the operation, and only the diff is honestly unavailable.
+
+A failed write is never recorded as an edit. Kiro reports one with the same tool name and the same arguments as a success, and `success` on the result is the only thing that separates them; without that guard a diff would be built from a write that never landed.
+
+<Note>
+**`command` on a write is not a shell command.** Kiro's write tool descends from a multiplexed `fs_write` where `command` names the editor operation — `create`, `str_replace`, `insert` — and `command` is also what the shell tool calls its command line. Asymptote guards on the tool name, so an editor operation is never recorded under `command.command` and a real shell command is never dropped.
+</Note>
+
+## Approvals and enforcement
+
+**Asymptote records no approval decisions for Kiro, and does not synthesize any.**
+
+Kiro genuinely does ask the operator — through `permissions.yaml` rules and an interactive trust picker — and exposes none of that to a hook. `PreToolUse` fires identically whether the call was pre-approved by a rule, waved through by autopilot, or about to stop and wait for a person. An `approval.allowed` derived from it would therefore claim a decision in exactly the cases where none has been made yet, which is worse than the runtimes that have no approval gate at all. This is the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), [OpenHands](/runtimes/openhands), and [fx](/runtimes/vercel-fx).
+
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. Kiro is one of the runtimes where a provider deny does take effect, and it is the only one where the deny is **not** a JSON object: Asymptote exits with code **2** and writes the reason to stderr, which is Kiro's documented way to block `PreToolUse`. Kiro hands that stderr text to the agent as the explanation for the refusal. Any other non-zero exit code is an error to Kiro rather than a block, which is why Asymptote exits 0 on every other path.
+
+## Data handling
+
+Kiro content is handled like every other runtime. Prompts, tool arguments, commands, command output, paths, diffs, and the agent's final response are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+
+Unlike [Qwen Code](/runtimes/qwen-code) and [Muse Code](/runtimes/muse-code), Asymptote does **not** preserve the verbatim Kiro payload under a `raw` key. Kiro's envelope has no field left over once the readers have run, so keeping the payload would duplicate `tool_input` and `tool_response` — file contents included — to preserve nothing.
+
+## Known gaps
+
+- **No approval decisions.** Kiro exposes no approval or permission hook, and Asymptote does not synthesize one from `PreToolUse`. Approval rules and dashboards will show nothing for this runtime.
+- **No token usage or cost.** No Kiro hook payload carries token counts or cost. Kiro activity therefore does not appear in `beacon token-usage` reports or the dashboard token view.
+- **No spec task lifecycle.** Kiro's `PreTaskExec` and `PostTaskExec` triggers announce a spec task starting and finishing, and they are real signal with no duplicate elsewhere — but Kiro does not document what they put on stdin, and without a task id or name the event would say only that some task began. Asymptote does not subscribe to them. This is the one gap a published payload would close.
+- **No file-trigger events.** `PostFileCreate`, `PostFileSave`, and `PostFileDelete` are deliberately not subscribed to. Kiro's file triggers fire only for changes the agent made, and every such change goes through a write tool — so subscribing would record two events for one write with no way for a reader to tell they were the same action, and the duplicate would be the poorer of the two: a file trigger offers a path where `PostToolUse` carries the path, the operation, the content, and the result. Nothing is lost, and double-counting a file change in a security log is avoided.
+- **No per-session end event.** Kiro's `Stop` fires when the agent finishes a turn, not when a session ends, so it is recorded as `tool.completed` rather than `session.ended`. There is no session-end trigger to subscribe to.
+- **No tool call identity.** The hook payload carries no per-call identifier, so `gen_ai.tool.call.id` is absent and a pre-tool event cannot be joined to its post-tool event by id.
+- **No transcript path.** Kiro keeps session state in its own directory and no payload field points at it.
+- **No compaction or subagent events.** Kiro emits neither on a hook, so neither is recorded.
+- **Write argument shapes are inferred.** Kiro publishes its tool names and not its tool argument schemas. Asymptote reads both plausible spellings and records no diff when neither resolves — see [Diffs, and what Asymptote will not guess](#diffs-and-what-asymptote-will-not-guess).
+- **Kiro Web and Mobile do not read a user-scope install.** Neither surface has a local filesystem, so only hooks committed under a repository's `.kiro/hooks/` reach them.
+
+## Deployment notes
+
+Hooks are loaded when a session starts, so an install taken while Kiro is running takes effect on the next session. Restart Kiro, or start a new session, after installing or removing hooks.
+
+Confirm status, then generate one Kiro event and check the log:
+
+```bash
+beacon endpoint hooks status --harness kiro
+beacon endpoint doctor --system
+grep '"name":"kiro"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+If Kiro telemetry is missing:
+
+- Confirm the Kiro version. `.kiro/hooks/*.json` needs IDE 1.0 or CLI 3.0; earlier versions use formats Asymptote does not write. In the CLI, `kiro-cli agent migrate` converts 2.x hooks.
+- Confirm the file exists at the scope you installed and contains commands with `--platform kiro`.
+- Check `$KIRO_HOME`: if it is set, the user-scope file is under that directory, not `~/.kiro`.
+- Confirm the file's `version` is `"v1"`. Kiro skips a hook file whose version it does not recognize, without an error.
+- Confirm hook timeouts are second values, not milliseconds.
+- Run `/config hooks` in a V3 session to see the hooks loaded for that session.
+- Start a new session so the updated registration is loaded.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures each runtime.
+  </Card>
+</Columns>

@@ -32,6 +32,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity emitted through Copilot CLI spans |
 | [Grok Build](/runtimes/grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session-end, command, and file telemetry |
+| [Kiro](/runtimes/kiro) | Native hooks through a Beacon-owned file in `.kiro/hooks/` | Session start, prompts, pre-tool and post-tool activity, commands with output, file reads and edits, MCP tool calls, failed tools, and the agent's final response. No approval decisions or token usage, because Kiro exposes neither on a hook |
 | [Muse Code](/runtimes/muse-code) | Native hooks through a managed hooks file | Session start, prompt, pre-tool, post-tool, permission request, subagent, context compaction, stop, command, and file telemetry |
 | [Oh My Pi](/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle, operator approval decisions, commands including operator `!` and `$` commands, file reads and edits with the unified patch, MCP tool activity, agent reasoning, and token usage |
 | [OpenCode](/runtimes/opencode) | Managed plugin hooks | Chat messages, session events, command execution, permission activity, diffs, and errors |

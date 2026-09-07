@@ -106,6 +106,7 @@ var usageExpectation = map[string]struct {
 	"claude_web":    {ExpectNone, "no recorded claude.ai stream has carried a usage object"},
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
+	"kiro":          {ExpectNone, "hook payloads carry no token counts"},
 }
 
 // InstalledConfig is the part of a config-scanner row that install detection reads.

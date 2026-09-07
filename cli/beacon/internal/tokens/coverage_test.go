@@ -212,7 +212,7 @@ func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
 	scanned := []string{
 		"antigravity_cli", "claude_code", "cline", "codex_cli", "copilot_cli", "cursor",
 		"devin-cli", "devin-desktop", "factory", "gemini_cli", "grok", "hermes",
-		"muse_code", "omp", "opencode", "openhands", "pi_cli", "qwen_code", "vscode",
+		"kiro", "muse_code", "omp", "opencode", "openhands", "pi_cli", "qwen_code", "vscode",
 	}
 	for _, runtime := range scanned {
 		harness := normalizedHarnessForTest(runtime)
@@ -249,6 +249,13 @@ func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
 	openhands := lineFor(t, Coverage([]schema.Event{plainEvent("openhands")}, []string{"openhands"}), "openhands")
 	if openhands.Status != CoverageNotInstrumented || openhands.Expectation != ExpectNone {
 		t.Errorf("openhands = %+v, want not_instrumented/none -- no OpenHands hook payload carries token counts", openhands)
+	}
+	// A runtime missing from the expectation table is reported as silent, which is the one status
+	// the table exists to keep clean: it means "should be reporting and is not". Kiro reports no
+	// tokens because no Kiro hook payload carries any, so its row has to say expected-none.
+	kiro := lineFor(t, Coverage([]schema.Event{plainEvent("kiro")}, []string{"kiro"}), "kiro")
+	if kiro.Status != CoverageNotInstrumented || kiro.Expectation != ExpectNone {
+		t.Errorf("kiro = %+v, want not_instrumented/none -- no Kiro hook payload carries token counts", kiro)
 	}
 
 	grokBot := lineFor(t, Coverage([]schema.Event{plainEvent("grok_bot")}, nil), "grok_bot")
