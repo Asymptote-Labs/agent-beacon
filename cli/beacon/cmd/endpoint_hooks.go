@@ -203,6 +203,20 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 				"and its agent server (used by the CLI and the GUI) reads only the repository file. " +
 				"Run the install again with --level project inside a repository to cover those.")
 		}
+	case "kiro":
+		status, err := endpointhooks.InstallKiro(endpointhooks.KiroOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Kiro hooks installed: %s\n", status.HooksPath)
+		// No scope caveat, unlike OpenHands just above. Kiro merges hook files across scopes
+		// rather than resolving them by precedence, so a user-scope install keeps working inside a
+		// repository that has hooks of its own, and one install covers the IDE and the CLI at
+		// once. There is nothing here that a successful install leaves silently uncovered.
 	case "muse":
 		status, err := endpointhooks.InstallMuse(endpointhooks.MuseOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -416,6 +430,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "kiro":
+		status, err := endpointhooks.UninstallKiro(endpointhooks.KiroOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "muse":
 		status, err := endpointhooks.UninstallMuse(endpointhooks.MuseOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -554,6 +578,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "kiro":
+			statuses["kiro"] = endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "muse":
 			statuses["muse"] = endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -637,6 +667,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "openhands":
 			status := statuses["openhands"].(endpointhooks.OpenHandsStatus)
 			fmt.Printf("OpenHands hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "kiro":
+			status := statuses["kiro"].(endpointhooks.KiroStatus)
+			fmt.Printf("Kiro hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
 		case "muse":
 			status := statuses["muse"].(endpointhooks.MuseStatus)
