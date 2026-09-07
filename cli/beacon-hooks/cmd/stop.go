@@ -40,6 +40,13 @@ func runStop(cmd *cobra.Command, args []string) {
 	logger := newHookLogger("stop", platformFlag, sessionID)
 
 	logger.Debug("Stop hook called", "session_id", sessionID, "has_transcript", transcriptPath != "", "platform", platformFlag)
+	// Kiro puts the agent's final reply on this payload and nowhere else. Recorded before the
+	// completion event below and before the sessionID guard, because the reply happened before the
+	// turn ended and because a payload with no session id still carries real model output --
+	// dropping it there would lose the message to protect a field it does not need.
+	if platformFlag == kiroPlatform {
+		emitKiroAssistantResponse(logger, input, sessionID)
+	}
 	if sessionID == "" {
 		if isDevinLikePlatform(platformFlag) {
 			logger.Info("stop completed")

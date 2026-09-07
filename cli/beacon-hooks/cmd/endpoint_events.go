@@ -314,7 +314,13 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 		// that names the editor operation (view, str_replace, create), not a shell command.
 		// Promoting it into command.command would store an editor operation as shell execution and
 		// let the policy seam upgrade tool.invoked to command.executed.
-		if !(platformFlag == openHandsPlatform && openHandsFileEditorTools[strings.ToLower(strings.TrimSpace(toolName))]) {
+		// Kiro's write tool has the same shape for the same reason: its `command` argument may name
+		// an editor operation (create, str_replace, insert) rather than a shell command, because
+		// the tool descends from Amazon Q Developer CLI's multiplexed fs_write. Guarded on the
+		// tool name so `shell`/`execute_bash`, where `command` really is the command line, keeps
+		// the field that makes a shell event worth recording.
+		if !(platformFlag == openHandsPlatform && openHandsFileEditorTools[strings.ToLower(strings.TrimSpace(toolName))]) &&
+			!(platformFlag == kiroPlatform && kiroWriteCommandIsEditorOperation(toolName, toolInput)) {
 			fields["command"] = map[string]interface{}{"command": command}
 			fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
 		}
@@ -326,7 +332,15 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	// `dir_path` is the snake_case sibling of `DirectoryPath` already in this list: it is what
 	// OpenHands' list_directory names its target. Unambiguous, so reading it costs nothing and its
 	// absence costs a `file` field on every directory listing.
-	if path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "absolute_path", "notebook_path", "DirectoryPath", "dir_path", "SearchPath", "searchPath"); path != "" {
+	path := firstToolString(toolInput, "file_path", "filePath", "path", "Path", "AbsolutePath", "absolute_path", "notebook_path", "DirectoryPath", "dir_path", "SearchPath", "searchPath")
+	// Kiro's read tool -- its most frequent one -- puts the path inside an `operations` array
+	// rather than at the top level of tool_input, so every key above misses it and a read event
+	// would carry no file at all. Asked after the shared list rather than before it, because a
+	// payload that does carry a top-level path has said something more direct.
+	if path == "" && platformFlag == kiroPlatform {
+		path = kiroToolPath(toolInput)
+	}
+	if path != "" {
 		fields["file"] = map[string]interface{}{
 			"path":      path,
 			"operation": fileOperation(toolName, toolInput),
@@ -441,6 +455,11 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 	// platform like the Cascade pair above, because `kind` is a key other runtimes use for other
 	// things.
 	hasOpenHandsMCPObservation := platformFlag == openHandsPlatform && openHandsIsMCPToolCall(toolResponse)
+	// Kiro says so in the tool name, which is the easy case -- but it says it with a prefix no
+	// generic signal above recognizes: `@postgres/query` contains no "mcp", carries no mcp_*
+	// argument, and comes back with whatever the server returned. Keyed on the platform because a
+	// leading "@" is Kiro's convention and not a general one.
+	hasKiroMCPToolName := platformFlag == kiroPlatform && kiroIsMCPToolName(toolName)
 
 	server := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "server", "server_name", "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
 	tool := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "tool", "tool_name", "function_name", "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name", "gen_ai.tool.name")
@@ -450,6 +469,20 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 	resource := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "mcp.resource.uri", "mcp_resource_uri", "resource_uri", "uri")
 	session := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "mcp.session.id", "mcp_session_id")
 
+	if hasKiroMCPToolName {
+		// Read before the shared derivation rather than after, because deriveMCPServerTool
+		// recognizes only the `mcp:` and `mcp__` spellings and would leave both halves empty for
+		// an `@server/tool` name -- recording an MCP call whose server and tool are blank.
+		if server == "" || tool == "" {
+			derivedServer, derivedTool, _ := kiroMCPServerTool(toolName)
+			if server == "" {
+				server = derivedServer
+			}
+			if tool == "" {
+				tool = derivedTool
+			}
+		}
+	}
 	if derivedServer, derivedTool := deriveMCPServerTool(toolName); derivedServer != "" || derivedTool != "" {
 		if server == "" {
 			server = derivedServer
@@ -459,7 +492,7 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 		}
 	}
 
-	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || strings.Contains(strings.ToLower(toolName), "mcp")
+	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || hasKiroMCPToolName || strings.Contains(strings.ToLower(toolName), "mcp")
 	if !isMCP {
 		return nil
 	}
@@ -729,6 +762,11 @@ func fileOperation(toolName string, toolInput map[string]interface{}) string {
 			return operation
 		}
 	}
+	if platformFlag == kiroPlatform {
+		if operation := kiroFileOperation(toolName, toolInput, nil); operation != "" {
+			return operation
+		}
+	}
 	lower := strings.ToLower(toolName)
 	switch {
 	case strings.Contains(lower, "read") || strings.Contains(lower, "view") || strings.Contains(lower, "list") || strings.Contains(lower, "grep") || strings.Contains(lower, "search"):
@@ -751,6 +789,11 @@ func actionForTool(hookEvent, toolName string, toolInput, toolResponse map[strin
 	lower := strings.ToLower(toolName)
 	if platformFlag == openHandsPlatform {
 		if action := openHandsToolAction(toolName, toolInput, toolResponse); action != "" {
+			return action
+		}
+	}
+	if platformFlag == kiroPlatform {
+		if action := kiroToolAction(toolName, toolInput, toolResponse); action != "" {
 			return action
 		}
 	}

@@ -50,7 +50,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform {
 		// Muse Code belongs on the observing side rather than with the runtimes whose pre-tool
 		// notification gets turned into a synthesized approval, and the reason is that it has a
 		// real one. Its PermissionRequest event is a separate hook Beacon also subscribes to, so
@@ -64,6 +64,14 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		// not surfaced to hooks. Synthesizing approval.allowed from it would put an operator
 		// decision in the log that no operator made, which is the call Cline, Pi and fx already
 		// settled the same way.
+		//
+		// Kiro is on that same side, and it is the sharpest case for it: Kiro genuinely does ask
+		// the operator, through permissions.yaml rules and an interactive trust picker, and it
+		// exposes none of that to a hook. PreToolUse fires whether the call was pre-approved by a
+		// rule, waved through by autopilot, or about to stop and wait for a person -- so an
+		// approval.allowed derived from it would claim a decision was made in the very cases where
+		// one has not been made yet, on a runtime where real decisions exist and are invisible.
+		// That is worse than the no-approval-gate runtimes, not better.
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -146,7 +154,13 @@ func preToolResponse() map[string]interface{} {
 	// in the conversation, so it puts a decision Beacon did not make in front of the user -- and if
 	// OpenHands ever reads that key, an observing hook would begin approving tool calls on the
 	// user's behalf without a line of Beacon changing. An empty object asserts nothing either way.
-	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform {
+	// Kiro reaches this branch and never uses what it returns: hookStdoutIsConsumedAsAgentContext
+	// suppresses the write entirely, because on Kiro stdout is model context rather than a
+	// response object. The empty object is still the right value to hand back -- it is what the
+	// suppression would have to fall back to if that ever changed, and it keeps this function
+	// answering the same question for every runtime rather than having one whose answer is
+	// "nothing, and the writer knows why".
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform {
 		return emptyResponse
 	}
 	return allowResponse
