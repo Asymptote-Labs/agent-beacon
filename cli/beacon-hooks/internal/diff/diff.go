@@ -369,3 +369,102 @@ func FromContentChange(filePath, oldContent, newContent string) string {
 	}
 	return fromWriteTool(filePath, newContent, oldContent)
 }
+
+// FromKiroWrite builds the diff for one Kiro write call.
+//
+// Kiro is the one supported runtime that publishes its tool names and not its tool arguments, so
+// this reads every plausible spelling of each field rather than one. That sounds like guessing and
+// is the opposite: an unrecognized shape returns "", which records the file event with its path
+// and no diff, while a shape that resolves produces a diff from values that can only have been the
+// content. There is no reading here that could produce a *wrong* diff -- only one or none.
+//
+// The two spellings come from two real places. `file_text`, `old_str` and `new_str` are Amazon Q
+// Developer CLI's names for the same tool, which Kiro CLI descends from and still documents a
+// migration path out of; `content`, `old_string` and `new_string` are the ecosystem convention the
+// shared resolver already knows. Reading both costs one lookup.
+//
+// operation is passed in rather than derived, because deciding whether a write is a create or a
+// replacement is the taxonomy's job and it already answered. An empty operation means the tool
+// name is the whole answer.
+func FromKiroWrite(operation, toolName string, toolInput, toolResponse map[string]interface{}) string {
+	filePath := NormalizePath(kiroWritePath(toolInput, toolResponse))
+	if filePath == "" {
+		return ""
+	}
+	if operation == "" {
+		operation = kiroOperationForToolName(toolName)
+	}
+	switch operation {
+	case "create":
+		content := GetStringFromMaps("file_text", toolInput, toolResponse)
+		if content == "" {
+			content = GetStringFromMaps("content", toolInput, toolResponse)
+		}
+		if content == "" {
+			content = GetStringFromMaps("text", toolInput, toolResponse)
+		}
+		if content == "" {
+			return ""
+		}
+		// A create that reports the previous contents is an overwrite, and rendering it as a new
+		// file would hide what was replaced. Kiro is not documented to send this; it is read
+		// because fromWriteTool already distinguishes the two cases and an absent value degrades
+		// to the new-file rendering that would have been produced anyway.
+		original := GetStringFromMaps("original_file", toolInput, toolResponse)
+		if original == "" {
+			original = GetStringFromMaps("originalFile", toolInput, toolResponse)
+		}
+		if original == "" {
+			original = GetStringFromMaps("old_content", toolInput, toolResponse)
+		}
+		return fromWriteTool(filePath, content, original)
+	case "str_replace":
+		oldString := resolveEditString("old_string", "oldString", "old_str", toolInput, toolResponse)
+		newString := resolveEditString("new_string", "newString", "new_str", toolInput, toolResponse)
+		return fromEditTool(filePath, oldString, newString)
+	case "insert", "append":
+		// An insert or an append adds lines and removes none, so the diff has an empty old side.
+		// Rendering it through the same edit builder keeps the shape identical to a replacement's,
+		// which is what a reader and a rule matching on file.diff both expect.
+		added := resolveEditString("new_string", "newString", "new_str", toolInput, toolResponse)
+		if added == "" {
+			added = GetStringFromMaps("content", toolInput, toolResponse)
+		}
+		if added == "" {
+			added = GetStringFromMaps("file_text", toolInput, toolResponse)
+		}
+		return fromEditTool(filePath, "", added)
+	default:
+		// Includes "delete" and "undo_edit". Neither carries content on both sides, so there is
+		// nothing to render; the caller records the file event without a diff.
+		return ""
+	}
+}
+
+// kiroOperationForToolName maps Kiro's split write tools onto the operation each one performs.
+//
+// Kiro's unified tool catalog lists the operations as separate tools while its CLI reference lists
+// one multiplexed tool, so a payload may name the operation in the tool or in an argument. This
+// covers the first case; the caller covers the second.
+func kiroOperationForToolName(toolName string) string {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "write", "fs_write", "fswrite":
+		return "create"
+	case "str_replace":
+		return "str_replace"
+	case "fs_append":
+		return "append"
+	default:
+		return ""
+	}
+}
+
+// kiroWritePath resolves the file a Kiro write call named, reading the arguments before the result.
+func kiroWritePath(toolInput, toolResponse map[string]interface{}) string {
+	for _, key := range []string{"path", "file_path", "filePath", "Path", "absolute_path"} {
+		if value := GetStringFromMaps(key, toolInput, toolResponse); value != "" {
+			return value
+		}
+	}
+	return ""
+}

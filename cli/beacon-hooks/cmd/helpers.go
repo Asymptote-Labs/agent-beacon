@@ -20,14 +20,22 @@ func readStdinJSON() (map[string]interface{}, error) {
 	return input, err
 }
 
-// outputJSON writes a JSON object to stdout.
+// outputJSON writes a JSON object to stdout, unless the runtime would read it as agent context.
+//
+// The suppression is not an optimization. On a runtime whose hook contract is exit codes rather
+// than response objects, stdout is either ignored or pasted into the model's context window, so
+// the no-op `{}` every command here finishes with is at best unread and at worst text Beacon put
+// in front of the model. See hookStdoutIsConsumedAsAgentContext.
 func outputJSON(data map[string]interface{}) {
+	if hookStdoutIsConsumedAsAgentContext(platformFlag) {
+		return
+	}
 	json.NewEncoder(os.Stdout).Encode(data)
 }
 
 // outputJSONAndExit writes a JSON object to stdout and exits.
 func outputJSONAndExit(data map[string]interface{}) {
-	json.NewEncoder(os.Stdout).Encode(data)
+	outputJSON(data)
 	os.Exit(0)
 }
 

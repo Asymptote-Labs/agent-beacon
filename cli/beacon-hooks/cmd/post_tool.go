@@ -83,6 +83,14 @@ func runPostTool(cmd *cobra.Command, args []string) {
 			outputJSON(emptyResponse)
 			return
 		}
+	} else if platformFlag == kiroPlatform {
+		// Kiro gets its own reader rather than riding parseClaudeCopilotInput because a write may
+		// name its operation in an argument rather than in the tool name, and because the argument
+		// spellings are not published -- both of which the shared reader has no way to ask about.
+		// A nil result is not a failure: it means this payload is a read, a shell command, a
+		// delete or a write this build could not read, and it falls through to the observing path
+		// below, which still records the call with its path and operation.
+		params = parseKiroEdit(input, logger)
 	} else {
 		params = parseClaudeCopilotInput(input, logger)
 	}
@@ -396,6 +404,16 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 			return
 		}
 	}
+	// Kiro says so on the result itself: its documented tool_response carries `success`. Same
+	// predicate the diff path uses, called rather than restated, so the two cannot drift the way
+	// the Qwen pair once did.
+	if platformFlag == kiroPlatform {
+		applyKiroToolResult(fields, toolName, toolInput, toolResponse)
+		if kiroToolFailed(toolResponse) {
+			emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
+			return
+		}
+	}
 	action := actionForTool(hookEvent, toolName, toolInput, toolResponse)
 	category := "tool"
 	if strings.HasPrefix(action, "file.") {
@@ -499,6 +517,19 @@ func isFileEditTool(platform, toolName string) bool {
 	}
 	if platform == "qwen" {
 		return isQwenFileEditTool(toolName)
+	}
+	// Kiro's write tools are named things the Claude Code fallback below does not recognize --
+	// `fs_write`, `str_replace`, `fs_append` -- and the one it would recognize by substring,
+	// `delete_file`, is not an edit that can produce a diff. The taxonomy answers both, from the
+	// same table the action classifier reads, so the two cannot disagree about what a write is.
+	//
+	// nil arguments, deliberately: this predicate takes only a name, and the one Kiro case that
+	// needs more -- a multiplexed `write` whose `command` argument says "delete" -- never reaches
+	// here, because kiroToolAction answers first for every tool in the table. Threading the
+	// arguments through this shared signature for a branch that cannot be taken would change six
+	// runtimes' call sites to document one that does not happen.
+	if platform == kiroPlatform {
+		return isKiroFileEditTool(toolName, nil)
 	}
 	// Muse Code's tool names are not published, and the fallback below is Claude Code's PascalCase
 	// set, which a snake_case runtime never matches -- so without a branch here a Muse file edit

@@ -1065,6 +1065,14 @@ func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string),
 	if captured.err != nil {
 		t.Fatalf("read hook output: %v", captured.err)
 	}
+	// No output at all is a valid result, not a decode failure. A runtime whose hook contract is
+	// exit codes rather than response objects gets nothing on stdout -- see
+	// hookStdoutIsConsumedAsAgentContext -- and a helper that fataled on it could not test those
+	// runtimes at all. Distinguished from a truncated write, which still reaches the decoder below
+	// and still fails there.
+	if len(bytes.TrimSpace(captured.data)) == 0 {
+		return nil
+	}
 	var out map[string]interface{}
 	// Decoder rather than Unmarshal, so trailing output after the JSON value is tolerated exactly
 	// as it was before.
