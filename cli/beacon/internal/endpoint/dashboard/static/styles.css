@@ -485,7 +485,25 @@ tr:hover {
 }
 
 .col-timestamp {
-  width: 11rem;
+  width: 8rem;
+  text-align: center;
+}
+
+.timestamp-cell {
+  vertical-align: middle;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+  line-height: 1.15;
+}
+
+.timestamp-cell span {
+  display: block;
+  white-space: nowrap;
+}
+
+.timestamp-time {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .mono {
@@ -1860,9 +1878,10 @@ body[data-page="sessions"] .search-input {
   font-size: 0.78rem;
 }
 
-body[data-page="sessions"] th:nth-child(8),
-body[data-page="sessions"] td:nth-child(8) {
+body[data-page="sessions"] th,
+body[data-page="sessions"] td {
   text-align: center;
+  vertical-align: middle;
 }
 
 .session-harness-cell {
