@@ -565,7 +565,13 @@ func preserveExistingLog(cfg Config) error {
 	if info.Size() == 0 {
 		return os.Remove(cfg.LogPath)
 	}
-	if st, err := readState(cfg.StatePath); err == nil && st.LastObject != "" && uploadConfigured(cfg) {
+	st, stateErr := readState(cfg.StatePath)
+	hasState := stateErr == nil && st.LastObject != ""
+	// Bucket targets can only re-upload under the object name a previous run already used, so
+	// they need state. Managed ingest is addressed by the lines' own session ids, so a log from
+	// a run that never got a successful batch out (no state) is shipped whole rather than
+	// renamed aside, where an ephemeral sandbox would lose it.
+	if uploadConfigured(cfg) && (hasState || cfg.Upload == uploadAsymptote) {
 		snapshot, cleanup, err := snapshotLog(cfg.LogPath)
 		if err == nil {
 			defer cleanup()
@@ -576,7 +582,9 @@ func preserveExistingLog(cfg Config) error {
 				// Ship whatever the previous run's last hook did not get to, under that run's
 				// identity so the stored offset applies and nothing is sent twice.
 				previous := cfg
-				previous.Provider, previous.RunID = st.Provider, st.RunID
+				if hasState {
+					previous.Provider, previous.RunID = st.Provider, st.RunID
+				}
 				uploadErr = uploadAsymptoteIncremental(ctx, previous, snapshot, info.Size())
 			} else {
 				uploadErr = uploadSnapshot(ctx, cfg, st.LastObject, snapshot)

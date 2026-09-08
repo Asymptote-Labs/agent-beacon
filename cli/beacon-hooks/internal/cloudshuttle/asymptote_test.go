@@ -224,3 +224,24 @@ func TestSessionStartFlushesThePreviousRunsTailToManagedIngest(t *testing.T) {
 		t.Fatal("the flushed log should be removed before the new run starts")
 	}
 }
+
+func TestSessionStartShipsALogWhoseRunNeverUploaded(t *testing.T) {
+	server, calls := startFakeIngest(t, 200)
+	cfg := asymptoteConfig(t, server)
+	appendLines(t, cfg.LogPath, `{"event":1}`, `{"event":2}`) // the previous run's Stop hook never fired
+
+	next := cfg
+	next.RunID = "run-2"
+	if err := preserveExistingLog(next); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 1 || strings.Join((*calls)[0].lines, "|") != `{"event":1}|{"event":2}` {
+		t.Fatalf("expected the whole never-sent log to be posted: %+v", *calls)
+	}
+	if _, err := os.Stat(cfg.LogPath); !os.IsNotExist(err) {
+		t.Fatal("the shipped log should be removed, not renamed aside")
+	}
+	if matches, _ := filepath.Glob(cfg.LogPath + ".previous-*"); len(matches) != 0 {
+		t.Fatalf("no .previous-* copy should be left behind: %v", matches)
+	}
+}
