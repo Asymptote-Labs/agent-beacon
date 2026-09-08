@@ -1,6 +1,6 @@
 ---
 title: "Claude Code Cloud Agents"
-description: "Capture Claude Code cloud agent telemetry and forward cloud-agent runtime logs to customer-managed object storage"
+description: "Capture Claude Code cloud agent telemetry and send each session log to Asymptote Managed or to object storage you own"
 ---
 
 <Frame>
@@ -14,43 +14,44 @@ description: "Capture Claude Code cloud agent telemetry and forward cloud-agent 
 
 ## Overview
 
-Use this integration to capture Claude Code cloud-agent activity and upload each
-session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant
-for testing cloud-agent telemetry without running a hosted Asymptote backend.
+Use this integration to capture Claude Code cloud-agent activity and send each
+session log to one of three places: [Asymptote Managed](/deployment/managed),
+where it appears in your dashboard next to your laptops' sessions, or a Google
+Cloud Storage or Amazon S3 bucket you own.
 
 This flow depends on the Beacon CLI. You run `beacon cloud` commands from your
-workstation to create the object-storage upload path, print Claude environment
-variables, and generate the setup script that runs inside the Claude cloud
-sandbox.
-
-<Info>
-  If you're interested in leveraging this telemetry ingest across your
-  enterprise, [Asymptote Managed](/deployment/managed) is designed for
-  production cloud-agent telemetry ingest at scale.
-</Info>
+workstation to create a bucket upload path if you want one, print Claude
+environment variables, and generate the setup script that runs inside the Claude
+cloud sandbox.
 
 ## How it works
 
 Claude Code Cloud Agents run in Anthropic's cloud environment, so Beacon cannot
 use the long-running endpoint agent that local installs use. Instead, the setup
 script installs Beacon hooks inside the sandbox. During a cloud-agent session,
-those hooks write `/tmp/beacon/runtime.jsonl`; at the end of the session, Beacon
-uploads that file to customer-managed object storage.
+those hooks write `/tmp/beacon/runtime.jsonl`. When the agent stops, Beacon
+ships that file: to Asymptote Managed it posts the new lines to the same ingest
+endpoint the laptop forwarder uses, so the session shows up in the dashboard a
+minute or two later; to a bucket it uploads the whole file as one object.
 
 ```mermaid
 flowchart LR
   ClaudeWeb["Claude Code Cloud Agents"] --> Hooks["Beacon hooks in sandbox"]
   Hooks --> RuntimeLog["/tmp/beacon/runtime.jsonl"]
-  RuntimeLog --> Storage["Customer-managed GCS or S3 bucket"]
+  RuntimeLog --> Managed["Asymptote Managed ingest → dashboard"]
+  RuntimeLog --> Storage["Your GCS or S3 bucket"]
 ```
 
 The setup has three parts:
 
-1. Create a dedicated GCS or S3 upload path with Beacon.
+1. Get a device key from Asymptote, or create a GCS or S3 upload path with Beacon.
 2. Add Beacon cloud telemetry environment variables to the Claude Code cloud environment.
 3. Paste a Beacon-generated setup script into the Claude cloud environment.
 
-Each Claude Code cloud agent session writes one readable JSONL object:
+With Asymptote Managed, the sessions land in the same per-organization tables as
+your endpoints' telemetry, attributed to the device you created for the cloud
+environment. With a bucket, each Claude Code cloud agent session writes one
+readable JSONL object:
 
 ```text
 gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<claude_session_id>.jsonl.gz
@@ -71,6 +72,8 @@ s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<clau
   create buckets, IAM users, inline IAM policies, and access keys.
 - Claude Code cloud agent access for the repository you want to test.
 - A Claude cloud environment with outbound access to:
+  - For Asymptote Managed: the ingest host from your device key hand-off
+    (currently `beacon-ingest-gulcylfs4a-uw.a.run.app`)
   - For GCS: `oauth2.googleapis.com` and `storage.googleapis.com`
   - For S3: `s3.<region>.amazonaws.com`
   - `github.com`
@@ -100,7 +103,19 @@ aws sts get-caller-identity
 
 ## 1. Create the upload path
 
-Choose GCS or S3 for the cloud-agent session logs.
+Choose Asymptote Managed, GCS, or S3 for the cloud-agent session logs.
+
+### Asymptote Managed
+
+A cloud sandbox has no browser and no Vector, so it cannot run
+[`beacon endpoint connect`](/cli/endpoint-connect). Instead it authenticates with
+a device key that an Asymptote operator mints for the environment itself: one
+key per cloud environment, bound to your organization, listed on
+`/dashboard/endpoints` like any laptop and revocable from there. Ask your
+Asymptote contact for a key, naming the environment (for example
+"Claude Code web, acme/frontend"). You receive three values to put in the
+environment in step 2: `BEACON_CLOUD_UPLOAD=asymptote`, the ingest URL, and the
+key itself. Self-serve headless enrollment is on the roadmap.
 
 ### GCS
 
@@ -202,13 +217,13 @@ repository.
 Set network access to **Custom** and allow:
 
 ```text
-s3.<region>.amazonaws.com
+beacon-ingest-gulcylfs4a-uw.a.run.app
 github.com
 *.githubusercontent.com
 ```
 
 For GCS, allow `oauth2.googleapis.com` and `storage.googleapis.com` instead of
-the S3 regional hostname.
+the ingest host; for S3, allow `s3.<region>.amazonaws.com`.
 
 Add these common environment variables:
 
@@ -217,6 +232,14 @@ BEACON_ORIGIN=cloud
 BEACON_RUN_PROVIDER=claude_code_web
 BEACON_RUN_EPHEMERAL=true
 BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
+```
+
+For Asymptote Managed, add:
+
+```bash
+BEACON_CLOUD_UPLOAD=asymptote
+BEACON_CLOUD_INGEST_URL=<ingest-url-from-asymptote>
+BEACON_CLOUD_DEVICE_KEY=<bcn_device_...-from-asymptote>
 ```
 
 For GCS, add:
@@ -280,6 +303,18 @@ Read the README, run pwd && ls, create a tiny temporary markdown note under /tmp
 
 ## 5. Verify upload
 
+For Asymptote Managed, open `/dashboard/endpoints`: the cloud environment's
+device shows a fresh **last seen** time as soon as the first batch is accepted,
+and the session appears on `/dashboard/telemetry` within a couple of minutes,
+with `run.provider=claude_code_web` and the Claude session id as the run id.
+To check the key itself from your workstation:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $BEACON_CLOUD_DEVICE_KEY" \
+  "$BEACON_CLOUD_INGEST_URL/v1/ingest/health"     # 200 valid, 401 revoked
+```
+
 For GCS, list the uploaded session objects:
 
 ```bash
@@ -328,11 +363,18 @@ run.run_id=cse_...
 
 ## Security note
 
+The Asymptote Managed flow puts a per-device key in the Claude Code environment.
+It can only append telemetry to your organization's ingest stream; it reads
+nothing and grants no dashboard access, and revoking the device on
+`/dashboard/endpoints` stops it within a minute. This is the one place a Beacon
+device key lives in an environment variable: a sandbox has no keychain and no
+secrets file to hold it, unlike a laptop, where the key stays in a `0600` file.
+
 The self-serve GCS flow above creates a dedicated service account scoped to
 object uploads for one bucket. The S3 flow creates a dedicated IAM user scoped
-to `s3:PutObject` under one prefix. Both flows store credentials in the Claude
-Code environment. This is useful for proof-of-concept testing, but treat those
-environment variables as sensitive credentials.
+to `s3:PutObject` under one prefix. All three flows store credentials in the
+Claude Code environment, so treat those environment variables as sensitive
+credentials.
 
 Claude notes that cloud environment variables are visible to users of that
 environment and recommends avoiding secrets there when possible. Avoid broad
@@ -340,6 +382,14 @@ credentials, rotate or delete the generated key after testing, and review access
 before using this flow with sensitive telemetry.
 
 ## Troubleshooting
+
+### Nothing reaches the dashboard
+
+Run the health check from step 5. A `401` means the key was revoked or the
+approver left the organization; ask for a new key. A `200` with no sessions
+usually means the ingest host is not in the environment's allowed network
+domains, or the Stop hook did not run (the upload happens on Stop and
+SessionEnd). Beacon logs upload failures to the hook log with the HTTP status.
 
 ### The bucket is empty
 

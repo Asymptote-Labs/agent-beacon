@@ -11,6 +11,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### Unreleased
+
+- **Cloud agents can send telemetry to Asymptote Managed** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
+
 ### v1.3.3 · September 4, 2026
 
 - **Homebrew installs Vector again** · `brew install asymptote-labs/tap/beacon` failed
