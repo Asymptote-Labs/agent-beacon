@@ -25,7 +25,7 @@ no policies all yield `{}` and an unchanged turn.
 | `hook.sh` | Cloud-only shim. No-ops unless `CLAUDE_CODE_REMOTE=true`, picks the binary by arch, sets `BEACON_*` telemetry vars. |
 | `bin/beacon-hooks-linux-{amd64,arm64}` | Prebuilt static hook adapters. Committed because the sandbox clones from GitHub and never compiles. Both arches, since the sandbox CPU isn't contractual. |
 | `build.sh` | Rebuild + `chmod` + `git add` + verify modes are `100755`. |
-| `../../.claude/settings.json` | Registers the hooks. `Stop` is load-bearing — it triggers the S3 telemetry upload. |
+| `../../.claude/settings.json` | Registers the hooks. `Stop` is load-bearing — it triggers the telemetry upload to Asymptote Managed ingest. |
 | `../../.mcp.json` | The Slack MCP the agent uses to exfiltrate in pass 1. |
 
 ## ⚠️ The policy MUST be enforcement_type = `block`
@@ -64,6 +64,7 @@ demo/mdr/build.sh && git commit --amend --no-edit && git push -f
 ## Cloud environment
 
 Network access **Custom**, allowing `asymptote-edge-gulcylfs4a-uw.a.run.app`,
+`beacon-ingest-gulcylfs4a-uw.a.run.app`,
 with *"also include default list of common package managers"* checked (`npx`
 needs the npm registry for the Slack MCP). Environment variables:
 
@@ -71,19 +72,18 @@ needs the npm registry for the Slack MCP). Environment variables:
 BEACON_MDR_URL=https://asymptote-edge-gulcylfs4a-uw.a.run.app/v1/mdr/decide
 BEACON_MDR_TOKEN=ask_live_xxxxx_...
 BEACON_MDR_TIMEOUT_MS=4000
-BEACON_CLOUD_UPLOAD=s3
-BEACON_CLOUD_S3_BUCKET=agent-beacon-prod
-BEACON_CLOUD_S3_PREFIX=agent-traces
-BEACON_CLOUD_S3_REGION=us-east-1
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
+BEACON_CLOUD_UPLOAD=asymptote
+BEACON_CLOUD_INGEST_URL=https://beacon-ingest-gulcylfs4a-uw.a.run.app
+BEACON_CLOUD_DEVICE_KEY=bcn_device_xxxxxxxx_...
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_TEAM_ID=T...
 ```
 
-`BEACON_CLOUD_UPLOAD=s3` is **mandatory**, not inferred — the default is `gcs`,
-and the S3 bucket variable is only read once the mode is already `s3`. Omit it
-and telemetry silently goes nowhere.
+`BEACON_CLOUD_UPLOAD=asymptote` is **mandatory**, not inferred — the default is `gcs`,
+which needs a bucket and would silently upload nothing. The device key is a per-environment
+`bcn_device_*` key minted for the Asymptote Labs org (device `claude-code-web-demo`); it can only
+append telemetry, and is revoked from `/dashboard/endpoints`. Sessions land in the org's managed
+tables and show up on the dashboard with `run.provider=claude_code_web` within a minute or two.
 
 No setup script needed.
 
