@@ -61,6 +61,9 @@ type Config struct {
 	S3SecretKey    string
 	S3SessionToken string
 	S3Endpoint     string
+	// Asymptote managed ingest target (Upload == "asymptote").
+	IngestURL string
+	DeviceKey string
 }
 
 type serviceAccount struct {
@@ -109,6 +112,8 @@ func ConfigFromEnv() Config {
 		S3SecretKey:    firstEnv("AWS_SECRET_ACCESS_KEY"),
 		S3SessionToken: firstEnv("AWS_SESSION_TOKEN"),
 		S3Endpoint:     firstEnv("BEACON_CLOUD_S3_ENDPOINT"),
+		IngestURL:      strings.TrimRight(firstEnv("BEACON_CLOUD_INGEST_URL"), "/"),
+		DeviceKey:      firstEnv("BEACON_CLOUD_DEVICE_KEY"),
 	}
 }
 
@@ -161,6 +166,9 @@ func Upload(ctx context.Context, cfg Config, force bool) error {
 		return err
 	}
 	defer cleanup()
+	if cfg.Upload == uploadAsymptote {
+		return uploadAsymptoteIncremental(ctx, cfg, snapshot, info.Size())
+	}
 	objectName := uploadObjectName(cfg)
 	if err := uploadSnapshot(ctx, cfg, objectName, snapshot); err != nil {
 		return err
@@ -557,13 +565,31 @@ func preserveExistingLog(cfg Config) error {
 	if info.Size() == 0 {
 		return os.Remove(cfg.LogPath)
 	}
-	if st, err := readState(cfg.StatePath); err == nil && st.LastObject != "" && uploadConfigured(cfg) {
+	st, stateErr := readState(cfg.StatePath)
+	hasState := stateErr == nil && st.LastObject != ""
+	// Bucket targets can only re-upload under the object name a previous run already used, so
+	// they need state. Managed ingest is addressed by the lines' own session ids, so a log from
+	// a run that never got a successful batch out (no state) is shipped whole rather than
+	// renamed aside, where an ephemeral sandbox would lose it.
+	if uploadConfigured(cfg) && (hasState || cfg.Upload == uploadAsymptote) {
 		snapshot, cleanup, err := snapshotLog(cfg.LogPath)
 		if err == nil {
 			defer cleanup()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			if uploadErr := uploadSnapshot(ctx, cfg, st.LastObject, snapshot); uploadErr == nil {
+			var uploadErr error
+			if cfg.Upload == uploadAsymptote {
+				// Ship whatever the previous run's last hook did not get to, under that run's
+				// identity so the stored offset applies and nothing is sent twice.
+				previous := cfg
+				if hasState {
+					previous.Provider, previous.RunID = st.Provider, st.RunID
+				}
+				uploadErr = uploadAsymptoteIncremental(ctx, previous, snapshot, info.Size())
+			} else {
+				uploadErr = uploadSnapshot(ctx, cfg, st.LastObject, snapshot)
+			}
+			if uploadErr == nil {
 				return os.Remove(cfg.LogPath)
 			}
 		}
@@ -586,6 +612,8 @@ func cloudUploadFromEnv() string {
 		return uploadS3
 	case uploadGCS:
 		return uploadGCS
+	case uploadAsymptote:
+		return uploadAsymptote
 	}
 	return uploadGCS
 }
@@ -616,6 +644,9 @@ func normalizeConfig(cfg Config) Config {
 }
 
 func uploadConfigured(cfg Config) bool {
+	if cfg.Upload == uploadAsymptote {
+		return asymptoteConfigured(cfg)
+	}
 	if strings.TrimSpace(cfg.Bucket) == "" {
 		return false
 	}
