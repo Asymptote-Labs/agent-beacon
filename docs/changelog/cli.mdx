@@ -11,9 +11,56 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
-### Unreleased
+### v1.3.9 · September 9, 2026
 
 - **Cloud agents can send telemetry to Asymptote Managed** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
+
+### v1.3.8 · September 7, 2026
+
+- **Homebrew stops colliding with vectordotdev's Vector** · The tap mirrored Vector
+  as a formula named `vector`, which clashed with anyone who had tapped
+  `vectordotdev/brew` and broke `brew upgrade`. The mirror is renamed
+  `beacon-vector` and the Beacon formula depends on that, so a Beacon install no
+  longer fights an existing Vector install.
+
+### v1.3.7 · September 7, 2026
+
+- **Kiro (AWS) endpoint telemetry** · Beacon configures Kiro hook telemetry through
+  a Beacon-owned hook file in the directory Kiro scans, covering session start,
+  prompts, pre- and post-tool activity, commands with output, file reads and edits,
+  MCP tool calls, failed tools, and the agent's final response. One harness name
+  covers the Kiro IDE and CLI. A policy deny is honored through Kiro's exit-code-2
+  block contract. Install with `beacon endpoint install --harness kiro` or
+  `beacon endpoint hooks install --harness kiro`.
+
+### v1.3.6 · September 6, 2026
+
+- **OpenHands endpoint telemetry** · Beacon merges its hooks into OpenHands' own
+  `.openhands/hooks.json`, covering session start and end, prompts, pre- and
+  post-tool activity, commands with exit code and output, file reads and edits with
+  diffs, and MCP tool calls. Install with `beacon endpoint install --harness openhands`.
+- **Token spend coverage** · `beacon token-usage --coverage` and the dashboard token
+  view report which runtimes actually carry token usage and where it is missing.
+  Model names are canonicalized at write time keeping the provider, Claude context
+  windows in the utilization table are corrected, claude.ai cache token counts are
+  captured, and context-size events are recorded as their own field so they no
+  longer inflate usage counts or create zero-token rows.
+- **Grok Bot harness identity** · Adds the `grok_bot` harness so its telemetry is
+  named and classified correctly.
+- **Security** · Bumps `google.golang.org/grpc` to 1.83.1 for a heap-exhaustion
+  advisory (GHSA, DATA-frame fragmentation).
+
+### v1.3.5 · September 6, 2026
+
+- **Muse Code (Meta) endpoint telemetry** · Beacon configures Muse Code hook
+  telemetry through a Beacon-owned managed hooks file that Muse's settings point at,
+  covering session start, prompts, tool lifecycle, operator approval decisions,
+  subagent start and stop, context compaction, commands, and file activity. Install
+  with `beacon endpoint install --harness muse`.
+
+### v1.3.4 · September 5, 2026
+
+- Maintenance release. No functional changes; carries the v1.3.3 changelog.
 
 ### v1.3.3 · September 4, 2026
 
