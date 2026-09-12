@@ -483,16 +483,45 @@ func goosePluginsDir(home string) string {
 	return filepath.Join(home, ".agents", "plugins")
 }
 
-// gooseConfigFile resolves goose's config.yaml, mirroring the harness configurator -- including
-// that goose resolves it through the XDG layout on macOS as well as Linux.
+// gooseConfigFile resolves goose's config.yaml, mirroring the harness configurator -- both halves
+// of the part that is the opposite of what a reader assumes. goose calls etcetera's
+// choose_app_strategy, which is XDG on macOS as well as Linux, so the config is not under
+// ~/Library/Application Support -- and is *not* XDG on Windows, where it lands under
+// %APPDATA%\Block\goose\config with the extra "config" segment and XDG_CONFIG_HOME ignored.
+//
+// The Windows branch is the one that matters most here, because Beacon writes that path itself:
+// scanning ~/.config/goose on Windows would report an export the installer had just configured as
+// missing.
 func gooseConfigFile(home string) string {
 	if root := strings.TrimSpace(os.Getenv("GOOSE_PATH_ROOT")); filepath.IsAbs(root) {
 		return filepath.Join(root, "config", "config.yaml")
+	}
+	if runtime.GOOS == "windows" {
+		if appData, err := os.UserConfigDir(); err == nil {
+			return filepath.Join(appData, "Block", "goose", "config", "config.yaml")
+		}
 	}
 	if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); filepath.IsAbs(xdg) {
 		return filepath.Join(xdg, "goose", "config.yaml")
 	}
 	return filepath.Join(home, ".config", "goose", "config.yaml")
+}
+
+// gooseExportEndpoint reads the value of goose's otel_exporter_otlp_endpoint key, returning "" when
+// the key is absent or the file does not parse.
+//
+// The value is read rather than the file searched, because this is goose's own config.yaml and the
+// operator's other keys are in it: extensions carry URIs, and a local MCP server or a commented-out
+// endpoint would make a whole-file search for "127.0.0.1" true while the export itself points at a
+// vendor's collector. That is the one mistake the locality guard exists to prevent.
+func gooseExportEndpoint(data []byte) string {
+	var doc struct {
+		Endpoint string `yaml:"otel_exporter_otlp_endpoint"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.Endpoint)
 }
 
 // kiroUserDir resolves the global Kiro directory, mirroring the installer.
@@ -915,12 +944,17 @@ func beaconManaged(item candidate, data []byte) bool {
 	// goose has two files under one runtime name and only one of them carries a hook command, so
 	// the kind decides which question is being asked. The hooks file is Beacon-owned and matched on
 	// the command, like Kiro's. The config file is goose's own and is matched on the endpoint key
-	// Beacon wrote into it, which is the same shape the Gemini and VS Code checks below use -- and
-	// the local-endpoint guard is what keeps a config pointed at a vendor's collector from being
-	// reported as Beacon-managed.
+	// Beacon wrote into it -- and the local-endpoint guard is what keeps a config pointed at a
+	// vendor's collector from being reported as Beacon-managed.
+	//
+	// Unlike the Gemini and VS Code checks below, the guard is applied to the key's value rather
+	// than to the whole file, because this file is goose's own: the operator's extensions live in
+	// it too, so a config exporting to a vendor while running a local MCP server would pass a
+	// whole-file search for a loopback address and be reported as Beacon-managed.
 	case "goose":
 		if item.kind == KindNativeConfig {
-			return strings.Contains(text, "otel_exporter_otlp_endpoint") && localEndpointText(text)
+			endpoint := gooseExportEndpoint(data)
+			return endpoint != "" && localEndpointText(endpoint)
 		}
 		return strings.Contains(text, "--platform goose") || strings.Contains(text, "--platform=goose")
 	}

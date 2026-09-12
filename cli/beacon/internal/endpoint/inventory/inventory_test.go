@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1052,7 +1053,7 @@ func TestScanDetectsBothGooseHalvesAndOnlyLocalExport(t *testing.T) {
 
 	hooksPath := filepath.Join(home, ".agents", "plugins", "beacon-endpoint", "hooks", "hooks.json")
 	writeFile(t, hooksPath, `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/opt/beacon/beacon-hooks --platform goose pre-tool"}]}]}}`)
-	configPath := filepath.Join(home, ".config", "goose", "config.yaml")
+	configPath := gooseConfigForHome(t, home)
 	writeFile(t, configPath, "otel_exporter_otlp_endpoint: http://127.0.0.1:4318\n")
 
 	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
@@ -1072,12 +1073,68 @@ func TestScanDetectsBothGooseHalvesAndOnlyLocalExport(t *testing.T) {
 		t.Fatalf("goose config status = %s managed=%t, want ok/managed", config.ParserStatus, config.BeaconManaged)
 	}
 
-	// The same file pointed at somebody else's collector is configured and not Beacon-managed.
+	// The same file pointed at somebody else's collector is configured and not Beacon-managed --
+	// and this one also runs a local MCP server, which is the ordinary case that a whole-file
+	// search for a loopback address gets wrong. The endpoint is what decides, not the file.
 	remoteHome := t.TempDir()
-	remoteConfig := filepath.Join(remoteHome, ".config", "goose", "config.yaml")
-	writeFile(t, remoteConfig, "otel_exporter_otlp_endpoint: https://otel.vendor.example\n")
+	remoteConfig := gooseConfigForHome(t, remoteHome)
+	writeFile(t, remoteConfig, `otel_exporter_otlp_endpoint: https://otel.vendor.example
+extensions:
+  fetch:
+    type: sse
+    uri: http://127.0.0.1:3001/sse
+`)
 	remote := Scan(Options{HomeDir: remoteHome, WorkingDir: t.TempDir(), Now: fixedNow})
 	if found := findConfig(remote.Configs, "goose", remoteConfig); found == nil || found.BeaconManaged {
 		t.Fatalf("a goose export pointed at a remote collector was reported as Beacon-managed: %#v", found)
+	}
+}
+
+// gooseConfigForHome resolves the config path Scan will look for under home, and redirects the one
+// variable goose's Windows layout resolves through so that it lands under home there too.
+//
+// Without the redirect the Windows branch of gooseConfigFile ignores home entirely and answers with
+// the developer's real %APPDATA% path -- so the test would assert against a file outside its own
+// fixture, and two scans of two different homes would collide on one path.
+func gooseConfigForHome(t *testing.T, home string) string {
+	t.Helper()
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	return gooseConfigFile(home)
+}
+
+// gooseConfigFile has to mirror the harness configurator on every platform, because on Windows that
+// is a path Beacon itself writes: goose takes etcetera's Windows app strategy there, so its config
+// is %APPDATA%\Block\goose\config\config.yaml -- an extra "config" segment, and XDG_CONFIG_HOME
+// ignored no matter what it says. An inventory scanning ~/.config/goose on Windows would report an
+// export the installer had just configured as missing, which is the failure that looks exactly like
+// a runtime nobody instrumented.
+func TestGooseConfigFileFollowsGooseOwnLayout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if runtime.GOOS == "windows" {
+		appData := t.TempDir()
+		t.Setenv("APPDATA", appData)
+		want := filepath.Join(appData, "Block", "goose", "config", "config.yaml")
+		if got := gooseConfigFile(home); got != want {
+			t.Fatalf("gooseConfigFile = %q, want %q", got, want)
+		}
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		if got := gooseConfigFile(home); got != want {
+			t.Fatalf("XDG_CONFIG_HOME moved the Windows path to %q, want %q", got, want)
+		}
+		return
+	}
+
+	want := filepath.Join(home, ".config", "goose", "config.yaml")
+	if got := gooseConfigFile(home); got != want {
+		t.Fatalf("gooseConfigFile = %q, want %q", got, want)
+	}
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	want = filepath.Join(xdg, "goose", "config.yaml")
+	if got := gooseConfigFile(home); got != want {
+		t.Fatalf("gooseConfigFile = %q, want %q", got, want)
 	}
 }
