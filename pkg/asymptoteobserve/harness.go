@@ -249,6 +249,42 @@ func NormalizeHarnessName(name string) string {
 		lower == "kiro_agent" || lower == "kiro-agent" || lower == "kiro agent" ||
 		lower == "kiro.dev":
 		return "kiro"
+	// goose (Block) reaches Beacon over two paths at once, and pinning the name here is what keeps
+	// them from splitting one session in two. The hook path installs with --platform goose; the
+	// OTLP path reads goose's own resource attributes, which set service.name and
+	// service.namespace to the literal string "goose". Both land on the same value only because
+	// this case exists to say so.
+	//
+	// The canonical spelling is plain `goose` for the reason `cline`, `openhands` and `kiro` are
+	// unsuffixed: one agent core serves the CLI, the desktop app and the embedded server, all
+	// three discover the same `.agents/plugins` hooks and all three export under the same
+	// service.name -- so a CLI suffix would name one of the surfaces the events come from and not
+	// the others.
+	//
+	// Equality against a closed set rather than Contains(lower, "goose"), and here the substring
+	// rule would be worse than usual on three counts:
+	//
+	//   - GooseAI is a different company's LLM inference service. Its spellings -- gooseai,
+	//     goose-ai, goose.ai -- are a model provider, not this runtime, and they are deliberately
+	//     absent from the set. That is the Muse Spark and OpenHands LM failure in a sharper form:
+	//     those are at least the same vendor's model, while this would file a third party's
+	//     inference endpoint as Block's agent.
+	//   - "goose" is an ordinary English word, so it turns up in repository names, hostnames and
+	//     user names that a harness attribute can legitimately carry.
+	//   - goose stamps its own name across paths and configuration a reader may pass through this
+	//     function -- .goosehints, GOOSE_MODE, goose-docs -- exactly the Kiro hazard above.
+	//
+	// Everything left out falls to the passthrough case and shows up as itself, which reads as an
+	// anomaly a person can act on rather than a silent misattribution.
+	//
+	// "codename goose" is in the set because it is the project's own branding and appears in
+	// release artifacts and documentation, so it is a spelling that arrives in practice rather
+	// than one invented here.
+	case lower == "goose" || lower == "goose_cli" || lower == "goose-cli" || lower == "goose cli" ||
+		lower == "goosecli" || lower == "goose_agent" || lower == "goose-agent" || lower == "goose agent" ||
+		lower == "codename_goose" || lower == "codename-goose" || lower == "codename goose" ||
+		lower == "block_goose" || lower == "block-goose" || lower == "block goose":
+		return "goose"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
