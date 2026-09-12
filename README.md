@@ -134,11 +134,6 @@ collector. Prompt and response text is retained in full by default.
 | [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Sandbox hooks → GCS or S3 | – | ✅ | ✅ | ✅ | ✅ | – |
 | [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | API poll → GCS | ✅ | ✅ | – | – | – | ✅ |
 
-Cursor Cloud picks up follow-up prompts, subagents, and compaction once project hooks are
-active. Devin's autonomous agent runs no in-sandbox hooks, so `beacon cloud devin pull`
-reads the org-wide API instead: agent messages, status, pull requests, and ACU usage at
-message level.
-
 CI jobs are the ephemeral case:
 [`beacon ci exec`](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) or
 `beacon ci start` / `beacon ci finish` runs a temporary local collector for the length of
