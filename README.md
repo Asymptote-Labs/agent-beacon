@@ -61,7 +61,7 @@ single OpenTelemetry-based event model.
 - **Sources** — [local agents](#local-agents) through hooks, plugins, and local
   OpenTelemetry; [browser chat](#browser-chat) through an optional extension;
   agents in code through the [TypeScript SDK](#cloud-agents);
-  [CI pipelines](#ci-agents) through a temporary collector; and
+  [CI pipelines](#cloud-agents) through a temporary collector; and
   [cloud agents](#cloud-agents) through sandbox hooks.
 - **Beacon** — collect, normalize, store, correlate, and detect. Every surface lands
   in one event model, one durable JSONL log, one session timeline, and one
@@ -83,58 +83,66 @@ to compare it with the managed path.
 
 #### Local Agents
 
-| Runtime | Collection path | Telemetry coverage |
-| --- | --- | --- |
-| [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Native hooks | Prompt, pre-tool, post-tool, stop, invocation, command, and file |
-| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | Local OTLP export plus optional hooks | Prompt, command, tool, file, approval, API/model lifecycle, MCP connection, subagent, and session |
-| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | Admin-configured OTLP | Prompt, assistant response, approval, command, tool, file, MCP, session, model, token usage, and runtime-reported cost |
-| [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Managed plugin hooks | Prompts, task lifecycle and errors, tool lifecycle and results, commands with exit codes, file reads/edits with diffs, MCP activity, and token usage/cost |
-| [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | Local OTLP plus a session identity hook | Session, prompt, approval, tool results, and per-user/session/model turn token usage |
-| [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Native hooks | Prompt, tool, shell command, MCP-like activity, approval, and file edits |
-| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session end, approval, and file |
-| [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write |
-| [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, and session end |
-| [fx (Vercel Labs)](https://docs.asymptotelabs.ai/runtimes/vercel-fx) | Poll of fx's own session records under `~/.fx/sessions/` through `beacon endpoint fx sync`; events land a turn late and cannot gate a tool call | Session start, prompts, tool calls, commands with exit codes and output, file reads/creates/edits with diffs, MCP tool calls, agent messages, compaction, and token usage/cost. No approval or session-end record, because fx persists neither |
-| [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | Opt-in local OTLP | Prompts, tool calls, MCP activity, file operations, and approval-related events |
-| [goose](https://docs.asymptotelabs.ai/runtimes/goose) | Two paths, both wanted: native plugin hooks in `.agents/plugins/beacon-endpoint/`, plus opt-in local OTLP over HTTP | Hooks: session start and end, prompt, pre-tool, post-tool, failed tool, command line, file create/modify with diffs, and MCP tool calls. OTLP adds token usage, model and provider, response ids and agent reasoning. No tool output, exit codes or command output at all, and no approval decisions, because goose exposes none of those on a hook |
-| [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | MDM-managed OTLP HTTP | Prompt, session, tool, and approval-like activity |
-| [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, stop, session end, command, and file |
-| [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop |
-| [Kiro](https://docs.asymptotelabs.ai/runtimes/kiro) | Native hooks through a Beacon-owned file in `.kiro/hooks/` | Session start, prompt, pre-tool, post-tool, failed tool, command with output, file read/modify with diffs, MCP tool calls, and the agent's final response. No approval decisions or token usage, because Kiro exposes neither on a hook |
-| [Muse Code](https://docs.asymptotelabs.ai/runtimes/muse-code) | Native hooks through a managed hooks file | Session start, prompt, pre-tool, post-tool, permission request/approval, subagent, context compaction, stop, command, and file. No session end or token usage, because Muse emits neither on a hook |
-| [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, approval decisions with the session's approval mode, commands including operator `!` and `$`, file reads/writes/edits with diffs, MCP activity, agent reasoning, and token usage/cost |
-| [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
-| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Managed plugin hooks | Prompts, assistant output and reasoning, model usage/cost, tool lifecycle and results, commands, file/web/MCP activity, approvals, and session errors |
-| [OpenHands](https://docs.asymptotelabs.ai/runtimes/openhands) | Native hooks merged into the repository's own `.openhands/hooks.json` | Session start and end, prompt, pre-tool, post-tool, failed tool, command with exit code and output, file read/modify with exact before/after diffs, and MCP tool calls. No approval decisions or token usage, because OpenHands exposes neither on a hook |
-| [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, commands including operator `!`, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
-| [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Managed extension hooks | Session lifecycle, prompts, tool lifecycle and results, commands including operator `!`, file reads/writes/edits with diffs, agent reasoning, and token usage/cost |
-| [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Native hooks | Session, prompt, pre-tool, post-tool, failed tool, permission request/approval, subagent, stop, session end, command, and file |
-| [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | Copilot Chat OTel plus optional preview hooks | Copilot session, prompt, model, and tool activity, plus extra lifecycle detail through optional hooks |
+| Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens |
+| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
+| [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | OTLP + hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP + hook | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
+| [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP + hooks | ✅ | ✅ | ✅ | – | ✅ | – | – | – |
+| [fx (Vercel Labs)](https://docs.asymptotelabs.ai/runtimes/vercel-fx) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – |
+| [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | OTLP | ✅ | ✅ | ✅ | – | – | ✅ | – | – |
+| [goose](https://docs.asymptotelabs.ai/runtimes/goose) | Plugin + OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
+| [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| [Kiro](https://docs.asymptotelabs.ai/runtimes/kiro) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| [Muse Code](https://docs.asymptotelabs.ai/runtimes/muse-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | OTLP | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [OpenHands](https://docs.asymptotelabs.ai/runtimes/openhands) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
+| [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Not yet collected | – | – | – | – | – | – | – | – |
+| [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
 
 #### Browser Chat
 
-| Runtime | Collection path | Telemetry coverage |
-| --- | --- | --- |
-| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Managed browser extension over local OTLP | Prompt, assistant response, tool call, and token usage from the claude.ai chat stream |
-| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Managed browser extension over local OTLP | Prompt, assistant response, and tool call from the chatgpt.com chat stream |
+| Site | Collection | Prompt | Response | Tool | Tokens |
+| --- | --- | :-: | :-: | :-: | :-: |
+| [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Extension → local OTLP | ✅ | ✅ | ✅ | ✅ |
+| [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Extension → local OTLP | ✅ | ✅ | ✅ | – |
 
-#### CI Agents
-
-| Runtime | Collection path | Telemetry coverage |
-| --- | --- | --- |
-| [CI agent telemetry](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | Temporary local collector through `beacon ci exec` or `beacon ci start` / `beacon ci finish` | Supported agent prompt, tool, command, file, and run context emitted during the job |
+One optional Chrome extension reads both chat streams and posts them to the local
+collector. Prompt and response text is retained in full by default.
 
 #### Cloud Agents
 
-| Runtime | Collection path | Telemetry coverage |
+| Runtime | Collection | Session | Prompt | Tool | Command | File | Tokens |
+| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Sandbox hooks → GCS or S3 | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Sandbox hooks → GCS or S3 | – | ✅ | ✅ | ✅ | ✅ | – |
+| [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | API poll → GCS | ✅ | ✅ | – | – | – | ✅ |
+
+CI jobs are the ephemeral case:
+[`beacon ci exec`](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) or
+`beacon ci start` / `beacon ci finish` runs a temporary local collector for the length of
+the job, capturing supported agent prompt, tool, command, file, and run context instead of
+installing a persistent endpoint service.
+
+##### SDK Instrumentation
+
+| SDK surface | Collection | Captures |
 | --- | --- | --- |
-| [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry instrumentation through `@asymptote/sdk` | Anthropic model call spans, errors, and OpenTelemetry attributes |
-| [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | Query wrapper through `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
-| [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Session, prompt, tool, command, file, and lifecycle |
-| [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Cloud sandbox hooks with direct GCS or S3 upload | Follow-up prompts, tool, shell command, file, subagent, and compaction once project hooks are active |
-| [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | Org-wide API poll through `beacon cloud devin pull`, with GCS upload | Session, prompt, agent message, status, pull request, and ACU usage at message level; the autonomous agent runs no in-sandbox hooks |
-| [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry instrumentation through `@asymptote/sdk` | OpenAI model call spans, errors, and OpenTelemetry attributes |
-| [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | Tracer handoff through `experimental_telemetry` | AI SDK model call and tool spans where telemetry is enabled |
+| [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry through `@asymptote/sdk` | Model call spans, errors, and OTel attributes |
+| [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry through `@asymptote/sdk` | Model call spans, errors, and OTel attributes |
+| [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
+| [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | `experimental_telemetry` tracer handoff | Model call and tool spans where telemetry is enabled |
 
 ### Output Destinations
 
@@ -142,44 +150,24 @@ Beacon writes endpoint telemetry to local JSONL by default and supports
 customer-controlled forwarding into SIEM, log aggregation, and object storage
 destinations, plus an opt-in managed path to the Asymptote dashboard.
 
-#### Asymptote Managed
+| Destination | Category | Support path |
+| --- | --- | --- |
+| [Local JSONL](https://docs.asymptotelabs.ai/cli/local-testing-logs) | Local | Default endpoint log and local dashboard source |
+| [Asymptote Managed](https://docs.asymptotelabs.ai/log-forwarding/asymptote) | Managed | Vector `http` forwarder with a per-device key approved in the browser, revocable from the dashboard |
+| [CrowdStrike Falcon LogScale HEC](https://docs.asymptotelabs.ai/cli/siem-forwarding-falcon) | SIEM | Endpoint forwarding with LogScale ingest tokens during install or repair |
+| [Microsoft Sentinel](https://docs.asymptotelabs.ai/cli/siem-forwarding-microsoft-sentinel) | SIEM | Azure Monitor Agent and Data Collection Rule content pack |
+| [Rapid7 InsightIDR](https://docs.asymptotelabs.ai/cli/siem-forwarding-rapid7) | SIEM | Custom Logs webhook content pack |
+| [Splunk HEC](https://docs.asymptotelabs.ai/cli/siem-forwarding-splunk) | SIEM | Endpoint forwarding during install or repair |
+| [Sumo Logic](https://docs.asymptotelabs.ai/cli/siem-forwarding-sumo) | SIEM | HTTP Logs & Metrics Source content pack |
+| [Wazuh](https://docs.asymptotelabs.ai/cli/siem-forwarding-wazuh) | SIEM | Localfile configuration and Beacon Wazuh content pack |
+| [AWS CloudWatch Logs](https://docs.asymptotelabs.ai/cli/siem-forwarding-cloudwatch) | Log aggregation | Vector content pack using customer-managed AWS credentials |
+| [Datadog](https://docs.asymptotelabs.ai/cli/siem-forwarding-datadog) | Log aggregation | Datadog Agent custom log collection |
+| [Elastic](https://docs.asymptotelabs.ai/cli/siem-forwarding-elastic) | Log aggregation | Filebeat or Elastic Agent content pack |
+| [Customer-managed pipelines](https://docs.asymptotelabs.ai/cli/siem-forwarding) | Log aggregation | Forwarding from local Beacon JSONL under customer control |
+| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Object storage | Vector, CI upload, or direct compressed snapshots from supported cloud agents |
+| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Object storage | Vector and packaged macOS helpers, CI upload, or direct compressed snapshots |
 
-| Destination | Support path |
-| --- | --- |
-| [Asymptote Managed](https://docs.asymptotelabs.ai/log-forwarding/asymptote) | Vector `http` forwarder over endpoint JSONL with a per-device key approved in the browser; revocable from the dashboard |
-
-#### Security Information and Event Management (SIEM)
-
-| Destination | Support path |
-| --- | --- |
-| [CrowdStrike Falcon LogScale HEC](https://docs.asymptotelabs.ai/cli/siem-forwarding-falcon) | Optional endpoint forwarding with LogScale ingest tokens during install or repair |
-| [Microsoft Sentinel](https://docs.asymptotelabs.ai/cli/siem-forwarding-microsoft-sentinel) | Azure Monitor Agent and Data Collection Rule content pack over local JSONL |
-| [Rapid7 InsightIDR](https://docs.asymptotelabs.ai/cli/siem-forwarding-rapid7) | Custom Logs webhook content pack over local JSONL |
-| [Splunk HEC](https://docs.asymptotelabs.ai/cli/siem-forwarding-splunk) | Optional endpoint forwarding during install or repair |
-| [Sumo Logic](https://docs.asymptotelabs.ai/cli/siem-forwarding-sumo) | HTTP Logs & Metrics Source content pack over local JSONL |
-| [Wazuh](https://docs.asymptotelabs.ai/cli/siem-forwarding-wazuh) | Localfile configuration and Beacon Wazuh content pack |
-
-#### Log Aggregation
-
-| Destination | Support path |
-| --- | --- |
-| [AWS CloudWatch Logs](https://docs.asymptotelabs.ai/cli/siem-forwarding-cloudwatch) | Vector content pack over local JSONL using customer-managed AWS credentials |
-| [Customer-managed log pipelines](https://docs.asymptotelabs.ai/cli/siem-forwarding) | Forwarding from local Beacon JSONL under customer control |
-| [Datadog](https://docs.asymptotelabs.ai/cli/siem-forwarding-datadog) | Datadog Agent custom log collection over local JSONL |
-| [Elastic](https://docs.asymptotelabs.ai/cli/siem-forwarding-elastic) | Filebeat or Elastic Agent content pack over local JSONL |
-
-#### Object Storage
-
-| Destination | Support path |
-| --- | --- |
-| [AWS S3](https://docs.asymptotelabs.ai/cli/siem-forwarding-s3) | Vector over endpoint JSONL, CI upload, or direct compressed snapshots from supported cloud agents |
-| [Google Cloud Storage](https://docs.asymptotelabs.ai/cli/siem-forwarding-gcs) | Vector and packaged macOS helpers over endpoint JSONL, CI upload, or direct compressed snapshots from supported cloud agents |
-
-#### Local
-
-| Destination | Support path |
-| --- | --- |
-| [Local JSONL](https://docs.asymptotelabs.ai/cli/local-testing-logs) | Default endpoint log and local dashboard source |
+Every destination except Asymptote Managed reads the same local JSONL, under your control.
 
 ### MDM Deployment
 
