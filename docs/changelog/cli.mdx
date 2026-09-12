@@ -11,6 +11,31 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### v1.3.10 · September 12, 2026
+
+- **goose (Block) hook telemetry** · The hooks binary reads goose's plugin hook
+  payloads (`--platform goose`), covering session start and end, prompts, tool
+  lifecycle, command lines, and file creates and edits with diffs. goose spells
+  three envelope fields its own way (`event`, `working_dir`, `message`) and
+  reports a failed tool call as its own `PostToolUseFailure` event with a payload
+  otherwise identical to `PostToolUse`, so the event name is what decides whether
+  a write is recorded as landed. MCP tools are identified by goose's
+  `<extension>__<tool>` prefix not naming a built-in extension, since goose sends
+  no tool output and no `mcp_*` argument to give it away. goose classifies a
+  blocking hook's stdout, so `PreToolUse` and `Stop` answer with an explicit
+  `{"decision":"allow"}` — the `{}` other runtimes read as no opinion is a failed
+  hook here — and a policy-seam deny is returned as `{"decision":"block"}`,
+  goose's own spelling for it. Approval decisions and token usage are not on any
+  goose hook and are not synthesized. See [goose](/runtimes/goose).
+- **`goose` is a canonical harness name** · `codename-goose`, `block-goose`, and
+  the CLI and agent spellings all normalize to `goose`, so the hook path and
+  goose's own OpenTelemetry export land on one harness instead of splitting a
+  session in two. GooseAI spellings (`gooseai`, `goose-ai`, `goose.ai`) are
+  deliberately left unmapped and pass through as themselves — that is a different
+  company's inference service, not this runtime.
+- **Security** · Bumps `google.golang.org/grpc` to 1.83.2 in the collector
+  exporter and sandbox modules.
+
 ### v1.3.9 · September 9, 2026
 
 - **Cloud agents can send telemetry to Asymptote Managed** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
