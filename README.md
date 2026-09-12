@@ -83,11 +83,6 @@ to compare it with the managed path.
 
 #### Local Agents
 
-✅ collected · – not collected today, because the runtime does not expose it ·
-~ depends on what the upstream exporter emits. Collection paths: **hooks** native to the
-runtime, a Beacon-managed **plugin** or **extension**, local **OTLP**, or a **poll** of the
-runtime's own session store.
-
 | Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens |
 | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
 | [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
