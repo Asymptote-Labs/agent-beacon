@@ -976,6 +976,9 @@ func TestConfigureHarnessesGivesGooseTheHTTPEndpoint(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	// On Windows goose's config resolves through APPDATA rather than HOME, so it is redirected too
+	// -- otherwise this writes a real config file into the developer's own profile.
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("GOOSE_PATH_ROOT", "")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
