@@ -61,7 +61,7 @@ single OpenTelemetry-based event model.
 - **Sources** — [local agents](#local-agents) through hooks, plugins, and local
   OpenTelemetry; [browser chat](#browser-chat) through an optional extension;
   agents in code through the [TypeScript SDK](#cloud-agents);
-  [CI pipelines](#ci-agents) through a temporary collector; and
+  [CI pipelines](#cloud-agents) through a temporary collector; and
   [cloud agents](#cloud-agents) through sandbox hooks.
 - **Beacon** — collect, normalize, store, correlate, and detect. Every surface lands
   in one event model, one durable JSONL log, one session timeline, and one
@@ -116,27 +116,6 @@ runtime's own session store.
 | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
 
-Where the columns need context:
-
-- **Session** means start and end where the runtime emits both. fx, Kiro, and Muse Code
-  emit a session start but no session end, so nothing is invented to close them.
-- **Approval** is only ever what the runtime itself reports. Beacon never infers a
-  decision from an adjacent event, which is why Cline, fx, goose, Kiro, OpenHands, and Pi
-  show a dash even though some of them do ask the operator.
-- **Agent reasoning** is captured, outside the columns above, for Cursor, goose, Oh My Pi,
-  OpenCode, and Pi.
-- **goose** needs both paths: hooks carry prompts, tools, commands, and file diffs, while
-  OTLP carries token usage, model and provider, response ids, and agent reasoning. Hooks
-  expose no tool output at all, so command exit codes and output are missing.
-- **fx** exposes no hook, plugin, or OTLP surface, so `beacon endpoint fx sync` reads the
-  session records fx commits under `~/.fx/sessions/`. Events land a turn late and cannot
-  gate a tool call.
-- **OpenClaw Gateway** relays whatever its diagnostics plugin exports over OTLP, so its
-  coverage is the Gateway's rather than Beacon's. **VS Code** likewise follows Copilot
-  Chat's OTel, with optional hooks for extra lifecycle detail.
-- **Prime Agent** ships harness identity only: Beacon resolves every spelling of it to one
-  canonical name, but no managed extension exists yet, so nothing is collected.
-
 #### Browser Chat
 
 | Site | Collection | Prompt | Response | Tool | Tokens |
@@ -146,13 +125,6 @@ Where the columns need context:
 
 One optional Chrome extension reads both chat streams and posts them to the local
 collector. Prompt and response text is retained in full by default.
-
-#### CI Agents
-
-[CI agent telemetry](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) runs
-a temporary local collector through `beacon ci exec` or `beacon ci start` /
-`beacon ci finish`, capturing supported agent prompt, tool, command, file, and run context
-emitted during the job.
 
 #### Cloud Agents
 
@@ -166,6 +138,12 @@ Cursor Cloud picks up follow-up prompts, subagents, and compaction once project 
 active. Devin's autonomous agent runs no in-sandbox hooks, so `beacon cloud devin pull`
 reads the org-wide API instead: agent messages, status, pull requests, and ACU usage at
 message level.
+
+CI jobs are the ephemeral case:
+[`beacon ci exec`](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) or
+`beacon ci start` / `beacon ci finish` runs a temporary local collector for the length of
+the job, capturing supported agent prompt, tool, command, file, and run context instead of
+installing a persistent endpoint service.
 
 ##### SDK Instrumentation
 
