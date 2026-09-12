@@ -22,6 +22,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"qwen":        "qwen_code",
 		"prime":       "prime_agent",
 		"muse":        "muse_code",
+		"goose":       "goose",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -41,7 +42,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "vercel_fx",
-		"muse_code", "grok_bot",
+		"muse_code", "grok_bot", "goose",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -612,6 +613,67 @@ func TestKiroIDEAndCLIResolveToOneHarness(t *testing.T) {
 // log and fed back in resolves to the same harness rather than drifting to a second name.
 func TestKiroCanonicalNameIsStableUnderRenormalization(t *testing.T) {
 	once := NormalizeHarnessName("kiro-cli")
+	if got := NormalizeHarnessName(once); got != once {
+		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
+	}
+}
+
+// goose (Block) is the case where the two writers demonstrably agree before normalization: the
+// hook path installs with --platform goose and goose's OTLP resource sets service.name to the
+// literal "goose". This pins that agreement rather than assuming it, because the canonical value
+// is what every other goose spelling is folded onto.
+func TestGooseSpellingsConvergeOnGoose(t *testing.T) {
+	for _, in := range []string{
+		"goose", "Goose", "GOOSE", " goose ", "goose_cli", "goose-cli", "Goose CLI", "goosecli",
+		"goose_agent", "goose-agent", "Goose Agent", "codename_goose", "codename-goose",
+		"Codename Goose", "block_goose", "block-goose", "Block Goose",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "goose" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "goose")
+			}
+		})
+	}
+}
+
+// The sharpest reason the goose case is an equality match. GooseAI is a different company's LLM
+// inference service, so a Contains(lower, "goose") rule would report a third party's model
+// provider as Block's agent -- the Muse Spark and OpenHands LM hazard, except that those are at
+// least the same vendor's own model. These must fall through and show up as themselves.
+func TestGooseAIProviderSpellingsAreNotTheGooseHarness(t *testing.T) {
+	for _, name := range []string{
+		"gooseai", "goose-ai", "goose_ai", "goose.ai", "gooseai/gpt-neo-20b", "GooseAI",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "goose" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; GooseAI is an inference provider and "+
+					"must not be reported as the goose harness", name, got)
+			}
+		})
+	}
+}
+
+// "goose" is an ordinary English word and goose stamps it across its own paths and configuration,
+// so the closed set has to exclude both. Falling through to the passthrough case is the wanted
+// behavior: the value shows up as itself, which reads as an anomaly rather than a goose session.
+func TestNamesMerelyContainingGooseAreNotTheGooseHarness(t *testing.T) {
+	for _, name := range []string{
+		".goosehints", "GOOSE_MODE", "goose-docs", "mongoose", "gooseberry", "wild-goose-chase",
+		"goose-island", "goosebumps",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "goose" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"goose\" must "+
+					"not be reported as the goose harness", name, got)
+			}
+		})
+	}
+}
+
+// The normalized name is itself a spelling this function accepts, so a row read out of the runtime
+// log and fed back in resolves to the same harness rather than drifting to a second name.
+func TestGooseCanonicalNameIsStableUnderRenormalization(t *testing.T) {
+	once := NormalizeHarnessName("codename goose")
 	if got := NormalizeHarnessName(once); got != once {
 		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
 	}
