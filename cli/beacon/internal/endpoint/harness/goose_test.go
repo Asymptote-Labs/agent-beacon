@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,6 +21,10 @@ func gooseConfigFixture(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	// APPDATA is redirected as well, because on Windows goose's config resolves through it rather
+	// than through HOME. Without this the tests below write goose a real config file in the
+	// developer's own profile -- and the next test to run discovers it.
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv(goosePathRootEnv, "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	// Cleared so a developer with any of these exported does not have the status assertions below
@@ -387,6 +392,9 @@ func TestGooseProtocolPrefersTheSignalSpecificVariable(t *testing.T) {
 // included. That is the opposite of what a reader would assume, and getting it wrong fails
 // silently by writing a file goose never reads.
 func TestGooseConfigPathFollowsTheXDGLayout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("goose takes the Windows strategy there; TestGooseConfigPathUsesTheWindowsStrategy covers it")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -397,8 +405,8 @@ func TestGooseConfigPathFollowsTheXDGLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gooseConfigPath: %v", err)
 	}
-	if runtime := filepath.Base(filepath.Dir(path)); runtime != "goose" {
-		t.Fatalf("config sits in %q, want a goose directory", runtime)
+	if dir := filepath.Base(filepath.Dir(path)); dir != "goose" {
+		t.Fatalf("config sits in %q, want a goose directory", dir)
 	}
 	if filepath.Base(path) != "config.yaml" {
 		t.Fatalf("config file is %q, want config.yaml", filepath.Base(path))
@@ -406,6 +414,9 @@ func TestGooseConfigPathFollowsTheXDGLayout(t *testing.T) {
 }
 
 func TestGooseConfigPathHonorsXDGConfigHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("goose ignores XDG_CONFIG_HOME there; TestGooseConfigPathUsesTheWindowsStrategy asserts that")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -422,12 +433,35 @@ func TestGooseConfigPathHonorsXDGConfigHome(t *testing.T) {
 	}
 }
 
+// Windows is the one platform where etcetera's choose_app_strategy is not XDG, so goose's config
+// lands under %APPDATA%\Block\goose\config -- with the extra "config" segment, and with
+// XDG_CONFIG_HOME ignored no matter what it says. Neither half is derivable from the layout above,
+// which is why this asserts the whole path rather than a directory name.
+func TestGooseConfigPathUsesTheWindowsStrategy(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the Windows strategy only applies on Windows")
+	}
+	appData := t.TempDir()
+	t.Setenv("APPDATA", appData)
+	t.Setenv(goosePathRootEnv, "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	path, err := gooseConfigPath()
+	if err != nil {
+		t.Fatalf("gooseConfigPath: %v", err)
+	}
+	if want := filepath.Join(appData, "Block", "goose", "config", "config.yaml"); path != want {
+		t.Fatalf("gooseConfigPath = %q, want %q", path, want)
+	}
+}
+
 // GOOSE_PATH_ROOT relocates every goose directory and outranks XDG_CONFIG_HOME, matching goose's
 // own resolution -- and a relative value is ignored, because goose ignores it.
 func TestGooseConfigPathHonorsAnAbsolutePathRootAndIgnoresARelativeOne(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	root := t.TempDir()
