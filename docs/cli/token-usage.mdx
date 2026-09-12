@@ -57,6 +57,7 @@ Cline reports usage once per task rather than per model call, because Beacon's r
 | Factory Droid | As above |
 | OpenClaw Gateway | As above |
 | Grok Bot | Reaches Asymptote only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
+| goose | goose's `chat` spans carry the full `gen_ai.usage.*` set, cache reads and writes included, under the exact semconv names -- that much is read out of the runtime rather than hoped for. What is conditional is whether it arrives: usage reaches Asymptote only over OTLP, so a goose endpoint with hooks installed and `beacon endpoint install --harness goose` never run is correctly silent rather than faulty. goose reports no cost. See [goose](/runtimes/goose) |
 
 This table records what Beacon is built to read, not what your machine actually produced. A runtime can be listed here and still contribute nothing, because it was never run, or because its build reports no usage.
 
