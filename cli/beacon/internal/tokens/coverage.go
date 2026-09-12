@@ -77,6 +77,19 @@ var usageExpectation = map[string]struct {
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 
+	// goose is a stronger claim than the generic-OTLP entries below it and a weaker one than the
+	// reported entries above. Its `chat` span carries the full gen_ai.usage.* set, cache reads and
+	// writes included, under the exact semconv names -- that is read out of the runtime, not hoped
+	// for. What is conditional is whether it arrives: usage reaches Beacon only over OTLP, and a
+	// goose endpoint with hooks installed and `beacon endpoint install --harness goose` never run
+	// is correctly silent. Reporting that as a fault would be crying wolf at an operator who
+	// installed exactly half of what goose offers, which is the case this table exists to keep
+	// clean.
+	//
+	// It also carries no cost: goose reports tokens and not a price, so gen_ai.usage.cost_usd stays
+	// empty here by the runtime's choice rather than by Beacon declining to derive one.
+	"goose": {ExpectGenericOTLP, "usage arrives on OTLP chat spans; install `--harness goose` to enable the export"},
+
 	"gemini_cli":       {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"copilot_cli":      {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot":   {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},

@@ -53,6 +53,7 @@ func DiscoverAll() []Harness {
 		DiscoverClaude(),
 		DiscoverCodex(),
 		DiscoverGemini(),
+		DiscoverGoose(),
 		DiscoverAntigravity(),
 		DiscoverCopilotCLI(),
 		DiscoverOpenCode(),
@@ -411,6 +412,7 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 	claude := DiscoverClaude()
 	codex := DiscoverCodex()
 	gemini := DiscoverGemini()
+	goose := DiscoverGoose()
 	copilot := discoverCopilotCLI(endpoint)
 	factory := DiscoverFactory()
 	vscode := discoverVSCode(endpoint)
@@ -429,6 +431,17 @@ func ValidateConfigured(endpoint string) []ValidationResult {
 			Harness: gemini.Name,
 			Status:  gemini.TelemetryStatus,
 			Message: validateEndpointMessage(gemini.TelemetryStatus, gemini.Message, endpoint),
+		},
+		{
+			Harness: goose.Name,
+			Status:  goose.TelemetryStatus,
+			// The shared endpoint message is deliberately not applied to goose. It asserts that a
+			// harness reporting "enabled" is pointed at the endpoint passed in, and that endpoint is
+			// the collector's gRPC address -- which is the one address goose must never be pointed
+			// at, since its build carries no gRPC transport. gooseStatus has already checked the
+			// configured value against the local collector and against the environment overrides
+			// that silently turn its export off, so its own message is the more specific answer.
+			Message: goose.Message,
 		},
 		{
 			Harness: copilot.Name,
