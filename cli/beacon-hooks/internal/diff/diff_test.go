@@ -357,3 +357,37 @@ func hasExactLine(diff, want string) bool {
 	}
 	return false
 }
+
+// FromEditFragments and FromContentChange take the same two arguments and mean different things by
+// them, so the case that separates them is worth pinning: a replacement whose "before" side is
+// empty.
+//
+// FromContentChange is told the file's whole contents, so an empty old side means the file did not
+// exist and `@@ -0,0` is right. FromEditFragments is told one replaced span, so an empty before
+// side means an insertion into a file that does exist, and `@@ -0,0` would claim the whole file was
+// created by an edit that added one line.
+func TestFromEditFragmentsDoesNotReportAnInsertionAsANewFile(t *testing.T) {
+	inserted := FromEditFragments("/repo/main.go", "", "\tdefer cancel()")
+	if strings.Contains(inserted, "@@ -0,0") {
+		t.Fatalf("FromEditFragments reported an insertion as a new file: %q", inserted)
+	}
+	if !strings.Contains(inserted, "+\tdefer cancel()") {
+		t.Fatalf("FromEditFragments did not record the inserted line: %q", inserted)
+	}
+
+	created := FromContentChange("/repo/main.go", "", "package main\n")
+	if !strings.Contains(created, "@@ -0,0") {
+		t.Fatalf("FromContentChange must still report a created file as new: %q", created)
+	}
+}
+
+// A replacement that substitutes a fragment for an identical one changed nothing, and a hunk for it
+// would record that a file changed when it did not.
+func TestFromEditFragmentsReturnsNothingForAnUnchangedSpan(t *testing.T) {
+	if got := FromEditFragments("/repo/main.go", "timeout := 5", "timeout := 5"); got != "" {
+		t.Fatalf("FromEditFragments = %q, want empty for an unchanged span", got)
+	}
+	if got := FromEditFragments("", "before", "after"); got != "" {
+		t.Fatalf("FromEditFragments = %q, want empty without a path", got)
+	}
+}

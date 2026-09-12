@@ -468,3 +468,30 @@ func kiroWritePath(toolInput, toolResponse map[string]interface{}) string {
 	}
 	return ""
 }
+
+// FromEditFragments builds the diff for a find-and-replace edit stated as the text on either side
+// of it, rather than as the file's whole contents.
+//
+// The distinction from FromContentChange is the whole point of having both, and getting it wrong
+// produces a diff that is wrong rather than absent. FromContentChange renders its two arguments as
+// the entire file before and after, which is right for a runtime that reports a write by echoing
+// the file; this renders them as one replaced span, which is right for a runtime that reports an
+// edit by naming the text it matched and the text it substituted.
+//
+// goose's `edit` is the second shape: it takes `before` and `after` and requires `before` to match
+// the file exactly and uniquely, so the pair describes a fragment and never the file. Claude Code's
+// old_string/new_string is the same shape, which is why this is the builder that case already uses
+// -- exported here so goose reaches it by the same route rather than by a second implementation.
+func FromEditFragments(filePath, before, after string) string {
+	filePath = NormalizePath(filePath)
+	if filePath == "" {
+		return ""
+	}
+	// An edit that substitutes a fragment for an identical one changed nothing. Returning a hunk
+	// for it would record that a file changed when it did not -- the guard FromContentChange makes
+	// for the same reason.
+	if before == after {
+		return ""
+	}
+	return fromEditTool(filePath, before, after)
+}

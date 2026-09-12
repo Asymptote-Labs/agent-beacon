@@ -104,6 +104,14 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		// delete or a write this build could not read, and it falls through to the observing path
 		// below, which still records the call with its path and operation.
 		params = parseKiroEdit(input, logger)
+	} else if platformFlag == goosePlatform {
+		// goose gets its own reader rather than riding parseClaudeCopilotInput for two reasons the
+		// shared reader cannot be told about: its edit tool names the replaced span `before` and
+		// `after` rather than old_string/new_string, and its failure signal is the event name
+		// rather than anything in the payload. A nil result is not a failure -- it means this
+		// payload is a read, a shell command, an MCP call or a failed write -- and it falls through
+		// to the observing path below, which still records the call.
+		params = parseGooseEdit(input, logger)
 	} else {
 		params = parseClaudeCopilotInput(input, logger)
 	}
@@ -382,6 +390,15 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		toolName = antigravityToolName(input)
 	}
 	hookEvent := getFirstStr(input, "hook_event_name", "hookEventName")
+	// goose spells it `event`, and that spelling is deliberately not added to the shared list
+	// above: `event` is an ordinary key that other runtimes' payloads use for other things, so
+	// widening the list would make one of those the hook event name for a runtime that has nothing
+	// to do with goose. Reading it here is what lets the failure check below fire, since goose
+	// reports a failed call only by sending `PostToolUseFailure` -- whose payload is otherwise
+	// identical to a success -- and the check already matches that exact spelling.
+	if platformFlag == goosePlatform {
+		hookEvent = gooseHookEvent(input)
+	}
 	toolInput := resolveToolInput(input)
 	if toolInput == nil {
 		if nested, ok := input["tool_input"].(map[string]interface{}); ok {

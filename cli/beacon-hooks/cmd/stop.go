@@ -26,12 +26,26 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 }
 
+// stopResponse is the no-op reply for the Stop hook, per runtime.
+//
+// It exists for goose and only for goose, and it is the same hazard preToolResponse answers: goose
+// runs Stop through emit_blocking, so the `{}` this hook used to write on every path is classified
+// as a failed hook rather than as no opinion -- once per turn, for a hook whose entire job is to
+// observe one. Every other runtime ignores this hook's stdout or reads `{}` as no opinion, and
+// keeps getting it.
+func stopResponse() map[string]interface{} {
+	if platformFlag == goosePlatform {
+		return gooseBlockingEventResponse
+	}
+	return emptyResponse
+}
+
 func runStop(cmd *cobra.Command, args []string) {
 	start := time.Now()
 
 	input, err := readStdinJSON()
 	if err != nil {
-		outputJSONAndExit(emptyResponse)
+		outputJSONAndExit(stopResponse())
 		return
 	}
 
@@ -52,11 +66,11 @@ func runStop(cmd *cobra.Command, args []string) {
 			logger.Info("stop completed")
 			emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields("", input))
 			uploadCloudTelemetry(logger, true)
-			outputJSON(emptyResponse)
+			outputJSON(stopResponse())
 			return
 		}
 		uploadCloudTelemetry(logger, true)
-		outputJSONAndExit(emptyResponse)
+		outputJSONAndExit(stopResponse())
 		return
 	}
 
@@ -78,7 +92,7 @@ func runStop(cmd *cobra.Command, args []string) {
 	logger.Info("stop completed", "duration_ms", elapsed.Milliseconds())
 	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
 	uploadCloudTelemetry(logger, true)
-	outputJSONAndExit(emptyResponse)
+	outputJSONAndExit(stopResponse())
 }
 
 // platformToTranscriptName maps the platform flag to the transcript platform identifier.
