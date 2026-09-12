@@ -71,16 +71,27 @@ var harnessTargets = []harnessTarget{
 	// people say it; Kiro's own documentation does not, which is why it is an alias and not the
 	// name.
 	{name: "kiro", endpointKind: endpointTargetHook, endpointAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}, hookAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}},
-	// goose (Block). One row for the CLI and the desktop app together, because they are one agent
-	// core reading one plugins directory -- so asking for either gets the install that covers both.
-	// "goose" is also the canonical harness name events are written under, so a row read out of the
-	// runtime log and passed back to --harness resolves to the runtime it names. "gooseai" and
-	// "goose-ai" are deliberately not aliases: GooseAI is a different company's inference service,
-	// and accepting either would let someone ask to install hooks for a model provider.
+	// goose (Block). One name for the CLI and the desktop app together, because they are one agent
+	// core reading one plugins directory and exporting under one service.name -- so asking for
+	// either gets the install that covers both. "goose" is also the canonical harness name events
+	// are written under, so a row read out of the runtime log and passed back to --harness resolves
+	// to the runtime it names.
 	//
-	// The OTLP target for goose is a separate row rather than a second kind on this one; it lands
-	// with the config.yaml writer that backs it.
-	{name: "goose", endpointKind: endpointTargetHook, endpointAliases: []string{"goose", "codename-goose", "block-goose"}, hookAliases: []string{"goose", "codename-goose", "block-goose"}},
+	// Two rows, and it is the only runtime with both kinds under one name. They split the two
+	// commands cleanly: `endpoint install --harness goose` configures the OTLP export, because only
+	// the first row carries endpoint aliases, and `endpoint hooks install --harness goose` installs
+	// the hooks, because only the second carries hook aliases. The two lookups are built from
+	// different alias lists, so neither row can shadow the other.
+	//
+	// Both paths are wanted on a goose endpoint and neither subsumes the other: hooks see prompts,
+	// tool calls, commands and file edits; OTLP carries the token usage, reported cost, model,
+	// provider and reasoning that goose puts on no hook at all.
+	//
+	// "gooseai" and "goose-ai" are deliberately not aliases on either row: GooseAI is a different
+	// company's inference service, and accepting either would let someone ask to install telemetry
+	// for a model provider.
+	{name: "goose", endpointKind: endpointTargetOTLP, endpointAliases: []string{"goose", "codename-goose", "block-goose"}},
+	{name: "goose", endpointKind: endpointTargetHook, hookAliases: []string{"goose", "codename-goose", "block-goose"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen

@@ -829,6 +829,15 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 				return paths, err
 			}
 			paths = append(paths, path)
+		// goose takes the HTTP endpoint, not the gRPC one every harness above is given. Its
+		// opentelemetry-otlp build enables only the HTTP transport, and pointing it at 4317 fails
+		// silently: the exporter builds, and the telemetry never arrives.
+		case "goose":
+			path, err := harness.ConfigureGoose(harness.ConfigureOptions{Endpoint: httpEndpoint, UserMode: cfg.UserMode})
+			if err != nil {
+				return paths, err
+			}
+			paths = append(paths, path)
 		case "vscode", "vs_code", "vscode_copilot":
 			path, err := harness.ConfigureVSCode(harness.VSCodeConfigOptions{Endpoint: httpEndpoint})
 			if err != nil {

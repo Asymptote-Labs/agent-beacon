@@ -116,7 +116,7 @@ func resolveUserConfigTargets(values []string) (userConfigTargets, error) {
 		}
 		if endpointOK && endpointTarget.Kind == endpointTargetOTLP {
 			switch endpointTarget.Name {
-			case "claude", "codex", "gemini":
+			case "claude", "codex", "gemini", "goose":
 				if !seenNative[endpointTarget.Name] {
 					targets.native = append(targets.native, endpointTarget.Name)
 					seenNative[endpointTarget.Name] = true
@@ -133,6 +133,11 @@ func resolveUserConfigTargets(values []string) (userConfigTargets, error) {
 
 func repairNativeRuntimeConfigForUser(info consoleUserInfo, cfg endpointconfig.Config, targets []string) ([]string, []string, error) {
 	grpcEndpoint := fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.GRPCPort)
+	// goose is the one native-config harness that cannot use the gRPC address: its
+	// opentelemetry-otlp build enables only the HTTP transport. Pointing it at 4317 fails silently
+	// -- the exporter builds and the telemetry never arrives -- so the two endpoints are kept as
+	// separate values rather than one being derived at the call site.
+	httpEndpoint := fmt.Sprintf("http://127.0.0.1:%d", cfg.Collector.HTTPPort)
 	seen := map[string]bool{}
 	var configured []string
 	var paths []string
@@ -190,6 +195,23 @@ func repairNativeRuntimeConfigForUser(info consoleUserInfo, cfg endpointconfig.C
 				configured = append(configured, "gemini")
 				paths = append(paths, path)
 				seen["gemini"] = true
+			case "goose":
+				if seen["goose"] {
+					continue
+				}
+				path, err := harness.ConfigureGoose(harness.ConfigureOptions{Endpoint: httpEndpoint, UserMode: true})
+				if err != nil {
+					return struct{}{}, err
+				}
+				if err := collapseUserConfigBackups(path); err != nil {
+					return struct{}{}, err
+				}
+				if err := chownUserConfigArtifacts(info, path); err != nil {
+					return struct{}{}, err
+				}
+				configured = append(configured, "goose")
+				paths = append(paths, path)
+				seen["goose"] = true
 			}
 		}
 		return struct{}{}, nil

@@ -101,10 +101,19 @@ func TestGooseIsInTheRepairTargetList(t *testing.T) {
 	t.Fatal("goose is missing from the repair target list; `endpoint repair` would silently skip it")
 }
 
-// Every spelling a person plausibly types resolves to the one hook target, in both namespaces.
+// Every spelling a person plausibly types resolves to goose in both namespaces, and the two
+// namespaces resolve to different kinds on purpose.
+//
+// goose is the only runtime with both, under one name: `endpoint install --harness goose`
+// configures the OTLP export and `endpoint hooks install --harness goose` installs the hooks. Both
+// are wanted on a goose endpoint and neither subsumes the other -- hooks see prompts, tool calls,
+// commands and file edits; OTLP carries the token usage, cost, model and reasoning goose puts on no
+// hook at all -- so a spelling that resolved in only one namespace would silently offer half the
+// integration.
+//
 // Space-separated spellings are deliberately absent: normalizeHarnessKey folds case and
 // underscores but not spaces, so no runtime accepts them and goose is not the place to change that.
-func TestGooseHarnessSpellingsResolveToTheHookTarget(t *testing.T) {
+func TestGooseHarnessSpellingsResolveInBothNamespaces(t *testing.T) {
 	for _, spelling := range []string{
 		"goose", "Goose", " goose ", "GOOSE", "codename-goose", "codename_goose",
 		"block-goose", "block_goose",
@@ -114,9 +123,12 @@ func TestGooseHarnessSpellingsResolveToTheHookTarget(t *testing.T) {
 			if !ok {
 				t.Fatalf("normalizeEndpointTarget(%q) = not found", spelling)
 			}
-			if target.Name != "goose" || target.Kind != endpointTargetHook {
-				t.Fatalf("normalizeEndpointTarget(%q) = %+v, want the goose hook target", spelling, target)
+			// The endpoint namespace is the OTLP row: `endpoint install` configures config.yaml.
+			if target.Name != "goose" || target.Kind != endpointTargetOTLP {
+				t.Fatalf("normalizeEndpointTarget(%q) = %+v, want the goose OTLP target", spelling, target)
 			}
+			// The hook namespace is the hook row, built from a separate alias list so neither row
+			// can shadow the other.
 			if got, ok := normalizeHookTarget(spelling); !ok || got != "goose" {
 				t.Fatalf("normalizeHookTarget(%q) = %q, %t; want goose, true", spelling, got, ok)
 			}
@@ -144,6 +156,9 @@ func TestGooseCanonicalHarnessNameIsAnAcceptedTarget(t *testing.T) {
 	target, ok := normalizeEndpointTarget("goose")
 	if !ok || target.Name != "goose" {
 		t.Fatalf("normalizeEndpointTarget(goose) = %+v, %t", target, ok)
+	}
+	if hookTarget, ok := normalizeHookTarget("goose"); !ok || hookTarget != "goose" {
+		t.Fatalf("normalizeHookTarget(goose) = %q, %t", hookTarget, ok)
 	}
 }
 

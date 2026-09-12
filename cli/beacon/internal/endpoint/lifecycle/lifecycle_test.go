@@ -966,3 +966,43 @@ func TestConfigureHarnessesRejectsQwenAsHookManaged(t *testing.T) {
 		}
 	}
 }
+
+// goose is the one harness here that must be given the collector's HTTP endpoint rather than its
+// gRPC one, and the mistake fails silently: its opentelemetry-otlp build enables only the HTTP
+// transport, so an exporter pointed at 4317 builds successfully and then exports nothing. Nothing
+// in goose's config file or in `beacon endpoint status` would say so, which is why the port is
+// asserted here rather than left to the call site reading correctly.
+func TestConfigureHarnessesGivesGooseTheHTTPEndpoint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	cfg := endpointconfig.Config{
+		Harnesses: []string{"goose"},
+		Collector: endpointconfig.Collector{
+			GRPCPort: 54317,
+			HTTPPort: 54318,
+		},
+	}
+
+	paths, err := configureHarnesses(cfg)
+	if err != nil {
+		t.Fatalf("configureHarnesses returned error: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("configureHarnesses wrote %d paths, want 1: %v", len(paths), paths)
+	}
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatalf("read goose config: %v", err)
+	}
+	written := string(data)
+	if !strings.Contains(written, "54318") {
+		t.Fatalf("goose was not pointed at the collector's HTTP port:\n%s", written)
+	}
+	if strings.Contains(written, "54317") {
+		t.Fatalf("goose was pointed at the collector's gRPC port, which its build cannot use:\n%s", written)
+	}
+}
