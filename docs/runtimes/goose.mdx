@@ -1,0 +1,284 @@
+---
+title: "goose"
+description: "Asymptote support details for goose endpoint telemetry"
+---
+
+## Runtime overview
+
+Asymptote supports goose — the open-source agent from Block — through **two** collection paths, and both are wanted on the same machine:
+
+```bash
+beacon endpoint hooks install --harness goose    # plugin hooks
+beacon endpoint install --harness goose          # OTLP export
+```
+
+`--harness codename-goose` and `--harness block-goose` are also accepted, and install the same thing.
+
+The two are not alternatives. goose's hooks report prompts, tool calls, command lines and file edits; goose's OpenTelemetry export reports token usage, the model and provider, response ids and the agent's reasoning. **Neither path carries the other's data**, so an endpoint with only one installed is half instrumented.
+
+<Note>
+**One integration covers the CLI and the desktop app.** goose runs one agent core behind both, they discover plugins from the same directory, and both export under the same `service.name`. There is one harness name — `goose` — rather than one per surface.
+</Note>
+
+<Warning>
+**GooseAI is a different product.** GooseAI is an LLM inference service from another company, and `gooseai`, `goose-ai` and `goose.ai` are deliberately **not** accepted as harness names or install targets. They fall through as themselves, so a model provider can never be recorded as this runtime or have telemetry installed for it.
+</Warning>
+
+## Prerequisites
+
+Before enabling goose telemetry, make sure:
+
+- goose is installed, either the CLI or the desktop app.
+- `beacon endpoint install` has run so shared endpoint config, the collector, and runtime log paths exist. The OTLP path needs the collector actually listening; the hook path does not.
+- goose is restarted, or a new session started, after installing or removing hooks — plugins are discovered when a session begins.
+
+## Collection path 1: plugin hooks
+
+goose discovers plugins as the **immediate subdirectories** of its plugins directory, names each plugin after its directory, and loads `<plugin-root>/hooks/hooks.json` from every plugin that is enabled. So Asymptote owns a **directory** rather than a file, and never reads or writes any other plugin beside it.
+
+| Scope | Directory | Covers |
+|-------|-----------|--------|
+| User | `~/.agents/plugins/beacon-endpoint/hooks/hooks.json` | Every project on the machine |
+| Project | `<repo>/.agents/plugins/beacon-endpoint/hooks/hooks.json` | Sessions started in that repository |
+
+`$GOOSE_PATH_ROOT` relocates the user-scope location when it is set to an absolute path, matching how goose resolves its own directories. A relative value is ignored, exactly as goose ignores it.
+
+<Warning>
+**The two scopes replace each other; they do not add up.** goose deduplicates plugins by **name**, taking project scope first — so a project-scope `beacon-endpoint` plugin replaces the user-scope one for sessions in that directory rather than running alongside it. Asymptote installs the same directory name at both scopes deliberately: an operator who installs at both gets **one** registration, not two copies of every event.
+
+This is the opposite of [Kiro](/runtimes/kiro), where hook files merge across scopes, and it matches [OpenHands](/runtimes/openhands), where a project file shadows the user one.
+</Warning>
+
+`beacon endpoint inventory` reports both scopes, so an install at either is visible.
+
+<Note>
+**`.agents/plugins` is a shared directory, not goose's namespace.** It is the [Open Plugins](https://open-plugins.com) convention, so another agent implementing that specification would also discover this plugin and run its hooks — and those events would be attributed to goose, because nothing in a hook payload says which host invoked it. goose sets no distinguishing variable and the event schema has no field for the question.
+
+This is a stated limitation with no fix on Asymptote's side. It costs nothing today, because goose is the only supported runtime that reads this directory.
+</Note>
+
+### Registered events
+
+goose exposes twelve lifecycle events. Asymptote registers seven, and the five it leaves out are covered under [Known gaps](#known-gaps).
+
+| goose event | Adapter subcommand | Timeout |
+|-------------|--------------------|---------|
+| `SessionStart` | `session-start` | 10 s |
+| `UserPromptSubmit` | `prompt-submit` | 30 s |
+| `PreToolUse` | `pre-tool` | 10 s |
+| `PostToolUse` | `post-tool` | 10 s |
+| `PostToolUseFailure` | `post-tool` | 10 s |
+| `Stop` | `stop` | 45 s |
+| `SessionEnd` | `session-end` | 45 s |
+
+<Warning>
+**goose hook timeouts are seconds, not milliseconds.** The same `timeout` field is milliseconds on [Qwen Code](/runtimes/qwen-code), in a hooks file that looks similar. goose's own default is 30 seconds; Asymptote writes explicit values because these are ceilings on a hang, not budgets — and because goose **holds the turn** for a blocking hook, so the value on `Stop` is the ceiling on a stalled turn.
+</Warning>
+
+`PostToolUse` and `PostToolUseFailure` share the `post-tool` subcommand and are two separate registrations. goose has no single post-tool event: it sends one or the other, with **otherwise identical payloads**, and the event name is the only thing that distinguishes a write that landed from one that did not.
+
+Asymptote's hooks carry no `matcher`. The field is a regex tested against goose's `matcher_context`, and that is not a tool name on every event — on `UserPromptSubmit` it is **the prompt text**. A matcher that looked like a harmless `.*` would be a regex run over every prompt, and a narrower one would silently drop prompts that did not match it. Omitting it means always-match, which is what a telemetry hook wants on all seven.
+
+### The hook environment
+
+goose runs a `command` action through `sh -c`, exports `PLUGIN_ROOT`, and sends the event as JSON on stdin. Asymptote passes the endpoint log and config locations to `beacon-hooks` as `--log` and `--config` flags rather than through the environment, so a hook finds them wherever it runs.
+
+<Warning>
+**On goose, a hook's stdout is judged, not ignored.** `PreToolUse` and `Stop` run through goose's blocking path, which **classifies** what the hook wrote: a hook that exits 0 with stdout carrying no recognized decision is classified as a *failed hook*. goose logs one per tool call and per turn, and on a rule configured `on_failure: block` it **denies the tool call outright**.
+
+The no-op `{}` that every other runtime reads as "no opinion" lands there, and so does `{"permission":"allow"}` — goose reads `decision`, and accepts only `allow` and `block`. Asymptote therefore answers `{"decision":"allow"}` on both blocking events.
+
+**That allow approves nothing.** goose's hook chain is a plugin-policy layer inside `ToolExecutionOperation`, and the pipeline runs `ToolApprovalOperation` *before* it — so the operator's decision has already been made by the time a hook is consulted. It means "this policy hook does not object", and reaches no permission judge. This is the opposite of [Qwen Code](/runtimes/qwen-code), where answering "allow" would disarm the user's own prompts and Asymptote therefore answers with an empty object.
+</Warning>
+
+### Asymptote owns one plugin directory and nothing else
+
+Because goose loads every plugin it discovers, an install is additive by construction: your own plugins keep working, untouched, and Asymptote never parses them.
+
+The one thing Asymptote claims is the directory name `beacon-endpoint`. If its `hooks/hooks.json` already holds a hook Asymptote did not write, both install and uninstall **refuse** with an error naming the hook rather than overwriting or deleting it — move that hook into a plugin of its own and run the install again. A file goose itself could not parse is overwritten, since there are no live hooks in it to protect.
+
+Re-running the install rewrites the file rather than appending to it, so a repair does not end with each event registered twice. Uninstall removes the file **and the plugin directory Asymptote created**, because a plugin directory with no hooks file is still a plugin goose discovers and records in `config.yaml`. A directory you put something else into is left alone.
+
+## Collection path 2: OpenTelemetry export
+
+goose ships a real OpenTelemetry exporter emitting OTel GenAI semantic-convention spans, and `beacon endpoint install --harness goose` points it at the local collector by writing two keys into goose's own `config.yaml`:
+
+```yaml
+otel_exporter_otlp_endpoint: http://127.0.0.1:4318
+otel_exporter_otlp_timeout: 10000
+```
+
+<Warning>
+**goose exports OTLP over HTTP only.** Its build includes the HTTP transport and not gRPC, so it takes the collector's **HTTP** port where [Claude Code](/runtimes/claude-code), [Codex CLI](/runtimes/codex-cli) and [Gemini CLI](/runtimes/gemini-cli) take gRPC. Pointing goose at `4317` fails **silently**: the exporter builds successfully and the telemetry never arrives.
+</Warning>
+
+This path is what carries `gen_ai.usage.*` — including cache reads and writes — along with `gen_ai.request.model`, `gen_ai.provider.name`, `gen_ai.response.id`, `gen_ai.response.finish_reasons` and the agent's reasoning, on `chat` and `execute_tool` spans. None of that appears on any hook.
+
+### Your config.yaml is edited, not rewritten
+
+`config.yaml` is a file you write by hand — your provider, your model, your extensions, your permissions. Asymptote changes two keys and **preserves comments, key order, values, nesting and two-space indentation**, and backs the file up before writing. A config Asymptote cannot parse is refused rather than overwritten.
+
+The one thing not preserved is **blank lines between top-level keys**, which the YAML library cannot retain. That is the reason for the backup.
+
+### The file is not the whole answer
+
+Three environment conditions leave the config file saying "local" while goose exports nothing, so `beacon endpoint status` reads the environment as well as the file:
+
+| Condition | What goose does |
+|-----------|-----------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` set to something else | goose copies the config file's endpoint into the environment **only when the variable is unset**, so another tool's remote collector silently redirects goose |
+| `OTEL_SDK_DISABLED=true` | Disables every signal |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` set to a gRPC variant | goose **disables the signal** rather than panicking its exporter threads, with one stderr warning as the only sign |
+
+Reporting "enabled" from the file alone would say a runtime is covered when it is silent, so each of these is reported as misconfigured with the variable named.
+
+## Discovery and status
+
+```bash title="Show goose status on both paths"
+beacon endpoint hooks status --harness goose
+beacon endpoint status --json | jq '.harnesses[] | select(.name == "goose")'
+```
+
+goose reports as the `goose` harness. Hook events carry `harness.collection_method=hook` — the events, the payload shapes and the hooks schema are all goose's, and Asymptote ships no plugin source goose loads and executes — while OTLP events carry `harness.collection_method=otlp`.
+
+<Note>
+**A hooks file on disk is a registration, not a guarantee.** goose lets you disable a plugin from the `plugins` map in `config.yaml` or from `disabledPlugins` in a `settings.json` at any of three scopes, and a disabled plugin keeps its hooks file. `beacon endpoint hooks status` reports the registration, which is the narrower claim it can actually make — answering the rest would mean reimplementing goose's precedence across four files it does not version. Run one session and check the log to confirm events are arriving.
+</Note>
+
+## Install or configuration support
+
+```bash
+beacon endpoint hooks install --harness goose                    # ~/.agents/plugins/beacon-endpoint/
+beacon endpoint hooks install --harness goose --level project    # <repo>/.agents/plugins/beacon-endpoint/
+beacon endpoint install --harness goose                          # OTLP export in goose's config.yaml
+beacon endpoint hooks status --harness goose
+beacon endpoint hooks uninstall --harness goose
+```
+
+Commit `.agents/plugins/beacon-endpoint/` if you want the hooks to apply to everyone working in the repository — remembering that it then **replaces** any user-scope install for sessions in that repository.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through the plugin directory at both scopes, and through `config.yaml` for the export |
+| Harness attribution | Supported. `goose`, `goose_cli`, `goose-cli`, `goose cli`, `goosecli`, `goose_agent`, `goose-agent`, `goose agent`, `codename_goose`, `codename-goose`, `codename goose`, `block_goose`, `block-goose`, and `block goose` normalize to `goose` |
+| Hook install, status, uninstall, and repair | Supported |
+| OTLP export configuration | Supported. Written into goose's own `config.yaml`, preserving the rest of the file |
+| Session lifecycle | Supported. `session.started` from `SessionStart`, `session.ended` from `SessionEnd`, `tool.completed` from `Stop` |
+| Prompts | Supported. `prompt.submitted` from `UserPromptSubmit`, read from the payload's `message` field |
+| Tool use | Supported for pre-tool and post-tool activity, correlated by `gen_ai.tool.call.id` |
+| Commands | Supported. `command.executed` with the command line. **No exit code and no output** — see [Known gaps](#known-gaps) |
+| File activity | Supported. `file.modified` with paths, operations, and diffs; `file.read` for directory listings and local image reads |
+| MCP activity | Supported. Recognized from goose's `<extension>__<tool>` naming, with the server and tool split out |
+| Failed tools | Supported. `tool.failed` at high severity from `PostToolUseFailure` |
+| Token usage | Supported **through OTLP only**. Reported as `generic_otlp` coverage, because it arrives only when the export is installed |
+| Model, provider, and reasoning | Supported through OTLP only |
+| Approval decisions | Not collected. See [Known gaps](#known-gaps) |
+| Reported cost | Not collected. goose reports tokens, not a price |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent. goose hooks are installed per repository or in the logged-in user's context |
+
+### Tool taxonomy
+
+goose registers its `developer` extension with `unprefixed_tools`, so its tools arrive **bare** — the model calls `shell`, not `developer__shell`. goose's own resolver also recovers `developer__shell` and `developer.shell` from a model that adds the prefix anyway, so all three spellings reach a hook and all three classify identically.
+
+| Tool | Recorded as |
+|------|-------------|
+| `shell` | `command.executed`, with the command line |
+| `write` | `file.modified`, operation `create`, with a diff of the new content |
+| `edit` | `file.modified`, operation `modify`, with a diff built from `before` and `after` |
+| `tree` | `file.read`, against the directory listed |
+| `read_image` | `file.read` when its `source` is a local path; `tool.invoked` when it is an http(s) URL |
+| `<extension>__<tool>` where the extension is not built in | `mcp.tool_invoked`, with `mcp.server` and `mcp.tool` |
+| `analyze`, `load_skill`, `delegate`, the todo and orchestrator tools, and the rest | `tool.invoked` |
+
+<Note>
+**MCP calls are identified by exclusion, and they have to be.** goose calls an MCP tool `<extension>__<tool>` — no `mcp` anywhere in the name, no `mcp_*` argument, and no result to inspect, because goose populates no tool output at all. What identifies the call is that the prefix is **not** one of goose's built-in extensions.
+
+Without that, a GitHub MCP server's `github__create_issue` would be classified by the generic substring rules, which see "create" and would record an API call as a **file modification**.
+</Note>
+
+`read_image` is the one tool whose argument is ambiguous: `source` is documented as a local path *or* an http(s) URL. A URL is never recorded under `file.path`, because that field is what every rule, git helper and SIEM query treats as a filesystem path.
+
+### Diffs, and the guard that makes them trustworthy
+
+goose's `edit` states the replaced span as `before` and `after` — **fragments** of the file, not copies of it, because the tool requires `before` to match the file exactly and uniquely. That is the same shape as Claude Code's `old_string`/`new_string`, and it takes the same fragment-diff builder. `write` carries the whole new file under `content` and takes the whole-content builder.
+
+A failed edit is **never** recorded as a change. goose reports one with the same tool name and the same arguments as a success — its `edit` fails whenever `before` does not match — and the event name is the only thing that separates them. Without that guard, a diff would be built from an edit that never landed, and the log would assert a file changed when it did not.
+
+An edit whose `before` and `after` are identical produces no diff, for the same reason.
+
+## Approvals and enforcement
+
+**Asymptote records no approval decisions for goose, and does not synthesize any.**
+
+goose genuinely does ask the operator — `ToolApprovalOperation` runs the permission judge, marks calls that need a person as not executable, and stops the turn for an answer — and exposes none of that to a hook. Its `HookEvent` set has no approval event at all, and `PreToolUse` fires identically whether the call was pre-approved by `goose_mode`, waved through, or already confirmed by somebody. An `approval.allowed` derived from it would claim a decision in exactly the cases where none was made. This is the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), [OpenHands](/runtimes/openhands), [Kiro](/runtimes/kiro), and [fx](/runtimes/vercel-fx).
+
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. goose is a runtime where a provider deny does take effect, and its deny shape is distinctive:
+
+```json
+{"decision": "block", "reason": "..."}
+```
+
+<Warning>
+**On goose the deny value is `block`, not `deny`.** goose's classifier accepts the literal strings `allow` and `block` and nothing else. `deny` — the word every other runtime's deny shape uses — reads to goose as a hook that exited 0 without a verdict, which it treats as a *failed* hook and, on a rule not configured to block on failure, waves the tool call straight through. A seam that meant to deny would have allowed.
+</Warning>
+
+The reason rides along because goose puts it in front of both the operator and the model, prefixed with "Tool call denied by policy hook" and an instruction not to retry.
+
+## Data handling
+
+goose content is handled like every other runtime. Prompts, tool arguments, command lines, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+
+The OTLP path carries message content only when `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` is set in goose's environment. That is goose's own opt-in and is not written by Asymptote — it cannot be: goose reads it from the environment only, never from `config.yaml`.
+
+## Known gaps
+
+- **No tool output of any kind.** goose's hook context has a `tool_output` field and **no emission site in the runtime populates it**. So there are no command exit codes, no command output, no file-read contents and no MCP results anywhere on the hook path. A command is recorded as executed, with its command line, and nothing about how it went. This is the largest gap on this runtime, and closing it needs a change in goose.
+- **No approval decisions.** goose exposes no approval event, and Asymptote does not synthesize one from `PreToolUse`. Approval rules and dashboards will show nothing for this runtime.
+- **No reported cost.** goose reports token counts and not a price, so `gen_ai.usage.cost_usd` is empty. Asymptote does not derive cost from local pricing tables for any runtime.
+- **Token usage needs the OTLP path.** Usage arrives on `chat` spans, so a hooks-only install reports none. That is expected rather than a fault, and `beacon token-usage` classifies goose accordingly.
+- **No working directory on three events.** goose omits it on `SessionStart` and `SessionEnd` when they come from the agent rather than the CLI session loop, and on a `UserPromptSubmit` raised by steering mid-turn. Those events carry no `session.working_directory` and no repository. Asymptote deliberately does **not** fall back to the hook process's own directory: goose runs hooks with `sh -c` inheriting its own cwd, which is the application bundle under the desktop app — a path that looks like a repository and resolves to nothing. Every tool event does carry it.
+- **No duplicate shell and file events.** `BeforeShellExecution`, `AfterShellExecution`, `BeforeReadFile` and `AfterFileEdit` are deliberately not subscribed to. Each fires alongside `PreToolUse` or `PostToolUse` for the **same call**, with the same tool name and arguments and — the part that makes them worse than redundant — **no tool call id at all**. Subscribing would record every shell command and file edit twice, with the second copy uncorrelatable.
+- **No policy-decision events.** `PreToolUseResult` reports what the `PreToolUse` hook chain decided, which plugin denied, and why. It is real signal with no duplicate elsewhere, but it fires once per tool call to report an outcome that is almost always "allow", so subscribing as-is would double event volume. It is deferred rather than declined.
+- **No compaction or subagent events.** goose emits neither on a hook.
+- **No transcript path.** goose keeps conversation state in its own sessions database and no payload field points at it.
+- **Another Open Plugins host would run these hooks.** `.agents/plugins` is a shared convention directory, and nothing in a payload identifies the host. See [Collection path 1](#collection-path-1-plugin-hooks).
+
+## Deployment notes
+
+Plugins are discovered when a session starts, so an install taken while goose is running takes effect on the next session. Restart goose, or start a new session, after installing or removing hooks.
+
+Confirm status, then generate one goose event and check the log:
+
+```bash
+beacon endpoint hooks status --harness goose
+beacon endpoint doctor --system
+grep '"name":"goose"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+If goose hook telemetry is missing:
+
+- Confirm the plugin is enabled. Check the `plugins` map in `~/.config/goose/config.yaml` and `disabledPlugins` in any `settings.json` — a disabled plugin keeps its hooks file, so the install looks complete.
+- Check `$GOOSE_PATH_ROOT`: if it is set to an absolute path, the user-scope plugin is under that directory, not `~/.agents`.
+- Check for a project-scope install in the repository you are working in. It **replaces** the user-scope one rather than adding to it.
+- Confirm the file contains commands with `--platform goose`.
+- Start a new session so the plugin is rediscovered.
+
+If goose token usage or model data is missing:
+
+- Confirm `otel_exporter_otlp_endpoint` is in `~/.config/goose/config.yaml` and names the collector's **HTTP** port, not the gRPC one.
+- Check `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SDK_DISABLED` and `OTEL_EXPORTER_OTLP_PROTOCOL` in goose's launch environment. Each can silently turn the export off or redirect it, and `beacon endpoint status` names whichever one is doing it.
+- Confirm the collector is running and listening on the HTTP port.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Asymptote discovers and configures each runtime.
+  </Card>
+</Columns>

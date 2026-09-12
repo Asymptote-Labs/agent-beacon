@@ -147,6 +147,7 @@
                       "runtimes/vercel-fx",
                       "runtimes/gemini-cli",
                       "runtimes/github-copilot-cli",
+                      "runtimes/goose",
                       "runtimes/grok-build",
                       "runtimes/kiro",
                       "runtimes/muse-code",
