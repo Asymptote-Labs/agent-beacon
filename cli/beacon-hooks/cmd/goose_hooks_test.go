@@ -171,6 +171,46 @@ func TestGoosePreToolAnswersWithAnExplicitAllowDecision(t *testing.T) {
 	}
 }
 
+// Stop is goose's other blocking event, and it runs through the same classifier: a `{}` there is a
+// failed hook once per turn, for a hook whose entire job is to observe the turn ending. Pinned
+// separately from pre-tool because the two replies are written by different functions and the
+// failure mode is invisible -- goose logs it and carries on.
+//
+// stopResponse is called directly rather than through runStop, which ends with os.Exit and so
+// cannot be driven in-process. That is the same reason no existing test runs that command either;
+// the reply is the whole of what this asserts, and stopResponse is where the reply is decided.
+func TestGooseStopAnswersWithAnExplicitAllowDecision(t *testing.T) {
+	gooseTestSetup(t)
+
+	out := stopResponse()
+	if got, _ := out["decision"].(string); got != "allow" {
+		t.Fatalf("stopResponse() = %#v, want {\"decision\":\"allow\"} -- goose runs Stop through "+
+			"emit_blocking and reads anything else as a failed hook", out)
+	}
+	// Both blocking events answer with the same value, from one definition. A second literal is how
+	// one of them gets left behind when goose's accepted decisions change.
+	stop, _ := out["decision"].(string)
+	if pre, _ := preToolResponse()["decision"].(string); pre != stop {
+		t.Fatalf("pre-tool answers %q and stop answers %q; goose's two blocking events are one "+
+			"contract and must be answered from one definition", pre, stop)
+	}
+}
+
+// The stop reply must not change for any runtime that is not goose. Every other one either ignores
+// this hook's stdout or reads `{}` as no opinion, and a decision key appearing there would be
+// Beacon asserting something about a turn it only watched.
+func TestGooseStopReplyDoesNotLeakToOtherRuntimes(t *testing.T) {
+	gooseTestSetup(t)
+	for _, platform := range []string{"claude", "qwen", openHandsPlatform, kiroPlatform} {
+		t.Run(platform, func(t *testing.T) {
+			platformFlag = platform
+			if out := stopResponse(); len(out) != 0 {
+				t.Fatalf("stopResponse() for %s = %#v, want an empty object", platform, out)
+			}
+		})
+	}
+}
+
 // Saying "allow" to goose does not approve anything, which is what makes the test above safe and
 // what separates goose from Qwen Code. goose's hook chain is a plugin-policy layer inside
 // ToolExecutionOperation, and the pipeline registers ToolApprovalOperation before it -- so the

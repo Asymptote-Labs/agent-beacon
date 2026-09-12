@@ -175,26 +175,10 @@ func preToolResponse() map[string]interface{} {
 	// answering the same question for every runtime rather than having one whose answer is
 	// "nothing, and the writer knows why".
 	// goose is the one runtime where the empty object is the harmful answer, so it is answered
-	// before the group below rather than joining it.
-	//
-	// Its PreToolUse chain classifies every hook run, and a hook that exits 0 with stdout carrying
-	// no decision is classified a *failure*: goose logs "Plugin hook failed; continuing without it"
-	// for every tool call, and on a rule configured `on_failure: block` it denies the call
-	// outright. `{}` and `{"permission":"allow"}` both land there -- goose reads `decision`, and
-	// only the values "allow" and "block". Silence would also be accepted, but an explicit allow is
-	// the one shape that is unambiguous on both of goose's blocking events, Stop included.
-	//
-	// Saying "allow" here does not approve anything, which is what makes it safe and what separates
-	// goose from Qwen Code above. goose's hook chain is a plugin-policy layer inside
-	// ToolExecutionOperation, and the pipeline registers ToolApprovalOperation *before* it -- so by
-	// the time a hook is consulted the operator's decision has already been made and the call has
-	// already survived it. HookDecision::Allow means "this policy hook does not object"; there is
-	// no code path by which it reaches the permission judge or skips a prompt.
-	//
-	// The key is `decision` rather than `permission`: allowResponse below is a different runtime's
-	// spelling and goose would read it as no decision at all.
+	// before the group below rather than joining it. gooseBlockingEventResponse carries why, and
+	// carries it once because Stop needs the same answer for the same reason.
 	if platformFlag == goosePlatform {
-		return map[string]interface{}{"decision": "allow"}
+		return gooseBlockingEventResponse
 	}
 	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform {
 		return emptyResponse

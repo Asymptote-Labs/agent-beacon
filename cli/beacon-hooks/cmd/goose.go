@@ -133,6 +133,27 @@ var (
 // gooseReadImageToolName is the built-in that reads an image from a path *or* a URL.
 const gooseReadImageToolName = "read_image"
 
+// gooseBlockingEventResponse is the reply goose's two blocking events require.
+//
+// goose runs `PreToolUse` and `Stop` through emit_blocking, which classifies what the hook wrote to
+// stdout instead of ignoring it. A hook that exits 0 with stdout carrying no recognized decision is
+// classified a *failure*: goose logs one per tool call and per turn, and on a PreToolUse rule
+// configured `on_failure: block` it denies the call outright. The no-op `{}` every other runtime
+// reads as "no opinion" lands there, and so does `{"permission":"allow"}` -- goose reads `decision`
+// and accepts only "allow" and "block".
+//
+// Saying "allow" approves nothing. goose's hook chain is a plugin-policy layer inside
+// ToolExecutionOperation, and the pipeline registers ToolApprovalOperation *before* it, so the
+// operator's decision has already been made by the time a hook is consulted; HookDecision::Allow
+// means "this policy hook does not object" and reaches no permission judge. That is what separates
+// goose from Qwen Code, where "allow" would genuinely disarm the user's own prompts and Beacon
+// therefore answers with an empty object.
+//
+// Shared by both callers rather than written twice, because the two events are one contract: a
+// change to what goose accepts has to reach pre-tool and stop together, and the literal appearing
+// in two files is how one of them gets left behind.
+var gooseBlockingEventResponse = map[string]interface{}{"decision": "allow"}
+
 // gooseHookEvent reads which goose lifecycle event a payload describes.
 func gooseHookEvent(input map[string]interface{}) string {
 	return getFirstStr(input, "event")
