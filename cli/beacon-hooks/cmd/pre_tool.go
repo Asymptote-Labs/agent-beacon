@@ -54,7 +54,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == goosePlatform {
 		// Muse Code belongs on the observing side rather than with the runtimes whose pre-tool
 		// notification gets turned into a synthesized approval, and the reason is that it has a
 		// real one. Its PermissionRequest event is a separate hook Beacon also subscribes to, so
@@ -76,6 +76,16 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		// approval.allowed derived from it would claim a decision was made in the very cases where
 		// one has not been made yet, on a runtime where real decisions exist and are invisible.
 		// That is worse than the no-approval-gate runtimes, not better.
+		//
+		// goose is on that same side and for the Kiro reason: ToolApprovalOperation runs the
+		// permission judge, marks calls that need a person as not executable and stops the turn
+		// for an answer, and none of that reaches a hook -- goose's HookEvent set has no approval
+		// event at all. PreToolUse fires identically whether the call was pre-approved by
+		// goose_mode, waved through, or already confirmed by somebody, so an approval.allowed
+		// derived from it would claim a decision in exactly the cases where none was made.
+		//
+		// The reply goose gets is a separate question from this one, and the two answers point
+		// opposite ways; see preToolResponse.
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -164,6 +174,28 @@ func preToolResponse() map[string]interface{} {
 	// suppression would have to fall back to if that ever changed, and it keeps this function
 	// answering the same question for every runtime rather than having one whose answer is
 	// "nothing, and the writer knows why".
+	// goose is the one runtime where the empty object is the harmful answer, so it is answered
+	// before the group below rather than joining it.
+	//
+	// Its PreToolUse chain classifies every hook run, and a hook that exits 0 with stdout carrying
+	// no decision is classified a *failure*: goose logs "Plugin hook failed; continuing without it"
+	// for every tool call, and on a rule configured `on_failure: block` it denies the call
+	// outright. `{}` and `{"permission":"allow"}` both land there -- goose reads `decision`, and
+	// only the values "allow" and "block". Silence would also be accepted, but an explicit allow is
+	// the one shape that is unambiguous on both of goose's blocking events, Stop included.
+	//
+	// Saying "allow" here does not approve anything, which is what makes it safe and what separates
+	// goose from Qwen Code above. goose's hook chain is a plugin-policy layer inside
+	// ToolExecutionOperation, and the pipeline registers ToolApprovalOperation *before* it -- so by
+	// the time a hook is consulted the operator's decision has already been made and the call has
+	// already survived it. HookDecision::Allow means "this policy hook does not object"; there is
+	// no code path by which it reaches the permission judge or skips a prompt.
+	//
+	// The key is `decision` rather than `permission`: allowResponse below is a different runtime's
+	// spelling and goose would read it as no decision at all.
+	if platformFlag == goosePlatform {
+		return map[string]interface{}{"decision": "allow"}
+	}
 	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform {
 		return emptyResponse
 	}

@@ -45,6 +45,9 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 	if platformFlag == openHandsPlatform {
 		prompt = openHandsPrompt(input)
 	}
+	if platformFlag == goosePlatform {
+		prompt = goosePrompt(input)
+	}
 	hasPrompt := prompt != ""
 	if hasPrompt {
 		fields["prompt"] = map[string]interface{}{"text": prompt}

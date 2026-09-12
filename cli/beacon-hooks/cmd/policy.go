@@ -109,6 +109,13 @@ func newPolicyCandidate(input map[string]interface{}, sessionID string) policyCa
 	}
 	toolInput := resolveToolInput(input)
 	hookEvent := getFirstStr(input, "hook_event_name", "hookEventName")
+	// goose spells it `event`; see the note in emitPostToolObserved for why that spelling stays out
+	// of the shared list. It changes nothing on this path today -- the seam only runs pre-tool,
+	// where no runtime's event name affects the classification -- and is read so the two callers of
+	// actionForTool ask it the same question rather than one of them silently passing "".
+	if platformFlag == goosePlatform {
+		hookEvent = gooseHookEvent(input)
+	}
 
 	fields := sessionFields(sessionID, input)
 	for key, value := range toolFields(toolName, toolInput) {
@@ -260,6 +267,23 @@ func policyDenyResponse(reason string, phase policycontract.Phase) map[string]in
 	// works without changing that.
 	case platformFlag == openHandsPlatform:
 		return map[string]interface{}{"decision": "deny", "reason": reason}
+	// goose reads the same two keys and one different value: its classifier accepts the literal
+	// strings "allow" and "block", and nothing else. "deny" -- the word every runtime above uses --
+	// is not a decision goose recognizes, so sending it would be read as a hook that exited 0
+	// without a verdict, which goose classifies as a *failed* hook and, on a rule that is not
+	// configured to block on failure, waves the tool call straight through. A seam that meant to
+	// deny would have allowed.
+	//
+	// The reason rides along for the OpenHands purpose and one more: goose puts it in front of both
+	// the operator and the model, prefixed with "Tool call denied by policy hook" and the
+	// instruction not to retry, so the seam's explanation is what the agent is told.
+	//
+	// Exit code 2 with the reason on stderr is goose's documented alternative, not a requirement
+	// alongside this: classify_output reads stdout first and a parsed `decision: block` denies
+	// whatever the exit code. Beacon exits 0 on every hook path, so the object is the only shape
+	// that works without changing that -- the same reasoning as OpenHands above.
+	case platformFlag == goosePlatform:
+		return map[string]interface{}{"decision": "block", "reason": reason}
 	// Qwen Code shares Claude Code's deny shape exactly: `hookSpecificOutput.permissionDecision`
 	// with a `permissionDecisionReason`, both required by its PreToolUse contract. The
 	// `hookEventName` stays "PreToolUse" in both phases the seam runs in, matching the existing

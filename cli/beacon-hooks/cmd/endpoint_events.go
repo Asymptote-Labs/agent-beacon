@@ -340,6 +340,15 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	if path == "" && platformFlag == kiroPlatform {
 		path = kiroToolPath(toolInput)
 	}
+	// goose's read_image names its target `source`, not `path`, so every key above misses it and
+	// the call would record no file at all. Asked after the shared list for the Kiro reason -- a
+	// payload carrying a top-level path has said something more direct -- and `source` is
+	// deliberately not added to that list: it is an ordinary key other runtimes use for other
+	// things, and gooseReadImageSource also has to reject the http(s) URLs this one argument
+	// legitimately carries.
+	if path == "" && platformFlag == goosePlatform {
+		path = gooseToolPath(toolName, toolInput)
+	}
 	if path != "" {
 		fields["file"] = map[string]interface{}{
 			"path":      path,
@@ -460,6 +469,12 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 	// argument, and comes back with whatever the server returned. Keyed on the platform because a
 	// leading "@" is Kiro's convention and not a general one.
 	hasKiroMCPToolName := platformFlag == kiroPlatform && kiroIsMCPToolName(toolName)
+	// goose says so in the tool name too, but only by exclusion. It calls an MCP tool
+	// `<extension>__<tool>` with no "mcp" anywhere, no mcp_* argument, and -- since goose populates
+	// no tool output at all -- no result to inspect. What identifies the call is that the prefix is
+	// not one of goose's built-in extensions. Keyed on the platform because `a__b` is goose's
+	// convention and not a general one.
+	hasGooseMCPToolName := platformFlag == goosePlatform && gooseIsMCPToolName(toolName)
 
 	server := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "server", "server_name", "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
 	tool := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "tool", "tool_name", "function_name", "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name", "gen_ai.tool.name")
@@ -483,6 +498,20 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 			}
 		}
 	}
+	if hasGooseMCPToolName {
+		// Same placement and the same reason as Kiro just above: the shared derivation matches
+		// `mcp__` and `mcp:` and would find neither half of `github__create_issue`, recording an
+		// MCP call whose server and tool are blank.
+		if server == "" || tool == "" {
+			derivedServer, derivedTool := gooseMCPServerTool(toolName)
+			if server == "" {
+				server = derivedServer
+			}
+			if tool == "" {
+				tool = derivedTool
+			}
+		}
+	}
 	if derivedServer, derivedTool := deriveMCPServerTool(toolName); derivedServer != "" || derivedTool != "" {
 		if server == "" {
 			server = derivedServer
@@ -492,7 +521,7 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 		}
 	}
 
-	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || hasKiroMCPToolName || strings.Contains(strings.ToLower(toolName), "mcp")
+	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || hasKiroMCPToolName || hasGooseMCPToolName || strings.Contains(strings.ToLower(toolName), "mcp")
 	if !isMCP {
 		return nil
 	}
@@ -767,6 +796,11 @@ func fileOperation(toolName string, toolInput map[string]interface{}) string {
 			return operation
 		}
 	}
+	if platformFlag == goosePlatform {
+		if operation := gooseFileOperation(toolName, toolInput); operation != "" {
+			return operation
+		}
+	}
 	lower := strings.ToLower(toolName)
 	switch {
 	case strings.Contains(lower, "read") || strings.Contains(lower, "view") || strings.Contains(lower, "list") || strings.Contains(lower, "grep") || strings.Contains(lower, "search"):
@@ -794,6 +828,14 @@ func actionForTool(hookEvent, toolName string, toolInput, toolResponse map[strin
 	}
 	if platformFlag == kiroPlatform {
 		if action := kiroToolAction(toolName, toolInput, toolResponse); action != "" {
+			return action
+		}
+	}
+	if platformFlag == goosePlatform {
+		// Asked before the failure checks other runtimes do here, and it needs none of its own:
+		// goose reports a failed call as a different event, and emitPostToolObserved has already
+		// classified that as tool.failed and returned before reaching this function.
+		if action := gooseToolAction(toolName, toolInput); action != "" {
 			return action
 		}
 	}
