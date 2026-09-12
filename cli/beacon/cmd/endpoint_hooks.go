@@ -203,6 +203,31 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 				"and its agent server (used by the CLI and the GUI) reads only the repository file. " +
 				"Run the install again with --level project inside a repository to cover those.")
 		}
+	case "goose":
+		status, err := endpointhooks.InstallGoose(endpointhooks.GooseOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("goose hooks installed: %s\n", status.HooksPath)
+		// Said on every install rather than at one scope, because it is not a scope caveat: goose
+		// discovers plugins from `.agents/plugins`, the shared Open Plugins directory, and can be
+		// told to ignore one from config.yaml or from a settings.json Beacon does not write. So a
+		// file on disk is a registration, not a guarantee that goose is running it -- and that is
+		// the one thing `beacon endpoint status` cannot tell the operator either.
+		fmt.Println("goose loads this plugin unless it is disabled in ~/.config/goose/config.yaml " +
+			"or in a goose settings.json; run `goose session` once and check the runtime log to " +
+			"confirm events are arriving.")
+		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
+			// goose keeps one plugin per name, project before user, so this replaces rather than
+			// supplements. Worth saying because it is the opposite of Kiro just below, where the
+			// scopes merge.
+			fmt.Println("A project-scope goose plugin replaces the user-scope one of the same name " +
+				"for sessions in this directory rather than running alongside it.")
+		}
 	case "kiro":
 		status, err := endpointhooks.InstallKiro(endpointhooks.KiroOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -430,6 +455,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "goose":
+		status, err := endpointhooks.UninstallGoose(endpointhooks.GooseOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "kiro":
 		status, err := endpointhooks.UninstallKiro(endpointhooks.KiroOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -578,6 +613,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "goose":
+			statuses["goose"] = endpointhooks.GooseHookStatus(endpointhooks.GooseOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "kiro":
 			statuses["kiro"] = endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -667,6 +708,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "openhands":
 			status := statuses["openhands"].(endpointhooks.OpenHandsStatus)
 			fmt.Printf("OpenHands hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "goose":
+			status := statuses["goose"].(endpointhooks.GooseStatus)
+			fmt.Printf("goose hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
 		case "kiro":
 			status := statuses["kiro"].(endpointhooks.KiroStatus)
