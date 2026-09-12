@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -379,6 +380,17 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// above. Both can be live at once, so showing one would understate the install.
 		{runtime: "kiro", path: filepath.Join(kiroUserDir(home), "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "kiro", path: filepath.Join(work, ".kiro", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		// goose is the only runtime with two files that answer different questions, so all three
+		// entries are here. The two hooks files are the Beacon-owned plugin at each scope, reported
+		// both because goose deduplicates plugins by name with project scope first -- a project
+		// copy replaces the user one, the OpenHands shadowing problem rather than Kiro's additive
+		// coverage. The config file is goose's own and is what carries the OTLP export: token
+		// usage, cost, model and reasoning, none of which reach a hook. An endpoint with hooks and
+		// no export is half instrumented, and an inventory reporting one as the other would hide
+		// that. It has no project scope because goose resolves config.yaml per user.
+		{runtime: "goose", path: filepath.Join(goosePluginsDir(home), "beacon-endpoint", "hooks", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "goose", path: filepath.Join(work, ".agents", "plugins", "beacon-endpoint", "hooks", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		{runtime: "goose", path: gooseConfigFile(home), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.
@@ -1021,5 +1033,108 @@ func TestScanFxWithoutMCPConfigurationIsQuiet(t *testing.T) {
 	}
 	if config.Exists || config.ParserStatus != StatusNotFound {
 		t.Errorf("absent fx mcp.json reported as exists:%t parser:%s", config.Exists, config.ParserStatus)
+	}
+}
+
+// goose is the one runtime whose two inventory rows are detected by different evidence, so both
+// halves need their own case in beaconManaged and a missing one reports half an install as absent.
+//
+// The hooks file carries a hook command, like Kiro's. The config file carries no command at all --
+// Beacon wrote two keys into goose's own YAML -- so it is matched on the endpoint key, guarded on
+// the endpoint being local. That guard is the half worth pinning: a goose pointed at a vendor's
+// collector is configured, and it is not configured by Beacon, and an inventory that conflated the
+// two would report a machine as reporting to Beacon when its telemetry goes somewhere else.
+func TestScanDetectsBothGooseHalvesAndOnlyLocalExport(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	hooksPath := filepath.Join(home, ".agents", "plugins", "beacon-endpoint", "hooks", "hooks.json")
+	writeFile(t, hooksPath, `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/opt/beacon/beacon-hooks --platform goose pre-tool"}]}]}}`)
+	configPath := gooseConfigForHome(t, home)
+	writeFile(t, configPath, "otel_exporter_otlp_endpoint: http://127.0.0.1:4318\n")
+
+	result := Scan(Options{HomeDir: home, WorkingDir: work, Now: fixedNow})
+
+	hooks := findConfig(result.Configs, "goose", hooksPath)
+	if hooks == nil {
+		t.Fatal("goose hooks config not found")
+	}
+	if hooks.ParserStatus != StatusOK || !hooks.BeaconManaged {
+		t.Fatalf("goose hooks status = %s managed=%t, want ok/managed", hooks.ParserStatus, hooks.BeaconManaged)
+	}
+	config := findConfig(result.Configs, "goose", configPath)
+	if config == nil {
+		t.Fatal("goose config.yaml not found")
+	}
+	if config.ParserStatus != StatusOK || !config.BeaconManaged {
+		t.Fatalf("goose config status = %s managed=%t, want ok/managed", config.ParserStatus, config.BeaconManaged)
+	}
+
+	// The same file pointed at somebody else's collector is configured and not Beacon-managed --
+	// and this one also runs a local MCP server, which is the ordinary case that a whole-file
+	// search for a loopback address gets wrong. The endpoint is what decides, not the file.
+	remoteHome := t.TempDir()
+	remoteConfig := gooseConfigForHome(t, remoteHome)
+	writeFile(t, remoteConfig, `otel_exporter_otlp_endpoint: https://otel.vendor.example
+extensions:
+  fetch:
+    type: sse
+    uri: http://127.0.0.1:3001/sse
+`)
+	remote := Scan(Options{HomeDir: remoteHome, WorkingDir: t.TempDir(), Now: fixedNow})
+	if found := findConfig(remote.Configs, "goose", remoteConfig); found == nil || found.BeaconManaged {
+		t.Fatalf("a goose export pointed at a remote collector was reported as Beacon-managed: %#v", found)
+	}
+}
+
+// gooseConfigForHome resolves the config path Scan will look for under home, and redirects the one
+// variable goose's Windows layout resolves through so that it lands under home there too.
+//
+// Without the redirect the Windows branch of gooseConfigFile ignores home entirely and answers with
+// the developer's real %APPDATA% path -- so the test would assert against a file outside its own
+// fixture, and two scans of two different homes would collide on one path.
+func gooseConfigForHome(t *testing.T, home string) string {
+	t.Helper()
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	return gooseConfigFile(home)
+}
+
+// gooseConfigFile has to mirror the harness configurator on every platform, because on Windows that
+// is a path Beacon itself writes: goose takes etcetera's Windows app strategy there, so its config
+// is %APPDATA%\Block\goose\config\config.yaml -- an extra "config" segment, and XDG_CONFIG_HOME
+// ignored no matter what it says. An inventory scanning ~/.config/goose on Windows would report an
+// export the installer had just configured as missing, which is the failure that looks exactly like
+// a runtime nobody instrumented.
+func TestGooseConfigFileFollowsGooseOwnLayout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GOOSE_PATH_ROOT", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if runtime.GOOS == "windows" {
+		appData := t.TempDir()
+		t.Setenv("APPDATA", appData)
+		want := filepath.Join(appData, "Block", "goose", "config", "config.yaml")
+		if got := gooseConfigFile(home); got != want {
+			t.Fatalf("gooseConfigFile = %q, want %q", got, want)
+		}
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		if got := gooseConfigFile(home); got != want {
+			t.Fatalf("XDG_CONFIG_HOME moved the Windows path to %q, want %q", got, want)
+		}
+		return
+	}
+
+	want := filepath.Join(home, ".config", "goose", "config.yaml")
+	if got := gooseConfigFile(home); got != want {
+		t.Fatalf("gooseConfigFile = %q, want %q", got, want)
+	}
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	want = filepath.Join(xdg, "goose", "config.yaml")
+	if got := gooseConfigFile(home); got != want {
+		t.Fatalf("gooseConfigFile = %q, want %q", got, want)
 	}
 }
