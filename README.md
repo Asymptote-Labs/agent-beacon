@@ -65,6 +65,56 @@ Key Capabilities:
 
 Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
+## Getting Started
+
+Prerequisites:
+
+- macOS, Linux, or Windows. Homebrew installs the CLI; every release also ships a
+  [native package](#mdm-deployment) that installs the service itself
+- At least one [supported agent runtime](#agent-runtimes) on the machine
+- No account, no API key, and no network dependency. Forwarding to Asymptote Managed
+  additionally needs [Vector](https://vector.dev) 0.50+, which the macOS package bundles
+
+Installation and First Run:
+
+```bash
+# Install Beacon
+brew tap asymptote-labs/tap
+brew install beacon
+
+# Install the endpoint agent and point local runtimes at it
+beacon endpoint install
+
+# Watch what your agents are doing
+beacon endpoint dashboard
+```
+
+> **Note**
+> Events land in `~/.beacon/endpoint/logs/runtime.jsonl` and the dashboard is local and
+> read-only. The first interactive install asks for your email and where this machine's
+> telemetry should go; Enter keeps everything local, and `BEACON_ONBOARDING=0` skips the
+> question. The
+> [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
+> list field by field what that one request sends.
+
+Ways to Run Beacon:
+
+- **Open Source:** free, local-only, your machine and your logs.
+  [Quickstart](https://docs.asymptotelabs.ai/cli/quickstart)
+- **Asymptote Enterprise:** fleet rollout through MDM, managed ingest with per-device
+  approval and revocation, and one dashboard across your organization.
+  [Book a demo →](https://asymptotelabs.ai/contact)
+
+### Asymptote Enterprise
+
+Run the same open-source agent across a fleet: deploy it through
+[Jamf, Fleet, or Rippling](#mdm-deployment), approve each device from the browser, and
+forward every runtime and inventory event into one organization-wide dashboard with a
+per-device key you can revoke at any time. Endpoints keep writing local JSONL either
+way, so nothing depends on the hosted path staying on.
+
+[Book a demo →](https://asymptotelabs.ai/contact)
+
 ## High-Level Architecture
 
 Beacon captures activity where each agent actually runs, then normalizes it into a
@@ -217,59 +267,6 @@ user's browser. Headless enrollment tokens for MDM fleets are planned as a follo
 - [Command reference](https://docs.asymptotelabs.ai/cli/command-reference) — detailed CLI command docs.
 
 ## Quickstart
-
-See the [Quickstart docs](https://docs.asymptotelabs.ai/cli/quickstart) for the full
-setup paths.
-
-### First-Run Onboarding
-
-The first time you run `beacon endpoint install` in a terminal, Beacon asks for your
-email and whether this is work or personal use, and sends that to Asymptote once.
-Knowing who runs Beacon is how we decide which runtimes and integrations to build
-next. It happens once per machine and never runs non-interactively: MDM deployments,
-package postinstall scripts, `--system` installs, CI, `--dry-run`, and piped stdin all
-skip it silently, and `BEACON_ONBOARDING=0` turns it off. Exactly what is sent, and
-nothing else:
-
-| Field | Example |
-| --- | --- |
-| Email you enter | `you@company.com` |
-| Work, personal, or evaluating | `work` |
-| OS, architecture, OS version | `darwin`, `arm64`, `15.5` |
-| Beacon version and install method | `v0.0.31`, `homebrew` |
-| Names of agent runtimes on this machine | `claude_code`, `cursor` |
-| A random install ID | `64871b2b…` |
-
-**Never sent:** prompts, file contents, commands, telemetry events, repository names,
-or anything else Beacon captures. The endpoint agent itself stays local-only; this is
-one HTTP request at install time, not an ongoing channel, unless you connect the
-machine to Asymptote Managed.
-
-The same first-run prompt ends with one more question, **where should this machine's
-agent telemetry go?**, answered with the arrow keys:
-
-- **Keep it on this machine** (the default, so Enter never forwards anything). Local
-  JSONL and local dashboard.
-- **Forward to your own infrastructure**: a SIEM, observability platform, or an S3/GCS
-  bucket you own. Beacon points you at the [log forwarding docs](https://docs.asymptotelabs.ai/log-forwarding)
-  and the install stays local until you set up a pack.
-- **Forward to Asymptote Managed**: runs `beacon endpoint connect` after the install. Your
-  browser opens the Asymptote dashboard, a member of your organization approves this
-  specific device, and a Vector forwarder starts shipping the runtime and inventory JSONL
-  with a per-device key. Nothing recorded before the approval is sent, and the device can
-  be revoked from the dashboard at any time.
-
-The answer stays on the machine and is never sent. Local and own-infrastructure answers
-are recorded at once and the question is not asked again; the Asymptote answer is
-recorded once the machine is connected, so a failed install or connection is asked again
-on the next interactive install. `beacon endpoint install --connect` skips the question
-and connects; `BEACON_MANAGED_INGEST=0` hides the Asymptote option. See
-[`beacon endpoint connect`](https://docs.asymptotelabs.ai/cli/endpoint-connect) and
-[Asymptote Managed forwarding](https://docs.asymptotelabs.ai/log-forwarding/asymptote).
-
-See the [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
-for fleet attribution without a terminal, inspecting or clearing the record, and
-deletion requests.
 
 ### For Security & IT Teams
 
