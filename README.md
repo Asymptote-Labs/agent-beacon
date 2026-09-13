@@ -106,10 +106,9 @@ staying on.
 | Capability | What it means |
 | --- | --- |
 | **Real-time policy enforcement** | Allow or deny agent actions as they happen, with identity mapping and approval workflows |
+| **Real-time detection and response** | Detections run on the live event stream, surfacing risky agent behavior as it happens with the session timeline to act on it |
 | **Fleet-wide inventory** | Every agent, harness, and device in the organization in one view, rolled out through [MDM](#mdm-deployment) |
-| **Managed ingest and retention** | Hosted search, retention, and detections across every endpoint, without running the pipeline yourself |
-| **Investigation workflows** | Investigation-ready session timelines and case workflows over the same unified schema |
-| **Enterprise integrations** | Forward to Datadog, Splunk, CrowdStrike Falcon, and the rest of your security stack |
+| **Managed ingest and retention** | Hosted search and long-term retention across every endpoint, without running the pipeline yourself |
 | **SSO and access control** | Single sign-on, role-based access control, and priority support and onboarding |
 
 [Book a demo →](https://asymptotelabs.ai/contact)
