@@ -251,18 +251,6 @@ system-mode endpoint to Asymptote Managed is interactive today: an admin runs
 `sudo beacon endpoint connect --system` on the machine and approves it in the console
 user's browser. Headless enrollment tokens for MDM fleets are planned as a follow-up.
 
-## Start Here
-
-- [Beacon CLI docs](https://docs.asymptotelabs.ai) — full documentation index.
-- [Installation](https://docs.asymptotelabs.ai/cli/installation) — install Beacon locally.
-- [For Security & IT Teams](https://docs.asymptotelabs.ai/cli/security-it-teams) — rollout, validation, and security workflows.
-- [Security review](https://docs.asymptotelabs.ai/cli/security-review) — architecture, data handling, and local-only posture.
-- [Endpoint agent](https://docs.asymptotelabs.ai/cli/endpoint) — install, status, repair, and uninstall.
-- [Dashboard](https://docs.asymptotelabs.ai/cli/dashboard) — inspect local runtime logs.
-- [Endpoint event schema](https://docs.asymptotelabs.ai/cli/event-schema) — normalized JSONL event model.
-- [Supported surfaces](https://docs.asymptotelabs.ai/runtimes) — supported runtimes, destinations, and boundaries.
-- [Command reference](https://docs.asymptotelabs.ai/cli/command-reference) — detailed CLI command docs.
-
 ## For Security & IT Teams
 
 Start with the [security and IT quickstart](https://docs.asymptotelabs.ai/cli/quickstart)
