@@ -31,10 +31,10 @@
   <a href="https://docs.asymptotelabs.ai/cli/command-reference">Commands</a>
 </p>
 
-## What is Agent Beacon
+## Beacon Overview
 
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
-for AI agents - it captures what your agents actually do, across every runtime and
+for AI agents. It captures what your agents actually do, across every runtime and
 environment, and normalizes that activity into a
 [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema). Built for
 security and platform teams who need to see agent activity from endpoints and CI to
@@ -43,21 +43,21 @@ report on itself.
 
 Key Capabilities:
 
-- **Broad runtime coverage** - [21+ local agent runtimes](#local-agents) plus
+- **Broad runtime coverage:** [21+ local agent runtimes](#local-agents) plus
   [browser chat, CI, cloud agents, and SDK instrumentation](#supported-surfaces),
   collected through hooks, plugins, and OpenTelemetry
-- **One unified schema** - sessions, prompts, tools, commands, file edits, approvals,
+- **One unified schema:** sessions, prompts, tools, commands, file edits, approvals,
   MCP activity, and token usage in a single OpenTelemetry-based event model
-- **Local-first by default** - collection, storage, and inspection stay on the machine,
+- **Local-first by default:** collection, storage, and inspection stay on the machine,
   behind a read-only [local dashboard](#dashboard-and-local-detection) and durable JSONL,
   with no hosted account required
-- **Offline threat detection** - `beacon scan` runs the open
+- **Offline threat detection:** `beacon scan` runs the open
   [Threat Rules](spec/threat-rules/SPEC.md) format over local telemetry with no network
   access
-- **Forwards where you already work** - the same local log streams to
+- **Forwards where you already work:** the same local log streams to
   [major SIEM, observability, and object storage platforms](#output-destinations) under
   your control
-- **Deploys in one command or fleet-wide** - a lightweight
+- **Deploys in one command or fleet-wide:** a lightweight
   [endpoint binary](https://docs.asymptotelabs.ai/cli/endpoint) and
   [TypeScript SDK](#cloud-agents), installed with
   [one command](https://docs.asymptotelabs.ai/cli/installation) or through
