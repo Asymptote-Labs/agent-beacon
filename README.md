@@ -42,7 +42,7 @@ Beacon solves this problem by capturing the full agent execution trace across ev
 [harness](#agent-runtimes) and [environment](#supported-surfaces), and normalizes that
 activity into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema).
 
-Key Capabilities:
+**Key Capabilities:**
 
 | Capability | What it means |
 | --- | --- |
