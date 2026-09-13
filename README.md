@@ -34,9 +34,13 @@
 ## Beacon Overview
 
 Beacon is the system of record for all your agent activity, wherever your agents run.
-It captures the full agent execution trace across every [harness](#agent-runtimes) and
-[environment](#supported-surfaces), and normalizes that activity into a
-[single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema).
+
+Agent activity is fragmented across harnesses and environments, leaving no consistent way
+to see, reconstruct, or reason about what agents actually did.
+
+Beacon solves this problem by capturing the full agent execution trace across every
+[harness](#agent-runtimes) and [environment](#supported-surfaces), and normalizes that
+activity into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema).
 
 Key Capabilities:
 
@@ -250,62 +254,6 @@ The macOS package also ships
 system-mode endpoint to Asymptote Managed is interactive today: an admin runs
 `sudo beacon endpoint connect --system` on the machine and approves it in the console
 user's browser. Headless enrollment tokens for MDM fleets are planned as a follow-up.
-
-## For Security & IT Teams
-
-Start with the [security and IT quickstart](https://docs.asymptotelabs.ai/cli/quickstart)
-and [managed deployment guidance](https://docs.asymptotelabs.ai/cli/security-it-teams)
-for rollout, validation, retention, and SIEM forwarding. For vendor review, see the
-[security review](https://docs.asymptotelabs.ai/cli/security-review).
-
-## For Developers
-
-Install the released CLI with Homebrew, or build from source. On macOS the formula also
-pulls in the tap's own Vector mirror, so a Homebrew install can connect to Asymptote
-Managed without a second step. That mirror is the `beacon-vector` formula, not `vector`:
-Homebrew allows a single keg named `vector`, so it installs alongside — and never
-conflicts with — a Vector you already have from `vectordotdev/brew`. It is kept off your
-PATH and Beacon finds it on its own. On Linux, install the `vector` package from
-[vector.dev](https://vector.dev) if you want managed forwarding.
-
-```bash
-brew tap asymptote-labs/tap
-brew install beacon
-beacon version
-```
-
-```bash
-cd cli/beacon
-make build
-```
-
-To verify a change against a **real** Claude Code session rather than only synthetic
-payloads, `beacon-sandbox` runs one in a disposable Linux sandbox and checks what
-Beacon actually captured:
-
-```bash
-cd beacon-sandbox
-go run ./cmd/beacon-sandbox doctor
-go run ./cmd/beacon-sandbox run --scenario s02-bash-command
-```
-
-See [Verify Beacon In A Sandbox](https://docs.asymptotelabs.ai/contributing/beacon-sandbox)
-for setup, coverage, and limitations.
-
-The browser extension is a separate, optional component that builds on its own. It
-needs a running Beacon endpoint to post to, and its test suite replays recorded chat
-streams through the real extension in headless Chromium, so it needs no login and no
-network:
-
-```bash
-cd browser-extension
-npm ci
-npm run build          # load dist/ unpacked in Chrome
-npm test               # replay e2e
-```
-
-See [`browser-extension/README.md`](browser-extension/) for what it captures and
-retains.
 
 ## Star Growth
 
