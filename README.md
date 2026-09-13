@@ -94,12 +94,9 @@ beacon endpoint dashboard
 ### Asymptote Enterprise
 
 Asymptote's enterprise platform builds on the open-source foundation and adds
-real-time policy enforcement. It runs the same open-source agent across your fleet:
-deploy through [Jamf, Fleet, or Rippling](#mdm-deployment), approve each device from
-the browser, and forward every runtime and inventory event into one organization-wide
-dashboard. Each device carries its own key that you can revoke at any time, and every
-endpoint keeps writing local JSONL regardless, so nothing depends on the hosted path
-staying on.
+real-time policy enforcement. It solves the engineering and infrastructure challenges
+of analyzing fleet-wide agent activity in real time for detection, remediation, and
+containment at petabyte scale.
 
 **Enterprise Capabilities:**
 
