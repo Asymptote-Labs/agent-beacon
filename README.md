@@ -49,8 +49,8 @@ Key Capabilities:
 - **One unified schema:** sessions, prompts, tools, commands, file edits, approvals,
   MCP activity, and token usage in a single OpenTelemetry-based event model
 - **Local-first by default:** collection, storage, and inspection stay on the machine,
-  behind a read-only [local dashboard](#dashboard-and-local-detection) and durable JSONL,
-  with no hosted account required
+  behind a read-only [local dashboard](https://docs.asymptotelabs.ai/cli/dashboard)
+  and durable JSONL, with no hosted account required
 - **Offline threat detection:** `beacon scan` runs the open
   [Threat Rules](spec/threat-rules/SPEC.md) format over local telemetry with no network
   access
@@ -81,7 +81,7 @@ single OpenTelemetry-based event model.
   [cloud agents](#cloud-agents) through sandbox hooks.
 - **Beacon** — collect, normalize, store, correlate, and detect. Every surface lands
   in one event model, one durable JSONL log, one session timeline, and one
-  [local detection engine](#dashboard-and-local-detection).
+  [local detection engine](spec/threat-rules/SPEC.md).
 - **Destinations** — inspect events in the local dashboard, retain JSONL, or forward
   the same stream into the [major enterprise-grade SIEMs](#output-destinations),
   log aggregators, and object storage.
@@ -144,12 +144,11 @@ collector. Prompt and response text is retained in full by default.
 | [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Sandbox hooks → GCS or S3 | ✅ | ✅ | ✅ | ✅ | ✅ | – |
 | [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Sandbox hooks → GCS or S3 | – | ✅ | ✅ | ✅ | ✅ | – |
 | [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | API poll → GCS | ✅ | ✅ | – | – | – | ✅ |
+| [CI jobs](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | `beacon ci exec` → temporary local collector | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-CI jobs are the ephemeral case:
-[`beacon ci exec`](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) or
-`beacon ci start` / `beacon ci finish` runs a temporary local collector for the length of
-the job, capturing supported agent prompt, tool, command, file, and run context instead of
-installing a persistent endpoint service.
+`beacon ci exec`, or `beacon ci start` with `beacon ci finish`, runs a collector only for
+the length of the job. Coverage above is the Claude Code profile; Codex in CI captures no
+command or file activity.
 
 ##### SDK Instrumentation
 
@@ -204,21 +203,6 @@ The macOS package also ships
 system-mode endpoint to Asymptote Managed is interactive today: an admin runs
 `sudo beacon endpoint connect --system` on the machine and approves it in the console
 user's browser. Headless enrollment tokens for MDM fleets are planned as a follow-up.
-
-## Dashboard and Local Detection
-
-Beacon includes a local, read-only [dashboard](https://docs.asymptotelabs.ai/cli/dashboard)
-for validating endpoint activity without a hosted backend. It reads `runtime.jsonl`,
-where Beacon writes endpoint activity, alongside the sibling `inventory_state.jsonl`
-of periodic Cursor and Claude Code configuration inventory. Storage and retention
-behavior is summarized in the
-[local testing and logs docs](https://docs.asymptotelabs.ai/cli/local-testing-logs).
-
-For offline threat detection, `beacon scan` runs open threat rules over local
-telemetry with no network access. See the
-[Threat Rules spec](spec/threat-rules/SPEC.md) and the generated
-[rule field reference](spec/threat-rules/FIELDS.md) for rule format, CEL matching,
-fixtures, and supported event fields.
 
 ## Start Here
 
