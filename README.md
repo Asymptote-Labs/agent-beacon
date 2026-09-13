@@ -42,27 +42,16 @@ Beacon solves this problem by capturing the full agent execution trace across ev
 [harness](#agent-runtimes) and [environment](#supported-surfaces), and normalizes that
 activity into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema).
 
-Key Capabilities:
+**Key Capabilities:**
 
-- **Broad runtime coverage:** [24 local agent runtimes](#local-agents) plus
-  [browser chat, CI, cloud agents, and SDK instrumentation](#supported-surfaces),
-  collected through hooks, plugins, and OpenTelemetry
-- **One unified schema:** sessions, prompts, tools, commands, file edits, approvals,
-  MCP activity, and token usage in a single OpenTelemetry-based event model
-- **Local-first by default:** collection, storage, and inspection stay on the machine,
-  behind a read-only [local dashboard](https://docs.asymptotelabs.ai/cli/dashboard)
-  and durable JSONL, with no hosted account required
-- **Offline threat detection:** `beacon scan` runs the open
-  [Threat Rules](spec/threat-rules/SPEC.md) format over local telemetry with no network
-  access
-- **Forwards where you already work:** the same local log streams to
-  [major SIEM, observability, and object storage platforms](#output-destinations) under
-  your control
-- **Deploys in one command or fleet-wide:** a lightweight
-  [endpoint binary](https://docs.asymptotelabs.ai/cli/endpoint) and
-  [TypeScript SDK](#cloud-agents), installed with
-  [one command](https://docs.asymptotelabs.ai/cli/installation) or through
-  [MDM](#mdm-deployment)
+| Capability | What it means |
+| --- | --- |
+| **Broad runtime coverage** | [24 local agent runtimes](#local-agents), plus [browser chat, CI, cloud agents, and SDKs](#supported-surfaces) |
+| **One unified schema** | Every session, prompt, tool, command, edit, approval, and token in one event model |
+| **Local-first by default** | Data stays on the machine: durable JSONL and a read-only [dashboard](https://docs.asymptotelabs.ai/cli/dashboard), no account |
+| **Offline threat detection** | `beacon scan` runs open [Threat Rules](spec/threat-rules/SPEC.md) over your logs, with no network |
+| **Forwards where you already work** | Stream the same log to [your SIEM, observability, or object storage](#output-destinations) |
+| **Deploys in one command or fleet-wide** | [One command](https://docs.asymptotelabs.ai/cli/installation) on a laptop, [MDM](#mdm-deployment) across a fleet |
 
 Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
