@@ -2,6 +2,7 @@ package onboarding
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -101,6 +102,74 @@ func TestEmailDomain(t *testing.T) {
 	}
 }
 
+// AcceptEmail hands back an answer for anything the user actually typed. Whether it
+// validated is a note for the prompt, not grounds for dropping the address.
+func TestAcceptEmailKeepsWhatWasTyped(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		want   string
+		reason error
+	}{
+		{"valid is normalized", "  <Shukan@AsymptoteLabs.AI> ", "shukan@asymptotelabs.ai", nil},
+		{"no at", "shukan", "shukan", ErrEmailNoAt},
+		{"no dot", "shukan@localhostish", "shukan@localhostish", ErrEmailNoDot},
+		{"placeholder domain", "you@example.com", "you@example.com", ErrEmailPlaceholder},
+		{"reserved tld", "dev@beacon.test", "dev@beacon.test", ErrEmailPlaceholder},
+		{"two ats", "a@b@company.com", "a@b@company.com", ErrEmailMultipleAt},
+		{"wrappers still trimmed", " <nope> ", "nope", ErrEmailNoAt},
+		{"case kept when it does not parse", "Shukan@Bad", "Shukan@Bad", ErrEmailNoDot},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := AcceptEmail(tc.input)
+			if got != tc.want {
+				t.Fatalf("AcceptEmail(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+			if tc.reason == nil {
+				if err != nil {
+					t.Fatalf("AcceptEmail(%q) returned error: %v", tc.input, err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.reason) {
+				t.Fatalf("AcceptEmail(%q) error = %v, want %v", tc.input, err, tc.reason)
+			}
+		})
+	}
+}
+
+// A blank answer leaves nothing to keep, so the caller can ask again.
+func TestAcceptEmailRefusesBlank(t *testing.T) {
+	for _, input := range []string{"", "   ", "<>", " <> "} {
+		got, err := AcceptEmail(input)
+		if got != "" {
+			t.Fatalf("AcceptEmail(%q) = %q, want empty", input, got)
+		}
+		if !errors.Is(err, ErrEmailEmpty) {
+			t.Fatalf("AcceptEmail(%q) error = %v, want ErrEmailEmpty", input, err)
+		}
+	}
+}
+
+// Keeping what was typed must not mean keeping a pasted file. An answer longer than any
+// address can be is refused rather than written to the profile and sent.
+func TestAcceptEmailRefusesOverlongInput(t *testing.T) {
+	longest := strings.Repeat("a", maxLocalPart) + "@" + strings.Repeat("b", maxDomain-4) + ".com"
+	if got, err := AcceptEmail(longest); err != nil || got != longest {
+		t.Fatalf("AcceptEmail(<%d chars>) = %q, %v; want the longest legal address kept", len(longest), got, err)
+	}
+	for _, input := range []string{strings.Repeat("x", maxEmail+1), "a@" + strings.Repeat("b", maxEmail)} {
+		got, err := AcceptEmail(input)
+		if got != "" {
+			t.Fatalf("AcceptEmail(<%d chars>) = %q, want empty", len(input), got)
+		}
+		if !errors.Is(err, ErrEmailTooLong) {
+			t.Fatalf("AcceptEmail(<%d chars>) error = %v, want ErrEmailTooLong", len(input), err)
+		}
+	}
+}
+
 func TestClassifyDomain(t *testing.T) {
 	cases := []struct {
 		domain string
@@ -114,6 +183,12 @@ func TestClassifyDomain(t *testing.T) {
 		{"proton.me", DomainFree},
 		{"", DomainUnknown},
 		{"   ", DomainUnknown},
+		// Reachable now that a malformed address is kept: a domain that cannot hold a
+		// mailbox must not be counted as a company.
+		{"bad", DomainUnknown},
+		{"example.com", DomainUnknown},
+		{"beacon.test", DomainUnknown},
+		{"company..com", DomainUnknown},
 	}
 	for _, tc := range cases {
 		if got := ClassifyDomain(tc.domain); got != tc.want {

@@ -48,9 +48,12 @@ func TestPromptExplainsWhyItIsAsking(t *testing.T) {
 }
 
 func TestPromptNormalizesAnswers(t *testing.T) {
-	answers, _, err := runPrompt(t, "  work  \n  <Shukan@AsymptoteLabs.AI>  \n")
+	answers, out, err := runPrompt(t, "  work  \n  <Shukan@AsymptoteLabs.AI>  \n")
 	if err != nil {
 		t.Fatalf("Prompt returned error: %v", err)
+	}
+	if strings.Contains(out, "using it anyway") {
+		t.Fatalf("an address that parses was flagged:\n%s", out)
 	}
 	if answers.Usage != UsageWork {
 		t.Fatalf("Usage = %q, want %q", answers.Usage, UsageWork)
@@ -60,19 +63,76 @@ func TestPromptNormalizesAnswers(t *testing.T) {
 	}
 }
 
-func TestPromptRetriesInvalidEmailThenAccepts(t *testing.T) {
-	answers, out, err := runPrompt(t, "1\nnot-an-email\nstill@bad\nshukan@asymptotelabs.ai\n")
+// A malformed address is kept, not thrown away. The whole point of the prompt is to
+// end up with an answer on disk; refusing one we cannot parse loses the email, the
+// usage answer and the install alongside it.
+func TestPromptKeepsInvalidEmail(t *testing.T) {
+	cases := map[string]struct {
+		typed, want string
+		reason      error
+	}{
+		"no at":       {"not-an-email", "not-an-email", ErrEmailNoAt},
+		"no dot":      {"still@bad", "still@bad", ErrEmailNoDot},
+		"placeholder": {"you@example.com", "you@example.com", ErrEmailPlaceholder},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			answers, out, err := runPrompt(t, "1\n"+tc.typed+"\n")
+			if err != nil {
+				t.Fatalf("Prompt returned error: %v", err)
+			}
+			if answers.Email != tc.want {
+				t.Fatalf("Email = %q, want the typed answer %q", answers.Email, tc.want)
+			}
+			if answers.Usage != UsageWork {
+				t.Fatalf("Usage = %q, want the usage answer kept too", answers.Usage)
+			}
+			if !strings.Contains(out, tc.reason.Error()) {
+				t.Fatalf("output did not say what looked wrong:\n%s", out)
+			}
+			if !strings.Contains(out, "using it anyway") {
+				t.Fatalf("output did not say the answer was kept:\n%s", out)
+			}
+			// One note, then on to the next question -- not a second ask.
+			if strings.Count(out, "Email") != 1 {
+				t.Fatalf("asked for an email %d times, want once:\n%s", strings.Count(out, "Email"), out)
+			}
+		})
+	}
+}
+
+// A pasted wall of text is not an answer either, so it is asked again rather than
+// written to the profile and sent.
+func TestPromptRepromptsForOverlongEmail(t *testing.T) {
+	answers, out, err := runPrompt(t, "1\n"+strings.Repeat("x", maxEmail+1)+"\nshukan@asymptotelabs.ai\n")
 	if err != nil {
 		t.Fatalf("Prompt returned error: %v", err)
 	}
 	if answers.Email != "shukan@asymptotelabs.ai" {
-		t.Fatalf("Email = %q, want the third answer accepted", answers.Email)
+		t.Fatalf("Email = %q, want the second answer", answers.Email)
 	}
-	if !strings.Contains(out, ErrEmailNoAt.Error()) {
-		t.Fatalf("output did not explain the first failure:\n%s", out)
+	if !strings.Contains(out, ErrEmailTooLong.Error()) {
+		t.Fatalf("output did not say the answer was too long:\n%s", out)
 	}
-	if !strings.Contains(out, ErrEmailNoDot.Error()) {
-		t.Fatalf("output did not explain the second failure:\n%s", out)
+	if strings.Contains(out, "using it anyway") {
+		t.Fatalf("an overlong answer was kept:\n%s", out)
+	}
+}
+
+// An empty line is the one answer with nothing to keep, so it is asked again.
+func TestPromptRepromptsForEmptyEmail(t *testing.T) {
+	answers, out, err := runPrompt(t, "1\n\n   \nshukan@asymptotelabs.ai\n")
+	if err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+	if answers.Email != "shukan@asymptotelabs.ai" {
+		t.Fatalf("Email = %q, want the typed answer", answers.Email)
+	}
+	if !strings.Contains(out, ErrEmailEmpty.Error()) {
+		t.Fatalf("output did not ask again for a blank answer:\n%s", out)
+	}
+	if strings.Contains(out, "using it anyway") {
+		t.Fatalf("a blank answer was kept:\n%s", out)
 	}
 }
 
@@ -89,8 +149,8 @@ func TestPromptRetriesInvalidUsageThenAccepts(t *testing.T) {
 	}
 }
 
-func TestPromptGivesUpAfterTooManyBadEmails(t *testing.T) {
-	input := "1\n" + strings.Repeat("nope\n", maxAttempts+2)
+func TestPromptGivesUpAfterTooManyEmptyEmails(t *testing.T) {
+	input := "1\n" + strings.Repeat(" \n", maxAttempts+2)
 	_, out, err := runPrompt(t, input)
 	if !errors.Is(err, ErrTooManyAttempts) {
 		t.Fatalf("error = %v, want ErrTooManyAttempts", err)

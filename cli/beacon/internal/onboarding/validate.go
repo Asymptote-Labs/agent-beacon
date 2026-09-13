@@ -59,11 +59,16 @@ var (
 	ErrEmailEmptyLabel    = errors.New("the domain has an empty part, like a doubled or trailing dot")
 	ErrEmailBadTLD        = errors.New("the domain doesn't end in a valid extension")
 	ErrEmailPlaceholder   = errors.New("that looks like a placeholder address")
+	ErrEmailTooLong       = errors.New("that is too long to be an email address")
 )
 
 const (
 	maxLocalPart = 64
 	maxDomain    = 255
+	// maxEmail is the longest an address can be (RFC 3696 erratum 1690). Since a
+	// malformed answer is kept as typed, this is also what bounds what a pasted wall of
+	// text can put in the profile and on the wire.
+	maxEmail = maxLocalPart + 1 + maxDomain
 )
 
 // placeholderDomains are domains that cannot belong to a real mailbox. Accepting one
@@ -134,15 +139,19 @@ var freeProviders = map[string]bool{
 	"duck.com":       true,
 }
 
+// cleanEmail strips the wrappers people paste around an address. It says nothing
+// about whether what is left is a usable address.
+func cleanEmail(input string) string {
+	// People paste addresses out of mail clients, which often wrap them.
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(input), "<>"))
+}
+
 // NormalizeEmail validates an address and returns it in canonical lowercase form.
 //
 // The returned error is meant to be shown to the user verbatim, so each failure mode
 // gets its own message.
 func NormalizeEmail(input string) (string, error) {
-	email := strings.TrimSpace(input)
-	// People paste addresses out of mail clients, which often wrap them.
-	email = strings.Trim(email, "<>")
-	email = strings.TrimSpace(email)
+	email := cleanEmail(input)
 	if email == "" {
 		return "", ErrEmailEmpty
 	}
@@ -170,43 +179,81 @@ func NormalizeEmail(input string) (string, error) {
 	}
 
 	domain = strings.ToLower(domain)
+	if err := checkDomain(domain); err != nil {
+		return "", err
+	}
+
+	return strings.ToLower(local) + "@" + domain, nil
+}
+
+// checkDomain reports why a lowercase domain cannot belong to a real mailbox, or nil
+// if it looks like one.
+func checkDomain(domain string) error {
 	if domain == "" {
-		return "", ErrEmailNoDomain
+		return ErrEmailNoDomain
 	}
 	if len(domain) > maxDomain {
-		return "", ErrEmailDomainTooLong
+		return ErrEmailDomainTooLong
 	}
 	if !strings.Contains(domain, ".") {
-		return "", ErrEmailNoDot
+		return ErrEmailNoDot
 	}
 	labels := strings.Split(domain, ".")
 	for _, label := range labels {
 		if label == "" {
-			return "", ErrEmailEmptyLabel
+			return ErrEmailEmptyLabel
 		}
 		for _, r := range label {
 			isLower := r >= 'a' && r <= 'z'
 			isDigit := r >= '0' && r <= '9'
 			if !isLower && !isDigit && r != '-' {
-				return "", ErrEmailBadTLD
+				return ErrEmailBadTLD
 			}
 		}
 	}
 	tld := labels[len(labels)-1]
 	if len(tld) < 2 {
-		return "", ErrEmailBadTLD
+		return ErrEmailBadTLD
 	}
 	for _, r := range tld {
 		if r < 'a' || r > 'z' {
-			return "", ErrEmailBadTLD
+			return ErrEmailBadTLD
 		}
 	}
-
 	if placeholderDomains[domain] || reservedTLDs[tld] {
-		return "", ErrEmailPlaceholder
+		return ErrEmailPlaceholder
 	}
+	return nil
+}
 
-	return strings.ToLower(local) + "@" + domain, nil
+// AcceptEmail takes the address as the user's answer whatever it looks like.
+//
+// A well-formed address comes back normalized with a nil error. Anything else comes
+// back as typed, alongside the reason it did not validate so the caller can say so
+// once and move on.
+//
+// The local checks are a hint, not a gate: a malformed answer is still the only answer
+// the user gave, and discarding it loses the one thing the prompt exists to collect --
+// along with the usage answer and the install context that came with it. Whether a
+// mailbox actually exists was never something this code could know; the server-side MX
+// check decides that.
+//
+// Two answers are still refused, because neither leaves anything to keep: a blank line,
+// and something longer than any address can be -- a pasted file or a stuck key, which
+// would otherwise land in the profile and on the wire as-is.
+func AcceptEmail(input string) (string, error) {
+	cleaned := cleanEmail(input)
+	if cleaned == "" {
+		return "", ErrEmailEmpty
+	}
+	if len(cleaned) > maxEmail {
+		return "", ErrEmailTooLong
+	}
+	normalized, err := NormalizeEmail(cleaned)
+	if err != nil {
+		return cleaned, err
+	}
+	return normalized, nil
 }
 
 // EmailDomain returns the domain of an already-normalized address.
@@ -222,6 +269,12 @@ func EmailDomain(email string) string {
 func ClassifyDomain(domain string) string {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {
+		return DomainUnknown
+	}
+	// A domain that cannot belong to a real mailbox says nothing about who the user
+	// works for. This is reachable because the prompt keeps whatever was typed, so
+	// junk is reported as unknown rather than counted as a company.
+	if checkDomain(domain) != nil {
 		return DomainUnknown
 	}
 	if freeProviders[domain] {
