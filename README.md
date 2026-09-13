@@ -43,7 +43,7 @@ report on itself.
 
 Key Capabilities:
 
-- **Broad runtime coverage:** [21+ local agent runtimes](#local-agents) plus
+- **Broad runtime coverage:** [24 local agent runtimes](#local-agents) plus
   [browser chat, CI, cloud agents, and SDK instrumentation](#supported-surfaces),
   collected through hooks, plugins, and OpenTelemetry
 - **One unified schema:** sessions, prompts, tools, commands, file edits, approvals,
