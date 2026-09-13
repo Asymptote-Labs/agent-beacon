@@ -53,11 +53,11 @@ activity into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event
 | **Forwards where you already work** | Stream the same log to [your SIEM, observability, or object storage](#output-destinations) |
 | **Deploys in one command or fleet-wide** | [One command](https://docs.asymptotelabs.ai/cli/installation) on a laptop, [MDM](#mdm-deployment) across a fleet |
 
-Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
+Read the [documentation](https://docs.asymptotelabs.ai) to learn more.
 
 ## Getting Started
 
-Prerequisites:
+**Prerequisites:**
 
 - macOS, Linux, or Windows. Homebrew installs the CLI; every release also ships a
   [native package](#mdm-deployment) that installs the service itself
@@ -65,7 +65,7 @@ Prerequisites:
 - No account, no API key, and no network dependency. Forwarding to Asymptote Managed
   additionally needs [Vector](https://vector.dev) 0.50+, which the macOS package bundles
 
-Installation and First Run:
+**Installation**
 
 ```bash
 # Install Beacon
@@ -81,13 +81,9 @@ beacon endpoint dashboard
 
 > **Note**
 > Events land in `~/.beacon/endpoint/logs/runtime.jsonl` and the dashboard is local and
-> read-only. The first interactive install asks for your email and where this machine's
-> telemetry should go; Enter keeps everything local, and `BEACON_ONBOARDING=0` skips the
-> question. The
-> [first-run onboarding docs](https://docs.asymptotelabs.ai/cli/endpoint-onboarding#first-run-onboarding)
-> list field by field what that one request sends.
+> read-only.
 
-Ways to Run Beacon:
+**Ways to Run Beacon:**
 
 - **Open Source:** free, local-only, your machine and your logs.
   [Quickstart](https://docs.asymptotelabs.ai/cli/quickstart)
@@ -97,11 +93,20 @@ Ways to Run Beacon:
 
 ### Asymptote Enterprise
 
-Run the same open-source agent across a fleet: deploy it through
-[Jamf, Fleet, or Rippling](#mdm-deployment), approve each device from the browser, and
-forward every runtime and inventory event into one organization-wide dashboard with a
-per-device key you can revoke at any time. Endpoints keep writing local JSONL either
-way, so nothing depends on the hosted path staying on.
+Asymptote's enterprise platform builds on the open-source foundation and adds
+real-time policy enforcement. It solves the engineering and infrastructure challenges
+of analyzing fleet-wide agent activity in real time for detection, remediation, and
+containment at petabyte scale.
+
+**Enterprise Capabilities:**
+
+| Capability | What it means |
+| --- | --- |
+| **Real-time policy enforcement** | Allow or deny agent actions as they happen, with identity mapping and approval workflows |
+| **Real-time detection and response** | Detections run on the live event stream, surfacing risky agent behavior as it happens with the session timeline to act on it |
+| **Fleet-wide inventory** | Every agent, harness, and device in the organization in one view, rolled out through [MDM](#mdm-deployment) |
+| **Managed ingest and retention** | Hosted search and long-term retention across every endpoint, without running the pipeline yourself |
+| **SSO and access control** | Single sign-on, role-based access control, and priority support and onboarding |
 
 [Book a demo →](https://asymptotelabs.ai/contact)
 
@@ -174,9 +179,6 @@ to compare it with the managed path.
 | [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Extension → local OTLP | ✅ | ✅ | ✅ | ✅ |
 | [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Extension → local OTLP | ✅ | ✅ | ✅ | – |
 
-One optional Chrome extension reads both chat streams and posts them to the local
-collector. Prompt and response text is retained in full by default.
-
 #### Cloud Agents
 
 | Runtime | Collection | Session | Prompt | Tool | Command | File | Tokens |
@@ -185,10 +187,6 @@ collector. Prompt and response text is retained in full by default.
 | [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Sandbox hooks → GCS or S3 | – | ✅ | ✅ | ✅ | ✅ | – |
 | [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | API poll → GCS | ✅ | ✅ | – | – | – | ✅ |
 | [CI jobs](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | `beacon ci exec` → temporary local collector | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-`beacon ci exec`, or `beacon ci start` with `beacon ci finish`, runs a collector only for
-the length of the job. Coverage above is the Claude Code profile; Codex in CI captures no
-command or file activity.
 
 ##### SDK Instrumentation
 
