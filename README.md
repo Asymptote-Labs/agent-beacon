@@ -263,16 +263,14 @@ user's browser. Headless enrollment tokens for MDM fleets are planned as a follo
 - [Supported surfaces](https://docs.asymptotelabs.ai/runtimes) — supported runtimes, destinations, and boundaries.
 - [Command reference](https://docs.asymptotelabs.ai/cli/command-reference) — detailed CLI command docs.
 
-## Quickstart
-
-### For Security & IT Teams
+## For Security & IT Teams
 
 Start with the [security and IT quickstart](https://docs.asymptotelabs.ai/cli/quickstart)
 and [managed deployment guidance](https://docs.asymptotelabs.ai/cli/security-it-teams)
 for rollout, validation, retention, and SIEM forwarding. For vendor review, see the
 [security review](https://docs.asymptotelabs.ai/cli/security-review).
 
-### For Developers
+## For Developers
 
 Install the released CLI with Homebrew, or build from source. On macOS the formula also
 pulls in the tap's own Vector mirror, so a Homebrew install can connect to Asymptote
