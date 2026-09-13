@@ -36,10 +36,7 @@
 Agent Beacon is the world's first [open-source telemetry layer](https://justindsouza.substack.com/p/introducing-beacon-endpoint-telemetry)
 for AI agents. It captures what your agents actually do, across every runtime and
 environment, and normalizes that activity into a
-[single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema). Built for
-security and platform teams who need to see agent activity from endpoints and CI to
-browsers and the cloud, without standing up a hosted backend or trusting each runtime to
-report on itself.
+[single, unified schema](https://docs.asymptotelabs.ai/cli/event-schema).
 
 Key Capabilities:
 
