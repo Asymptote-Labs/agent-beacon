@@ -119,24 +119,8 @@ single OpenTelemetry-based event model.
   <img src="images/beacon-architecture.png" alt="Agent Beacon architecture: local agents, browser, agents in code, CI pipelines, and cloud agents feed a Beacon layer that collects, normalizes, stores, correlates, and detects, then forwards unified AI telemetry to customer-owned destinations" width="860">
 </p>
 
-- **Sources** — [local agents](#local-agents) through hooks, plugins, and local
-  OpenTelemetry; [browser chat](#browser-chat) through an optional extension;
-  agents in code through the [TypeScript SDK](#cloud-agents);
-  [CI pipelines](#cloud-agents) through a temporary collector; and
-  [cloud agents](#cloud-agents) through sandbox hooks.
-- **Beacon** — collect, normalize, store, correlate, and detect. Every surface lands
-  in one event model, one durable JSONL log, one session timeline, and one
-  [local detection engine](spec/threat-rules/SPEC.md).
-- **Destinations** — inspect events in the local dashboard, retain JSONL, or forward
-  the same stream into the [major enterprise-grade SIEMs](#output-destinations),
-  log aggregators, and object storage.
-
-Collection, processing, and inspection stay local by default; the same normalized
-event model extends to CI, cloud-agent, and SDK paths under customer control. See the
-[open-source architecture reference](https://docs.asymptotelabs.ai/architecture/architecture)
-for the full breakdown by surface, or the
-[system architecture overview](https://docs.asymptotelabs.ai/architecture/system-architecture)
-to compare it with the managed path.
+See the [open-source architecture reference](https://docs.asymptotelabs.ai/architecture/architecture)
+for the full breakdown by surface.
 
 ## Supported Surfaces
 
