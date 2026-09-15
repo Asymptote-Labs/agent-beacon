@@ -13,7 +13,7 @@ import (
 
 func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
 	args := inventoryJobArgs(false, "")
-	got := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", args, 6*time.Hour)
+	got := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", args, 6*time.Hour, inventoryJobLogPrefix(false))
 	for _, want := range []string{
 		"<string>com.beacon.endpoint.inventory</string>",
 		"<string>/opt/beacon/bin/beacon</string>",
@@ -31,14 +31,20 @@ func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
 			t.Fatalf("plist must not contain %q:\n%s", forbidden, got)
 		}
 	}
-	user := inventoryPlist(InventoryLabel, "/usr/local/bin/beacon", inventoryJobArgs(true, "/Users/me/.beacon/endpoint/logs/runtime.jsonl"), time.Hour)
+	user := inventoryPlist(InventoryLabel, "/usr/local/bin/beacon", inventoryJobArgs(true, "/Users/me/.beacon/endpoint/logs/runtime.jsonl"), time.Hour, inventoryJobLogPrefix(true))
 	if !strings.Contains(user, "<string>--user</string>") || strings.Contains(user, "<string>--system</string>") {
 		t.Fatalf("user-mode plist must carry --user:\n%s", user)
 	}
 	if !strings.Contains(user, "<string>--log-path</string>\n    <string>/Users/me/.beacon/endpoint/logs/runtime.jsonl</string>") {
 		t.Fatalf("plist must pass the pinned log path:\n%s", user)
 	}
-	escaped := inventoryPlist("l", "/tmp/a&b", []string{"--log-path", "/tmp/<c>.jsonl"}, time.Hour)
+	// A user agent must not share the system daemon's root-owned /tmp log files, or launchd
+	// refuses to spawn it (EX_CONFIG). Seen live on a Mac with both modes installed.
+	uidSuffixed := fmt.Sprintf("/tmp/%s.%d.err", InventoryLabel, os.Getuid())
+	if !strings.Contains(user, uidSuffixed) || strings.Contains(user, "/tmp/"+InventoryLabel+".err") {
+		t.Fatalf("user-mode plist must log to a per-user path, got:\n%s", user)
+	}
+	escaped := inventoryPlist("l", "/tmp/a&b", []string{"--log-path", "/tmp/<c>.jsonl"}, time.Hour, "/tmp/l")
 	if !strings.Contains(escaped, "/tmp/a&amp;b") || !strings.Contains(escaped, "&lt;c&gt;") {
 		t.Fatalf("plist must XML-escape program and arguments:\n%s", escaped)
 	}
@@ -53,7 +59,7 @@ func TestInventoryIntervalEnvOverride(t *testing.T) {
 	if got := InventoryInterval(); got != time.Minute {
 		t.Fatalf("overridden interval = %s, want 1m", got)
 	}
-	plist := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", inventoryJobArgs(false, ""), InventoryInterval())
+	plist := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", inventoryJobArgs(false, ""), InventoryInterval(), inventoryJobLogPrefix(false))
 	if !strings.Contains(plist, "<key>StartInterval</key>\n  <integer>60</integer>") {
 		t.Fatalf("plist should use the overridden interval:\n%s", plist)
 	}

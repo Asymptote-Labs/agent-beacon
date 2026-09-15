@@ -181,7 +181,7 @@ func (m InventoryManager) WriteUnit(program, logPath string) (string, error) {
 		}
 		return path, nil
 	}
-	content := inventoryPlist(InventoryLabel, program, args, InventoryInterval())
+	content := inventoryPlist(InventoryLabel, program, args, InventoryInterval(), inventoryJobLogPrefix(m.UserMode))
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", err
 	}
@@ -309,9 +309,20 @@ WantedBy=timers.target
 `, int(interval.Seconds()), InventoryServiceUnit)
 }
 
+// inventoryJobLogPrefix is where launchd sends the job's stdout and stderr. The user-mode path
+// carries the uid: a machine that also has (or once had) the system-mode job owns
+// /tmp/<label>.out as root, and a LaunchAgent that cannot open its own log files is refused by
+// launchd with EX_CONFIG before it ever runs.
+func inventoryJobLogPrefix(userMode bool) string {
+	if userMode {
+		return fmt.Sprintf("/tmp/%s.%d", InventoryLabel, os.Getuid())
+	}
+	return "/tmp/" + InventoryLabel
+}
+
 // inventoryPlist renders the launchd job: one shot at load, then every interval. No KeepAlive,
 // so launchd does not restart a job that exited normally.
-func inventoryPlist(label, program string, args []string, interval time.Duration) string {
+func inventoryPlist(label, program string, args []string, interval time.Duration, logPrefix string) string {
 	var argv strings.Builder
 	fmt.Fprintf(&argv, "    <string>%s</string>\n", xmlEscape(program))
 	for _, arg := range args {
@@ -331,10 +342,10 @@ func inventoryPlist(label, program string, args []string, interval time.Duration
   <key>StartInterval</key>
   <integer>%d</integer>
   <key>StandardOutPath</key>
-  <string>/tmp/%s.out</string>
+  <string>%s.out</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/%s.err</string>
+  <string>%s.err</string>
 </dict>
 </plist>
-`, xmlEscape(label), argv.String(), int(interval.Seconds()), xmlEscape(label), xmlEscape(label))
+`, xmlEscape(label), argv.String(), int(interval.Seconds()), xmlEscape(logPrefix), xmlEscape(logPrefix))
 }
