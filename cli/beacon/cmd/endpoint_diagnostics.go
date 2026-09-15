@@ -572,6 +572,9 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 		"snapshot_digest":          digest,
 		"previous_snapshot_digest": previousDigest,
 		"counts":                   counts,
+		// Metadata only (mode and hashes). It is what distinguishes a liveness heartbeat written
+		// with nobody at the console from one for an unchanged inventory.
+		"user_scope": result.UserScope,
 	}
 	if previousDigest == "" {
 		inventoryMeta["change_reason"] = "initial"

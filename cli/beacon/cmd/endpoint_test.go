@@ -1216,6 +1216,9 @@ func TestScheduledHeartbeatInSystemModeScansTheConsoleUsersHome(t *testing.T) {
 	if strings.Count(string(data), "inventory.heartbeat") != 2 || strings.Count(string(data), "inventory.snapshot") != 1 {
 		t.Fatalf("expected a second heartbeat and no second snapshot: %s", data)
 	}
+	if !strings.Contains(string(data), `"mode":"no_console_user"`) {
+		t.Fatalf("the liveness heartbeat must say nobody was at the console: %s", data)
+	}
 	stateAfter, _ := endpointinventory.ReadState(endpointinventory.StatePathForLog(logPath, false))
 	// last_emitted_at has second resolution, so only the digest is a reliable assertion here.
 	if stateAfter.LastSnapshotDigest != stateBefore.LastSnapshotDigest || stateAfter.LastEmittedAt == "" {

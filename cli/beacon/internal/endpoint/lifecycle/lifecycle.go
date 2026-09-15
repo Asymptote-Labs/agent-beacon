@@ -48,6 +48,7 @@ type inventoryJobController interface {
 	Supported() bool
 	UnsupportedReason() string
 	UnitPath() (string, error)
+	UnitPaths() []string
 	WriteUnit(program, logPath string) (string, error)
 	Load() error
 	Unload() error
@@ -131,15 +132,25 @@ func inventoryEnabledFromConfigFile(path string) bool {
 // package postinstall that is /opt/beacon/bin/beacon; under Homebrew it is the keg's binary.
 func DefaultInventoryJobProgram(userMode bool) string {
 	if exe, err := os.Executable(); err == nil {
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			return resolved
-		}
-		return exe
+		return stableProgramPath(exe)
 	}
 	if !userMode {
 		return selfupdate.SystemBeaconPath()
 	}
 	return "beacon"
+}
+
+// stableProgramPath keeps the scheduled unit pointing at a path that survives upgrades. A
+// Homebrew binary reports its versioned Cellar keg, which `brew upgrade` deletes; the linked
+// `<prefix>/bin/beacon` is the path that keeps resolving, so that is what the unit records.
+func stableProgramPath(exe string) string {
+	if idx := strings.Index(exe, string(filepath.Separator)+"Cellar"+string(filepath.Separator)); idx > 0 {
+		linked := filepath.Join(exe[:idx], "bin", filepath.Base(exe))
+		if _, err := os.Stat(linked); err == nil {
+			return linked
+		}
+	}
+	return exe
 }
 
 // InventoryHeartbeatStatus is the status view of the scheduled inventory job.
@@ -283,8 +294,12 @@ type serviceController interface {
 }
 
 type installRollback struct {
-	Manager       serviceController
-	ServiceLoaded bool
+	// InventoryJob and InventoryLoaded let a failed install unload the scheduled inventory job
+	// it started, so the scheduler is not left registered against rolled-back config.
+	InventoryJob    inventoryJobController
+	InventoryLoaded bool
+	Manager         serviceController
+	ServiceLoaded   bool
 	// ServiceWasRunning records whether a collector was already up when this install began.
 	//
 	// It decides what rollback owes the machine. Unloading is right for a service this transaction
@@ -331,6 +346,9 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	// beside it.
 	if r.ServiceLoaded {
 		_ = r.Manager.Unload()
+	}
+	if r.InventoryLoaded && r.InventoryJob != nil {
+		_ = r.InventoryJob.Unload()
 	}
 
 	restoreBackups(manifest.Backups)
@@ -424,9 +442,10 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	// tracked for rollback but kept out of the manifest, like the updater's, and a host with no
 	// scheduler does not fail the install: it is reported and the endpoint still collects.
 	inventoryJob := newInventoryJob(cfg.UserMode, opts.ServiceKind)
-	if path, err := inventoryJob.UnitPath(); err == nil {
+	for _, path := range inventoryJob.UnitPaths() {
 		tx.Track(path)
 	}
+	tx.InventoryJob = inventoryJob
 	inventoryResult, inventoryErr := reconcileInventoryJobWith(inventoryJob, InventoryJobOptions{
 		UserMode: cfg.UserMode,
 		Kind:     opts.ServiceKind,
@@ -434,9 +453,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		LogPath:  cfg.LogPath,
 		Load:     opts.StartService,
 	})
+	tx.InventoryLoaded = inventoryResult.Loaded
 	inventoryDetail := inventoryResult.Skipped
 	if inventoryErr != nil {
-		inventoryDetail = inventoryErr.Error()
+		// Written but not enabled is not installed: report the failure, not the unit path.
+		inventoryResult.UnitPath = ""
+		inventoryDetail = "scheduled inventory job: " + inventoryErr.Error()
 	}
 
 	harnessPaths, err := configureHarnesses(cfg)

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,26 +17,37 @@ type recordingInventoryJob struct {
 	calls     *[]string
 	supported bool
 	unitPath  string
+	loadErr   error
 }
 
 func (r recordingInventoryJob) Supported() bool           { return r.supported }
 func (r recordingInventoryJob) UnsupportedReason() string { return "no scheduler in this test" }
 func (r recordingInventoryJob) UnitPath() (string, error) { return r.unitPath, nil }
+func (r recordingInventoryJob) UnitPaths() []string {
+	return []string{r.unitPath, r.unitPath + ".service"}
+}
 func (r recordingInventoryJob) WriteUnit(program, logPath string) (string, error) {
 	*r.calls = append(*r.calls, "write "+program+" "+logPath)
 	return r.unitPath, nil
 }
-func (r recordingInventoryJob) Load() error            { *r.calls = append(*r.calls, "load"); return nil }
+func (r recordingInventoryJob) Load() error {
+	*r.calls = append(*r.calls, "load")
+	return r.loadErr
+}
 func (r recordingInventoryJob) Unload() error          { *r.calls = append(*r.calls, "unload"); return nil }
 func (r recordingInventoryJob) RemoveUnits()           { *r.calls = append(*r.calls, "remove") }
 func (r recordingInventoryJob) Status() service.Status { return service.Status{} }
 
 func installFakeInventoryJob(t *testing.T, supported bool) *[]string {
+	return installFakeInventoryJobWithLoadError(t, supported, nil)
+}
+
+func installFakeInventoryJobWithLoadError(t *testing.T, supported bool, loadErr error) *[]string {
 	t.Helper()
 	calls := &[]string{}
 	old := newInventoryJob
 	newInventoryJob = func(userMode bool, kind service.Kind) inventoryJobController {
-		return recordingInventoryJob{calls: calls, supported: supported, unitPath: "/fake/" + InventoryUnitName(userMode)}
+		return recordingInventoryJob{calls: calls, supported: supported, unitPath: "/fake/" + InventoryUnitName(userMode), loadErr: loadErr}
 	}
 	t.Cleanup(func() { newInventoryJob = old })
 	return calls
@@ -236,5 +248,60 @@ func TestUninstallRemovesTheInventoryJobForTheMode(t *testing.T) {
 	}
 	if len(removedFor) != 1 || !removedFor[0] {
 		t.Fatalf("uninstall should remove the user-mode inventory job once, got %v", removedFor)
+	}
+}
+
+// A job that was loaded by an install that then fails must be unloaded by the rollback, or the
+// scheduler keeps a unit registered against config that no longer exists.
+func TestRollbackUnloadsALoadedInventoryJob(t *testing.T) {
+	calls := &[]string{}
+	job := recordingInventoryJob{calls: calls, supported: true, unitPath: filepath.Join(t.TempDir(), "x.plist")}
+	tx := newInstallRollback(service.Manager{UserMode: true, Kind: service.KindSupervised})
+	tx.InventoryJob = job
+	tx.InventoryLoaded = true
+	tx.Rollback(Manifest{})
+	if strings.Join(*calls, ",") != "unload" {
+		t.Fatalf("rollback calls = %q, want unload", *calls)
+	}
+	*calls = nil
+	tx.InventoryLoaded = false
+	tx.Rollback(Manifest{})
+	if len(*calls) != 0 {
+		t.Fatalf("rollback must not unload a job it never loaded: %q", *calls)
+	}
+}
+
+func TestReconcileSurfacesARefusedLoad(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	installFakeInventoryJobWithLoadError(t, true, errors.New("enable --now refused"))
+	result, err := ReconcileInventoryJob(InventoryJobOptions{UserMode: true, Program: "/usr/local/bin/beacon", Load: true})
+	if err == nil || result.Loaded {
+		t.Fatalf("a refused load must surface: result=%+v err=%v", result, err)
+	}
+}
+
+func TestStableProgramPathPrefersTheLinkedHomebrewBinary(t *testing.T) {
+	prefix := t.TempDir()
+	keg := filepath.Join(prefix, "Cellar", "beacon", "1.3.11", "bin", "beacon")
+	linked := filepath.Join(prefix, "bin", "beacon")
+	for _, p := range []string{keg, linked} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := stableProgramPath(keg); got != linked {
+		t.Fatalf("stableProgramPath(keg) = %q, want the linked %q", got, linked)
+	}
+	if got := stableProgramPath("/opt/beacon/bin/beacon"); got != "/opt/beacon/bin/beacon" {
+		t.Fatalf("non-Homebrew path must pass through, got %q", got)
+	}
+	if err := os.Remove(linked); err != nil {
+		t.Fatal(err)
+	}
+	if got := stableProgramPath(keg); got != keg {
+		t.Fatalf("without a linked binary the keg path stays, got %q", got)
 	}
 }
