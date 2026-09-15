@@ -5,7 +5,7 @@ description: "Asymptote support details for Codex CLI endpoint telemetry"
 
 ## Runtime overview
 
-Asymptote supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. A lightweight SessionStart hook records the local OS user for token attribution and also triggers endpoint inventory heartbeats.
+Asymptote supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. A lightweight SessionStart hook records the local OS user for token attribution.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ Before enabling Codex CLI telemetry, make sure:
 
 ## Collection path
 
-Codex CLI exports local OpenTelemetry logs and traces to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The SessionStart hook writes a metadata-only `session.context` event and refreshes `inventory_state.jsonl`; it never reads transcript content.
+Codex CLI exports local OpenTelemetry logs and traces to Asymptote's localhost collector. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The SessionStart hook writes a metadata-only `session.context` event; it never reads transcript content. Inventory is written by the scheduled inventory job, not by this hook.
 
 Use `--include-codex-spans` during install or repair only when you need every raw Codex span for troubleshooting. It is not required for token attribution.
 
@@ -82,7 +82,7 @@ them independently, run:
 beacon endpoint hooks install --harness codex
 ```
 
-The hook installer writes the metadata-only session context hook plus inventory heartbeats to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
+The hook installer writes the metadata-only session context hook to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
 
 ```text
 Codex CLI endpoint hooks installed: /Users/you/.codex/hooks.json

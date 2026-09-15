@@ -33,6 +33,10 @@ fi
 if [ -x /opt/beacon/bin/beacon ]; then
   /opt/beacon/bin/beacon endpoint update install-daemon >/dev/null 2>&1 || \
     echo "beacon: scheduled updater not configured (endpoint is installed and running)" >&2
+  # The scheduled inventory job is on by default; endpoint install already wrote and loaded it,
+  # this re-reconcile is idempotent and covers an upgrade that skipped install.
+  /opt/beacon/bin/beacon endpoint inventory install-daemon --system >/dev/null 2>&1 || \
+    echo "beacon: scheduled inventory job not configured (endpoint is installed and running)" >&2
 fi
 
 echo "beacon: endpoint installed. Check it with: beacon endpoint status --system"

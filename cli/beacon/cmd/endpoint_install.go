@@ -133,6 +133,12 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Service definition written to %s\n", result.PlistPath)
 	fmt.Printf("Install manifest written to %s\n", result.ManifestPath)
 	fmt.Printf("Runtime log: %s\n", result.LogPath)
+	switch {
+	case result.InventoryJobPath != "":
+		fmt.Printf("Scheduled inventory job: %s\n", result.InventoryJobPath)
+	case result.InventoryJobDetail != "":
+		fmt.Printf("Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
+	}
 	printLingerGap(cmd.ErrOrStderr(), result)
 	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
 		return fmt.Errorf("endpoint install completed, but hook installation failed: %w", err)
@@ -187,6 +193,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("Last event: present")
 	}
 	fmt.Println(managedIngestStatusLine(status.ManagedIngest))
+	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
 	return nil
 }
 

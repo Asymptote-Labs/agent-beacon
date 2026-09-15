@@ -61,8 +61,8 @@ const openHandsAllToolsMatcher = "*"
 // rather than the inherited default because 60 seconds is a long time to hold an agent turn for a
 // telemetry hook that finishes in milliseconds -- these are ceilings on a hang, not budgets.
 //
-// The two long ones are long for a reason: prompt submission may run the inventory heartbeat, and
-// the closing events flush cloud telemetry, which has a ten-second timeout of its own.
+// The two long ones are long for a reason: prompt submission can wait on the policy seam, and the
+// closing events flush cloud telemetry, which has a ten-second timeout of its own.
 const (
 	openHandsSessionStartTimeoutSeconds = 10
 	openHandsPromptSubmitTimeoutSeconds = 30

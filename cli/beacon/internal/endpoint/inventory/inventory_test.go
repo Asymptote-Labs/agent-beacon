@@ -1023,3 +1023,61 @@ func TestScanFxWithoutMCPConfigurationIsQuiet(t *testing.T) {
 		t.Errorf("absent fx mcp.json reported as exists:%t parser:%s", config.Exists, config.ParserStatus)
 	}
 }
+
+// The scheduled heartbeat runs with no meaningful working directory (launchd and systemd start
+// jobs in /). It must not fall back to the process cwd and scan whatever repo happens to be there.
+func TestScanSkipProjectScopeIgnoresTheProcessCwd(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".cursor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".cursor", "mcp.json"), []byte(`{"mcpServers":{"proj":{"command":"npx"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills", "s1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".claude", "skills", "s1", "SKILL.md"), []byte("---\nname: s1\ndescription: d\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	withCwd := Scan(Options{HomeDir: home})
+	if !hasScope(withCwd, ScopeProject) {
+		t.Fatal("without SkipProjectScope the cwd project config should be scanned (control)")
+	}
+	skipped := Scan(Options{HomeDir: home, SkipProjectScope: true})
+	if hasScope(skipped, ScopeProject) {
+		t.Fatalf("SkipProjectScope must drop project-scoped configs and skills: %+v", skipped)
+	}
+	if skipped.UserScope.WorkingDir != "" || skipped.UserScope.WorkDirHash != "" {
+		t.Fatalf("SkipProjectScope must leave the working dir empty: %+v", skipped.UserScope)
+	}
+	for _, server := range skipped.MCPServers {
+		if server.ServerName == "proj" {
+			t.Fatal("project MCP server leaked into a project-scope-free scan")
+		}
+	}
+}
+
+func hasScope(result Result, scope string) bool {
+	for _, c := range result.Configs {
+		if c.Scope == scope {
+			return true
+		}
+	}
+	for _, s := range result.Skills {
+		if s.SourceScope == scope {
+			return true
+		}
+	}
+	return false
+}

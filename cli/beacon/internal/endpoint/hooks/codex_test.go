@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestInstallCodexHooksUsesInventoryAndSessionContext(t *testing.T) {
+func TestInstallCodexHooksWritesSessionContextOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex inventory-heartbeat"}]}],"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex codex-usage-sync"}]}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
@@ -26,9 +26,7 @@ func TestInstallCodexHooksUsesInventoryAndSessionContext(t *testing.T) {
 	for _, want := range []string{
 		"echo keep",
 		"SessionStart",
-		"UserPromptSubmit",
 		"--platform codex",
-		"inventory-heartbeat",
 		"codex-session-context",
 		"--log '/tmp/runtime.jsonl'",
 		"--config '/tmp/config.json'",
@@ -37,7 +35,8 @@ func TestInstallCodexHooksUsesInventoryAndSessionContext(t *testing.T) {
 			t.Fatalf("Codex hooks missing %q:\n%s", want, text)
 		}
 	}
-	for _, forbidden := range []string{"session-start", "prompt-submit", " stop", " session-end", "codex-usage-sync"} {
+	// The fixture's old inventory-heartbeat entry proves a reinstall strips what older versions wrote.
+	for _, forbidden := range []string{"session-start", "prompt-submit", " stop", " session-end", "codex-usage-sync", "inventory-heartbeat", "UserPromptSubmit", "--cli"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("Codex hooks should not install duplicate generic runtime hooks %q:\n%s", forbidden, text)
 		}

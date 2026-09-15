@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
@@ -22,10 +21,11 @@ type Counts struct {
 	Skills     int `json:"skills"`
 }
 
+// State is what the scheduled heartbeat remembers between runs. A run that fails to append
+// leaves it untouched, so the next run is a plain retry.
 type State struct {
 	LastEmittedAt      string `json:"last_emitted_at,omitempty"`
 	LastSnapshotDigest string `json:"last_snapshot_digest,omitempty"`
-	LastAttemptAt      string `json:"last_attempt_at,omitempty"`
 }
 
 type LockedState struct {
@@ -148,28 +148,6 @@ func SnapshotDigest(result Result) string {
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func TTLExpired(state State, now time.Time, ttlSeconds int) bool {
-	if ttlSeconds <= 0 || state.LastEmittedAt == "" {
-		return true
-	}
-	last, err := time.Parse(time.RFC3339, state.LastEmittedAt)
-	if err != nil {
-		return true
-	}
-	return !now.Before(last.Add(time.Duration(ttlSeconds) * time.Second))
-}
-
-func AttemptBackoffActive(state State, now time.Time, backoff time.Duration) bool {
-	if backoff <= 0 || state.LastAttemptAt == "" {
-		return false
-	}
-	last, err := time.Parse(time.RFC3339, state.LastAttemptAt)
-	if err != nil {
-		return false
-	}
-	return now.Before(last.Add(backoff))
 }
 
 func existingConfigs(configs []Config) []Config {

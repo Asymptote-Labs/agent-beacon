@@ -65,8 +65,8 @@ const (
 // rather than the inherited default because 60 seconds is a long time to hold an agent turn for a
 // telemetry hook that finishes in milliseconds -- these are ceilings on a hang, not budgets.
 //
-// The two long ones are long for a reason: prompt submission may run the inventory heartbeat, and
-// the closing event flushes cloud telemetry, which has a ten-second timeout of its own.
+// The two long ones are long for a reason: prompt submission can wait on the policy seam, and the
+// closing event flushes cloud telemetry, which has a ten-second timeout of its own.
 //
 // Zero is deliberately never written. On Kiro `0` does not mean "the default", it means *no
 // timeout at all* -- a hook that hung would hang the agent turn with it, indefinitely.

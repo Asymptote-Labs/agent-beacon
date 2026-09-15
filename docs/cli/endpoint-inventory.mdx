@@ -60,29 +60,32 @@ Content capture is opt-in and offline; `--contents` only reads files inventory a
 
 ## Inventory heartbeats
 
-Endpoint hooks can periodically append inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`. The hook that fires is recorded as trigger provenance, but the default heartbeat scans all supported local inventory candidates:
+A scheduled local job appends inventory telemetry to a separate `inventory_state.jsonl` file beside `runtime.jsonl`. It runs once when it is loaded (install, repair, reboot, package upgrade) and then every 6 hours, on every install in both modes: a LaunchAgent (`com.beacon.endpoint.inventory`) or LaunchDaemon on macOS, a `beacon-inventory.timer` under the user or system scope on Linux. Agent hooks no longer trigger inventory; an idle machine reports on the same schedule as a busy one.
 
-- `inventory.heartbeat` records that Beacon checked local agent configuration inventory, including counts and a snapshot digest.
-- `inventory.snapshot` records the current metadata-only inventory when the snapshot changed or when inventory is first initialized.
+- `inventory.heartbeat` records that Beacon checked local agent configuration inventory, including counts and a snapshot digest. Every run writes one; it is the endpoint's liveness signal.
+- `inventory.snapshot` records the current metadata-only inventory. It is written only when the snapshot digest changed since the last run.
+
+A system-mode job runs as root and inventories the active console user's home. When nobody is logged in it still writes the heartbeat, with `user_scope.mode` set to `no_console_user`, and no snapshot. The scheduled scan covers user-level configuration only; project-scoped files (`.cursor/mcp.json`, `.claude/settings.json` in a repository) are reported by `beacon endpoint inventory` run from that directory, not by the job.
 
 By default, inventory snapshots include config file metadata, MCP server metadata, skill metadata, and hook config metadata across supported local runtimes. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content.
 
-Set `include_contents` to opt the snapshot/heartbeat telemetry into capturing full definitions, matching the `--contents` CLI behavior. When enabled, `inventory.snapshot` events carry redacted, size-limited config/hook/skill `content` blocks and full MCP server `definition` blocks. Secret-looking values are redacted and bodies are truncated to `max_content_bytes` (64 KiB by default). This setting is off by default so the snapshot contract stays metadata-only unless an operator explicitly enables it.
+Set `include_contents` to opt the snapshot telemetry into capturing full definitions, matching the `--contents` CLI behavior. When enabled, `inventory.snapshot` events carry redacted, size-limited config/hook/skill `content` blocks and full MCP server `definition` blocks. Secret-looking values are redacted and bodies are truncated to `max_content_bytes` (64 KiB by default). This setting is off by default so the snapshot contract stays metadata-only unless an operator explicitly enables it.
 
-The heartbeat TTL and content capture are configured in the existing endpoint config file. Omit `runtimes` to scan all supported inventory runtimes, or set it when you intentionally want a narrower snapshot:
+The job is configured in the existing endpoint config file. Omit `runtimes` to scan all supported inventory runtimes, or set it when you intentionally want a narrower snapshot. `enabled: false` removes the job on the next install, repair, or package upgrade and stops the writer; a `ttl_seconds` key written by older versions is ignored.
 
 ```json title="~/.beacon/endpoint/config.json"
 {
   "inventory_heartbeat": {
     "enabled": true,
-    "ttl_seconds": 86400,
     "include_contents": false,
     "max_content_bytes": 65536
   }
 }
 ```
 
-For a manual smoke test, temporarily lower `ttl_seconds`, start a Cursor or Claude Code session with Beacon hooks installed, add a harmless test MCP server to `~/.cursor/mcp.json`, `.cursor/mcp.json`, `~/.claude.json`, or `.claude/settings.json`, then trigger another hook action. `inventory_state.jsonl` should contain an `inventory.heartbeat` event and, when the digest changes, an `inventory.snapshot` event with the new MCP server metadata under `raw.inventory.mcp_servers`. `runtime.jsonl` should remain limited to agent runtime activity.
+`beacon endpoint status` prints an `Inventory heartbeat:` line with the interval, whether the job is loaded, and when it last wrote; `--json` carries the same in `inventory_heartbeat`. The hidden `beacon endpoint inventory install-daemon [--user|--system]` command re-reconciles the job with the config and loads it, which also fires a heartbeat at once; the package postinstall runs it on every upgrade.
+
+For a manual smoke test, add a harmless test MCP server to `~/.cursor/mcp.json` or `~/.claude.json`, then run `beacon endpoint inventory heartbeat --scheduled` (or `sudo ... --system`). `inventory_state.jsonl` should gain an `inventory.heartbeat` event and, because the digest changed, an `inventory.snapshot` event with the new MCP server metadata under `raw.inventory.mcp_servers`. `runtime.jsonl` should remain limited to agent runtime activity. To watch the schedule itself, set `BEACON_INVENTORY_INTERVAL_SECONDS=60` before `install-daemon` and tail the file.
 
 ## Flags
 

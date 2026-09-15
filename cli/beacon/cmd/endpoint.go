@@ -79,6 +79,7 @@ var endpointOpts struct {
 	inventoryHooks           bool
 	inventoryContents        bool
 	inventoryHeartbeatForce  bool
+	inventoryScheduled       bool
 	inventoryHeartbeatConfig string
 	inventoryWorkingDir      string
 	inventoryTrigger         string
@@ -373,6 +374,7 @@ func init() {
 	endpointCmd.AddCommand(endpointUserConfigCmd)
 	endpointCmd.AddCommand(endpointConfigCmd)
 	endpointInventoryCmd.AddCommand(endpointInventoryHeartbeatCmd)
+	endpointInventoryCmd.AddCommand(endpointInventoryInstallDaemonCmd)
 	endpointConfigCmd.AddCommand(endpointConfigShowCmd)
 	endpointConfigCmd.AddCommand(endpointConfigValidateCmd)
 	endpointIntegrationsCmd.AddCommand(endpointIntegrationsValidateCmd)
@@ -396,7 +398,7 @@ func init() {
 	endpointVSCodeCmd.AddCommand(endpointVSCodeStatusCmd)
 	endpointVSCodeCmd.AddCommand(endpointVSCodeValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointInventoryInstallDaemonCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -454,11 +456,19 @@ func init() {
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryHooks, "hooks", false, "Show only hook integration and hook config inventory")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.inventoryContents, "contents", false, "Include redacted, size-limited config/hook/skill file contents and full MCP server definitions")
 	endpointInventoryCmd.Flags().BoolVar(&endpointOpts.writeInventoryEvent, "write-event", false, "Append inventory events to the endpoint runtime log")
-	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.inventoryHeartbeatForce, "force", false, "Write inventory heartbeat even when TTL has not expired")
+	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.inventoryHeartbeatForce, "force", false, "Write the heartbeat even when inventory_heartbeat.enabled is false")
+	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.inventoryScheduled, "scheduled", false, "Internal: run as the scheduled inventory job")
 	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryHeartbeatConfig, "config", "", "Endpoint config path")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryWorkingDir, "working-dir", "", "Working directory for project inventory")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTrigger, "trigger", "manual", "Inventory trigger source")
-	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTriggerHarness, "trigger-harness", "", "Harness that triggered inventory")
+	// Hooks installed by older Beacon versions still invoke this command with these three flags on
+	// every session start and prompt. They must keep parsing, and --trigger hook must stay a no-op,
+	// or every prompt on an un-repaired machine would error or write a heartbeat.
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryWorkingDir, "working-dir", "", "Ignored; kept for hook commands written by older versions")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTrigger, "trigger", "", "Ignored; kept for hook commands written by older versions")
+	endpointInventoryHeartbeatCmd.Flags().StringVar(&endpointOpts.inventoryTriggerHarness, "trigger-harness", "", "Ignored; kept for hook commands written by older versions")
+	_ = endpointInventoryHeartbeatCmd.Flags().MarkHidden("scheduled")
+	_ = endpointInventoryHeartbeatCmd.Flags().MarkHidden("working-dir")
+	_ = endpointInventoryHeartbeatCmd.Flags().MarkHidden("trigger")
+	_ = endpointInventoryHeartbeatCmd.Flags().MarkHidden("trigger-harness")
 	endpointInventoryHeartbeatCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print heartbeat result as JSON")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print doctor results as JSON")
 	topLevelDoctorCmd.Flags().BoolVar(&endpointOpts.fix, "fix", false, "Apply safe endpoint doctor remediations")

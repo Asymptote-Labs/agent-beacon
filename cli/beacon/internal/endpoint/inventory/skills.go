@@ -36,7 +36,17 @@ type skillRoot struct {
 
 func scanSkills(home, wd, redaction string, runtimes []string, co contentOptions) []Skill {
 	var skills []Skill
-	for _, root := range filterSkillRoots(skillRoots(home, wd), runtimes) {
+	roots := skillRoots(home, wd)
+	if wd == "" {
+		kept := roots[:0]
+		for _, root := range roots {
+			if root.scope != ScopeProject {
+				kept = append(kept, root)
+			}
+		}
+		roots = kept
+	}
+	for _, root := range filterSkillRoots(roots, runtimes) {
 		skills = append(skills, inspectSkillRoot(root, redaction, co)...)
 	}
 	return dedupeSkills(skills)

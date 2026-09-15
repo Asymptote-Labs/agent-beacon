@@ -47,7 +47,7 @@ type policyDenial struct {
 
 // policyExit is os.Exit, indirected so a test can observe the status without ending the run.
 //
-// Same reason runInventoryHeartbeatCommand is a variable: the behavior under test is a side effect
+// Indirected for the same reason the runtime writers are: the behavior under test is a side effect
 // on the process, and there is no way to assert on it otherwise.
 var policyExit = os.Exit
 

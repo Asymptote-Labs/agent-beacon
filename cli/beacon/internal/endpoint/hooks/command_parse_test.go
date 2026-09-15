@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -230,5 +231,22 @@ func TestEndpointCommandArgsMatchPrefix(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Inventory is written by the scheduled job, so the hook command no longer carries a path to the
+// CLI. Emitting it again would be harmless but would re-open the door to hook-driven inventory.
+func TestEndpointCommandBuildersNoLongerEmitCLI(t *testing.T) {
+	prefix := endpointCommandPrefix("claude", "/opt/beacon/hooks/beacon-hooks", "/var/log/beacon/runtime.jsonl", "/etc/beacon/config.json")
+	if strings.Contains(prefix, "--cli") {
+		t.Fatalf("prefix must not carry --cli: %s", prefix)
+	}
+	for _, arg := range endpointCommandArgs("claude", "/opt/beacon/hooks/beacon-hooks", "/var/log/beacon/runtime.jsonl", "/etc/beacon/config.json") {
+		if arg == "--cli" {
+			t.Fatal("argv must not carry --cli")
+		}
+	}
+	if !commandCarriesEndpointSettings("beacon-hooks --platform claude --cli /opt/beacon/bin/beacon session-start") {
+		t.Fatal("a hook written by an older version, carrying only --cli, must still be recognized")
 	}
 }

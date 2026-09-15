@@ -70,6 +70,14 @@ cat "$INSTALL_OUTPUT"
 test -f "$HOME_DIR/.beacon/endpoint/config.json"
 test -f "$HOME_DIR/.beacon/endpoint/otelcol.yaml"
 test -f "$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.collector.user.plist"
+# The scheduled inventory job is written by install in user mode too (and, with --no-start, left
+# unloaded), pointing the job at this install's runtime log.
+INVENTORY_PLIST="$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.inventory.plist"
+test -f "$INVENTORY_PLIST"
+if ! grep -q -- "--scheduled" "$INVENTORY_PLIST" || ! grep -q -- "$LOG_PATH" "$INVENTORY_PLIST"; then
+  echo "scheduled inventory job must invoke the heartbeat with --scheduled and this install's log path" >&2
+  exit 1
+fi
 test -f "$LOG_PATH"
 
 # A non-interactive install must never ask for an email or record an onboarding
@@ -88,7 +96,13 @@ if [ -e "$HOME_DIR/.beacon/profile.json" ]; then
 fi
 
 echo "Checking endpoint status..."
-run_beacon endpoint status --user --log-path "$LOG_PATH" >/dev/null
+STATUS_OUTPUT="$TMP_DIR/status.txt"
+run_beacon endpoint status --user --log-path "$LOG_PATH" >"$STATUS_OUTPUT"
+if ! grep -q '^Inventory heartbeat: scheduled every' "$STATUS_OUTPUT"; then
+  echo "endpoint status must report the scheduled inventory job" >&2
+  cat "$STATUS_OUTPUT" >&2
+  exit 1
+fi
 
 echo "Writing Wazuh validation event..."
 run_beacon endpoint wazuh validate --user --log-path "$LOG_PATH" >/dev/null
@@ -183,6 +197,11 @@ if [ -f "$PLIST" ]; then
   exit 1
 fi
 echo "ok: the launchd plist was removed"
+if [ -f "$INVENTORY_PLIST" ]; then
+  echo "scheduled inventory job plist survived uninstall: $INVENTORY_PLIST" >&2
+  exit 1
+fi
+echo "ok: the scheduled inventory job plist was removed"
 
 # Deliberately not asked of launchd. This install passes --no-start into a temporary HOME, so no job is
 # ever bootstrapped -- which means any answer launchctl gave would be about some *other* install of the

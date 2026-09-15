@@ -13,6 +13,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
+	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
@@ -30,7 +31,153 @@ var (
 		_ = updater.Unload()
 		updater.RemoveUnits()
 	}
+	// newInventoryJob and removeInventoryJob are the seams tests replace so Install, Uninstall
+	// and Repair can be exercised without touching launchd or systemd.
+	newInventoryJob = func(userMode bool, kind service.Kind) inventoryJobController {
+		return service.InventoryManager{UserMode: userMode, Kind: kind}
+	}
+	removeInventoryJob = func(userMode bool) {
+		job := newInventoryJob(userMode, service.KindAuto)
+		_ = job.Unload()
+		job.RemoveUnits()
+	}
 )
+
+// inventoryJobController is what lifecycle needs from service.InventoryManager.
+type inventoryJobController interface {
+	Supported() bool
+	UnsupportedReason() string
+	UnitPath() (string, error)
+	UnitPaths() []string
+	WriteUnit(program, logPath string) (string, error)
+	Load() error
+	Unload() error
+	RemoveUnits()
+	Status() service.Status
+}
+
+// InventoryJobOptions drives ReconcileInventoryJob.
+type InventoryJobOptions struct {
+	UserMode bool
+	Kind     service.Kind
+	// Program is the beacon binary the scheduler invokes.
+	Program string
+	// LogPath pins the runtime log the inventory log sits beside; empty means the mode's default.
+	LogPath string
+	// Load activates the schedule after writing the unit. False writes the unit only (--no-start).
+	Load bool
+}
+
+// InventoryJobResult reports what ReconcileInventoryJob did.
+type InventoryJobResult struct {
+	Enabled  bool   `json:"enabled"`
+	UnitPath string `json:"unit_path,omitempty"`
+	Loaded   bool   `json:"loaded"`
+	Removed  bool   `json:"removed"`
+	// Skipped names why no job was installed on a host without a scheduler.
+	Skipped string `json:"skipped,omitempty"`
+}
+
+// ReconcileInventoryJob makes the scheduled inventory job match the endpoint config for the
+// mode: installed and loaded when `inventory_heartbeat.enabled` is true or absent (the default),
+// removed when it is false. It runs on every install, repair and package upgrade, which is how
+// an endpoint installed before the job existed gets it without anyone doing anything.
+func ReconcileInventoryJob(opts InventoryJobOptions) (InventoryJobResult, error) {
+	return reconcileInventoryJobWith(newInventoryJob(opts.UserMode, opts.Kind), opts)
+}
+
+func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOptions) (InventoryJobResult, error) {
+	result := InventoryJobResult{Enabled: inventoryEnabledFromConfigFile(endpointconfig.ConfigPath(opts.UserMode))}
+	if !job.Supported() {
+		result.Skipped = job.UnsupportedReason()
+		return result, nil
+	}
+	if !result.Enabled {
+		_ = job.Unload()
+		job.RemoveUnits()
+		result.Removed = true
+		return result, nil
+	}
+	path, err := job.WriteUnit(opts.Program, opts.LogPath)
+	if err != nil {
+		return result, err
+	}
+	result.UnitPath = path
+	if opts.Load {
+		if err := job.Load(); err != nil {
+			return result, err
+		}
+		result.Loaded = true
+	}
+	return result, nil
+}
+
+// inventoryEnabledFromConfigFile reads only the inventory_heartbeat.enabled key. A missing or
+// unreadable config, or an absent key, means enabled: the job is on by default.
+func inventoryEnabledFromConfigFile(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	var partial struct {
+		Inventory *endpointconfig.Inventory `json:"inventory_heartbeat"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil || partial.Inventory == nil || partial.Inventory.Enabled == nil {
+		return true
+	}
+	return *partial.Inventory.Enabled
+}
+
+// DefaultInventoryJobProgram is the binary the scheduled job should run: this one. Under the
+// package postinstall that is /opt/beacon/bin/beacon; under Homebrew it is the keg's binary.
+func DefaultInventoryJobProgram(userMode bool) string {
+	if exe, err := os.Executable(); err == nil {
+		return stableProgramPath(exe)
+	}
+	if !userMode {
+		return selfupdate.SystemBeaconPath()
+	}
+	return "beacon"
+}
+
+// stableProgramPath keeps the scheduled unit pointing at a path that survives upgrades. A
+// Homebrew binary reports its versioned Cellar keg, which `brew upgrade` deletes; the linked
+// `<prefix>/bin/beacon` is the path that keeps resolving, so that is what the unit records.
+func stableProgramPath(exe string) string {
+	if idx := strings.Index(exe, string(filepath.Separator)+"Cellar"+string(filepath.Separator)); idx > 0 {
+		linked := filepath.Join(exe[:idx], "bin", filepath.Base(exe))
+		if _, err := os.Stat(linked); err == nil {
+			return linked
+		}
+	}
+	return exe
+}
+
+// InventoryHeartbeatStatus is the status view of the scheduled inventory job.
+type InventoryHeartbeatStatus struct {
+	Enabled       bool           `json:"enabled"`
+	Scheduled     bool           `json:"scheduled"`
+	Interval      string         `json:"interval"`
+	Job           service.Status `json:"job"`
+	LastEmittedAt string         `json:"last_emitted_at,omitempty"`
+	LogPath       string         `json:"log_path"`
+}
+
+func inventoryHeartbeatStatus(requestedUserMode bool, logPath string) InventoryHeartbeatStatus {
+	cfg := loadOrDefault(requestedUserMode, logPath)
+	job := newInventoryJob(requestedUserMode, service.KindAuto).Status()
+	status := InventoryHeartbeatStatus{
+		Enabled:   endpointconfig.InventoryConfig(cfg).Enabled,
+		Scheduled: job.Loaded,
+		Interval:  service.InventoryInterval().String(),
+		Job:       job,
+		LogPath:   endpointinventory.LogPath(cfg.LogPath, requestedUserMode),
+	}
+	if state, err := endpointinventory.ReadState(endpointinventory.StatePathForLog(cfg.LogPath, requestedUserMode)); err == nil {
+		status.LastEmittedAt = state.LastEmittedAt
+	}
+	return status
+}
 
 type InstallOptions struct {
 	UserMode              bool
@@ -71,6 +218,10 @@ type InstallResult struct {
 	LingerEnabled     bool   `json:"linger_enabled,omitempty"`
 	LingerDetail      string `json:"linger_detail,omitempty"`
 	LingerRemediation string `json:"linger_remediation,omitempty"`
+	// The scheduled inventory job is reconciled on every install; a host without a scheduler
+	// reports why in InventoryJobDetail and the install still succeeds.
+	InventoryJobPath   string `json:"inventory_job_path,omitempty"`
+	InventoryJobDetail string `json:"inventory_job_detail,omitempty"`
 }
 
 type Status struct {
@@ -85,6 +236,8 @@ type Status struct {
 	LastEvent     string                        `json:"last_event,omitempty"`
 	Destinations  DestinationStatus             `json:"destinations"`
 	ManagedIngest asymptote.ManagedIngestStatus `json:"managed_ingest"`
+	// InventoryHeartbeat follows the requested mode, like ManagedIngest: each mode has its own job.
+	InventoryHeartbeat InventoryHeartbeatStatus `json:"inventory_heartbeat"`
 }
 
 type DestinationStatus struct {
@@ -141,8 +294,15 @@ type serviceController interface {
 }
 
 type installRollback struct {
-	Manager       serviceController
-	ServiceLoaded bool
+	// InventoryJob and InventoryLoaded let a failed install unload the scheduled inventory job
+	// it started, so the scheduler is not left registered against rolled-back config.
+	// InventoryWasLoaded records a job that was already scheduled before this install began; a
+	// reinstall that re-enabled it and then failed must bring it back, exactly like the collector.
+	InventoryJob       inventoryJobController
+	InventoryLoaded    bool
+	InventoryWasLoaded bool
+	Manager            serviceController
+	ServiceLoaded      bool
 	// ServiceWasRunning records whether a collector was already up when this install began.
 	//
 	// It decides what rollback owes the machine. Unloading is right for a service this transaction
@@ -190,6 +350,9 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	if r.ServiceLoaded {
 		_ = r.Manager.Unload()
 	}
+	if r.InventoryLoaded && r.InventoryJob != nil && !r.InventoryWasLoaded {
+		_ = r.InventoryJob.Unload()
+	}
 
 	restoreBackups(manifest.Backups)
 	for i := len(r.files) - 1; i >= 0; i-- {
@@ -210,6 +373,12 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	// brought us here, and the install error the caller receives is the more useful signal.
 	if r.ServiceLoaded && r.ServiceWasRunning {
 		_ = r.Manager.Load()
+	}
+	// Same claim for the inventory job: its unit file has just been restored to what was scheduled
+	// before, so re-loading it puts the schedule back rather than leaving it stopped and, on
+	// systemd, disabled across reboot.
+	if r.InventoryLoaded && r.InventoryWasLoaded && r.InventoryJob != nil {
+		_ = r.InventoryJob.Load()
 	}
 }
 
@@ -275,6 +444,31 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	if _, err := saveEndpointConfig(cfg); err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
+	}
+
+	// The scheduled inventory job is on by default and reconciled on every install, which is
+	// how a package upgrade turns it on for an endpoint installed before it existed. The unit is
+	// tracked for rollback but kept out of the manifest, like the updater's, and a host with no
+	// scheduler does not fail the install: it is reported and the endpoint still collects.
+	inventoryJob := newInventoryJob(cfg.UserMode, opts.ServiceKind)
+	for _, path := range inventoryJob.UnitPaths() {
+		tx.Track(path)
+	}
+	tx.InventoryJob = inventoryJob
+	tx.InventoryWasLoaded = inventoryJob.Status().Loaded
+	inventoryResult, inventoryErr := reconcileInventoryJobWith(inventoryJob, InventoryJobOptions{
+		UserMode: cfg.UserMode,
+		Kind:     opts.ServiceKind,
+		Program:  DefaultInventoryJobProgram(cfg.UserMode),
+		LogPath:  cfg.LogPath,
+		Load:     opts.StartService,
+	})
+	tx.InventoryLoaded = inventoryResult.Loaded
+	inventoryDetail := inventoryResult.Skipped
+	if inventoryErr != nil {
+		// Written but not enabled is not installed: report the failure, not the unit path.
+		inventoryResult.UnitPath = ""
+		inventoryDetail = "scheduled inventory job: " + inventoryErr.Error()
 	}
 
 	harnessPaths, err := configureHarnesses(cfg)
@@ -365,6 +559,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		LingerEnabled:       lingerOutcome.Enabled,
 		LingerDetail:        lingerOutcome.Detail,
 		LingerRemediation:   lingerOutcome.Remediation,
+		InventoryJobPath:    inventoryResult.UnitPath,
+		InventoryJobDetail:  inventoryDetail,
 	}, nil
 }
 
@@ -406,6 +602,7 @@ func Uninstall(opts UninstallOptions) error {
 	if !cfg.UserMode && !opts.KeepUpdater {
 		removeUpdaterJob()
 	}
+	removeInventoryJob(cfg.UserMode)
 	// The managed-ingest forwarder and its credentials go with the endpoint; server-side the
 	// device stays registered until it is revoked from the dashboard.
 	fail("disconnect managed ingest", asymptote.Disconnect(asymptote.DisconnectOptions{
@@ -582,17 +779,18 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		})
 	}
 	return Status{
-		Version:       version.GetVersion(),
-		ConfigPath:    endpointconfig.ConfigPath(effectiveCfg.UserMode),
-		LogPath:       effectiveCfg.LogPath,
-		RuntimeLog:    runtimeLog,
-		Collector:     endpointcollector.CheckStatus(effectiveCfg),
-		Service:       service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
-		Harnesses:     harness.DiscoverAll(),
-		Diagnostics:   checks,
-		LastEvent:     last,
-		Destinations:  destinationStatus(effectiveCfg),
-		ManagedIngest: asymptote.Status(requestedUserMode, managedOpts),
+		Version:            version.GetVersion(),
+		ConfigPath:         endpointconfig.ConfigPath(effectiveCfg.UserMode),
+		LogPath:            effectiveCfg.LogPath,
+		RuntimeLog:         runtimeLog,
+		Collector:          endpointcollector.CheckStatus(effectiveCfg),
+		Service:            service.Manager{UserMode: effectiveCfg.UserMode}.Status(),
+		Harnesses:          harness.DiscoverAll(),
+		Diagnostics:        checks,
+		LastEvent:          last,
+		Destinations:       destinationStatus(effectiveCfg),
+		ManagedIngest:      asymptote.Status(requestedUserMode, managedOpts),
+		InventoryHeartbeat: inventoryHeartbeatStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 	}
 }
 
@@ -644,8 +842,15 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	}
 	// A re-install (upgrades run one) must not disconnect the machine on paper: the
 	// managed_ingest block is owned by connect/disconnect, so carry the existing one over.
-	if existing, err := endpointconfig.Load(opts.UserMode); err == nil && existing.ManagedIngest != nil {
-		cfg.ManagedIngest = existing.ManagedIngest
+	// The same goes for inventory_heartbeat: an operator's `enabled: false` must survive the
+	// package upgrade that re-runs install, or the scheduled job would come back.
+	if existing, err := endpointconfig.Load(opts.UserMode); err == nil {
+		if existing.ManagedIngest != nil {
+			cfg.ManagedIngest = existing.ManagedIngest
+		}
+		if existing.Inventory != nil {
+			cfg.Inventory = existing.Inventory
+		}
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses

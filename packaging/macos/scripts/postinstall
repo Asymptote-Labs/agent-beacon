@@ -124,6 +124,11 @@ if command -v launchctl >/dev/null 2>&1; then
     echo "Error: could not reconcile Beacon endpoint updater daemon" >&2
     exit 1
   }
+  # The scheduled inventory job is on by default; loading it fires the first heartbeat at once, so
+  # an endpoint upgraded from a version without the job starts reporting inventory immediately.
+  # Non-fatal: the endpoint is installed and collecting either way.
+  "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint inventory install-daemon --system || \
+    echo "Warning: scheduled inventory job not configured (endpoint is installed and running)" >&2
 fi
 
 exit 0

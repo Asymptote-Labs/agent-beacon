@@ -42,7 +42,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "claude", "Platform context: claude, cline, codex, antigravity, copilot, cursor, vscode, devin, devin-cli, devin-desktop, factory, goose, grok, hermes, kiro, muse, opencode, openhands, or qwen")
 	rootCmd.PersistentFlags().StringVar(&logFlag, "log", "", "Endpoint runtime log to append to (same value as BEACON_ENDPOINT_LOG)")
 	rootCmd.PersistentFlags().StringVar(&configFlag, "config", "", "Endpoint config to read (same value as BEACON_ENDPOINT_CONFIG)")
-	rootCmd.PersistentFlags().StringVar(&cliFlag, "cli", "", "Path to the beacon CLI for inventory heartbeats (same value as BEACON_ENDPOINT_CLI)")
+	// --cli is ignored. Every hook command written before inventory became a scheduled job
+	// carries it, and those commands are only rewritten by a hooks reinstall, so it must keep
+	// parsing. Hidden rather than deprecated: cobra prints a deprecation notice to stderr on
+	// every use, and several runtimes surface hook stderr to the person at the keyboard.
+	rootCmd.PersistentFlags().StringVar(&cliFlag, "cli", "", "Ignored; kept for hook commands written by older versions (mapped to BEACON_ENDPOINT_CLI)")
+	_ = rootCmd.PersistentFlags().MarkHidden("cli")
 	rootCmd.PersistentPreRun = func(*cobra.Command, []string) { applyEndpointFlagsToEnv() }
 }
 
@@ -55,8 +60,7 @@ func init() {
 // leave two ways to answer the same question during the transition. One source of truth is worth
 // more here than avoiding a Setenv in a process that exists for a few milliseconds and does one job.
 //
-// It also means a child process inherits them, which is what the inventory heartbeat subprocess
-// needs anyway.
+// It also means a child process inherits them, which is what the policy provider subprocess relies on.
 //
 // A flag beats an inherited variable. Both can be present -- an already-installed POSIX hook carries
 // the env prefix, and a repair rewrites the command to use flags -- and when they disagree the flag

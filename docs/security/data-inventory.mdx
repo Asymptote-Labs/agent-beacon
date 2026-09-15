@@ -54,10 +54,10 @@ By default, inventory is metadata- and hash-only. Beacon hashes config, hook, an
 
 Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction and a per-file size cap (64 KiB by default, configurable with `max_content_bytes`). Redaction replaces values under keys matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL` with `***REDACTED***`.
 
-Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. Normal hook execution can periodically write:
+Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. A scheduled local job (every 6 hours, and once at install, boot, or upgrade) writes:
 
 - `inventory.heartbeat`, a small event showing that Beacon checked local agent configuration inventory and recording counts plus a snapshot digest.
-- `inventory.snapshot`, a snapshot written when the digest changes or inventory is first initialized. Metadata-only unless `include_contents` is enabled.
+- `inventory.snapshot`, a snapshot written when the digest changes or inventory is first initialized. Metadata-only unless `include_contents` is enabled. Scheduled snapshots cover user-level configuration; project-scoped files appear only in `beacon endpoint inventory` output.
 
 By default, snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata across supported local runtimes. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content. When `include_contents` is enabled, snapshots additionally carry redacted, size-limited `content` and `definition` blocks as described above.
 
