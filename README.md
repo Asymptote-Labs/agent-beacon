@@ -69,6 +69,7 @@ Read the [documentation](https://docs.asymptotelabs.ai) to learn more.
 
 ```bash
 # Install Beacon
+brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 
