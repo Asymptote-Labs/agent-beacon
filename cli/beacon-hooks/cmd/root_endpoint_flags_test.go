@@ -97,3 +97,20 @@ func TestWhitespaceOnlyFlagsAreNotValues(t *testing.T) {
 		t.Fatalf("BEACON_ENDPOINT_MODE = %q, want a blank flag not to imply endpoint mode", got)
 	}
 }
+
+// A hook command written by an older version may carry --cli as its only endpoint flag. It must
+// keep implying endpoint mode, or that install would silently start writing to a default path.
+func TestCLIFlagAloneStillImpliesEndpointMode(t *testing.T) {
+	t.Setenv("BEACON_ENDPOINT_CLI", "")
+	t.Setenv("BEACON_ENDPOINT_MODE", "")
+	withFlags(t, "", "", "/opt/beacon/bin/beacon")
+
+	applyEndpointFlagsToEnv()
+
+	if got := os.Getenv("BEACON_ENDPOINT_MODE"); got != "1" {
+		t.Fatalf("BEACON_ENDPOINT_MODE = %q, want 1 from --cli alone", got)
+	}
+	if got := os.Getenv("BEACON_ENDPOINT_CLI"); got != "/opt/beacon/bin/beacon" {
+		t.Fatalf("BEACON_ENDPOINT_CLI = %q; the value is still mapped even though nothing reads it", got)
+	}
+}

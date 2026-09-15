@@ -62,12 +62,12 @@ func codexStatusFromRuntime(status runtimeStatus) CodexStatus {
 
 func installCodexHooks(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("codex", binaryPath, logPath, configPath)
+	// Only the OS-user session context is hook-driven. Inventory used to ride SessionStart and
+	// UserPromptSubmit here; it is written by the scheduled inventory job now.
 	endpointHooks := map[string]settingsHookGroup{
 		"SessionStart": {Hooks: []settingsHookRef{
-			{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10},
 			{Type: "command", Command: prefix + " codex-session-context", Timeout: 10},
 		}},
-		"UserPromptSubmit": {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " inventory-heartbeat", Timeout: 10}}},
 	}
 	return installSettingsEndpointHooks(path, "codex", endpointHooks)
 }

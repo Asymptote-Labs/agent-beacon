@@ -143,11 +143,6 @@ func endpointCommandArgs(platform, binaryPath, logPath, configPath string) []str
 	if configPath != "" {
 		args = append(args, "--config", configPath)
 	}
-	// Best-effort, exactly as in endpointCommandPrefix: the CLI path only enables the inventory
-	// heartbeat, and a hook with no --cli still captures everything else.
-	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
-		args = append(args, "--cli", cliPath)
-	}
 	return args
 }
 
@@ -158,11 +153,6 @@ func endpointCommandPrefix(platform, binaryPath, logPath, configPath string) str
 	}
 	if configPath != "" {
 		args = append(args, "--config", hookCommandQuote(configPath))
-	}
-	// Best-effort: the CLI path only enables the inventory heartbeat, and a hook with no --cli
-	// still captures everything else.
-	if cliPath, err := os.Executable(); err == nil && cliPath != "" {
-		args = append(args, "--cli", hookCommandQuote(cliPath))
 	}
 	return strings.Join(args, " ")
 }
@@ -220,6 +210,8 @@ func commandCarriesEndpointSettings(command string) bool {
 		if field == "BEACON_ENDPOINT_MODE=1" {
 			return true
 		}
+		// --cli is no longer written (inventory comes from the scheduled job, not the hook), but
+		// it is still recognized so hooks installed by older versions are repaired and removed.
 		for _, name := range []string{"--log", "--config", "--cli"} {
 			if field == name || strings.HasPrefix(field, name+"=") {
 				return true

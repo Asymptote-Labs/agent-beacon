@@ -1,14 +1,9 @@
 package cmd
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"testing"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
 func writeGitHead(t *testing.T, repo, head string) {
@@ -400,115 +395,4 @@ func TestToolFieldsMapsGenericFlatTransportKeysForKnownMCP(t *testing.T) {
 	if got := mcp["resource"].(map[string]interface{})["uri"]; got != "file:///tmp/report.md" {
 		t.Fatalf("mcp.resource.uri = %q, want file URI", got)
 	}
-}
-
-func TestMaybeEmitInventoryHeartbeatInvokesBeaconCLI(t *testing.T) {
-	oldPlatform := platformFlag
-	oldRunner := runInventoryHeartbeatCommand
-	defer func() {
-		platformFlag = oldPlatform
-		runInventoryHeartbeatCommand = oldRunner
-	}()
-	platformFlag = "cursor"
-	t.Setenv("BEACON_ENDPOINT_CLI", "/usr/local/bin/beacon")
-	t.Setenv("BEACON_ENDPOINT_CONFIG", "/tmp/beacon/config.json")
-	t.Setenv("BEACON_ENDPOINT_LOG", "/tmp/beacon/runtime.jsonl")
-
-	var gotName string
-	var gotArgs []string
-	runInventoryHeartbeatCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		gotName = name
-		gotArgs = append([]string(nil), args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestInventoryHeartbeatCommandHelperProcess")
-		cmd.Env = append(os.Environ(), "GO_WANT_INVENTORY_HELPER_PROCESS=1")
-		return cmd
-	}
-
-	logger := logging.NewLoggerForPlatform("test", "cursor")
-	maybeEmitInventoryHeartbeat(logger, map[string]interface{}{"cwd": "/repo"})
-
-	if gotName != "/usr/local/bin/beacon" {
-		t.Fatalf("command name = %q, want beacon path", gotName)
-	}
-	wantArgs := []string{
-		"endpoint", "inventory", "heartbeat",
-		"--trigger", "hook",
-		"--trigger-harness", "cursor",
-		"--config", "/tmp/beacon/config.json",
-		"--log-path", "/tmp/beacon/runtime.jsonl",
-		"--working-dir", "/repo",
-	}
-	if !reflect.DeepEqual(gotArgs, wantArgs) {
-		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
-	}
-}
-
-func TestMaybeEmitInventoryHeartbeatInvokesBeaconCLIForAnyEndpointPlatform(t *testing.T) {
-	oldPlatform := platformFlag
-	oldRunner := runInventoryHeartbeatCommand
-	defer func() {
-		platformFlag = oldPlatform
-		runInventoryHeartbeatCommand = oldRunner
-	}()
-	platformFlag = "gemini"
-	t.Setenv("BEACON_ENDPOINT_CLI", "/usr/local/bin/beacon")
-	t.Setenv("BEACON_ENDPOINT_LOG", "/tmp/beacon/runtime.jsonl")
-	var gotArgs []string
-	called := false
-	runInventoryHeartbeatCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		called = true
-		gotArgs = append([]string(nil), args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestInventoryHeartbeatCommandHelperProcess")
-		cmd.Env = append(os.Environ(), "GO_WANT_INVENTORY_HELPER_PROCESS=1")
-		return cmd
-	}
-
-	logger := logging.NewLoggerForPlatform("test", "gemini")
-	maybeEmitInventoryHeartbeat(logger, map[string]interface{}{"cwd": "/repo"})
-
-	if !called {
-		t.Fatal("inventory heartbeat command should run for endpoint hook platforms")
-	}
-	wantArgs := []string{
-		"endpoint", "inventory", "heartbeat",
-		"--trigger", "hook",
-		"--trigger-harness", "gemini",
-		"--log-path", "/tmp/beacon/runtime.jsonl",
-		"--working-dir", "/repo",
-	}
-	if !reflect.DeepEqual(gotArgs, wantArgs) {
-		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
-	}
-}
-
-func TestMaybeEmitInventoryHeartbeatSkipsWithoutEndpointCLI(t *testing.T) {
-	oldPlatform := platformFlag
-	oldRunner := runInventoryHeartbeatCommand
-	defer func() {
-		platformFlag = oldPlatform
-		runInventoryHeartbeatCommand = oldRunner
-	}()
-	platformFlag = "cursor"
-	t.Setenv("BEACON_ENDPOINT_CLI", "")
-	called := false
-	runInventoryHeartbeatCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		called = true
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestInventoryHeartbeatCommandHelperProcess")
-		cmd.Env = append(os.Environ(), "GO_WANT_INVENTORY_HELPER_PROCESS=1")
-		return cmd
-	}
-
-	logger := logging.NewLoggerForPlatform("test", "cursor")
-	maybeEmitInventoryHeartbeat(logger, map[string]interface{}{"cwd": "/repo"})
-
-	if called {
-		t.Fatal("inventory heartbeat command should not run without BEACON_ENDPOINT_CLI")
-	}
-}
-
-func TestInventoryHeartbeatCommandHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_INVENTORY_HELPER_PROCESS") != "1" {
-		return
-	}
-	os.Exit(0)
 }

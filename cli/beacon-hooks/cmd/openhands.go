@@ -14,8 +14,8 @@ import (
 // OpenHands documents its hooks format as compatible with Claude Code's, and the six events line
 // up one for one with commands this binary already has -- SessionStart, UserPromptSubmit,
 // PreToolUse, PostToolUse, Stop, SessionEnd. That is why OpenHands rides the shared commands
-// rather than getting a mapper of its own: the shared path already carries the inventory
-// heartbeat, log rotation, session state, the policy seam, content retention and the tool call id,
+// rather than getting a mapper of its own: the shared path already carries log rotation,
+// session state, the policy seam, content retention and the tool call id,
 // and a second implementation of those would be the thing that drifts.
 //
 // What "compatible" does not cover is the envelope's field names, which are the SDK's HookEvent

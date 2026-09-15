@@ -20,7 +20,7 @@ import (
 //	 "prompt": "...", "assistant_response": "..."}
 //
 // So Kiro rides the shared subcommands, the way OpenHands does and for the same reason: the shared
-// path already carries the inventory heartbeat, log rotation, session state, the policy seam,
+// path already carries log rotation, session state, the policy seam,
 // content retention and the tool call id, and a second implementation of those would be the thing
 // that drifts. There is not one envelope reader in this file, because there is nothing to
 // translate -- `session_id`, `cwd` and `prompt` all resolve through the shared default cases.

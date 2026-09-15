@@ -30,7 +30,6 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 	logger := newHookLogger("prompt-submit", platformFlag, sessionID)
 
 	logger.Debug("Prompt submit observed")
-	maybeEmitInventoryHeartbeat(logger, input)
 	fields := sessionFields(sessionID, input)
 	if isCascadePlatform(platformFlag) {
 		fields = cascadeMetadataFields(sessionID, input)
