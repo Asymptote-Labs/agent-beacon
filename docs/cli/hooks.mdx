@@ -73,7 +73,7 @@ Beacon validates the embedded `beacon-hooks` binary before writing hook configur
 beacon endpoint hooks install --harness cursor
 ```
 
-The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Codex CLI uses `SessionStart` for metadata-only OS-user context and inventory, plus `UserPromptSubmit` for inventory heartbeats; Codex prompt, tool, and token telemetry still comes from its local OpenTelemetry export path. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events. Cline hooks use Beacon's managed local plugin to forward `beforeRun`, `beforeTool`, `afterTool`, and `afterRun`, and also accept Cline's file-based hook names (`TaskStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`) so one adapter serves both of Cline's hook surfaces.
+The hook adapter records local endpoint events for sessions, prompt submission, tool use, command execution, MCP-like tool activity, approval decisions, permissions, diffs, and file edits where the selected runtime exposes those hook payloads. Antigravity hooks cover `PreInvocation`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostInvocation`, and `Stop`. Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Codex CLI uses `SessionStart` for metadata-only OS-user context; Codex prompt, tool, and token telemetry still comes from its local OpenTelemetry export path, and inventory comes from the scheduled inventory job rather than a hook. Devin CLI hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. Devin Desktop hooks use Cascade/Windsurf payloads for prompt submission, file writes, command execution, MCP tool use, and file reads. Factory hooks cover `SessionStart`, `UserPromptSubmit`, `PostToolUse` for write/edit/create operations, `Stop`, and `SessionEnd`. Grok Build hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionEnd`. Hermes Agent hooks cover session lifecycle, `pre_llm_call`, `pre_tool_call`, `post_tool_call`, approval request and response, and subagent stop events. OpenCode hooks use Beacon's managed local plugin to forward `chat.message`, session, command, permission, diff, and error events. Cline hooks use Beacon's managed local plugin to forward `beforeRun`, `beforeTool`, `afterTool`, and `afterRun`, and also accept Cline's file-based hook names (`TaskStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`) so one adapter serves both of Cline's hook surfaces.
 
 ### Examples
 
@@ -95,13 +95,13 @@ Install Claude Code hooks at the user level:
 beacon endpoint hooks install --harness claude
 ```
 
-Install Codex CLI inventory hooks at the user level:
+Install Codex CLI session-context hooks at the user level:
 
-```bash title="Install Codex CLI inventory hooks at the user level"
+```bash title="Install Codex CLI session-context hooks at the user level"
 beacon endpoint hooks install --harness codex
 ```
 
-A successful user-level install prints `Codex CLI inventory hooks installed: /Users/you/.codex/hooks.json`.
+A successful user-level install prints `Codex CLI hooks installed: /Users/you/.codex/hooks.json`.
 
 Install Antigravity hooks at the project level:
 
@@ -444,9 +444,9 @@ Beacon's `PreToolUse` hook answers with an empty object on purpose. Qwen reads `
 
 ## Codex CLI troubleshooting
 
-Beacon writes Codex CLI endpoint hooks to `~/.codex/hooks.json` for user-level installs or `./.codex/hooks.json` for project-level installs. `SessionStart` writes local OS-user/session context and triggers inventory; `UserPromptSubmit` refreshes inventory. These metadata-only hooks do not replace the Codex OTLP runtime path for prompt, tool, or token events.
+Beacon writes Codex CLI endpoint hooks to `~/.codex/hooks.json` for user-level installs or `./.codex/hooks.json` for project-level installs. `SessionStart` writes local OS-user/session context. This metadata-only hook does not replace the Codex OTLP runtime path for prompt, tool, or token events, and it no longer triggers inventory: that is the scheduled inventory job's work, in every mode, whether or not Codex runs.
 
-If Codex inventory updates are missing, check the selected level, confirm the hook file contains commands with `--platform codex`, and restart Codex CLI so new sessions pick up the updated hook configuration.
+If Codex session context is missing, check the selected level, confirm the hook file contains a command with `--platform codex`, and restart Codex CLI so new sessions pick up the updated hook configuration.
 
 ## OpenCode troubleshooting
 

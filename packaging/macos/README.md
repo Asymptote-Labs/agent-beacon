@@ -34,7 +34,9 @@ The endpoint install creates system configuration and runtime state:
 /Library/Application Support/Beacon/Endpoint/config.json
 /Library/Application Support/Beacon/Endpoint/otelcol.yaml
 /Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/Library/LaunchDaemons/com.beacon.endpoint.inventory.plist
 /var/log/beacon-agent/runtime.jsonl
+/var/log/beacon-agent/inventory_state.jsonl
 ```
 
 Connecting a system-mode endpoint to Asymptote managed ingest
@@ -434,7 +436,8 @@ Use `/opt/beacon/jamf/claude/common/repair-hooks.sh` when a Jamf policy
 needs only to repair the system endpoint, prepare
 `/var/log/beacon-agent/runtime.jsonl`,
 `/var/log/beacon-agent/inventory_state.jsonl`, and the inventory heartbeat state
-file for user-run hooks, reinstall Claude Code hooks for the interactive console
+file (inventory is written by the root-scheduled `com.beacon.endpoint.inventory` job now, so
+user-run hooks no longer need those files writable), reinstall Claude Code hooks for the interactive console
 user, and run a manual Claude hook smoke test. Newer packages perform the
 console-user native OTLP repair in postinstall; Jamf scripts should not need to
 hand-edit Claude settings JSON.

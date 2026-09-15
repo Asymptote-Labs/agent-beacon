@@ -11,6 +11,24 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### Unreleased
+
+- **Inventory is a scheduled job now** · Endpoint inventory heartbeats used to fire only from
+  agent hooks, so a machine that ran no hook-instrumented agent (or an idle one) never reported,
+  and system installs needed user hooks to be able to write a root-owned log. `beacon endpoint
+  install` now writes a scheduled job in both modes, `com.beacon.endpoint.inventory` (LaunchAgent
+  or LaunchDaemon) on macOS and `beacon-inventory.timer` on Linux, that writes `inventory.heartbeat`
+  every 6 hours and once at load, and `inventory.snapshot` when the inventory changed. It is on by
+  default; the package postinstall reconciles it on every upgrade, so an existing system install
+  starts reporting inventory after its next self-update with no action. `inventory_heartbeat.enabled:
+  false` removes it; `ttl_seconds` is gone (old keys are ignored). Hooks no longer trigger inventory:
+  Codex's `UserPromptSubmit` inventory hook is dropped, hook commands no longer carry `--cli`, and
+  the hook binary keeps `--cli` and `inventory-heartbeat` as no-ops for hook files written by
+  older versions. `beacon endpoint status` gains an `Inventory heartbeat` line and `--json`
+  `inventory_heartbeat` object. A system-mode run inventories the console user's home; the
+  scheduled scan no longer includes project-scoped config, which `beacon endpoint inventory` still
+  reports.
+
 ### v1.3.10 · September 12, 2026
 
 - **goose (Block) hook telemetry** · The hooks binary reads goose's plugin hook
