@@ -49,15 +49,6 @@ through [MDM](#mdm-deployment), and forwards telemetry to
 
 Learn more in the [Agent Beacon documentation](https://docs.asymptotelabs.ai).
 
-## Install
-
-```bash
-brew trust asymptote-labs/tap
-brew tap asymptote-labs/tap
-brew install beacon
-beacon endpoint install
-```
-
 ## High-Level Architecture
 
 Beacon captures activity where each agent actually runs, then normalizes it into a
