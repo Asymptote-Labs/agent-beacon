@@ -11,6 +11,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### v1.3.12 · September 15, 2026
+
+- **User-mode inventory job starts beside a system install** · On a Mac that also ran the
+  system-mode inventory daemon, the user-mode LaunchAgent pointed its stdout and stderr at the
+  same root-owned `/tmp` files and launchd refused to spawn it (`EX_CONFIG`). The user-mode job
+  now logs to per-user paths (`/tmp/com.beacon.endpoint.inventory.<uid>.out|err`).
+
 ### v1.3.11 · September 15, 2026
 
 - **Inventory is a scheduled job now** · Endpoint inventory heartbeats used to fire only from
