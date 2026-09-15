@@ -291,15 +291,17 @@ for rollout, validation, retention, and SIEM forwarding. For vendor review, see 
 
 ### For Developers
 
-Install the released CLI with Homebrew, or build from source. On macOS the formula also
-pulls in the tap's own Vector mirror, so a Homebrew install can connect to Asymptote
-Managed without a second step. That mirror is the `beacon-vector` formula, not `vector`:
+Install the released CLI with Homebrew, or build from source. Trust the tap once before
+tapping it; newer Homebrew releases require this for third-party formulae. On macOS the
+formula also pulls in the tap's own Vector mirror, so a Homebrew install can connect to
+Asymptote Managed without a second step. That mirror is the `beacon-vector` formula, not `vector`:
 Homebrew allows a single keg named `vector`, so it installs alongside — and never
 conflicts with — a Vector you already have from `vectordotdev/brew`. It is kept off your
 PATH and Beacon finds it on its own. On Linux, install the `vector` package from
 [vector.dev](https://vector.dev) if you want managed forwarding.
 
 ```bash
+brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 beacon version
