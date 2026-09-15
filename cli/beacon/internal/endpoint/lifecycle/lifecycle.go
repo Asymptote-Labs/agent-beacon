@@ -296,10 +296,13 @@ type serviceController interface {
 type installRollback struct {
 	// InventoryJob and InventoryLoaded let a failed install unload the scheduled inventory job
 	// it started, so the scheduler is not left registered against rolled-back config.
-	InventoryJob    inventoryJobController
-	InventoryLoaded bool
-	Manager         serviceController
-	ServiceLoaded   bool
+	// InventoryWasLoaded records a job that was already scheduled before this install began; a
+	// reinstall that re-enabled it and then failed must bring it back, exactly like the collector.
+	InventoryJob       inventoryJobController
+	InventoryLoaded    bool
+	InventoryWasLoaded bool
+	Manager            serviceController
+	ServiceLoaded      bool
 	// ServiceWasRunning records whether a collector was already up when this install began.
 	//
 	// It decides what rollback owes the machine. Unloading is right for a service this transaction
@@ -347,7 +350,7 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	if r.ServiceLoaded {
 		_ = r.Manager.Unload()
 	}
-	if r.InventoryLoaded && r.InventoryJob != nil {
+	if r.InventoryLoaded && r.InventoryJob != nil && !r.InventoryWasLoaded {
 		_ = r.InventoryJob.Unload()
 	}
 
@@ -370,6 +373,12 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	// brought us here, and the install error the caller receives is the more useful signal.
 	if r.ServiceLoaded && r.ServiceWasRunning {
 		_ = r.Manager.Load()
+	}
+	// Same claim for the inventory job: its unit file has just been restored to what was scheduled
+	// before, so re-loading it puts the schedule back rather than leaving it stopped and, on
+	// systemd, disabled across reboot.
+	if r.InventoryLoaded && r.InventoryWasLoaded && r.InventoryJob != nil {
+		_ = r.InventoryJob.Load()
 	}
 }
 
@@ -446,6 +455,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		tx.Track(path)
 	}
 	tx.InventoryJob = inventoryJob
+	tx.InventoryWasLoaded = inventoryJob.Status().Loaded
 	inventoryResult, inventoryErr := reconcileInventoryJobWith(inventoryJob, InventoryJobOptions{
 		UserMode: cfg.UserMode,
 		Kind:     opts.ServiceKind,

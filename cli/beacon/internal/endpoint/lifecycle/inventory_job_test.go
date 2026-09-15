@@ -18,6 +18,8 @@ type recordingInventoryJob struct {
 	supported bool
 	unitPath  string
 	loadErr   error
+	// scheduled makes Status report an already-loaded job, the reinstall case.
+	scheduled bool
 }
 
 func (r recordingInventoryJob) Supported() bool           { return r.supported }
@@ -36,7 +38,7 @@ func (r recordingInventoryJob) Load() error {
 }
 func (r recordingInventoryJob) Unload() error          { *r.calls = append(*r.calls, "unload"); return nil }
 func (r recordingInventoryJob) RemoveUnits()           { *r.calls = append(*r.calls, "remove") }
-func (r recordingInventoryJob) Status() service.Status { return service.Status{} }
+func (r recordingInventoryJob) Status() service.Status { return service.Status{Loaded: r.scheduled} }
 
 func installFakeInventoryJob(t *testing.T, supported bool) *[]string {
 	return installFakeInventoryJobWithLoadError(t, supported, nil)
@@ -268,6 +270,15 @@ func TestRollbackUnloadsALoadedInventoryJob(t *testing.T) {
 	tx.Rollback(Manifest{})
 	if len(*calls) != 0 {
 		t.Fatalf("rollback must not unload a job it never loaded: %q", *calls)
+	}
+	// A job that was already scheduled before the install is brought back, not torn down: the
+	// failed reinstall must not end inventory on a healthy endpoint.
+	*calls = nil
+	tx.InventoryLoaded = true
+	tx.InventoryWasLoaded = true
+	tx.Rollback(Manifest{})
+	if strings.Join(*calls, ",") != "load" {
+		t.Fatalf("rollback of a reinstall should re-load the previously scheduled job, got %q", *calls)
 	}
 }
 
