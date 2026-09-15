@@ -845,10 +845,15 @@ func plannedInstallActions(repair bool, kind service.Kind) []plannedAction {
 	if unitPath, err := mgr.UnitPath(); err == nil {
 		serviceAction.Target = unitPath
 	}
+	inventoryAction := plannedAction{Action: "write_unit", Message: "scheduled inventory heartbeat job"}
+	if unitPath, err := (service.InventoryManager{UserMode: cfg.UserMode, Kind: kind}).UnitPath(); err == nil {
+		inventoryAction.Target = unitPath
+	}
 	actions = append(actions,
 		plannedAction{Action: "write_file", Target: cfg.Collector.ConfigPath, Message: "collector configuration"},
 		serviceAction,
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
+		inventoryAction,
 	)
 	for _, h := range otlpTargets {
 		actions = append(actions, plannedAction{Action: "configure_harness", Target: h})
@@ -857,14 +862,20 @@ func plannedInstallActions(repair bool, kind service.Kind) []plannedAction {
 		actions = append(actions, plannedAction{Action: "configure_harness", Target: h, Message: "install endpoint hook integration"})
 	}
 	if !endpointOpts.noStart {
-		actions = append(actions, plannedAction{Action: "load_service", Message: "start endpoint collector service"})
+		actions = append(actions,
+			plannedAction{Action: "load_service", Message: "start endpoint collector service"},
+			plannedAction{Action: "load_service", Message: "start scheduled inventory heartbeat job"},
+		)
 	}
 	return actions
 }
 
 func plannedUninstallActions() []plannedAction {
 	cfg := loadOrDefaultConfig()
-	actions := []plannedAction{{Action: "unload_service", Message: "stop endpoint collector service if present"}}
+	actions := []plannedAction{
+		{Action: "unload_service", Message: "stop endpoint collector service if present"},
+		{Action: "unload_service", Message: "remove scheduled inventory heartbeat job if present"},
+	}
 	if !endpointOpts.keepConfig {
 		actions = append(actions, plannedAction{Action: "restore_backup", Message: "restore backed up harness configs when available"})
 	}

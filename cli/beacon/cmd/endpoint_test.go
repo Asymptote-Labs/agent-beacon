@@ -94,6 +94,18 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	if counts["devin"] != 0 {
 		t.Fatalf("legacy devin alias should be deduped, counts=%#v", counts)
 	}
+	inventoryUnits := 0
+	for _, action := range actions {
+		if action.Action == "write_unit" && action.Message == "scheduled inventory heartbeat job" {
+			inventoryUnits++
+		}
+		if action.Action == "load_service" {
+			t.Fatalf("--no-start plan must not load anything: %+v", action)
+		}
+	}
+	if inventoryUnits != 1 {
+		t.Fatalf("plan should write the scheduled inventory job once, got %d in %+v", inventoryUnits, actions)
+	}
 }
 
 func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T) {
