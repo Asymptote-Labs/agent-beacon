@@ -132,9 +132,11 @@ type Collector struct {
 	IncludeCodexSpans     bool   `json:"include_codex_spans,omitempty"`
 }
 
+// Inventory is the `inventory_heartbeat` block. `enabled` nil means enabled; it governs both the
+// scheduled job and the writer. A `ttl_seconds` key written by older versions is ignored: the
+// heartbeat runs on the scheduler's interval, not a TTL.
 type Inventory struct {
 	Enabled         *bool    `json:"enabled,omitempty"`
-	TTLSeconds      int      `json:"ttl_seconds,omitempty"`
 	Runtimes        []string `json:"runtimes,omitempty"`
 	IncludeContents *bool    `json:"include_contents,omitempty"`
 	MaxContentBytes int      `json:"max_content_bytes,omitempty"`
@@ -142,7 +144,6 @@ type Inventory struct {
 
 type InventorySettings struct {
 	Enabled         bool
-	TTLSeconds      int
 	Runtimes        []string
 	IncludeContents bool
 	MaxContentBytes int
@@ -192,9 +193,8 @@ func Default(userMode bool, logPath string) Config {
 
 func InventoryDefaults() InventorySettings {
 	return InventorySettings{
-		Enabled:    true,
-		TTLSeconds: 24 * 60 * 60,
-		Runtimes:   []string{},
+		Enabled:  true,
+		Runtimes: []string{},
 	}
 }
 
@@ -205,9 +205,6 @@ func InventoryConfig(cfg Config) InventorySettings {
 	}
 	if cfg.Inventory.Enabled != nil {
 		settings.Enabled = *cfg.Inventory.Enabled
-	}
-	if cfg.Inventory.TTLSeconds > 0 {
-		settings.TTLSeconds = cfg.Inventory.TTLSeconds
 	}
 	if len(cfg.Inventory.Runtimes) > 0 {
 		settings.Runtimes = append([]string(nil), cfg.Inventory.Runtimes...)

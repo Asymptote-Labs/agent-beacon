@@ -61,8 +61,12 @@ const (
 type Options struct {
 	HomeDir    string
 	WorkingDir string
-	Runtimes   []string
-	Now        func() time.Time
+	// SkipProjectScope leaves project-scoped config out of the scan and never falls back to the
+	// process working directory. The scheduled heartbeat sets it: a job under launchd or systemd
+	// has no meaningful cwd (it is `/`), so project scope belongs to `beacon endpoint inventory`.
+	SkipProjectScope bool
+	Runtimes         []string
+	Now              func() time.Time
 	// IncludeContents opts into capturing redacted, size-limited raw bodies of
 	// config, hook, and skill files plus full (redacted) MCP server definitions.
 	// When false (the default) inventory stays metadata- and hash-only.
@@ -142,7 +146,7 @@ func Scan(opts Options) Result {
 		home, _ = os.UserHomeDir()
 	}
 	wd := opts.WorkingDir
-	if wd == "" {
+	if wd == "" && !opts.SkipProjectScope {
 		wd, _ = os.Getwd()
 	}
 	now := opts.Now
@@ -160,13 +164,28 @@ func Scan(opts Options) Result {
 		},
 	}
 	co := contentOptions{include: opts.IncludeContents, maxBytes: opts.MaxContentBytes}
-	for _, item := range filterCandidates(candidates(home, wd), opts.Runtimes) {
+	for _, item := range filterCandidates(withoutProjectScope(candidates(home, wd), wd), opts.Runtimes) {
 		config, servers := inspectCandidate(item, redaction, co)
 		result.Configs = append(result.Configs, config)
 		result.MCPServers = append(result.MCPServers, servers...)
 	}
 	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes, co)
 	return result
+}
+
+// withoutProjectScope drops project-scoped candidates when there is no working directory to
+// scope them to; otherwise they would resolve relative to the process cwd.
+func withoutProjectScope(items []candidate, wd string) []candidate {
+	if wd != "" {
+		return items
+	}
+	out := items[:0]
+	for _, item := range items {
+		if item.scope != ScopeProject {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func filterCandidates(items []candidate, runtimes []string) []candidate {

@@ -1062,48 +1062,39 @@ func TestWriteInventoryEventsHonorsConfiguredRuntimes(t *testing.T) {
 	}
 }
 
-func TestInventoryHeartbeatTTLAndSnapshotDigest(t *testing.T) {
+func TestScheduledInventoryHeartbeatAlwaysWritesAndSnapshotsOnChange(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	work := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"}}}`)
 	writeTestFile(t, filepath.Join(home, ".codex", "config.toml"), `[mcp_servers.github]
 command = "gh"
 `)
 	cfg := endpointconfig.Default(true, logPath)
-	enabled := true
-	cfg.Inventory = &endpointconfig.Inventory{Enabled: &enabled, TTLSeconds: 86400}
 	settings := endpointconfig.InventoryConfig(cfg)
 
-	first, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	first, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{})
 	if err != nil {
 		t.Fatalf("first heartbeat returned error: %v", err)
 	}
 	if !first.Written || !first.SnapshotWritten || first.SnapshotDigest == "" {
 		t.Fatalf("first heartbeat = %#v, want heartbeat and snapshot", first)
 	}
-	second, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	// Nothing changed: the heartbeat (liveness) is still written, the snapshot is not. No TTL.
+	second, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{})
 	if err != nil {
 		t.Fatalf("second heartbeat returned error: %v", err)
 	}
-	if second.Written || second.SkippedReason != "ttl_active" {
-		t.Fatalf("second heartbeat = %#v, want TTL skip", second)
-	}
-	forced, err := writeInventoryHeartbeat(cfg, settings, true, work, "hook", "cursor")
-	if err != nil {
-		t.Fatalf("forced heartbeat returned error: %v", err)
-	}
-	if !forced.Written || forced.SnapshotWritten {
-		t.Fatalf("forced unchanged heartbeat = %#v, want heartbeat only", forced)
+	if !second.Written || second.SnapshotWritten || second.SkippedReason != "" {
+		t.Fatalf("unchanged heartbeat = %#v, want heartbeat only", second)
 	}
 
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"},"two":{"command":"uvx"}}}`)
-	changed, err := writeInventoryHeartbeat(cfg, settings, true, work, "hook", "cursor")
+	changed, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{})
 	if err != nil {
 		t.Fatalf("changed heartbeat returned error: %v", err)
 	}
-	if !changed.Written || !changed.SnapshotWritten || changed.SnapshotDigest == forced.SnapshotDigest {
+	if !changed.Written || !changed.SnapshotWritten || changed.SnapshotDigest == second.SnapshotDigest {
 		t.Fatalf("changed heartbeat = %#v, want new snapshot digest", changed)
 	}
 
@@ -1122,11 +1113,15 @@ command = "gh"
 	if strings.Count(text, "inventory.snapshot") != 2 {
 		t.Fatalf("snapshot count = %d, want 2; log=%s", strings.Count(text, "inventory.snapshot"), text)
 	}
-	if !strings.Contains(text, `"server_name":"two"`) {
-		t.Fatalf("changed snapshot missing new MCP server: %s", text)
+	for _, want := range []string{`"trigger":"scheduled"`, `"server_name":"two"`, `"server_name":"github"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inventory log missing %q: %s", want, text)
+		}
 	}
-	if !strings.Contains(text, `"server_name":"github"`) {
-		t.Fatalf("default heartbeat should include Codex inventory from cursor trigger: %s", text)
+	for _, forbidden := range []string{"ttl_seconds", "trigger_harness", `"scope":"project"`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("inventory log must not contain %q: %s", forbidden, text)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(logPath), "inventory-state.json")); err != nil {
 		t.Fatalf("inventory state should live beside inventory log: %v", err)
@@ -1136,10 +1131,9 @@ command = "gh"
 	}
 }
 
-func TestInventoryHeartbeatAppendFailureRecordsAttemptOnly(t *testing.T) {
+func TestInventoryHeartbeatAppendFailureLeavesStateUntouched(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	work := t.TempDir()
 	logDir := t.TempDir()
 	logPath := filepath.Join(logDir, "runtime.jsonl")
 	inventoryLogPath := endpointinventory.LogPath(logPath, true)
@@ -1148,34 +1142,92 @@ func TestInventoryHeartbeatAppendFailureRecordsAttemptOnly(t *testing.T) {
 	}
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"}}}`)
 	cfg := endpointconfig.Default(true, logPath)
-	cfg.Inventory = &endpointconfig.Inventory{TTLSeconds: 86400, Runtimes: []string{"cursor"}}
+	cfg.Inventory = &endpointconfig.Inventory{Runtimes: []string{"cursor"}}
 	settings := endpointconfig.InventoryConfig(cfg)
 
-	first, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
+	first, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{})
 	if err == nil {
 		t.Fatal("writeInventoryHeartbeat should fail when inventory log path is a directory")
 	}
 	if first.SnapshotDigest == "" {
 		t.Fatalf("failed heartbeat should still report snapshot digest: %#v", first)
 	}
-	statePath := endpointinventory.StatePathForLog(logPath, true)
-	state, err := endpointinventory.ReadState(statePath)
+	state, err := endpointinventory.ReadState(endpointinventory.StatePathForLog(logPath, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.LastAttemptAt == "" {
-		t.Fatalf("failed append should persist attempt timestamp: %#v", state)
-	}
 	if state.LastEmittedAt != "" || state.LastSnapshotDigest != "" {
-		t.Fatalf("failed append should not mark emission complete: %#v", state)
+		t.Fatalf("failed append must leave the state untouched: %#v", state)
 	}
+	// No backoff: the next scheduled run is a plain retry.
+	if _, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{}); err == nil {
+		t.Fatal("second run should retry and fail again, not be skipped")
+	}
+}
 
-	second, err := writeInventoryHeartbeat(cfg, settings, false, work, "hook", "cursor")
-	if err != nil {
-		t.Fatalf("second heartbeat should be skipped by attempt backoff, got error: %v", err)
+func TestScheduledHeartbeatInSystemModeScansTheConsoleUsersHome(t *testing.T) {
+	consoleHome := t.TempDir()
+	writeTestFile(t, filepath.Join(consoleHome, ".cursor", "mcp.json"), `{"mcpServers":{"console-one":{"command":"npx"}}}`)
+	t.Setenv("HOME", t.TempDir()) // root's home: must not be what gets scanned
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	cfg := endpointconfig.Default(false, logPath)
+	settings := endpointconfig.InventoryConfig(cfg)
+
+	oldResolver := activeConsoleUser
+	t.Cleanup(func() { activeConsoleUser = oldResolver })
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		return consoleUserInfo{Username: "console", HomeDir: consoleHome}, true, nil
 	}
-	if second.SkippedReason != "attempt_backoff" {
-		t.Fatalf("second heartbeat = %#v, want attempt_backoff", second)
+	if _, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, systemHeartbeatScope()); err != nil {
+		t.Fatalf("heartbeat with console user: %v", err)
+	}
+	inventoryLogPath := endpointinventory.LogPath(logPath, false)
+	data, err := os.ReadFile(inventoryLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"server_name":"console-one"`) {
+		t.Fatalf("system-mode heartbeat should inventory the console user's home: %s", data)
+	}
+	stateBefore, _ := endpointinventory.ReadState(endpointinventory.StatePathForLog(logPath, false))
+
+	// Nobody logged in: liveness only, no snapshot, digest untouched.
+	activeConsoleUser = func() (consoleUserInfo, bool, error) { return consoleUserInfo{}, false, nil }
+	result, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, systemHeartbeatScope())
+	if err != nil {
+		t.Fatalf("heartbeat without console user: %v", err)
+	}
+	if !result.Written || result.SnapshotWritten {
+		t.Fatalf("no-console-user heartbeat = %#v, want heartbeat only", result)
+	}
+	data, _ = os.ReadFile(inventoryLogPath)
+	if strings.Count(string(data), "inventory.heartbeat") != 2 || strings.Count(string(data), "inventory.snapshot") != 1 {
+		t.Fatalf("expected a second heartbeat and no second snapshot: %s", data)
+	}
+	stateAfter, _ := endpointinventory.ReadState(endpointinventory.StatePathForLog(logPath, false))
+	// last_emitted_at has second resolution, so only the digest is a reliable assertion here.
+	if stateAfter.LastSnapshotDigest != stateBefore.LastSnapshotDigest || stateAfter.LastEmittedAt == "" {
+		t.Fatalf("no-console-user run must keep the digest: before=%#v after=%#v", stateBefore, stateAfter)
+	}
+}
+
+// Hooks installed by older versions still run `inventory heartbeat --trigger hook` on every prompt.
+func TestHeartbeatHookTriggerIsRetired(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	oldOpts := endpointOpts
+	t.Cleanup(func() { endpointOpts = oldOpts })
+	endpointOpts.userMode, endpointOpts.systemMode = true, false
+	endpointOpts.logPath = logPath
+	endpointOpts.inventoryTrigger = "hook"
+	endpointOpts.inventoryTriggerHarness = "claude"
+	endpointOpts.inventoryWorkingDir = "/tmp"
+	endpointOpts.jsonOutput = false
+	if err := runEndpointInventoryHeartbeat(nil, nil); err != nil {
+		t.Fatalf("retired hook trigger must exit cleanly: %v", err)
+	}
+	if _, err := os.Stat(endpointinventory.LogPath(logPath, true)); !os.IsNotExist(err) {
+		t.Fatalf("retired hook trigger must not write inventory, stat err=%v", err)
 	}
 }
 

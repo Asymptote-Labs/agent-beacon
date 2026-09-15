@@ -30,7 +30,7 @@ func TestDefaultUserConfigUsesHomeScopedPaths(t *testing.T) {
 		t.Fatalf("unexpected default harnesses: %#v", cfg.Harnesses)
 	}
 	inventory := InventoryConfig(cfg)
-	if !inventory.Enabled || inventory.TTLSeconds != 86400 || len(inventory.Runtimes) != 0 {
+	if !inventory.Enabled || len(inventory.Runtimes) != 0 {
 		t.Fatalf("unexpected inventory defaults: %#v", inventory)
 	}
 	if inventory.IncludeContents || inventory.MaxContentBytes != 0 {
@@ -61,7 +61,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg.Collector.IncludeCodexSpans = true
 	cfg.EventCategories = []string{"tool", "session"}
 	enabled := true
-	cfg.Inventory = &Inventory{Enabled: &enabled, TTLSeconds: 30, Runtimes: []string{"cursor"}}
+	cfg.Inventory = &Inventory{Enabled: &enabled, Runtimes: []string{"cursor"}}
 
 	path, err := Save(cfg)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("EventCategories did not round-trip: %#v", loaded.EventCategories)
 	}
 	inventory := InventoryConfig(loaded)
-	if !inventory.Enabled || inventory.TTLSeconds != 30 || len(inventory.Runtimes) != 1 || inventory.Runtimes[0] != "cursor" {
+	if !inventory.Enabled || len(inventory.Runtimes) != 1 || inventory.Runtimes[0] != "cursor" {
 		t.Fatalf("Inventory did not round-trip: %#v", inventory)
 	}
 	data, err := os.ReadFile(path)

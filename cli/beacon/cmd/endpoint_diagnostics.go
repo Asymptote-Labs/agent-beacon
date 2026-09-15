@@ -423,7 +423,7 @@ func inventoryConfigIncluded(config endpointinventory.Config) bool {
 func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Result) error {
 	settings := endpointconfig.InventoryConfig(cfg)
 	result = filterInventoryResult(result, settings.Runtimes)
-	_, err := writeInventorySnapshotEvents(cfg, settings, result, "manual", "", true, endpointinventory.State{})
+	_, err := writeInventorySnapshotEvents(cfg, settings, result, "manual", endpointinventory.SnapshotDigest(result), true, endpointinventory.State{})
 	return err
 }
 
@@ -435,19 +435,58 @@ type inventoryHeartbeatWriteResult struct {
 	PreviousDigest  string `json:"previous_snapshot_digest,omitempty"`
 }
 
-const inventoryAttemptBackoff = 5 * time.Minute
+// heartbeatScope says whose runtimes the heartbeat inventories. In user mode the zero value
+// means the current user. In system mode the job runs as root, whose home holds nothing, so
+// the scan targets the active console user; when nobody is logged in the heartbeat is still
+// written (it is the endpoint's liveness signal) but carries no snapshot.
+type heartbeatScope struct {
+	HomeDir       string
+	NoConsoleUser bool
+}
+
+const inventoryTriggerScheduled = "scheduled"
 
 func runEndpointInventoryHeartbeat(cmd *cobra.Command, args []string) error {
+	if endpointOpts.inventoryTrigger == "hook" {
+		// Hooks installed by older Beacon versions call this on every session start and prompt.
+		// Inventory comes from the scheduled job now; honouring the old trigger would turn every
+		// prompt into a heartbeat.
+		if endpointOpts.jsonOutput {
+			_ = json.NewEncoder(os.Stdout).Encode(inventoryHeartbeatWriteResult{SkippedReason: "hook_trigger_retired"})
+		}
+		return nil
+	}
 	cfg, err := loadInventoryHeartbeatConfig(endpointUserMode(), endpointOpts.logPath, endpointOpts.inventoryHeartbeatConfig)
 	if err != nil {
 		return err
 	}
 	settings := endpointconfig.InventoryConfig(cfg)
-	result, err := writeInventoryHeartbeat(cfg, settings, endpointOpts.inventoryHeartbeatForce, endpointOpts.inventoryWorkingDir, endpointOpts.inventoryTrigger, endpointOpts.inventoryTriggerHarness)
+	trigger := "manual"
+	if endpointOpts.inventoryScheduled {
+		trigger = inventoryTriggerScheduled
+	}
+	scope := heartbeatScope{}
+	if !cfg.UserMode {
+		scope = systemHeartbeatScope()
+	}
+	result, err := writeInventoryHeartbeat(cfg, settings, endpointOpts.inventoryHeartbeatForce, trigger, scope)
 	if endpointOpts.jsonOutput {
 		_ = json.NewEncoder(os.Stdout).Encode(result)
 	}
 	return err
+}
+
+// systemHeartbeatScope resolves the console user a system-mode heartbeat should inventory. A
+// resolution failure is reported but never fatal: the liveness heartbeat still goes out.
+func systemHeartbeatScope() heartbeatScope {
+	info, ok, err := activeConsoleUser()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not resolve the console user for inventory: %v\n", err)
+	}
+	if !ok || strings.TrimSpace(info.HomeDir) == "" {
+		return heartbeatScope{NoConsoleUser: true}
+	}
+	return heartbeatScope{HomeDir: info.HomeDir}
 }
 
 func loadInventoryHeartbeatConfig(userMode bool, logPath, configPath string) (endpointconfig.Config, error) {
@@ -475,7 +514,10 @@ func loadInventoryHeartbeatConfig(userMode bool, logPath, configPath string) (en
 	return cfg, nil
 }
 
-func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.InventorySettings, force bool, workingDir, trigger, triggerHarness string) (inventoryHeartbeatWriteResult, error) {
+// writeInventoryHeartbeat always appends an inventory.heartbeat and appends an inventory.snapshot
+// only when the scan's digest differs from the last one written. There is no TTL: the caller
+// (the scheduled job, or an operator running the command) decides when to run.
+func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.InventorySettings, force bool, trigger string, scope heartbeatScope) (inventoryHeartbeatWriteResult, error) {
 	if !settings.Enabled && !force {
 		return inventoryHeartbeatWriteResult{SkippedReason: "disabled"}, nil
 	}
@@ -486,30 +528,28 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 		return inventoryHeartbeatWriteResult{}, err
 	}
 	defer locked.Close()
-	if !force && !endpointinventory.TTLExpired(state, now, settings.TTLSeconds) {
-		return inventoryHeartbeatWriteResult{SkippedReason: "ttl_active", PreviousDigest: state.LastSnapshotDigest}, nil
+
+	var inventoryResult endpointinventory.Result
+	digest := state.LastSnapshotDigest
+	writeSnapshot := false
+	if scope.NoConsoleUser {
+		inventoryResult = endpointinventory.Result{
+			GeneratedAt: now.Format(time.RFC3339),
+			UserScope:   endpointinventory.UserScope{Mode: "no_console_user"},
+		}
+	} else {
+		inventoryResult = endpointinventory.Scan(endpointinventory.Options{
+			HomeDir:          scope.HomeDir,
+			SkipProjectScope: true,
+			Runtimes:         settings.Runtimes,
+			Now:              func() time.Time { return now },
+			IncludeContents:  settings.IncludeContents,
+			MaxContentBytes:  settings.MaxContentBytes,
+		})
+		digest = endpointinventory.SnapshotDigest(inventoryResult)
+		writeSnapshot = state.LastSnapshotDigest != digest
 	}
-	if !force && endpointinventory.AttemptBackoffActive(state, now, inventoryAttemptBackoff) {
-		return inventoryHeartbeatWriteResult{SkippedReason: "attempt_backoff", PreviousDigest: state.LastSnapshotDigest}, nil
-	}
-	scanOpts := endpointinventory.Options{
-		WorkingDir:      workingDir,
-		Runtimes:        settings.Runtimes,
-		Now:             func() time.Time { return now },
-		IncludeContents: settings.IncludeContents,
-		MaxContentBytes: settings.MaxContentBytes,
-	}
-	inventoryResult := endpointinventory.Scan(scanOpts)
-	digest := endpointinventory.SnapshotDigest(inventoryResult)
-	writeSnapshot := state.LastSnapshotDigest != digest
-	if err := locked.Save(endpointinventory.State{
-		LastEmittedAt:      state.LastEmittedAt,
-		LastSnapshotDigest: state.LastSnapshotDigest,
-		LastAttemptAt:      now.Format(time.RFC3339),
-	}); err != nil {
-		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: state.LastSnapshotDigest}, err
-	}
-	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, triggerHarness, writeSnapshot, state)
+	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, digest, writeSnapshot, state)
 	if err != nil {
 		return writeResult, err
 	}
@@ -522,16 +562,13 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 	return writeResult, nil
 }
 
-func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointconfig.InventorySettings, result endpointinventory.Result, trigger, triggerHarness string, writeSnapshot bool, state endpointinventory.State) (inventoryHeartbeatWriteResult, error) {
-	digest := endpointinventory.SnapshotDigest(result)
+func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointconfig.InventorySettings, result endpointinventory.Result, trigger, digest string, writeSnapshot bool, state endpointinventory.State) (inventoryHeartbeatWriteResult, error) {
 	previousDigest := state.LastSnapshotDigest
 	counts := endpointinventory.CountsFor(result)
 	inventoryMeta := map[string]interface{}{
 		"generated_at":             result.GeneratedAt,
 		"runtimes":                 settings.Runtimes,
 		"trigger":                  trigger,
-		"trigger_harness":          triggerHarness,
-		"ttl_seconds":              settings.TTLSeconds,
 		"snapshot_digest":          digest,
 		"previous_snapshot_digest": previousDigest,
 		"counts":                   counts,
@@ -557,7 +594,7 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: previousDigest}, err
 	}
 	out := inventoryHeartbeatWriteResult{Written: true, SnapshotDigest: digest, PreviousDigest: previousDigest}
-	if !writeSnapshot && previousDigest != "" {
+	if !writeSnapshot {
 		return out, nil
 	}
 	snapshot := schema.NewEvent(schema.NewEventOptions{
@@ -573,8 +610,6 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 			"generated_at":             result.GeneratedAt,
 			"runtimes":                 settings.Runtimes,
 			"trigger":                  trigger,
-			"trigger_harness":          triggerHarness,
-			"ttl_seconds":              settings.TTLSeconds,
 			"snapshot_digest":          digest,
 			"previous_snapshot_digest": previousDigest,
 			"counts":                   counts,
