@@ -11,6 +11,15 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### Unreleased
+
+- **Scheduled inventory on shared Macs** · A system-mode heartbeat inventories whoever owns the
+  console. macOS service accounts (`_mbsetupuser` at the login window, home `/var/empty`) passed
+  that check and produced an empty snapshot, and on a Mac where two people alternate at the
+  console every switch wrote a "changed" snapshot although nobody's inventory changed. Service
+  accounts are now treated as no console user (heartbeat only, no snapshot), and the state file
+  remembers the last digest per home, so returning to an unchanged user writes a heartbeat only.
+
 ### v1.3.12 · September 15, 2026
 
 - **User-mode inventory job starts beside a system install** · On a Mac that also ran the

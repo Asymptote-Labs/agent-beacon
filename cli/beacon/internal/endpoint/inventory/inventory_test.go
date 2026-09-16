@@ -673,7 +673,7 @@ func TestReadStateTreatsEmptyFileAsFreshState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadState returned error for empty state file: %v", err)
 	}
-	if state != (State{}) {
+	if state.LastEmittedAt != "" || state.LastSnapshotDigest != "" || len(state.LastSnapshotDigests) != 0 {
 		t.Fatalf("state = %#v, want empty", state)
 	}
 }
@@ -1080,4 +1080,21 @@ func hasScope(result Result, scope string) bool {
 		}
 	}
 	return false
+}
+
+func TestStateDigestFallsBackToTheLegacyFieldThenTracksPerHome(t *testing.T) {
+	legacy := State{LastSnapshotDigest: "sha256:old"}
+	if legacy.DigestFor("home-a") != "sha256:old" {
+		t.Fatal("a pre-map state must answer with the endpoint-wide digest for any home")
+	}
+	next := legacy.WithDigest("home-a", "sha256:a")
+	if next.DigestFor("home-a") != "sha256:a" || next.LastSnapshotDigest != "sha256:a" {
+		t.Fatalf("WithDigest should record per home and overall: %+v", next)
+	}
+	if next.DigestFor("home-b") != "" {
+		t.Fatal("once per-home digests exist, an unknown home has no previous digest")
+	}
+	if legacy.LastSnapshotDigests != nil {
+		t.Fatal("WithDigest must not mutate its receiver")
+	}
 }

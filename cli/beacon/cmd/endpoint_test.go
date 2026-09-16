@@ -2219,3 +2219,69 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	}
 	return string(output), runErr
 }
+
+// A shared Mac alternates console users. Switching between them is not a change in anyone's
+// inventory, so the second visit to each home must write a heartbeat and no snapshot.
+func TestScheduledHeartbeatKeepsOneDigestPerConsoleUser(t *testing.T) {
+	alice, bob := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(alice, ".cursor", "mcp.json"), `{"mcpServers":{"alice-one":{"command":"npx"}}}`)
+	writeTestFile(t, filepath.Join(bob, ".cursor", "mcp.json"), `{"mcpServers":{"bob-one":{"command":"npx"},"bob-two":{"command":"uvx"}}}`)
+	t.Setenv("HOME", t.TempDir())
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	cfg := endpointconfig.Default(false, logPath)
+	settings := endpointconfig.InventoryConfig(cfg)
+
+	run := func(home string) inventoryHeartbeatWriteResult {
+		t.Helper()
+		r, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{HomeDir: home})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if r := run(alice); !r.SnapshotWritten {
+		t.Fatalf("first visit to alice must snapshot: %+v", r)
+	}
+	if r := run(bob); !r.SnapshotWritten {
+		t.Fatalf("first visit to bob must snapshot: %+v", r)
+	}
+	if r := run(alice); r.SnapshotWritten || !r.Written {
+		t.Fatalf("returning to alice with nothing changed must be heartbeat only: %+v", r)
+	}
+	if r := run(bob); r.SnapshotWritten {
+		t.Fatalf("returning to bob with nothing changed must be heartbeat only: %+v", r)
+	}
+	writeTestFile(t, filepath.Join(alice, ".cursor", "mcp.json"), `{"mcpServers":{"alice-one":{"command":"npx"},"alice-two":{"command":"uvx"}}}`)
+	if r := run(alice); !r.SnapshotWritten {
+		t.Fatalf("a real change for alice must snapshot: %+v", r)
+	}
+	state, err := endpointinventory.ReadState(endpointinventory.StatePathForLog(logPath, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.LastSnapshotDigests) != 2 {
+		t.Fatalf("state should remember one digest per home: %+v", state)
+	}
+}
+
+func TestSystemHeartbeatScopeIgnoresServiceAccountsAtTheConsole(t *testing.T) {
+	oldResolver := activeConsoleUser
+	t.Cleanup(func() { activeConsoleUser = oldResolver })
+	for _, tc := range []struct {
+		name string
+		info consoleUserInfo
+		want bool // NoConsoleUser
+	}{
+		{"setup assistant", consoleUserInfo{Username: "_mbsetupuser", HomeDir: "/var/empty"}, true},
+		{"root", consoleUserInfo{Username: "root", HomeDir: "/var/root"}, true},
+		{"loginwindow", consoleUserInfo{Username: "loginwindow", HomeDir: "/"}, true},
+		{"empty home", consoleUserInfo{Username: "someone", HomeDir: ""}, true},
+		{"real user", consoleUserInfo{Username: "zac", HomeDir: t.TempDir()}, false},
+	} {
+		info := tc.info
+		activeConsoleUser = func() (consoleUserInfo, bool, error) { return info, true, nil }
+		if got := systemHeartbeatScope().NoConsoleUser; got != tc.want {
+			t.Errorf("%s: NoConsoleUser = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+}

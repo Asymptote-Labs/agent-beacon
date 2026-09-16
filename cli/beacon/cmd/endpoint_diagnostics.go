@@ -423,7 +423,7 @@ func inventoryConfigIncluded(config endpointinventory.Config) bool {
 func writeInventoryEvents(cfg endpointconfig.Config, result endpointinventory.Result) error {
 	settings := endpointconfig.InventoryConfig(cfg)
 	result = filterInventoryResult(result, settings.Runtimes)
-	_, err := writeInventorySnapshotEvents(cfg, settings, result, "manual", endpointinventory.SnapshotDigest(result), true, endpointinventory.State{})
+	_, err := writeInventorySnapshotEvents(cfg, settings, result, "manual", endpointinventory.SnapshotDigest(result), "", true)
 	return err
 }
 
@@ -483,10 +483,27 @@ func systemHeartbeatScope() heartbeatScope {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not resolve the console user for inventory: %v\n", err)
 	}
-	if !ok || strings.TrimSpace(info.HomeDir) == "" {
+	if !ok || !isInventoriableUser(info) {
 		return heartbeatScope{NoConsoleUser: true}
 	}
 	return heartbeatScope{HomeDir: info.HomeDir}
+}
+
+// isInventoriableUser rejects the accounts that can own /dev/console without being a person:
+// macOS service accounts (underscore-prefixed, home /var/empty) hold it at the login window and
+// during setup, and root holds it on a headless box. Inventorying their homes yields an empty
+// snapshot that then flips the digest back and forth with the real user's.
+func isInventoriableUser(info consoleUserInfo) bool {
+	home := strings.TrimSpace(info.HomeDir)
+	name := strings.TrimSpace(info.Username)
+	if home == "" || name == "root" || name == "loginwindow" || strings.HasPrefix(name, "_") {
+		return false
+	}
+	switch home {
+	case "/", "/var/empty", "/var/root", "/nonexistent":
+		return false
+	}
+	return true
 }
 
 func loadInventoryHeartbeatConfig(userMode bool, logPath, configPath string) (endpointconfig.Config, error) {
@@ -531,7 +548,9 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 
 	var inventoryResult endpointinventory.Result
 	digest := state.LastSnapshotDigest
+	previous := state.LastSnapshotDigest
 	writeSnapshot := false
+	next := state
 	if scope.NoConsoleUser {
 		inventoryResult = endpointinventory.Result{
 			GeneratedAt: now.Format(time.RFC3339),
@@ -547,23 +566,24 @@ func writeInventoryHeartbeat(cfg endpointconfig.Config, settings endpointconfig.
 			MaxContentBytes:  settings.MaxContentBytes,
 		})
 		digest = endpointinventory.SnapshotDigest(inventoryResult)
-		writeSnapshot = state.LastSnapshotDigest != digest
+		// Compare against the last digest for *this* home: a multi-user machine alternates
+		// console users, and a switch is not a change in anyone's inventory.
+		previous = state.DigestFor(inventoryResult.UserScope.HomeHash)
+		writeSnapshot = previous != digest
+		next = state.WithDigest(inventoryResult.UserScope.HomeHash, digest)
 	}
-	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, digest, writeSnapshot, state)
+	writeResult, err := writeInventorySnapshotEvents(cfg, settings, inventoryResult, trigger, digest, previous, writeSnapshot)
 	if err != nil {
 		return writeResult, err
 	}
-	if err := locked.Save(endpointinventory.State{
-		LastEmittedAt:      now.Format(time.RFC3339),
-		LastSnapshotDigest: digest,
-	}); err != nil {
-		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: state.LastSnapshotDigest}, err
+	next.LastEmittedAt = now.Format(time.RFC3339)
+	if err := locked.Save(next); err != nil {
+		return inventoryHeartbeatWriteResult{SnapshotDigest: digest, PreviousDigest: previous}, err
 	}
 	return writeResult, nil
 }
 
-func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointconfig.InventorySettings, result endpointinventory.Result, trigger, digest string, writeSnapshot bool, state endpointinventory.State) (inventoryHeartbeatWriteResult, error) {
-	previousDigest := state.LastSnapshotDigest
+func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointconfig.InventorySettings, result endpointinventory.Result, trigger, digest, previousDigest string, writeSnapshot bool) (inventoryHeartbeatWriteResult, error) {
 	counts := endpointinventory.CountsFor(result)
 	inventoryMeta := map[string]interface{}{
 		"generated_at":             result.GeneratedAt,
