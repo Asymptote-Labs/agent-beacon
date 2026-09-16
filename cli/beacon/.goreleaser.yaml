@@ -237,9 +237,10 @@ brews:
     # which Homebrew never links into the prefix -- so it cannot collide on a bin/vector
     # symlink either. FindVector looks there first; see internal/endpoint/asymptote.
     #
-    # os: mac because the mirror only carries Vector's macOS tarballs; renders as
-    # `depends_on "..." if OS.mac?`. Homebrew-on-Linux installs Beacon with no
-    # dependency and uses the vector.dev package, as the docs say.
+    # os: mac because Beacon only bundles the tap's Vector mirror for macOS.
+    # Homebrew-on-Linux installs Beacon with no dependency and uses the vector.dev
+    # package, as the docs say. The mirror formula itself still carries Linux URLs
+    # so Homebrew's cross-platform tap validation can load it.
     dependencies:
       - name: asymptote-labs/tap/beacon-vector
         os: mac

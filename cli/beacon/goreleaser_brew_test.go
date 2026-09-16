@@ -70,9 +70,10 @@ func TestHomebrewFormulaNeverDependsOnAFormulaNamedVector(t *testing.T) {
 // nothing else finds it. Renaming the formula on either side alone leaves `brew install
 // beacon` installing a Vector that `beacon endpoint connect` cannot see.
 //
-// The dependency is macOS-only because the mirror only carries Vector's macOS tarballs.
-// Dropping that guard would break Homebrew-on-Linux installs of Beacon outright, which is
-// how the tap's macOS-only vector.rb behaved before the rename.
+// The dependency is macOS-only because Beacon bundles the tap's Vector mirror only on
+// macOS. Homebrew-on-Linux installs Beacon without a Vector dependency and uses the
+// vector.dev package path documented for Linux instead. The mirror formula itself still
+// carries Linux URLs so Homebrew's cross-platform tap validation can load it.
 func TestHomebrewFormulaDependsOnTheVectorMirrorFindVectorLooksFor(t *testing.T) {
 	want := "asymptote-labs/tap/" + asymptote.TapVectorFormula
 	for _, brew := range loadBrewConfig(t).Brews {
@@ -86,9 +87,10 @@ func TestHomebrewFormulaDependsOnTheVectorMirrorFindVectorLooksFor(t *testing.T)
 			}
 			found = true
 			if dep.OS != "mac" {
-				t.Errorf("brew %q depends on %q with os %q, want %q: the mirror carries only "+
-					"Vector's macOS tarballs, so an unguarded dependency breaks Homebrew-on-Linux "+
-					"installs of Beacon", brew.Name, dep.Name, dep.OS, "mac")
+				t.Errorf("brew %q depends on %q with os %q, want %q: Beacon bundles the "+
+					"tap's Vector mirror only on macOS; Homebrew-on-Linux installs Beacon "+
+					"without a Vector dependency and uses the vector.dev package path instead",
+					brew.Name, dep.Name, dep.OS, "mac")
 			}
 		}
 		if !found {
