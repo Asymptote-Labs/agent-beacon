@@ -251,13 +251,15 @@ system-mode endpoint to Asymptote Managed is interactive today: an admin runs
 `sudo beacon endpoint connect --system` on the machine and approves it in the console
 user's browser. Headless enrollment tokens for MDM fleets are planned as a follow-up.
 
-## Star Growth
+## Star History
 
-<p align="center">
-  <a href="https://star-history.dera.page/#asymptote-labs/agent-beacon&Date">
-    <img src="https://star-history.dera.page/svg?repos=asymptote-labs/agent-beacon&type=Date" alt="Beacon GitHub star growth" width="860">
-  </a>
-</p>
+<a href="https://www.star-history.com/?repos=agent-beacon%2Fagent-beacon%2Casymptote-labs%2Fagent-beacon&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=agent-beacon/agent-beacon%2Casymptote-labs/agent-beacon&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=agent-beacon/agent-beacon%2Casymptote-labs/agent-beacon&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=agent-beacon/agent-beacon%2Casymptote-labs/agent-beacon&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## License
 
