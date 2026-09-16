@@ -59,30 +59,54 @@ Read the [documentation](https://docs.asymptotelabs.ai) to learn more.
 
 **Prerequisites:**
 
-- macOS, Linux, or Windows. Homebrew installs the CLI; every release also ships a
-  [native package](#mdm-deployment) that installs the service itself
+- macOS, Linux, or Windows. Homebrew installs the CLI on macOS; Linux and Windows
+  install from a [native package](#mdm-deployment) that registers the service itself
 - At least one [supported agent runtime](#agent-runtimes) on the machine
 - No account, no API key, and no network dependency. Forwarding to Asymptote Managed
   additionally needs [Vector](https://vector.dev) 0.50+, which the macOS package bundles
 
 **Installation**
 
+**[macOS](https://docs.asymptotelabs.ai/platforms/macos)** — Homebrew:
+
 ```bash
-# Install Beacon
 brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 
 # Install the endpoint agent and point local runtimes at it
 beacon endpoint install
+```
 
-# Watch what your agents are doing
+**[Linux](https://docs.asymptotelabs.ai/platforms/linux)** — `.deb` or `.rpm` from the
+[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) (amd64,
+arm64). The package does the whole install, so there is no second command:
+
+```bash
+sudo apt install ./beacon_<version>_linux_amd64.deb   # Debian, Ubuntu
+sudo dnf install ./beacon_<version>_linux_amd64.rpm   # Fedora, RHEL, Rocky, Alma
+```
+
+**[Windows](https://docs.asymptotelabs.ai/platforms/windows)** — the x64 `.msi` from the
+[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest), from an
+elevated prompt. It also does the whole install:
+
+```powershell
+msiexec /i BeaconEndpointAgent-<version>-x64.msi           # interactive
+msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn       # silent, for fleet deployment
+```
+
+Then watch what your agents are doing:
+
+```bash
 beacon endpoint dashboard
 ```
 
 > **Note**
-> Events land in `~/.beacon/endpoint/logs/runtime.jsonl` and the dashboard is local and
-> read-only.
+> The dashboard is local and read-only. Events land in
+> `~/.beacon/endpoint/logs/runtime.jsonl` for a user-mode install,
+> `/var/log/beacon-agent/runtime.jsonl` for a system-mode one, and
+> `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl` on Windows.
 
 **Ways to Run Beacon:**
 
