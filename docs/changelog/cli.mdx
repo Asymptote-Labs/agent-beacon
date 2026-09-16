@@ -13,12 +13,15 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
-- **Scheduled inventory on shared Macs** · A system-mode heartbeat inventories whoever owns the
-  console. macOS service accounts (`_mbsetupuser` at the login window, home `/var/empty`) passed
-  that check and produced an empty snapshot, and on a Mac where two people alternate at the
-  console every switch wrote a "changed" snapshot although nobody's inventory changed. Service
-  accounts are now treated as no console user (heartbeat only, no snapshot), and the state file
-  remembers the last digest per home, so returning to an unchanged user writes a heartbeat only.
+- **Scheduled inventory snapshots only on real change** · The first day of scheduled inventory
+  showed every run writing a "changed" snapshot on machines where nothing had changed, because
+  the digest hashed `~/.claude.json` whole and Claude Code rewrites that state file on every
+  session. That file's raw hash is now left out of the digest (it is still reported); the MCP
+  servers parsed from it keep their own hashes, so a real MCP change still snapshots. Two smaller
+  fixes from the same data: a macOS service account holding the console at the login window
+  (`_mbsetupuser`, home `/var/empty`) produced an empty snapshot and now counts as no console user
+  (heartbeat only), and the state file keeps the last digest per home so a machine with more than
+  one console user does not report a switch as a change.
 
 ### v1.3.12 · September 15, 2026
 

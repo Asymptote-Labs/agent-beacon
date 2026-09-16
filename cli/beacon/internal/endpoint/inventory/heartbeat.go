@@ -169,7 +169,7 @@ func SnapshotDigest(result Result) string {
 		Skills     []Skill     `json:"skills"`
 		UserScope  UserScope   `json:"user_scope"`
 	}{
-		Configs:    existingConfigs(result.Configs),
+		Configs:    digestConfigs(existingConfigs(result.Configs)),
 		MCPServers: result.MCPServers,
 		Skills:     existingSkills(result.Skills),
 		UserScope:  result.UserScope,
@@ -180,6 +180,23 @@ func SnapshotDigest(result Result) string {
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// digestConfigs strips the raw-file fingerprint from volatile runtime state files so the digest
+// reflects inventory (which files exist, what they parse to, which MCP servers they declare) and
+// not the runtime's own bookkeeping. ~/.claude.json is rewritten by Claude Code on every session;
+// hashing it whole made every scheduled run a "changed" snapshot on a machine where nothing moved.
+func digestConfigs(configs []Config) []Config {
+	out := make([]Config, len(configs))
+	for i, config := range configs {
+		if config.Volatile {
+			config.FileSHA256 = ""
+			config.ModifiedAt = ""
+			config.Content = nil
+		}
+		out[i] = config
+	}
+	return out
 }
 
 func existingConfigs(configs []Config) []Config {

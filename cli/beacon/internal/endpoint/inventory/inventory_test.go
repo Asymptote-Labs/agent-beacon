@@ -1098,3 +1098,50 @@ func TestStateDigestFallsBackToTheLegacyFieldThenTracksPerHome(t *testing.T) {
 		t.Fatal("WithDigest must not mutate its receiver")
 	}
 }
+
+// ~/.claude.json is Claude Code's state file and changes on every session. Its raw hash must not
+// move the digest; the MCP servers parsed from it must.
+func TestSnapshotDigestIgnoresVolatileStateFileChurn(t *testing.T) {
+	home := t.TempDir()
+	statePath := filepath.Join(home, ".claude.json")
+	if err := os.WriteFile(statePath, []byte(`{"numStartups":1,"mcpServers":{"one":{"command":"npx"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := Scan(Options{HomeDir: home, SkipProjectScope: true})
+	if err := os.WriteFile(statePath, []byte(`{"numStartups":2,"lastSessionId":"abc","mcpServers":{"one":{"command":"npx"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := Scan(Options{HomeDir: home, SkipProjectScope: true})
+	if first.Configs[0].FileSHA256 == second.Configs[0].FileSHA256 {
+		t.Fatal("test setup: the file hash should differ between scans")
+	}
+	if !second.Configs[0].Volatile {
+		t.Fatal("~/.claude.json must be marked volatile")
+	}
+	if SnapshotDigest(first) != SnapshotDigest(second) {
+		t.Fatal("bookkeeping churn in ~/.claude.json must not change the snapshot digest")
+	}
+	if err := os.WriteFile(statePath, []byte(`{"numStartups":3,"mcpServers":{"one":{"command":"npx"},"two":{"command":"uvx"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	third := Scan(Options{HomeDir: home, SkipProjectScope: true})
+	if SnapshotDigest(second) == SnapshotDigest(third) {
+		t.Fatal("a new MCP server in ~/.claude.json must change the digest")
+	}
+	// A non-volatile config keeps its content in the digest.
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fourth := Scan(Options{HomeDir: home, SkipProjectScope: true})
+	if err := os.WriteFile(settings, []byte(`{"hooks":{"Stop":[]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fifth := Scan(Options{HomeDir: home, SkipProjectScope: true})
+	if SnapshotDigest(fourth) == SnapshotDigest(fifth) {
+		t.Fatal("an edit to settings.json must still change the digest")
+	}
+}
