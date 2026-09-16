@@ -67,132 +67,46 @@ Read the [documentation](https://docs.asymptotelabs.ai) to learn more.
 
 **Installation**
 
-Pick the path for your platform. Full instructions live in the
-[macOS](https://docs.asymptotelabs.ai/platforms/macos),
-[Linux](https://docs.asymptotelabs.ai/platforms/linux), and
-[Windows](https://docs.asymptotelabs.ai/platforms/windows) install guides.
-
-<details open>
-<summary><strong>macOS</strong> — Homebrew</summary>
+**[macOS](https://docs.asymptotelabs.ai/platforms/macos)** — Homebrew:
 
 ```bash
-# Install Beacon
 brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 
 # Install the endpoint agent and point local runtimes at it
 beacon endpoint install
+```
 
-# Watch what your agents are doing
+**[Linux](https://docs.asymptotelabs.ai/platforms/linux)** — `.deb` or `.rpm` from the
+[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) (amd64,
+arm64). The package does the whole install, so there is no second command:
+
+```bash
+sudo apt install ./beacon_<version>_linux_amd64.deb   # Debian, Ubuntu
+sudo dnf install ./beacon_<version>_linux_amd64.rpm   # Fedora, RHEL, Rocky, Alma
+```
+
+**[Windows](https://docs.asymptotelabs.ai/platforms/windows)** — the x64 `.msi` from the
+[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest), from an
+elevated prompt. It also does the whole install:
+
+```powershell
+msiexec /i BeaconEndpointAgent-<version>-x64.msi           # interactive
+msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn       # silent, for fleet deployment
+```
+
+Then watch what your agents are doing:
+
+```bash
 beacon endpoint dashboard
 ```
 
-`beacon endpoint install` with no flags is a user-mode install under `~/.beacon/endpoint`
-and needs no root. A signed, notarized `.pkg` is published for fleet rollout.
-
-</details>
-
-<details>
-<summary><strong>Linux</strong> — <code>.deb</code> / <code>.rpm</code>, or a tarball without root</summary>
-
-Download the package for your architecture from the
-[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) and
-install it. `amd64` and `arm64` are published for both formats.
-
-```bash
-# Debian, Ubuntu
-sudo apt install ./beacon_<version>_linux_amd64.deb
-
-# Fedora, RHEL, Rocky, Alma
-sudo dnf install ./beacon_<version>_linux_amd64.rpm
-```
-
-The package is the whole setup: it performs the system-mode install, registers and starts
-the systemd unit, and points the installing user's runtimes at the collector. There is no
-second command to run.
-
-```bash
-# Confirm it worked
-beacon endpoint status --system
-```
-
-Without root, or on a distribution without systemd, use the tarball and install in user
-mode instead:
-
-```bash
-LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"
-VERSION="${LATEST_URL##*/v}"
-
-case "$(uname -m)" in
-  x86_64) ARCH=amd64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
-  *) echo "Beacon publishes Linux archives for amd64 and arm64, not $(uname -m)" >&2; exit 1 ;;
-esac
-
-ARCHIVE="beacon_${VERSION}_linux_${ARCH}.tar.gz"
-BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
-curl -fsSLO "${BASE}/${ARCHIVE}"
-curl -fsSLO "${BASE}/checksums.txt"
-
-# Verify this exact archive before extracting it
-grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
-
-tar -xzf "${ARCHIVE}"
-mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
-beacon version
-beacon endpoint install
-```
-
-All three binaries are needed: the `beacon` CLI, the `beacon-hooks` adapter, and the
-`beacon-otelcol` collector.
-
-</details>
-
-<details>
-<summary><strong>Windows</strong> — <code>.msi</code> (x64)</summary>
-
-Download `BeaconEndpointAgent-<version>-x64.msi` from the
-[latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest). The MSI
-is not code-signed yet, so verify it against the published `.sha256` first:
-
-```powershell
-(Get-FileHash BeaconEndpointAgent-<version>-x64.msi -Algorithm SHA256).Hash
-```
-
-Install it from an elevated prompt:
-
-```powershell
-# Interactive
-msiexec /i BeaconEndpointAgent-<version>-x64.msi
-
-# Silent, for fleet deployment
-msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
-```
-
-The package is the whole setup: it performs the system-mode install, registers and starts
-the `BeaconCollector` service, and points the interactive user's runtimes at the
-collector. There is no second command to run.
-
-```powershell
-# Confirm it worked, and that you got a real service rather than the supervised fallback
-& "$env:ProgramFiles\Beacon\bin\beacon.exe" endpoint status --system
-beacon endpoint status --system --json | Select-String '"kind"'
-```
-
-x64 only. There is no Windows ARM package, because there is no Windows ARM build of the
-collector to put in it.
-
-</details>
-
-Once the endpoint is installed, `beacon endpoint dashboard` opens the local read-only view
-on any platform. Events land in the log for the install mode you chose:
-
-| Install | Runtime log |
-| --- | --- |
-| User mode (macOS Homebrew, Linux tarball) | `~/.beacon/endpoint/logs/runtime.jsonl` |
-| System mode (Linux `.deb` / `.rpm`, macOS `.pkg`) | `/var/log/beacon-agent/runtime.jsonl` |
-| Windows `.msi` | `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl` |
+> **Note**
+> The dashboard is local and read-only. Events land in
+> `~/.beacon/endpoint/logs/runtime.jsonl` for a user-mode install,
+> `/var/log/beacon-agent/runtime.jsonl` for a system-mode one, and
+> `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl` on Windows.
 
 **Ways to Run Beacon:**
 
