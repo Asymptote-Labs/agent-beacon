@@ -26,6 +26,38 @@ type Counts struct {
 type State struct {
 	LastEmittedAt      string `json:"last_emitted_at,omitempty"`
 	LastSnapshotDigest string `json:"last_snapshot_digest,omitempty"`
+	// LastSnapshotDigests remembers the last digest per scanned home (keyed by UserScope.HomeHash).
+	// Inventory is per user but the state file is per endpoint: on a Mac where the console user
+	// changes between runs, a single digest would flip on every switch and write a snapshot each
+	// time although nobody's inventory changed. LastSnapshotDigest keeps the most recent value
+	// for status and for state files written before this map existed.
+	LastSnapshotDigests map[string]string `json:"last_snapshot_digests,omitempty"`
+}
+
+// DigestFor returns the last digest recorded for a home, falling back to the endpoint-wide value
+// when no per-home record exists yet (a state file from an older version).
+func (s State) DigestFor(homeHash string) string {
+	if d, ok := s.LastSnapshotDigests[homeHash]; ok && homeHash != "" {
+		return d
+	}
+	if len(s.LastSnapshotDigests) == 0 {
+		return s.LastSnapshotDigest
+	}
+	return ""
+}
+
+// WithDigest returns a copy of the state recording digest for a home and as the latest overall.
+func (s State) WithDigest(homeHash, digest string) State {
+	out := s
+	out.LastSnapshotDigest = digest
+	out.LastSnapshotDigests = make(map[string]string, len(s.LastSnapshotDigests)+1)
+	for k, v := range s.LastSnapshotDigests {
+		out.LastSnapshotDigests[k] = v
+	}
+	if homeHash != "" {
+		out.LastSnapshotDigests[homeHash] = digest
+	}
+	return out
 }
 
 type LockedState struct {
@@ -137,7 +169,7 @@ func SnapshotDigest(result Result) string {
 		Skills     []Skill     `json:"skills"`
 		UserScope  UserScope   `json:"user_scope"`
 	}{
-		Configs:    existingConfigs(result.Configs),
+		Configs:    digestConfigs(existingConfigs(result.Configs)),
 		MCPServers: result.MCPServers,
 		Skills:     existingSkills(result.Skills),
 		UserScope:  result.UserScope,
@@ -148,6 +180,23 @@ func SnapshotDigest(result Result) string {
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// digestConfigs strips the raw-file fingerprint from volatile runtime state files so the digest
+// reflects inventory (which files exist, what they parse to, which MCP servers they declare) and
+// not the runtime's own bookkeeping. ~/.claude.json is rewritten by Claude Code on every session;
+// hashing it whole made every scheduled run a "changed" snapshot on a machine where nothing moved.
+func digestConfigs(configs []Config) []Config {
+	out := make([]Config, len(configs))
+	for i, config := range configs {
+		if config.Volatile {
+			config.FileSHA256 = ""
+			config.ModifiedAt = ""
+			config.Content = nil
+		}
+		out[i] = config
+	}
+	return out
 }
 
 func existingConfigs(configs []Config) []Config {

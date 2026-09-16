@@ -92,18 +92,21 @@ type UserScope struct {
 }
 
 type Config struct {
-	Runtime        string           `json:"runtime"`
-	Path           string           `json:"path,omitempty"`
-	PathHash       string           `json:"path_hash,omitempty"`
-	Scope          string           `json:"scope"`
-	ConfigKind     string           `json:"config_kind"`
-	ParserMode     string           `json:"parser_mode"`
-	Exists         bool             `json:"exists"`
-	Readable       bool             `json:"readable"`
-	Reason         string           `json:"reason,omitempty"`
-	ParserStatus   string           `json:"parser_status"`
-	FileSHA256     string           `json:"file_sha256,omitempty"`
-	ModifiedAt     string           `json:"modified_at,omitempty"`
+	Runtime      string `json:"runtime"`
+	Path         string `json:"path,omitempty"`
+	PathHash     string `json:"path_hash,omitempty"`
+	Scope        string `json:"scope"`
+	ConfigKind   string `json:"config_kind"`
+	ParserMode   string `json:"parser_mode"`
+	Exists       bool   `json:"exists"`
+	Readable     bool   `json:"readable"`
+	Reason       string `json:"reason,omitempty"`
+	ParserStatus string `json:"parser_status"`
+	FileSHA256   string `json:"file_sha256,omitempty"`
+	ModifiedAt   string `json:"modified_at,omitempty"`
+	// Volatile is true for a runtime state file whose raw content changes on every session, so
+	// the snapshot digest ignores its file hash and mtime; parsed MCP servers still count.
+	Volatile       bool             `json:"volatile,omitempty"`
 	MCPServerCount int              `json:"mcp_server_count"`
 	BeaconManaged  bool             `json:"beacon_managed"`
 	Redaction      string           `json:"redaction"`
@@ -137,6 +140,10 @@ type candidate struct {
 	scope   string
 	format  string
 	kind    string
+	// volatile marks a runtime state file the runtime itself rewrites constantly (session
+	// bookkeeping, timestamps, project lists). Its raw content hash is reported but left out of
+	// the snapshot digest; the MCP servers parsed from it carry their own definition hashes.
+	volatile bool
 }
 
 func Scan(opts Options) Result {
@@ -253,7 +260,7 @@ func candidates(home, wd string) []candidate {
 
 func claudeCandidates(home, wd string) []candidate {
 	return []candidate{
-		{runtime: "claude_code", path: filepath.Join(home, ".claude.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "claude_code", path: filepath.Join(home, ".claude.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig, volatile: true},
 		{runtime: "claude_code", path: filepath.Join(home, ".claude", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: filepath.Join(wd, ".claude", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged, format: formatJSON, kind: KindManagedConfig},
@@ -558,6 +565,7 @@ func shellProfilePath(home string) string {
 
 func inspectCandidate(item candidate, redaction string, co contentOptions) (Config, []MCPServer) {
 	config := Config{
+		Volatile:     item.volatile,
 		Runtime:      item.runtime,
 		Path:         valueForPath(item.path, redaction),
 		PathHash:     hashString(item.path),
