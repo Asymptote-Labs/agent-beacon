@@ -180,6 +180,16 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Prime Agent extension installed: %s\n", status.ExtensionPath)
+	case "omo":
+		status, err := endpointhooks.InstallOmo(endpointhooks.OmoOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Senpi extension installed: %s\n", status.ExtensionPath)
 	case "openclaw":
 		status, err := endpointhooks.InstallOpenClaw(endpointhooks.OpenClawOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -454,6 +464,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "omo":
+		status, err := endpointhooks.UninstallOmo(endpointhooks.OmoOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "openclaw":
 		status, err := endpointhooks.UninstallOpenClaw(endpointhooks.OpenClawOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -626,6 +646,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "omo":
+			statuses["omo"] = endpointhooks.OmoHookStatus(endpointhooks.OmoOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "openclaw":
 			statuses["openclaw"] = endpointhooks.OpenClawHookStatus(endpointhooks.OpenClawOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -729,6 +755,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "prime":
 			status := statuses["prime"].(endpointhooks.PrimeStatus)
 			fmt.Printf("Prime Agent extension: installed=%t path=%s\n", status.Installed, status.ExtensionPath)
+			fmt.Println(status.Message)
+		case "omo":
+			status := statuses["omo"].(endpointhooks.OmoStatus)
+			fmt.Printf("Senpi extension: installed=%t path=%s\n", status.Installed, status.ExtensionPath)
 			fmt.Println(status.Message)
 		case "openclaw":
 			status := statuses["openclaw"].(endpointhooks.OpenClawStatus)

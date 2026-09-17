@@ -239,6 +239,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, ompCandidates(home, wd)...)
 	items = append(items, openClawCandidates(home, wd)...)
 	items = append(items, primeCandidates(home, wd)...)
+	items = append(items, omoCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -438,6 +439,34 @@ func primeCandidates(home, wd string) []candidate {
 		items = append(items, candidate{
 			runtime: "prime_agent",
 			path:    filepath.Join(wd, ".prime", "agent", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// omoCandidates covers both Senpi extension locations.
+//
+// Like primeCandidates, the user path comes from the installer rather than being rebuilt here,
+// because it is not a fixed string: OMO_CODING_AGENT_DIR (and its legacy SENPI_/PI_ fallbacks)
+// moves it, and only the installer knows that rule. The project path keeps the `agent` segment the
+// user path has -- Senpi's own resolveAgentDir joins the same two-segment literal at both scopes,
+// unlike Pi and Oh My Pi, whose project directories drop it.
+func omoCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OmoExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "omo_senpi",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "omo_senpi",
+			path:    filepath.Join(wd, ".omo", "agent", "extensions", "beacon.ts"),
 			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
 		})
 	}
@@ -925,6 +954,11 @@ func beaconManaged(item candidate, data []byte) bool {
 	// whichever case ran first.
 	case "prime_agent":
 		return strings.Contains(text, hooks.PrimeManagedExtensionMarker)
+	// Fourth distinct marker in this family, matched separately for the same reason: a file found
+	// at any of the four paths is attributed to the runtime that actually loads it rather than to
+	// whichever case ran first.
+	case "omo_senpi":
+		return strings.Contains(text, hooks.OmoManagedExtensionMarker)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	// Matched on the hook command rather than on a marker, because Beacon merges into Qwen's own

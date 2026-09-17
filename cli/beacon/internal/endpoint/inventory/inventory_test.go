@@ -310,6 +310,10 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	// otherwise see this test fail on a path that is correct for their machine.
 	t.Setenv("PI_CODING_AGENT_DIR", "")
 	t.Setenv("PI_CONFIG_DIR", "")
+	// Senpi reads the same PI_CODING_AGENT_DIR as its last fallback, plus two of its own; all three
+	// are cleared for the same reason.
+	t.Setenv("OMO_CODING_AGENT_DIR", "")
+	t.Setenv("SENPI_CODING_AGENT_DIR", "")
 
 	result := Scan(Options{
 		HomeDir:    home,
@@ -358,6 +362,10 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// Oh My Pi drop it, so a path derived from either sibling would be wrong here.
 		{runtime: "prime_agent", path: filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "prime_agent", path: filepath.Join(work, ".prime", "agent", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		// Senpi, the fourth pi-family runtime, under its own `.omo` root. Both scopes carry the
+		// `agent` segment, the same shape Prime Agent uses and Pi and Oh My Pi do not.
+		{runtime: "omo_senpi", path: filepath.Join(home, ".omo", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "omo_senpi", path: filepath.Join(work, ".omo", "agent", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		// OpenClaw's candidate is the plugin entry rather than its directory, because the entry is
 		// what carries Beacon's marker -- the two manifests beside it are byte-identical for every
 		// install and identify nothing. Both scopes are reported: OpenClaw discovers a workspace

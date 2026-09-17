@@ -157,6 +157,7 @@
                       "runtimes/pi",
                       "runtimes/prime-agent",
                       "runtimes/qwen-code",
+                      "runtimes/senpi",
                       "runtimes/vscode"
                     ]
                   },
