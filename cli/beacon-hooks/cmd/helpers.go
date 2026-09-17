@@ -142,6 +142,14 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	// own, which lands on the same key and needs no separate spelling.
 	case "pi", "omp":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
+	// The Beacon plugin lifts OpenClaw's session id onto the envelope from the hook context,
+	// falling back to the event's own when the context did not carry one. `sessionKey` is
+	// deliberately not read here: it is the *conversation* key, stable across the session-id
+	// rotation a compaction causes, so reading it as the session id would merge every compaction
+	// generation of one conversation into a single session. It is kept under `raw` instead, where
+	// a query that wants the conversation can still reach it.
+	case openClawPlatform:
+		return getFirstStr(input, "sessionId", "session_id")
 	default:
 		id, _ := input["session_id"].(string)
 		return id
@@ -273,6 +281,17 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 		if cwd := getFirstStr(input, "cwd", "workingDirectory", "working_directory"); cwd != "" {
 			return cwd
 		}
+	}
+	if platform == openClawPlatform {
+		// The plugin lifts `ctx.workspaceDir` onto the envelope as `cwd`. OpenClaw sets it for
+		// runs that have a repository and omits it for the rest -- a chat turn that never touched
+		// a workspace genuinely has none -- so an absent value leaves the field absent rather than
+		// falling back to the gateway process's own directory, which would attribute the work to
+		// wherever the daemon happens to have been started.
+		if cwd := getFirstStr(input, "cwd", "workspaceDir", "workspace_dir"); cwd != "" {
+			return cwd
+		}
+		return ""
 	}
 	if platform == "cline" {
 		if cwd := getFirstStr(input, "cwd", "workingDirectory", "working_directory"); cwd != "" {
