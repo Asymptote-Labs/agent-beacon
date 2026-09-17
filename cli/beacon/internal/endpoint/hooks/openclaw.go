@@ -283,12 +283,9 @@ func openClawInstalledAt(path string) bool {
 func OpenClawEntryPath(level Level) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Only the user level needs a home directory. Failing here for a project install would
-		// refuse a path that does not depend on the value that could not be read.
-		if level == LevelProject {
-			return OpenClawEntryPathForHome("", level)
-		}
-		return "", err
+		// Pass an empty home and let downstream resolution decide: project scope never
+		// needs one, and user scope can resolve from OPENCLAW_STATE_DIR alone.
+		return OpenClawEntryPathForHome("", level)
 	}
 	return OpenClawEntryPathForHome(home, level)
 }
