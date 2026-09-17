@@ -321,13 +321,11 @@ func OpenClawEntryPathForHome(home string, level Level) (string, error) {
 func openClawPluginDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
-		if stateDir := strings.TrimSpace(os.Getenv(openClawStateDirEnv)); stateDir != "" {
-			return filepath.Join(stateDir, "extensions", openClawPluginID), nil
+		stateDir, err := OpenClawStateDir(home)
+		if err != nil {
+			return "", err
 		}
-		if home == "" {
-			return "", fmt.Errorf("home directory is required to resolve the OpenClaw plugin path")
-		}
-		return filepath.Join(home, openClawStateDirName, "extensions", openClawPluginID), nil
+		return filepath.Join(stateDir, "extensions", openClawPluginID), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -337,6 +335,29 @@ func openClawPluginDir(home string, level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
+}
+
+// OpenClawStateDir returns the directory OpenClaw keeps its own state in for a caller-supplied
+// home directory.
+//
+// Exported because discovery needs it as evidence in its own right, not just as a prefix of the
+// plugin path. A gateway is commonly daemonized under an account whose PATH this process did not
+// inherit, so an absent `openclaw` executable is not absence of OpenClaw -- and the directory
+// OpenClaw creates on first run is what says otherwise. That directory is this one; the
+// `extensions` directory beneath it does not exist until something installs a plugin, which on a
+// fresh gateway may be never.
+//
+// Deriving this by walking up from the plugin path is what made that distinction easy to get
+// wrong: the plugin path has a directory segment of its own, so "two levels up" lands on
+// `extensions` here where it lands on the state root for the runtimes this was modelled on.
+func OpenClawStateDir(home string) (string, error) {
+	if stateDir := strings.TrimSpace(os.Getenv(openClawStateDirEnv)); stateDir != "" {
+		return stateDir, nil
+	}
+	if home == "" {
+		return "", fmt.Errorf("home directory is required to resolve the OpenClaw state directory")
+	}
+	return filepath.Join(home, openClawStateDirName), nil
 }
 
 // OpenClawConfigAdvice reports what the operator still owes OpenClaw's own config, if anything.
@@ -414,14 +435,16 @@ func openClawConfigPath() string {
 	if override := strings.TrimSpace(os.Getenv(openClawConfigPathEnv)); override != "" {
 		return override
 	}
-	if stateDir := strings.TrimSpace(os.Getenv(openClawStateDirEnv)); stateDir != "" {
-		return filepath.Join(stateDir, openClawConfigFileName)
-	}
 	home, err := os.UserHomeDir()
+	if err != nil {
+		// Only matters when OPENCLAW_STATE_DIR is unset; OpenClawStateDir reports that itself.
+		home = ""
+	}
+	stateDir, err := OpenClawStateDir(home)
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, openClawStateDirName, openClawConfigFileName)
+	return filepath.Join(stateDir, openClawConfigFileName)
 }
 
 func openClawEmbeddedPluginSourcePath() string {

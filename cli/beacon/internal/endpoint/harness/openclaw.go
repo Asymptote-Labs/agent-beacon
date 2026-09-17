@@ -39,11 +39,21 @@ func DiscoverOpenClaw() Harness {
 	// the operator is actively running, the same fallback the Pi, Oh My Pi, opencode, Cursor and
 	// Hermes probes make for the same reason.
 	//
-	// The directory checked is the extensions root the resolved entry lives under, two levels up
-	// from the entry file, so an OPENCLAW_STATE_DIR override is detected where it actually is
-	// rather than being missed at the default location.
-	if !h.Detected && dirExists(filepath.Dir(filepath.Dir(entryPath))) {
-		h.Detected = true
+	// The directory checked is OpenClaw's *state* directory, asked for by name rather than derived
+	// by walking up from the plugin path. Those are not the same place: the plugin path ends in a
+	// directory of its own, so walking up two levels lands on `extensions` -- which does not exist
+	// until something installs a plugin. A gateway with no plugins yet is exactly the case this
+	// fallback is for, and testing `extensions` would report it as not detected. Asking
+	// hooks.OpenClawStateDir also keeps an OPENCLAW_STATE_DIR override detected where it actually
+	// is rather than missed at the default location.
+	if !h.Detected {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = ""
+		}
+		if stateDir, err := hooks.OpenClawStateDir(home); err == nil && dirExists(stateDir) {
+			h.Detected = true
+		}
 	}
 
 	h.TelemetryStatus, h.Message = openClawStatus(entryPath)
