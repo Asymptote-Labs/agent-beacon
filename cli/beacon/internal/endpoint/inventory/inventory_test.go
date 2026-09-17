@@ -353,6 +353,11 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// project -- but under its own `.omp` root, because the two runtimes install separately.
 		{runtime: "omp", path: filepath.Join(home, ".omp", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "omp", path: filepath.Join(work, ".omp", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		// Prime Agent, the third pi-family runtime, under its own `.prime` root. Both scopes carry
+		// the `agent` segment: it joins the same two-segment literal at project scope where Pi and
+		// Oh My Pi drop it, so a path derived from either sibling would be wrong here.
+		{runtime: "prime_agent", path: filepath.Join(home, ".prime", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "prime_agent", path: filepath.Join(work, ".prime", "agent", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
