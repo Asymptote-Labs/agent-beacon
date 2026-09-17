@@ -39,7 +39,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 // re-reads and re-writes an event would have silently reassigned VS Code activity to the CLI.
 func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
-		"claude_code", "codex_cli", "gemini_cli", "antigravity_cli", "vscode_copilot",
+		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "vercel_fx",
 		"muse_code", "grok_bot", "goose",
@@ -48,6 +48,25 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
 				t.Errorf("NormalizeHarnessName(%q) = %q; a canonical name must survive being "+
 					"normalized again", canonical, got)
+			}
+		})
+	}
+}
+
+func TestCodexDesktopDoesNotCollapseIntoCodexCLI(t *testing.T) {
+	for _, in := range []string{
+		"codex-app-server", "codex_app_server", "Codex App Server", "codex-desktop", "Codex Desktop",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "codex_desktop" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want codex_desktop", in, got)
+			}
+		})
+	}
+	for _, in := range []string{"codex", "codex-cli", "codex_exec", "codex_cli_rs"} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "codex_cli" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want codex_cli", in, got)
 			}
 		})
 	}

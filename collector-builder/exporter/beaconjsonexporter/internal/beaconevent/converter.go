@@ -158,9 +158,11 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
-	switch HarnessName(attrs, record.Body().AsString()) {
-	case "codex_cli":
+	harness := HarnessName(attrs, record.Body().AsString())
+	if isCodexHarness(harness) {
 		return isNoisyCodexLog(attrs, record.Body().AsString())
+	}
+	switch harness {
 	case "vscode_copilot":
 		return isNoisyVSCodeCopilotLog(attrs, record.Body().AsString())
 	default:
@@ -230,7 +232,7 @@ func shouldDropRuntimeMetric(name string) bool {
 }
 
 func shouldDropCodexMetric(resourceAttrs map[string]interface{}, name string) bool {
-	if HarnessName(resourceAttrs, name) != "codex_cli" {
+	if !isCodexHarness(HarnessName(resourceAttrs, name)) {
 		return false
 	}
 	normalized := strings.ToLower(strings.TrimSpace(name))
@@ -380,9 +382,11 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 
 func (c Converter) ShouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
-	switch HarnessName(attrs, span.Name()) {
-	case "codex_cli":
+	harness := HarnessName(attrs, span.Name())
+	if isCodexHarness(harness) {
 		return !c.opts.IncludeCodexSpans && !IsCodexTurnUsageSpan(attrs, span.Name())
+	}
+	switch harness {
 	case "vscode_copilot":
 		return shouldDropVSCodeCopilotSpan(attrs, span.Name(), c.opts.IncludeRuntimeMetrics)
 	default:
@@ -394,7 +398,7 @@ func (c Converter) ShouldDropSpan(resourceAttrs map[string]interface{}, span ptr
 // Codex's session-attributable token totals. The span name alone is not enough:
 // unfinished turns and some older builds can emit the same span with no usage.
 func IsCodexTurnUsageSpan(attrs map[string]interface{}, spanName string) bool {
-	if HarnessName(attrs, spanName) != "codex_cli" {
+	if !isCodexHarness(HarnessName(attrs, spanName)) {
 		return false
 	}
 	for _, key := range []string{
@@ -492,7 +496,7 @@ func NormalizeCodexTurnUsageSpan(event *Event, attrs map[string]interface{}) {
 }
 
 func (c Converter) NormalizeCodexLogEvent(event *Event, attrs map[string]interface{}) {
-	if event == nil || event.Harness.Name != "codex_cli" {
+	if event == nil || !isCodexHarness(event.Harness.Name) {
 		return
 	}
 	name := CodexLogEventName(attrs)
@@ -1948,6 +1952,11 @@ func HarnessName(attrs map[string]interface{}, hints ...string) string {
 // under two names. Keeping one implementation is what stops that recurring.
 func NormalizeHarnessName(name string) string {
 	return asymptoteobserve.NormalizeHarnessName(name)
+}
+
+func isCodexHarness(name string) bool {
+	normalized := NormalizeHarnessName(name)
+	return normalized == "codex_cli" || normalized == "codex_desktop"
 }
 
 // InferAction derives an event action from OTLP attributes. It is retained for callers that only
