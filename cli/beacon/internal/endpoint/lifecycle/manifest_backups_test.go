@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -66,5 +67,112 @@ func TestBackupTimestampParsesOnlyStampedNames(t *testing.T) {
 	stamp, ok := backupTimestamp("/x/hooks.json.beacon.20260917T161813Z.bak")
 	if !ok || stamp != time.Date(2026, 9, 17, 16, 18, 13, 0, time.UTC) {
 		t.Fatalf("stamp = %v ok=%t", stamp, ok)
+	}
+}
+
+func TestRestoreBackupsUsesTheOldestBackupPerTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "hooks.json")
+	oldest := target + ".beacon.20260901T080000Z.bak"
+	newer := target + ".beacon.20260917T120000Z.bak"
+	for p, body := range map[string]string{target: "rewritten", oldest: "original", newer: "already-beacon"} {
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restoreBackups([]string{newer, oldest})
+	got, _ := os.ReadFile(target)
+	if string(got) != "original" {
+		t.Fatalf("restore must use the oldest backup, got %q", got)
+	}
+	legacy := target + ".beacon.bak"
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restoreBackups([]string{oldest, legacy})
+	got, _ = os.ReadFile(target)
+	if string(got) != "legacy" {
+		t.Fatalf("an unstamped legacy backup counts as oldest, got %q", got)
+	}
+}
+
+func TestAppendManifestBackupsCarriesExistingOnesForward(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if _, err := writeManifest(true, Manifest{UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(t.TempDir(), "hooks.json.beacon.20260901T080000Z.bak")
+	if err := os.WriteFile(keep, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "hooks.json.beacon.20260901T090000Z.bak")
+	if err := AppendManifestBackups(true, []string{keep, gone, keep}); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := ReadManifest(true)
+	if len(m.Backups) != 1 || m.Backups[0] != keep {
+		t.Fatalf("manifest should carry the existing backup once and drop the missing one: %v", m.Backups)
+	}
+}
+
+// A repair (uninstall + install with the same content) must not forget the backup that holds
+// the pre-Beacon hooks; that is the very path the Homebrew upgrade caveat sends people down.
+func TestRepairKeepsThePreviousManifestBackups(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
+	if err := os.MkdirAll(filepath.Dir(collectorPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(collectorPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeInventoryJob(t, true)
+	opts := InstallOptions{UserMode: true, LogPath: filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl"), Harnesses: []string{}, GRPCPort: freePort(t), HTTPPort: freePort(t), CollectorPath: collectorPath, StartService: false}
+	if _, err := Install(opts); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(home, ".codex", "hooks.json.beacon.20260917T100000Z.bak")
+	if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendManifestBackups(true, []string{backup}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Repair(opts); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ReadManifest(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, b := range m.Backups {
+		if b == backup {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("repair dropped the hook backup from the manifest: %v", m.Backups)
+	}
+	// And a plain reinstall over the existing manifest keeps it too.
+	if _, err := Install(opts); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = ReadManifest(true)
+	found = false
+	for _, b := range m.Backups {
+		if b == backup {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("reinstall dropped the hook backup from the manifest: %v", m.Backups)
 	}
 }
