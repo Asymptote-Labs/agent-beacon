@@ -30,7 +30,7 @@ func TestEndpointHooksInstallAndUninstallOpenHands(t *testing.T) {
 	endpointOpts.hookLevel = "user"
 
 	hooksPath := filepath.Join(home, ".openhands", "hooks.json")
-	if err := installEndpointHookTarget("openhands", cfg); err != nil {
+	if _, err := installEndpointHookTarget("openhands", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(openhands) returned error: %v", err)
 	}
 	data, err := os.ReadFile(hooksPath)
@@ -167,7 +167,7 @@ func TestEndpointHooksInstallOpenHandsAtProjectLevel(t *testing.T) {
 	t.Cleanup(func() { endpointOpts.hookLevel = origLevel })
 	endpointOpts.hookLevel = "project"
 
-	if err := installEndpointHookTarget("openhands", cfg); err != nil {
+	if _, err := installEndpointHookTarget("openhands", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(openhands, project) returned error: %v", err)
 	}
 	// os.Getwd resolves symlinks on macOS, where TempDir hands back a /var path that is really

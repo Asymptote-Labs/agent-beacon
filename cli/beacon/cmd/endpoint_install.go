@@ -332,10 +332,20 @@ func installHookTargetsFromEndpointInstall(targets []string) error {
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
+	var files []string
 	for _, target := range targets {
-		if err := installEndpointHookTarget(target, cfg); err != nil {
+		path, err := installEndpointHookTarget(target, cfg)
+		if err != nil {
 			return err
 		}
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	// Hook files rewritten by this install keep a backup beside them; registering those in the
+	// manifest is what lets `endpoint uninstall` put the previous hooks back.
+	if err := lifecycle.RecordManifestBackups(cfg.UserMode, files); err != nil {
+		return fmt.Errorf("record hook backups: %w", err)
 	}
 	return nil
 }

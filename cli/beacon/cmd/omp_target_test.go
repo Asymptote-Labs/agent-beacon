@@ -79,7 +79,7 @@ func TestInstallEndpointHookTargetHandlesOmp(t *testing.T) {
 		UserMode: true,
 	}
 
-	if err := installEndpointHookTarget("omp", cfg); err != nil {
+	if _, err := installEndpointHookTarget("omp", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(omp) returned error: %v", err)
 	}
 

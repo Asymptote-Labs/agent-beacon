@@ -13,6 +13,18 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **`endpoint uninstall` restores hook files the install rewrote** · A user-mode
+  `beacon endpoint install` on a machine that also has a system install rewrote the console
+  user's Codex hooks to point at the user log, and `uninstall --user` left them that way, so
+  Codex telemetry silently went to a log nothing read. Settings-style hook files (Claude Code,
+  Codex, Factory, Qwen) now keep a `<file>.beacon.<timestamp>.bak` beside them when an install
+  changes them, the install manifest records it, and `endpoint uninstall` puts the previous
+  hooks back. An install that changes nothing writes nothing.
+- **Homebrew upgrades and the scheduled inventory job** · `brew upgrade` does not re-run
+  `endpoint install`, and Homebrew's sandbox does not let a formula install a LaunchAgent, so
+  the formula now says it: run `beacon endpoint repair --user` once after upgrading to refresh
+  the job.
+
 ### v1.3.14 · September 17, 2026
 
 - **OpenClaw Gateway endpoint telemetry** · Beacon now ships end-to-end OpenClaw

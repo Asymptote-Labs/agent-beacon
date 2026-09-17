@@ -51,14 +51,17 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 	}
 	cfg := loadOrDefaultConfig()
 	for _, name := range targets {
-		if err := installEndpointHookTarget(name, cfg); err != nil {
+		if _, err := installEndpointHookTarget(name, cfg); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
+// installEndpointHookTarget installs one hook target and returns the file it wrote, so an
+// endpoint install can register that file's backups in the manifest for uninstall to restore.
+func installEndpointHookTarget(name string, cfg endpointconfig.Config) (string, error) {
+	var installed string
 	switch strings.TrimSpace(name) {
 	case "antigravity":
 		status, err := endpointhooks.InstallAntigravity(endpointhooks.AntigravityOptions{
@@ -67,8 +70,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ConfigPath
 		fmt.Printf("Antigravity hooks installed: %s\n", status.ConfigPath)
 	case "cursor":
 		status, err := endpointhooks.InstallCursor(endpointhooks.CursorOptions{
@@ -77,8 +81,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.HooksJSONPath
 		fmt.Printf("Cursor hooks installed: %s\n", status.HooksJSONPath)
 	case "claude":
 		status, err := endpointhooks.InstallClaude(endpointhooks.ClaudeOptions{
@@ -87,8 +92,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.SettingsPath
 		fmt.Printf("Claude Code hooks installed: %s\n", status.SettingsPath)
 	case "codex":
 		status, err := endpointhooks.InstallCodex(endpointhooks.CodexOptions{
@@ -97,8 +103,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.HooksPath
 		fmt.Printf("Codex CLI endpoint hooks installed: %s\n", status.HooksPath)
 	case "vscode":
 		status, err := endpointhooks.InstallVSCode(endpointhooks.VSCodeOptions{
@@ -107,8 +114,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.HooksPath
 		fmt.Printf("VS Code hooks installed: %s\n", status.HooksPath)
 	case "factory":
 		status, err := endpointhooks.InstallFactory(endpointhooks.FactoryOptions{
@@ -117,8 +125,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.SettingsPath
 		fmt.Printf("Factory hooks installed: %s\n", status.SettingsPath)
 	case "opencode":
 		status, err := endpointhooks.InstallOpenCode(endpointhooks.OpenCodeOptions{
@@ -127,8 +136,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.PluginPath
 		fmt.Printf("opencode plugin installed: %s\n", status.PluginPath)
 	case "cline":
 		status, err := endpointhooks.InstallCline(endpointhooks.ClineOptions{
@@ -137,8 +147,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.PluginPath
 		fmt.Printf("Cline plugin installed: %s\n", status.PluginPath)
 	case "pi":
 		status, err := endpointhooks.InstallPi(endpointhooks.PiOptions{
@@ -147,8 +158,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ExtensionPath
 		fmt.Printf("Pi extension installed: %s\n", status.ExtensionPath)
 		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
 			fmt.Println("Project-level Pi extensions are subject to Pi's project-trust prompt; a user-level install needs no further interaction.")
@@ -160,8 +172,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ExtensionPath
 		fmt.Printf("Oh My Pi extension installed: %s\n", status.ExtensionPath)
 		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
 			// Unlike Pi, Oh My Pi has no per-directory trust gate -- its own isProjectTrusted()
@@ -177,8 +190,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ExtensionPath
 		fmt.Printf("Prime Agent extension installed: %s\n", status.ExtensionPath)
 	case "omo":
 		status, err := endpointhooks.InstallOmo(endpointhooks.OmoOptions{
@@ -187,8 +201,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ExtensionPath
 		fmt.Printf("Senpi extension installed: %s\n", status.ExtensionPath)
 	case "openclaw":
 		status, err := endpointhooks.InstallOpenClaw(endpointhooks.OpenClawOptions{
@@ -197,8 +212,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.PluginPath
 		fmt.Printf("OpenClaw plugin installed: %s\n", status.PluginPath)
 		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
 			// OpenClaw reads a workspace plugin root relative to the gateway's working directory,
@@ -221,8 +237,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.HooksPath
 		fmt.Printf("Grok hooks installed: %s\n", status.HooksPath)
 		if strings.Contains(status.Message, "/hooks-trust") {
 			fmt.Println(status.Message)
@@ -234,8 +251,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.HooksPath
 		fmt.Printf("OpenHands hooks installed: %s\n", status.HooksPath)
 		// Said at user scope only, because it is the case where a successful install still collects
 		// nothing. OpenHands reads the first hooks.json it finds rather than merging the two, and
@@ -254,8 +272,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.HooksPath
 		fmt.Printf("Kiro hooks installed: %s\n", status.HooksPath)
 		// No scope caveat, unlike OpenHands just above. Kiro merges hook files across scopes
 		// rather than resolving them by precedence, so a user-scope install keeps working inside a
@@ -268,12 +287,13 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
 		// Both paths, because an install is only complete with both and neither is guessable from
 		// the other: Beacon owns the hooks file, while the settings key that makes Muse read it
 		// lives in the user's own settings.json. Anyone verifying the install by hand needs to look
 		// at both files.
+		installed = status.HooksPath
 		fmt.Printf("Muse Code hooks installed: %s\n", status.HooksPath)
 		fmt.Printf("Muse Code settings updated: %s\n", status.SettingsPath)
 	case "qwen":
@@ -283,8 +303,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.SettingsPath
 		fmt.Printf("Qwen Code hooks installed: %s\n", status.SettingsPath)
 		// Printed only when it applies. A project-level install into an untrusted folder writes a
 		// file that does nothing until the user trusts the folder, and silence there would read as
@@ -299,8 +320,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ConfigPath
 		fmt.Printf("Hermes Agent hooks installed: %s\n", status.ConfigPath)
 		fmt.Println("Hermes may prompt to trust new shell hooks on first use; use HERMES_ACCEPT_HOOKS=1 or hooks_auto_accept: true for non-TTY runs.")
 	case "devin-cli":
@@ -310,8 +332,9 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ConfigPath
 		fmt.Printf("Devin CLI hooks installed: %s\n", status.ConfigPath)
 	case "devin-desktop":
 		status, err := endpointhooks.InstallDevinDesktop(endpointhooks.DevinDesktopOptions{
@@ -320,15 +343,16 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			UserMode: cfg.UserMode,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
+		installed = status.ConfigPath
 		fmt.Printf("Devin Desktop hooks installed: %s\n", status.ConfigPath)
 		fmt.Println("Devin Desktop hook files are installed; generate a Desktop event and check the runtime log to validate execution.")
 	case "":
 	default:
-		return fmt.Errorf("unsupported hook harness %q", name)
+		return "", fmt.Errorf("unsupported hook harness %q", name)
 	}
-	return nil
+	return installed, nil
 }
 
 func runEndpointHooksUninstall(cmd *cobra.Command, args []string) error {

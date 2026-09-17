@@ -1,9 +1,12 @@
 package hooks
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 type settingsHookGroup struct {
@@ -85,7 +88,25 @@ func installSettingsEndpointHooks(path, platform string, endpointHooks map[strin
 	if err != nil {
 		return err
 	}
+	// Keep what was there before the rewrite, the way harness configs are kept: a user-mode
+	// install on a machine with a system install rewrites the console user's hooks to the user
+	// log, and `endpoint uninstall --user` restores this copy so the system hooks come back.
+	// A no-op rewrite makes no backup and no write.
+	if existing, readErr := os.ReadFile(path); readErr == nil && len(existing) > 0 {
+		if bytes.Equal(existing, data) {
+			return nil
+		}
+		if err := os.WriteFile(hookBackupPath(path), existing, 0600); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(path, data, 0600)
+}
+
+// hookBackupPath follows the harness-config convention (<path>.beacon.<timestamp>.bak) so
+// lifecycle's discoverBackups and restoreBackups handle hook files without special cases.
+func hookBackupPath(path string) string {
+	return fmt.Sprintf("%s.beacon.%s.bak", path, time.Now().UTC().Format("20060102T150405Z"))
 }
 
 func removeSettingsEndpointHooksFromLoaded(settings *settingsHooksFile, platform string) bool {

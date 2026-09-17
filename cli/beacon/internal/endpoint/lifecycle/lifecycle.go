@@ -1075,6 +1075,39 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 	return paths, nil
 }
 
+// RecordManifestBackups adds the backups found beside the given files to the install manifest,
+// so Uninstall restores them. Files written after Install (hook targets) are registered this way;
+// a missing manifest means no install to attach them to, which is not an error.
+func RecordManifestBackups(userMode bool, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	manifest, err := ReadManifest(userMode)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	seen := make(map[string]bool, len(manifest.Backups))
+	for _, b := range manifest.Backups {
+		seen[b] = true
+	}
+	changed := false
+	for _, b := range discoverBackups(paths) {
+		if !seen[b] {
+			manifest.Backups = append(manifest.Backups, b)
+			seen[b] = true
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	_, err = writeManifest(userMode, manifest)
+	return err
+}
+
 func discoverBackups(paths []string) []string {
 	var backups []string
 	for _, path := range paths {
