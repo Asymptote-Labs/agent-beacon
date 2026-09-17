@@ -64,13 +64,17 @@ const nonBlockingHooks = new Set(["before_tool_call"])
 
 // How many in-flight tool calls the apply_patch enrichment below will remember at once.
 //
-// Bounded because the map is cleared by `after_tool_call`, and a call that never produces one --
-// an aborted run, a gateway restart mid-tool -- would otherwise leave an entry behind for the life
-// of the process. A gateway fans several conversations into one process, so this is set well above
-// a single agent's working set and is still only a few kilobytes at worst.
+// An entry is consumed by its own `after_tool_call`, so this bound only has to cover calls that
+// never produce one -- an aborted run, a session torn down mid-tool, a gateway shutting down
+// between the two halves. Those are reclaimed by oldest-first eviction here and by nothing else:
+// no lifecycle hook clears this map, deliberately, because in a gateway every session boundary
+// belongs to *one* of the conversations in flight and clearing on it would discard the others'
+// live state. A gateway fans several conversations into one process, so this is set well above a
+// single agent's working set and is still only a few kilobytes at worst.
 const maxPendingToolCalls = 256
 
-// The destination paths OpenClaw derived for a proposed tool call, keyed by its own tool call id.
+// rememberDerivedPaths records the destination paths OpenClaw derived for a proposed tool call,
+// keyed by OpenClaw's own tool call id.
 //
 // This exists for one reason: `before_tool_call` carries `derivedPaths` and `after_tool_call` does
 // not. `apply_patch` takes the whole patch envelope as a single string argument, so without those
@@ -78,20 +82,20 @@ const maxPendingToolCalls = 256
 // file-scoped detection Beacon ships matches on `file.path`.
 //
 // The join is OpenClaw's own call id rather than a timestamp or a guess, and both halves fire in
-// this same process, so remembering the value until the call completes is exact.
-const pendingDerivedPaths = new Map()
-
-function rememberDerivedPaths(event) {
+// this same process, so remembering the value until the call completes is exact. That id is either
+// the provider's own (`call_...`, `toolu_...`) or `openclaw-<randomUUID()>`, so it is unique across
+// every conversation the gateway is serving and two sessions cannot collide on one entry.
+function rememberDerivedPaths(pending, event) {
   const id = typeof event?.toolCallId === "string" ? event.toolCallId : ""
   if (!id || !Array.isArray(event.derivedPaths) || event.derivedPaths.length === 0) return
   // Re-inserting moves the entry to the end of the Map's insertion order, which is what makes the
   // eviction below drop the genuinely oldest call rather than the least recently seen one.
-  pendingDerivedPaths.delete(id)
-  pendingDerivedPaths.set(id, event.derivedPaths)
-  while (pendingDerivedPaths.size > maxPendingToolCalls) {
-    const oldest = pendingDerivedPaths.keys().next()
+  pending.delete(id)
+  pending.set(id, event.derivedPaths)
+  while (pending.size > maxPendingToolCalls) {
+    const oldest = pending.keys().next()
     if (oldest.done) break
-    pendingDerivedPaths.delete(oldest.value)
+    pending.delete(oldest.value)
   }
 }
 
@@ -100,11 +104,11 @@ function rememberDerivedPaths(event) {
 // Absent rather than guessed when the call is unknown: a patch event enriched with some other
 // call's paths would be worse than one with none, because it would read as evidence that those
 // files changed.
-function takeDerivedPaths(event) {
+function takeDerivedPaths(pending, event) {
   const id = typeof event?.toolCallId === "string" ? event.toolCallId : ""
   if (!id) return undefined
-  const paths = pendingDerivedPaths.get(id)
-  pendingDerivedPaths.delete(id)
+  const paths = pending.get(id)
+  pending.delete(id)
   return paths
 }
 
@@ -320,25 +324,33 @@ function buildEnvelope(hook, event, ctx) {
 
 // createBeaconPlugin is exported for tests; OpenClaw loads the default export below.
 export function createBeaconPlugin() {
+  // Per plugin instance rather than per module. OpenClaw loads the plugin once, so this is the
+  // same lifetime in production, and it keeps one instance's in-flight calls out of another's.
+  const pendingDerivedPaths = new Map()
+
   const handlerFor = (hook) => (event, ctx) => {
     let envelope
     try {
       envelope = buildEnvelope(hook, event, ctx)
 
       if (hook === "before_tool_call") {
-        rememberDerivedPaths(event)
+        rememberDerivedPaths(pendingDerivedPaths, event)
       } else if (hook === "after_tool_call") {
         // OpenClaw does not repeat `derivedPaths` on the completion, so the value remembered from
         // the proposal is attached here under the same key the mapper already reads.
-        const derived = takeDerivedPaths(event)
+        const derived = takeDerivedPaths(pendingDerivedPaths, event)
         if (derived !== undefined && envelope.event && typeof envelope.event === "object") {
           envelope.event = { ...envelope.event, derivedPaths: derived }
         }
-      } else if (hook === "session_end") {
-        // A session ending abandons any call still in flight for it. Clearing keeps those paths
-        // from being joined to an unrelated call id in a later session.
-        pendingDerivedPaths.clear()
       }
+      // No session lifecycle hook clears pendingDerivedPaths, and that is deliberate. A gateway
+      // serves many conversations in one process, so a `session_end` belongs to one of them --
+      // clearing on it would discard the paths of every apply_patch in flight for every *other*
+      // conversation, and their completions would then be recorded with no file rows at all.
+      // Compaction also ends a session, so this would fire in ordinary operation rather than only
+      // at shutdown. There is nothing to protect against by clearing: the key is a per-call id
+      // OpenClaw never reuses, so a stale entry cannot be joined to a later call, and the bound
+      // above reclaims it.
     } catch (err) {
       // Unreachable in practice, and caught anyway: a throw here on `before_tool_call` would block
       // the tool call, because OpenClaw registers that hook fail-closed.

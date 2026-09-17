@@ -57,11 +57,8 @@ function context(overrides: Record<string, unknown> = {}) {
 
 afterEach(() => {
   delete (globalThis as Record<symbol, unknown>)[senderKey]
-  // The pending-paths cache is module state, so a test that leaves an entry behind would change
-  // the next test's result. A session_end clears it through the plugin's own path.
-  const gateway = fakeGateway()
-  createBeaconPlugin().register(gateway.api)
-  void gateway.fire("session_end", { sessionId: "cleanup" }, context())
+  // No cache reset is needed: pending derived paths live on the plugin instance, and every test
+  // builds its own.
 })
 
 describe("beacon openclaw plugin", () => {
@@ -271,6 +268,53 @@ describe("beacon openclaw plugin", () => {
     await gateway.fire("after_tool_call", { toolName: "apply_patch", toolCallId: "call-1", params: {} }, context())
 
     expect((sent.at(-2)?.event as Record<string, unknown>).derivedPaths).toEqual(["/a.go"])
+    expect((sent.at(-1)?.event as Record<string, unknown>).derivedPaths).toBeUndefined()
+  })
+
+  // The bug this guards: a gateway serves many conversations in one process, so clearing pending
+  // paths on `session_end` discards the in-flight apply_patch of every *other* conversation, and
+  // their completions are then recorded with no file rows. Compaction also ends a session, so it
+  // would fire in ordinary operation rather than only at shutdown.
+  test("a session ending does not discard another conversation's in-flight paths", async () => {
+    const sent = captureSends()
+    const gateway = fakeGateway()
+    createBeaconPlugin().register(gateway.api)
+
+    const conversationA = context({ sessionId: "sess-a", sessionKey: "discord:a" })
+    const conversationB = context({ sessionId: "sess-b", sessionKey: "slack:b" })
+
+    await gateway.fire(
+      "before_tool_call",
+      { toolName: "apply_patch", toolCallId: "call-a", params: {}, derivedPaths: ["/repo/a.go"] },
+      conversationA,
+    )
+    // Conversation B ends -- by compaction, a reset, an idle timeout, anything.
+    await gateway.fire("session_end", { sessionId: "sess-b", reason: "compaction" }, conversationB)
+    await gateway.fire(
+      "after_tool_call",
+      { toolName: "apply_patch", toolCallId: "call-a", params: {} },
+      conversationA,
+    )
+
+    const completion = sent.at(-1)?.event as Record<string, unknown>
+    expect(completion.derivedPaths).toEqual(["/repo/a.go"])
+  })
+
+  // Two plugin instances must not share in-flight state.
+  test("pending paths are scoped to the plugin instance", async () => {
+    const sent = captureSends()
+    const first = fakeGateway()
+    const second = fakeGateway()
+    createBeaconPlugin().register(first.api)
+    createBeaconPlugin().register(second.api)
+
+    await first.fire(
+      "before_tool_call",
+      { toolName: "apply_patch", toolCallId: "call-x", params: {}, derivedPaths: ["/repo/x.go"] },
+      context(),
+    )
+    await second.fire("after_tool_call", { toolName: "apply_patch", toolCallId: "call-x", params: {} }, context())
+
     expect((sent.at(-1)?.event as Record<string, unknown>).derivedPaths).toBeUndefined()
   })
 
