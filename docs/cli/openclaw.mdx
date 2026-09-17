@@ -7,6 +7,18 @@ description: "Set up OpenClaw Gateway OpenTelemetry export for Beacon"
 
 OpenClaw Gateway can export diagnostics through the `diagnostics-otel` plugin. Beacon can print a local OTLP/HTTP Gateway configuration and validate whether OpenClaw-derived events are arriving in the endpoint runtime log.
 
+<Note>
+**This is the gateway half of OpenClaw support, not the whole of it.** These commands cover OpenClaw's own OpenTelemetry export, which carries gateway traces and metrics — and, unless `captureContent` is explicitly enabled, no prompt, tool, or file content at all.
+
+What the **agent** did is collected by a separate, Beacon-managed plugin:
+
+```bash
+beacon endpoint hooks install --harness openclaw
+```
+
+Both paths report under the same `openclaw_gateway` harness and are wanted together. See [OpenClaw Gateway](/runtimes/openclaw-gateway) for the plugin, the config key token usage needs, and what is deliberately not collected.
+</Note>
+
 ```bash title="Command syntax"
 beacon endpoint integrations openclaw [command]
 ```
