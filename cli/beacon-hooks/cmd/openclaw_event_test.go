@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -590,4 +594,72 @@ func TestOpenClawHarnessName(t *testing.T) {
 			t.Fatalf("NormalizeHarnessName(%q) = %q, want openclaw_gateway", spelling, got)
 		}
 	}
+}
+
+// The contract between the managed plugin's registration list and this mapper's switch.
+//
+// A name misspelled on either side produces no error anywhere -- OpenClaw dispatches nothing, the
+// mapper is never called, and the only symptom is a category of agent activity silently missing
+// from the log. Read out of the shipped plugin source rather than duplicated here, so this test
+// cannot pass against a list that only exists in the test.
+func TestOpenClawPluginRegistrationsMatchTheMapper(t *testing.T) {
+	registered := openClawSubscribedHooks(t)
+	want := append([]string(nil), supportedOpenClawHooks()...)
+	sort.Strings(want)
+	sort.Strings(registered)
+
+	if len(registered) != len(want) {
+		t.Fatalf("the plugin registers %v but the mapper handles %v", registered, want)
+	}
+	for i := range registered {
+		if registered[i] != want[i] {
+			t.Fatalf("the plugin registers %v but the mapper handles %v; a name on either side "+
+				"that the other does not have produces no telemetry and no error", registered, want)
+		}
+	}
+}
+
+// Registering any of these would ask OpenClaw for a power Beacon must not hold: rewriting a
+// prompt, claiming a message before the agent sees it, gating an install, or voting on whether a
+// skill may be created. Asserted against the shipped source, not just the plugin's own test,
+// because this is the property that keeps Beacon an observer.
+func TestOpenClawPluginRegistersNoMutatingHook(t *testing.T) {
+	registered := map[string]bool{}
+	for _, hook := range openClawSubscribedHooks(t) {
+		registered[hook] = true
+	}
+	for _, forbidden := range []string{
+		"before_prompt_build", "agent_turn_prepare", "heartbeat_prompt_contribution",
+		"before_agent_reply", "before_agent_run", "before_agent_finalize",
+		"inbound_claim", "before_dispatch", "reply_dispatch",
+		"message_sending", "reply_payload_sending", "before_message_write",
+		"tool_result_persist", "resolve_exec_env", "before_install",
+		"skill_proposal_evaluate", "subagent_delivery_target", "before_model_resolve",
+	} {
+		if registered[forbidden] {
+			t.Fatalf("the OpenClaw plugin registers %q, which can change what the agent does", forbidden)
+		}
+	}
+}
+
+// openClawSubscribedHooks reads the `subscribedHooks` array out of the shipped plugin source.
+func openClawSubscribedHooks(t *testing.T) []string {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "plugins", "openclaw-beacon", "src", "beacon.js")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("plugin source is unreadable: %v", err)
+	}
+	block := regexp.MustCompile(`(?s)const subscribedHooks = \[(.*?)\n\]`).FindSubmatch(data)
+	if len(block) != 2 {
+		t.Fatalf("%s has no subscribedHooks array; the mapper's contract is with that list", path)
+	}
+	var names []string
+	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(block[1], -1) {
+		names = append(names, string(match[1]))
+	}
+	if len(names) == 0 {
+		t.Fatalf("%s registers no hooks", path)
+	}
+	return names
 }

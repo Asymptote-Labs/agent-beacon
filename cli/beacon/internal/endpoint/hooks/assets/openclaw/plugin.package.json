@@ -1,0 +1,11 @@
+{
+  "name": "@asymptote-labs/openclaw-beacon-endpoint",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Beacon endpoint telemetry plugin for OpenClaw Gateway",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./beacon.js"],
+    "runtimeExtensions": ["./beacon.js"]
+  }
+}

@@ -124,10 +124,13 @@ cd plugins/opencode-beacon && bun run check && bun test
 cd ../cline-beacon && bun run check && bun test
 cd ../pi-beacon && bun run check && bun test
 cd ../omp-beacon && bun run check && bun test
+cd ../openclaw-beacon && bun run check && bun test
 ```
 
 After editing a plugin or extension source, run `bun run sync` in its directory to update the
 embedded copy under `cli/beacon/internal/endpoint/hooks/assets/`; a Go test fails if the two drift.
+`openclaw-beacon` syncs three files rather than one, because OpenClaw discovers a plugin as a
+directory: the entry plus the two manifests it is declared in.
 
 Run TypeScript SDK checks:
 
