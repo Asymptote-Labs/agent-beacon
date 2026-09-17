@@ -180,6 +180,7 @@ for the full breakdown by surface.
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/pi-agent.png" alt="" width="16"> | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/qwen-code.png" alt="" width="16"> | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" alt="" width="16"> | [Senpi](https://docs.asymptotelabs.ai/runtimes/senpi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/visual-studio-code.png" alt="" width="16"> | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
 
 #### Browser Chat
