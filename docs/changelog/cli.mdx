@@ -13,6 +13,25 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+### v1.3.14 · September 17, 2026
+
+- **OpenClaw Gateway endpoint telemetry** · Beacon now ships end-to-end OpenClaw
+  Gateway collection: a managed `openclaw-beacon` plugin, the `beacon-hooks
+  openclaw-event` adapter, discovery and install wiring, README runtime coverage,
+  and docs. The plugin path covers session lifecycle and resume, prompts, tool
+  lifecycle, commands with exit code and output, file reads/creates/edits with
+  diffs, `apply_patch` fan-out, MCP tools, compaction, subagents, agent messages,
+  and token usage including cache reads and writes. The existing OTLP integration
+  remains the gateway traces and metrics path; together they report the
+  `openclaw_gateway` harness.
+- **Prime Agent endpoint telemetry** · Prime Agent is now a first-class collected
+  runtime with a managed extension, installer, discovery, documentation, and hook
+  adapter support. Its persistent `ipython` kernel activity is recorded as
+  `command.executed` so file operations and shell work inside cells stay visible
+  to command-scoped rules, with token usage, reasoning, session lifecycle,
+  prompts, file diffs, and runtime status preserved under the `prime_agent`
+  harness.
+
 ### v1.3.13 · September 16, 2026
 
 - **Codex Desktop is tracked separately from Codex CLI** · Codex Desktop's app-server now
