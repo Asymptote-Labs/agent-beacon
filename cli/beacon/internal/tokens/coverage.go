@@ -75,6 +75,7 @@ var usageExpectation = map[string]struct {
 	"opencode":          {ExpectReported, "plugin reports usage per assistant message"},
 	"pi_cli":            {ExpectReported, "extension reports usage and cost"},
 	"omp":               {ExpectReported, "extension reports usage and cost"},
+	"prime_agent":       {ExpectReported, "extension reports usage and cost"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 
@@ -103,7 +104,6 @@ var usageExpectation = map[string]struct {
 	"devin-desktop": {ExpectNone, "Cascade/Windsurf hook payloads carry no token counts"},
 	"muse_code":     {ExpectNone, "usage arrives on PostLLMCall, which Beacon does not subscribe to"},
 	"qwen_code":     {ExpectNone, "Stop reports context occupancy, not per-call usage"},
-	"prime_agent":   {ExpectNone, "no managed extension ships yet"},
 	"claude_web":    {ExpectNone, "no recorded claude.ai stream has carried a usage object"},
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},

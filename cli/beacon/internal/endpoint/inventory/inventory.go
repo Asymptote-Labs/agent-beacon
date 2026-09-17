@@ -237,6 +237,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, clineCandidates(home, wd)...)
 	items = append(items, piCandidates(home, wd)...)
 	items = append(items, ompCandidates(home, wd)...)
+	items = append(items, primeCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
 	items = append(items, grokCandidates(home, wd)...)
@@ -378,6 +379,34 @@ func ompCandidates(home, wd string) []candidate {
 		items = append(items, candidate{
 			runtime: "omp",
 			path:    filepath.Join(wd, ".omp", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// primeCandidates covers both Prime Agent extension locations.
+//
+// Like ompCandidates, the user path comes from the installer rather than being rebuilt here,
+// because it is not a fixed string: PRIME_AGENT_CODING_AGENT_DIR moves it, and only the installer
+// knows that rule. The project path keeps the `agent` segment the user path has -- Prime Agent
+// joins the same two-segment literal at both scopes, unlike Pi and Oh My Pi, whose project
+// directories drop it.
+func primeCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.PrimeExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "prime_agent",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "prime_agent",
+			path:    filepath.Join(wd, ".prime", "agent", "extensions", "beacon.ts"),
 			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
 		})
 	}
@@ -856,6 +885,11 @@ func beaconManaged(item candidate, data []byte) bool {
 	// is attributed to the runtime that actually loads it rather than to whichever case ran first.
 	case "omp":
 		return strings.Contains(text, hooks.OmpManagedExtensionMarker)
+	// Third distinct marker in this family, matched separately for the same reason: a file found at
+	// any of the three paths is attributed to the runtime that actually loads it rather than to
+	// whichever case ran first.
+	case "prime_agent":
+		return strings.Contains(text, hooks.PrimeManagedExtensionMarker)
 	case "grok":
 		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
 	// Matched on the hook command rather than on a marker, because Beacon merges into Qwen's own
