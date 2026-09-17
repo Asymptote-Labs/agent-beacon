@@ -178,7 +178,7 @@ for the full breakdown by surface.
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/opencode.png" alt="" width="16"> | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openhands.png" alt="" width="16"> | [OpenHands](https://docs.asymptotelabs.ai/runtimes/openhands) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/pi-agent.png" alt="" width="16"> | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Not yet collected | – | – | – | – | – | – | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/qwen-code.png" alt="" width="16"> | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/visual-studio-code.png" alt="" width="16"> | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
 

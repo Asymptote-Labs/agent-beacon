@@ -44,6 +44,7 @@ Token coverage is not uniform, and the reason is almost always the runtime rathe
 | OpenCode | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | Oh My Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Prime Agent | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 
 Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason.
@@ -88,7 +89,6 @@ A runtime that reports occupancy and no spend still shows as `not_instrumented` 
 | Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
 | OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
 | Kiro | No Kiro hook payload carries token counts. See [Kiro](/runtimes/kiro) |
-| Prime Agent | No managed extension ships yet, so nothing is collected |
 | Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
 | ChatGPT | The chat stream reports no token counts |
 | Devin Cloud | Devin bills ACUs rather than tokens. The count is preserved in the Devin raw block; there is no token or USD equivalent to normalize it into |
