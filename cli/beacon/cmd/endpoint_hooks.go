@@ -163,6 +163,13 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Oh My Pi extension installed: %s\n", status.ExtensionPath)
+		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
+			// Unlike Pi, Oh My Pi has no per-directory trust gate -- its own isProjectTrusted()
+			// always returns true because `.omp` project inputs are loaded unconditionally. So the
+			// note here is about scope rather than about a prompt: a project install covers one
+			// checkout, and the operator's other Oh My Pi sessions stay uninstrumented.
+			fmt.Println("Project-level Oh My Pi extensions cover only this working directory; a user-level install follows the operator across checkouts.")
+		}
 	case "prime":
 		status, err := endpointhooks.InstallPrime(endpointhooks.PrimeOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -173,13 +180,6 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Prime Agent extension installed: %s\n", status.ExtensionPath)
-		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
-			// Unlike Pi, Oh My Pi has no per-directory trust gate -- its own isProjectTrusted()
-			// always returns true because `.omp` project inputs are loaded unconditionally. So the
-			// note here is about scope rather than about a prompt: a project install covers one
-			// checkout, and the operator's other Oh My Pi sessions stay uninstrumented.
-			fmt.Println("Project-level Oh My Pi extensions cover only this working directory; a user-level install follows the operator across checkouts.")
-		}
 	case "grok":
 		status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
