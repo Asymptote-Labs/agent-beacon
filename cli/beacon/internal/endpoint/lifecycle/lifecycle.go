@@ -1050,6 +1050,13 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 			return paths, fmt.Errorf("Oh My Pi telemetry is installed with `beacon endpoint hooks install --harness omp`, not endpoint install")
 		case "prime", "prime_agent", "prime-agent":
 			return paths, fmt.Errorf("Prime Agent telemetry is installed with `beacon endpoint hooks install --harness prime`, not endpoint install")
+		// OpenClaw has an OTLP surface, and it is still not one `endpoint install` can configure:
+		// it lives in OpenClaw's own config behind its diagnostics-otel plugin, so Beacon prints
+		// the settings rather than writing them. The agent-activity path is the managed plugin.
+		// Both commands are named, because an operator who reached for --harness openclaw wants
+		// one of them and cannot tell from here which.
+		case "openclaw", "openclaw_gateway", "openclaw-gateway":
+			return paths, fmt.Errorf("OpenClaw agent telemetry is installed with `beacon endpoint hooks install --harness openclaw`, and its gateway OTLP export is set up with `beacon endpoint integrations openclaw print-config`, not endpoint install")
 		// Qwen Code has no OpenTelemetry export to point at the local collector, so `endpoint
 		// install --harness qwen` has nothing to configure. Saying so beats the generic
 		// "unsupported harness", which reads as "Beacon does not support Qwen Code" when the

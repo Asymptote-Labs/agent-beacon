@@ -67,24 +67,29 @@ var usageExpectation = map[string]struct {
 	expect string
 	reason string
 }{
-	"claude_code":       {ExpectReported, "OTLP token and cost telemetry"},
-	"codex_cli":         {ExpectReported, "per-turn usage trace; Codex emits no cost"},
-	"codex_desktop":     {ExpectReported, "per-turn usage trace; Codex emits no cost"},
-	"claude_cowork":     {ExpectReported, "OTLP token and cost telemetry"},
-	"cline":             {ExpectReported, "plugin reports usage once per task"},
-	"opencode":          {ExpectReported, "plugin reports usage per assistant message"},
-	"pi_cli":            {ExpectReported, "extension reports usage and cost"},
-	"omp":               {ExpectReported, "extension reports usage and cost"},
-	"prime_agent":       {ExpectReported, "extension reports usage and cost"},
+	"claude_code":   {ExpectReported, "OTLP token and cost telemetry"},
+	"codex_cli":     {ExpectReported, "per-turn usage trace; Codex emits no cost"},
+	"codex_desktop": {ExpectReported, "per-turn usage trace; Codex emits no cost"},
+	"claude_cowork": {ExpectReported, "OTLP token and cost telemetry"},
+	"cline":         {ExpectReported, "plugin reports usage once per task"},
+	"opencode":      {ExpectReported, "plugin reports usage per assistant message"},
+	"pi_cli":        {ExpectReported, "extension reports usage and cost"},
+	"omp":           {ExpectReported, "extension reports usage and cost"},
+	"prime_agent":   {ExpectReported, "extension reports usage and cost"},
+	// Reported by the managed plugin's `llm_output` hook, which is the only OpenClaw surface that
+	// carries usage. It is a conversation hook, so OpenClaw withholds it from a non-bundled plugin
+	// until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set -- which is why
+	// an OpenClaw endpoint can be collecting everything else and reporting no tokens at all.
+	// `beacon endpoint hooks status --harness openclaw` is where that gap is surfaced.
+	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 
-	"gemini_cli":       {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"copilot_cli":      {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"vscode_copilot":   {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"factory":          {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"factory_droid":    {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"openclaw_gateway": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	"copilot_cli":    {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	"factory":        {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	"factory_droid":  {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	// Grok Bot runs on a Cursor-hosted cloud computer and reaches Beacon only through Cursor's
 	// server-side OpenTelemetry export, so whether usage arrives depends on whether that export
 	// carries the semconv names -- the generic-OTLP case exactly, not a runtime Beacon reads.

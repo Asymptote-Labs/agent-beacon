@@ -51,7 +51,7 @@ One row in that table is not a hook or OTLP integration. [fx](/runtimes/vercel-f
 |----------------|-----------------|--------------------|
 | [Claude Cowork](/runtimes/claude-cowork) | Admin-configured OTLP | Prompt, assistant response, approval, command, tool, file, MCP, session, model, token usage, and runtime-reported cost telemetry when emitted through Cowork OTLP |
 | [Hermes Agent](/runtimes/hermes-agent) | Shell hooks | Prompt, observed tool, command, file, approval request and response, session lifecycle, and subagent stop telemetry |
-| [OpenClaw Gateway](/runtimes/openclaw-gateway) | Gateway-configured OTLP/HTTP | OTLP logs, traces, and metrics from the Gateway diagnostics plugin |
+| [OpenClaw Gateway](/runtimes/openclaw-gateway) | Managed plugin, plus gateway-configured OTLP/HTTP | Session lifecycle, prompts with the sender and chat channel, tool, command with exit code and output, file with diffs, MCP, compaction, subagent, and token usage telemetry from the plugin; gateway traces and metrics from OpenClaw's own diagnostics export. Approvals are not exposed by OpenClaw and are not synthesized |
 
 ### Browser chat surfaces
 
@@ -114,9 +114,9 @@ MDM assets, meaning Jamf Pro Extension Attributes, Fleet osquery queries, and Ri
 | fx (Vercel Labs) | Nothing to configure in fx. Schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) in the logged-in user's context, or leave `--watch` running, so committed sessions keep reaching the runtime log. Nothing sweeps on its own. |
 | GitHub Copilot CLI | Configure launch environment through MDM or customer policy: `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Asymptote validates the endpoint but does not edit shell profiles or launch environments. |
 | Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. |
-| OpenClaw Gateway | Configure OTLP in OpenClaw. Use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local Gateway settings and validate events. |
+| OpenClaw Gateway | Install the managed plugin in the account the gateway runs as with `beacon endpoint hooks install --harness openclaw`, then grant `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` in OpenClaw's own config so token usage is collected. For the gateway's OTLP export, use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local settings and validate events; Asymptote never writes OpenClaw's config. |
 
-Install hooks separately in the logged-in user's context when you need richer hook telemetry. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI session-context hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, goose, Muse Code, Oh My Pi, OpenCode, OpenHands, Pi, Qwen Code, and the optional VS Code hooks. fx is the exception with no hooks to install: schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) instead.
+Install hooks separately in the logged-in user's context when you need richer hook telemetry. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI session-context hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, goose, Muse Code, Oh My Pi, OpenClaw Gateway, OpenCode, OpenHands, Pi, Qwen Code, and the optional VS Code hooks. fx is the exception with no hooks to install: schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) instead.
 
 If a system collector is running while the CLI is reading the default per-user log, `beacon endpoint status` and the local dashboard surface a runtime-log source warning so you can tell where OTLP events are being written.
 
