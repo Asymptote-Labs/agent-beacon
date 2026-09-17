@@ -48,6 +48,17 @@ var (
 	// events are written under is still `prime_agent`; NormalizeHarnessName pins both spellings so
 	// one session cannot be recorded under two names.
 	primeRuntime = piFamily{platform: "prime", displayName: "Prime Agent"}
+	// Senpi is the standalone edition of oh-my-openagent: an in-flight fork of pi-mono
+	// (code-yeongyu/senpi) that OMO brands and bundles its own extension into, distributed as the
+	// `omo` command. Its ExtensionEvent union kept Pi's shape -- the same `type` discriminator, the
+	// same toolName/input/details tool events, the same usage object -- even where it added events
+	// Pi does not have, so the seven events Beacon's Senpi extension subscribes to map through this
+	// family unchanged. "omo" rather than "senpi" because that is the binary the operator runs and
+	// the directory Beacon installs into (~/.omo/agent); "senpi" is the upstream project name, not
+	// the product. The harness name events are written under is omo_senpi, not omo, because "omo"
+	// alone would not distinguish this edition from oh-my-openagent's OpenCode and Codex CLI
+	// editions if Beacon ever observes those too -- see asymptoteobserve.NormalizeHarnessName.
+	omoRuntime = piFamily{platform: "omo", displayName: "Senpi"}
 )
 
 // rawKey namespaces a runtime-specific detail inside the `raw` block.
