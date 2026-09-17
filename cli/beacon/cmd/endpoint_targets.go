@@ -71,6 +71,19 @@ var harnessTargets = []harnessTarget{
 	// people say it; Kiro's own documentation does not, which is why it is an alias and not the
 	// name.
 	{name: "kiro", endpointKind: endpointTargetHook, endpointAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}, hookAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}},
+	// OpenClaw Gateway. One row, and it is the plugin row: `--harness openclaw` installs the
+	// Beacon-managed plugin, which is the path that collects the agent's work. The gateway's other
+	// surface, its own diagnostics-otel plugin, is configured inside OpenClaw rather than by
+	// Beacon and has its own commands under `beacon endpoint integrations openclaw`, so it is not
+	// an endpoint target here.
+	//
+	// "openclaw-gateway" and "openclaw_gateway" both normalize to "openclaw-gateway" through
+	// normalizeHarnessKey, so the two spellings need one alias between them; it is accepted
+	// because `openclaw_gateway` is the canonical harness name events are written under, and a row
+	// read out of the runtime log and passed back to --harness should resolve to the runtime it
+	// names. "claw" is deliberately not an alias: it is short enough to collide with something
+	// else later, and nothing calls the product that.
+	{name: "openclaw", endpointKind: endpointTargetHook, endpointAliases: []string{"openclaw", "openclaw-gateway"}, hookAliases: []string{"openclaw", "openclaw-gateway"}},
 	{name: "grok", endpointKind: endpointTargetHook, endpointAliases: []string{"grok"}, hookAliases: []string{"grok"}},
 	// "qwen-code" and "qwen_code" both normalize to "qwen-code" through normalizeHarnessKey, so the
 	// two spellings need one alias between them. "qwen-cli" is not accepted: the product is Qwen

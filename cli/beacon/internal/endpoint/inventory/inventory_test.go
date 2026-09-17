@@ -353,6 +353,12 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// project -- but under its own `.omp` root, because the two runtimes install separately.
 		{runtime: "omp", path: filepath.Join(home, ".omp", "agent", "extensions", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "omp", path: filepath.Join(work, ".omp", "extensions", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+		// OpenClaw's candidate is the plugin entry rather than its directory, because the entry is
+		// what carries Beacon's marker -- the two manifests beside it are byte-identical for every
+		// install and identify nothing. Both scopes are reported: OpenClaw discovers a workspace
+		// plugin root and a global one, and a gateway can be running with either.
+		{runtime: "openclaw_gateway", path: filepath.Join(home, ".openclaw", "extensions", "beacon-endpoint", "beacon.js"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "openclaw_gateway", path: filepath.Join(work, ".openclaw", "extensions", "beacon-endpoint", "beacon.js"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
 		{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
 		{runtime: "devin-cli", path: filepath.Join(work, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
