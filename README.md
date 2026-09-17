@@ -153,59 +153,59 @@ for the full breakdown by surface.
 
 #### Local Agents
 
-| Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens |
-| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/antigravity.png" alt="" width="16"> [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | OTLP + hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cline.png" alt="" width="16"> [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP + hook | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> [Codex Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cursor.png" alt="" width="16"> [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/factory.png" alt="" width="16"> [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP + hooks | ✅ | ✅ | ✅ | – | ✅ | – | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/vercel-fx.png" alt="" width="16"> [fx (Vercel Labs)](https://docs.asymptotelabs.ai/runtimes/vercel-fx) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| <img src="https://www.google.com/s2/favicons?domain=gemini.google.com&sz=32" alt="" width="16"> [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/github-copilot.png" alt="" width="16"> [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | OTLP | ✅ | ✅ | ✅ | – | – | ✅ | – | – |
-| <img src="https://www.google.com/s2/favicons?domain=block.xyz&sz=32" alt="" width="16"> [goose](https://docs.asymptotelabs.ai/runtimes/goose) | Plugin + OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/grok-build.png" alt="" width="16"> [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/hermes-agent.png" alt="" width="16"> [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/kiro.png" alt="" width="16"> [Kiro](https://docs.asymptotelabs.ai/runtimes/kiro) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/muse-code.png" alt="" width="16"> [Muse Code](https://docs.asymptotelabs.ai/runtimes/muse-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/omp.png" alt="" width="16"> [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openclaw.png" alt="" width="16"> [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | OTLP | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/opencode.png" alt="" width="16"> [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openhands.png" alt="" width="16"> [OpenHands](https://docs.asymptotelabs.ai/runtimes/openhands) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/pi-agent.png" alt="" width="16"> [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Not yet collected | – | – | – | – | – | – | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/qwen-code.png" alt="" width="16"> [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/visual-studio-code.png" alt="" width="16"> [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
+| Logo | Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens |
+| :-: | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/antigravity.png" alt="" width="16"> | [Antigravity CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-antigravity-cli) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | OTLP + hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cline.png" alt="" width="16"> | [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP + hook | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> | [Codex Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cursor.png" alt="" width="16"> | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> | [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> | [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/factory.png" alt="" width="16"> | [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP + hooks | ✅ | ✅ | ✅ | – | ✅ | – | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/vercel-fx.png" alt="" width="16"> | [fx (Vercel Labs)](https://docs.asymptotelabs.ai/runtimes/vercel-fx) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| <img src="https://www.google.com/s2/favicons?domain=gemini.google.com&sz=32" alt="" width="16"> | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/github-copilot.png" alt="" width="16"> | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | OTLP | ✅ | ✅ | ✅ | – | – | ✅ | – | – |
+| <img src="https://www.google.com/s2/favicons?domain=block.xyz&sz=32" alt="" width="16"> | [goose](https://docs.asymptotelabs.ai/runtimes/goose) | Plugin + OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/grok-build.png" alt="" width="16"> | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/hermes-agent.png" alt="" width="16"> | [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/kiro.png" alt="" width="16"> | [Kiro](https://docs.asymptotelabs.ai/runtimes/kiro) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/muse-code.png" alt="" width="16"> | [Muse Code](https://docs.asymptotelabs.ai/runtimes/muse-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/omp.png" alt="" width="16"> | [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openclaw.png" alt="" width="16"> | [OpenClaw Gateway](https://docs.asymptotelabs.ai/cli/supported-runtimes-openclaw-gateway) | OTLP | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/opencode.png" alt="" width="16"> | [OpenCode](https://docs.asymptotelabs.ai/cli/supported-runtimes-opencode) | Plugin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openhands.png" alt="" width="16"> | [OpenHands](https://docs.asymptotelabs.ai/runtimes/openhands) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/pi-agent.png" alt="" width="16"> | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Not yet collected | – | – | – | – | – | – | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/qwen-code.png" alt="" width="16"> | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/visual-studio-code.png" alt="" width="16"> | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
 
 #### Browser Chat
 
-| Site | Collection | Prompt | Response | Tool | Tokens |
-| --- | --- | :-: | :-: | :-: | :-: |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Extension → local OTLP | ✅ | ✅ | ✅ | ✅ |
-| <img src="https://www.google.com/s2/favicons?domain=chatgpt.com&sz=32" alt="" width="16"> [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Extension → local OTLP | ✅ | ✅ | ✅ | – |
+| Logo | Site | Collection | Prompt | Response | Tool | Tokens |
+| :-: | --- | --- | :-: | :-: | :-: | :-: |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude.ai](https://docs.asymptotelabs.ai/runtimes/claude-web) | Extension → local OTLP | ✅ | ✅ | ✅ | ✅ |
+| <img src="https://www.google.com/s2/favicons?domain=chatgpt.com&sz=32" alt="" width="16"> | [ChatGPT](https://docs.asymptotelabs.ai/runtimes/chatgpt-web) | Extension → local OTLP | ✅ | ✅ | ✅ | – |
 
 #### Cloud Agents
 
-| Runtime | Collection | Session | Prompt | Tool | Command | File | Tokens |
-| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Sandbox hooks → GCS or S3 | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cursor.png" alt="" width="16"> [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Sandbox hooks → GCS or S3 | – | ✅ | ✅ | ✅ | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | API poll → GCS | ✅ | ✅ | – | – | – | ✅ |
-| <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" alt="" width="16"> [CI jobs](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | `beacon ci exec` → temporary local collector | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Logo | Runtime | Collection | Session | Prompt | Tool | Command | File | Tokens |
+| :-: | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude Code Cloud Agents](https://docs.asymptotelabs.ai/claude-code-cloud-agents) | Sandbox hooks → GCS or S3 | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cursor.png" alt="" width="16"> | [Cursor Cloud Agents](https://docs.asymptotelabs.ai/cursor-cloud-agents) | Sandbox hooks → GCS or S3 | – | ✅ | ✅ | ✅ | ✅ | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> | [Devin Cloud Agents](https://docs.asymptotelabs.ai/devin-cloud-agents) | API poll → GCS | ✅ | ✅ | – | – | – | ✅ |
+| <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" alt="" width="16"> | [CI jobs](https://docs.asymptotelabs.ai/supported-runtimes-claude-code-ci) | `beacon ci exec` → temporary local collector | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ##### SDK Instrumentation
 
-| SDK surface | Collection | Captures |
-| --- | --- | --- |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry through `@asymptote/sdk` | Model call spans, errors, and OTel attributes |
-| <img src="https://www.google.com/s2/favicons?domain=openai.com&sz=32" alt="" width="16"> [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry through `@asymptote/sdk` | Model call spans, errors, and OTel attributes |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/vercel-fx.png" alt="" width="16"> [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | `experimental_telemetry` tracer handoff | Model call and tool spans where telemetry is enabled |
+| Logo | SDK surface | Collection | Captures |
+| :-: | --- | --- | --- |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Anthropic](https://docs.asymptotelabs.ai/sdk/integrations-anthropic) | OpenLLMetry through `@asymptote/sdk` | Model call spans, errors, and OTel attributes |
+| <img src="https://www.google.com/s2/favicons?domain=openai.com&sz=32" alt="" width="16"> | [OpenAI](https://docs.asymptotelabs.ai/sdk/integrations-openai) | OpenLLMetry through `@asymptote/sdk` | Model call spans, errors, and OTel attributes |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude Agent SDK](https://docs.asymptotelabs.ai/sdk/integrations-claude-agent-sdk) | `Observe.wrapClaudeAgentQuery()` | Query root spans with Beacon-compatible prompt attributes |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/vercel-fx.png" alt="" width="16"> | [Vercel AI SDK](https://docs.asymptotelabs.ai/sdk/integrations-vercel-ai-sdk) | `experimental_telemetry` tracer handoff | Model call and tool spans where telemetry is enabled |
 
 ### Output Destinations
 
