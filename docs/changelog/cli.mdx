@@ -13,6 +13,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+### v1.3.13 · September 16, 2026
+
+- **Codex Desktop is tracked separately from Codex CLI** · Codex Desktop's app-server now
+  normalizes to its own `codex_desktop` harness instead of merging with terminal Codex CLI
+  activity. Dashboards, token coverage, data inventory, and exported events can now distinguish
+  the desktop app from CLI sessions while preserving the same Codex OTLP token and tool telemetry
+  mapping.
 - **Scheduled inventory snapshots only on real change** · The first day of scheduled inventory
   showed every run writing a "changed" snapshot on machines where nothing had changed, because
   the digest hashed `~/.claude.json` whole and Claude Code rewrites that state file on every
@@ -22,6 +29,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   (`_mbsetupuser`, home `/var/empty`) produced an empty snapshot and now counts as no console user
   (heartbeat only), and the state file keeps the last digest per home so a machine with more than
   one console user does not report a switch as a change.
+- **Install guidance matches the release artifacts** · The README now separates macOS Homebrew,
+  Linux `.deb`/`.rpm`, and Windows `.msi` install paths, calls out the default log locations for
+  each platform, and gives the supported runtime table a logo column with Codex CLI and Codex
+  Desktop split into separate rows.
+- **Homebrew keeps Beacon's Vector dependency private** · The generated Homebrew formula now makes
+  the `beacon-vector` dependency explicit in the macOS formula and keeps that helper out of `PATH`,
+  so Beacon's bundled forwarding dependency does not collide with a user's own Vector install.
 
 ### v1.3.12 · September 15, 2026
 
