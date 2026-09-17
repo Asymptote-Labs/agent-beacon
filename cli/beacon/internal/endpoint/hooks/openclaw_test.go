@@ -458,3 +458,52 @@ func firstLines(s string, n int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// A gateway running as a service unit routinely has no HOME and can still have been given a state
+// directory. Refusing to resolve the path in that case ignores the override exactly where it is
+// most likely to be in use, so the install and the discovery probe both abort for a machine that
+// is perfectly well configured.
+func TestOpenClawStateDirOverrideWorksWithoutAHomeDirectory(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "gateway-state")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv(openClawStateDirEnv, state)
+
+	path, err := OpenClawEntryPath(LevelUser)
+	if err != nil {
+		t.Fatalf("OpenClawEntryPath with no home but %s set: %v", openClawStateDirEnv, err)
+	}
+	want := filepath.Join(state, "extensions", "beacon-endpoint", "beacon.js")
+	if path != want {
+		t.Fatalf("entry path = %q, want %q", path, want)
+	}
+}
+
+// With neither a home directory nor the override there is genuinely nothing to resolve from, and
+// the error should name the missing home rather than something further down.
+func TestOpenClawEntryPathReportsTheMissingHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv(openClawStateDirEnv, "")
+
+	if _, err := OpenClawEntryPath(LevelUser); err == nil {
+		t.Fatal("expected an error with no home directory and no state-dir override")
+	}
+}
+
+// A project install resolves from the working directory, so it never needed a home directory.
+func TestOpenClawProjectPathWorksWithoutAHomeDirectory(t *testing.T) {
+	wd := t.TempDir()
+	t.Chdir(wd)
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv(openClawStateDirEnv, "")
+
+	path, err := OpenClawEntryPath(LevelProject)
+	if err != nil {
+		t.Fatalf("project entry path with no home: %v", err)
+	}
+	if want := filepath.Join(wd, ".openclaw", "extensions", "beacon-endpoint", "beacon.js"); path != want {
+		t.Fatalf("project entry path = %q, want %q", path, want)
+	}
+}
