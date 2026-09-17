@@ -65,6 +65,19 @@ var harnessTargets = []harnessTarget{
 	// runtime it names. Prime Intellect's model names are deliberately not aliases -- accepting one
 	// would let someone ask to install an extension for a model.
 	{name: "prime", endpointKind: endpointTargetHook, endpointAliases: []string{"prime", "prime-agent", "prime_agent", "primeagent"}, hookAliases: []string{"prime", "prime-agent", "prime_agent", "primeagent"}},
+	// Senpi (the standalone edition of oh-my-openagent) is a fourth row rather than an alias of any
+	// of the above, for the reason Prime Agent is a third: it is a separately installed product with
+	// its own config root, and folding a spelling into another runtime would install that runtime's
+	// extension while the operator asked for this one. "omo" is the --platform value, the binary the
+	// operator runs, and the config directory Beacon installs into; "omo_senpi" and "omo-senpi" are
+	// the canonical harness name events are written under, so a row read out of the runtime log and
+	// passed back to --harness resolves to the runtime it names. Bare "senpi" and
+	// "oh-my-openagent" are deliberately not aliases: upstream Senpi is a separately installable
+	// engine a user can run without OMO at all, and "oh-my-openagent" also names OMO's OpenCode and
+	// Codex CLI editions, which install through the existing "opencode" and hook-config paths rather
+	// than through this extension -- accepting either spelling here would claim a name that belongs
+	// to a different install, exactly the reason NormalizeHarnessName keeps them unmapped too.
+	{name: "omo", endpointKind: endpointTargetHook, endpointAliases: []string{"omo", "omo_senpi", "omo-senpi"}, hookAliases: []string{"omo", "omo_senpi", "omo-senpi"}},
 	// OpenHands. "open-hands" is accepted because the product is written as two words as often as
 	// one, and normalizeHarnessKey folds "open_hands" onto it. "openhands" is also the canonical
 	// harness name events are written under, so a row read out of the runtime log and passed back
