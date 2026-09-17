@@ -495,7 +495,7 @@ unpacked through Chrome's developer mode.
 
 `.github/workflows/ci.yml` runs these jobs on every pull request and on pushes to `main`:
 
-- `go-test` (macOS): `bun run check && bun test` in all four `plugins/*` directories, then `make build-hooks-current`, then `go test ./...` in `cli/beacon`, `go test -race ./internal/endpoint/...`, `go test ./...` in `cli/beacon-hooks`, `collector-builder/exporter/beaconjsonexporter`, and `pkg/asymptoteobserve` (includes threat-rules pack conformance), then CLI help smoke checks that also assert removed commands stay unexposed.
+- `go-test` (macOS): `bun run check && bun test` in all five `plugins/*` directories, then `make build-hooks-current`, then `go test ./...` in `cli/beacon`, `go test -race ./internal/endpoint/...`, `go test ./...` in `cli/beacon-hooks`, `collector-builder/exporter/beaconjsonexporter`, and `pkg/asymptoteobserve` (includes threat-rules pack conformance), then CLI help smoke checks that also assert removed commands stay unexposed.
 - `linux-test` (ubuntu) and `windows-test` (windows-2025) rerun the Go suites per platform. The Windows job tests a measured package list rather than `./...`; the excluded packages are tracked in #318, and the scope must not be widened back to `./...`.
 - `typescript-sdk` (Node 20, 22, 24): `npm test`, `npm run check`, `npm run build`, `npm run pack:dry-run`, `npm run pack:smoke` in `packages/asymptote-sdk-js`.
 - `browser-extension` (Node 22): `npm run check`, `npm run test:unit`, `npm run build`, a check that the build is a loadable MV3 extension, and the Playwright replay e2e running the real extension in headless Chromium against a local HTTPS replay server; the HTML report and traces upload on failure.
