@@ -180,6 +180,30 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Printf("Prime Agent extension installed: %s\n", status.ExtensionPath)
+	case "openclaw":
+		status, err := endpointhooks.InstallOpenClaw(endpointhooks.OpenClawOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("OpenClaw plugin installed: %s\n", status.PluginPath)
+		if endpointhooks.Level(endpointOpts.hookLevel) == endpointhooks.LevelProject {
+			// OpenClaw reads a workspace plugin root relative to the gateway's working directory,
+			// which for a daemonized gateway is wherever the service manager started it rather
+			// than the checkout the operator is thinking of. A user-level install follows the
+			// gateway regardless, which is why it is the default.
+			fmt.Println("Project-level OpenClaw plugins are discovered relative to the gateway's workspace, not the directory you install from; a user-level install follows the gateway.")
+		}
+		// OpenClaw gates conversation hooks behind a config key Beacon does not write, and an
+		// allowlisted config has to name the plugin. Printed at install time because the symptom
+		// otherwise is partial telemetry that looks like working telemetry.
+		for _, advice := range status.ConfigAdvice {
+			fmt.Println(advice)
+		}
+		fmt.Println("Restart the gateway, or run `openclaw plugins reload beacon-endpoint`, for OpenClaw to pick the plugin up.")
 	case "grok":
 		status, err := endpointhooks.InstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -430,6 +454,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "openclaw":
+		status, err := endpointhooks.UninstallOpenClaw(endpointhooks.OpenClawOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "grok":
 		status, err := endpointhooks.UninstallGrok(endpointhooks.GrokOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -592,6 +626,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "openclaw":
+			statuses["openclaw"] = endpointhooks.OpenClawHookStatus(endpointhooks.OpenClawOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "grok":
 			statuses["grok"] = endpointhooks.GrokHookStatus(endpointhooks.GrokOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -690,6 +730,16 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			status := statuses["prime"].(endpointhooks.PrimeStatus)
 			fmt.Printf("Prime Agent extension: installed=%t path=%s\n", status.Installed, status.ExtensionPath)
 			fmt.Println(status.Message)
+		case "openclaw":
+			status := statuses["openclaw"].(endpointhooks.OpenClawStatus)
+			fmt.Printf("OpenClaw plugin: installed=%t path=%s\n", status.Installed, status.PluginPath)
+			fmt.Println(status.Message)
+			// An installed plugin with conversation access withheld collects everything except
+			// tokens and agent messages, which reads as working until somebody looks for a token
+			// count. Surfaced on every status check rather than only at install.
+			for _, advice := range status.ConfigAdvice {
+				fmt.Println(advice)
+			}
 		case "grok":
 			status := statuses["grok"].(endpointhooks.GrokStatus)
 			fmt.Printf("Grok hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)

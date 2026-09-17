@@ -237,6 +237,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, clineCandidates(home, wd)...)
 	items = append(items, piCandidates(home, wd)...)
 	items = append(items, ompCandidates(home, wd)...)
+	items = append(items, openClawCandidates(home, wd)...)
 	items = append(items, primeCandidates(home, wd)...)
 	items = append(items, hermesCandidates(home)...)
 	items = append(items, devinCandidates(home, wd)...)
@@ -379,6 +380,36 @@ func ompCandidates(home, wd string) []candidate {
 		items = append(items, candidate{
 			runtime: "omp",
 			path:    filepath.Join(wd, ".omp", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// openClawCandidates covers both OpenClaw plugin locations.
+//
+// The user path comes from the installer rather than being rebuilt here, for the reason
+// ompCandidates gives: OPENCLAW_STATE_DIR moves it, and only the installer knows the rule. The
+// project path is the literal OpenClaw joins onto its workspace, which has no override.
+//
+// The candidate is the plugin *entry*, not its directory, because the entry is what carries
+// Beacon's marker -- the manifests beside it are byte-identical for every install and identify
+// nothing.
+func openClawCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OpenClawEntryPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "openclaw_gateway",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "openclaw_gateway",
+			path:    filepath.Join(wd, ".openclaw", "extensions", "beacon-endpoint", "beacon.js"),
 			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
 		})
 	}
@@ -885,6 +916,10 @@ func beaconManaged(item candidate, data []byte) bool {
 	// is attributed to the runtime that actually loads it rather than to whichever case ran first.
 	case "omp":
 		return strings.Contains(text, hooks.OmpManagedExtensionMarker)
+	// The plugin entry's marker, read from the installer's own constant for the reason the Pi case
+	// gives. The manifests beside it carry no marker because they are identical for every install.
+	case "openclaw_gateway":
+		return strings.Contains(text, hooks.OpenClawManagedPluginMarker)
 	// Third distinct marker in this family, matched separately for the same reason: a file found at
 	// any of the three paths is attributed to the runtime that actually loads it rather than to
 	// whichever case ran first.
