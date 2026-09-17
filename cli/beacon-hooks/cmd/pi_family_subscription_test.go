@@ -27,6 +27,7 @@ func TestManagedExtensionSubscriptionsMatchTheirMappers(t *testing.T) {
 	}{
 		{"pi", filepath.Join("..", "..", "..", "plugins", "pi-beacon", "src", "beacon.ts"), supportedPiEventTypes()},
 		{"omp", filepath.Join("..", "..", "..", "plugins", "omp-beacon", "src", "beacon.ts"), supportedOmpEventTypes()},
+		{"prime", filepath.Join("..", "..", "..", "plugins", "prime-beacon", "src", "beacon.ts"), supportedPrimeEventTypes()},
 	} {
 		t.Run(tc.runtime, func(t *testing.T) {
 			subscribed := subscribedEventTypes(t, tc.source)
@@ -60,6 +61,7 @@ func TestEverySubscribedTypeIsMappedToAnEvent(t *testing.T) {
 	}{
 		{piRuntime, filepath.Join("..", "..", "..", "plugins", "pi-beacon", "src", "beacon.ts")},
 		{ompRuntime, filepath.Join("..", "..", "..", "plugins", "omp-beacon", "src", "beacon.ts")},
+		{primeRuntime, filepath.Join("..", "..", "..", "plugins", "prime-beacon", "src", "beacon.ts")},
 	} {
 		t.Run(tc.runtime.platform, func(t *testing.T) {
 			for _, name := range subscribedEventTypes(t, tc.source) {
