@@ -56,6 +56,15 @@ var harnessTargets = []harnessTarget{
 	// for the other's. "oh-my-pi" is accepted because it is the repository name people reach for;
 	// "omp" is the binary, and the canonical harness name events are written under.
 	{name: "omp", endpointKind: endpointTargetHook, endpointAliases: []string{"omp", "oh-my-pi", "ohmypi"}, hookAliases: []string{"omp", "oh-my-pi", "ohmypi"}},
+	// Prime Agent is a third row rather than an alias of either, for the reason Oh My Pi is a
+	// second: it is a separately installed product with its own config root, and folding a spelling
+	// into another runtime would install that runtime's extension while the operator asked for this
+	// one. "prime" is the --platform value and the shortest unambiguous spelling; "prime-agent" is
+	// what the binary is called; "prime_agent" is the canonical harness name events are written
+	// under, so a row read out of the runtime log and passed back to --harness resolves to the
+	// runtime it names. Prime Intellect's model names are deliberately not aliases -- accepting one
+	// would let someone ask to install an extension for a model.
+	{name: "prime", endpointKind: endpointTargetHook, endpointAliases: []string{"prime", "prime-agent", "prime_agent", "primeagent"}, hookAliases: []string{"prime", "prime-agent", "prime_agent", "primeagent"}},
 	// OpenHands. "open-hands" is accepted because the product is written as two words as often as
 	// one, and normalizeHarnessKey folds "open_hands" onto it. "openhands" is also the canonical
 	// harness name events are written under, so a row read out of the runtime log and passed back
