@@ -8,7 +8,7 @@ description: "Asymptote support details for Prime Agent (Prime Intellect) endpoi
 Asymptote supports [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), Prime Intellect's coding and research harness, through a managed local extension.
 
 <Note>
-Prime Agent is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono), as [Oh My Pi](/runtimes/oh-my-pi) is. All three are supported separately and recorded under their own harness names, because they are separately installed products that one machine can run side by side.
+Prime Agent is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono), as [Oh My Pi](/runtimes/oh-my-pi) and [Senpi](/runtimes/senpi) are. All four are supported separately and recorded under their own harness names, because they are separately installed products that one machine can run side by side.
 </Note>
 
 Prime Agent fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/cli/supported-runtimes-opencode) and [Cline](/cli/supported-runtimes-cline) integrations.
