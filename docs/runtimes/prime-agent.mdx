@@ -1,49 +1,153 @@
 ---
 title: "Prime Agent"
-description: "Asymptote support status for Prime Agent (Prime Intellect) endpoint telemetry"
+description: "Asymptote support details for Prime Agent (Prime Intellect) endpoint telemetry"
 ---
 
 ## Runtime overview
 
-[Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) is Prime Intellect's coding and research harness. Like [Oh My Pi](/runtimes/oh-my-pi), it is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono) and kept its TypeScript extension API, so it fits the same integration shape as [Pi](/runtimes/pi): no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector.
+Asymptote supports [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), Prime Intellect's coding and research harness, through a managed local extension.
+
+<Note>
+Prime Agent is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono), as [Oh My Pi](/runtimes/oh-my-pi) is. All three are supported separately and recorded under their own harness names, because they are separately installed products that one machine can run side by side.
+</Note>
+
+Prime Agent fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/cli/supported-runtimes-opencode) and [Cline](/cli/supported-runtimes-cline) integrations.
+
+```bash
+beacon endpoint hooks install --harness prime
+```
+
+## The single-tool design changes what telemetry looks like
+
+Prime Agent gives the model one tool by default: `ipython`, a persistent Python REPL. The agent reads files, writes files and runs shell commands through that kernel — `bash('cmd')` from inside Python — rather than through separate file and shell tools. `bash` and `edit` tool definitions do ship, but they are opt-in rather than part of the default tool set. Two consequences run through everything below.
+
+**A cell is recorded as a command, not as an anonymous tool call.** The code goes into `command.command`, where the command-scoped rules can read it, and is marked as Python in `raw` so nobody mistakes it for a shell line. `import os; os.system("rm -rf /")` is a shell command wearing a Python hat, and a log that filed it under `tool.completed` would hide essentially every action the agent took. This is the same reading Oh My Pi's operator `$` code gets.
+
+**The kernel's own file writes become file events.** Prime Agent streams a diff display for each file its kernel helpers rewrite, so one cell that edits three files produces three `file.modified` events, each carrying the unified patch and joined back to the cell by `gen_ai.tool.call.id`.
+
+## Prerequisites
+
+Before enabling Prime Agent telemetry, make sure:
+
+- Prime Agent is installed and available as the `prime-agent` executable, or has a local state directory at `~/.prime/agent`.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Prime Agent is restarted after install or removal so new sessions load the updated extension.
+
+## Collection path
+
+Asymptote's managed Prime Agent extension is a single TypeScript file at one of two auto-discovered extension locations:
+
+| Level | Extension path |
+|-------|----------------|
+| User | `~/.prime/agent/extensions/beacon.ts` |
+| Project | `./.prime/agent/extensions/beacon.ts` |
+
+User level is the default, because it follows the operator rather than one checkout. `beacon endpoint discover` reports on the user path only, so a project-level extension does not appear in discovery output.
 
 <Warning>
-**Partial support.** Harness identity ships today; collection does not. Asymptote recognizes Prime Agent as its own runtime and resolves every spelling to one canonical harness name, but there is no managed extension, no installer, and no discovery probe yet, so `beacon` collects no Prime Agent telemetry. There is nothing to install for this runtime at present.
+The project path keeps the `agent` segment. Prime Agent's config directory name is the two-segment literal `.prime/agent`, and it joins that whole string under the working directory as well as under the home directory — where [Pi](/runtimes/pi) uses `.pi/extensions` and [Oh My Pi](/runtimes/oh-my-pi) uses `.omp/extensions` at project scope. A file written to `./.prime/extensions/` is never loaded.
 </Warning>
 
-## What ships today
+`PRIME_AGENT_CODING_AGENT_DIR` replaces the user-level agent directory outright, and Asymptote honors it — including a leading `~`, which the runtime expands before use. It does not move the project path, because Prime Agent does not consult it there. Asymptote deliberately ignores `PI_CODING_AGENT_DIR`: that is the variable the same upstream code produces for Pi and Oh My Pi, and reading it here would move this install whenever you had set it for a different product.
+
+Asymptote identifies its own extension file by the marker `beacon-managed-prime-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry. The marker is distinct from Pi's and Oh My Pi's, so a file found at any of the three paths is attributed to the runtime that actually loads it.
+
+Prime Agent has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+
+## Discovery and status
+
+Asymptote detects Prime Agent through the `prime-agent` executable, and treats the `~/.prime/agent` state directory as an additional signal. Prime Agent installed through npm, or through its own installer into `~/.local/share/prime-agent`, is often missing from the `PATH` the endpoint process inherited, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The Pi, Oh My Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
+
+The bare name `prime` is deliberately not probed for. It is an ordinary word another binary or an internal script could plausibly claim, and a false positive reports a runtime the machine does not have.
+
+```bash title="Show Prime Agent discovery state"
+beacon endpoint discover --all --json
+```
+
+Prime Agent reports as the `prime_agent` harness with capability `plugin`:
+
+| Telemetry status | Meaning |
+|------------------|---------|
+| `missing` | No extension file at the user-level managed path |
+| `disabled` | A `beacon.ts` exists but carries no Asymptote marker, so it is somebody else's extension sharing the filename |
+| `enabled` | Asymptote's managed extension is in place |
+
+An unmarked extension file reports `disabled` rather than `enabled`, because reporting it as enabled would show the runtime as covered while no events arrive.
+
+## Install or configuration support
+
+`beacon endpoint install` prepares shared endpoint config and runtime log paths. The extension is installed separately, because Prime Agent loads it from the user's own profile rather than from a machine-wide location:
+
+```bash
+beacon endpoint hooks install --harness prime            # user level (default)
+beacon endpoint hooks install --harness prime --level project
+beacon endpoint hooks status --harness prime
+beacon endpoint hooks uninstall --harness prime
+```
+
+`prime`, `prime-agent`, `prime_agent`, and `primeagent` all resolve to this runtime. Prime Intellect's model names are deliberately not accepted, so nobody can ask to install an extension for a model.
+
+Install writes one file and refuses to touch a `beacon.ts` it did not write, so an extension of your own that happens to share the filename is left alone and the install fails loudly rather than replacing it. Uninstall removes only a file carrying this runtime's marker.
+
+`status` reports `installed=false` when the extension exists but points at a hook binary that is no longer there, which happens after a Beacon uninstall, a partly applied update, or a home directory restored onto a different machine. In each case Prime Agent loads an extension that spawns nothing.
+
+## Telemetry coverage
 
 | Area | Support |
 |------|---------|
+| Runtime discovery | Supported through executable and `~/.prime/agent` detection, managed extension path, and telemetry status |
 | Harness attribution | Supported. `prime`, `prime_agent`, `prime-agent`, `primeagent`, `prime_cli`, `prime-cli`, `prime_intellect`, and `prime-intellect` all normalize to `prime_agent` |
-| Collection method | Defined. The `prime` platform is registered as a plugin-shaped integration, so any Prime Agent event carries `harness.collection_method=plugin` rather than defaulting to `hook` |
-| Managed extension | Not shipped |
-| Discovery and telemetry status | Not shipped. `beacon endpoint discover` does not probe for Prime Agent |
-| Install, status, uninstall, repair | Not shipped. `beacon endpoint hooks install --harness prime` is not a supported target |
-| Runtime event collection | Not shipped. No prompt, tool, command, file, MCP, reasoning, or token telemetry is collected |
+| Extension install, status, uninstall, and repair | Supported |
+| Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped — a fork and a resume both produce a session with history behind it |
+| Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
+| Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
+| Commands | Supported. `command.executed` for each `ipython` cell, for the optional `bash` tool, and for commands you run with the `!` prefix, which are marked as operator-initiated. A cell's result carries its captured output, the runtime's own duration, and its status |
+| File activity | Supported. `file.modified` per file a kernel cell rewrote, with the unified patch; plus `file.modified` for the optional `edit` tool, carrying the unified diff it reports |
+| Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
+| Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
+| Approval decisions | Not available. Prime Agent exposes no operator approval decision to observe. See [Known gaps](#known-gaps) |
+| MCP activity | Not separately attributed. Prime Agent does not expose MCP as agent tools. See [Known gaps](#known-gaps) |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent. The Prime Agent extension installs separately in the logged-in user's context |
 
-## Why the harness name ships first
+Harness names are matched against a closed set of spellings rather than by substring. `prime` is an ordinary English word that appears in model ids, file paths, and vendor names, so a substring rule would report any event whose harness attribute merely contained it as a Prime Agent session. Both the hook spelling (`--platform prime`) and the runtime's own name (`prime-agent`) are pinned, so one session cannot be recorded under two names.
 
-`harness.name` is a release contract: dashboards, SIEM queries, and the rule pack group by it, so the name has to be pinned before any events are written under it. Two decisions are already fixed and will not change when collection lands.
+## Data handling
 
-**Prime Agent is not Pi.** Recording its sessions as `pi_cli` would merge two separately installed products' activity under one name in every query that groups by harness — the one thing a security log must not do to two different runtimes on the same machine. It gets its own canonical name, as Oh My Pi does, for the same reason.
+Prime Agent content is handled like every other runtime. Prompts, cell code, command output, tool arguments, paths, diffs, and reasoning text are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-**Matching is by equality against a closed set, not by substring.** "prime" is an ordinary English word that appears in model ids, file paths, and vendor names, so a substring rule would report any event whose harness attribute merely contained it as a Prime Agent session. Both the hook spelling (`--platform prime`) and the runtime's own name (`prime-agent`) are pinned, so one session cannot be recorded under two names.
+The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall Prime Agent's agent loop, and a failure to spawn costs the event rather than the run.
 
-## What collection will look like
+## Known gaps
 
-Prime Agent's observation surface is its extension API, the same one Pi and Oh My Pi expose, so support will follow the same shape those runtimes use: one Asymptote-owned TypeScript extension file, installed at user or project level, forwarding runtime events to the local `beacon-hooks` binary. That is why the platform is already registered as `plugin` rather than left to the `hook` default — a plugin platform reported as `hook` overstates vendor support.
+- **No approval telemetry.** Prime Agent's `tool_call` event lets an extension block a call, but that is an extension deciding rather than an operator being asked. It exposes no operator approval decision through the extension API, so Beacon records these as tool activity and writes no approval events. [Pi](/runtimes/pi) and [Cline](/cli/supported-runtimes-cline) work the same way for the same reason; [Oh My Pi](/runtimes/oh-my-pi) is the fork that does report real ones. Detections in `rules/approval-abuse/` do not fire on Prime Agent activity.
+- **MCP calls are not separately attributed.** Consistent with its single-tool design, Prime Agent does not expose MCP servers as agent tools: each integration is a Python skill package the model imports and calls from inside the kernel. So an MCP call arrives as part of a cell's code in `command.command` rather than as an `mcp.tool_invoked` event with a server and tool name, and the two questions MCP telemetry usually answers — which server did this agent reach, and what did it call there — have no dedicated field to answer them here. This is a property of the runtime rather than a gap Beacon can close from its side.
+- **No per-cell exit code.** A Python cell does not have one. The runtime reports a `status` of `ok`, `error`, or `aborted`, which Beacon records verbatim; deriving a `0`/`1` from it would put a shell's vocabulary on something that is not a shell. An interrupted cell is recorded as aborted rather than failed, so a Ctrl+C does not read as an agent error.
+- **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Prime Agent. Its blocking `tool_call` handler makes it a viable target for that seam later.
+- **Streaming events are not collected.** The extension subscribes to seven of Prime Agent's event types and ignores the rest — provider request and response internals, streaming message updates, compaction, refinement and tree-navigation signals, and TUI plumbing. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
+- **`.agents` and other hosts.** Prime Agent's extension directory is its own (`.prime/agent/extensions`), not a shared one, so unlike [goose](/runtimes/goose) there is no ambiguity about which runtime ran the extension.
 
-Two things will not change with it. Asymptote will not synthesize approval decisions from a blocking tool handler, matching the [Pi](/runtimes/pi) and [Cline](/runtimes/cline) posture, and enforcement will stay behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`).
+## Deployment notes
+
+The extension is loaded when Prime Agent starts, so an install taken while it is running takes effect on the next launch.
+
+Confirm discovery sees the runtime, then generate one Prime Agent event and check the log:
+
+```bash
+/opt/beacon/bin/beacon endpoint discover --all --json
+/opt/beacon/bin/beacon endpoint hooks status --harness prime
+/opt/beacon/bin/beacon endpoint doctor --system
+grep '"name":"prime_agent"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
 
 ## Related
 
 <Columns cols={3}>
   <Card title="Pi" icon="code" href="/runtimes/pi">
-    The upstream runtime Prime Agent forked, supported through a managed extension.
+    The upstream runtime Prime Agent forked, supported through the same extension shape.
   </Card>
   <Card title="Oh My Pi" icon="code" href="/runtimes/oh-my-pi">
-    Another pi-mono fork, and the shape Prime Agent support will follow.
+    The other pi-mono fork, and the one that reports operator approval decisions.
   </Card>
   <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
     Return to the runtime support overview.

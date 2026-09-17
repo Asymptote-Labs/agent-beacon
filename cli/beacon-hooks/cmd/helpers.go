@@ -137,10 +137,10 @@ func resolveSessionID(input map[string]interface{}, platform string) string {
 	// the handler context's session manager per event. The snake_case spellings are a fallback for
 	// a payload that reached this command by some other route.
 	//
-	// Oh My Pi shares this reader because it shares the envelope: its extension is built from the
-	// same contract. Some of its events -- the approval pair -- also carry a `sessionId` of their
-	// own, which lands on the same key and needs no separate spelling.
-	case "pi", "omp":
+	// Oh My Pi and Prime Agent share this reader because they share the envelope: both extensions
+	// are built from the same contract. Some Oh My Pi events -- the approval pair -- also carry a
+	// `sessionId` of their own, which lands on the same key and needs no separate spelling.
+	case "pi", "omp", "prime":
 		return getFirstStr(input, "sessionId", "session_id", "sessionID")
 	// The Beacon plugin lifts OpenClaw's session id onto the envelope from the hook context,
 	// falling back to the event's own when the context did not carry one. `sessionKey` is
@@ -273,7 +273,7 @@ func resolveCwd(input map[string]interface{}, platform string) string {
 			return cwd
 		}
 	}
-	if platform == "pi" || platform == "omp" {
+	if platform == "pi" || platform == "omp" || platform == "prime" {
 		// The extension lifts the runtime's cwd onto the envelope, preferring the handler context's
 		// own cwd and falling back to the session manager's. An event that carried its own cwd --
 		// user_bash does, and so does Oh My Pi's user_python -- wins over both, because the
