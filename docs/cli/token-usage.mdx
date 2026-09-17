@@ -38,6 +38,7 @@ Token coverage is not uniform, and the reason is almost always the runtime rathe
 |---------|--------|------|-------------|----------|
 | Claude Code | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | When local user context is present |
 | Codex CLI | input, output, cache read, cache creation, reasoning | Not emitted by Codex | Yes, from the turn trace | Yes, from matching SessionStart context |
+| Codex Desktop | input, output, cache read, cache creation, reasoning | Not emitted by Codex | Yes, from the turn trace | When local user context is present |
 | Claude Cowork | input, output, cache read, cache creation | Reported when Cowork emits it | Yes | When the OTLP stream carries it |
 | Cline | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes, per task | Yes |
 | OpenCode | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |

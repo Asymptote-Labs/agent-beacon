@@ -1410,15 +1410,60 @@ func TestNormalizeHarnessNameBrowserSources(t *testing.T) {
 		"chatgpt_web": "chatgpt_web",
 		"chatgpt.com": "chatgpt_web",
 		// Regression: existing harnesses must be unchanged.
-		"claude_code": "claude_code",
-		"claude":      "claude_code",
-		"codex":       "codex_cli",
-		"gemini":      "gemini_cli",
+		"claude_code":      "claude_code",
+		"claude":           "claude_code",
+		"codex":            "codex_cli",
+		"codex-app-server": "codex_desktop",
+		"gemini":           "gemini_cli",
 	}
 	for in, want := range cases {
 		if got := NormalizeHarnessName(in); got != want {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestHarnessNameSeparatesCodexDesktopFromCLI(t *testing.T) {
+	cases := map[string]string{
+		"codex-app-server": "codex_desktop",
+		"codex-desktop":    "codex_desktop",
+		"codex":            "codex_cli",
+		"codex-cli":        "codex_cli",
+		"codex_exec":       "codex_cli",
+		"codex_cli_rs":     "codex_cli",
+	}
+	for serviceName, want := range cases {
+		t.Run(serviceName, func(t *testing.T) {
+			attrs := map[string]interface{}{"service.name": serviceName}
+			if got := HarnessName(attrs); got != want {
+				t.Errorf("HarnessName(%q) = %q, want %q", serviceName, got, want)
+			}
+		})
+	}
+}
+
+func TestCodexDesktopUsesCodexFilteringRules(t *testing.T) {
+	attrs := map[string]interface{}{"service.name": "codex-app-server"}
+	if !ShouldDropMetric(attrs, "codex.tool.call.duration_ms", false) {
+		t.Fatal("expected Codex Desktop runtime metric to be dropped")
+	}
+	if ShouldDropMetric(attrs, "codex.turn.token_usage", false) {
+		t.Fatal("expected Codex Desktop token usage metric to be kept")
+	}
+
+	usageSpan := ptrace.NewSpan()
+	usageSpan.SetName("session_task.turn")
+	usageSpan.Attributes().PutInt("codex.turn.token_usage.input_tokens", 10)
+	if !IsCodexTurnUsageSpan(MergeMaps(attrs, AttrsToMap(usageSpan.Attributes())), usageSpan.Name()) {
+		t.Fatal("expected Codex Desktop turn span with usage to be recognized")
+	}
+	if (Converter{}).ShouldDropSpan(attrs, usageSpan) {
+		t.Fatal("expected Codex Desktop turn span with usage to be kept")
+	}
+	transportSpan := ptrace.NewSpan()
+	transportSpan.SetName("FramedRead::poll_next")
+	if !(Converter{}).ShouldDropSpan(attrs, transportSpan) {
+		t.Fatal("expected Codex Desktop transport span to be dropped")
 	}
 }
 

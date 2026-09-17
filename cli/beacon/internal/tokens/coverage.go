@@ -69,6 +69,7 @@ var usageExpectation = map[string]struct {
 }{
 	"claude_code":       {ExpectReported, "OTLP token and cost telemetry"},
 	"codex_cli":         {ExpectReported, "per-turn usage trace; Codex emits no cost"},
+	"codex_desktop":     {ExpectReported, "per-turn usage trace; Codex emits no cost"},
 	"claude_cowork":     {ExpectReported, "OTLP token and cost telemetry"},
 	"cline":             {ExpectReported, "plugin reports usage once per task"},
 	"opencode":          {ExpectReported, "plugin reports usage per assistant message"},

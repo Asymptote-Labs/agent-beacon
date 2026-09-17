@@ -450,6 +450,7 @@ const inventoryRuntimeLogos = {
   cline_cli: "/runtime-logos/cline.png",
   codex: "/runtime-logos/codex.png",
   codex_cli: "/runtime-logos/codex.png",
+  codex_desktop: "/runtime-logos/codex.png",
   copilot: "/runtime-logos/github-copilot.png",
   copilot_cli: "/runtime-logos/github-copilot.png",
   github_copilot: "/runtime-logos/github-copilot.png",
@@ -1147,6 +1148,7 @@ function runtimeLabel(value) {
   const labels = {
     claude_code: "Claude Code",
     codex_cli: "Codex CLI",
+    codex_desktop: "Codex Desktop",
     cursor: "Cursor",
     gemini_cli: "Gemini CLI",
     antigravity: "Antigravity CLI",
@@ -1541,6 +1543,7 @@ function harnessLabel(value) {
     cursor: "Cursor",
     claude_code: "Claude Code",
     codex_cli: "Codex CLI",
+    codex_desktop: "Codex Desktop",
     copilot_cli: "GitHub Copilot CLI",
     grok: "Grok Build",
     kiro: "Kiro",
