@@ -21,6 +21,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"cline":       "cline",
 		"qwen":        "qwen_code",
 		"prime":       "prime_agent",
+		"omo":         "omo_senpi",
 		"muse":        "muse_code",
 		"goose":       "goose",
 	} {
@@ -41,7 +42,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
-		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "vercel_fx",
+		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "omo_senpi", "vercel_fx",
 		"muse_code", "grok_bot", "goose",
 	} {
 		t.Run(canonical, func(t *testing.T) {
@@ -333,6 +334,66 @@ func TestPrimeSubstringsAreNotTreatedAsTheHarness(t *testing.T) {
 		if got := NormalizeHarnessName(name); got == "prime_agent" {
 			t.Errorf("NormalizeHarnessName(%q) = %q; a name that merely contains \"prime\" must not be "+
 				"reported as the Prime Agent harness", name, got)
+		}
+	}
+}
+
+// Senpi (the standalone edition of oh-my-openagent) reaches Beacon under more than one spelling for
+// the same reason Prime Agent does: the hook path installs with --platform omo, while the harness
+// name events are written under is the fuller omo_senpi.
+func TestOmoSenpiSpellingsConvergeOnOmoSenpi(t *testing.T) {
+	for _, in := range []string{
+		"omo", "Omo", "OMO", " omo ", "omo_senpi", "omo-senpi", "Omo Senpi", "omo senpi",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "omo_senpi" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "omo_senpi")
+			}
+		})
+	}
+}
+
+// Senpi is a Pi distribution -- it ships Pi's extension API under a rebranded config directory --
+// which is exactly why this needs a test. The two runtimes are observed through the same
+// mechanism, so the temptation is to file them under one name; doing that would merge two products'
+// sessions in every query that groups by harness.name, and would make "which runtime is running
+// here" unanswerable from the log.
+func TestOmoSenpiIsNotAttributedToPi(t *testing.T) {
+	for _, in := range []string{"omo", "omo-senpi", "omo_senpi", "Omo Senpi"} {
+		if got := NormalizeHarnessName(in); got == "pi_cli" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; Senpi must not be recorded as Pi", in, got)
+		}
+	}
+	for _, in := range []string{"pi", "pi.dev", "pi-agent"} {
+		if got := NormalizeHarnessName(in); got != "pi_cli" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; adding Senpi must not move Pi", in, got)
+		}
+	}
+}
+
+// Neither upstream Senpi nor the wider oh-my-openagent project name should collapse onto this one
+// edition's harness name. Both name something bigger than the omo-branded standalone CLI: plain
+// "senpi" is a real, separately installable engine a user can run without OMO at all, and
+// "oh-my-openagent" also covers the OpenCode and Codex CLI editions Beacon does not observe through
+// this extension. Accepting either spelling here would claim a name a future integration for one of
+// those needs for itself.
+func TestBareSenpiAndOhMyOpenagentAreNotTreatedAsOmoSenpi(t *testing.T) {
+	for _, name := range []string{"senpi", "Senpi", "oh-my-openagent", "oh-my-opencode", "oh_my_openagent"} {
+		if got := NormalizeHarnessName(name); got == "omo_senpi" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; only the omo-branded spelling should resolve to "+
+				"the Senpi standalone edition", name, got)
+		}
+	}
+}
+
+// The reason the omo case is an equality match rather than a Contains rule. "omo" is an ordinary
+// three-letter string that turns up in names that have nothing to do with this runtime, and a
+// substring rule would file every one of them under omo_senpi.
+func TestOmoSubstringsAreNotTreatedAsTheHarness(t *testing.T) {
+	for _, name := range []string{"ammo", "promotion", "omoplate", "homology"} {
+		if got := NormalizeHarnessName(name); got == "omo_senpi" {
+			t.Errorf("NormalizeHarnessName(%q) = %q; a name that merely contains \"omo\" must not be "+
+				"reported as the Senpi harness", name, got)
 		}
 	}
 }

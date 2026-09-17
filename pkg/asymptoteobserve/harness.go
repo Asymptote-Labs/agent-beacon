@@ -170,6 +170,29 @@ func NormalizeHarnessName(name string) string {
 		lower == "primeagent" || lower == "prime_cli" || lower == "prime-cli" || lower == "prime cli" ||
 		lower == "prime_intellect" || lower == "prime-intellect" || lower == "prime intellect":
 		return "prime_agent"
+	// Senpi is the standalone edition of oh-my-openagent (OMO): an in-flight fork of pi-mono that
+	// OMO brands and bundles its own extension into, distributed as the `omo` command. It is a
+	// separate product from Pi, Oh My Pi and Prime Agent, so it gets its own canonical name rather
+	// than folding into pi_cli -- recording its sessions as pi_cli would merge two runtimes'
+	// activity under one name in every query that groups by harness.name.
+	//
+	// The canonical spelling is omo_senpi rather than bare omo because oh-my-openagent ships two
+	// other editions today (a plugin riding OpenCode, and one riding Codex CLI); "omo" alone would
+	// not say which one produced a row if Beacon ever observes those too, so it is normalized to
+	// this edition's full name rather than left standing for the whole project.
+	//
+	// Deliberately narrow, and that is the whole reason for the set rather than a wider one. "senpi"
+	// and "oh-my-openagent" both name things bigger than this one edition -- upstream Senpi is a
+	// real, separately installable engine a user can run without OMO at all, and
+	// "oh-my-openagent"/"oh-my-opencode" (the pre-rename package name) name the project as a whole,
+	// under which the OpenCode and Codex CLI editions also ship. Accepting either here would claim a
+	// spelling that a future integration for one of those needs for itself. Only spellings that say
+	// "omo" specifically -- the branded binary and config directory this edition actually uses --
+	// are accepted, and equality against that closed set rather than Contains for the same reason
+	// Pi, Cline, Qwen Code and Prime Agent above use equality: "omo" is an ordinary three-letter
+	// string that could appear inside an unrelated harness attribute.
+	case lower == "omo" || lower == "omo_senpi" || lower == "omo-senpi" || lower == "omo senpi":
+		return "omo_senpi"
 	// fx (vercel-labs/fx) is matched by equality against a closed set for the same reason Pi is,
 	// only more so: "fx" is two characters and appears inside ordinary words a harness attribute
 	// can plausibly carry -- "sfx", "fx-runner", "effects" does not contain it but "fxagent" does
