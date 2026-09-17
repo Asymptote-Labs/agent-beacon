@@ -1,6 +1,9 @@
 package lifecycle
 
 import (
+	"errors"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -174,5 +177,62 @@ func TestRepairKeepsThePreviousManifestBackups(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("reinstall dropped the hook backup from the manifest: %v", m.Backups)
+	}
+}
+
+// A failed reinstall rolls back to the state from minutes ago, not to a pre-Beacon backup from
+// an earlier install. The historical backups are persisted for Uninstall, never handed to Rollback.
+func TestFailedReinstallDoesNotRevertToHistoricalBackups(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
+	if err := os.MkdirAll(filepath.Dir(collectorPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(collectorPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeInventoryJob(t, true)
+	opts := InstallOptions{UserMode: true, LogPath: filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl"), Harnesses: []string{}, GRPCPort: freePort(t), HTTPPort: freePort(t), CollectorPath: collectorPath, StartService: false}
+	if _, err := Install(opts); err != nil {
+		t.Fatal(err)
+	}
+	// A hook file with an old, pre-Beacon backup registered by the previous install.
+	hooks := filepath.Join(home, ".codex", "hooks.json")
+	ancient := hooks + ".beacon.20260901T080000Z.bak"
+	if err := os.MkdirAll(filepath.Dir(hooks), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hooks, []byte("current"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ancient, []byte("ancient"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendManifestBackups(true, []string{ancient}); err != nil {
+		t.Fatal(err)
+	}
+	// Make the reinstall fail at its last step so Rollback runs.
+	oldAppend := appendInstallEvent
+	appendInstallEvent = func(schema.Event, writer.Options) (string, error) { return "", errors.New("disk full") }
+	t.Cleanup(func() { appendInstallEvent = oldAppend })
+	if _, err := Install(opts); err == nil {
+		t.Fatal("reinstall should fail")
+	}
+	got, _ := os.ReadFile(hooks)
+	if string(got) != "current" {
+		t.Fatalf("rollback reverted a file this run never touched to a historical backup: %q", got)
+	}
+	// The persisted manifest from the successful install still carries the historical backup.
+	m, err := ReadManifest(true)
+	if err == nil {
+		for _, b := range m.Backups {
+			if b == ancient {
+				return
+			}
+		}
 	}
 }

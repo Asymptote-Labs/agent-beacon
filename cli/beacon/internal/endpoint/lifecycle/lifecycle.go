@@ -383,6 +383,7 @@ func (r *installRollback) Rollback(manifest Manifest) {
 }
 
 func Install(opts InstallOptions) (InstallResult, error) {
+	started := time.Now().UTC()
 	var priorBackups []string
 	if prior, err := ReadManifest(opts.UserMode); err == nil {
 		priorBackups = prior.Backups
@@ -477,10 +478,11 @@ func Install(opts InstallOptions) (InstallResult, error) {
 
 	harnessPaths, err := configureHarnesses(cfg)
 	manifest.HarnessConfigs = harnessPaths
-	// Carry the previous install's backups forward: a reinstall rewrites the same files with
-	// the same content, makes no new backup, and would otherwise forget the one that holds the
-	// pre-Beacon state an uninstall must restore.
-	manifest.Backups = mergeBackups(priorBackups, discoverBackups(harnessPaths))
+	// Only the backups this run just wrote belong in the in-memory manifest, because that is
+	// what Rollback restores: a failed reinstall must put back the files as they were minutes
+	// ago, not revert them to pre-Beacon content from an earlier install. The previous
+	// install's backups are merged in only when the manifest is persisted, for Uninstall.
+	manifest.Backups = backupsSince(discoverBackups(harnessPaths), started)
 	if err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -537,7 +539,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		}
 	}
 	tx.Track(manifestPath(cfg.UserMode))
-	manifestPath, err := writeManifest(cfg.UserMode, manifest)
+	// Carry the previous install's backups forward on disk: a reinstall rewrites the same files
+	// with the same content, makes no new backup, and would otherwise forget the one that holds
+	// the pre-Beacon state an uninstall must restore.
+	persisted := manifest
+	persisted.Backups = mergeBackups(priorBackups, manifest.Backups)
+	manifestPath, err := writeManifest(cfg.UserMode, persisted)
 	if err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -1108,19 +1115,25 @@ func RecordManifestBackups(userMode bool, paths []string, since time.Time) error
 		}
 		return err
 	}
-	var fresh []string
-	for _, b := range discoverBackups(paths) {
-		if stamp, ok := backupTimestamp(b); ok && !stamp.Before(since.Truncate(time.Second)) {
-			fresh = append(fresh, b)
-		}
-	}
-	merged := mergeBackups(manifest.Backups, fresh)
+	merged := mergeBackups(manifest.Backups, backupsSince(discoverBackups(paths), since))
 	if len(merged) == len(manifest.Backups) {
 		return nil
 	}
 	manifest.Backups = merged
 	_, err = writeManifest(userMode, manifest)
 	return err
+}
+
+// backupsSince keeps the timestamped backups written at or after since; unstamped legacy
+// backups are by definition older.
+func backupsSince(backups []string, since time.Time) []string {
+	var out []string
+	for _, b := range backups {
+		if stamp, ok := backupTimestamp(b); ok && !stamp.Before(since.Truncate(time.Second)) {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // AppendManifestBackups adds explicit backup paths to the manifest (those that still exist),
