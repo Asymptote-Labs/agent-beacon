@@ -12,7 +12,7 @@ Beacon Endpoint Agent is a local-only endpoint telemetry agent for AI runtimes. 
 - `packages/asymptote-sdk-js`: TypeScript SDK for cloud agent telemetry that exports Beacon-compatible OpenTelemetry spans.
 - `browser-extension`: optional Chrome MV3 collector that relays Claude.ai and ChatGPT chat telemetry into the local pipeline as OTLP.
 - `pkg/asymptoteobserve`: shared Go library — event schema, harness-name normalization, provenance markers, token usage, and the threat-rules engine. Imported by the CLI, the hook adapter, and the collector exporter, so a change here reaches all three.
-- `plugins`: TypeScript sources for the managed runtime plugins/extensions (`opencode-beacon`, `cline-beacon`, `pi-beacon`, `omp-beacon`, `openclaw-beacon`, `prime-beacon`), each mirrored into an embedded copy under `cli/beacon/internal/endpoint/hooks/assets/`.
+- `plugins`: TypeScript sources for the managed runtime plugins/extensions (`opencode-beacon`, `cline-beacon`, `pi-beacon`, `omp-beacon`, `openclaw-beacon`, `prime-beacon`, `omo-beacon`), each mirrored into an embedded copy under `cli/beacon/internal/endpoint/hooks/assets/`.
 - `rules` and `spec/threat-rules`: the open rule corpus and the Threat Rules format it conforms to.
 - `beacon-sandbox`: harness that runs a real Claude Code session in a disposable sandbox and checks what Beacon captured. See `beacon-sandbox/AGENTS.md`.
 - `packaging`: macOS, Linux, and Windows packaging and deployment assets.
@@ -129,6 +129,7 @@ cd ../pi-beacon && bun run check && bun test
 cd ../omp-beacon && bun run check && bun test
 cd ../openclaw-beacon && bun run check && bun test
 cd ../prime-beacon && bun run check && bun test
+cd ../omo-beacon && bun run check && bun test
 ```
 
 After editing a plugin or extension source, run `bun run sync` in its directory to update the
@@ -498,7 +499,7 @@ unpacked through Chrome's developer mode.
 
 `.github/workflows/ci.yml` runs these jobs on every pull request and on pushes to `main`:
 
-- `go-test` (macOS): `bun run check && bun test` in all six `plugins/*` directories, then `make build-hooks-current`, then `go test ./...` in `cli/beacon`, `go test -race ./internal/endpoint/...`, `go test ./...` in `cli/beacon-hooks`, `collector-builder/exporter/beaconjsonexporter`, and `pkg/asymptoteobserve` (includes threat-rules pack conformance), then CLI help smoke checks that also assert removed commands stay unexposed.
+- `go-test` (macOS): `bun run check && bun test` in all seven `plugins/*` directories, then `make build-hooks-current`, then `go test ./...` in `cli/beacon`, `go test -race ./internal/endpoint/...`, `go test ./...` in `cli/beacon-hooks`, `collector-builder/exporter/beaconjsonexporter`, and `pkg/asymptoteobserve` (includes threat-rules pack conformance), then CLI help smoke checks that also assert removed commands stay unexposed.
 - `linux-test` (ubuntu) and `windows-test` (windows-2025) rerun the Go suites per platform. The Windows job tests a measured package list rather than `./...`; the excluded packages are tracked in #318, and the scope must not be widened back to `./...`.
 - `typescript-sdk` (Node 20, 22, 24): `npm test`, `npm run check`, `npm run build`, `npm run pack:dry-run`, `npm run pack:smoke` in `packages/asymptote-sdk-js`.
 - `browser-extension` (Node 22): `npm run check`, `npm run test:unit`, `npm run build`, a check that the build is a loadable MV3 extension, and the Playwright replay e2e running the real extension in headless Chromium against a local HTTPS replay server; the HTML report and traces upload on failure.
