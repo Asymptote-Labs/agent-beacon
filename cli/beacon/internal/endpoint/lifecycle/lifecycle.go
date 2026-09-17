@@ -1075,10 +1075,13 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 	return paths, nil
 }
 
-// RecordManifestBackups adds the backups found beside the given files to the install manifest,
-// so Uninstall restores them. Files written after Install (hook targets) are registered this way;
-// a missing manifest means no install to attach them to, which is not an error.
-func RecordManifestBackups(userMode bool, paths []string) error {
+// RecordManifestBackups adds the backups this install created beside the given files to the
+// manifest, so Uninstall restores them. Only backups stamped at or after `since` count: an older
+// one beside the same file belongs to an earlier install or repair and holds content Beacon had
+// already rewritten, so restoring it would not recover the pre-install hooks. Files written after
+// Install (hook targets) are registered this way; a missing manifest means no install to attach
+// them to, which is not an error.
+func RecordManifestBackups(userMode bool, paths []string, since time.Time) error {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -1095,17 +1098,38 @@ func RecordManifestBackups(userMode bool, paths []string) error {
 	}
 	changed := false
 	for _, b := range discoverBackups(paths) {
-		if !seen[b] {
-			manifest.Backups = append(manifest.Backups, b)
-			seen[b] = true
-			changed = true
+		stamp, ok := backupTimestamp(b)
+		if !ok || stamp.Before(since.Truncate(time.Second)) || seen[b] {
+			continue
 		}
+		manifest.Backups = append(manifest.Backups, b)
+		seen[b] = true
+		changed = true
 	}
 	if !changed {
 		return nil
 	}
 	_, err = writeManifest(userMode, manifest)
 	return err
+}
+
+// backupTimestamp parses the stamp in a <path>.beacon.<timestamp>.bak name. The legacy
+// <path>.beacon.bak form carries none and reports false.
+func backupTimestamp(backup string) (time.Time, bool) {
+	const suffix = ".bak"
+	if !strings.HasSuffix(backup, suffix) {
+		return time.Time{}, false
+	}
+	trimmed := strings.TrimSuffix(backup, suffix)
+	idx := strings.LastIndex(trimmed, ".beacon.")
+	if idx < 0 {
+		return time.Time{}, false
+	}
+	stamp, err := time.Parse("20060102T150405Z", trimmed[idx+len(".beacon."):])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return stamp, true
 }
 
 func discoverBackups(paths []string) []string {
