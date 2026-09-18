@@ -32,7 +32,7 @@ func TestEndpointHooksInstallAndUninstallMuse(t *testing.T) {
 	hooksPath := filepath.Join(home, ".config", "muse", "beacon-endpoint-hooks.json")
 	settingsPath := filepath.Join(home, ".config", "muse", "settings.json")
 
-	if err := installEndpointHookTarget("muse", cfg); err != nil {
+	if _, err := installEndpointHookTarget("muse", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(muse) returned error: %v", err)
 	}
 

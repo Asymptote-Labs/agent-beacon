@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
@@ -332,10 +333,24 @@ func installHookTargetsFromEndpointInstall(targets []string) error {
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
+	started := time.Now().UTC()
+	var files []string
+	var installErr error
 	for _, target := range targets {
-		if err := installEndpointHookTarget(target, cfg); err != nil {
-			return err
+		path, err := installEndpointHookTarget(target, cfg)
+		if path != "" {
+			files = append(files, path)
+		}
+		if err != nil {
+			installErr = err
+			break
 		}
 	}
-	return nil
+	// Hook files rewritten by this install keep a backup beside them; registering those in the
+	// manifest is what lets `endpoint uninstall` put the previous hooks back. Registered even
+	// when a later target failed: the earlier ones were already rewritten.
+	if err := lifecycle.RecordManifestBackups(cfg.UserMode, files, started); err != nil && installErr == nil {
+		return fmt.Errorf("record hook backups: %w", err)
+	}
+	return installErr
 }

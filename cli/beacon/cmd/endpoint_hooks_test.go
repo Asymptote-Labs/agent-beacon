@@ -61,7 +61,7 @@ func TestEndpointHooksInstallAndUninstallQwen(t *testing.T) {
 	endpointOpts.hookLevel = "user"
 
 	settings := filepath.Join(home, ".qwen", "settings.json")
-	if err := installEndpointHookTarget("qwen", cfg); err != nil {
+	if _, err := installEndpointHookTarget("qwen", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(qwen) returned error: %v", err)
 	}
 	data, err := os.ReadFile(settings)

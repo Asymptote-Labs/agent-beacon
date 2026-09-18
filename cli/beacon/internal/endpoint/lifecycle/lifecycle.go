@@ -383,6 +383,11 @@ func (r *installRollback) Rollback(manifest Manifest) {
 }
 
 func Install(opts InstallOptions) (InstallResult, error) {
+	started := time.Now().UTC()
+	var priorBackups []string
+	if prior, err := ReadManifest(opts.UserMode); err == nil {
+		priorBackups = prior.Backups
+	}
 	cfg := buildConfig(opts)
 	if err := preflight(cfg, opts.StartService, opts.ServiceKind); err != nil {
 		return InstallResult{}, err
@@ -473,7 +478,11 @@ func Install(opts InstallOptions) (InstallResult, error) {
 
 	harnessPaths, err := configureHarnesses(cfg)
 	manifest.HarnessConfigs = harnessPaths
-	manifest.Backups = discoverBackups(harnessPaths)
+	// Only the backups this run just wrote belong in the in-memory manifest, because that is
+	// what Rollback restores: a failed reinstall must put back the files as they were minutes
+	// ago, not revert them to pre-Beacon content from an earlier install. The previous
+	// install's backups are merged in only when the manifest is persisted, for Uninstall.
+	manifest.Backups = backupsSince(discoverBackups(harnessPaths), started)
 	if err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -530,7 +539,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		}
 	}
 	tx.Track(manifestPath(cfg.UserMode))
-	manifestPath, err := writeManifest(cfg.UserMode, manifest)
+	// Carry the previous install's backups forward on disk: a reinstall rewrites the same files
+	// with the same content, makes no new backup, and would otherwise forget the one that holds
+	// the pre-Beacon state an uninstall must restore.
+	persisted := manifest
+	persisted.Backups = mergeBackups(priorBackups, manifest.Backups)
+	manifestPath, err := writeManifest(cfg.UserMode, persisted)
 	if err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -667,10 +681,19 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 			priorAutoUpdateMode = mode
 		}
 	}
+	var priorBackups []string
+	if prior, err := ReadManifest(opts.UserMode); err == nil {
+		priorBackups = prior.Backups
+	}
 	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true, KeepUpdater: true})
 	result, err := Install(opts)
 	if err != nil {
 		restoreFile(configPath, configSnapshot)
+		return result, err
+	}
+	// Uninstall removed the manifest before Install wrote a new one, so the backups it carried
+	// are re-attached here; a repair must not make an uninstall forget the pre-Beacon files.
+	if err := AppendManifestBackups(opts.UserMode, priorBackups); err != nil {
 		return result, err
 	}
 	if !opts.UserMode {
@@ -1075,6 +1098,108 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 	return paths, nil
 }
 
+// RecordManifestBackups adds the backups this install created beside the given files to the
+// manifest, so Uninstall restores them. Only backups stamped at or after `since` count: an older
+// one beside the same file belongs to an earlier install or repair and holds content Beacon had
+// already rewritten, so restoring it would not recover the pre-install hooks. Files written after
+// Install (hook targets) are registered this way; a missing manifest means no install to attach
+// them to, which is not an error.
+func RecordManifestBackups(userMode bool, paths []string, since time.Time) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	manifest, err := ReadManifest(userMode)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	merged := mergeBackups(manifest.Backups, backupsSince(discoverBackups(paths), since))
+	if len(merged) == len(manifest.Backups) {
+		return nil
+	}
+	manifest.Backups = merged
+	_, err = writeManifest(userMode, manifest)
+	return err
+}
+
+// backupsSince keeps the timestamped backups written at or after since; unstamped legacy
+// backups are by definition older.
+func backupsSince(backups []string, since time.Time) []string {
+	var out []string
+	for _, b := range backups {
+		if stamp, ok := backupTimestamp(b); ok && !stamp.Before(since.Truncate(time.Second)) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// AppendManifestBackups adds explicit backup paths to the manifest (those that still exist),
+// without a timestamp filter. Repair uses it to carry the previous manifest's backups across
+// the uninstall/install it performs.
+func AppendManifestBackups(userMode bool, backups []string) error {
+	if len(backups) == 0 {
+		return nil
+	}
+	manifest, err := ReadManifest(userMode)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var existing []string
+	for _, b := range backups {
+		if _, err := os.Stat(b); err == nil {
+			existing = append(existing, b)
+		}
+	}
+	merged := mergeBackups(manifest.Backups, existing)
+	if len(merged) == len(manifest.Backups) {
+		return nil
+	}
+	manifest.Backups = merged
+	_, err = writeManifest(userMode, manifest)
+	return err
+}
+
+// mergeBackups appends b to a without duplicates, preserving order.
+func mergeBackups(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, p := range list {
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// backupTimestamp parses the stamp in a <path>.beacon.<timestamp>.bak name. The legacy
+// <path>.beacon.bak form carries none and reports false.
+func backupTimestamp(backup string) (time.Time, bool) {
+	const suffix = ".bak"
+	if !strings.HasSuffix(backup, suffix) {
+		return time.Time{}, false
+	}
+	trimmed := strings.TrimSuffix(backup, suffix)
+	idx := strings.LastIndex(trimmed, ".beacon.")
+	if idx < 0 {
+		return time.Time{}, false
+	}
+	stamp, err := time.Parse("20060102T150405Z", trimmed[idx+len(".beacon."):])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return stamp, true
+}
+
 func discoverBackups(paths []string) []string {
 	var backups []string
 	for _, path := range paths {
@@ -1087,16 +1212,41 @@ func discoverBackups(paths []string) []string {
 	return backups
 }
 
+// restoreBackups puts each target back to its oldest recorded backup: the content from before
+// Beacon first touched the file. Later backups hold content Beacon had already rewritten, so
+// letting the last one win (the previous behaviour) could restore Beacon's own hooks.
 func restoreBackups(backups []string) {
+	chosen := map[string]string{}
 	for _, backup := range backups {
 		target := restoreTarget(backup)
 		if target == "" {
 			continue
 		}
+		current, ok := chosen[target]
+		if !ok || backupOlder(backup, current) {
+			chosen[target] = backup
+		}
+	}
+	for target, backup := range chosen {
 		data, err := os.ReadFile(backup)
 		if err == nil {
 			_ = os.WriteFile(target, data, 0600)
 		}
+	}
+}
+
+// backupOlder reports whether a predates b. An unstamped legacy backup was written by a version
+// before timestamps existed and counts as the oldest.
+func backupOlder(a, b string) bool {
+	ta, okA := backupTimestamp(a)
+	tb, okB := backupTimestamp(b)
+	switch {
+	case !okA:
+		return true
+	case !okB:
+		return false
+	default:
+		return ta.Before(tb)
 	}
 }
 

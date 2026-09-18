@@ -80,7 +80,7 @@ func TestInstallEndpointHookTargetHandlesPrime(t *testing.T) {
 		UserMode: true,
 	}
 
-	if err := installEndpointHookTarget("prime", cfg); err != nil {
+	if _, err := installEndpointHookTarget("prime", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(prime) returned error: %v", err)
 	}
 

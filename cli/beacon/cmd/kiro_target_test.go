@@ -30,7 +30,7 @@ func TestEndpointHooksInstallAndUninstallKiro(t *testing.T) {
 	endpointOpts.hookLevel = "user"
 
 	hooksPath := filepath.Join(home, ".kiro", "hooks", "beacon-endpoint.json")
-	if err := installEndpointHookTarget("kiro", cfg); err != nil {
+	if _, err := installEndpointHookTarget("kiro", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(kiro) returned error: %v", err)
 	}
 	data, err := os.ReadFile(hooksPath)
@@ -167,7 +167,7 @@ func TestEndpointHooksInstallKiroAtProjectLevel(t *testing.T) {
 	t.Cleanup(func() { endpointOpts.hookLevel = origLevel })
 	endpointOpts.hookLevel = "project"
 
-	if err := installEndpointHookTarget("kiro", cfg); err != nil {
+	if _, err := installEndpointHookTarget("kiro", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(kiro, project) returned error: %v", err)
 	}
 	// os.Getwd resolves symlinks on macOS, where TempDir hands back a /var path that is really
@@ -210,7 +210,7 @@ func TestEndpointHooksKiroLeavesOtherHookFilesAlone(t *testing.T) {
 		t.Fatalf("write their hook file: %v", err)
 	}
 
-	if err := installEndpointHookTarget("kiro", cfg); err != nil {
+	if _, err := installEndpointHookTarget("kiro", cfg); err != nil {
 		t.Fatalf("installEndpointHookTarget(kiro) returned error: %v", err)
 	}
 	if err := uninstallEndpointHookTarget("kiro", cfg); err != nil {

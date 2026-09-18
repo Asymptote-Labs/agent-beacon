@@ -248,9 +248,16 @@ brews:
       bin.install "beacon"
       bin.install "beacon-hooks"
       bin.install "beacon-otelcol"
+    # No post_install: Homebrew runs it inside its macOS sandbox, which denies writes to
+    # ~/Library/LaunchAgents, so a formula cannot install or load the scheduled inventory job
+    # (verified 2026-09-17: "operation not permitted"). The caveat below covers upgrades instead.
     caveats: |
       To configure local endpoint telemetry, run:
         beacon endpoint install
+
+      After a `brew upgrade`, refresh the endpoint's services (including the
+      scheduled inventory job) once:
+        beacon endpoint repair --user
 
       To forward telemetry to the Asymptote dashboard (opt-in, revocable), run:
         beacon endpoint connect
