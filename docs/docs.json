@@ -7,6 +7,9 @@
     "light": "#54A2FF",
     "dark": "#155DFC"
   },
+  "fonts": {
+    "family": "Familjen Grotesk"
+  },
   "favicon": "/images/favicon.ico",
   "navigation": {
     "style": "sidebar",

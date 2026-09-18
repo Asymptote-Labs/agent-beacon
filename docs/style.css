@@ -1,0 +1,14 @@
+:root {
+  --beacon-nav-font: "ABC ROM Mono", "ABC Rom Mono", ui-monospace,
+    "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+}
+
+#navbar,
+#navbar *,
+header,
+header *,
+footer,
+footer * {
+  font-family: var(--beacon-nav-font);
+}
