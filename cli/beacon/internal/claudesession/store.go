@@ -2,6 +2,7 @@ package claudesession
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -147,15 +148,31 @@ func (s *Store) Read(ref SessionRef) ([]Record, Stats, error) {
 }
 
 func decodeRecords(r io.Reader) ([]Record, Stats, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), MaxLineBytes)
+	br := bufio.NewReaderSize(r, 64*1024)
 	var records []Record
 	var stats Stats
 	lineNo := 0
-	for scanner.Scan() {
+	for {
+		line, status, readErr := readLine(br)
+		switch status {
+		case lineEOF:
+			return records, stats, nil
+		case linePartial:
+			stats.PartialTail = true
+			return records, stats, nil
+		case lineError:
+			return records, stats, readErr
+		case lineOversized:
+			lineNo++
+			stats.Lines = lineNo
+			stats.Malformed++
+			if stats.FirstError == nil {
+				stats.FirstError = fmt.Errorf("claude session line exceeds %d bytes", MaxLineBytes)
+			}
+			continue
+		}
 		lineNo++
 		stats.Lines = lineNo
-		line := scanner.Bytes()
 		if len(strings.TrimSpace(string(line))) == 0 {
 			continue
 		}
@@ -170,17 +187,53 @@ func decodeRecords(r io.Reader) ([]Record, Stats, error) {
 		stats.Decoded++
 		records = append(records, Record{Line: lineNo, Entry: *entry})
 	}
-	if err := scanner.Err(); err != nil {
-		if errors.Is(err, bufio.ErrTooLong) {
-			stats.Malformed++
-			if stats.FirstError == nil {
-				stats.FirstError = fmt.Errorf("claude session line exceeds %d bytes", MaxLineBytes)
-			}
-			return records, stats, nil
+}
+
+type lineStatus int
+
+const (
+	lineOK        lineStatus = iota
+	lineOversized            // consumed and discarded; too large
+	linePartial              // unterminated trailing fragment
+	lineEOF                  // clean end of stream
+	lineError                // I/O error
+)
+
+// readLine reads one JSONL line from br, handling oversized lines (consumed and
+// discarded so later lines are still reachable) and partial tails (unterminated
+// trailing fragments from a file still being written).
+func readLine(br *bufio.Reader) ([]byte, lineStatus, error) {
+	var buf []byte
+	oversized := false
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if oversized || len(buf)+len(chunk) > MaxLineBytes {
+			oversized = true
+			buf = nil
+		} else {
+			buf = append(buf, chunk...)
 		}
-		return records, stats, err
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if oversized {
+				return nil, lineOversized, nil
+			}
+			if len(buf) > 0 {
+				return nil, linePartial, nil
+			}
+			return nil, lineEOF, nil
+		}
+		if err != nil {
+			return nil, lineError, err
+		}
+		break
 	}
-	return records, stats, nil
+	if oversized {
+		return nil, lineOversized, nil
+	}
+	return bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r")), lineOK, nil
 }
 
 func readIndex(projectDir string) map[string]*IndexEntry {

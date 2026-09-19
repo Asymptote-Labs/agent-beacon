@@ -173,9 +173,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	}
 	for i, item := range mapped {
 		if err := emit(item.Event, opts); err != nil {
-			if i > 0 {
-				cursor.LastLine = mapped[i-1].SourceLine
-			}
+			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -191,6 +189,28 @@ func advanceCursor(cursor *Cursor, ref SessionRef, lines int) {
 	cursor.LastLine = lines
 	cursor.SizeBytes = ref.SizeBytes
 	cursor.ModTimeUnixMS = ref.ModTimeUnixMS
+}
+
+// advanceCursorPartial moves the cursor past source lines whose mapped events
+// were all emitted, so the next sweep retries only from the source line that
+// failed. failedIdx is the index into mapped of the event whose emit returned
+// an error.
+func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
+	var lastCompleteLine int
+	found := false
+	for i := range mapped {
+		if i == failedIdx {
+			break
+		}
+		if i+1 < len(mapped) && mapped[i+1].SourceLine != mapped[i].SourceLine {
+			lastCompleteLine = mapped[i].SourceLine
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+	cursor.LastLine = lastCompleteLine
 }
 
 func emit(event schema.Event, opts CollectOptions) error {
