@@ -191,8 +191,10 @@ func (s *Store) Read(ref SessionRef) ([]Record, ReadStats, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), MaxLineBytes)
 	var records []Record
 	stats := ReadStats{}
+	lastLineMalformed := false
 	for scanner.Scan() {
 		stats.Lines++
+		lastLineMalformed = false
 		text := strings.TrimSpace(scanner.Text())
 		if text == "" {
 			continue
@@ -200,6 +202,7 @@ func (s *Store) Read(ref SessionRef) ([]Record, ReadStats, error) {
 		var record Record
 		if err := json.Unmarshal([]byte(text), &record); err != nil {
 			stats.Malformed++
+			lastLineMalformed = true
 			continue
 		}
 		record.Line = stats.Lines
@@ -209,6 +212,23 @@ func (s *Store) Read(ref SessionRef) ([]Record, ReadStats, error) {
 	if err := scanner.Err(); err != nil {
 		stats.Partial = true
 		return records, stats, nil
+	}
+	// bufio.Scanner returns the last line even without a trailing newline, and
+	// Err() is nil. An unterminated tail is a record Factory is still writing;
+	// withhold it so the next sweep reads it complete.
+	if stats.Lines > 0 {
+		if pos, seekErr := file.Seek(-1, io.SeekEnd); seekErr == nil && pos >= 0 {
+			var buf [1]byte
+			if _, readErr := file.Read(buf[:]); readErr == nil && buf[0] != '\n' {
+				stats.Partial = true
+				if lastLineMalformed {
+					stats.Malformed--
+				} else if len(records) > 0 && records[len(records)-1].Line == stats.Lines {
+					records = records[:len(records)-1]
+				}
+				stats.Lines--
+			}
+		}
 	}
 	return records, stats, nil
 }

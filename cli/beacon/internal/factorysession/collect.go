@@ -210,8 +210,6 @@ func advanceCursorPartial(cursor *Cursor, ref SessionRef, mapped []MappedEvent, 
 			cursor.Started = true
 		}
 	}
-	cursor.ModTimeUnixMS = ref.ModTimeUnixMS
-	cursor.SizeBytes = ref.SizeBytes
 }
 
 func emit(event schema.Event, opts CollectOptions) error {

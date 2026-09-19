@@ -1,8 +1,11 @@
 package factorysession
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -242,11 +245,37 @@ func (m *mapper) append(record *Record, suffix string, ev schema.Event) {
 	if record.ID != "" {
 		ev.Raw["source_record_id"] = record.ID
 	}
+	dedupID := fmt.Sprintf("%s:%d:%s", m.ref.ID, record.Line, suffix)
+	ev.Event.ID = factoryEventID(dedupID)
 	m.out = append(m.out, MappedEvent{
 		SourceLine: record.Line,
-		DedupID:    fmt.Sprintf("%s:%d:%s", m.ref.ID, record.Line, suffix),
+		DedupID:    dedupID,
 		Event:      ev,
 	})
+}
+
+// factoryIDNamespace is the fixed UUID namespace for Factory dedup-coordinate
+// event IDs, distinct from both the content-based namespace in asymptoteobserve
+// and the fx namespace so the derivations can never collide.
+var factoryIDNamespace = [16]byte{
+	0x5e, 0x2a, 0x3f, 0x8c, 0x9b, 0x61, 0x4b, 0x1f,
+	0x6d, 0x7c, 0x0d, 0x5a, 0x14, 0x2c, 0x8e, 0x3a,
+}
+
+// factoryEventID derives a deterministic UUID v5 from a dedup coordinate so the
+// same Factory record always produces the same event ID regardless of how many
+// times it is read.
+func factoryEventID(dedupID string) string {
+	digest := sha1.New()
+	digest.Write(factoryIDNamespace[:])
+	io.WriteString(digest, dedupID)
+	var id [16]byte
+	copy(id[:], digest.Sum(nil))
+	id[6] = (id[6] & 0x0f) | 0x50 // version 5
+	id[8] = (id[8] & 0x3f) | 0x80 // RFC 4122 variant
+	out := make([]byte, 32)
+	hex.Encode(out, id[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
 }
 
 func messageTexts(msg *Message) []string {
