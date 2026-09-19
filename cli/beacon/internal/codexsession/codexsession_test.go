@@ -84,32 +84,31 @@ func TestMapCodexTranscriptProducesEndpointEvents(t *testing.T) {
 	}
 }
 
-func TestTokenCountLastWinsForMultipleSnapshotsPerTurn(t *testing.T) {
+func TestTokenCountCoversEveryCompletionInAMultiCallTurn(t *testing.T) {
 	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
 	records := decodeFixture(t, []string{
 		sessionMetaLine("sess-1", "/tmp/repo"),
 		turnContextLine("turn-1", "gpt-6-astra"),
 		messageLine("user", "msg-user", "build it"),
-		tokenCountLine("turn-1", 0, 0, 0, 0),
-		tokenCountLine("turn-1", 50, 20, 50, 20),
-		tokenCountLine("turn-1", 80, 30, 130, 50),
+		tokenCountLine("turn-1", &TokenUsage{}, &TokenUsage{}),
+		tokenCountLine("turn-1", &TokenUsage{InputTokens: 50, OutputTokens: 20}, &TokenUsage{InputTokens: 50, OutputTokens: 20}),
+		tokenCountLine("turn-1", &TokenUsage{InputTokens: 80, OutputTokens: 30}, &TokenUsage{InputTokens: 130, OutputTokens: 50}),
 	})
 	mapped := MapSession(ref, records, MapOptions{})
-	var usageEvents []schema.Event
+	var reported int64
+	var count int
 	for _, item := range mapped {
-		if item.Event.Event.Action == "token.usage" {
-			usageEvents = append(usageEvents, item.Event)
+		if item.Event.Event.Action != "token.usage" {
+			continue
 		}
+		count++
+		reported += *item.Event.GenAI.Usage.OutputTokens
 	}
-	if len(usageEvents) != 1 {
-		t.Fatalf("expected 1 token.usage event, got %d", len(usageEvents))
-	}
-	ev := usageEvents[0]
-	if ev.GenAI == nil || ev.GenAI.Usage == nil || ev.GenAI.Usage.OutputTokens == nil {
-		t.Fatal("missing usage on token.usage event")
-	}
-	if *ev.GenAI.Usage.OutputTokens != 30 {
-		t.Fatalf("output tokens = %d, want 30 (last snapshot)", *ev.GenAI.Usage.OutputTokens)
+	// Each model completion in the turn is reported once, so the reported
+	// output tokens add up to the turn's cumulative total_token_usage rather
+	// than to whichever single snapshot was kept.
+	if count != 2 || reported != 50 {
+		t.Fatalf("token.usage events = %d totalling %d output tokens, want 2 totalling 50", count, reported)
 	}
 }
 
@@ -260,10 +259,109 @@ func quote(s string) string {
 	return string(data)
 }
 
-func tokenCountLine(turnID string, lastInput, lastOutput, totalInput, totalOutput int64) string {
-	return `{"timestamp":"2026-09-19T22:00:04.000Z","type":"event_msg","payload":{"type":"token_count","turn_id":` + quote(turnID) + `,"info":{"last_token_usage":{"input_tokens":` + i64(lastInput) + `,"output_tokens":` + i64(lastOutput) + `},"total_token_usage":{"input_tokens":` + i64(totalInput) + `,"output_tokens":` + i64(totalOutput) + `}}}}`
-}
-
 func i64(v int64) string {
 	return strconv.FormatInt(v, 10)
+}
+
+func TestTokenCountEmitsEveryModelCompletionOnce(t *testing.T) {
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	first := &TokenUsage{InputTokens: 100, CachedInputTokens: 90, OutputTokens: 8, TotalTokens: 108}
+	second := &TokenUsage{InputTokens: 40, CachedInputTokens: 30, OutputTokens: 12, TotalTokens: 52}
+	records := decodeFixture(t, []string{
+		sessionMetaLine("sess-1", "/tmp/repo"),
+		turnContextLine("turn-1", "gpt-6-astra"),
+		// An empty snapshot before the first completion carries no usage.
+		tokenCountLine("turn-1", &TokenUsage{}, &TokenUsage{}),
+		tokenCountLine("turn-1", first, first),
+		// Codex re-emits the same snapshot without a new completion.
+		tokenCountLine("turn-1", first, first),
+		tokenCountLine("turn-1", second, &TokenUsage{InputTokens: 140, CachedInputTokens: 120, OutputTokens: 20, TotalTokens: 160}),
+	})
+
+	mapped := MapSession(ref, records, MapOptions{})
+	var outputs []int64
+	for _, item := range mapped {
+		if item.Event.Event.Action != "token.usage" {
+			continue
+		}
+		usage := item.Event.GenAI.Usage
+		if usage == nil || usage.OutputTokens == nil {
+			t.Fatalf("token.usage missing output tokens: %+v", usage)
+		}
+		outputs = append(outputs, *usage.OutputTokens)
+		if err := item.Event.Validate(); err != nil {
+			t.Fatalf("token.usage failed validation: %v", err)
+		}
+	}
+	if len(outputs) != 2 || outputs[0] != 8 || outputs[1] != 12 {
+		t.Fatalf("token.usage output tokens = %v, want [8 12]", outputs)
+	}
+}
+
+func TestTokenCountYieldsToTokenUsageRecord(t *testing.T) {
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	snapshot := &TokenUsage{InputTokens: 120, CachedInputTokens: 90, OutputTokens: 8, TotalTokens: 128}
+	records := decodeFixture(t, []string{
+		sessionMetaLine("sess-1", "/tmp/repo"),
+		turnContextLine("turn-1", "gpt-6-astra"),
+		tokenCountLine("turn-1", snapshot, snapshot),
+		tokenUsageLine("sess-1", "turn-1", 120, 90, 10, 8, 2),
+	})
+
+	mapped := MapSession(ref, records, MapOptions{})
+	var sources []string
+	for _, item := range mapped {
+		if item.Event.Event.Action != "token.usage" {
+			continue
+		}
+		raw, _ := item.Event.Raw["codex_session"].(map[string]interface{})
+		source, _ := raw["source"].(string)
+		sources = append(sources, source)
+	}
+	if len(sources) != 1 || sources[0] != "codex_session_token_usage_record" {
+		t.Fatalf("token.usage sources = %v, want the token_usage_record only", sources)
+	}
+}
+
+func TestTokenCountWithoutLastUsageReportsDelta(t *testing.T) {
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	records := decodeFixture(t, []string{
+		sessionMetaLine("sess-1", "/tmp/repo"),
+		turnContextLine("turn-1", "gpt-6-astra"),
+		tokenCountLine("turn-1", nil, &TokenUsage{InputTokens: 100, CachedInputTokens: 90, OutputTokens: 8, TotalTokens: 108}),
+		tokenCountLine("turn-1", nil, &TokenUsage{InputTokens: 140, CachedInputTokens: 120, OutputTokens: 20, TotalTokens: 160}),
+	})
+
+	mapped := MapSession(ref, records, MapOptions{})
+	var outputs []int64
+	for _, item := range mapped {
+		if item.Event.Event.Action != "token.usage" {
+			continue
+		}
+		outputs = append(outputs, *item.Event.GenAI.Usage.OutputTokens)
+	}
+	if len(outputs) != 2 || outputs[0] != 8 || outputs[1] != 12 {
+		t.Fatalf("token.usage output tokens = %v, want [8 12] from the cumulative delta", outputs)
+	}
+}
+
+func tokenCountLine(turnID string, last, total *TokenUsage) string {
+	info := map[string]interface{}{"model_context_window": 272000}
+	if last != nil {
+		info["last_token_usage"] = last
+	}
+	if total != nil {
+		info["total_token_usage"] = total
+	}
+	entry := map[string]interface{}{
+		"timestamp": "2026-09-19T22:00:04.500Z",
+		"type":      "event_msg",
+		"payload": map[string]interface{}{
+			"type":    "token_count",
+			"turn_id": turnID,
+			"info":    info,
+		},
+	}
+	data, _ := json.Marshal(entry)
+	return string(data)
 }

@@ -42,8 +42,11 @@ type mapper struct {
 	turnID    string
 	started   bool
 
-	tokenRecordTurns      map[string]bool
-	emittedTokenCountIdx  map[string]int
+	tokenRecordTurns map[string]bool
+	// tokenCountTotals remembers the last cumulative total_token_usage seen per
+	// turn so repeated token_count snapshots are skipped while each new model
+	// completion inside a turn is still counted once.
+	tokenCountTotals map[string]TokenUsage
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
@@ -54,13 +57,13 @@ func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent
 		}
 	}
 	m := &mapper{
-		ref:                    ref,
-		opts:                   opts,
-		tools:                  map[string]codexToolCall{},
-		sessionID:              ref.ID,
-		workspace:              ref.Workspace,
-		tokenRecordTurns:      tokenRecordTurns,
-		emittedTokenCountIdx:  map[string]int{},
+		ref:              ref,
+		opts:             opts,
+		tools:            map[string]codexToolCall{},
+		sessionID:        ref.ID,
+		workspace:        ref.Workspace,
+		tokenRecordTurns: tokenRecordTurns,
+		tokenCountTotals: map[string]TokenUsage{},
 	}
 	for i := range records {
 		m.consume(records[i])
@@ -169,6 +172,12 @@ func (m *mapper) consumeEventMessage(record Record, emit bool) {
 	if msg.TurnID != "" {
 		m.turnID = msg.TurnID
 	}
+	if msg.Type == "token_count" {
+		// Handled before the emit guard so the cumulative totals of records
+		// already collected still inform the next sweep's deduplication.
+		m.consumeTokenCount(record, msg, emit)
+		return
+	}
 	if !emit {
 		return
 	}
@@ -186,20 +195,39 @@ func (m *mapper) consumeEventMessage(record Record, emit bool) {
 			},
 		}
 		m.append(record, "task.complete", ev)
-	case "token_count":
-		m.consumeTokenCount(record, msg)
 	}
 }
 
-func (m *mapper) consumeTokenCount(record Record, msg *EventMessage) {
+func (m *mapper) consumeTokenCount(record Record, msg *EventMessage, emit bool) {
 	if msg.Info == nil {
 		return
 	}
 	turnID := firstNonEmpty(msg.TurnID, m.turnID)
+	total := msg.Info.TotalTokenUsage
+	previous, hadPrevious := m.tokenCountTotals[turnID]
+	if total != nil {
+		if hadPrevious && previous == *total {
+			// Codex re-emits token_count without a new model completion (a
+			// rate-limit refresh, for example); nothing was spent since the
+			// last snapshot.
+			return
+		}
+		m.tokenCountTotals[turnID] = *total
+	}
 	if turnID != "" && m.tokenRecordTurns[turnID] {
+		// token_usage_record carries the authoritative per-turn total.
 		return
 	}
-	usage := usageFromCodex(firstUsage(msg.Info.LastTokenUsage, msg.Info.TotalTokenUsage))
+	if !emit {
+		return
+	}
+	snapshot := msg.Info.LastTokenUsage
+	if snapshot == nil {
+		// Without the per-completion snapshot, report what the cumulative
+		// total grew by rather than the running total itself.
+		snapshot = deltaTokenUsage(total, previous, hadPrevious)
+	}
+	usage := usageFromCodex(snapshot)
 	if usage == nil {
 		return
 	}
@@ -217,17 +245,7 @@ func (m *mapper) consumeTokenCount(record Record, msg *EventMessage) {
 			"source":      "codex_session_token_count",
 		},
 	}
-	suffix := "usage.token_count." + firstNonEmpty(msg.TurnID, itoa(record.Line))
-	if turnID != "" {
-		if idx, ok := m.emittedTokenCountIdx[turnID]; ok {
-			coordinate := firstNonEmpty(m.sessionID, m.ref.ID, m.ref.Path) + ":" + itoa(record.Line) + ":" + suffix
-			ev.Event.ID = codexEventID(coordinate)
-			m.out[idx] = MappedEvent{DedupID: ev.Event.ID, SourceLine: record.Line, Event: ev}
-			return
-		}
-		m.emittedTokenCountIdx[turnID] = len(m.out)
-	}
-	m.append(record, suffix, ev)
+	m.append(record, "usage.token_count."+firstNonEmpty(msg.TurnID, itoa(record.Line)), ev)
 }
 
 func (m *mapper) consumeTokenUsageRecord(record Record, emit bool) {
@@ -512,7 +530,7 @@ func toolResultGenAI(call codexToolCall, result string) *schema.GenAIInfo {
 }
 
 func usageFromCodex(raw *TokenUsage) *schema.GenAIUsageInfo {
-	if raw == nil {
+	if raw == nil || *raw == (TokenUsage{}) {
 		return nil
 	}
 	usage := &schema.GenAIUsageInfo{}
@@ -530,6 +548,27 @@ func usageFromCodex(raw *TokenUsage) *schema.GenAIUsageInfo {
 	usage.OutputTokens = &output
 	usage.Reasoning = &schema.GenAIUsageReasoningInfo{OutputTokens: &reasoning}
 	return usage
+}
+
+// deltaTokenUsage reports how much the cumulative total grew since the previous
+// snapshot, so a session without per-completion usage is not counted as the
+// running total every time it is observed.
+func deltaTokenUsage(total *TokenUsage, previous TokenUsage, hadPrevious bool) *TokenUsage {
+	if total == nil {
+		return nil
+	}
+	if !hadPrevious {
+		return total
+	}
+	delta := TokenUsage{
+		InputTokens:           max64(total.InputTokens-previous.InputTokens, 0),
+		CachedInputTokens:     max64(total.CachedInputTokens-previous.CachedInputTokens, 0),
+		CacheWriteInputTokens: max64(total.CacheWriteInputTokens-previous.CacheWriteInputTokens, 0),
+		OutputTokens:          max64(total.OutputTokens-previous.OutputTokens, 0),
+		ReasoningOutputTokens: max64(total.ReasoningOutputTokens-previous.ReasoningOutputTokens, 0),
+		TotalTokens:           max64(total.TotalTokens-previous.TotalTokens, 0),
+	}
+	return &delta
 }
 
 func firstUsage(values ...*TokenUsage) *TokenUsage {
