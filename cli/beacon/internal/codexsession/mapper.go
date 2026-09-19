@@ -43,10 +43,11 @@ type mapper struct {
 	started   bool
 
 	tokenRecordTurns map[string]bool
-	// tokenCountTotals remembers the last cumulative total_token_usage seen per
-	// turn so repeated token_count snapshots are skipped while each new model
-	// completion inside a turn is still counted once.
-	tokenCountTotals map[string]TokenUsage
+	// lastSessionTotal remembers the last cumulative total_token_usage seen
+	// across the whole session so repeated snapshots are skipped while each
+	// new model completion is still counted once.  The total is session-scoped
+	// because Codex's total_token_usage grows across turns.
+	lastSessionTotal *TokenUsage
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
@@ -63,7 +64,6 @@ func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent
 		sessionID:        ref.ID,
 		workspace:        ref.Workspace,
 		tokenRecordTurns: tokenRecordTurns,
-		tokenCountTotals: map[string]TokenUsage{},
 	}
 	for i := range records {
 		m.consume(records[i])
@@ -204,7 +204,11 @@ func (m *mapper) consumeTokenCount(record Record, msg *EventMessage, emit bool) 
 	}
 	turnID := firstNonEmpty(msg.TurnID, m.turnID)
 	total := msg.Info.TotalTokenUsage
-	previous, hadPrevious := m.tokenCountTotals[turnID]
+	hadPrevious := m.lastSessionTotal != nil
+	var previous TokenUsage
+	if hadPrevious {
+		previous = *m.lastSessionTotal
+	}
 	if total != nil {
 		if hadPrevious && previous == *total {
 			// Codex re-emits token_count without a new model completion (a
@@ -212,7 +216,8 @@ func (m *mapper) consumeTokenCount(record Record, msg *EventMessage, emit bool) 
 			// last snapshot.
 			return
 		}
-		m.tokenCountTotals[turnID] = *total
+		t := *total
+		m.lastSessionTotal = &t
 	}
 	if turnID != "" && m.tokenRecordTurns[turnID] {
 		// token_usage_record carries the authoritative per-turn total.
