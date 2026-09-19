@@ -121,6 +121,19 @@ func (m *mapper) consumeResponseItem(record Record, emit bool) {
 		if emit {
 			m.emitToolResult(record, item)
 		}
+	case "function_call":
+		input := parseFunctionArguments(item.Arguments, item.Input)
+		call := codexToolCall{ID: item.CallID, Name: item.Name, Input: input}
+		if call.ID != "" {
+			m.tools[call.ID] = call
+		}
+		if emit {
+			m.emitToolInvoked(record, call)
+		}
+	case "function_call_output":
+		if emit {
+			m.emitToolResult(record, item)
+		}
 	}
 }
 
@@ -145,21 +158,51 @@ func (m *mapper) consumeEventMessage(record Record, emit bool) {
 	if msg.TurnID != "" {
 		m.turnID = msg.TurnID
 	}
-	if !emit || msg.Type != "task_complete" {
+	if !emit {
 		return
 	}
-	ev := m.base(record, "session.status", "session", schema.SeverityInfo, schema.FidelityObserved, "Codex task completed")
+	switch msg.Type {
+	case "task_complete":
+		ev := m.base(record, "session.status", "session", schema.SeverityInfo, schema.FidelityObserved, "Codex task completed")
+		ev.Raw = map[string]interface{}{
+			"codex_session": map[string]interface{}{
+				"source_path":            recordSourcePath(m.ref),
+				"line":                   record.Line,
+				"payload_type":           msg.Type,
+				"turn_id":                msg.TurnID,
+				"duration_ms":            msg.DurationMS,
+				"time_to_first_token_ms": msg.TimeToFirstTokenMS,
+			},
+		}
+		m.append(record, "task.complete", ev)
+	case "token_count":
+		m.consumeTokenCount(record, msg)
+	}
+}
+
+func (m *mapper) consumeTokenCount(record Record, msg *EventMessage) {
+	if msg.Info == nil {
+		return
+	}
+	usage := usageFromCodex(firstUsage(msg.Info.LastTokenUsage, msg.Info.TotalTokenUsage))
+	if usage == nil {
+		return
+	}
+	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, schema.FidelityObserved, "Codex token usage observed")
+	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Usage: usage})
+	if ev.GenAI == nil {
+		ev.GenAI = &schema.GenAIInfo{}
+	}
+	ev.GenAI.Conversation = &schema.GenAIConversationInfo{ID: m.sessionID}
 	ev.Raw = map[string]interface{}{
 		"codex_session": map[string]interface{}{
-			"source_path":            recordSourcePath(m.ref),
-			"line":                   record.Line,
-			"payload_type":           msg.Type,
-			"turn_id":                msg.TurnID,
-			"duration_ms":            msg.DurationMS,
-			"time_to_first_token_ms": msg.TimeToFirstTokenMS,
+			"source_path": recordSourcePath(m.ref),
+			"line":        record.Line,
+			"turn_id":     msg.TurnID,
+			"source":      "codex_session_token_count",
 		},
 	}
-	m.append(record, "task.complete", ev)
+	m.append(record, "usage.token_count."+firstNonEmpty(msg.TurnID, itoa(record.Line)), ev)
 }
 
 func (m *mapper) consumeTokenUsageRecord(record Record, emit bool) {
@@ -371,6 +414,18 @@ func toolOutputText(value interface{}) string {
 		data, _ := json.Marshal(value)
 		return string(data)
 	}
+}
+
+func parseFunctionArguments(args string, fallback interface{}) interface{} {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return fallback
+	}
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		return args
+	}
+	return parsed
 }
 
 func commandFromTool(call codexToolCall) string {

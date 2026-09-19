@@ -2,6 +2,7 @@ package codexsession
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,15 +135,30 @@ func (s *Store) Read(ref SessionRef) ([]Record, Stats, error) {
 }
 
 func decodeRecords(r io.Reader) ([]Record, Stats, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), MaxLineBytes)
+	br := bufio.NewReaderSize(r, 64*1024)
 	var records []Record
 	var stats Stats
 	lineNo := 0
-	for scanner.Scan() {
+	for {
+		line, partial, oversized, err := readLine(br)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if partial {
+					stats.PartialTail = true
+				}
+				break
+			}
+			return records, stats, err
+		}
 		lineNo++
 		stats.Lines = lineNo
-		line := scanner.Bytes()
+		if oversized {
+			stats.Malformed++
+			if stats.FirstError == nil {
+				stats.FirstError = fmt.Errorf("codex session line exceeds %d bytes", MaxLineBytes)
+			}
+			continue
+		}
 		if len(strings.TrimSpace(string(line))) == 0 {
 			continue
 		}
@@ -157,17 +173,48 @@ func decodeRecords(r io.Reader) ([]Record, Stats, error) {
 		stats.Decoded++
 		records = append(records, Record{Line: lineNo, Entry: *entry})
 	}
-	if err := scanner.Err(); err != nil {
-		if errors.Is(err, bufio.ErrTooLong) {
-			stats.Malformed++
-			if stats.FirstError == nil {
-				stats.FirstError = fmt.Errorf("codex session line exceeds %d bytes", MaxLineBytes)
-			}
-			return records, stats, nil
-		}
-		return records, stats, err
-	}
 	return records, stats, nil
+}
+
+// readLine returns one complete line without its trailing newline.
+//
+// Three endings are distinguished. A complete line (terminated by \n) is returned with partial
+// and oversized both false. A trailing fragment with no newline is a record Codex is still
+// writing: it is reported as partial so the caller can set PartialTail and avoid advancing the
+// cursor past an incomplete record. A line longer than MaxLineBytes is consumed and discarded
+// as oversized so a corrupt file cannot dictate memory use.
+func readLine(br *bufio.Reader) (line []byte, partial, oversized bool, err error) {
+	var buf []byte
+	for {
+		chunk, readErr := br.ReadSlice('\n')
+		if oversized || len(buf)+len(chunk) > MaxLineBytes {
+			oversized = true
+			buf = nil
+		} else {
+			buf = append(buf, chunk...)
+		}
+		if errors.Is(readErr, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(readErr, io.EOF) {
+			if oversized {
+				return nil, false, true, nil
+			}
+			if len(buf) > 0 {
+				return buf, true, false, io.EOF
+			}
+			return nil, false, false, io.EOF
+		}
+		if readErr != nil {
+			return nil, false, false, readErr
+		}
+		break
+	}
+	if oversized {
+		return nil, false, true, nil
+	}
+	line = bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r"))
+	return line, false, false, nil
 }
 
 func (s *Store) readIndex() map[string]*IndexEntry {

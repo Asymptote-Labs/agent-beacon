@@ -56,15 +56,16 @@ type TurnContext struct {
 }
 
 type ResponseItem struct {
-	Type    string      `json:"type"`
-	ID      string      `json:"id,omitempty"`
-	Role    string      `json:"role,omitempty"`
-	Content interface{} `json:"content,omitempty"`
-	Status  string      `json:"status,omitempty"`
-	CallID  string      `json:"call_id,omitempty"`
-	Name    string      `json:"name,omitempty"`
-	Input   interface{} `json:"input,omitempty"`
-	Output  interface{} `json:"output,omitempty"`
+	Type      string      `json:"type"`
+	ID        string      `json:"id,omitempty"`
+	Role      string      `json:"role,omitempty"`
+	Content   interface{} `json:"content,omitempty"`
+	Status    string      `json:"status,omitempty"`
+	CallID    string      `json:"call_id,omitempty"`
+	Name      string      `json:"name,omitempty"`
+	Input     interface{} `json:"input,omitempty"`
+	Output    interface{} `json:"output,omitempty"`
+	Arguments string      `json:"arguments,omitempty"`
 }
 
 type EventMessage struct {
