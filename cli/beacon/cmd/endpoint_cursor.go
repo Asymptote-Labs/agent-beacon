@@ -192,12 +192,15 @@ func runEndpointCursorStatus(cmd *cobra.Command, args []string) error {
 		report.Traces = append(report.Traces, status)
 	}
 	if endpointOpts.jsonOutput {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+		if encErr := json.NewEncoder(cmd.OutOrStdout()).Encode(report); encErr != nil {
+			return encErr
+		}
+		return listErr
 	}
 	out := cmd.OutOrStdout()
 	if !report.Present {
 		fmt.Fprintf(out, "cursor sessions: none (%s and %s do not exist)\n", report.GlobalDBPath, report.ProjectsDir)
-		return nil
+		return listErr
 	}
 	fmt.Fprintf(out, "cursor sessions: %d traces\n", len(report.Traces))
 	for _, trace := range report.Traces {
@@ -207,7 +210,7 @@ func runEndpointCursorStatus(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(out, "  %s  %s  %s  %s\n", trace.ID, trace.Source, state, strings.TrimSpace(trace.Workspace))
 	}
-	return nil
+	return listErr
 }
 
 func resolveCursorStatePath(override string, userMode bool) string {
