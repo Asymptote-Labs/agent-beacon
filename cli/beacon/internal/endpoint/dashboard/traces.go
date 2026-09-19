@@ -74,9 +74,9 @@ func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
 	filtered := filterTraceSummaries(traces, query)
 	if needle := strings.TrimSpace(query.Q); needle != "" {
 		matched := make([]TraceSummaryV1, 0, len(filtered))
-		for _, s := range filtered {
-			if traceSummaryMatches(s, needle) {
-				matched = append(matched, s)
+		for _, summary := range filtered {
+			if traceAggregateMatches(traces[summary.ID], needle) {
+				matched = append(matched, summary)
 			}
 		}
 		filtered = matched
@@ -227,10 +227,11 @@ func readTraceAggregates(path string, query EventQuery) (map[string]*traceAggreg
 		agg := traces[id]
 		if agg == nil {
 			agg = &traceAggregate{
-				summary: newTraceSummary(id, event),
-				spans:   map[string]*TraceSpanV1{},
-				models:  map[string]bool{},
-				methods: map[string]bool{},
+				summary:       newTraceSummary(id, event),
+				spans:         map[string]*TraceSpanV1{},
+				models:        map[string]bool{},
+				methods:       map[string]bool{},
+				titlePriority: -1,
 			}
 			traces[id] = agg
 		}
@@ -276,7 +277,9 @@ func (a *traceAggregate) update(event schema.Event, traceEvent TraceEventV1) {
 	}
 	if p := traceTitlePriority(traceEvent); p > a.titlePriority {
 		a.summary.Title = traceTitle(event, traceEvent)
-		a.summary.Preview = tracePreview(traceEvent)
+		if preview := tracePreview(traceEvent); preview != "" {
+			a.summary.Preview = preview
+		}
 		a.titlePriority = p
 	}
 	if event.Session != nil && a.summary.Session == nil {
@@ -551,6 +554,13 @@ func traceActor(event schema.Event) string {
 	}
 }
 
+// traceTitlePriority ranks an event as a source for the trace title and
+// preview. A trace usually opens on lifecycle noise (session.started,
+// session.context), so a later user prompt outranks it and takes the label;
+// ties keep the earlier event, so the first prompt names the trace. The
+// aggregate seeds this at -1 rather than 0, so a trace that only ever carries
+// lifecycle events is still named by its first one rather than falling back to
+// its raw trace ID in finish().
 func traceTitlePriority(event TraceEventV1) int {
 	switch event.Type {
 	case "user_message":
@@ -736,6 +746,25 @@ func filterTraceSummaries(traces map[string]*traceAggregate, query TraceQuery) [
 		out = append(out, agg.summary)
 	}
 	return out
+}
+
+// traceAggregateMatches keeps a trace whose summary or any of its events match
+// the free-text query. Matching the summary alone would hide a trace whose only
+// mention of the term is in a command, a path, or a message -- the events the
+// list is built from but does not show.
+func traceAggregateMatches(agg *traceAggregate, needle string) bool {
+	if agg == nil {
+		return false
+	}
+	if traceSummaryMatches(agg.summary, needle) {
+		return true
+	}
+	for _, event := range agg.events {
+		if traceEventMatches(event, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortTraceSummaries(traces []TraceSummaryV1) {
