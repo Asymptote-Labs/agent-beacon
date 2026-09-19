@@ -90,10 +90,7 @@ func (s *Store) List() ([]TraceRef, error) {
 		}
 		return refs[i].ID < refs[j].ID
 	})
-	if len(refs) == 0 && len(errs) > 0 {
-		return refs, errors.Join(errs...)
-	}
-	return refs, nil
+	return refs, errors.Join(errs...)
 }
 
 func (s *Store) listGlobalStorage() ([]TraceRef, error) {

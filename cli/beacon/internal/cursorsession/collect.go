@@ -115,9 +115,9 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
-	refs, err := store.List()
-	if err != nil {
-		return summary, err
+	refs, listErr := store.List()
+	if listErr != nil && len(refs) == 0 {
+		return summary, listErr
 	}
 	summary.Traces = len(refs)
 	state, err := LoadState(opts.StatePath)
@@ -131,6 +131,10 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}()
 
 	var errs []error
+	if listErr != nil {
+		summary.Errors++
+		errs = append(errs, listErr)
+	}
 	for _, ref := range refs {
 		changed, collectErr := collectTrace(store, ref, state, opts, &summary)
 		if collectErr != nil {
