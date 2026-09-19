@@ -113,6 +113,11 @@ var usageExpectation = map[string]struct {
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
 	"kiro":          {ExpectNone, "hook payloads carry no token counts"},
+	// The bridge builds each hook payload from a fixed base plus per-event fields, and no usage
+	// count is among them on any of the seven events it supports. dsh does record usage -- in its
+	// own session log -- but nothing in the hook surface exposes it, so a DeepSeek Harness session
+	// reporting no tokens is correct rather than silent.
+	"deepseek_harness": {ExpectNone, "the hook bridge's payloads carry no token counts"},
 }
 
 // InstalledConfig is the part of a config-scanner row that install detection reads.
