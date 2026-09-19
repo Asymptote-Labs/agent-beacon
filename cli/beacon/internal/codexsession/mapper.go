@@ -41,15 +41,26 @@ type mapper struct {
 	model     string
 	turnID    string
 	started   bool
+
+	tokenRecordTurns       map[string]bool
+	emittedTokenCountTurns map[string]bool
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
+	tokenRecordTurns := map[string]bool{}
+	for _, r := range records {
+		if r.Entry.TokenUsageRecord != nil && r.Entry.TokenUsageRecord.TurnID != "" {
+			tokenRecordTurns[r.Entry.TokenUsageRecord.TurnID] = true
+		}
+	}
 	m := &mapper{
-		ref:       ref,
-		opts:      opts,
-		tools:     map[string]codexToolCall{},
-		sessionID: ref.ID,
-		workspace: ref.Workspace,
+		ref:                    ref,
+		opts:                   opts,
+		tools:                  map[string]codexToolCall{},
+		sessionID:              ref.ID,
+		workspace:              ref.Workspace,
+		tokenRecordTurns:       tokenRecordTurns,
+		emittedTokenCountTurns: map[string]bool{},
 	}
 	for i := range records {
 		m.consume(records[i])
@@ -184,9 +195,19 @@ func (m *mapper) consumeTokenCount(record Record, msg *EventMessage) {
 	if msg.Info == nil {
 		return
 	}
+	turnID := firstNonEmpty(msg.TurnID, m.turnID)
+	if turnID != "" && m.tokenRecordTurns[turnID] {
+		return
+	}
+	if turnID != "" && m.emittedTokenCountTurns[turnID] {
+		return
+	}
 	usage := usageFromCodex(firstUsage(msg.Info.LastTokenUsage, msg.Info.TotalTokenUsage))
 	if usage == nil {
 		return
+	}
+	if turnID != "" {
+		m.emittedTokenCountTurns[turnID] = true
 	}
 	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, schema.FidelityObserved, "Codex token usage observed")
 	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Usage: usage})
@@ -433,7 +454,7 @@ func commandFromTool(call codexToolCall) string {
 	case string:
 		return strings.TrimSpace(v)
 	case map[string]interface{}:
-		return firstString(v, "command", "cmd", "shell_command")
+		return firstStringOrJoinedArray(v, "command", "cmd", "shell_command")
 	default:
 		if call.Input == nil {
 			return ""
@@ -441,6 +462,36 @@ func commandFromTool(call codexToolCall) string {
 		data, _ := json.Marshal(call.Input)
 		return string(data)
 	}
+}
+
+func firstStringOrJoinedArray(m map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		val, ok := m[key]
+		if !ok {
+			continue
+		}
+		switch v := val.(type) {
+		case string:
+			if v != "" {
+				return v
+			}
+		case []interface{}:
+			if s := joinStringSlice(v); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func joinStringSlice(arr []interface{}) string {
+	parts := make([]string, 0, len(arr))
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
 func isCommandTool(call codexToolCall) bool {
