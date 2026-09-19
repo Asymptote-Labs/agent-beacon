@@ -24,6 +24,20 @@ Codex CLI exports local OpenTelemetry logs and traces to Asymptote's localhost c
 
 Use `--include-codex-spans` during install or repair only when you need every raw Codex span for troubleshooting. It is not required for token attribution.
 
+### Session-file recovery
+
+Beacon can also recover Codex CLI activity from Codex's local rollout files with an explicit command:
+
+```bash
+beacon endpoint codex sync
+```
+
+This reads committed files under `~/.codex/sessions` and appends mapped events to the local runtime log with `harness.collection_method=poll`. It is useful for historical sessions or sessions that ran before OTLP was configured. The sync path is not part of hook execution and cannot approve, deny, or delay tool calls.
+
+Use `beacon endpoint codex sync --print` to preview mapped events without writing the runtime log or advancing the cursor. Use `beacon endpoint codex status` to see which session files are present and how far Beacon has read each one.
+
+Codex rollout files can contain prompts, assistant responses, tool inputs, command output, and code. Sync is therefore explicit: Beacon does not read `~/.codex/sessions` during normal Codex hook execution, and it never reads `~/.codex/auth.json`.
+
 ### Token usage and cost
 
 `beacon endpoint install` configures Codex's log and trace exporters in `~/.codex/config.toml`. Beacon normalizes the completed turn span into the same canonical `gen_ai.usage` fields used for Claude Code: uncached `input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens`, and `reasoning.output_tokens`. Codex's input count includes both cache reads and cache writes, so Beacon subtracts both before recording uncached input.
@@ -36,11 +50,9 @@ Legacy `codex.turn.token_usage` metrics in older logs remain reportable, but the
 
 See [How token attribution works](/cli/token-usage#how-token-attribution-works) for the cross-runtime model.
 
-### Rollout JSONL recovery
+### Rollout JSONL recovery behavior
 
-Beacon does not continuously scan `~/.codex/sessions` or ingest rollout transcripts. Turn traces are structured, attributable, and avoid reading files that can contain prompts, tool output, and code.
-
-If historical backfill is added later, it should be an explicit recovery action over a hook-provided transcript path. A safe parser must read only session metadata, turn boundaries, and `token_count` records; compute positive field-by-field deltas from cumulative totals; handle repeated snapshots, forks, and resumes; and atomically checkpoint complete JSONL lines. It must never inspect `auth.json`.
+The Codex session sync reads complete JSONL lines and checkpoints by file path and line number. It maps session metadata, prompts, assistant messages, custom tool calls and outputs, task completion, and `token_usage_record` rows. Token input is normalized into Beacon's disjoint `gen_ai.usage` fields by subtracting cache reads and cache writes from Codex's inclusive input count.
 
 ## CI support
 

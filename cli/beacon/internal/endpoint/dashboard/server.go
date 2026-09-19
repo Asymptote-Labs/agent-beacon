@@ -145,6 +145,51 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		writeJSON(w, events)
 	})
+	mux.HandleFunc("/api/traces", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		traces, err := ReadTraceList(opts.LogPath, ParseTraceQuery(r, defaultEventLimit))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, traces)
+	})
+	mux.HandleFunc("/api/trace/search", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		results, err := SearchTraces(opts.LogPath, ParseTraceQuery(r, defaultEventLimit))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, results)
+	})
+	mux.HandleFunc("/api/trace", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		id := r.URL.Query().Get("id")
+		if strings.TrimSpace(id) == "" {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("trace id is required"))
+			return
+		}
+		trace, ok, err := ShowTrace(opts.LogPath, id, ParseTraceQuery(r, defaultEventLimit))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("trace not found"))
+			return
+		}
+		writeJSON(w, trace)
+	})
 	mux.HandleFunc("/api/tokens", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
