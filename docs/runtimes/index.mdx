@@ -25,6 +25,7 @@ These integrations are grouped by where the agent runs and how telemetry is coll
 | [Cline](/runtimes/cline) | Managed plugin hooks | Prompts, task lifecycle, tool lifecycle, commands, file reads and edits with diffs, MCP activity, and token usage |
 | [Codex CLI](/runtimes/codex-cli) | Local OTLP logs and a selective usage trace plus endpoint hooks | Session, prompt, approval, and tool-result activity plus per-user/session/model turn token usage |
 | [Cursor](/runtimes/cursor) | Native hooks | Prompt, tool, shell command, MCP-like, approval, and file edit telemetry |
+| [DeepSeek Harness](/runtimes/deepseek-harness) | DeepSeek's own Claude Code hook bridge, mounted by a Beacon row in `$DSH_HOME/cordis.patch.yml` at a hooks file Beacon owns | Session start, prompts, pre-tool and post-tool activity, commands with output and exit code, file reads and edits with diffs, MCP tool calls, subagent start and stop, and the turn-closing stop. No approval decisions, token usage, or failed-tool events, because the bridge exposes none of them on a hook |
 | [Devin CLI](/runtimes/devin) | Native hooks | Session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry |
 | [Devin Desktop](/runtimes/devin-desktop) | Cascade/Windsurf hooks | Prompt, command, MCP tool, file read, and file write telemetry where Desktop exposes Cascade hook payloads |
 | [Factory Droid](/runtimes/factory-droid) | OTLP HTTP plus optional hooks | Session, prompt, write/edit/create tool use, stop, session-end, and available OTLP telemetry |
