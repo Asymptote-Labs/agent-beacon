@@ -24,6 +24,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"omo":         "omo_senpi",
 		"muse":        "muse_code",
 		"goose":       "goose",
+		"dsh":         "deepseek_harness",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -756,5 +757,76 @@ func TestGooseCanonicalNameIsStableUnderRenormalization(t *testing.T) {
 	once := NormalizeHarnessName("codename goose")
 	if got := NormalizeHarnessName(once); got != once {
 		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
+	}
+}
+
+func TestDeepSeekHarnessSpellingsConvergeOnDeepSeekHarness(t *testing.T) {
+	for _, in := range []string{
+		"dsh", "DSH", " dsh ", "Dsh", "dsh_cli", "dsh-cli", "DSH CLI", "dshcli",
+		"deepseek_harness", "deepseek-harness", "DeepSeek Harness", "deepseekharness",
+		"deepseek_ai/dsh", "deepseek-ai/dsh", "@deepseek-ai/dsh", "deepseek_dsh", "deepseek-dsh",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "deepseek_harness" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "deepseek_harness")
+			}
+		})
+	}
+}
+
+// The reason the DeepSeek Harness case is an equality match rather than a Contains rule, in its
+// model half. DeepSeek ships the agent and a model family under one name, so every DeepSeek model
+// id begins with the letters the harness does. A substring rule would file an event whose harness
+// attribute carried one of those model strings as a DeepSeek Harness session, and a reader could
+// not tell the misattribution from the real thing.
+func TestDeepSeekModelSpellingsAreNotTheDeepSeekHarness(t *testing.T) {
+	for _, name := range []string{
+		"deepseek-chat", "deepseek-reasoner", "deepseek-v3", "deepseek-v3.2", "deepseek-r1",
+		"deepseek-coder", "deepseek-coder-v2", "deepseek-ai/DeepSeek-V3", "DeepSeek-R1-0528",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "deepseek_harness" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a DeepSeek model id must not be reported "+
+					"as the DeepSeek Harness runtime", name, got)
+			}
+		})
+	}
+}
+
+// Bare "deepseek" is the vendor and the model family, not the harness. It is the entry a reader is
+// most likely to want to add to the set, and adding it would attribute provider traffic to an
+// endpoint install that may not exist. Pinned as a decision rather than left to be re-litigated.
+func TestBareDeepSeekIsNotTheDeepSeekHarness(t *testing.T) {
+	for _, name := range []string{"deepseek", "DeepSeek", " deepseek ", "deepseek.com", "deepseek_api"} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "deepseek_harness" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; bare \"deepseek\" names the vendor and "+
+					"the model family, not the harness", name, got)
+			}
+		})
+	}
+}
+
+// The other half of the equality rule. `dsh` is three letters the runtime stamps on environment
+// variables and paths that legitimately turn up in other fields, and a Contains rule would claim
+// any of them.
+func TestNamesMerelyContainingDshAreNotTheDeepSeekHarness(t *testing.T) {
+	for _, name := range []string{
+		"DSH_HOME", "~/.dsh", ".dsh/skills", "dsh-runtime-sandbox", "dshield", "sdsh", "dshell",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "deepseek_harness" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"dsh\" must not "+
+					"be reported as the DeepSeek Harness runtime", name, got)
+			}
+		})
+	}
+}
+
+// A name that has been through the function once must not change meaning going through again.
+func TestDeepSeekHarnessIsStableUnderRenormalization(t *testing.T) {
+	once := NormalizeHarnessName("dsh")
+	if twice := NormalizeHarnessName(once); twice != once {
+		t.Fatalf("NormalizeHarnessName(%q) = %q; the canonical name must be stable", once, twice)
 	}
 }

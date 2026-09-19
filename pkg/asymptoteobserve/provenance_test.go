@@ -125,6 +125,15 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		// loads and executes, which it does not: Kiro runs a command, and the command is the same
 		// beacon-hooks binary every other hook runtime runs.
 		"kiro": CollectionMethodHook,
+		// DeepSeek Harness is hook-shaped, and it is the case most likely to be argued the other
+		// way. The runtime reaches Beacon through `@deepseek-ai/dsh-hooks-claude-code`, a plugin --
+		// but that plugin is DeepSeek's, shipped in the `dsh` CLI and versioned with it. What Beacon
+		// contributes is a hooks file of command entries and one row mounting the vendor's bridge, so
+		// the thing that runs on each event is the same beacon-hooks binary every other hook runtime
+		// runs. `plugin` is reserved for the runtimes where Beacon ships and versions the source the
+		// runtime loads (opencode, Cline, Pi, Oh My Pi), and claiming it here would send someone to
+		// fix Beacon for a field the bridge never sent.
+		"dsh": CollectionMethodHook,
 		// vscode is the case that justifies keying on --platform rather than on the normalized
 		// harness name: its hook and OTLP telemetry both normalize to vscode_copilot, so the
 		// harness name cannot distinguish them and only the flag can.
