@@ -295,10 +295,11 @@ func (s *Store) readGlobalStorage(ref TraceRef) ([]Record, error) {
 		}
 		ts := bubble.CreatedAt.Millis
 		duration := bubble.TurnDurationMS
+		used, limit := contextFromAny(bubble, bubble.Context)
 		switch bubble.Type {
 		case 1:
 			if strings.TrimSpace(bubble.Text) != "" {
-				records = append(records, Record{Order: order, NativeID: header.BubbleID, Type: "user_message", TimestampMS: ts, Content: bubble.Text})
+				records = append(records, Record{Order: order, NativeID: header.BubbleID, Type: "user_message", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, Content: bubble.Text})
 				order++
 			}
 		case 2:
@@ -306,11 +307,11 @@ func (s *Store) readGlobalStorage(ref TraceRef) ([]Record, error) {
 				if strings.TrimSpace(block.Thinking) == "" {
 					continue
 				}
-				records = append(records, Record{Order: order, NativeID: fmt.Sprintf("%s:thinking:%d", header.BubbleID, i), Type: "agent_thinking", TimestampMS: ts, DurationMS: duration, Content: block.Thinking})
+				records = append(records, Record{Order: order, NativeID: fmt.Sprintf("%s:thinking:%d", header.BubbleID, i), Type: "agent_thinking", TimestampMS: ts, DurationMS: duration, ContextUsedTokens: used, ContextLimitTokens: limit, Content: block.Thinking})
 				order++
 			}
 			if bubble.Thinking != nil && strings.TrimSpace(bubble.Thinking.Text) != "" {
-				records = append(records, Record{Order: order, NativeID: header.BubbleID + ":thinking", Type: "agent_thinking", TimestampMS: ts, DurationMS: bubble.ThinkingDurationMS, Content: bubble.Thinking.Text})
+				records = append(records, Record{Order: order, NativeID: header.BubbleID + ":thinking", Type: "agent_thinking", TimestampMS: ts, DurationMS: bubble.ThinkingDurationMS, ContextUsedTokens: used, ContextLimitTokens: limit, Content: bubble.Thinking.Text})
 				order++
 			}
 			if bubble.ToolFormerData != nil {
@@ -319,18 +320,18 @@ func (s *Store) readGlobalStorage(ref TraceRef) ([]Record, error) {
 				if bubble.ToolFormerData.Name == "edit_file_v2" {
 					args = s.enrichEditFileV2Args(db, args, bubble.ToolFormerData.Result)
 				}
-				records = append(records, Record{Order: order, NativeID: header.BubbleID + ":tool_call", Type: "tool_call", TimestampMS: ts, DurationMS: duration, CallID: callID, ToolName: firstNonEmpty(bubble.ToolFormerData.Name, "unknown_tool"), Args: args})
+				records = append(records, Record{Order: order, NativeID: header.BubbleID + ":tool_call", Type: "tool_call", TimestampMS: ts, DurationMS: duration, ContextUsedTokens: used, ContextLimitTokens: limit, CallID: callID, ToolName: firstNonEmpty(bubble.ToolFormerData.Name, "unknown_tool"), Args: args})
 				order++
 				if output := formatToolFormerResult(bubble.ToolFormerData); output != "" {
 					status := "success"
 					if bubble.ToolFormerData.Status == "error" {
 						status = "error"
 					}
-					records = append(records, Record{Order: order, NativeID: header.BubbleID + ":tool_result", Type: "tool_result", TimestampMS: ts, DurationMS: duration, CallID: callID, ToolName: firstNonEmpty(bubble.ToolFormerData.Name, "unknown_tool"), Args: args, Output: output, Status: status})
+					records = append(records, Record{Order: order, NativeID: header.BubbleID + ":tool_result", Type: "tool_result", TimestampMS: ts, DurationMS: duration, ContextUsedTokens: used, ContextLimitTokens: limit, CallID: callID, ToolName: firstNonEmpty(bubble.ToolFormerData.Name, "unknown_tool"), Args: args, Output: output, Status: status})
 					order++
 				}
 			} else if strings.TrimSpace(bubble.Text) != "" {
-				records = append(records, Record{Order: order, NativeID: header.BubbleID, Type: "agent_text", TimestampMS: ts, DurationMS: duration, Content: bubble.Text, Model: model})
+				records = append(records, Record{Order: order, NativeID: header.BubbleID, Type: "agent_text", TimestampMS: ts, DurationMS: duration, ContextUsedTokens: used, ContextLimitTokens: limit, Content: bubble.Text, Model: model})
 				order++
 			}
 			if bubble.ErrorDetails != nil && strings.TrimSpace(bubble.ErrorDetails.Message) != "" {
@@ -338,13 +339,14 @@ func (s *Store) readGlobalStorage(ref TraceRef) ([]Record, error) {
 				if strings.TrimSpace(bubble.ErrorDetails.Title) != "" {
 					msg = bubble.ErrorDetails.Title + ": " + msg
 				}
-				records = append(records, Record{Order: order, NativeID: header.BubbleID + ":error", Type: "error", TimestampMS: ts, DurationMS: duration, Content: msg})
+				records = append(records, Record{Order: order, NativeID: header.BubbleID + ":error", Type: "error", TimestampMS: ts, DurationMS: duration, ContextUsedTokens: used, ContextLimitTokens: limit, Content: msg})
 				order++
 			}
 		}
 	}
 	if summary := compactionSummary(composer); summary != nil {
-		records = append(records, Record{Order: order, NativeID: "compaction:" + stringValue(summary["compacted_through_id"]), Type: "system_event", Subtype: "compaction", TimestampMS: ref.UpdatedAtUnixMS, Data: summary})
+		used, limit := contextFromAny(composer, composer.Context, summary)
+		records = append(records, Record{Order: order, NativeID: "compaction:" + stringValue(summary["compacted_through_id"]), Type: "system_event", Subtype: "compaction", TimestampMS: ref.UpdatedAtUnixMS, ContextUsedTokens: used, ContextLimitTokens: limit, Data: summary})
 	}
 	return records, nil
 }
@@ -377,6 +379,7 @@ func (s *Store) readTranscript(ref TraceRef) ([]Record, error) {
 		typ := strings.ToLower(pickString(rec, "type"))
 		role := normalizeRole(pickString(rec, "role"))
 		baseID := firstNonEmpty(pickString(rec, "id"), fmt.Sprintf("entry-%d", i+1))
+		used, limit := contextFromAny(rec, rec["data"], rec["message"])
 		before := len(out)
 		switch {
 		case typ == "message":
@@ -407,6 +410,16 @@ func (s *Store) readTranscript(ref TraceRef) ([]Record, error) {
 		}
 		if len(out) == before && role != "" {
 			order = appendTranscriptMessage(outPtr(&out), pending, rec, baseID, ts, role, model, order)
+		}
+		if used > 0 || limit > 0 {
+			for idx := before; idx < len(out); idx++ {
+				if out[idx].ContextUsedTokens == 0 {
+					out[idx].ContextUsedTokens = used
+				}
+				if out[idx].ContextLimitTokens == 0 {
+					out[idx].ContextLimitTokens = limit
+				}
+			}
 		}
 	}
 	return out, nil

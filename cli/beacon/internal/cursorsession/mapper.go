@@ -158,6 +158,18 @@ func baseEvent(ref TraceRef, record Record, action, category string, severity sc
 	if record.Model != "" {
 		ev.Model = asymptoteobserve.NormalizeModelName(record.Model)
 	}
+	if record.ContextUsedTokens > 0 || record.ContextLimitTokens > 0 {
+		ev.GenAI = withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) {
+			context := &schema.GenAIContextInfo{}
+			if record.ContextUsedTokens > 0 {
+				context.UsedTokens = &record.ContextUsedTokens
+			}
+			if record.ContextLimitTokens > 0 {
+				context.LimitTokens = &record.ContextLimitTokens
+			}
+			genAI.Context = context
+		})
+	}
 	return ev
 }
 

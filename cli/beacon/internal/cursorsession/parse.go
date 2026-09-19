@@ -131,9 +131,10 @@ func coerceTranscriptCandidates(v interface{}) []transcriptRecord {
 func appendTranscriptMessage(out *[]Record, pending map[string]Record, msg map[string]interface{}, baseID string, ts int64, fallbackRole, fallbackModel string, order int) int {
 	role := normalizeRole(firstNonEmpty(pickString(msg, "role"), fallbackRole))
 	model := firstNonEmpty(pickString(msg, "modelId", "model"), fallbackModel)
+	used, limit := contextFromAny(msg)
 	if role == "user" {
 		if text := messageText(msg); text != "" {
-			*out = append(*out, Record{Order: order, NativeID: baseID, Type: "user_message", TimestampMS: ts, Content: stripUserQueryTags(text), Model: model})
+			*out = append(*out, Record{Order: order, NativeID: baseID, Type: "user_message", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, Content: stripUserQueryTags(text), Model: model})
 			order++
 		}
 		return order
@@ -144,15 +145,17 @@ func appendTranscriptMessage(out *[]Record, pending map[string]Record, msg map[s
 			if strings.TrimSpace(thinking) == "" {
 				continue
 			}
-			*out = append(*out, Record{Order: order, NativeID: fmt.Sprintf("%s:thinking:%d", baseID, i), Type: "agent_thinking", TimestampMS: ts, Content: thinking, Model: model})
+			*out = append(*out, Record{Order: order, NativeID: fmt.Sprintf("%s:thinking:%d", baseID, i), Type: "agent_thinking", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, Content: thinking, Model: model})
 			order++
 		}
 		if text := messageText(msg); text != "" {
-			*out = append(*out, Record{Order: order, NativeID: baseID, Type: "agent_text", TimestampMS: ts, Content: text, Model: model})
+			*out = append(*out, Record{Order: order, NativeID: baseID, Type: "agent_text", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, Content: text, Model: model})
 			order++
 		}
 		for _, call := range toolCallsFromMessage(msg) {
 			r := transcriptToolCall(call, baseID, ts, order)
+			r.ContextUsedTokens = used
+			r.ContextLimitTokens = limit
 			pending[r.CallID] = r
 			*out = append(*out, r)
 			order++
@@ -160,7 +163,7 @@ func appendTranscriptMessage(out *[]Record, pending map[string]Record, msg map[s
 		return order
 	}
 	if text := messageText(msg); text != "" {
-		*out = append(*out, Record{Order: order, NativeID: baseID, Type: "agent_text", TimestampMS: ts, Content: text, Model: model})
+		*out = append(*out, Record{Order: order, NativeID: baseID, Type: "agent_text", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, Content: text, Model: model})
 		order++
 	}
 	return order
@@ -231,7 +234,8 @@ func transcriptToolCall(call map[string]interface{}, baseID string, ts int64, or
 	callID := firstNonEmpty(pickString(call, "id", "toolCallId", "callId"), baseID+":call")
 	name := firstNonEmpty(pickString(call, "name", "toolName", "tool"), "unknown_tool")
 	args := objectArgs(firstNonNil(call["args"], call["arguments"], call["params"], call["input"]))
-	return Record{Order: order, NativeID: baseID + ":tool_call", Type: "tool_call", TimestampMS: ts, CallID: callID, ToolName: name, Args: args}
+	used, limit := contextFromAny(call)
+	return Record{Order: order, NativeID: baseID + ":tool_call", Type: "tool_call", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, CallID: callID, ToolName: name, Args: args}
 }
 
 func transcriptToolResult(result map[string]interface{}, baseID string, ts int64, order int, pending map[string]Record) Record {
@@ -243,7 +247,14 @@ func transcriptToolResult(result map[string]interface{}, baseID string, ts int64
 	if status == "failure" || status == "failed" {
 		status = "error"
 	}
-	return Record{Order: order, NativeID: baseID + ":tool_result", Type: "tool_result", TimestampMS: ts, CallID: callID, ToolName: name, Args: args, Output: output, Status: status}
+	used, limit := contextFromAny(result)
+	if used == 0 {
+		used = pending[callID].ContextUsedTokens
+	}
+	if limit == 0 {
+		limit = pending[callID].ContextLimitTokens
+	}
+	return Record{Order: order, NativeID: baseID + ":tool_result", Type: "tool_result", TimestampMS: ts, ContextUsedTokens: used, ContextLimitTokens: limit, CallID: callID, ToolName: name, Args: args, Output: output, Status: status}
 }
 
 func parseTranscriptTimestamp(rec map[string]interface{}, fallback int64) int64 {
@@ -276,6 +287,123 @@ func millisFrom(v interface{}) int64 {
 		}
 	}
 	return 0
+}
+
+func contextFromAny(values ...interface{}) (used, limit int64) {
+	for _, value := range values {
+		u, l := contextFromValue(value, 0)
+		if used == 0 {
+			used = u
+		}
+		if limit == 0 {
+			limit = l
+		}
+	}
+	return used, limit
+}
+
+func contextFromValue(value interface{}, depth int) (used, limit int64) {
+	if value == nil || depth > 4 {
+		return 0, 0
+	}
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		used = firstIntKey(typed,
+			"context_tokens",
+			"contextTokens",
+			"contextTokenCount",
+			"context_usage_tokens",
+			"contextUsageTokens",
+			"context_used_tokens",
+			"contextUsedTokens",
+			"used_context_tokens",
+			"usedContextTokens",
+		)
+		limit = firstIntKey(typed,
+			"context_window_size",
+			"contextWindowSize",
+			"context_window_tokens",
+			"contextWindowTokens",
+			"context_token_budget",
+			"contextTokenBudget",
+			"max_context_tokens",
+			"maxContextTokens",
+			"context_limit",
+			"contextLimit",
+			"context_limit_tokens",
+			"contextLimitTokens",
+		)
+		if used > 0 && limit > 0 {
+			return used, limit
+		}
+		for key, child := range typed {
+			if !strings.Contains(strings.ToLower(key), "context") && key != "data" && key != "message" {
+				continue
+			}
+			u, l := contextFromValue(child, depth+1)
+			if used == 0 {
+				used = u
+			}
+			if limit == 0 {
+				limit = l
+			}
+			if used > 0 && limit > 0 {
+				return used, limit
+			}
+		}
+	case []interface{}:
+		for _, child := range typed {
+			u, l := contextFromValue(child, depth+1)
+			if used == 0 {
+				used = u
+			}
+			if limit == 0 {
+				limit = l
+			}
+			if used > 0 && limit > 0 {
+				return used, limit
+			}
+		}
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil || len(data) == 0 || data[0] != '{' {
+			return 0, 0
+		}
+		var asObject map[string]interface{}
+		if err := json.Unmarshal(data, &asObject); err != nil {
+			return 0, 0
+		}
+		return contextFromValue(asObject, depth+1)
+	}
+	return used, limit
+}
+
+func firstIntKey(m map[string]interface{}, keys ...string) int64 {
+	for _, key := range keys {
+		if value := int64From(m[key]); value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func int64From(value interface{}) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case json.Number:
+		n, _ := typed.Int64()
+		return n
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		return n
+	default:
+		return 0
+	}
 }
 
 func formatToolFormerResult(data *toolFormerData) string {

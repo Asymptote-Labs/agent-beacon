@@ -30,6 +30,8 @@ func TestCollectGlobalStorageComposer(t *testing.T) {
 		"bubbleId:composer-1:t1": `{
 			"type":2,
 			"createdAt":"2026-09-19T20:00:02Z",
+			"context_tokens":185000,
+			"context_window_size":200000,
 			"toolFormerData":{"name":"run_terminal_cmd","params":"{\"command\":\"go test ./...\"}","result":"ok","status":"success"}
 		}`,
 	})
@@ -58,6 +60,10 @@ func TestCollectGlobalStorageComposer(t *testing.T) {
 	if got := nested(events[3], "harness")["collection_method"]; got != "poll" {
 		t.Fatalf("collection method = %v, want poll", got)
 	}
+	context := nested(events[3], "gen_ai", "context")
+	if context["used_tokens"] != float64(185000) || context["limit_tokens"] != float64(200000) {
+		t.Fatalf("context = %#v, want used/limit tokens", context)
+	}
 }
 
 func TestCollectTranscriptJSONL(t *testing.T) {
@@ -68,7 +74,7 @@ func TestCollectTranscriptJSONL(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(project, "session-1.jsonl"), []byte(strings.Join([]string{
 		`{"type":"user_message","id":"u1","text":"hello","timestamp":"2026-09-19T20:00:00Z"}`,
-		`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"reasoning","text":"thinking"},{"type":"text","text":"hi"}],"model":"claude-sonnet-4"},"timestamp":"2026-09-19T20:00:01Z"}`,
+		`{"type":"message","id":"a1","contextTokens":42,"contextWindowSize":100,"message":{"role":"assistant","content":[{"type":"reasoning","text":"thinking"},{"type":"text","text":"hi"}],"model":"claude-sonnet-4"},"timestamp":"2026-09-19T20:00:01Z"}`,
 		`{"type":"tool_call","id":"c1","toolCall":{"id":"call-1","name":"read_file","args":{"path":"/tmp/a.txt"}},"timestamp":"2026-09-19T20:00:02Z"}`,
 	}, "\n")), 0o644); err != nil {
 		t.Fatal(err)
@@ -93,6 +99,10 @@ func TestCollectTranscriptJSONL(t *testing.T) {
 	}
 	if got := nested(events[1], "gen_ai", "output")["messages"]; got == nil {
 		t.Fatalf("reasoning event missing gen_ai output: %#v", events[1])
+	}
+	context := nested(events[1], "gen_ai", "context")
+	if context["used_tokens"] != float64(42) || context["limit_tokens"] != float64(100) {
+		t.Fatalf("transcript context = %#v, want used/limit tokens", context)
 	}
 }
 

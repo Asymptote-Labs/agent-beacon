@@ -38,20 +38,22 @@ type TraceRef struct {
 }
 
 type Record struct {
-	Order       int
-	NativeID    string
-	Type        string
-	Subtype     string
-	TimestampMS int64
-	DurationMS  int64
-	Content     string
-	Model       string
-	CallID      string
-	ToolName    string
-	Args        map[string]interface{}
-	Output      string
-	Status      string
-	Data        map[string]interface{}
+	Order              int
+	NativeID           string
+	Type               string
+	Subtype            string
+	TimestampMS        int64
+	DurationMS         int64
+	ContextUsedTokens  int64
+	ContextLimitTokens int64
+	Content            string
+	Model              string
+	CallID             string
+	ToolName           string
+	Args               map[string]interface{}
+	Output             string
+	Status             string
+	Data               map[string]interface{}
 }
 
 type composerData struct {
@@ -66,6 +68,11 @@ type composerData struct {
 	Context                     map[string]interface{}   `json:"context"`
 	LatestConversationSummary   *latestConversationState `json:"latestConversationSummary"`
 	SubagentComposerIDs         []string                 `json:"subagentComposerIds"`
+	ContextTokens               int64                    `json:"context_tokens"`
+	ContextTokensCamel          int64                    `json:"contextTokens"`
+	ContextWindowSize           int64                    `json:"context_window_size"`
+	ContextWindowSizeCamel      int64                    `json:"contextWindowSize"`
+	ContextTokenBudget          int64                    `json:"contextTokenBudget"`
 }
 
 type composerModelConfig struct {
@@ -90,6 +97,11 @@ type bubbleData struct {
 		Text string `json:"text"`
 	} `json:"thinking"`
 	ThinkingDurationMS int64 `json:"thinkingDurationMs"`
+	ContextTokens      int64 `json:"context_tokens"`
+	ContextTokensCamel int64 `json:"contextTokens"`
+	ContextWindowSize  int64 `json:"context_window_size"`
+	ContextWindowCamel int64 `json:"contextWindowSize"`
+	ContextTokenBudget int64 `json:"contextTokenBudget"`
 	AllThinkingBlocks  []struct {
 		Thinking string `json:"thinking"`
 	} `json:"allThinkingBlocks"`
