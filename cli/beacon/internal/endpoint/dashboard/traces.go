@@ -58,19 +58,29 @@ type TraceQuery struct {
 }
 
 type traceAggregate struct {
-	summary TraceSummaryV1
-	events  []TraceEventV1
-	spans   map[string]*TraceSpanV1
-	models  map[string]bool
-	methods map[string]bool
+	summary       TraceSummaryV1
+	events        []TraceEventV1
+	spans         map[string]*TraceSpanV1
+	models        map[string]bool
+	methods       map[string]bool
+	titlePriority int
 }
 
 func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
-	traces, err := readTraceAggregates(path, query.EventQuery)
+	traces, err := readTraceAggregates(path, withoutFreeText(query.EventQuery))
 	if err != nil {
 		return TraceListResultV1{}, err
 	}
 	filtered := filterTraceSummaries(traces, query)
+	if needle := strings.TrimSpace(query.Q); needle != "" {
+		matched := make([]TraceSummaryV1, 0, len(filtered))
+		for _, s := range filtered {
+			if traceSummaryMatches(s, needle) {
+				matched = append(matched, s)
+			}
+		}
+		filtered = matched
+	}
 	sortTraceSummaries(filtered)
 	limit := normalizeLimit(query.Limit)
 	page := query.Page
@@ -106,13 +116,15 @@ func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
 		return TraceSearchResultV1{}, err
 	}
 	filtered := filterTraceSummaries(traces, query)
+	sortTraceSummaries(filtered)
 	needle := strings.TrimSpace(query.Q)
 	resp := TraceSearchResultV1{ResultLevel: query.ResultLevel, Limit: limit, Filters: activeTraceFilters(query)}
 	switch query.ResultLevel {
 	case "event":
 		for _, summary := range filtered {
 			agg := traces[summary.ID]
-			for _, event := range agg.events {
+			events := filterTraceEvents(agg.events, query.EventTypes)
+			for _, event := range events {
 				if needle != "" && !traceEventMatches(event, needle) {
 					continue
 				}
@@ -152,7 +164,7 @@ func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
 }
 
 func ShowTrace(path, id string, query TraceQuery) (TraceShowResultV1, bool, error) {
-	traces, err := readTraceAggregates(path, query.EventQuery)
+	traces, err := readTraceAggregates(path, withoutFreeText(query.EventQuery))
 	if err != nil {
 		return TraceShowResultV1{}, false, err
 	}
@@ -262,11 +274,10 @@ func (a *traceAggregate) update(event schema.Event, traceEvent TraceEventV1) {
 	if traceEvent.Type == "user_message" || traceEvent.Type == "agent_message" {
 		a.summary.LocalMessageCount++
 	}
-	if a.summary.Title == "" {
+	if p := traceTitlePriority(traceEvent); p > a.titlePriority {
 		a.summary.Title = traceTitle(event, traceEvent)
-	}
-	if a.summary.Preview == "" {
 		a.summary.Preview = tracePreview(traceEvent)
+		a.titlePriority = p
 	}
 	if event.Session != nil && a.summary.Session == nil {
 		a.summary.Session = &TraceSessionV1{ID: event.Session.ID, WorkingDirectory: event.Session.WorkingDirectory}
@@ -537,6 +548,17 @@ func traceActor(event schema.Event) string {
 			return "beacon"
 		}
 		return "runtime"
+	}
+}
+
+func traceTitlePriority(event TraceEventV1) int {
+	switch event.Type {
+	case "user_message":
+		return 2
+	case "session", "other":
+		return 0
+	default:
+		return 1
 	}
 }
 
