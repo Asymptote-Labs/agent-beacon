@@ -284,7 +284,7 @@ func removeDshHooks(path string) (bool, error) {
 		return patchRemoved, nil
 	}
 	if err := dshHookFileIsBeacons(path); err != nil {
-		return patchRemoved, err
+		return patchRemoved, nil
 	}
 	if err := os.Remove(path); err != nil {
 		return patchRemoved, err
