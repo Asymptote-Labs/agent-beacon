@@ -227,7 +227,11 @@ func TestDshToolActions(t *testing.T) {
 // executes a TypeScript program, and it is `other` because command.command is a shell command line
 // and a TypeScript program in that field would match shell rules on its comments while matching
 // none of them on what it does.
-func TestDshNonFilesystemToolsFallThroughToToolInvoked(t *testing.T) {
+//
+// These must return "tool.invoked" directly rather than "" so the generic substring classifier
+// never sees them: "" is the signal for unknown tools, and names like terminal_read match the
+// generic classifier's substring rules for shell execution.
+func TestDshNonFilesystemToolsReturnToolInvoked(t *testing.T) {
 	for _, toolName := range []string{
 		"terminal_read", "terminal_list", "terminal_open", "terminal_close", "terminal_signal",
 		"read_mcp_resource", "list_mcp_resources", "session_event_read", "session_search",
@@ -235,9 +239,9 @@ func TestDshNonFilesystemToolsFallThroughToToolInvoked(t *testing.T) {
 		"send_message", "spawn_teammate", "subagent", "todo_write", "skill", "lsp", "workflow",
 	} {
 		t.Run(toolName, func(t *testing.T) {
-			if got := dshToolAction(toolName, nil); got != "" {
-				t.Fatalf("dshToolAction(%q) = %q; a tool with no filesystem or shell meaning must "+
-					"fall through to the shared classifier", toolName, got)
+			if got := dshToolAction(toolName, nil); got != "tool.invoked" {
+				t.Fatalf("dshToolAction(%q) = %q, want tool.invoked so the generic substring "+
+					"classifier never sees the name", toolName, got)
 			}
 			if got := dshFileOperation(toolName, nil); got != "" {
 				t.Fatalf("dshFileOperation(%q) = %q, want no file operation", toolName, got)

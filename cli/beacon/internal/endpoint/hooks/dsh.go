@@ -284,7 +284,10 @@ func removeDshHooks(path string) (bool, error) {
 		return patchRemoved, nil
 	}
 	if err := dshHookFileIsBeacons(path); err != nil {
-		return patchRemoved, err
+		// The file contains a hook Beacon did not write. Leave it: the mount is already
+		// removed, so the bridge will no longer load this file. Returning an error here
+		// would report failure after the patch entry was already gone.
+		return patchRemoved, nil
 	}
 	if err := os.Remove(path); err != nil {
 		return patchRemoved, err

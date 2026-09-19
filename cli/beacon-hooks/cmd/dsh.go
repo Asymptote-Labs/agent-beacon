@@ -367,10 +367,11 @@ func dshToolAction(toolName string, toolInput map[string]interface{}) string {
 	case dshToolShell:
 		return "command.executed"
 	default:
-		// A known tool with no filesystem or shell meaning. "" hands it to the shared classifier,
-		// whose tool.invoked fallback is the right answer -- and which is also where an
-		// MCP-flavored name would still be caught if one reached here.
-		return ""
+		// A known tool with no filesystem or shell meaning. Returned directly rather than as ""
+		// so the generic substring classifier never sees the name: tools like terminal_read and
+		// read_mcp_resource contain substrings the classifier matches on, and "" is the signal
+		// for unknown tools that should fall through.
+		return "tool.invoked"
 	}
 }
 

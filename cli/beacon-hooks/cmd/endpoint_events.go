@@ -788,6 +788,9 @@ func fileOperation(toolName string, toolInput map[string]interface{}) string {
 		if operation := dshFileOperation(toolName, toolInput); operation != "" {
 			return operation
 		}
+		if _, known := dshToolKindFor(toolName); known {
+			return ""
+		}
 	}
 	lower := strings.ToLower(toolName)
 	switch {
