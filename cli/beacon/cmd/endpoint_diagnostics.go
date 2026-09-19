@@ -946,7 +946,9 @@ func hookTargets() ([]string, error) {
 
 // userScopeOnlyHookTargets are the targets whose installers refuse LevelProject outright, because
 // the runtime registers hooks only from a user-level config: Hermes has no project config at all,
-// and Muse's project .muse/hooks.json is ignored by the shipping build.
+// Muse's project .muse/hooks.json is ignored by the shipping build, and DeepSeek Harness composes
+// its plugin tree from the Harness home, so there is nowhere in a repository to mount a hook
+// bridge from.
 //
 // They are filtered out of the project-level --all list rather than left in to fail. Install and
 // uninstall both return on the first target error, so one refusing target does not just report
@@ -954,10 +956,11 @@ func hookTargets() ([]string, error) {
 var userScopeOnlyHookTargets = map[string]bool{
 	"hermes": true,
 	"muse":   true,
+	"dsh":    true,
 }
 
 func allHookTargetsForLevel() []string {
-	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "openhands", "kiro", "cline", "pi", "omp", "prime", "omo", "openclaw", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "openhands", "kiro", "dsh", "cline", "pi", "omp", "prime", "omo", "openclaw", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 	if endpointOpts.hookLevel != "project" {
 		return all
 	}
@@ -1028,6 +1031,12 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
 		case "openhands":
 			status := endpointhooks.OpenHandsHookStatus(endpointhooks.OpenHandsOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
+		case "dsh":
+			status := endpointhooks.DshHookStatus(endpointhooks.DshOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			// Path is the hooks file, which is the one a person would open. The patch file that
+			// mounts the bridge at it rides along in Raw, where the JSON output keeps it -- this
+			// struct carries one path and the install has two.
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
 		case "kiro":
 			status := endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
