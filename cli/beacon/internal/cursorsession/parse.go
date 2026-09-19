@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -689,7 +690,8 @@ func resolveDashEncodedProjectDirectory(name string) string {
 		}
 		seen[key] = true
 		for end := len(parts); end > idx; end-- {
-			candidate := filepath.Join(append([]string{root}, parts[idx:end]...)...)
+			component := strings.Join(parts[idx:end], "-")
+			candidate := filepath.Join(root, component)
 			info, err := os.Stat(candidate)
 			if err != nil || !info.IsDir() {
 				continue
@@ -703,8 +705,18 @@ func resolveDashEncodedProjectDirectory(name string) string {
 		}
 		return ""
 	}
-	if resolved := walk(string(filepath.Separator), 0); resolved != "" {
-		return resolved
+	roots := []string{string(filepath.Separator)}
+	if runtime.GOOS == "windows" && len(parts) > 0 && len(parts[0]) == 1 {
+		roots = append(roots, strings.ToUpper(parts[0])+`:\`)
+	}
+	for _, root := range roots {
+		start := 0
+		if root != string(filepath.Separator) {
+			start = 1
+		}
+		if resolved := walk(root, start); resolved != "" {
+			return resolved
+		}
 	}
 	return name
 }

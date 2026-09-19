@@ -150,7 +150,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 
 func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions, summary *Summary) (bool, error) {
 	cursor := state.cursor(ref)
-	if ref.UpdatedAtUnixMS > 0 && ref.UpdatedAtUnixMS <= cursor.UpdatedAtMS {
+	if ref.UpdatedAtUnixMS > 0 && ref.UpdatedAtUnixMS < cursor.UpdatedAtMS {
 		return false, nil
 	}
 	records, err := store.Read(ref)

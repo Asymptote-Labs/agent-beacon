@@ -73,14 +73,15 @@ func (s *Store) Exists() bool {
 
 func (s *Store) List() ([]TraceRef, error) {
 	var refs []TraceRef
+	var errs []error
 	global, err := s.listGlobalStorage()
 	if err != nil {
-		return refs, err
+		errs = append(errs, err)
 	}
 	refs = append(refs, global...)
 	transcripts, err := s.listTranscripts()
 	if err != nil {
-		return refs, err
+		errs = append(errs, err)
 	}
 	refs = append(refs, transcripts...)
 	sort.SliceStable(refs, func(i, j int) bool {
@@ -89,6 +90,9 @@ func (s *Store) List() ([]TraceRef, error) {
 		}
 		return refs[i].ID < refs[j].ID
 	})
+	if len(refs) == 0 && len(errs) > 0 {
+		return refs, errors.Join(errs...)
+	}
 	return refs, nil
 }
 
@@ -426,7 +430,11 @@ func (s *Store) readTranscript(ref TraceRef) ([]Record, error) {
 }
 
 func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	u := url.URL{Scheme: "file", Path: path}
+	uriPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	q := u.Query()
 	q.Set("mode", "ro")
 	q.Set("_pragma", "busy_timeout(1000)")

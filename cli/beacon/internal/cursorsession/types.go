@@ -140,6 +140,9 @@ type jsonTimeOrNumber struct {
 }
 
 func (t *jsonTimeOrNumber) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
 	var n float64
 	if err := json.Unmarshal(data, &n); err == nil {
 		t.Millis = int64(n)
