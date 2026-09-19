@@ -247,6 +247,24 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 				"and its agent server (used by the CLI and the GUI) reads only the repository file. " +
 				"Run the install again with --level project inside a repository to cover those.")
 		}
+	case "dsh":
+		status, err := endpointhooks.InstallDsh(endpointhooks.DshOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		// Both paths, because the install is two files and the mount is the half an operator is
+		// least likely to guess at. Naming only the hooks file would send somebody looking for a
+		// mount that is not there.
+		fmt.Printf("DeepSeek Harness hooks installed: %s\n", status.HooksPath)
+		fmt.Printf("DeepSeek Harness hook bridge mounted in: %s\n", status.PatchPath)
+		// Said on every install, because a running dsh will not pick this up on its own unless the
+		// profile enabled HMR -- and the symptom otherwise is a successful install collecting
+		// nothing until the next restart, which reads as a broken install.
+		fmt.Println("Restart dsh (or rely on its config watcher, if your profile enables HMR) for the hooks to take effect.")
 	case "kiro":
 		status, err := endpointhooks.InstallKiro(endpointhooks.KiroOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -504,6 +522,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "dsh":
+		status, err := endpointhooks.UninstallDsh(endpointhooks.DshOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "kiro":
 		status, err := endpointhooks.UninstallKiro(endpointhooks.KiroOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -670,6 +698,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "dsh":
+			statuses["dsh"] = endpointhooks.DshHookStatus(endpointhooks.DshOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "kiro":
 			statuses["kiro"] = endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -777,6 +811,14 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		case "openhands":
 			status := statuses["openhands"].(endpointhooks.OpenHandsStatus)
 			fmt.Printf("OpenHands hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
+			fmt.Println(status.Message)
+		case "dsh":
+			status := statuses["dsh"].(endpointhooks.DshStatus)
+			// Both paths again, and here it is diagnostic rather than informational: installed is
+			// the conjunction of the two files, so an operator reading installed=false needs to
+			// know which one to look at.
+			fmt.Printf("DeepSeek Harness hooks: installed=%t path=%s patch=%s\n",
+				status.Installed, status.HooksPath, status.PatchPath)
 			fmt.Println(status.Message)
 		case "kiro":
 			status := statuses["kiro"].(endpointhooks.KiroStatus)
