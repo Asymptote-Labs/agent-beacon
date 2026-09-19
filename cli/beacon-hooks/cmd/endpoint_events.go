@@ -456,6 +456,14 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 	// not one of goose's built-in extensions. Keyed on the platform because `a__b` is goose's
 	// convention and not a general one.
 	hasGooseMCPToolName := platformFlag == goosePlatform && gooseIsMCPToolName(toolName)
+	// dsh is the mirror image of the three above: it needs no help being recognized -- it spells an
+	// MCP call `mcp__<server>__<tool>`, which the generic substring signal below already reads --
+	// but three of its own built-ins carry "mcp" in their names while calling no server at all.
+	// `list_mcp_resources`, `list_mcp_resource_templates` and `read_mcp_resource` manage MCP
+	// servers, and recording them as invocations of one produces an mcp block with an empty tool
+	// and a method of "tools/call" that names a request nobody made. Keyed on the catalog, which a
+	// real MCP call is never in.
+	hasDshBuiltinMCPName := platformFlag == dshPlatform && dshIsCatalogToolName(toolName)
 
 	server := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "server", "server_name", "mcp_server", "mcp_server_name", "mcp.server", "mcp.server.name")
 	tool := firstToolStringAcross([]map[string]interface{}{toolInput, toolResponse}, "tool", "tool_name", "function_name", "mcp_tool", "mcp_tool_name", "mcp.tool", "mcp.tool.name", "gen_ai.tool.name")
@@ -502,7 +510,7 @@ func mcpToolFields(toolName string, toolInput, toolResponse map[string]interface
 		}
 	}
 
-	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || hasKiroMCPToolName || hasGooseMCPToolName || strings.Contains(strings.ToLower(toolName), "mcp")
+	isMCP := mcpServer != "" || mcpTool != "" || mcpMethod != "" || mcpProtocol != "" || mcpResource != "" || mcpSession != "" || hasCascadeServerToolPair || hasOpenHandsMCPObservation || hasKiroMCPToolName || hasGooseMCPToolName || (strings.Contains(strings.ToLower(toolName), "mcp") && !hasDshBuiltinMCPName)
 	if !isMCP {
 		return nil
 	}
@@ -784,8 +792,15 @@ func fileOperation(toolName string, toolInput map[string]interface{}) string {
 	}
 	// DeepSeek Harness needs the arguments for the reason this function takes them at all: its
 	// `str_replace_editor` is one name over four operations, one of which is a read.
+	//
+	// Answered on `known` rather than on a non-empty operation, unlike the branches above: dsh's
+	// table is exhaustive over its tool catalog, so a name it knows has been classified and a
+	// known tool with no file operation must return that rather than fall through. The generic
+	// reader below matches "read", "view", "list", "grep", "search" and "write" by substring, and
+	// dsh's `terminal_read`, `terminal_list`, `session_search` and `todo_write` would each pick up
+	// a file operation from it.
 	if platformFlag == dshPlatform {
-		if operation := dshFileOperation(toolName, toolInput); operation != "" {
+		if operation, known := dshFileOperation(toolName, toolInput); known {
 			return operation
 		}
 	}

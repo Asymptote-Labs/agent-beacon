@@ -222,28 +222,110 @@ func TestDshToolActions(t *testing.T) {
 // The tools the generic classifier would get wrong by substring, and the one that is argued about.
 //
 // `terminal_read` and `terminal_list` contain "terminal", which the generic classifier reads as
-// shell execution; `read_mcp_resource` and `session_event_read` contain "read", which it reads as a
-// file read. None of them touches a file or runs anything. `run_code` is the deliberate one: it
-// executes a TypeScript program, and it is `other` because command.command is a shell command line
-// and a TypeScript program in that field would match shell rules on its comments while matching
-// none of them on what it does.
-func TestDshNonFilesystemToolsFallThroughToToolInvoked(t *testing.T) {
+// shell execution; `read_mcp_resource` and `list_mcp_resources` contain "mcp", which it reads as an
+// MCP invocation; `session_event_read` contains "read", which it reads as a file read. None of them
+// touches a file or runs anything. `run_code` is the deliberate one: it executes a TypeScript
+// program, and it is `other` because command.command is a shell command line and a TypeScript
+// program in that field would match shell rules on its comments while matching none of them on what
+// it does.
+//
+// The taxonomy answers all of them itself rather than returning "" and letting the shared
+// classifier have another go, which is the whole point of entering them in the table: "" put them
+// straight back in front of the substring rule they are there to be kept away from.
+func TestDshNonFilesystemToolsAreRecordedAsToolInvocations(t *testing.T) {
 	for _, toolName := range []string{
 		"terminal_read", "terminal_list", "terminal_open", "terminal_close", "terminal_signal",
-		"read_mcp_resource", "list_mcp_resources", "session_event_read", "session_search",
+		"read_mcp_resource", "list_mcp_resources", "list_mcp_resource_templates",
+		"session_event_read", "session_search", "session_trace", "cordis_inspect_query",
 		"run_code", "job_output", "job_list", "job_kill", "web_fetch", "web_search",
 		"send_message", "spawn_teammate", "subagent", "todo_write", "skill", "lsp", "workflow",
+		"stagehand_screenshot", "present", "plugin_manager", "ask_user_question",
 	} {
 		t.Run(toolName, func(t *testing.T) {
-			if got := dshToolAction(toolName, nil); got != "" {
-				t.Fatalf("dshToolAction(%q) = %q; a tool with no filesystem or shell meaning must "+
-					"fall through to the shared classifier", toolName, got)
+			if got := dshToolAction(toolName, nil); got != "tool.invoked" {
+				t.Fatalf("dshToolAction(%q) = %q, want tool.invoked; a known tool with no "+
+					"filesystem or shell meaning must not be handed back to the substring "+
+					"classifier", toolName, got)
 			}
-			if got := dshFileOperation(toolName, nil); got != "" {
-				t.Fatalf("dshFileOperation(%q) = %q, want no file operation", toolName, got)
+			operation, known := dshFileOperation(toolName, nil)
+			if !known {
+				t.Fatalf("dshFileOperation(%q) reported the tool as unknown; every catalog tool "+
+					"must be in the table, or the generic reader classifies it by substring",
+					toolName)
+			}
+			if operation != "" {
+				t.Fatalf("dshFileOperation(%q) = %q, want no file operation", toolName, operation)
 			}
 			if isDshFileEditTool(toolName, nil) {
 				t.Fatalf("isDshFileEditTool(%q) = true; it changes no file", toolName)
+			}
+		})
+	}
+}
+
+// A tool outside the catalog is the one case that still falls through, and it has to: an MCP tool,
+// a tool a plugin registered, a tool added after this table was written. The shared classifier is
+// the right answer there, and for `mcp__files__read` it is the only one that gets MCP right.
+func TestDshUnknownToolsStillFallThroughToTheSharedClassifier(t *testing.T) {
+	for _, toolName := range []string{"mcp__files__read", "some_future_tool"} {
+		t.Run(toolName, func(t *testing.T) {
+			if got := dshToolAction(toolName, nil); got != "" {
+				t.Fatalf("dshToolAction(%q) = %q; a tool the table does not know must fall "+
+					"through to the shared classifier", toolName, got)
+			}
+			if _, known := dshFileOperation(toolName, nil); known {
+				t.Fatalf("dshFileOperation(%q) claimed to know the tool", toolName)
+			}
+		})
+	}
+}
+
+// The end-to-end half of the taxonomy, and the half that would have caught the classifiers handing
+// these names back to the substring rule: the unit assertions above passed while the emitted event
+// said command.executed, because "" meant "ask the generic classifier" and it matched "terminal".
+//
+// Each case names a real hazard. A `terminal_read` recorded as a command would carry no command
+// line and fire every rule that looks for shell execution; a `list_mcp_resources` recorded as an
+// MCP invocation would invent a server and a tool that were never called; a `session_search`
+// carrying a path would stamp a file read onto a call that opened no file.
+func TestDshCatalogToolsAreNotMisclassifiedBySubstring(t *testing.T) {
+	for _, tc := range []struct {
+		toolName string
+		input    map[string]interface{}
+	}{
+		{"terminal_read", map[string]interface{}{"sessionId": "t1"}},
+		{"terminal_list", map[string]interface{}{}},
+		{"terminal_signal", map[string]interface{}{"sessionId": "t1", "signal": "SIGINT"}},
+		{"list_mcp_resources", map[string]interface{}{"server": "files"}},
+		{"read_mcp_resource", map[string]interface{}{"server": "files", "uri": "file:///repo/a.go"}},
+		{"session_event_read", map[string]interface{}{"path": "/repo/.dsh/session.log"}},
+		{"session_search", map[string]interface{}{"path": "/repo", "query": "deploy"}},
+	} {
+		t.Run(tc.toolName, func(t *testing.T) {
+			logPath := dshTestSetup(t)
+
+			runHookWithInput(t, runPostTool, dshEvent("PostToolUse", "d-tax", map[string]interface{}{
+				"tool_name":     tc.toolName,
+				"tool_input":    tc.input,
+				"tool_response": "ok",
+			}))
+
+			event := lastEndpointEvent(t, logPath)
+			if got := leaf(event, "event", "action"); got != "tool.invoked" {
+				t.Fatalf("event.action = %q, want tool.invoked", got)
+			}
+			if _, ok := event["command"]; ok {
+				t.Fatalf("%s wrote a command field: %#v; it runs nothing", tc.toolName, event["command"])
+			}
+			if _, ok := event["mcp"]; ok {
+				t.Fatalf("%s wrote an mcp field: %#v; it is a built-in, not an MCP call",
+					tc.toolName, event["mcp"])
+			}
+			if file, ok := event["file"].(map[string]interface{}); ok {
+				if operation, _ := file["operation"].(string); operation != "" {
+					t.Fatalf("%s wrote file.operation = %q; it opened no file",
+						tc.toolName, operation)
+				}
 			}
 		})
 	}

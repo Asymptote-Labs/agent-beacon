@@ -262,6 +262,23 @@ func dshToolKindFor(toolName string) (dshToolKind, bool) {
 	return kind, ok
 }
 
+// dshIsCatalogToolName reports whether a name is one of dsh's own built-in tools.
+//
+// Its one caller is the MCP detection, which treats any tool name containing "mcp" as an MCP
+// invocation. That is true of every runtime that decorates MCP names -- dsh among them, which
+// spells one `mcp__<server>__<tool>` -- and false of three of dsh's own built-ins:
+// `list_mcp_resources`, `list_mcp_resource_templates` and `read_mcp_resource` manage MCP servers
+// rather than call one. Without this, listing a server's resources is recorded as a tool call to a
+// server that was never invoked, with an empty mcp.tool and a method of "tools/call" that is not
+// the request that was made.
+//
+// The catalog is the right question to ask because it is exhaustive and exact: a real MCP call is
+// never in it, so it is never suppressed here.
+func dshIsCatalogToolName(toolName string) bool {
+	_, known := dshToolKindFor(toolName)
+	return known
+}
+
 // dshEditorOperation reads the operation a `str_replace_editor` call performed, or "" when the call
 // is not one.
 //
@@ -367,34 +384,61 @@ func dshToolAction(toolName string, toolInput map[string]interface{}) string {
 	case dshToolShell:
 		return "command.executed"
 	default:
-		// A known tool with no filesystem or shell meaning. "" hands it to the shared classifier,
-		// whose tool.invoked fallback is the right answer -- and which is also where an
-		// MCP-flavored name would still be caught if one reached here.
-		return ""
+		// A known tool with no filesystem or shell meaning, answered here rather than handed back
+		// to the shared classifier -- and this is the whole reason the `other` entries are in the
+		// table at all. That classifier reasons from substrings, and dsh's names are full of the
+		// ones it looks for: `terminal_read`, `terminal_list`, `terminal_open`, `terminal_close`
+		// and `terminal_signal` contain "terminal" and would be recorded as command executions;
+		// `read_mcp_resource`, `list_mcp_resources` and `list_mcp_resource_templates` contain
+		// "mcp" and would be recorded as MCP tool invocations; `session_event_read` contains
+		// "read" and would be recorded as a file read. Returning "" would put every one of them
+		// back in front of the rule this table exists to keep them away from -- session
+		// inspection and resource listing firing command and file rules. Reported by Cursor
+		// Bugbot.
+		//
+		// A real MCP call cannot be swallowed by this branch: dsh names one `mcp__<server>__<tool>`
+		// and no entry in the table is that shape, so an MCP call is never `known` here and reaches
+		// the shared MCP detection unchanged.
+		return "tool.invoked"
 	}
 }
 
-// dshFileOperation is the `file.operation` value for a dsh tool, or "" to fall through to the
-// generic reader.
+// dshFileOperation is the `file.operation` value for a dsh tool. The second result reports whether
+// the tool was in the table at all, so the caller can tell a known tool that did nothing to a file
+// ("", true) from a tool this build has never seen ("", false) and only fall through to the generic
+// reader for the second.
 //
 // Separate from dshToolAction, as the Kiro, Qwen and OpenHands pairs are, because the two answer
 // different questions: an action says which event this is, an operation says what happened to the
 // file.
-func dshFileOperation(toolName string, toolInput map[string]interface{}) string {
+//
+// The distinction is the fileOperation half of the defect dshToolAction's default case describes:
+// the generic reader matches "read", "view", "list", "grep" and "search" as a read and "write" as a
+// create, so `terminal_read`, `terminal_list`, `session_search` and `todo_write` would each stamp a
+// file operation onto a call that opened no file, whenever the call also carried something the path
+// reader accepts.
+func dshFileOperation(toolName string, toolInput map[string]interface{}) (string, bool) {
 	kind, known := dshEffectiveToolKind(toolName, toolInput)
 	if !known {
-		return ""
+		return "", false
 	}
 	switch kind {
 	case dshToolRead:
-		return "read"
+		return "read", true
 	case dshToolCreate:
-		return "create"
+		return "create", true
 	case dshToolModify:
-		return "modify"
+		return "modify", true
 	default:
-		return ""
+		return "", true
 	}
+}
+
+// dshFileOperationValue is dshFileOperation for the callers that only want the operation, for whom
+// a known tool with no file operation and an unknown tool are the same answer: nothing to write.
+func dshFileOperationValue(toolName string, toolInput map[string]interface{}) string {
+	operation, _ := dshFileOperation(toolName, toolInput)
+	return operation
 }
 
 // isDshFileEditTool reports whether a dsh tool changes a file, which is what routes a post-tool
@@ -468,7 +512,7 @@ func dshExitCode(output string) (int, bool) {
 // call's arguments, and the shared reader has already written its answer into the file field by the
 // time this runs.
 func applyDshToolResult(fields map[string]interface{}, toolName string, toolInput, toolResponse map[string]interface{}) {
-	if operation := dshFileOperation(toolName, toolInput); operation != "" {
+	if operation := dshFileOperationValue(toolName, toolInput); operation != "" {
 		if file, ok := fields["file"].(map[string]interface{}); ok {
 			file["operation"] = operation
 		}
@@ -534,8 +578,9 @@ func parseDshEdit(input map[string]interface{}, logger *logging.Logger) *evaluat
 		filePath:  filePath,
 		diffStr:   diffStr,
 		// The taxonomy already answered this, and the shared diff path would otherwise write
-		// "modify" for a file that did not exist a moment ago.
-		fileOperation: dshFileOperation(toolName, toolInput),
+		// "modify" for a file that did not exist a moment ago. Only a write reaches here, so the
+		// operation is always one of "create" and "modify" and the known flag has nothing to add.
+		fileOperation: dshFileOperationValue(toolName, toolInput),
 	}
 }
 
