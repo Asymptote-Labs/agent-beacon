@@ -207,7 +207,7 @@ func (m *mapper) emitSettingsUsage(line int) {
 		raw["factory_credits"] = usage.FactoryCredits
 	}
 	ev.Raw = raw
-	m.append(record, "settings.usage", ev)
+	m.append(record, fmt.Sprintf("settings.usage.%d", m.ref.SettingsUnixMS), ev)
 }
 
 func (m *mapper) base(record *Record, action, category string, severity schema.Severity, message string) schema.Event {
