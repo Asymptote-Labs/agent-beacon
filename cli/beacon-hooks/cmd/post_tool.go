@@ -104,6 +104,14 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		// delete or a write this build could not read, and it falls through to the observing path
 		// below, which still records the call with its path and operation.
 		params = parseKiroEdit(input, logger)
+	} else if platformFlag == dshPlatform {
+		// DeepSeek Harness gets its own reader rather than riding parseClaudeCopilotInput for one
+		// reason the shared reader has no way to ask about: `str_replace_editor` multiplexes a
+		// read and three writes onto one tool name, selected by an argument, so whether this
+		// payload is an edit at all depends on the arguments. A nil result is not a failure -- it
+		// means this payload is a read, a shell command, an MCP call or an editor `view` -- and it
+		// falls through to the observing path below, which still records the call.
+		params = parseDshEdit(input, logger)
 	} else if platformFlag == goosePlatform {
 		// goose gets its own reader rather than riding parseClaudeCopilotInput for two reasons the
 		// shared reader cannot be told about: its edit tool names the replaced span `before` and
@@ -450,6 +458,13 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 			return
 		}
 	}
+	// DeepSeek Harness has no failure predicate beside its result reader, and that asymmetry is
+	// the point: the bridge flattens a tool result to text before a hook sees it, so nothing
+	// distinguishes a tool that threw from one that returned. What the result does carry is a
+	// shell command's output and, when it is non-zero, its exit code.
+	if platformFlag == dshPlatform {
+		applyDshToolResult(fields, toolName, toolInput, toolResponse)
+	}
 	action := actionForTool(hookEvent, toolName, toolInput, toolResponse)
 	category := "tool"
 	if strings.HasPrefix(action, "file.") {
@@ -566,6 +581,20 @@ func isFileEditTool(platform, toolName string) bool {
 	// runtimes' call sites to document one that does not happen.
 	if platform == kiroPlatform {
 		return isKiroFileEditTool(toolName, nil)
+	}
+	// DeepSeek Harness's `write` and `edit` would in fact be caught by the lowercase entries in the
+	// Claude Code fallback below, but `str_replace_editor` would not -- and the fallback would also
+	// claim `read_mcp_resource` and `session_event_read` by substring. The taxonomy answers all of
+	// them from the same table the action classifier reads, so the two cannot disagree.
+	//
+	// nil arguments, deliberately, for the reason the Kiro branch above gives: the one dsh case
+	// that needs them -- an editor `view`, which is a read rather than an edit -- never reaches
+	// here, because dshToolAction answers first for every tool in the table. Passing nil makes
+	// `str_replace_editor` fall back to its table entry, `create`, which is an edit; that is the
+	// safe direction, since reaching the diff path with a `view` payload would simply produce no
+	// diff.
+	if platform == dshPlatform {
+		return isDshFileEditTool(toolName, nil)
 	}
 	// Muse Code's tool names are not published, and the fallback below is Claude Code's PascalCase
 	// set, which a snake_case runtime never matches -- so without a branch here a Muse file edit

@@ -291,7 +291,17 @@ func policyDenyResponse(reason string, phase policycontract.Phase) map[string]in
 	// `hookSpecificOutput.decision` object, so a deny raised from that phase is not honored there.
 	// Stated rather than hidden: the seam fails open, so the cost is a deny that does not take
 	// effect on one of two phases, never a tool call blocked for the wrong reason.
-	case platformFlag == "claude" || platformFlag == "qwen":
+	// DeepSeek Harness shares Claude Code's deny shape because its bridge exists to run Claude Code
+	// hooks: the decoder reads `hookSpecificOutput.permissionDecision` as allow/deny/ask and
+	// `permissionDecisionReason` as the reason, and maps a deny onto the harness's own
+	// `tools/pre-execute` rejection with that reason handed to the model.
+	//
+	// `hookEventName` must equal the firing event or the whole hookSpecificOutput block is
+	// discarded -- the bridge passes the point name as expectedEventName precisely to stop a hook
+	// answering for an event that is not running. "PreToolUse" is correct in the only phase that
+	// can reach this on dsh: Beacon registers no permission-request hook there, because the bridge
+	// exposes no such event.
+	case platformFlag == "claude" || platformFlag == "qwen" || platformFlag == dshPlatform:
 		return map[string]interface{}{
 			"hookSpecificOutput": map[string]interface{}{
 				"hookEventName":            "PreToolUse",

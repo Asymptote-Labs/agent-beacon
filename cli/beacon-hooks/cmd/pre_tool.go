@@ -54,7 +54,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == goosePlatform {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == goosePlatform || platformFlag == dshPlatform {
 		// Muse Code belongs on the observing side rather than with the runtimes whose pre-tool
 		// notification gets turned into a synthesized approval, and the reason is that it has a
 		// real one. Its PermissionRequest event is a separate hook Beacon also subscribes to, so
@@ -86,6 +86,12 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		//
 		// The reply goose gets is a separate question from this one, and the two answers point
 		// opposite ways; see preToolResponse.
+		//
+		// DeepSeek Harness is on the same side as OpenHands rather than Kiro or goose: its Claude
+		// Code hook bridge supports seven events and PermissionRequest is not among them, so there
+		// is no approval decision anywhere on this runtime's hook surface. PreToolUse announces a
+		// call the agent is about to make. Synthesizing approval.allowed from it would put an
+		// operator decision in the log that no operator made.
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -180,7 +186,12 @@ func preToolResponse() map[string]interface{} {
 	if platformFlag == goosePlatform {
 		return gooseBlockingEventResponse
 	}
-	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform {
+	// DeepSeek Harness is here for the Qwen reason. Its bridge reads
+	// `hookSpecificOutput.permissionDecision`, where "allow" is a real pre-approval -- so an
+	// observing hook answering "allow" would not be observing, it would be disarming the
+	// deployment's own permission gate for every tool call. An empty object carries no decision,
+	// and the bridge's decoder treats stdout that parses to nothing as exactly that: no opinion.
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == dshPlatform {
 		return emptyResponse
 	}
 	return allowResponse
