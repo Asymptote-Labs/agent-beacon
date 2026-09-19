@@ -247,6 +247,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, museCandidates(home)...)
 	items = append(items, openHandsCandidates(home, wd)...)
 	items = append(items, kiroCandidates(home, wd)...)
+	items = append(items, dshCandidates(home)...)
 	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
@@ -556,6 +557,40 @@ func kiroCandidates(home, wd string) []candidate {
 	}
 }
 
+// dshCandidates covers both halves of a DeepSeek Harness install.
+//
+// Two files rather than one, because on this runtime either alone is inert: the hooks file is a
+// file nothing reads until the patch layer mounts the bridge at it, and the mount is a bridge that
+// registers nothing until the hooks file is there. Listing both is what lets the inventory report a
+// half-install -- which here is the failure that looks most like success, the same reason Muse Code
+// gets two candidates.
+//
+// No project scope, because dsh has none: its plugin tree is composed from the Harness home, so
+// there is nowhere in a repository for a hook bridge to be mounted from. A `wd` parameter is
+// therefore not taken at all rather than taken and ignored.
+//
+// The patch file is listed as YAML and the hooks file as JSON, which is what they are -- and the
+// patch file is also the user's own, so the inventory may well find rows in it that have nothing to
+// do with Beacon. Detection keys on Beacon's mount, not on the file existing.
+func dshCandidates(home string) []candidate {
+	dir := dshUserDir(home)
+	return []candidate{
+		{runtime: "deepseek_harness", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "deepseek_harness", path: filepath.Join(dir, "cordis.patch.yml"), scope: ScopeUser, format: formatYAML, kind: KindHookConfig},
+	}
+}
+
+// dshUserDir resolves the Harness home, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set DSH_HOME.
+func dshUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("DSH_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".dsh")
+}
+
 // kiroUserDir resolves the global Kiro directory, mirroring the installer.
 //
 // Exported to the test as a function rather than restated there as a literal path, so the
@@ -719,14 +754,33 @@ func parseMCPServers(item candidate, data []byte, redaction string, co contentOp
 		}
 		return serversFromMap(item, root, redaction, co), nil
 	case formatYAML:
-		var root map[string]interface{}
+		// Decoded into an interface rather than straight into a map, because a YAML config Beacon
+		// scans is not always a mapping. dsh's `cordis.patch.yml` is a top-level SEQUENCE of patch
+		// elements, so unmarshalling it into a map fails on every file that exists -- including a
+		// healthy Beacon install, which the dashboard would then badge as broken. A document whose
+		// top level is a list is valid YAML and readable; it simply has no mapping to look for a
+		// server block in at the root, so the walk starts one level down.
+		var root interface{}
 		if err := yaml.Unmarshal(data, &root); err != nil {
 			return nil, err
 		}
-		return serversFromMap(item, root, redaction, co), nil
+		return serversFromDocument(item, root, redaction, co), nil
 	default:
 		return nil, fmt.Errorf("unsupported config format %q", item.format)
 	}
+}
+
+// serversFromDocument reads MCP servers out of a parsed document whose top level may be a mapping
+// or may not be.
+//
+// A mapping goes through serversFromMap, which also honours a root-level `servers` block. Anything
+// else -- a sequence, a scalar, an empty document -- is walked for nested MCP blocks instead. That
+// is the whole difference: there is no root key to read, so only the nested search applies.
+func serversFromDocument(item candidate, root interface{}, redaction string, co contentOptions) []MCPServer {
+	if mapping, ok := root.(map[string]interface{}); ok {
+		return serversFromMap(item, mapping, redaction, co)
+	}
+	return dedupeServers(serversFromNestedMCPBlocks(item, root, redaction, co))
 }
 
 func serversFromMap(item candidate, root map[string]interface{}, redaction string, co contentOptions) []MCPServer {
@@ -988,6 +1042,19 @@ func beaconManaged(item candidate, data []byte) bool {
 	// keys on, and what survives someone renaming the hooks inside the file.
 	case "kiro":
 		return strings.Contains(text, "--platform kiro") || strings.Contains(text, "--platform=kiro")
+	// Two files with two different tells, both matched by one case because both are DeepSeek
+	// Harness's -- the Muse Code shape. The hooks file carries the hook command, since Beacon owns
+	// it outright; cordis.patch.yml carries neither a command nor a Beacon marker, because Beacon
+	// adds one row to a file the user also writes, so it is recognized by the bridge package its
+	// row mounts. Matching either is what lets the inventory report a half-install.
+	//
+	// The bridge package name is safe to match on here in a way a bare marker would not be: it is
+	// the plugin specifier the loader resolves, so it cannot be edited to something else and still
+	// work. A user who mounts the bridge themselves would match too -- which is correct, since
+	// that is a live route from this runtime into a hooks file.
+	case "deepseek_harness":
+		return strings.Contains(text, "--platform dsh") || strings.Contains(text, "--platform=dsh") ||
+			strings.Contains(text, "@deepseek-ai/dsh-hooks-claude-code")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {

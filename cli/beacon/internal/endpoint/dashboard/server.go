@@ -376,6 +376,11 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	add("openhands", openhands.Installed, openhands.HooksPath, openhands.BinaryPath, openhands.Message)
 	kiro := endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("kiro", kiro.Installed, kiro.HooksPath, kiro.BinaryPath, kiro.Message)
+	// The hooks file is the path reported, because it is the one a person would open. The patch
+	// file that mounts the bridge at it is not shown here -- this row carries one path -- and
+	// `beacon endpoint hooks status` reports both.
+	dsh := endpointhooks.DshHookStatus(endpointhooks.DshOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("dsh", dsh.Installed, dsh.HooksPath, dsh.BinaryPath, dsh.Message)
 	muse := endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("muse", muse.Installed, muse.HooksPath, muse.BinaryPath, muse.Message)
 	qwen := endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{Level: level, LogPath: logPath, UserMode: userMode})
