@@ -596,7 +596,7 @@ func parseKiroEdit(input map[string]interface{}, logger *logging.Logger) *evalua
 		logger.Debug("Skipping non-scannable file: " + filePath)
 		return nil
 	}
-	diffStr := hookdiff.FromKiroWrite(kiroWriteOperation(toolName, toolInput, toolResponse), toolName, toolInput, toolResponse)
+	diffStr := hookdiff.FromEditorCommandWrite(kiroWriteOperation(toolName, toolInput, toolResponse), toolName, toolInput, toolResponse)
 	if diffStr == "" {
 		logger.Debug("Could not construct diff, skipping", "tool_name", toolName, "file_path", filePath)
 		return nil

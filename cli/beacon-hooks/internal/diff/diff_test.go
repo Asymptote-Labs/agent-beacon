@@ -254,11 +254,11 @@ func TestFromContentChangeReturnsNothingWhenTheContentIsUnchanged(t *testing.T) 
 	}
 }
 
-// FromKiroWrite is the one diff builder written against a tool whose arguments the vendor does not
+// FromEditorCommandWrite is the one diff builder written against a tool whose arguments the vendor does not
 // publish, so its safety property is worth stating as a test rather than as a comment: an
 // unrecognized shape must produce no diff, never a wrong one. Every case below is a shape Kiro
 // could plausibly send, and each either resolves exactly or returns "".
-func TestFromKiroWriteReadsBothArgumentSpellings(t *testing.T) {
+func TestFromEditorCommandWriteReadsBothArgumentSpellings(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		operation string
@@ -303,7 +303,7 @@ func TestFromKiroWriteReadsBothArgumentSpellings(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FromKiroWrite(tc.operation, tc.toolName, tc.input, nil)
+			got := FromEditorCommandWrite(tc.operation, tc.toolName, tc.input, nil)
 			for _, want := range tc.wantLines {
 				if !hasExactLine(got, want) {
 					t.Fatalf("diff missing %q:\n%s", want, got)
@@ -315,7 +315,7 @@ func TestFromKiroWriteReadsBothArgumentSpellings(t *testing.T) {
 
 // The safety property itself. A shape this build cannot read yields nothing, which records the
 // file event without a diff -- rather than a diff built from a value that was not the content.
-func TestFromKiroWriteReturnsNothingRatherThanGuessing(t *testing.T) {
+func TestFromEditorCommandWriteReturnsNothingRatherThanGuessing(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		operation string
@@ -329,8 +329,8 @@ func TestFromKiroWriteReturnsNothingRatherThanGuessing(t *testing.T) {
 		{"an unknown tool", "", "some_future_tool", map[string]interface{}{"path": "/repo/a.go", "content": "x"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := FromKiroWrite(tc.operation, tc.toolName, tc.input, nil); got != "" {
-				t.Fatalf("FromKiroWrite = %q, want empty", got)
+			if got := FromEditorCommandWrite(tc.operation, tc.toolName, tc.input, nil); got != "" {
+				t.Fatalf("FromEditorCommandWrite = %q, want empty", got)
 			}
 		})
 	}
@@ -338,8 +338,8 @@ func TestFromKiroWriteReturnsNothingRatherThanGuessing(t *testing.T) {
 
 // A create that reports the file's previous contents is an overwrite, and rendering it as a new
 // file would hide what was replaced.
-func TestFromKiroWriteRendersAnOverwriteAsAReplacement(t *testing.T) {
-	got := FromKiroWrite("create", "fs_write", map[string]interface{}{
+func TestFromEditorCommandWriteRendersAnOverwriteAsAReplacement(t *testing.T) {
+	got := FromEditorCommandWrite("create", "fs_write", map[string]interface{}{
 		"path":          "/repo/a.go",
 		"file_text":     "new\n",
 		"original_file": "old\n",

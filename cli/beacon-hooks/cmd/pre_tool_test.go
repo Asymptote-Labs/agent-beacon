@@ -971,6 +971,7 @@ func setupHookConfigDirs(t *testing.T) {
 		"copilot":     &hookconfig.CopilotDir,
 		"cursor":      &hookconfig.CursorDir,
 		"devin":       &hookconfig.DevinDir,
+		"dsh":         &hookconfig.DshDir,
 		"factory":     &hookconfig.FactoryDir,
 		"grok":        &hookconfig.GrokDir,
 		"hermes":      &hookconfig.HermesDir,
