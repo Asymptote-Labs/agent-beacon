@@ -42,8 +42,8 @@ type mapper struct {
 	turnID    string
 	started   bool
 
-	tokenRecordTurns       map[string]bool
-	emittedTokenCountTurns map[string]bool
+	tokenRecordTurns      map[string]bool
+	emittedTokenCountIdx  map[string]int
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
@@ -59,8 +59,8 @@ func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent
 		tools:                  map[string]codexToolCall{},
 		sessionID:              ref.ID,
 		workspace:              ref.Workspace,
-		tokenRecordTurns:       tokenRecordTurns,
-		emittedTokenCountTurns: map[string]bool{},
+		tokenRecordTurns:      tokenRecordTurns,
+		emittedTokenCountIdx:  map[string]int{},
 	}
 	for i := range records {
 		m.consume(records[i])
@@ -199,15 +199,9 @@ func (m *mapper) consumeTokenCount(record Record, msg *EventMessage) {
 	if turnID != "" && m.tokenRecordTurns[turnID] {
 		return
 	}
-	if turnID != "" && m.emittedTokenCountTurns[turnID] {
-		return
-	}
 	usage := usageFromCodex(firstUsage(msg.Info.LastTokenUsage, msg.Info.TotalTokenUsage))
 	if usage == nil {
 		return
-	}
-	if turnID != "" {
-		m.emittedTokenCountTurns[turnID] = true
 	}
 	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, schema.FidelityObserved, "Codex token usage observed")
 	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Usage: usage})
@@ -223,7 +217,17 @@ func (m *mapper) consumeTokenCount(record Record, msg *EventMessage) {
 			"source":      "codex_session_token_count",
 		},
 	}
-	m.append(record, "usage.token_count."+firstNonEmpty(msg.TurnID, itoa(record.Line)), ev)
+	suffix := "usage.token_count." + firstNonEmpty(msg.TurnID, itoa(record.Line))
+	if turnID != "" {
+		if idx, ok := m.emittedTokenCountIdx[turnID]; ok {
+			coordinate := firstNonEmpty(m.sessionID, m.ref.ID, m.ref.Path) + ":" + itoa(record.Line) + ":" + suffix
+			ev.Event.ID = codexEventID(coordinate)
+			m.out[idx] = MappedEvent{DedupID: ev.Event.ID, SourceLine: record.Line, Event: ev}
+			return
+		}
+		m.emittedTokenCountIdx[turnID] = len(m.out)
+	}
+	m.append(record, suffix, ev)
 }
 
 func (m *mapper) consumeTokenUsageRecord(record Record, emit bool) {

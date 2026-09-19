@@ -84,6 +84,35 @@ func TestMapCodexTranscriptProducesEndpointEvents(t *testing.T) {
 	}
 }
 
+func TestTokenCountLastWinsForMultipleSnapshotsPerTurn(t *testing.T) {
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	records := decodeFixture(t, []string{
+		sessionMetaLine("sess-1", "/tmp/repo"),
+		turnContextLine("turn-1", "gpt-6-astra"),
+		messageLine("user", "msg-user", "build it"),
+		tokenCountLine("turn-1", 0, 0, 0, 0),
+		tokenCountLine("turn-1", 50, 20, 50, 20),
+		tokenCountLine("turn-1", 80, 30, 130, 50),
+	})
+	mapped := MapSession(ref, records, MapOptions{})
+	var usageEvents []schema.Event
+	for _, item := range mapped {
+		if item.Event.Event.Action == "token.usage" {
+			usageEvents = append(usageEvents, item.Event)
+		}
+	}
+	if len(usageEvents) != 1 {
+		t.Fatalf("expected 1 token.usage event, got %d", len(usageEvents))
+	}
+	ev := usageEvents[0]
+	if ev.GenAI == nil || ev.GenAI.Usage == nil || ev.GenAI.Usage.OutputTokens == nil {
+		t.Fatal("missing usage on token.usage event")
+	}
+	if *ev.GenAI.Usage.OutputTokens != 30 {
+		t.Fatalf("output tokens = %d, want 30 (last snapshot)", *ev.GenAI.Usage.OutputTokens)
+	}
+}
+
 func TestCollectOnceUsesCursorAndPrintDoesNotAdvance(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
@@ -229,6 +258,10 @@ func taskCompleteLine(turnID string) string {
 func quote(s string) string {
 	data, _ := json.Marshal(s)
 	return string(data)
+}
+
+func tokenCountLine(turnID string, lastInput, lastOutput, totalInput, totalOutput int64) string {
+	return `{"timestamp":"2026-09-19T22:00:04.000Z","type":"event_msg","payload":{"type":"token_count","turn_id":` + quote(turnID) + `,"info":{"last_token_usage":{"input_tokens":` + i64(lastInput) + `,"output_tokens":` + i64(lastOutput) + `},"total_token_usage":{"input_tokens":` + i64(totalInput) + `,"output_tokens":` + i64(totalOutput) + `}}}}`
 }
 
 func i64(v int64) string {
