@@ -370,9 +370,13 @@ func FromContentChange(filePath, oldContent, newContent string) string {
 	return fromWriteTool(filePath, newContent, oldContent)
 }
 
-// FromKiroWrite builds the diff for one Kiro write call.
+// FromEditorCommandWrite builds the diff for one write through a multiplexed editor tool: the
+// Anthropic text-editor shape, where `command` selects between create, str_replace and insert over
+// a `path`.
 //
-// Kiro is the one supported runtime that publishes its tool names and not its tool arguments, so
+// Two runtimes ship that tool and they spell its arguments differently, which is why this reads
+// several spellings of each field. Kiro is the one supported runtime that publishes its tool names
+// and not its tool arguments, so
 // this reads every plausible spelling of each field rather than one. That sounds like guessing and
 // is the opposite: an unrecognized shape returns "", which records the file event with its path
 // and no diff, while a shape that resolves produces a diff from values that can only have been the
@@ -380,13 +384,14 @@ func FromContentChange(filePath, oldContent, newContent string) string {
 //
 // The two spellings come from two real places. `file_text`, `old_str` and `new_str` are Amazon Q
 // Developer CLI's names for the same tool, which Kiro CLI descends from and still documents a
-// migration path out of; `content`, `old_string` and `new_string` are the ecosystem convention the
+// migration path out of -- and which DeepSeek Harness's `str_replace_editor` publishes verbatim in
+// its generated schema; `content`, `old_string` and `new_string` are the ecosystem convention the
 // shared resolver already knows. Reading both costs one lookup.
 //
 // operation is passed in rather than derived, because deciding whether a write is a create or a
 // replacement is the taxonomy's job and it already answered. An empty operation means the tool
 // name is the whole answer.
-func FromKiroWrite(operation, toolName string, toolInput, toolResponse map[string]interface{}) string {
+func FromEditorCommandWrite(operation, toolName string, toolInput, toolResponse map[string]interface{}) string {
 	filePath := NormalizePath(kiroWritePath(toolInput, toolResponse))
 	if filePath == "" {
 		return ""
