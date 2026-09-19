@@ -398,6 +398,14 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// above. Both can be live at once, so showing one would understate the install.
 		{runtime: "kiro", path: filepath.Join(kiroUserDir(home), "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "kiro", path: filepath.Join(work, ".kiro", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		// DeepSeek Harness is two files and no project entry. Both halves are reported because
+		// either one alone is inert and the runtime says nothing about it -- the Muse Code shape;
+		// the project scope is absent because dsh composes its plugin tree from the Harness home,
+		// so a repository has nowhere to mount a hook bridge from. cordis.patch.yml is the user's
+		// own file, which is why it is listed as YAML and matched on the bridge package rather
+		// than on a Beacon marker.
+		{runtime: "deepseek_harness", path: filepath.Join(dshUserDir(home), "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "deepseek_harness", path: filepath.Join(dshUserDir(home), "cordis.patch.yml"), scope: ScopeUser, format: formatYAML, kind: KindHookConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.
