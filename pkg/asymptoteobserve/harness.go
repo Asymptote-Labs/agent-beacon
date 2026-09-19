@@ -315,6 +315,38 @@ func NormalizeHarnessName(name string) string {
 		lower == "codename_goose" || lower == "codename-goose" || lower == "codename goose" ||
 		lower == "block_goose" || lower == "block-goose" || lower == "block goose":
 		return "goose"
+	// DeepSeek Harness (`dsh`) is DeepSeek's open agent harness: a TypeScript, plugin-composed
+	// runtime whose CLI, Web, ACP and SDK surfaces all boot from one `$DSH_HOME` and one patch
+	// layer -- so Beacon hooks all of them at once through a single mount and there is one runtime
+	// to name, not four.
+	//
+	// The canonical spelling is `deepseek_harness` rather than `dsh`, for the reason vercel_fx is
+	// not `fx`: harness.name is what a SIEM query groups by, and a three-letter value there says
+	// nothing about which product produced the row. `dsh` is accepted as an input spelling because
+	// it is what the binary is called and what an operator types.
+	//
+	// Equality against a closed set, and this is the sharpest case in this function for it.
+	// DeepSeek ships the agent and a model family under one name, so every DeepSeek model id
+	// begins with the letters the harness does -- deepseek-chat, deepseek-reasoner, deepseek-v3,
+	// deepseek-r1, deepseek-coder. A Contains(lower, "deepseek") rule would report any event whose
+	// harness attribute happened to carry one of those model strings as a DeepSeek Harness
+	// session, and the misattribution would be unreadable as one because both start with the same
+	// word. The same hazard applies to `dsh`: the runtime stamps those three letters on
+	// environment variables and paths that legitimately appear in other fields -- DSH_HOME,
+	// ~/.dsh, DSH_GITHUB_WEBHOOK_SECRET, the managed $DSH_* variables a bash tool call can print.
+	//
+	// Bare `deepseek` is deliberately NOT in the set, and that is the one entry a reader is most
+	// likely to want to add. It is the vendor and the model family, not the harness: an OTLP
+	// resource attribute reading "deepseek" is far more likely to have come from a provider route
+	// than from this runtime, and filing it under the agent would attribute somebody's API traffic
+	// to an endpoint install that may not exist. It falls to the passthrough case and shows up as
+	// itself, which reads as an anomaly a person can act on.
+	case lower == "dsh" || lower == "dsh_cli" || lower == "dsh-cli" || lower == "dsh cli" ||
+		lower == "dshcli" || lower == "deepseek_harness" || lower == "deepseek-harness" ||
+		lower == "deepseek harness" || lower == "deepseekharness" ||
+		lower == "deepseek_ai/dsh" || lower == "deepseek-ai/dsh" ||
+		lower == "@deepseek-ai/dsh" || lower == "deepseek_dsh" || lower == "deepseek-dsh":
+		return "deepseek_harness"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
