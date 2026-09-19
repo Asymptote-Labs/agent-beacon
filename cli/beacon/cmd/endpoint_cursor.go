@@ -162,9 +162,9 @@ func runEndpointCursorStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	refs, err := store.List()
-	if err != nil {
-		return err
+	refs, listErr := store.List()
+	if listErr != nil && len(refs) == 0 {
+		return listErr
 	}
 	report := cursorStatusReport{
 		GlobalDBPath: store.GlobalDBPath,
