@@ -1,0 +1,83 @@
+---
+title: "beacon endpoint opencode"
+description: "Collect endpoint telemetry from OpenCode session records"
+---
+
+## Command overview
+
+`beacon endpoint opencode` supplements the live [OpenCode](/runtimes/opencode) plugin by reading OpenCode's committed local session store and converting those records into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint opencode [command]
+```
+
+Beacon reads `opencode.db` when present and falls back to OpenCode's legacy `storage/session`, `storage/message`, `storage/part`, and `storage/project` tree. This path is useful for historical sessions and sessions that ran before Beacon's OpenCode plugin was installed or loaded.
+
+Every event is marked `harness.collection_method=poll`. Beacon sees what OpenCode already wrote, so nothing here can hold or deny a tool call. Keep the managed plugin installed when you need live approval telemetry and richer hook timing.
+
+Reading is local and offline. Nothing this command does reaches the network.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint opencode sync` | Read new OpenCode session records into the runtime log |
+| `beacon endpoint opencode status` | Show OpenCode local sessions and how much has been collected |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--data-dir <path>` | OpenCode data directory or `opencode.db` path. Defaults to `~/.config/opencode` |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/opencode-sessions.json` |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them or advancing the cursor |
+| `--watch` | Sweep continuously on `--interval` instead of sweeping once and exiting |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint opencode sync
+```
+
+```bash title="Preview without writing anything"
+beacon endpoint opencode sync --print
+```
+
+`--print` is a dry run in both directions: it neither writes the runtime log nor advances the cursor.
+
+```bash title="Sweep continuously"
+beacon endpoint opencode sync --watch --interval 5m
+```
+
+Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the user context that owns OpenCode's data directory.
+
+## Status
+
+```bash title="Show OpenCode sessions and collection progress"
+beacon endpoint opencode status
+```
+
+`collected` means the cursor is level with the records Beacon read from that OpenCode session source. SQLite-backed sessions and legacy JSON sessions are tracked separately so upgrading OpenCode's storage format does not confuse the cursor.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="OpenCode" icon="code" href="/runtimes/opencode">
+    Telemetry coverage, plugin setup, and known gaps for the runtime.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install the live OpenCode plugin for hook-time telemetry.
+  </Card>
+</Columns>

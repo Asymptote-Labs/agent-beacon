@@ -7,6 +7,10 @@ description: "Asymptote support details for OpenCode endpoint telemetry"
 
 Asymptote supports OpenCode through a managed local plugin that invokes `beacon-hooks`.
 
+Beacon can also read OpenCode's committed local session store with `beacon endpoint opencode sync`.
+That poll path backfills historical or uninstrumented sessions, while the managed plugin remains the
+live path for hook-time events and approval telemetry.
+
 ## Prerequisites
 
 Before enabling OpenCode telemetry, make sure:
@@ -22,11 +26,14 @@ Asymptote installs an owned OpenCode plugin at `~/.config/opencode/plugins/beaco
 
 The integration is plugin-based. OpenCode's native OTLP export is neither configured nor required by Beacon.
 
+For backfill, `beacon endpoint opencode sync` reads OpenCode's local `opencode.db` when present and falls back to the legacy `storage/session`, `storage/message`, `storage/part`, and `storage/project` tree. Those events are marked `harness.collection_method=poll` because Beacon reads committed records after the fact; nothing on that path can hold or deny a tool call.
+
 ## Discovery and status
 
 Asymptote detects OpenCode through the `opencode` executable or `~/.config/opencode`, then checks for Asymptote plugin configuration.
 
 Use `beacon endpoint hooks status --harness opencode` to inspect OpenCode plugin status.
+Use `beacon endpoint opencode status` to inspect persisted session-store collection progress.
 
 ## Install or configuration support
 
@@ -36,19 +43,23 @@ Use `beacon endpoint hooks status --harness opencode` to inspect OpenCode plugin
 beacon endpoint hooks install --harness opencode
 ```
 
+```bash title="Backfill committed local sessions"
+beacon endpoint opencode sync
+```
+
 ## Telemetry coverage
 
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported through `chat.message` hooks |
-| Assistant output and reasoning | Completed text and reasoning parts, correlated by session/message/part IDs |
+| Assistant output and reasoning | Completed text and reasoning parts, correlated by session/message/part IDs; committed text and reasoning can also be recovered from the session store |
 | Tool lifecycle | Invocation, completion, result, duration, and failure using `tool.execute.before`, `tool.execute.after`, and terminal tool parts |
 | Command telemetry | Model-invoked Bash/shell tools plus successful OpenCode custom commands |
 | File telemetry | Read/search/glob and write/edit/patch activity with agent-derived paths; empty session diffs are ignored |
 | Web and MCP telemetry | Web tool arguments/results and normalized MCP server/tool/resource context |
-| Approval telemetry | Requests plus `once`, `always`, and `reject` replies, normalized as requested, allowed, and denied |
-| Model and usage | Provider/model, finish reason, token usage, cache usage, reasoning tokens, and runtime-reported cost |
-| Session telemetry | Create, busy/idle/end, retry, and error boundaries |
+| Approval telemetry | Requests plus `once`, `always`, and `reject` replies from the live plugin, normalized as requested, allowed, and denied. Approval telemetry is not recovered from the session-store poll path |
+| Model and usage | Provider/model, finish reason, token usage, cache usage, reasoning tokens, and runtime-reported cost where OpenCode reports them |
+| Session telemetry | Live create, busy/idle/end, retry, and error boundaries through the plugin; persisted sessions can be backfilled through `beacon endpoint opencode sync` |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. OpenCode plugins are installed separately in the logged-in user's context |
 
@@ -56,13 +67,15 @@ beacon endpoint hooks install --harness opencode
 
 OpenCode prompts, completed assistant text and reasoning, tool arguments and results, commands, command output, paths, and diffs are retained in local or customer-controlled logs. Beacon applies local secret redaction and per-string limits before writing. Each content-bearing event includes a hash and byte count for the original value. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-The plugin uses OpenCode session, message, part, permission request, and tool call identifiers for correlation. It does not create file events without an agent-derived path, so object-storage ingestion paths are not treated as files the agent touched.
+The plugin uses OpenCode session, message, part, permission request, and tool call identifiers for correlation. The poll path uses OpenCode's persisted session, message, part, and tool call identifiers. It does not create file events without an agent-derived path, so object-storage ingestion paths are not treated as files the agent touched.
 
 ## Deployment notes
 
 Restart OpenCode after installing or removing hooks so new sessions pick up the updated plugin configuration.
 
 For local troubleshooting, set `BEACON_OPENCODE_DEBUG=1` in the environment that launches OpenCode to emit best-effort plugin debug logs. The adapter has a bounded local subprocess timeout and remains fail-open, so telemetry failures do not interrupt OpenCode execution.
+
+For historical collection or deployments where OpenCode did not load the plugin, run `beacon endpoint opencode sync --print` to preview mapped events, then `beacon endpoint opencode sync` to append them to the runtime log. Use `--watch` or a scheduler if you want the poll path to stay current.
 
 Validate a system-mode installation after restarting OpenCode:
 
@@ -74,11 +87,14 @@ Validate a system-mode installation after restarting OpenCode:
 
 ## Related
 
-<Columns cols={2}>
+<Columns cols={3}>
   <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
     Return to the runtime support overview.
   </Card>
   <Card title="Hooks" icon="plug" href="/cli/hooks">
     Install, inspect, and uninstall runtime hook integrations.
+  </Card>
+  <Card title="beacon endpoint opencode" icon="rotate" href="/cli/endpoint-opencode">
+    Backfill OpenCode sessions from the local session store.
   </Card>
 </Columns>
