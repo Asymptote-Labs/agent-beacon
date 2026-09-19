@@ -144,6 +144,7 @@
                       "runtimes/cline",
                       "runtimes/codex-cli",
                       "runtimes/cursor",
+                      "runtimes/deepseek-harness",
                       "runtimes/devin",
                       "runtimes/devin-desktop",
                       "runtimes/factory-droid",
