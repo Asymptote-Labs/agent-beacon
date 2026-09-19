@@ -754,14 +754,33 @@ func parseMCPServers(item candidate, data []byte, redaction string, co contentOp
 		}
 		return serversFromMap(item, root, redaction, co), nil
 	case formatYAML:
-		var root map[string]interface{}
+		// Decoded into an interface rather than straight into a map, because a YAML config Beacon
+		// scans is not always a mapping. dsh's `cordis.patch.yml` is a top-level SEQUENCE of patch
+		// elements, so unmarshalling it into a map fails on every file that exists -- including a
+		// healthy Beacon install, which the dashboard would then badge as broken. A document whose
+		// top level is a list is valid YAML and readable; it simply has no mapping to look for a
+		// server block in at the root, so the walk starts one level down.
+		var root interface{}
 		if err := yaml.Unmarshal(data, &root); err != nil {
 			return nil, err
 		}
-		return serversFromMap(item, root, redaction, co), nil
+		return serversFromDocument(item, root, redaction, co), nil
 	default:
 		return nil, fmt.Errorf("unsupported config format %q", item.format)
 	}
+}
+
+// serversFromDocument reads MCP servers out of a parsed document whose top level may be a mapping
+// or may not be.
+//
+// A mapping goes through serversFromMap, which also honours a root-level `servers` block. Anything
+// else -- a sequence, a scalar, an empty document -- is walked for nested MCP blocks instead. That
+// is the whole difference: there is no root key to read, so only the nested search applies.
+func serversFromDocument(item candidate, root interface{}, redaction string, co contentOptions) []MCPServer {
+	if mapping, ok := root.(map[string]interface{}); ok {
+		return serversFromMap(item, mapping, redaction, co)
+	}
+	return dedupeServers(serversFromNestedMCPBlocks(item, root, redaction, co))
 }
 
 func serversFromMap(item candidate, root map[string]interface{}, redaction string, co contentOptions) []MCPServer {

@@ -53,6 +53,49 @@ func TestScanReportsBothHalvesOfADshInstall(t *testing.T) {
 	if patch.ParserMode != formatYAML {
 		t.Fatalf("patch parser mode = %q, want yaml", patch.ParserMode)
 	}
+	// A patch file is a top-level YAML SEQUENCE, which is the one shape the inventory's YAML
+	// reader did not handle. Reading it into a mapping fails on every patch file that exists, so
+	// a perfectly healthy install got stored as parse_failed and badged as broken. The status is
+	// pinned here rather than left to the reader, because nothing else in this package scans a
+	// YAML document that is not a mapping.
+	if patch.ParserStatus != StatusOK {
+		t.Fatalf("patch parser status = %q (%s), want %q -- a readable patch file must not "+
+			"report as broken", patch.ParserStatus, patch.Reason, StatusOK)
+	}
+}
+
+// The patch file Beacon itself writes has to survive the same read. This is the install the
+// dashboard shows most often, and a sequence-shaped document is exactly what the installer emits.
+func TestScanReadsABeaconWrittenDshPatchFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DSH_HOME", "")
+
+	dir := filepath.Join(home, ".dsh")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	patchPath := filepath.Join(dir, "cordis.patch.yml")
+	if err := os.WriteFile(patchPath, []byte(
+		"# Beacon endpoint telemetry.\n"+
+			"- insert:\n    - id: beacon-endpoint-hooks\n      name: '@deepseek-ai/dsh-hooks-claude-code'\n"+
+			"      config:\n        configPath: '"+filepath.Join(dir, "beacon-endpoint-hooks.json")+"'\n"), 0644); err != nil {
+		t.Fatalf("write patch: %v", err)
+	}
+
+	result := Scan(Options{HomeDir: home, WorkingDir: t.TempDir()})
+	patch := findConfig(result.Configs, "deepseek_harness", patchPath)
+	if patch == nil {
+		t.Fatalf("scan did not report %s", patchPath)
+	}
+	if !patch.Readable {
+		t.Fatal("Beacon's own patch file was not readable")
+	}
+	if patch.ParserStatus != StatusOK {
+		t.Fatalf("Beacon's own patch file reported %q (%s), want %q", patch.ParserStatus, patch.Reason, StatusOK)
+	}
+	if patch.MCPServerCount != 0 {
+		t.Fatalf("patch file reported %d MCP servers; it mounts a hook bridge, not an MCP server", patch.MCPServerCount)
+	}
 }
 
 // The mount is recognized by the bridge package its row names rather than by a Beacon marker,
