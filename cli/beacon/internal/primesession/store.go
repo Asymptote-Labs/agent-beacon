@@ -211,17 +211,21 @@ func (s *Store) Read(ref SessionRef) ([]Entry, ReadStats, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
 	var entries []Entry
 	stats := ReadStats{}
+	lastLineMalformed := false
 	for scanner.Scan() {
 		stats.MaxLine++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
+			lastLineMalformed = false
 			continue
 		}
 		var item map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			stats.Malformed++
+			lastLineMalformed = true
 			continue
 		}
+		lastLineMalformed = false
 		entries = append(entries, Entry{Line: stats.MaxLine, Data: item})
 	}
 	if err := scanner.Err(); err != nil {
@@ -231,6 +235,8 @@ func (s *Store) Read(ref SessionRef) ([]Entry, ReadStats, error) {
 		stats.PartialTail = true
 		if len(entries) > 0 && entries[len(entries)-1].Line == stats.MaxLine {
 			entries = entries[:len(entries)-1]
+		} else if lastLineMalformed {
+			stats.Malformed--
 		}
 		stats.MaxLine--
 	}
