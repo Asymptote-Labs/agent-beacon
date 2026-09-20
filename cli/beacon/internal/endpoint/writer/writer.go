@@ -62,6 +62,7 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 	if opts.RotateArchives < 1 {
 		opts.RotateArchives = DefaultRotateArchives
 	}
+	asymptoteobserve.AttachDerivedTrace(&event)
 	event = SanitizeEvent(event, opts.MaxBytes)
 	if err := event.Validate(); err != nil {
 		return "", err

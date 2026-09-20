@@ -490,7 +490,11 @@ func traceEventFromRecord(record EventRecord, number int) TraceEventV1 {
 
 func traceProjectionID(event schema.Event) string {
 	if event.Trace != nil && strings.TrimSpace(event.Trace.ID) != "" {
-		return "trace:" + strings.TrimSpace(event.Trace.ID)
+		id := strings.TrimSpace(event.Trace.ID)
+		if strings.HasPrefix(id, "session:") || strings.HasPrefix(id, "trace:") || strings.HasPrefix(id, "event:") {
+			return id
+		}
+		return "trace:" + id
 	}
 	if event.Session != nil && strings.TrimSpace(event.Session.ID) != "" {
 		harness := asymptoteobserve.NormalizeHarnessName(event.Harness.Name)
