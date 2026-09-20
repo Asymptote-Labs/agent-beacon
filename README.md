@@ -46,7 +46,7 @@ activity into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event
 
 | Capability | What it means |
 | --- | --- |
-| **Broad runtime coverage** | [24 local agent runtimes](#local-agents), plus [browser chat, CI, cloud agents, and SDKs](#supported-surfaces) |
+| **Broad runtime coverage** | [Local agent runtimes](#local-agents), plus [browser chat, CI, cloud agents, and SDKs](#supported-surfaces) |
 | **One unified schema** | Every session, prompt, tool, command, edit, approval, and token in one event model |
 | **Local-first by default** | Data stays on the machine: durable JSONL and a read-only [dashboard](https://docs.asymptotelabs.ai/cli/dashboard), no account |
 | **Offline threat detection** | `beacon scan` runs open [Threat Rules](spec/threat-rules/SPEC.md) over your logs, with no network |
@@ -159,27 +159,27 @@ for the full breakdown by surface.
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-code) | OTLP + hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/claude-code.png" alt="" width="16"> | [Claude Cowork](https://docs.asymptotelabs.ai/cli/supported-runtimes-claude-cowork) | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cline.png" alt="" width="16"> | [Cline](https://docs.asymptotelabs.ai/cli/supported-runtimes-cline) | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP + hook | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> | [Codex CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/codex.png" alt="" width="16"> | [Codex Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-codex-cli) | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/cursor.png" alt="" width="16"> | [Cursor](https://docs.asymptotelabs.ai/cli/supported-runtimes-cursor) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
 | <img src="https://www.google.com/s2/favicons?domain=deepseek.com&sz=32" alt="" width="16"> | [DeepSeek Harness](https://docs.asymptotelabs.ai/runtimes/deepseek-harness) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> | [Devin CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/devin.png" alt="" width="16"> | [Devin Desktop](https://docs.asymptotelabs.ai/cli/supported-runtimes-devin-desktop) | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/factory.png" alt="" width="16"> | [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP + hooks + session sync | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/factory.png" alt="" width="16"> | [Factory Droid](https://docs.asymptotelabs.ai/cli/supported-runtimes-factory-droid) | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/vercel-fx.png" alt="" width="16"> | [fx (Vercel Labs)](https://docs.asymptotelabs.ai/runtimes/vercel-fx) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | <img src="https://www.google.com/s2/favicons?domain=gemini.google.com&sz=32" alt="" width="16"> | [Gemini CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-gemini-cli) | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/github-copilot.png" alt="" width="16"> | [GitHub Copilot CLI](https://docs.asymptotelabs.ai/cli/supported-runtimes-github-copilot-cli) | OTLP | ✅ | ✅ | ✅ | – | – | ✅ | – | – |
-| <img src="https://www.google.com/s2/favicons?domain=block.xyz&sz=32" alt="" width="16"> | [goose](https://docs.asymptotelabs.ai/runtimes/goose) | Plugin + OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
+| <img src="https://www.google.com/s2/favicons?domain=block.xyz&sz=32" alt="" width="16"> | goose | Adapter only; manual hooks/OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/grok-build.png" alt="" width="16"> | [Grok Build](https://docs.asymptotelabs.ai/cli/supported-runtimes-grok-build) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/hermes-agent.png" alt="" width="16"> | [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/hermes-agent.png" alt="" width="16"> | [Hermes Agent](https://docs.asymptotelabs.ai/cli/supported-runtimes-hermes-agent) | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/kiro.png" alt="" width="16"> | [Kiro](https://docs.asymptotelabs.ai/runtimes/kiro) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/muse-code.png" alt="" width="16"> | [Muse Code](https://docs.asymptotelabs.ai/runtimes/muse-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/omp.png" alt="" width="16"> | [Oh My Pi](https://docs.asymptotelabs.ai/runtimes/oh-my-pi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openclaw.png" alt="" width="16"> | [OpenClaw Gateway](https://docs.asymptotelabs.ai/runtimes/openclaw-gateway) | Plugin + OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ~ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/opencode.png" alt="" width="16"> | [OpenCode](https://docs.asymptotelabs.ai/runtimes/opencode) | Plugin + Poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/opencode.png" alt="" width="16"> | [OpenCode](https://docs.asymptotelabs.ai/runtimes/opencode) | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/openhands.png" alt="" width="16"> | [OpenHands](https://docs.asymptotelabs.ai/runtimes/openhands) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/pi-agent.png" alt="" width="16"> | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension + Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
-| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/pi-agent.png" alt="" width="16"> | [Pi](https://docs.asymptotelabs.ai/runtimes/pi) | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
+| <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/prime-agent.png" alt="" width="16"> | [Prime Agent](https://docs.asymptotelabs.ai/runtimes/prime-agent) | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/qwen-code.png" alt="" width="16"> | [Qwen Code](https://docs.asymptotelabs.ai/runtimes/qwen-code) | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" alt="" width="16"> | [Senpi](https://docs.asymptotelabs.ai/runtimes/senpi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/visual-studio-code.png" alt="" width="16"> | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
