@@ -468,6 +468,8 @@ function setSessionDetailViewState(mode, message = "") {
   );
 }
 
+const internalSessionCategories = ["inventory", "validation", "metric"];
+
 const sessionTypeOptions = [
   ["", "All types"],
   ["prompt", "Prompt"],
@@ -559,7 +561,7 @@ function renderSessionEventTable() {
   const typeLabel = sessionTypeOptions.find(([value]) => value === filters.type)?.[1] || "All types";
   const severityLabel = sessionSeverityOptions.find(([value]) => value === filters.severity)?.[1] || "All severities";
   const actionLabel = filters.destructive ? "Destructive" : "All";
-  const runtimeLabel = filters.showInternal ? "internal shown" : "internal hidden";
+  const runtimeLabel = filters.showInternal || internalSessionCategories.includes(filters.type) ? "internal shown" : "internal hidden";
   setText("#result-meta", `Type: ${typeLabel} · Severity: ${severityLabel} · Action: ${actionLabel} · Runtime: ${runtimeLabel} · ${records.length} of ${state.events.length} events`);
   if (!records.length) {
     tbody.innerHTML = `<tr><td colspan="11" class="muted">No events match these filters.</td></tr>`;
@@ -583,10 +585,11 @@ function renderSessionEventTable() {
 function filteredSessionEvents() {
   const filters = state.sessionEventFilters;
   const query = filters.search.trim().toLowerCase();
+  const internalTypeSelected = internalSessionCategories.includes(filters.type);
   return state.events.map((record, index) => ({ record, index })).filter(({ record }) => {
     const event = record.event || {};
     const type = sessionDisplayEventType(event);
-    if (!filters.showInternal && isInternalSessionEvent(event)) return false;
+    if (!filters.showInternal && !internalTypeSelected && isInternalSessionEvent(event)) return false;
     if (filters.type && type !== filters.type) return false;
     if (filters.severity && String(event.severity || "info").toLowerCase() !== filters.severity) return false;
     if (filters.destructive && !isDestructiveSessionEvent(record)) return false;
@@ -638,7 +641,7 @@ function sessionDisplayEventType(event) {
 function isInternalSessionEvent(event) {
   const category = sessionDisplayEventType(event);
   const action = String(event.event?.action || "").toLowerCase();
-  return ["inventory", "validation", "metric"].includes(category)
+  return internalSessionCategories.includes(category)
     || ["inventory.", "validation.", "metric.", "endpoint.", "telemetry."].some((prefix) => action.startsWith(prefix));
 }
 
@@ -1961,7 +1964,6 @@ function renderSessionOverview(detail) {
 }
 
 function renderSessionMetadata(session, events) {
-  const firstEvent = events[0] || {};
   const userName = firstNonEmpty(events.map((event) => event.user?.name)) || "Local user";
   const device = firstNonEmpty(events.map((event) => event.endpoint?.hostname))
     || firstNonEmpty(events.map((event) => event.endpoint?.os))
