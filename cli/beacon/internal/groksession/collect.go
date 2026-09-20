@@ -179,9 +179,19 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	if err != nil {
 		return false, err
 	}
+	minChat := cursor.ChatLine
+	minLifecycle := cursor.LifecycleLine
+	if len(data.Chat) < cursor.ChatLine {
+		minChat = 0
+		cursor.ChatLine = 0
+	}
+	if len(data.Lifecycle) < cursor.LifecycleLine {
+		minLifecycle = 0
+		cursor.LifecycleLine = 0
+	}
 	mapped := MapSession(data, MapOptions{
-		MinChatLine:      cursor.ChatLine,
-		MinLifecycleLine: cursor.LifecycleLine,
+		MinChatLine:      minChat,
+		MinLifecycleLine: minLifecycle,
 		SkipStarted:      cursor.Started,
 	})
 	if len(mapped) == 0 {

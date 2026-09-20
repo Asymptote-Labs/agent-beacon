@@ -394,6 +394,51 @@ func jsonEventFromSchema(t *testing.T, event interface{}) jsonEvent {
 	return out
 }
 
+func TestRewrittenShorterFileIsNotSkipped(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := writeFixtureSession(t, root, "/tmp/project", "session-rewrite")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	opts := CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	first, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("first CollectOnce: %v", err)
+	}
+	if first.EventsEmitted == 0 {
+		t.Fatal("first CollectOnce emitted no events")
+	}
+	beforeRewrite := countLines(t, logPath)
+
+	writeFile(t, filepath.Join(sessionDir, "chat_history.jsonl"),
+		`{"type":"user","content":"compacted prompt"}`+"\n"+
+			`{"type":"assistant","content":"compacted reply","model_id":"grok-build"}`+"\n")
+	writeFile(t, filepath.Join(sessionDir, "events.jsonl"),
+		`{"ts":"2026-05-21T16:49:25.601Z","type":"turn_started","session_id":"session-rewrite","turn_number":0,"model_id":"grok-build"}`+"\n"+
+			`{"ts":"2026-05-21T16:50:25.814Z","type":"turn_ended","outcome":"success"}`+"\n")
+	touchNewer(t, sessionDir)
+
+	second, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("second CollectOnce after rewrite: %v", err)
+	}
+	if second.EventsEmitted == 0 {
+		t.Fatal("rewritten content was silently skipped; cursor did not reset on file shrink")
+	}
+	afterRewrite := countLines(t, logPath)
+	if afterRewrite <= beforeRewrite {
+		t.Fatalf("log did not grow after rewrite: %d lines then %d", beforeRewrite, afterRewrite)
+	}
+
+	third, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("third CollectOnce: %v", err)
+	}
+	if third.EventsEmitted != 0 {
+		t.Fatalf("third sweep should emit nothing, got %d events", third.EventsEmitted)
+	}
+}
+
 func urlPathEscape(path string) string {
 	replacer := strings.NewReplacer("/", "%2F", " ", "%20")
 	return replacer.Replace(path)
