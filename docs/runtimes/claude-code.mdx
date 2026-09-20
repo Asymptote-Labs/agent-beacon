@@ -5,7 +5,7 @@ description: "Asymptote support details for Claude Code endpoint telemetry"
 
 ## Runtime overview
 
-Asymptote supports Claude Code through local OpenTelemetry export to Asymptote's localhost collector, with optional hook telemetry for richer lifecycle and tool activity.
+Asymptote supports Claude Code through local OpenTelemetry export to Asymptote's localhost collector, optional hook telemetry for richer lifecycle and tool activity, and local session-file sync for historical backfill.
 
 ## Prerequisites
 
@@ -33,6 +33,15 @@ User-level hooks are written to `~/.claude/settings.json`. Project-level hooks a
 beacon endpoint hooks install --harness claude --level project
 ```
 
+For backfill, Asymptote can also read Claude Code's committed JSONL session files under `~/.claude/projects`:
+
+```bash title="Sync Claude Code session files"
+beacon endpoint claude status
+beacon endpoint claude sync
+```
+
+The sync path is local and offline. It appends mapped events to the runtime log with `harness.collection_method=poll`, so it can recover historical sessions or sessions that ran before hooks were installed, but it cannot hold, approve, deny, or delay tool calls. Use `beacon endpoint claude sync --print` to preview mapped events without writing the runtime log or advancing the cursor.
+
 ## Claude Code Cloud Agents
 
 Asymptote also supports proof-of-concept telemetry capture from Claude Code
@@ -53,7 +62,7 @@ test Claude Code cloud agent telemetry without deploying Asymptote Managed.
 
 ## Discovery and status
 
-Asymptote detects Claude Code through the `claude` executable and Claude settings paths. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Claude Code is present and configured for local telemetry.
+Asymptote detects Claude Code through the `claude` executable and Claude settings paths. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Claude Code is present and configured for local telemetry. Use `beacon endpoint claude status` to inspect local session files and how far the sync cursor has read.
 
 ## Install or configuration support
 
@@ -69,6 +78,7 @@ Asymptote detects Claude Code through the `claude` executable and Claude setting
 | Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled |
 | Token usage and cost | Supported through OTLP token and cost metrics, with per-model and per-session attribution |
 | Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
+| Historical session sync | Supported through `beacon endpoint claude sync`; marked as poll collection |
 | Claude Code cloud agent sessions | Supported through cloud sandbox hooks with GCS upload |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported through the system-mode package or MDM-managed settings |
@@ -107,6 +117,12 @@ observation can appear as `tool.invoked`; the completed OTLP `tool_result` is
 the record that supplies the canonical command or file action.
 
 Detailed tool inputs can contain sensitive command arguments, paths, URLs, search terms, and MCP request data. Beacon sends this telemetry only to the configured local collector during normal endpoint execution; apply the same access, retention, and redaction controls used for other retained prompt and tool data.
+
+## Session-file sync
+
+`beacon endpoint claude sync` reads committed Claude Code transcripts after Claude has written them. The cursor is stored in Beacon endpoint state, not in Claude's directory, and tracks files by line so scheduled runs do not re-append the same records. A partly written trailing record is left for the next sweep.
+
+Run `beacon endpoint claude sync --watch`, or schedule one-shot sweeps, if you want the poll path to stay current. The live OTLP and hook paths remain the real-time integrations; the poll path is for backfill and catch-up.
 
 ## Deployment notes
 

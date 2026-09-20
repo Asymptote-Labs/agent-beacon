@@ -395,6 +395,7 @@
                   "cli/endpoint-opencode",
                   "cli/endpoint-pi",
                   "cli/endpoint-fx",
+                  "cli/endpoint-traces",
                   "cli/dashboard",
                   "cli/wazuh",
                   "cli/elastic",
