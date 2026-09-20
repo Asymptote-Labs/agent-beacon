@@ -135,10 +135,13 @@ func readJSONFile[T any](path string) (*T, error) {
 // blank or unparseable line advances the count without producing a record. The collector compares
 // the count against its line cursor to notice a file that was rewritten shorter, and using the
 // record count there would read a single malformed line as a rewrite.
+//
+// When the file cannot be opened the line count is -1, distinguishing a transient read failure from
+// a genuinely empty or truncated file. The collector must skip the shrink check for that file.
 func readJSONLines[T any](path string) ([]T, int, int) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, 0
+		return nil, -1, 0
 	}
 	defer f.Close()
 	var out []T

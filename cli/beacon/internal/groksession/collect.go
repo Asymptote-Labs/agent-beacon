@@ -190,11 +190,11 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	// cursor would read an ordinary malformed line as a rewrite and re-emit the whole file.
 	minChat := cursor.ChatLine
 	minLifecycle := cursor.LifecycleLine
-	if data.ChatLines < cursor.ChatLine {
+	if data.ChatLines >= 0 && data.ChatLines < cursor.ChatLine {
 		minChat = 0
 		cursor.ChatLine = 0
 	}
-	if data.LifecycleLines < cursor.LifecycleLine {
+	if data.LifecycleLines >= 0 && data.LifecycleLines < cursor.LifecycleLine {
 		minLifecycle = 0
 		cursor.LifecycleLine = 0
 	}
