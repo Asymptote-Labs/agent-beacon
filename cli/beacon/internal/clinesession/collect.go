@@ -1,6 +1,8 @@
 package clinesession
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,9 +18,10 @@ import (
 const StateVersion = 1
 
 type Cursor struct {
-	LastOrder   int   `json:"last_order"`
-	UpdatedAtMS int64 `json:"updated_at_ms,omitempty"`
-	Started     bool  `json:"started"`
+	LastOrder    int            `json:"last_order"`
+	UpdatedAtMS  int64          `json:"updated_at_ms,omitempty"`
+	Started      bool           `json:"started"`
+	KanbanHashes map[int]string `json:"kanban_hashes,omitempty"`
 }
 
 type State struct {
@@ -153,8 +156,10 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 		return false, err
 	}
 	minOrder := cursor.LastOrder
+	var pendingHashes map[int]string
 	if ref.Kind == SourceKanban {
 		minOrder = 0
+		records, pendingHashes = filterChangedKanbanRecords(records, cursor.KanbanHashes)
 	}
 	mapped := MapTrace(ref, records, MapOptions{MinOrder: minOrder, SkipStarted: cursor.Started})
 	if len(mapped) == 0 {
@@ -172,6 +177,14 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 			return true, err
 		}
 		cursor.LastOrder = item.SourceOrder
+		if pendingHashes != nil {
+			if h, ok := pendingHashes[item.SourceOrder]; ok {
+				if cursor.KanbanHashes == nil {
+					cursor.KanbanHashes = map[int]string{}
+				}
+				cursor.KanbanHashes[item.SourceOrder] = h
+			}
+		}
 		if item.Event.Event.Action == "session.started" {
 			cursor.Started = true
 		}
@@ -179,6 +192,25 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 	}
 	cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
 	return true, nil
+}
+
+func filterChangedKanbanRecords(records []Record, stored map[int]string) ([]Record, map[int]string) {
+	hashes := make(map[int]string, len(records))
+	var changed []Record
+	for _, r := range records {
+		h := kanbanContentHash(r)
+		hashes[r.Order] = h
+		if stored[r.Order] == h {
+			continue
+		}
+		changed = append(changed, r)
+	}
+	return changed, hashes
+}
+
+func kanbanContentHash(r Record) string {
+	h := sha1.Sum([]byte(r.Type + "\x00" + r.Content))
+	return hex.EncodeToString(h[:])
 }
 
 func emit(event schema.Event, opts CollectOptions) error {
