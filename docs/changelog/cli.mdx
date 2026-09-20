@@ -13,6 +13,31 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+### v1.3.15 · September 19, 2026
+
+- **Local session-store sync across more runtimes** · Beacon can now backfill
+  committed local session history for Claude Code, Cline, Codex CLI, Cursor,
+  Factory Droid, Grok Build, Hermes Agent, OpenClaw Gateway, OpenCode, Pi, and
+  Prime Agent. The new `beacon endpoint <runtime> sync` and `status` commands
+  read each runtime's own on-disk records locally and mark those events
+  `harness.collection_method=poll`, so they are useful for history and scheduled
+  catch-up without pretending Beacon observed or controlled the action live.
+- **Trace search for local endpoint activity** · `beacon endpoint traces` adds a
+  local SQLite trace index over runtime JSONL, with `status`, `reindex`, `list`,
+  `search`, and `show` commands. The index keeps source-scoped trace keys and
+  event ordering stable so the CLI and dashboard answer the same trace-search
+  questions over mixed hook, OTLP, plugin, and poll events.
+- **DeepSeek Harness and Senpi telemetry** · DeepSeek Harness now has managed
+  hook installation, payload mapping, discovery, inventory, dashboard, and token
+  coverage under the `deepseek_harness` canonical name. Senpi, the standalone
+  OMO edition, now ships as its own managed Pi-family extension and runtime page
+  under the `omo_senpi` harness.
+- **Poll-path reliability fixes** · The new collectors were hardened around
+  partial tails, oversized records, failed emits, system-mode cursor paths,
+  compaction and rewrite detection, deduplication coordinates, and session-scoped
+  token accounting, so a bad record or rewritten store does not silently skip
+  later telemetry.
+
 ### v1.3.14 · September 17, 2026
 
 - **OpenClaw Gateway endpoint telemetry** · Beacon now ships end-to-end OpenClaw

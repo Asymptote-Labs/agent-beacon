@@ -1,0 +1,100 @@
+---
+title: "beacon endpoint traces"
+description: "Index and search local endpoint traces from Beacon runtime logs"
+---
+
+## Command overview
+
+`beacon endpoint traces` builds and reads a local trace index over the Beacon runtime JSONL log. Use it when you want a trace-oriented view of endpoint activity without starting the dashboard.
+
+```bash title="Command syntax"
+beacon endpoint traces [command]
+```
+
+The index is local SQLite state derived from `runtime.jsonl`. Rebuilding it does not change the runtime log, and the command does not contact the network.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint traces status` | Show the trace-store path, indexed trace count, event count, index rows, size, and last index time |
+| `beacon endpoint traces reindex` | Rebuild the trace store from the current runtime JSONL log |
+| `beacon endpoint traces list` | List local traces with harness, update time, and title |
+| `beacon endpoint traces search <pattern>` | Search trace metadata or indexed event text |
+| `beacon endpoint traces show <trace-id>` | Show events from one trace |
+
+## Flags
+
+All commands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Print results as JSON |
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+`list`, `search`, and `show` also accept:
+
+| Flag | Description |
+|------|-------------|
+| `--limit <n>` | Limit returned traces or events. Defaults to `100` |
+| `--event-type <types>` | Filter trace events by comma-separated event type |
+
+`list` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--query <text>`, `-q <text>` | Filter traces by text |
+| `--page <n>` | Page number for trace listing. Defaults to `1` |
+| `--state <state>` | Filter by sharing state |
+| `--visibility <visibility>` | Filter by sharing visibility |
+
+`search` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--result-level trace` | Return matching traces. This is the default |
+| `--result-level event` | Return matching events with snippets |
+
+`show` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--offset <n>` | Start at this event number. Defaults to `1` |
+| `--around-event <n>` | Center output around this event number |
+| `--before <n>` | Events before `--around-event`. Defaults to `3` |
+| `--after <n>` | Events after `--around-event`. Defaults to `3` |
+
+## Examples
+
+```bash title="Check the trace index"
+beacon endpoint traces status
+```
+
+```bash title="Rebuild from runtime JSONL"
+beacon endpoint traces reindex
+```
+
+```bash title="List recent traces"
+beacon endpoint traces list --limit 20
+```
+
+```bash title="Search event text"
+beacon endpoint traces search "npm install" --result-level event
+```
+
+```bash title="Show a focused event window"
+beacon endpoint traces show <trace-id> --around-event 42 --before 5 --after 10
+```
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Local dashboard" icon="chart-line" href="/cli/dashboard">
+    Inspect the same local endpoint activity in the loopback dashboard.
+  </Card>
+  <Card title="Local JSONL" icon="file-lines" href="/log-forwarding/local-jsonl">
+    Understand the runtime log that the trace index is derived from.
+  </Card>
+</Columns>
