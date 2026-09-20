@@ -184,8 +184,6 @@ for the full breakdown by surface.
 | <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" alt="" width="16"> | [Senpi](https://docs.asymptotelabs.ai/runtimes/senpi) | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
 | <img src="cli/beacon/internal/endpoint/dashboard/static/runtime-logos/visual-studio-code.png" alt="" width="16"> | [VS Code](https://docs.asymptotelabs.ai/cli/supported-runtimes-vscode) | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
 
-goose currently has a tested hook adapter, but no Beacon installer, discovery row, or automatic OTLP configuration. Use it only by writing the goose hook and OTLP configuration manually.
-
 #### Browser Chat
 
 | Logo | Site | Collection | Prompt | Response | Tool | Tokens |
