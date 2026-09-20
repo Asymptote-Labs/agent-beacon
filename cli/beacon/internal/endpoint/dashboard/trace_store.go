@@ -92,6 +92,23 @@ func sqliteURI(path string) string {
 }
 
 func ensureTraceStoreSchema(db *sql.DB) error {
+	const currentSchemaVersion = 2
+
+	var version int
+	_ = db.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version < currentSchemaVersion {
+		for _, drop := range []string{
+			`DROP TABLE IF EXISTS trace_events`,
+			`DROP TABLE IF EXISTS trace_search`,
+			`DROP TABLE IF EXISTS traces`,
+			`DROP TABLE IF EXISTS trace_index_state`,
+		} {
+			if _, err := db.Exec(drop); err != nil {
+				return err
+			}
+		}
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS trace_index_state (
 			source_key TEXT PRIMARY KEY,
@@ -108,6 +125,7 @@ func ensureTraceStoreSchema(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS traces_by_source_updated ON traces (source_key, updated_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS trace_events (
+			source_key TEXT NOT NULL,
 			trace_id TEXT NOT NULL,
 			event_id TEXT NOT NULL,
 			event_number INTEGER NOT NULL,
@@ -115,10 +133,11 @@ func ensureTraceStoreSchema(db *sql.DB) error {
 			tool_name TEXT,
 			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL,
-			PRIMARY KEY (trace_id, event_id)
+			PRIMARY KEY (source_key, trace_id, event_id)
 		)`,
-		`CREATE INDEX IF NOT EXISTS trace_events_by_trace_number ON trace_events (trace_id, event_number)`,
+		`CREATE INDEX IF NOT EXISTS trace_events_by_trace_number ON trace_events (source_key, trace_id, event_number)`,
 		`CREATE TABLE IF NOT EXISTS trace_search (
+			source_key TEXT NOT NULL,
 			trace_id TEXT NOT NULL,
 			event_id TEXT,
 			source TEXT NOT NULL,
@@ -127,11 +146,17 @@ func ensureTraceStoreSchema(db *sql.DB) error {
 			event_number INTEGER,
 			body TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS trace_search_by_trace_source ON trace_search (trace_id, source)`,
+		`CREATE INDEX IF NOT EXISTS trace_search_by_trace_source ON trace_search (source_key, trace_id, source)`,
 		`CREATE INDEX IF NOT EXISTS trace_search_by_event_type ON trace_search (event_type)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	if version < currentSchemaVersion {
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", currentSchemaVersion)); err != nil {
 			return err
 		}
 	}
@@ -176,8 +201,8 @@ func (s *traceStore) reindexDB(db *sql.DB, fingerprint string) error {
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
-		`DELETE FROM trace_search WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`,
-		`DELETE FROM trace_events WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`,
+		`DELETE FROM trace_search WHERE source_key = ?`,
+		`DELETE FROM trace_events WHERE source_key = ?`,
 		`DELETE FROM traces WHERE source_key = ?`,
 	} {
 		if _, err := tx.Exec(stmt, s.logPath); err != nil {
@@ -207,8 +232,8 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 		agg.summary.ID, sourceKey, string(summaryJSON), agg.summary.UpdatedAt, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO trace_search (trace_id, source, body) VALUES (?, 'trace', ?)`,
-		agg.summary.ID, traceSummarySearchBody(agg.summary)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, source, body) VALUES (?, ?, 'trace', ?)`,
+		sourceKey, agg.summary.ID, traceSummarySearchBody(agg.summary)); err != nil {
 		return err
 	}
 	for _, event := range agg.events {
@@ -223,14 +248,14 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 		if event.Command != nil && toolName == "" {
 			toolName = "command"
 		}
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO trace_events (trace_id, event_id, event_number, event_type, tool_name, event_json, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			agg.summary.ID, event.ID, event.Number, event.Type, toolName, string(eventJSON), now); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO trace_events (source_key, trace_id, event_id, event_number, event_type, tool_name, event_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			sourceKey, agg.summary.ID, event.ID, event.Number, event.Type, toolName, string(eventJSON), now); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO trace_search (trace_id, event_id, source, event_type, tool_name, event_number, body)
-			VALUES (?, ?, 'event', ?, ?, ?, ?)`,
-			agg.summary.ID, event.ID, event.Type, toolName, event.Number, traceEventSearchBody(event)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, event_id, source, event_type, tool_name, event_number, body)
+			VALUES (?, ?, ?, 'event', ?, ?, ?, ?)`,
+			sourceKey, agg.summary.ID, event.ID, event.Type, toolName, event.Number, traceEventSearchBody(event)); err != nil {
 			return err
 		}
 	}
@@ -248,8 +273,8 @@ func (s *traceStore) Status() (traceStoreStatus, error) {
 	defer db.Close()
 	status := traceStoreStatus{Path: s.dbPath}
 	_ = db.QueryRow(`SELECT COUNT(*) FROM traces WHERE source_key = ?`, s.logPath).Scan(&status.Traces)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_events WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`, s.logPath).Scan(&status.Events)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_search WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`, s.logPath).Scan(&status.IndexRows)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_events WHERE source_key = ?`, s.logPath).Scan(&status.Events)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_search WHERE source_key = ?`, s.logPath).Scan(&status.IndexRows)
 	_ = db.QueryRow(`SELECT indexed_at FROM trace_index_state WHERE source_key = ?`, s.logPath).Scan(&status.IndexedAt)
 	return status, nil
 }
@@ -473,7 +498,7 @@ func (s *traceStore) matchingTraceIDs(query TraceQuery, opts traceSearchOptions)
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT trace_id, body FROM trace_search WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?) AND source IN (`+sourcePlaceholders(opts.Sources)+`)`, append([]interface{}{s.logPath}, sourcesOrDefault(opts.Sources)...)...)
+	rows, err := db.Query(`SELECT trace_id, body FROM trace_search WHERE source_key = ? AND source IN (`+sourcePlaceholders(opts.Sources)+`)`, append([]interface{}{s.logPath}, sourcesOrDefault(opts.Sources)...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +569,7 @@ func (s *traceStore) searchEvents(query TraceQuery, opts traceSearchOptions, lim
 }
 
 func (s *traceStore) loadTraceEvents(db *sql.DB, traceID string, eventTypes []string) ([]TraceEventV1, error) {
-	rows, err := db.Query(`SELECT event_json FROM trace_events WHERE trace_id = ? ORDER BY event_number`, traceID)
+	rows, err := db.Query(`SELECT event_json FROM trace_events WHERE source_key = ? AND trace_id = ? ORDER BY event_number`, s.logPath, traceID)
 	if err != nil {
 		return nil, err
 	}
@@ -569,7 +594,7 @@ func (s *traceStore) loadTraceEvents(db *sql.DB, traceID string, eventTypes []st
 
 func (s *traceStore) loadOneEvent(db *sql.DB, traceID, eventID string) (TraceEventV1, bool, error) {
 	var raw string
-	err := db.QueryRow(`SELECT event_json FROM trace_events WHERE trace_id = ? AND event_id = ?`, traceID, eventID).Scan(&raw)
+	err := db.QueryRow(`SELECT event_json FROM trace_events WHERE source_key = ? AND trace_id = ? AND event_id = ?`, s.logPath, traceID, eventID).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return TraceEventV1{}, false, nil
 	}
