@@ -392,6 +392,8 @@
                   "cli/endpoint-uninstall",
                   "cli/endpoint-config",
                   "cli/endpoint-onboarding",
+                  "cli/endpoint-opencode",
+                  "cli/endpoint-pi",
                   "cli/endpoint-fx",
                   "cli/dashboard",
                   "cli/wazuh",

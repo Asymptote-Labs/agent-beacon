@@ -1,0 +1,98 @@
+---
+title: "beacon endpoint pi"
+description: "Collect endpoint telemetry from Pi session records"
+---
+
+## Command overview
+
+`beacon endpoint pi` collects telemetry from [Pi](/runtimes/pi) by reading the JSONL session records Pi commits under `~/.pi/agent/sessions` and converting them into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint pi [command]
+```
+
+This is a poll path, not an install step. The managed Pi extension remains the live path for future sessions; `beacon endpoint pi sync` is for historical backfill, scheduled catch-up, or machines where the extension was not loaded.
+
+Every event is marked `harness.collection_method=poll`. Beacon sees what Pi wrote after the fact, so nothing here can hold or deny a tool call.
+
+Reading is local and offline. Nothing this command does reaches the network.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint pi sync` | Read new Pi session records into the runtime log |
+| `beacon endpoint pi status` | Show Pi sessions on this machine and how much of each has been collected |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--sessions-dir <path>` | Pi session directory. Defaults to `~/.pi/agent/sessions` |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/pi.json` |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths. The cursor moves beside the system runtime log |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them or advancing the cursor |
+| `--watch` | Sweep continuously on `--interval` instead of sweeping once and exiting |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint pi sync
+```
+
+```bash title="Preview without writing anything"
+beacon endpoint pi sync --print
+```
+
+`--print` is a dry run in both directions: it neither writes the runtime log nor advances the cursor, so running it twice shows the same events and running it does not quietly consume the work a later real sweep would do.
+
+```bash title="Sweep continuously"
+beacon endpoint pi sync --watch --interval 5m
+```
+
+Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running.
+
+## Status
+
+```bash title="Show Pi sessions and collection progress"
+beacon endpoint pi status
+```
+
+```text
+Pi sessions: 2 in /Users/you/.pi/agent/sessions
+  session-1  collected  line 42  /Users/you/src/app
+  session-2  pending    line 0   /Users/you/src/api
+```
+
+## Cursor behavior
+
+The cursor keeps a scheduled sweep from re-appending every session's whole history. It stores the last collected line per session file, plus the file size and modification time for a cheap unchanged check.
+
+| Mode | Default cursor path |
+|------|---------------------|
+| User | `~/.beacon/endpoint/state/pi.json` |
+| System | `pi-state.json` beside the system runtime log |
+
+Re-reading is safe: each event ID is derived from the source file, session id, line number, and event position, so the same Pi record maps to the same event every time.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Pi" icon="code" href="/runtimes/pi">
+    Telemetry coverage, discovery, and known gaps for the runtime.
+  </Card>
+  <Card title="Hooks" icon="plug" href="/cli/hooks">
+    Install the managed Pi extension for live telemetry.
+  </Card>
+</Columns>
