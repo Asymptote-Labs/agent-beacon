@@ -160,6 +160,11 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 	if ref.Kind == SourceKanban {
 		minOrder = 0
 		records, pendingHashes = filterChangedKanbanRecords(records, cursor.KanbanHashes)
+		for order := range cursor.KanbanHashes {
+			if _, ok := pendingHashes[order]; !ok {
+				delete(cursor.KanbanHashes, order)
+			}
+		}
 	}
 	mapped := MapTrace(ref, records, MapOptions{MinOrder: minOrder, SkipStarted: cursor.Started})
 	if len(mapped) == 0 {
