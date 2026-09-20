@@ -5,16 +5,17 @@ description: "Asymptote support details for OpenClaw Gateway endpoint telemetry"
 
 ## Runtime overview
 
-[OpenClaw](https://docs.openclaw.ai) is a self-hosted gateway that connects chat apps — Discord, Slack, Signal, Telegram, WhatsApp, iMessage, Matrix, Microsoft Teams and more — to AI coding agents. Asymptote supports it through **two** collection paths, and both are wanted on the same machine:
+[OpenClaw](https://docs.openclaw.ai) is a self-hosted gateway that connects chat apps — Discord, Slack, Signal, Telegram, WhatsApp, iMessage, Matrix, Microsoft Teams and more — to AI coding agents. Asymptote supports it through **three** collection paths. The first two are live collection paths and both are wanted on the same machine; the third is an offline recovery path for historical or missed sessions:
 
 ```bash
 beacon endpoint hooks install --harness openclaw                 # the Beacon-managed plugin
 beacon endpoint integrations openclaw print-config               # OpenClaw's own OTLP export
+beacon endpoint integrations openclaw sessions sync              # OpenClaw's committed session files
 ```
 
 `--harness openclaw-gateway` is also accepted and installs the same thing.
 
-The two are not alternatives. The plugin reports what the **agent** did — sessions, prompts, tool calls, commands, files, MCP activity and token usage. OpenClaw's own `diagnostics-otel` export reports what the **gateway** did, as traces and metrics, and by OpenClaw's default carries no prompt, tool, or system-prompt content at all unless `captureContent` is explicitly enabled.
+The live paths are not alternatives. The plugin reports what the **agent** did — sessions, prompts, tool calls, commands, files, MCP activity and token usage. OpenClaw's own `diagnostics-otel` export reports what the **gateway** did, as traces and metrics, and by OpenClaw's default carries no prompt, tool, or system-prompt content at all unless `captureContent` is explicitly enabled. The session-file sync reads what OpenClaw already committed to disk and marks every event `harness.collection_method=poll`, so it can backfill but cannot approve, deny, or delay a tool call.
 
 <Note>
 **A gateway is not a single-user CLI, and the telemetry reflects that.** One OpenClaw process fans several people's chat accounts into one or more agents. Every event therefore carries the chat channel, the sender, the OpenClaw agent id and the per-turn run id under `raw`, so a command executed on a repository can be traced back to the person who asked for it and the app they asked from.
@@ -100,6 +101,25 @@ This path carries gateway-level traces and metrics. It does **not** replace the 
 
 By default Asymptote filters OpenClaw's operational metrics out of the runtime log as low-signal; `beacon endpoint install --include-runtime-metrics` keeps them.
 
+## Collection path 3: committed session files
+
+OpenClaw also keeps committed session JSONL files under its state directory:
+
+```text
+~/.openclaw/agents/<profile>/sessions/
+```
+
+`$OPENCLAW_STATE_DIR` relocates the root, matching the plugin install path. The session sync prefers OpenClaw's `sessions.json` index when it exists, then flat-scans `*.jsonl` session files that are not in the index:
+
+```bash
+beacon endpoint integrations openclaw sessions sync
+beacon endpoint integrations openclaw sessions status
+```
+
+This is a **poll** collection path, not a live hook. It is useful for historical sessions, sessions that ran before Beacon was installed, and sessions missed because the plugin was not loaded. It records committed session starts, prompts, assistant messages, reasoning, tool calls and results, commands, file activity when the stored tool arguments name a path, MCP-shaped tool names, token usage, and errors.
+
+It does not replace the plugin. A poll reader cannot hold or deny a tool call, cannot record an operator approval decision, and can only report what survived in OpenClaw's own session file.
+
 ## Your gateway config is read, never written
 
 Asymptote does **not** edit `~/.openclaw/openclaw.json`. This is the one deliberate departure from how every other runtime is handled, and the reason is that OpenClaw's config is "JSON or JSON5" by its own documentation: JSON5 permits comments, trailing commas and unquoted keys, none of which survive a round trip through a JSON encoder. Rewriting it would silently strip your comments out of the file that configures every chat channel you run.
@@ -131,13 +151,14 @@ A config Asymptote cannot parse produces no advice rather than a guess, which is
 
 ## Discovery and status
 
-```bash title="Show OpenClaw status on both paths"
+```bash title="Show OpenClaw status on all paths"
 beacon endpoint hooks status --harness openclaw
 beacon endpoint integrations openclaw status
+beacon endpoint integrations openclaw sessions status
 beacon endpoint discover --all
 ```
 
-OpenClaw reports as the `openclaw_gateway` harness on **both** paths, so one gateway is one harness in any query that groups by `harness.name`. Plugin events carry `harness.collection_method=plugin` — Asymptote ships the plugin source OpenClaw loads, so its coverage is Asymptote's to fix rather than OpenClaw's to expose — while OTLP events carry `otlp`.
+OpenClaw reports as the `openclaw_gateway` harness on every path, so one gateway is one harness in any query that groups by `harness.name`. Plugin events carry `harness.collection_method=plugin` — Asymptote ships the plugin source OpenClaw loads, so its coverage is Asymptote's to fix rather than OpenClaw's to expose — OTLP events carry `otlp`, and session-file sync events carry `poll`.
 
 Status checks the manifests as well as the plugin entry, because a directory OpenClaw skipped and a plugin that loaded and saw nothing look identical from the log alone.
 
@@ -160,7 +181,8 @@ beacon endpoint hooks uninstall --harness openclaw
 | Harness attribution | Supported. `openclaw`, `openclaw_gateway`, `open-claw` and related spellings normalize to `openclaw_gateway` |
 | Plugin install, status, uninstall, and repair | Supported |
 | OTLP export configuration | Printed, not written. It lives in OpenClaw's own config |
-| Session lifecycle | Supported, including resumed sessions and the nine end reasons OpenClaw distinguishes |
+| Historical/session-file sync | Supported with `beacon endpoint integrations openclaw sessions sync`; events are `harness.collection_method=poll` |
+| Session lifecycle | Supported. The plugin includes resumed sessions and the nine end reasons OpenClaw distinguishes; session-file sync records committed session starts |
 | Prompts | Supported. `prompt.submitted` from the inbound chat message, with the sender and the channel |
 | Tool use | Supported for both halves, correlated by `gen_ai.tool.call.id` |
 | Commands | Supported. `command.executed` with the command line, **exit code and captured output** |
