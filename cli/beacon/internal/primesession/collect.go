@@ -92,9 +92,7 @@ func collectFile(store *Store, ref SessionRef, state *State, opts CollectOptions
 	}
 	for i, item := range mapped {
 		if err := emit(item.Event, opts); err != nil {
-			if i > 0 {
-				advance(cursor, ref, mapped[i-1].SourceLine, parent)
-			}
+			advancePartial(cursor, mapped, i, parent)
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -112,6 +110,27 @@ func advance(cursor *Cursor, ref SessionRef, line int, parent string) {
 	}
 	cursor.ModTimeMS = ref.ModTimeMS
 	cursor.SizeBytes = ref.SizeBytes
+	cursor.SubagentOf = parent
+}
+
+// advancePartial moves the cursor past source lines whose mapped events were
+// all emitted, without updating file identity (ModTimeMS, SizeBytes) so the
+// next sweep re-reads the file and retries the remaining events.
+func advancePartial(cursor *Cursor, mapped []MappedEvent, failedIdx int, parent string) {
+	var lastCompleteLine int
+	found := false
+	for i := 0; i < failedIdx; i++ {
+		if i+1 < len(mapped) && mapped[i+1].SourceLine != mapped[i].SourceLine {
+			lastCompleteLine = mapped[i].SourceLine
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+	if lastCompleteLine > cursor.LastLine {
+		cursor.LastLine = lastCompleteLine
+	}
 	cursor.SubagentOf = parent
 }
 

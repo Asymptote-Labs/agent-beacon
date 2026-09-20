@@ -42,8 +42,9 @@ type Entry struct {
 }
 
 type ReadStats struct {
-	Malformed int
-	MaxLine   int
+	Malformed   int
+	MaxLine     int
+	PartialTail bool
 }
 
 func NewStore(sessionsDir, artifactsDir string) (*Store, error) {
@@ -226,5 +227,24 @@ func (s *Store) Read(ref SessionRef) ([]Entry, ReadStats, error) {
 	if err := scanner.Err(); err != nil {
 		return entries, stats, err
 	}
+	if stats.MaxLine > 0 && fileHasPartialTail(file) {
+		stats.PartialTail = true
+		if len(entries) > 0 && entries[len(entries)-1].Line == stats.MaxLine {
+			entries = entries[:len(entries)-1]
+		}
+		stats.MaxLine--
+	}
 	return entries, stats, nil
+}
+
+func fileHasPartialTail(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return false
+	}
+	buf := make([]byte, 1)
+	if _, err := f.ReadAt(buf, info.Size()-1); err != nil {
+		return false
+	}
+	return buf[0] != '\n'
 }
