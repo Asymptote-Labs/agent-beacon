@@ -28,15 +28,16 @@ const (
 )
 
 type Cursor struct {
-	LastMessageID    int64   `json:"last_message_id"`
-	Started          bool    `json:"started"`
-	EndedAtMS        int64   `json:"ended_at_ms,omitempty"`
-	InputTokens      int64   `json:"input_tokens,omitempty"`
-	OutputTokens     int64   `json:"output_tokens,omitempty"`
-	CacheReadTokens  int64   `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens  int64   `json:"reasoning_tokens,omitempty"`
-	CostUSD          float64 `json:"cost_usd,omitempty"`
+	LastMessageID    int64                      `json:"last_message_id"`
+	Started          bool                       `json:"started"`
+	EndedAtMS        int64                      `json:"ended_at_ms,omitempty"`
+	InputTokens      int64                      `json:"input_tokens,omitempty"`
+	OutputTokens     int64                      `json:"output_tokens,omitempty"`
+	CacheReadTokens  int64                      `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64                      `json:"cache_write_tokens,omitempty"`
+	ReasoningTokens  int64                      `json:"reasoning_tokens,omitempty"`
+	CostUSD          float64                    `json:"cost_usd,omitempty"`
+	PendingCalls     map[string]json.RawMessage `json:"pending_calls,omitempty"`
 }
 
 type State struct {
@@ -242,6 +243,8 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 			return true, err
 		}
 		summary.EventsEmitted++
+	}
+	for _, item := range mapped {
 		if item.SourceMessageID > cursor.LastMessageID {
 			cursor.LastMessageID = item.SourceMessageID
 		}
@@ -250,8 +253,6 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 			cursor.Started = true
 		case "session.ended":
 			cursor.EndedAtMS = session.EndedAtMS
-		case "token.usage":
-			updateCursorTotals(cursor, session)
 		}
 	}
 	advanceCursorMessages(cursor, messages)
@@ -442,12 +443,32 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 
 func MapSession(session Session, messages []Message, cursor *Cursor) []MappedEvent {
 	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
+	if cursor != nil {
+		for id, raw := range cursor.PendingCalls {
+			var call toolCall
+			if json.Unmarshal(raw, &call) == nil && call.ID != "" {
+				m.calls[id] = call
+			}
+		}
+	}
 	m.mapSession()
 	for _, message := range messages {
 		m.mapMessage(message)
 	}
 	m.mapUsage()
 	m.mapSessionEnd()
+	if cursor != nil {
+		if len(m.calls) > 0 {
+			cursor.PendingCalls = make(map[string]json.RawMessage, len(m.calls))
+			for id, call := range m.calls {
+				if data, err := json.Marshal(call); err == nil {
+					cursor.PendingCalls[id] = data
+				}
+			}
+		} else {
+			cursor.PendingCalls = nil
+		}
+	}
 	return m.out
 }
 
@@ -460,9 +481,9 @@ type mapper struct {
 }
 
 type toolCall struct {
-	ID        string
-	Name      string
-	Arguments map[string]interface{}
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments,omitempty"`
 }
 
 func (m *mapper) mapSession() {
@@ -587,6 +608,7 @@ func (m *mapper) mapMessage(message Message) {
 		if call.Name == "" {
 			call.Name = message.ToolName
 		}
+		delete(m.calls, message.ToolCallID)
 		m.mapToolResult(message, call)
 	}
 }

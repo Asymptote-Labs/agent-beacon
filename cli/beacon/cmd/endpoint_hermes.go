@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -80,7 +81,7 @@ func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
 		UserMode: userMode,
 	}
 	if !endpointHermesOpts.print {
-		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath)
+		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, userMode)
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointHermesOpts.logPath).EffectiveLogPath
 	}
 
@@ -150,7 +151,7 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	if dbPath == "" {
 		dbPath = hermessession.DefaultDBPath()
 	}
-	statePath := resolveHermesStatePath(endpointHermesOpts.statePath)
+	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, endpointUserMode())
 	report := hermesStatusReport{DBPath: dbPath, StatePath: statePath}
 
 	store, err := hermessession.OpenStore(dbPath)
@@ -216,9 +217,14 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func resolveHermesStatePath(path string) string {
+func resolveHermesStatePath(path string, userMode bool) string {
 	if path != "" {
 		return path
+	}
+	if !userMode {
+		if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
+			return filepath.Join(dir, "hermes-state.json")
+		}
 	}
 	return hermessession.DefaultStatePath()
 }
