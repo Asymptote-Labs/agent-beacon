@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -16,9 +15,18 @@ import (
 
 const traceStoreFile = "traces.db"
 
+// traceStoreSchemaVersion is written to the database's user_version. The store
+// is a rebuildable index over the runtime log, never a source of truth, so a
+// version bump drops the tables and reindexes rather than migrating them.
+const traceStoreSchemaVersion = 2
+
 type traceStore struct {
-	dbPath  string
-	logPath string
+	dbPath string
+	// logPath is the log to read; sourceKey is the same path normalized, and is
+	// what every row is scoped by. Sibling logs in one directory share one
+	// traces.db, so two sources can hold the same trace or event id.
+	logPath   string
+	sourceKey string
 }
 
 type traceStoreStatus struct {
@@ -27,15 +35,6 @@ type traceStoreStatus struct {
 	Events    int    `json:"events"`
 	IndexRows int    `json:"index_rows"`
 	IndexedAt string `json:"indexed_at,omitempty"`
-}
-
-type traceSearchOptions struct {
-	Literal            bool
-	CaseSensitive      bool
-	Sources            []string
-	Tool               string
-	ScanTraces         int
-	ScanEventsPerTrace int
 }
 
 func TraceStorePath(logPath string) string {
@@ -62,7 +61,21 @@ func defaultTraceStorePath(logPath string) string {
 }
 
 func openTraceStore(logPath string) *traceStore {
-	return &traceStore{dbPath: defaultTraceStorePath(logPath), logPath: logPath}
+	return &traceStore{
+		dbPath:    defaultTraceStorePath(logPath),
+		logPath:   logPath,
+		sourceKey: traceSourceKey(logPath),
+	}
+}
+
+// traceSourceKey normalizes a log path so the same log reached by a relative
+// and an absolute path indexes once rather than twice.
+func traceSourceKey(logPath string) string {
+	abs, err := filepath.Abs(logPath)
+	if err != nil {
+		return logPath
+	}
+	return filepath.Clean(abs)
 }
 
 func (s *traceStore) db() (*sql.DB, error) {
@@ -93,32 +106,57 @@ func sqliteURI(path string) string {
 }
 
 func ensureTraceStoreSchema(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	// Any version but the current one is dropped, 0 included: a database this
+	// build has never stamped either is empty, where the drops are no-ops, or
+	// predates the stamp and holds tables CREATE TABLE IF NOT EXISTS would
+	// leave in their old shape.
+	if version != traceStoreSchemaVersion {
+		for _, table := range []string{"trace_search", "trace_events", "traces", "trace_index_state"} {
+			if _, err := db.Exec(`DROP TABLE IF EXISTS ` + table); err != nil {
+				return err
+			}
+		}
+	}
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS trace_index_state (
 			source_key TEXT PRIMARY KEY,
 			fingerprint TEXT NOT NULL,
 			indexed_at TEXT NOT NULL
 		)`,
+		// Trace ids are unique within one source, not across a directory of
+		// them, so the key carries the source.
 		`CREATE TABLE IF NOT EXISTS traces (
-			id TEXT PRIMARY KEY,
 			source_key TEXT NOT NULL,
+			id TEXT NOT NULL,
 			summary_json TEXT NOT NULL,
 			updated_at TEXT,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (source_key, id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS traces_by_source_updated ON traces (source_key, updated_at DESC)`,
+		// event_number is the event's ordinal within its trace, which is what
+		// makes a row unique. event_id is the runtime's own name for the call
+		// and is deliberately not part of the key: two events can share one --
+		// a repeated log line, or a hook and an OTLP capture of the same call,
+		// whose ids are derived to match -- and the JSONL path keeps both.
 		`CREATE TABLE IF NOT EXISTS trace_events (
+			source_key TEXT NOT NULL,
 			trace_id TEXT NOT NULL,
-			event_id TEXT NOT NULL,
 			event_number INTEGER NOT NULL,
+			event_id TEXT NOT NULL,
 			event_type TEXT,
 			tool_name TEXT,
 			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL,
-			PRIMARY KEY (trace_id, event_id)
+			PRIMARY KEY (source_key, trace_id, event_number)
 		)`,
-		`CREATE INDEX IF NOT EXISTS trace_events_by_trace_number ON trace_events (trace_id, event_number)`,
+		`CREATE INDEX IF NOT EXISTS trace_events_by_event_id ON trace_events (source_key, trace_id, event_id)`,
 		`CREATE TABLE IF NOT EXISTS trace_search (
+			source_key TEXT NOT NULL,
 			trace_id TEXT NOT NULL,
 			event_id TEXT,
 			source TEXT NOT NULL,
@@ -127,11 +165,15 @@ func ensureTraceStoreSchema(db *sql.DB) error {
 			event_number INTEGER,
 			body TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS trace_search_by_trace_source ON trace_search (trace_id, source)`,
-		`CREATE INDEX IF NOT EXISTS trace_search_by_event_type ON trace_search (event_type)`,
+		`CREATE INDEX IF NOT EXISTS trace_search_by_source_trace ON trace_search (source_key, source, trace_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if version != traceStoreSchemaVersion {
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, traceStoreSchemaVersion)); err != nil {
 			return err
 		}
 	}
@@ -146,7 +188,7 @@ func (s *traceStore) ensureCurrent() error {
 	defer db.Close()
 	fingerprint := traceLogFingerprint(s.logPath)
 	var current string
-	err = db.QueryRow(`SELECT fingerprint FROM trace_index_state WHERE source_key = ?`, s.logPath).Scan(&current)
+	err = db.QueryRow(`SELECT fingerprint FROM trace_index_state WHERE source_key = ?`, s.sourceKey).Scan(&current)
 	if err == nil && current == fingerprint {
 		return nil
 	}
@@ -176,23 +218,23 @@ func (s *traceStore) reindexDB(db *sql.DB, fingerprint string) error {
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
-		`DELETE FROM trace_search WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`,
-		`DELETE FROM trace_events WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`,
+		`DELETE FROM trace_search WHERE source_key = ?`,
+		`DELETE FROM trace_events WHERE source_key = ?`,
 		`DELETE FROM traces WHERE source_key = ?`,
 	} {
-		if _, err := tx.Exec(stmt, s.logPath); err != nil {
+		if _, err := tx.Exec(stmt, s.sourceKey); err != nil {
 			return err
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, agg := range traces {
-		if err := insertTraceAggregate(tx, s.logPath, agg, now); err != nil {
+		if err := insertTraceAggregate(tx, s.sourceKey, agg, now); err != nil {
 			return err
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO trace_index_state (source_key, fingerprint, indexed_at) VALUES (?, ?, ?)
 		ON CONFLICT(source_key) DO UPDATE SET fingerprint = excluded.fingerprint, indexed_at = excluded.indexed_at`,
-		s.logPath, fingerprint, now); err != nil {
+		s.sourceKey, fingerprint, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -203,12 +245,12 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO traces (id, source_key, summary_json, updated_at, created_at) VALUES (?, ?, ?, ?, ?)`,
-		agg.summary.ID, sourceKey, string(summaryJSON), agg.summary.UpdatedAt, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO traces (source_key, id, summary_json, updated_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		sourceKey, agg.summary.ID, string(summaryJSON), agg.summary.UpdatedAt, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO trace_search (trace_id, source, body) VALUES (?, 'trace', ?)`,
-		agg.summary.ID, traceSummarySearchBody(agg.summary)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, source, body) VALUES (?, ?, 'trace', ?)`,
+		sourceKey, agg.summary.ID, traceSummaryHaystack(agg.summary)); err != nil {
 		return err
 	}
 	for _, event := range agg.events {
@@ -223,14 +265,14 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 		if event.Command != nil && toolName == "" {
 			toolName = "command"
 		}
-		if _, err := tx.Exec(`INSERT INTO trace_events (trace_id, event_id, event_number, event_type, tool_name, event_json, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			agg.summary.ID, event.ID, event.Number, event.Type, toolName, string(eventJSON), now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO trace_events (source_key, trace_id, event_number, event_id, event_type, tool_name, event_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			sourceKey, agg.summary.ID, event.Number, event.ID, event.Type, toolName, string(eventJSON), now); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO trace_search (trace_id, event_id, source, event_type, tool_name, event_number, body)
-			VALUES (?, ?, 'event', ?, ?, ?, ?)`,
-			agg.summary.ID, event.ID, event.Type, toolName, event.Number, traceEventSearchBody(event)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, event_id, source, event_type, tool_name, event_number, body)
+			VALUES (?, ?, ?, 'event', ?, ?, ?, ?)`,
+			sourceKey, agg.summary.ID, event.ID, event.Type, toolName, event.Number, traceEventHaystack(event)); err != nil {
 			return err
 		}
 	}
@@ -247,10 +289,10 @@ func (s *traceStore) Status() (traceStoreStatus, error) {
 	}
 	defer db.Close()
 	status := traceStoreStatus{Path: s.dbPath}
-	_ = db.QueryRow(`SELECT COUNT(*) FROM traces WHERE source_key = ?`, s.logPath).Scan(&status.Traces)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_events WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`, s.logPath).Scan(&status.Events)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_search WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?)`, s.logPath).Scan(&status.IndexRows)
-	_ = db.QueryRow(`SELECT indexed_at FROM trace_index_state WHERE source_key = ?`, s.logPath).Scan(&status.IndexedAt)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM traces WHERE source_key = ?`, s.sourceKey).Scan(&status.Traces)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_events WHERE source_key = ?`, s.sourceKey).Scan(&status.Events)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_search WHERE source_key = ?`, s.sourceKey).Scan(&status.IndexRows)
+	_ = db.QueryRow(`SELECT indexed_at FROM trace_index_state WHERE source_key = ?`, s.sourceKey).Scan(&status.IndexedAt)
 	return status, nil
 }
 
@@ -266,7 +308,9 @@ func (s *traceStore) List(query TraceQuery) (TraceListResultV1, error) {
 		return TraceListResultV1{}, err
 	}
 	filtered := make([]TraceSummaryV1, 0, len(summaries))
-	matchingIDs, err := s.matchingTraceIDs(query, traceSearchOptions{})
+	// traceAggregateMatches keeps a trace whose summary or any of its events
+	// match, so the store searches both kinds of row.
+	matchingIDs, err := s.matchingTraceIDs(query.Q, "trace", "event")
 	if err != nil {
 		return TraceListResultV1{}, err
 	}
@@ -307,7 +351,7 @@ func (s *traceStore) List(query TraceQuery) (TraceListResultV1, error) {
 	}, nil
 }
 
-func (s *traceStore) Search(query TraceQuery, opts traceSearchOptions) (TraceSearchResultV1, error) {
+func (s *traceStore) Search(query TraceQuery) (TraceSearchResultV1, error) {
 	if !traceStoreSupportsQuery(query) {
 		return TraceSearchResultV1{}, errTraceStoreUnsupported
 	}
@@ -321,7 +365,7 @@ func (s *traceStore) Search(query TraceQuery, opts traceSearchOptions) (TraceSea
 	resp := TraceSearchResultV1{ResultLevel: query.ResultLevel, Limit: limit, Filters: activeTraceFilters(query)}
 	switch query.ResultLevel {
 	case "event":
-		events, err := s.searchEvents(query, opts, limit)
+		events, err := s.searchEvents(query, limit)
 		if err != nil {
 			return TraceSearchResultV1{}, err
 		}
@@ -334,7 +378,9 @@ func (s *traceStore) Search(query TraceQuery, opts traceSearchOptions) (TraceSea
 		if err != nil {
 			return TraceSearchResultV1{}, err
 		}
-		matching, err := s.matchingTraceIDs(query, opts)
+		// Unlike List, trace-level search matches the summary alone -- the
+		// JSONL path uses traceSummaryMatches here, not traceAggregateMatches.
+		matching, err := s.matchingTraceIDs(query.Q, "trace")
 		if err != nil {
 			return TraceSearchResultV1{}, err
 		}
@@ -373,7 +419,7 @@ func (s *traceStore) Show(id string, query TraceQuery) (TraceShowResultV1, bool,
 	}
 	defer db.Close()
 	var summaryJSON string
-	err = db.QueryRow(`SELECT summary_json FROM traces WHERE source_key = ? AND id = ?`, s.logPath, id).Scan(&summaryJSON)
+	err = db.QueryRow(`SELECT summary_json FROM traces WHERE source_key = ? AND id = ?`, s.sourceKey, id).Scan(&summaryJSON)
 	if err == sql.ErrNoRows {
 		return TraceShowResultV1{}, false, nil
 	}
@@ -442,7 +488,7 @@ func (s *traceStore) loadSummaries() ([]TraceSummaryV1, error) {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT summary_json FROM traces WHERE source_key = ?`, s.logPath)
+	rows, err := db.Query(`SELECT summary_json FROM traces WHERE source_key = ?`, s.sourceKey)
 	if err != nil {
 		return nil, err
 	}
@@ -462,10 +508,13 @@ func (s *traceStore) loadSummaries() ([]TraceSummaryV1, error) {
 	return summaries, rows.Err()
 }
 
-func (s *traceStore) matchingTraceIDs(query TraceQuery, opts traceSearchOptions) (map[string]bool, error) {
+// matchingTraceIDs returns the traces whose indexed text matches the free-text
+// query, looking only at the named row kinds ("trace" for summaries, "event"
+// for events).
+func (s *traceStore) matchingTraceIDs(q string, kinds ...string) (map[string]bool, error) {
 	out := map[string]bool{}
-	needle := strings.TrimSpace(query.Q)
-	if needle == "" {
+	needle := strings.TrimSpace(q)
+	if needle == "" || len(kinds) == 0 {
 		return out, nil
 	}
 	db, err := s.db()
@@ -473,7 +522,11 @@ func (s *traceStore) matchingTraceIDs(query TraceQuery, opts traceSearchOptions)
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT trace_id, body FROM trace_search WHERE trace_id IN (SELECT id FROM traces WHERE source_key = ?) AND source IN (`+sourcePlaceholders(opts.Sources)+`)`, append([]interface{}{s.logPath}, sourcesOrDefault(opts.Sources)...)...)
+	args := []any{s.sourceKey}
+	for _, kind := range kinds {
+		args = append(args, kind)
+	}
+	rows, err := db.Query(`SELECT trace_id, body FROM trace_search WHERE source_key = ? AND source IN (`+placeholders(len(kinds))+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +536,7 @@ func (s *traceStore) matchingTraceIDs(query TraceQuery, opts traceSearchOptions)
 		if err := rows.Scan(&id, &body); err != nil {
 			return nil, err
 		}
-		if textMatches(body, needle, opts.Literal, opts.CaseSensitive) {
+		if matchesAllTerms(body, needle) {
 			out[id] = true
 		}
 	}
@@ -495,7 +548,7 @@ type traceEventSearchRows struct {
 	total    int
 }
 
-func (s *traceStore) searchEvents(query TraceQuery, opts traceSearchOptions, limit int) (traceEventSearchRows, error) {
+func (s *traceStore) searchEvents(query TraceQuery, limit int) (traceEventSearchRows, error) {
 	db, err := s.db()
 	if err != nil {
 		return traceEventSearchRows{}, err
@@ -508,6 +561,7 @@ func (s *traceStore) searchEvents(query TraceQuery, opts traceSearchOptions, lim
 	sortTraceSummaries(summaries)
 	result := traceEventSearchRows{}
 	allowedTypes := traceEventTypeSet(query.EventTypes)
+	needle := strings.TrimSpace(query.Q)
 	for _, summary := range summaries {
 		if query.State != "" && !strings.EqualFold(summary.Sharing.State, query.State) {
 			continue
@@ -520,13 +574,10 @@ func (s *traceStore) searchEvents(query TraceQuery, opts traceSearchOptions, lim
 			return traceEventSearchRows{}, err
 		}
 		for _, event := range events {
-			if query.Q != "" && !textMatches(traceEventSearchBody(event), query.Q, opts.Literal, opts.CaseSensitive) {
-				continue
-			}
 			if len(allowedTypes) > 0 && !allowedTypes[traceEventTypeAlias(event.Type)] && !allowedTypes[strings.ToLower(event.Type)] {
 				continue
 			}
-			if opts.Tool != "" && (event.Tool == nil || !strings.EqualFold(event.Tool.Name, opts.Tool)) {
+			if needle != "" && !traceEventMatches(event, needle) {
 				continue
 			}
 			result.total++
@@ -534,7 +585,7 @@ func (s *traceStore) searchEvents(query TraceQuery, opts traceSearchOptions, lim
 				result.returned = append(result.returned, TraceEventMatchV1{
 					Trace:   summary,
 					Event:   event,
-					Snippet: traceSnippet(event, query.Q),
+					Snippet: traceSnippet(event, needle),
 					Score:   1,
 				})
 			}
@@ -544,7 +595,7 @@ func (s *traceStore) searchEvents(query TraceQuery, opts traceSearchOptions, lim
 }
 
 func (s *traceStore) loadTraceEvents(db *sql.DB, traceID string, eventTypes []string) ([]TraceEventV1, error) {
-	rows, err := db.Query(`SELECT event_json FROM trace_events WHERE trace_id = ? ORDER BY event_number`, traceID)
+	rows, err := db.Query(`SELECT event_json FROM trace_events WHERE source_key = ? AND trace_id = ? ORDER BY event_number`, s.sourceKey, traceID)
 	if err != nil {
 		return nil, err
 	}
@@ -565,22 +616,6 @@ func (s *traceStore) loadTraceEvents(db *sql.DB, traceID string, eventTypes []st
 		}
 	}
 	return events, rows.Err()
-}
-
-func (s *traceStore) loadOneEvent(db *sql.DB, traceID, eventID string) (TraceEventV1, bool, error) {
-	var raw string
-	err := db.QueryRow(`SELECT event_json FROM trace_events WHERE trace_id = ? AND event_id = ?`, traceID, eventID).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return TraceEventV1{}, false, nil
-	}
-	if err != nil {
-		return TraceEventV1{}, false, err
-	}
-	var event TraceEventV1
-	if err := json.Unmarshal([]byte(raw), &event); err != nil {
-		return TraceEventV1{}, false, err
-	}
-	return event, true, nil
 }
 
 func spansFromEvents(events []TraceEventV1) []TraceSpanV1 {
@@ -615,111 +650,12 @@ func traceLogFingerprint(logPath string) string {
 	return strings.Join(parts, "|")
 }
 
-func traceSummarySearchBody(summary TraceSummaryV1) string {
-	fields := []string{
-		summary.ID,
-		summary.Title,
-		summary.Preview,
-		summary.Harness.Name,
-		summary.Harness.Version,
-		summary.Sharing.State,
-		summary.Sharing.Visibility,
-		summary.Sharing.URL,
+// placeholders builds an n-wide SQL "?,?,..." list.
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
 	}
-	if summary.Session != nil {
-		fields = append(fields, summary.Session.ID, summary.Session.WorkingDirectory)
-	}
-	if summary.Repository != nil {
-		fields = append(fields, summary.Repository.RemoteURL, summary.Repository.Branch, summary.Repository.Ref, summary.Repository.Path)
-	}
-	if summary.Namespace != nil {
-		fields = append(fields, summary.Namespace.ID, summary.Namespace.Slug, summary.Namespace.Name)
-	}
-	if summary.Trace != nil {
-		fields = append(fields, summary.Trace.ID, summary.Trace.RootSpanID)
-	}
-	return strings.Join(fields, " ")
-}
-
-func traceEventSearchBody(event TraceEventV1) string {
-	fields := []string{event.ID, event.Type, event.Action, event.Category, event.Actor, event.Title, event.Summary, event.Model}
-	if event.Content != nil {
-		fields = append(fields, event.Content.Text, event.Content.Hash)
-	}
-	if event.Tool != nil {
-		fields = append(fields, event.Tool.Name, event.Tool.Command, event.Tool.Path, fmt.Sprint(event.Tool.Arguments), fmt.Sprint(event.Tool.Result))
-	}
-	if event.Command != nil {
-		fields = append(fields, event.Command.Command)
-		if event.Command.Output != nil {
-			fields = append(fields, event.Command.Output.Text)
-		}
-	}
-	if event.File != nil {
-		fields = append(fields, event.File.Path, event.File.Operation, event.File.Language, event.File.DiffHash)
-		if event.File.Diff != nil {
-			fields = append(fields, event.File.Diff.Text)
-		}
-	}
-	if event.MCP != nil {
-		fields = append(fields, event.MCP.Server, event.MCP.Tool, event.MCP.Method, event.MCP.ResourceURI)
-	}
-	if event.Approval != nil {
-		fields = append(fields, event.Approval.Decision, event.Approval.Reason)
-	}
-	return strings.Join(fields, " ")
-}
-
-func textMatches(body, pattern string, literal, caseSensitive bool) bool {
-	body = strings.TrimSpace(body)
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return true
-	}
-	if literal {
-		if caseSensitive {
-			return strings.Contains(body, pattern)
-		}
-		return strings.Contains(strings.ToLower(body), strings.ToLower(pattern))
-	}
-	expr := pattern
-	if !caseSensitive {
-		expr = "(?i)" + expr
-	}
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		if caseSensitive {
-			return strings.Contains(body, pattern)
-		}
-		return strings.Contains(strings.ToLower(body), strings.ToLower(pattern))
-	}
-	return re.MatchString(body)
-}
-
-func sourcePlaceholders(sources []string) string {
-	values := sourcesOrDefault(sources)
-	out := make([]string, len(values))
-	for i := range out {
-		out[i] = "?"
-	}
-	return strings.Join(out, ",")
-}
-
-func sourcesOrDefault(sources []string) []interface{} {
-	if len(sources) == 0 {
-		return []interface{}{"trace", "event"}
-	}
-	out := make([]interface{}, 0, len(sources))
-	for _, source := range sources {
-		source = strings.ToLower(strings.TrimSpace(source))
-		if source == "trace" || source == "event" {
-			out = append(out, source)
-		}
-	}
-	if len(out) == 0 {
-		return []interface{}{"trace", "event"}
-	}
-	return out
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 func traceEventTypeSet(values []string) map[string]bool {

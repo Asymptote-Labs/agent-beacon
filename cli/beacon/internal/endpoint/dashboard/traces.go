@@ -66,6 +66,12 @@ type traceAggregate struct {
 	titlePriority int
 }
 
+// The local store is an index over the runtime log, never a second source of
+// truth: it answers the same question the JSONL scan below answers, and any
+// error -- a query it does not support, an unreadable database, a stale index
+// it could not rebuild -- falls back to that scan rather than failing the read.
+// The two paths share one free-text matcher (matchesAllTerms) and one pair of
+// haystacks precisely so the fallback cannot change the answer.
 func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
 	if result, err := openTraceStore(path).List(query); err == nil {
 		return result, nil
@@ -109,8 +115,10 @@ func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
 	}, nil
 }
 
+// SearchTraces prefers the local store and falls back to scanning JSONL; see
+// ReadTraceList on why a store error is not an error here.
 func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
-	if result, err := openTraceStore(path).Search(query, traceSearchOptions{}); err == nil {
+	if result, err := openTraceStore(path).Search(query); err == nil {
 		return result, nil
 	}
 	if query.ResultLevel == "" {
@@ -169,6 +177,8 @@ func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
 	return resp, nil
 }
 
+// ShowTrace prefers the local store and falls back to scanning JSONL; see
+// ReadTraceList on why a store error is not an error here.
 func ShowTrace(path, id string, query TraceQuery) (TraceShowResultV1, bool, error) {
 	if result, ok, err := openTraceStore(path).Show(id, query); err == nil {
 		return result, ok, nil
@@ -847,8 +857,15 @@ func traceSpanList(spans map[string]*TraceSpanV1) []TraceSpanV1 {
 	return out
 }
 
-func traceSummaryMatches(summary TraceSummaryV1, query string) bool {
-	haystack := strings.ToLower(strings.Join([]string{
+// traceSummaryHaystack is the text a free-text query is matched against for one
+// trace. The local store indexes this exact string, so the store and the JSONL
+// fallback select the same traces from the same query.
+//
+// Fields are joined with a newline rather than concatenated: strings.Fields
+// splits the query on whitespace, so no term can contain one, and no term can
+// straddle two fields.
+func traceSummaryHaystack(summary TraceSummaryV1) string {
+	return strings.Join([]string{
 		summary.ID,
 		summary.Title,
 		summary.Preview,
@@ -860,17 +877,17 @@ func traceSummaryMatches(summary TraceSummaryV1, query string) bool {
 		summary.Sharing.State,
 		summary.Sharing.Visibility,
 		summary.Sharing.URL,
-	}, "\x00"))
-	for _, term := range strings.Fields(strings.ToLower(query)) {
-		if !strings.Contains(haystack, term) {
-			return false
-		}
-	}
-	return true
+	}, "\n")
 }
 
-func traceEventMatches(event TraceEventV1, query string) bool {
-	haystack := strings.ToLower(strings.Join([]string{
+func traceSummaryMatches(summary TraceSummaryV1, query string) bool {
+	return matchesAllTerms(traceSummaryHaystack(summary), query)
+}
+
+// traceEventHaystack is the per-event counterpart to traceSummaryHaystack, and
+// is indexed by the local store for the same reason.
+func traceEventHaystack(event TraceEventV1) string {
+	return strings.Join([]string{
 		event.ID,
 		event.Type,
 		event.Action,
@@ -891,7 +908,20 @@ func traceEventMatches(event TraceEventV1, query string) bool {
 		}),
 		valueOrEmpty(event.MCP, func(m *TraceMCPV1) string { return m.Server + " " + m.Tool + " " + m.Method + " " + m.ResourceURI }),
 		valueOrEmpty(event.Approval, func(a *TraceApprovalV1) string { return a.Decision + " " + a.Reason }),
-	}, "\x00"))
+	}, "\n")
+}
+
+func traceEventMatches(event TraceEventV1, query string) bool {
+	return matchesAllTerms(traceEventHaystack(event), query)
+}
+
+// matchesAllTerms reports whether every whitespace-separated term in query is a
+// case-insensitive substring of haystack. This is the one free-text matcher
+// Beacon's trace queries use; the store must not reinterpret a query as
+// anything else, or the same search would return different hits depending on
+// whether the index happened to be readable.
+func matchesAllTerms(haystack, query string) bool {
+	haystack = strings.ToLower(haystack)
 	for _, term := range strings.Fields(strings.ToLower(query)) {
 		if !strings.Contains(haystack, term) {
 			return false

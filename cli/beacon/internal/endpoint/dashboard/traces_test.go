@@ -426,4 +426,197 @@ func TestTraceStoreIndexesAndRefreshesRuntimeLog(t *testing.T) {
 	}
 }
 
+// traceStoreBlockedLog copies the given log lines into a directory where the
+// trace store cannot be opened (a directory sits where traces.db would go), so
+// a query against the returned path exercises the JSONL fallback.
+func traceStoreBlockedLog(t *testing.T, lines [][]byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.MkdirAll(TraceStorePath(path), 0700); err != nil {
+		t.Fatalf("block trace store path: %v", err)
+	}
+	writeTestLog(t, path, lines...)
+	return path
+}
+
+func traceStoreIndexedLog(t *testing.T, lines [][]byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	writeTestLog(t, path, lines...)
+	return path
+}
+
+// The store may be faster than scanning JSONL, but it may not answer a
+// different question. A query that reaches the index and the same query that
+// falls back must select the same traces and the same events -- which they do
+// not if the store reinterprets the query as a regular expression, or searches
+// event text where the JSONL path searches only the summary.
+func TestTraceStoreAndJSONLFallbackMatchIdentically(t *testing.T) {
+	prompt := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	prompt.Event.ID = "evt-prompt"
+	prompt.Session = &schema.SessionInfo{ID: "s1", WorkingDirectory: "/repo/a"}
+	prompt.Prompt = &schema.PromptInfo{Text: "Index local traces"}
+	command := testSchemaEvent("2026-06-11T10:01:00Z", "cursor", "command.executed", "command", "repo-a")
+	command.Event.ID = "evt-command"
+	command.Session = prompt.Session
+	command.Command = &schema.CommandInfo{Command: "go test ./internal/endpoint/dashboard"}
+	lines := marshalEvents(t, prompt, command)
+
+	indexed := traceStoreIndexedLog(t, lines)
+	fallback := traceStoreBlockedLog(t, lines)
+
+	queries := []string{
+		"dashboard go",       // terms out of order: a substring match, not a regex one
+		"endpoint.dashboard", // "." is a literal here, so this must not match "endpoint/dashboard"
+		"endpoint/dashboard", // ... while the real separator must
+		"go test",            // multi-word phrase
+		"(",                  // not a valid regular expression
+		"index local",
+		"INDEX LOCAL", // matching is case-insensitive
+		"nothing-matches-this",
+	}
+	for _, q := range queries {
+		t.Run(q, func(t *testing.T) {
+			indexedList, err := ReadTraceList(indexed, TraceQuery{EventQuery: EventQuery{Q: q}, Limit: 10})
+			if err != nil {
+				t.Fatalf("indexed list: %v", err)
+			}
+			fallbackList, err := ReadTraceList(fallback, TraceQuery{EventQuery: EventQuery{Q: q}, Limit: 10})
+			if err != nil {
+				t.Fatalf("fallback list: %v", err)
+			}
+			if indexedList.TotalMatched != fallbackList.TotalMatched {
+				t.Errorf("list matched %d traces from the index and %d from JSONL", indexedList.TotalMatched, fallbackList.TotalMatched)
+			}
+
+			for _, level := range []string{"trace", "event"} {
+				indexedSearch, err := SearchTraces(indexed, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: level, Limit: 10})
+				if err != nil {
+					t.Fatalf("indexed %s search: %v", level, err)
+				}
+				fallbackSearch, err := SearchTraces(fallback, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: level, Limit: 10})
+				if err != nil {
+					t.Fatalf("fallback %s search: %v", level, err)
+				}
+				if indexedSearch.TotalMatched != fallbackSearch.TotalMatched {
+					t.Errorf("%s search matched %d from the index and %d from JSONL", level, indexedSearch.TotalMatched, fallbackSearch.TotalMatched)
+				}
+				if len(indexedSearch.Events) != len(fallbackSearch.Events) {
+					t.Fatalf("%s search returned %d events from the index and %d from JSONL", level, len(indexedSearch.Events), len(fallbackSearch.Events))
+				}
+				for i := range indexedSearch.Events {
+					if indexedSearch.Events[i].Event.ID != fallbackSearch.Events[i].Event.ID {
+						t.Errorf("%s search event %d = %q from the index, %q from JSONL", level, i, indexedSearch.Events[i].Event.ID, fallbackSearch.Events[i].Event.ID)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Two events can carry one id -- a repeated log line, or a hook and an OTLP
+// capture of the same call, whose ids are derived to match. The JSONL path
+// keeps both, so the index must too rather than failing the whole reindex.
+func TestTraceStoreKeepsEventsThatShareAnID(t *testing.T) {
+	first := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "command.executed", "command", "repo-a")
+	first.Event.ID = "same-event-id"
+	first.Session = &schema.SessionInfo{ID: "s1"}
+	first.Command = &schema.CommandInfo{Command: "go build ./..."}
+	second := first
+	second.Timestamp = "2026-06-11T10:00:01Z"
+	path := traceStoreIndexedLog(t, marshalEvents(t, first, second))
+
+	status, err := TraceStoreStatus(path)
+	if err != nil {
+		t.Fatalf("TraceStoreStatus returned error: %v", err)
+	}
+	if status.Traces != 1 || status.Events != 2 {
+		t.Fatalf("status = %#v, want 1 trace and 2 events", status)
+	}
+
+	list, err := ReadTraceList(path, TraceQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadTraceList returned error: %v", err)
+	}
+	if len(list.Traces) != 1 {
+		t.Fatalf("ReadTraceList returned %d traces, want 1", len(list.Traces))
+	}
+
+	show, ok, err := ShowTrace(path, list.Traces[0].ID, TraceQuery{Limit: 10})
+	if err != nil || !ok {
+		t.Fatalf("ShowTrace ok=%v err=%v", ok, err)
+	}
+	if len(show.Events) != 2 {
+		t.Fatalf("ShowTrace returned %d events, want both events that share an id", len(show.Events))
+	}
+}
+
+// Sibling logs in one directory share one traces.db, and two logs can describe
+// the same session. Each must index under its own source rather than colliding.
+func TestTraceStoreScopesTracesBySourceLog(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "logs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	shared := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	shared.Event.ID = "evt-prompt"
+	shared.Session = &schema.SessionInfo{ID: "shared-session"}
+	shared.Prompt = &schema.PromptInfo{Text: "first log"}
+	other := shared
+	other.Prompt = &schema.PromptInfo{Text: "second log"}
+
+	first := filepath.Join(dir, "runtime.jsonl")
+	second := filepath.Join(dir, "archive.jsonl")
+	writeTestLog(t, first, marshalEvents(t, shared)...)
+	writeTestLog(t, second, marshalEvents(t, other)...)
+	if TraceStorePath(first) != TraceStorePath(second) {
+		t.Fatalf("expected both logs to share one trace store")
+	}
+
+	for _, tc := range []struct{ path, want string }{{first, "first log"}, {second, "second log"}} {
+		status, err := TraceStoreStatus(tc.path)
+		if err != nil {
+			t.Fatalf("TraceStoreStatus(%s) returned error: %v", tc.path, err)
+		}
+		if status.Traces != 1 || status.Events != 1 {
+			t.Fatalf("status for %s = %#v, want 1 trace and 1 event", tc.path, status)
+		}
+		result, err := SearchTraces(tc.path, TraceQuery{EventQuery: EventQuery{Q: tc.want}, ResultLevel: "event", Limit: 10})
+		if err != nil {
+			t.Fatalf("SearchTraces(%s) returned error: %v", tc.path, err)
+		}
+		if result.TotalMatched != 1 {
+			t.Fatalf("searching %s for %q matched %d events, want 1", tc.path, tc.want, result.TotalMatched)
+		}
+	}
+}
+
+// A relative and an absolute path to one log are one source, not two.
+func TestTraceStoreTreatsEquivalentLogPathsAsOneSource(t *testing.T) {
+	path := traceStoreIndexedLog(t, marshalEvents(t, func() schema.Event {
+		event := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+		event.Event.ID = "evt-prompt"
+		event.Session = &schema.SessionInfo{ID: "s1"}
+		event.Prompt = &schema.PromptInfo{Text: "one source"}
+		return event
+	}()))
+
+	if _, err := TraceStoreStatus(path); err != nil {
+		t.Fatalf("TraceStoreStatus returned error: %v", err)
+	}
+	status, err := TraceStoreStatus(filepath.Join(filepath.Dir(path), ".", "runtime.jsonl"))
+	if err != nil {
+		t.Fatalf("TraceStoreStatus for the equivalent path returned error: %v", err)
+	}
+	if status.Traces != 1 || status.Events != 1 {
+		t.Fatalf("status = %#v, want the same single indexed trace", status)
+	}
+}
+
 func int64Ptr(v int64) *int64 { return &v }
