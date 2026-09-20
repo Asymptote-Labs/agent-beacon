@@ -57,6 +57,22 @@ var rawPayloadKeys = map[string]string{
 	"vscode":        "vscode",
 	"muse":          "muse",
 	"devin-desktop": "cascade",
+	// DeepSeek Harness is here for one tool and the shape of its whole tool surface. `run_code`
+	// executes a TypeScript program against the other tools, and the program itself -- the `code`
+	// argument -- is the entire content of that call; the endpoint schema has no field for it,
+	// because it is neither a shell command line nor a file. Without the payload, the highest-
+	// privilege tool dsh ships would be recorded as a bare tool.invoked carrying only its name.
+	//
+	// It is not only run_code. Non-MCP tool arguments reach no schema field at all on any runtime
+	// -- gen_ai.tool.call.arguments is written for MCP calls only -- so on dsh this is also where a
+	// glob or grep pattern, a terminal_send `submit` flag and a job id survive. `source` on
+	// SessionStart is the ordinary rawPayloadKeys case on top of that.
+	//
+	// The cost is stated rather than hidden: on a `write` the payload repeats the file content the
+	// diff already carries. raw goes through SanitizeMap like every other field and is the first
+	// thing dropped when an event exceeds the 64 KiB ceiling, so the duplication is bounded and the
+	// diff is what survives. Qwen Code and Muse Code already pay the same cost for the same reason.
+	"dsh": "dsh",
 }
 
 func rawPayloadKey(platform string) string {
@@ -260,7 +276,17 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	if toolName != "" {
 		fields["tool"] = map[string]interface{}{"name": toolName}
 	}
-	if command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine"); command != "" {
+	command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine")
+	// DeepSeek Harness runs commands through a persistent terminal as well as through `bash`, and
+	// that tool names its command line `text` rather than `command`, so every key above misses it.
+	// Without this a terminal_send would be classified command.executed -- the dsh taxonomy says so
+	// -- and carry no command, which is invisible to every rule that matches on command.command.
+	// Asked after the shared list for the Kiro reason below: a payload carrying a `command` of its
+	// own has said something more direct.
+	if command == "" && platformFlag == dshPlatform {
+		command = dshTerminalCommand(toolName, toolInput)
+	}
+	if command != "" {
 		// OpenHands file editors multiplex operations onto one tool name via a `command` argument
 		// that names the editor operation (view, str_replace, create), not a shell command.
 		// Promoting it into command.command would store an editor operation as shell execution and
@@ -270,8 +296,12 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 		// the tool descends from Amazon Q Developer CLI's multiplexed fs_write. Guarded on the
 		// tool name so `shell`/`execute_bash`, where `command` really is the command line, keeps
 		// the field that makes a shell event worth recording.
+		// DeepSeek Harness's `str_replace_editor` is the third instance of the same shape, and the
+		// one that publishes it: its schema documents `command` as an enum of view/create/
+		// str_replace/insert over a `path`.
 		if !(platformFlag == openHandsPlatform && openHandsFileEditorTools[strings.ToLower(strings.TrimSpace(toolName))]) &&
-			!(platformFlag == kiroPlatform && kiroWriteCommandIsEditorOperation(toolName, toolInput)) {
+			!(platformFlag == kiroPlatform && kiroWriteCommandIsEditorOperation(toolName, toolInput)) &&
+			!(platformFlag == dshPlatform && dshEditorCommandIsOperation(toolName, toolInput)) {
 			fields["command"] = map[string]interface{}{"command": command}
 			fields["tool"] = mergeNested(fields["tool"], map[string]interface{}{"name": toolName, "command": command})
 		}
@@ -752,6 +782,16 @@ func fileOperation(toolName string, toolInput map[string]interface{}) string {
 			return operation
 		}
 	}
+	// DeepSeek Harness needs the arguments for the reason this function takes them at all: its
+	// `str_replace_editor` is one name over four operations, one of which is a read.
+	if platformFlag == dshPlatform {
+		if operation := dshFileOperation(toolName, toolInput); operation != "" {
+			return operation
+		}
+		if _, known := dshToolKindFor(toolName); known {
+			return ""
+		}
+	}
 	lower := strings.ToLower(toolName)
 	switch {
 	case strings.Contains(lower, "read") || strings.Contains(lower, "view") || strings.Contains(lower, "list") || strings.Contains(lower, "grep") || strings.Contains(lower, "search"):
@@ -787,6 +827,14 @@ func actionForTool(hookEvent, toolName string, toolInput, toolResponse map[strin
 		// goose reports a failed call as a different event, and emitPostToolObserved has already
 		// classified that as tool.failed and returned before reaching this function.
 		if action := gooseToolAction(toolName, toolInput); action != "" {
+			return action
+		}
+	}
+	if platformFlag == dshPlatform {
+		// No failure check of its own, and unlike goose that is not because the failure arrives as
+		// a different event -- the DeepSeek Harness bridge sends no failure signal at all. See the
+		// note on parseDshEdit.
+		if action := dshToolAction(toolName, toolInput); action != "" {
 			return action
 		}
 	}

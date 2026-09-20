@@ -555,6 +555,9 @@ contract, what leaves the machine, and revocation.
 ./beacon endpoint hooks install --harness kiro
 ./beacon endpoint hooks status --harness kiro
 
+./beacon endpoint hooks install --harness dsh
+./beacon endpoint hooks status --harness dsh
+
 ./beacon endpoint hooks install --harness hermes
 ./beacon endpoint hooks status --harness hermes
 
@@ -641,6 +644,31 @@ nothing to stdout there: on `SessionStart` and `UserPromptSubmit` Kiro adds a
 hook's stdout to the model's context, and an observing hook has nothing to say to
 the model. The one exception is the optional policy seam, whose deny is exit code
 2 with the reason on stderr -- Kiro's documented way to block a tool call.
+
+The DeepSeek Harness integration is the one install that takes two files,
+because `dsh` reads no hooks file until something mounts a reader at it: the
+harness composes itself from a plugin tree, and `@deepseek-ai/dsh-hooks-claude-code`
+-- the Claude Code hook bridge DeepSeek ships as a dependency of the CLI -- is not
+in the default tree. So Beacon writes `$DSH_HOME/beacon-endpoint-hooks.json`, a
+hooks file it owns outright, and adds one row to `$DSH_HOME/cordis.patch.yml`
+mounting the bridge at it. `$DSH_HOME` defaults to `~/.dsh`. The home-level patch
+layer applies over every profile, so one install covers the CLI, Web, ACP and SDK
+surfaces; there is no project scope, because the bridge's `configPath` is
+process-level and a repository has nowhere to mount from, so `--level project` is
+refused with that explanation rather than silently becoming a machine-wide
+install.
+
+The patch file is the user's own, and is edited as a document rather than
+rewritten: parsed into a YAML node tree, one self-contained element appended or
+removed, re-encoded from the same tree, so comments, quoting and `!!js`
+expressions survive. Beacon refuses rather than rewriting a patch file it cannot
+parse, one that is not a list of entries, or an insert element carrying its row
+alongside rows it did not write. An uninstall that would leave the file empty
+removes it instead: an empty or comments-only patch file fails `dsh` boot, while
+an absent one is skipped cleanly. `hooks status` and `endpoint inventory` report
+both files, because installed is the conjunction of the two -- a hooks file with
+nothing mounted at it is a file nothing reads, and a mount pointing at a missing
+hooks file registers nothing.
 
 The Hermes Agent integration writes shell-hook entries into
 `~/.hermes/config.yaml`. Hermes prompts for first-use consent for each

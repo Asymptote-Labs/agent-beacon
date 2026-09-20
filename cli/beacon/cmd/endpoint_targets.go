@@ -85,6 +85,17 @@ var harnessTargets = []harnessTarget{
 	// that is All Hands' model family, and accepting it would let someone ask to install hooks for
 	// a model.
 	{name: "openhands", endpointKind: endpointTargetHook, endpointAliases: []string{"openhands", "open-hands"}, hookAliases: []string{"openhands", "open-hands"}},
+	// DeepSeek Harness. One row for every surface, because the CLI, Web, ACP and SDK are four
+	// compositions of one harness booting from one Harness home -- and Beacon installs into the
+	// home-level patch layer, which applies to all of them. "dsh" is the binary, the --platform
+	// value and the shortest unambiguous spelling; "deepseek-harness" and "deepseek_harness" are
+	// what the product is called and the canonical harness name events are written under, so a row
+	// read out of the runtime log and passed back to --harness resolves to the runtime it names.
+	//
+	// Bare "deepseek" is deliberately not an alias, and it is the one a user is most likely to
+	// type. It names the vendor and the model family, and accepting it would let someone ask to
+	// install hooks for a model -- the same reason NormalizeHarnessName leaves it unmapped.
+	{name: "dsh", endpointKind: endpointTargetHook, endpointAliases: []string{"dsh", "deepseek-harness", "deepseek_harness", "deepseekharness"}, hookAliases: []string{"dsh", "deepseek-harness", "deepseek_harness", "deepseekharness"}},
 	// Kiro. One row for the IDE and the CLI together, because they are one harness reading one
 	// hooks directory -- so "kiro-ide" and "kiro-cli" are aliases of the same install rather than
 	// two targets, and asking for either gets the one that covers both. "kiro" is also the
