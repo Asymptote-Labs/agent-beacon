@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/spf13/cobra"
 )
@@ -219,9 +220,8 @@ func resolveClineStatePath(path string, userMode bool) string {
 	if strings.TrimSpace(path) != "" {
 		return path
 	}
-	base := filepath.Join("/var", "lib", "beacon", "endpoint", "state")
 	if userMode {
-		base = filepath.Dir(clinesession.DefaultStatePath())
+		return clinesession.DefaultStatePath()
 	}
-	return filepath.Join(base, "cline-sessions.json")
+	return filepath.Join(endpointconfig.BaseDir(false), "state", "cline-sessions.json")
 }

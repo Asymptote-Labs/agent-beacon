@@ -183,8 +183,9 @@ func (s *Store) collectHistoryRefs(out map[string]TraceRef) {
 			if !ok {
 				continue
 			}
-			if prev, exists := out[ref.ID]; !exists || ref.UpdatedAtUnixMS > prev.UpdatedAtUnixMS {
-				out[ref.ID] = ref
+			key := ref.Kind + ":" + ref.ID
+			if prev, exists := out[key]; !exists || ref.UpdatedAtUnixMS > prev.UpdatedAtUnixMS {
+				out[key] = ref
 			}
 		}
 	}
@@ -240,8 +241,9 @@ func (s *Store) collectSessionRefs(out map[string]TraceRef) {
 			if dir := extractDirectoryFromRecord(meta); dir != "" {
 				ref.Directory = dir
 			}
-			if prev, exists := out[ref.ID]; !exists || ref.UpdatedAtUnixMS > prev.UpdatedAtUnixMS {
-				out[ref.ID] = ref
+			key := ref.Kind + ":" + ref.ID
+			if prev, exists := out[key]; !exists || ref.UpdatedAtUnixMS > prev.UpdatedAtUnixMS {
+				out[key] = ref
 			}
 		}
 	}
@@ -298,8 +300,9 @@ func (s *Store) collectKanbanRefs(out map[string]TraceRef) {
 			if info, err := os.Stat(sessionsPath); err == nil {
 				ref.SizeBytes = info.Size()
 			}
-			if prev, exists := out[ref.ID]; !exists || ref.UpdatedAtUnixMS > prev.UpdatedAtUnixMS {
-				out[ref.ID] = ref
+			key := ref.Kind + ":" + ref.ID
+			if prev, exists := out[key]; !exists || ref.UpdatedAtUnixMS > prev.UpdatedAtUnixMS {
+				out[key] = ref
 			}
 		}
 	}

@@ -152,7 +152,11 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 	if err != nil {
 		return false, err
 	}
-	mapped := MapTrace(ref, records, MapOptions{MinOrder: cursor.LastOrder, SkipStarted: cursor.Started})
+	minOrder := cursor.LastOrder
+	if ref.Kind == SourceKanban {
+		minOrder = 0
+	}
+	mapped := MapTrace(ref, records, MapOptions{MinOrder: minOrder, SkipStarted: cursor.Started})
 	if len(mapped) == 0 {
 		if len(records) > 0 && records[len(records)-1].Order > cursor.LastOrder {
 			cursor.LastOrder = records[len(records)-1].Order
