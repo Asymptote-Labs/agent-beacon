@@ -68,10 +68,13 @@ type ToolCall struct {
 }
 
 type LifecycleEvent struct {
-	Type                     string `json:"type"`
-	TS                       string `json:"ts"`
-	SessionID                string `json:"session_id,omitempty"`
-	TurnNumber               int    `json:"turn_number,omitempty"`
+	Type      string `json:"type"`
+	TS        string `json:"ts"`
+	SessionID string `json:"session_id,omitempty"`
+	// TurnNumber is a pointer because Grok numbers turns from zero. As a plain int with omitempty,
+	// the first turn's number is indistinguishable from a row that carries no turn number at all,
+	// and reporting either as the other invents or drops a fact the source stated.
+	TurnNumber               *int   `json:"turn_number,omitempty"`
 	ModelID                  string `json:"model_id,omitempty"`
 	ToolName                 string `json:"tool_name,omitempty"`
 	Decision                 string `json:"decision,omitempty"`

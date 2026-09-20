@@ -141,6 +141,12 @@ func TestDiscoverGrokReportsCollectedSessionsAsEnabledWithoutHooks(t *testing.T)
 	if !strings.Contains(h.Message, "all 1 session") {
 		t.Errorf("message = %q", h.Message)
 	}
+	// With no hooks installed, the session store is what is carrying telemetry. Naming the hook
+	// path here would point at a file that is not on this machine and hide the one that is --
+	// GrokHookStatus reports the path it would use whether or not the file exists.
+	if want := filepath.Join(home, ".grok", "sessions"); h.ConfigPath != want {
+		t.Errorf("ConfigPath = %q, want the session store %q", h.ConfigPath, want)
+	}
 }
 
 // Grok that has never run here is not a broken install, and with no hooks the remedy is to install

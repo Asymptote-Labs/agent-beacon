@@ -70,6 +70,15 @@ func TestStoreListsAndMapsGrokSession(t *testing.T) {
 	if _, ok := byAction["session.ended"]; ok {
 		t.Fatal("turn_ended produced a session.ended event")
 	}
+	// Grok numbers turns from zero, so the first turn's number has to survive the mapping. Dropping
+	// it as a falsy value would report the one turn every session has as having no number.
+	turnEnd := rawGrokDetail(t, events, "session.context", "turn_ended")
+	if turnEnd == nil {
+		t.Fatal("no session.context event for turn_ended")
+	}
+	if got, ok := turnEnd["turn_number"]; !ok || got != float64(0) {
+		t.Fatalf("turn_number = %v (present=%t), want 0", got, ok)
+	}
 	if _, ok := byAction["session.started"]; !ok {
 		t.Fatal("no session.started event")
 	}
@@ -229,7 +238,7 @@ func writeFixtureSession(t *testing.T, root, workspace, sessionID string) string
 			`{"ts":"2026-05-21T16:49:27.545Z","type":"permission_requested","tool_name":"run_terminal_command"}`+"\n"+
 			`{"ts":"2026-05-21T16:49:27.545Z","type":"permission_resolved","tool_name":"run_terminal_command","decision":"allow","wait_ms":0}`+"\n"+
 			`{"ts":"2026-05-21T16:49:27.552Z","type":"tool_completed","tool_name":"run_terminal_command","duration_ms":6,"outcome":"success"}`+"\n"+
-			`{"ts":"2026-05-21T16:50:25.814Z","type":"turn_ended","outcome":"success"}`+"\n")
+			`{"ts":"2026-05-21T16:50:25.814Z","type":"turn_ended","outcome":"success","turn_number":0}`+"\n")
 	writeFile(t, filepath.Join(sessionDir, "chat_history.jsonl"),
 		`{"type":"user","content":[{"type":"text","text":"run ls token=secret"}]}`+"\n"+
 			`{"type":"assistant","content":"","reasoning":{"text":"Need to inspect files"},"tool_calls":[{"id":"call-abc","name":"run_terminal_command","arguments":"{\"command\":\"ls -la\",\"description\":\"list files\"}"}],"model_id":"grok-build"}`+"\n"+
@@ -237,6 +246,33 @@ func writeFixtureSession(t *testing.T, root, workspace, sessionID string) string
 			`{"type":"assistant","content":"done","model_id":"grok-build"}`+"\n")
 	writeFile(t, filepath.Join(sessionDir, "terminal", "call-abc-1.log"), "total 0\n")
 	return sessionDir
+}
+
+// rawGrokDetail pulls the grok detail map off the first event with the given action whose
+// "lifecycle" field matches, going through JSON so it reads the event exactly as the log does.
+func rawGrokDetail(t *testing.T, events []MappedEvent, action, lifecycle string) map[string]interface{} {
+	t.Helper()
+	for _, item := range events {
+		if item.Event.Event.Action != action {
+			continue
+		}
+		data, err := json.Marshal(item.Event)
+		if err != nil {
+			t.Fatalf("marshal event: %v", err)
+		}
+		var record struct {
+			Raw struct {
+				Grok map[string]interface{} `json:"grok"`
+			} `json:"raw"`
+		}
+		if err := json.Unmarshal(data, &record); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if record.Raw.Grok["lifecycle"] == lifecycle {
+			return record.Raw.Grok
+		}
+	}
+	return nil
 }
 
 func appendLine(t *testing.T, path, line string) {

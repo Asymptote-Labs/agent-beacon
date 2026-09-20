@@ -177,8 +177,8 @@ func (m *mapper) consumeLifecycle(ev LifecycleEvent) {
 		if ev.CancellationCategory != "" {
 			detail["cancellation_category"] = ev.CancellationCategory
 		}
-		if ev.TurnNumber > 0 {
-			detail["turn_number"] = ev.TurnNumber
+		if ev.TurnNumber != nil {
+			detail["turn_number"] = *ev.TurnNumber
 		}
 		out.Raw = map[string]interface{}{"grok": detail}
 		m.append(out, SourceLifecycle, ev.Index)

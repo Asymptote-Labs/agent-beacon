@@ -47,7 +47,12 @@ func DiscoverGrok() Harness {
 	// resolving it here would read whatever repository the command happened to run from and report
 	// it as the machine's state. DiscoverQwen, DiscoverCline and DiscoverPi guard the same way.
 	hookStatus := hooks.GrokHookStatus(hooks.GrokOptions{Level: hooks.LevelUser})
-	if hookStatus.HooksPath != "" {
+
+	// ConfigPath names what is carrying telemetry, which for this runtime depends on which path is
+	// live. GrokHookStatus reports the hook path it *would* use whenever home resolves, installed or
+	// not, so keying on the path being non-empty would name a file that is not there and hide the
+	// session store on a backfill-only machine. Gate it on the install instead.
+	if hookStatus.Installed {
 		h.ConfigPath = hookStatus.HooksPath
 	} else {
 		h.ConfigPath = sessionsDir
