@@ -101,6 +101,50 @@ func TestScanIncludesNamesAndPaths(t *testing.T) {
 	}
 }
 
+// The definition fingerprint is a correlation identifier for "is this the same MCP server", and a
+// hash is not a disclosure -- but a digest over a definition whose only varying part is one token
+// is guessable, so the raw secret must not reach it. Two homes differing only in the value of a
+// secret-marked env key must fingerprint identically; a real change to the definition must not.
+func TestMCPDefinitionHashExcludesSecretEnvValues(t *testing.T) {
+	definitionHash := func(t *testing.T, settings string) string {
+		t.Helper()
+		home := t.TempDir()
+		writeFile(t, filepath.Join(home, ".claude", "settings.json"), settings)
+		result := Scan(Options{HomeDir: home, SkipProjectScope: true, Now: fixedNow})
+		if len(result.MCPServers) != 1 {
+			t.Fatalf("MCPServers len = %d, want 1", len(result.MCPServers))
+		}
+		return result.MCPServers[0].DefinitionHash
+	}
+
+	const withToken = `{
+  "mcpServers": {
+    "github": {"command": "gh", "env": {"GITHUB_TOKEN": "ghp_aaaaaaaaaaaaaaaaaaaa", "NODE_ENV": "production"}}
+  }
+}`
+	const rotatedToken = `{
+  "mcpServers": {
+    "github": {"command": "gh", "env": {"GITHUB_TOKEN": "ghp_bbbbbbbbbbbbbbbbbbbb", "NODE_ENV": "production"}}
+  }
+}`
+	const changedCommand = `{
+  "mcpServers": {
+    "github": {"command": "gh-2", "env": {"GITHUB_TOKEN": "ghp_aaaaaaaaaaaaaaaaaaaa", "NODE_ENV": "production"}}
+  }
+}`
+
+	base := definitionHash(t, withToken)
+	if base == "" {
+		t.Fatal("DefinitionHash is empty")
+	}
+	if rotated := definitionHash(t, rotatedToken); rotated != base {
+		t.Errorf("rotating a secret env value changed DefinitionHash: %s -> %s", base, rotated)
+	}
+	if changed := definitionHash(t, changedCommand); changed == base {
+		t.Errorf("changing the command left DefinitionHash at %s", base)
+	}
+}
+
 func TestScanClaudeJSONMCPInventory(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()

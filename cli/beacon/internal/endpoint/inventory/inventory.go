@@ -837,6 +837,16 @@ func serverFromDefinition(item candidate, name string, def map[string]interface{
 	command := firstString(def["command"])
 	url := firstString(def["url"])
 	envKeys := mapKeys(def["env"])
+	// Fingerprint the redacted definition, not the raw one. The raw block is where an MCP server's
+	// API token actually lives (`env: {GITHUB_TOKEN: ghp_...}`), and this is the only field that
+	// carried those values into a digest: EnvKeys already drops secret-marked keys and Definition
+	// is already redacted. A digest is not a disclosure, but a digest over a definition whose only
+	// varying part is one token is guessable, and an inventory has no reason to hold that.
+	//
+	// Redaction is stable per key rather than per value, so the fingerprint still answers what it
+	// is for -- a server was added, a command or URL changed -- and it stops answering one thing it
+	// was never meant to: that a token was rotated while everything else stayed put.
+	redactedDef := redactStructuredMap(def)
 	server := MCPServer{
 		Runtime:        item.runtime,
 		ServerName:     valueForName(name, redaction),
@@ -851,7 +861,7 @@ func serverFromDefinition(item candidate, name string, def map[string]interface{
 		URLPresent:     url != "",
 		EnvKeys:        valuesForEnvKeys(envKeys, redaction),
 		EnvKeyCount:    len(envKeys),
-		DefinitionHash: "sha256:" + canonicalHash(def),
+		DefinitionHash: "sha256:" + canonicalHash(redactedDef),
 		ParserStatus:   StatusOK,
 		Redaction:      redaction,
 	}
@@ -859,7 +869,7 @@ func serverFromDefinition(item candidate, name string, def map[string]interface{
 		server.CommandNameHash = hashString(filepath.Base(command))
 	}
 	if co.include {
-		server.Definition = redactStructuredMap(def)
+		server.Definition = redactedDef
 	}
 	return server
 }
@@ -1098,6 +1108,20 @@ func truthyValue(value string) bool {
 func localEndpointText(text string) bool {
 	return strings.Contains(text, "127.0.0.1") || strings.Contains(text, "localhost")
 }
+
+// The three hashes below are correlation identifiers, not credential digests. They exist so two
+// snapshots of the same machine can be compared -- did this config file move, is this the same MCP
+// server as last run -- without the event carrying the operator's directory layout around with it.
+// A password hash has the opposite job: it must survive an attacker who holds the digest, which is
+// what makes bcrypt/scrypt/Argon2 and their work factors the right tool there. Nothing here is a
+// credential, so a fast hash is the correct one, and deliberately so: these values are recomputed
+// for every path, name, and file on every scheduled scan.
+//
+// Callers are responsible for what they pass. Every input today is a filesystem path, a server or
+// command name, a timestamp, or a whole config file's bytes. A secret value must not be hashed
+// here -- a digest over one short, low-entropy secret is a lookup table away from the secret
+// itself -- so route anything that may hold a secret through redactStructured first, the way
+// serverFromDefinition does. Secret-looking keys are stripped by containsSecretMarker.
 
 func hashString(value string) string {
 	if value == "" {

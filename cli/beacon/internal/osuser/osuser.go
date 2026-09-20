@@ -83,7 +83,7 @@ func Lookup(name string) (Info, error) {
 	if err != nil {
 		return Info{}, fmt.Errorf("%q is not in the local account database and NSS could not resolve it: %w", name, err)
 	}
-	return parsePasswdLine(out, name)
+	return parseAccountRecord(out, name)
 }
 
 func fromUser(u *user.User) (Info, error) {
@@ -98,11 +98,19 @@ func fromUser(u *user.User) (Info, error) {
 	return Info{Username: u.Username, UID: uid, GID: gid, HomeDir: u.HomeDir}, nil
 }
 
-// parsePasswdLine reads one getent passwd record: name:passwd:uid:gid:gecos:home:shell.
+// parseAccountRecord reads one account record from getent: name:passwd:uid:gid:gecos:home:shell.
+//
+// Named for the record rather than for the database it is queried from, because the password
+// field is the one field this never reads: on every modern system it holds "x" and the hash lives
+// in a shadow file getent does not expose. Fields 0, 2, 3, and 5 -- name, uid, gid, home -- are
+// the whole of what is taken, and only the home directory travels any further than this package.
+// The earlier name carried "passwd" into an identifier, which static analysis reads as a source
+// of password material; every identity hash the resolved home directory reaches then looks like a
+// password digest. See the comment on hashString in internal/endpoint/inventory.
 //
 // getent returns at most one record for a name query, but the output is scanned line by line
 // anyway so a trailing newline or a stray banner cannot turn a good answer into a parse failure.
-func parsePasswdLine(out, want string) (Info, error) {
+func parseAccountRecord(out, want string) (Info, error) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -128,5 +136,5 @@ func parsePasswdLine(out, want string) (Info, error) {
 		// is what ownership and re-execution should use.
 		return Info{Username: fields[0], UID: uid, GID: gid, HomeDir: fields[5]}, nil
 	}
-	return Info{}, fmt.Errorf("no usable passwd record for %q", want)
+	return Info{}, fmt.Errorf("no usable account record for %q", want)
 }
