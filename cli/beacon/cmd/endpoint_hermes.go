@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -217,8 +218,12 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolveHermesStatePath keeps the cursor beside the log the sweep writes to. A system-mode sweep
+// collects on behalf of the machine, so its cursor belongs next to the system runtime log rather
+// than in whichever home the operator happened to run from; everything else uses the per-user
+// default in hermessession.DefaultStatePath.
 func resolveHermesStatePath(path string, userMode bool) string {
-	if path != "" {
+	if strings.TrimSpace(path) != "" {
 		return path
 	}
 	if !userMode {

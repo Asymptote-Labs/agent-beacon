@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ func TestMapSessionClassifiesFileTool(t *testing.T) {
 		},
 	}
 
-	mapped := MapSession(session, messages, &Cursor{Started: true})
+	mapped, _ := MapSession(session, messages, &Cursor{Started: true})
 	fileEvent := findMappedAction(t, mapped, "file.read")
 	if fileEvent.File == nil || fileEvent.File.Path != "README.md" || fileEvent.File.Operation != "read" {
 		t.Fatalf("file event = %#v, want README.md read", fileEvent.File)
@@ -250,4 +251,134 @@ func findMappedAction(t *testing.T, mapped []MappedEvent, action string) schema.
 	}
 	t.Fatalf("action %q not found in mapped events", action)
 	return schema.Event{}
+}
+
+// CollectOnce saves the collector state even when a session fails part way through, so the cursor
+// must not move until every event in the batch is on disk. Advancing it inside the emit loop lost
+// the rest of the batch: the next sweep read past those messages and never wrote them.
+func TestCollectOnceKeepsCursorWhenAnEmitFails(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+	createHermesFixtureDB(t, dbPath)
+	statePath := filepath.Join(dir, "hermes-state.json")
+
+	failing := &writerFailingAfter{limit: 3}
+	if _, err := CollectOnce(CollectOptions{
+		DBPath:    dbPath,
+		StatePath: statePath,
+		Print:     true,
+		Out:       failing,
+	}); err == nil {
+		t.Fatal("CollectOnce returned no error although the writer failed mid-batch")
+	}
+
+	state, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+	if cursor := state.Sessions["hermes-session-1"]; cursor != nil {
+		if cursor.LastMessageID != 0 || cursor.Started || cursor.EndedAtMS != 0 {
+			t.Fatalf("cursor = %#v, want no progress recorded for a batch that was not written", cursor)
+		}
+	}
+
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	if _, err := CollectOnce(CollectOptions{
+		DBPath:    dbPath,
+		StatePath: statePath,
+		LogPath:   logPath,
+		Write:     true,
+		UserMode:  true,
+	}); err != nil {
+		t.Fatalf("second CollectOnce returned error: %v", err)
+	}
+	actions := eventActions(readEvents(t, logPath))
+	want := []string{
+		"session.started",
+		"prompt.submitted",
+		"agent.reasoning",
+		"tool.invoked",
+		"command.executed",
+		"token.usage",
+		"session.ended",
+	}
+	if strings.Join(actions, ",") != strings.Join(want, ",") {
+		t.Fatalf("actions after retry = %v, want the whole batch %v", actions, want)
+	}
+}
+
+// Hermes writes a tool call's arguments on the assistant row and the result on a later one, which
+// can land in a different sweep. The unresolved call rides on the cursor so the result is still
+// classified with the command it ran.
+func TestCollectOnceCarriesToolArgumentsAcrossSweeps(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+	createHermesFixtureDB(t, dbPath)
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "hermes-state.json")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	// Drop the tool result and the session end so the first sweep sees a call with no result yet,
+	// the way a sweep that runs while Hermes is still working does.
+	if _, err := db.Exec(`DELETE FROM messages WHERE id = 3;
+UPDATE sessions SET ended_at = NULL, end_reason = NULL WHERE id = 'hermes-session-1';`); err != nil {
+		t.Fatalf("trim fixture rows: %v", err)
+	}
+
+	opts := CollectOptions{DBPath: dbPath, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	if _, err := CollectOnce(opts); err != nil {
+		db.Close()
+		t.Fatalf("first CollectOnce returned error: %v", err)
+	}
+	state, err := LoadState(statePath)
+	if err != nil {
+		db.Close()
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+	cursor := state.Sessions["hermes-session-1"]
+	if cursor == nil || len(cursor.PendingCalls) != 1 {
+		db.Close()
+		t.Fatalf("cursor = %#v, want the unresolved call carried on the cursor", cursor)
+	}
+
+	if _, err := db.Exec(`
+INSERT INTO messages (id, session_id, role, tool_call_id, tool_name, content, timestamp, active)
+VALUES (3, 'hermes-session-1', 'tool', 'call_terminal', 'terminal', '{"output":"ok","exit_code":0,"error":null}', 1780632833.0, 1);
+UPDATE sessions SET ended_at = 1780632999.25, end_reason = 'cli_close' WHERE id = 'hermes-session-1';`); err != nil {
+		db.Close()
+		t.Fatalf("insert tool result: %v", err)
+	}
+	db.Close()
+
+	if _, err := CollectOnce(opts); err != nil {
+		t.Fatalf("second CollectOnce returned error: %v", err)
+	}
+	command := findAction(t, readEvents(t, logPath), "command.executed")
+	if command.Command == nil || command.Command.Command != "go test ./..." {
+		t.Fatalf("command event = %#v, want the command from the earlier sweep's tool call", command.Command)
+	}
+
+	state, err = LoadState(statePath)
+	if err != nil {
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+	if cursor := state.Sessions["hermes-session-1"]; cursor == nil || len(cursor.PendingCalls) != 0 {
+		t.Fatalf("cursor = %#v, want the resolved call dropped from the cursor", cursor)
+	}
+}
+
+type writerFailingAfter struct {
+	limit  int
+	writes int
+}
+
+func (w *writerFailingAfter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes > w.limit {
+		return 0, errors.New("destination unavailable")
+	}
+	return len(p), nil
 }

@@ -232,8 +232,9 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 	if err != nil {
 		return false, err
 	}
-	mapped := MapSession(session, messages, cursor)
+	mapped, pending := MapSession(session, messages, cursor)
 	if len(mapped) == 0 {
+		cursor.PendingCalls = pending
 		advanceCursorMessages(cursor, messages)
 		updateCursorTotals(cursor, session)
 		return false, nil
@@ -244,6 +245,9 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		}
 		summary.EventsEmitted++
 	}
+	// The cursor only moves once the whole batch is on disk. CollectOnce saves the state even when a
+	// session fails, so advancing while emitting would skip the events the failed sweep never wrote.
+	cursor.PendingCalls = pending
 	for _, item := range mapped {
 		if item.SourceMessageID > cursor.LastMessageID {
 			cursor.LastMessageID = item.SourceMessageID
@@ -441,7 +445,15 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", u.String())
 }
 
-func MapSession(session Session, messages []Message, cursor *Cursor) []MappedEvent {
+// MapSession maps one session's new messages into endpoint events. It also returns the tool calls
+// that are still waiting for their result, because Hermes writes a call's arguments on the
+// assistant row and the result on a later one: without carrying them across sweeps, a result
+// collected after its call would be classified with no command or path.
+//
+// The pending calls are returned rather than written onto the cursor so the caller can persist them
+// only once every event in the batch is written. Recording them earlier would drop a call's
+// arguments when a later emit fails and the sweep retries the same messages.
+func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
 	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
 	if cursor != nil {
 		for id, raw := range cursor.PendingCalls {
@@ -457,19 +469,25 @@ func MapSession(session Session, messages []Message, cursor *Cursor) []MappedEve
 	}
 	m.mapUsage()
 	m.mapSessionEnd()
-	if cursor != nil {
-		if len(m.calls) > 0 {
-			cursor.PendingCalls = make(map[string]json.RawMessage, len(m.calls))
-			for id, call := range m.calls {
-				if data, err := json.Marshal(call); err == nil {
-					cursor.PendingCalls[id] = data
-				}
-			}
-		} else {
-			cursor.PendingCalls = nil
-		}
+	return m.out, encodePendingCalls(m.calls)
+}
+
+func encodePendingCalls(calls map[string]toolCall) map[string]json.RawMessage {
+	if len(calls) == 0 {
+		return nil
 	}
-	return m.out
+	out := make(map[string]json.RawMessage, len(calls))
+	for id, call := range calls {
+		data, err := json.Marshal(call)
+		if err != nil {
+			continue
+		}
+		out[id] = data
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 type mapper struct {
