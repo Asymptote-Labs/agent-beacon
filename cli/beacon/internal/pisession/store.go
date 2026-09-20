@@ -31,6 +31,7 @@ type SessionRef struct {
 	Path      string
 	ModTimeMS int64
 	SizeBytes int64
+	Workspace string
 	Header    map[string]interface{}
 }
 
@@ -115,6 +116,7 @@ func (s *Store) List() ([]SessionRef, error) {
 			Path:      path,
 			ModTimeMS: info.ModTime().UnixMilli(),
 			SizeBytes: info.Size(),
+			Workspace: stringValue(header["cwd"]),
 			Header:    header,
 		})
 	}

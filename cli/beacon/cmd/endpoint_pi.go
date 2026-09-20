@@ -172,7 +172,7 @@ func runEndpointPiStatus(cmd *cobra.Command, args []string) error {
 		status := piSessionStatus{
 			SessionID:  ref.ID,
 			SourcePath: ref.Path,
-			Workspace:  stringFromMap(ref.Header, "cwd"),
+			Workspace:  strings.TrimSpace(ref.Workspace),
 			SizeBytes:  ref.SizeBytes,
 		}
 		if ref.ModTimeMS > 0 {
