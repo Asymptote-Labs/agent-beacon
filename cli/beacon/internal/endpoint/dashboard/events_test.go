@@ -349,6 +349,110 @@ func TestReadEventsFiltersBySessionState(t *testing.T) {
 	}
 }
 
+func TestReadSessionsGroupsEventsBySession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a"),
+		testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "command.executed", "command", "repo-a"),
+		testSchemaEvent("2026-05-13T01:02:00Z", "claude_code", "tool.failed", "tool", "repo-b"),
+		testSchemaEvent("2026-05-13T01:03:00Z", "cursor", "inventory.heartbeat", "inventory", "repo-c"),
+	}
+	events[0].Session = &schema.SessionInfo{ID: "session-a", WorkingDirectory: "/tmp/repo-a"}
+	events[0].Prompt = &schema.PromptInfo{Text: "Investigate the dashboard"}
+	events[1].Session = &schema.SessionInfo{ID: "session-a", WorkingDirectory: "/tmp/repo-a"}
+	events[1].Command = &schema.CommandInfo{Command: "go test ./..."}
+	events[2].Session = &schema.SessionInfo{ID: "session-b"}
+	events[2].Severity = schema.SeverityHigh
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	if result.EventsMatched != 4 || result.TotalSessions != 2 || len(result.Sessions) != 2 {
+		t.Fatalf("sessions result = matched %d total %d len %d, want 4/2/2", result.EventsMatched, result.TotalSessions, len(result.Sessions))
+	}
+	if result.Sessions[0].ID != "session-b" || result.Sessions[0].EventCount != 1 || result.Sessions[0].ReviewCount != 1 {
+		t.Fatalf("newest session = %#v, want high-risk session-b", result.Sessions[0])
+	}
+	if result.Sessions[1].ID != "session-a" || result.Sessions[1].EventCount != 2 || result.Sessions[1].CommandCount != 1 || result.Sessions[1].PromptCount != 1 {
+		t.Fatalf("older session = %#v, want aggregated session-a", result.Sessions[1])
+	}
+	if result.Sessions[1].WorkingDir != "/tmp/repo-a" || result.Sessions[1].LastArtifact != "go test ./..." {
+		t.Fatalf("session metadata = dir %q artifact %q", result.Sessions[1].WorkingDir, result.Sessions[1].LastArtifact)
+	}
+	if result.Sessions[1].OriginalPrompt != "Investigate the dashboard" {
+		t.Fatalf("original prompt = %q, want first submitted prompt", result.Sessions[1].OriginalPrompt)
+	}
+}
+
+func TestReadSessionsCountsEachEventInOneActivityCategory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "tool.completed", "tool", "repo-a")
+	event.Session = &schema.SessionInfo{ID: "session-a"}
+	event.Tool = &schema.ToolInfo{Name: "Shell"}
+	event.Command = &schema.CommandInfo{Command: "go test ./..."}
+	event.File = &schema.FileInfo{Path: "main.go", Operation: "modify"}
+	event.MCP = &schema.MCPInfo{Server: "filesystem", Tool: "write_file"}
+	event.Approval = &schema.ApprovalInfo{Decision: "approved"}
+	writeTestLog(t, path, marshalEvents(t, event)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	if len(result.Sessions) != 1 {
+		t.Fatalf("sessions length = %d, want 1", len(result.Sessions))
+	}
+	session := result.Sessions[0]
+	if session.EventCount != 1 || session.ToolCount != 1 {
+		t.Fatalf("session counts = events %d tools %d, want 1/1", session.EventCount, session.ToolCount)
+	}
+	if session.CommandCount != 0 || session.FileCount != 0 || session.MCPCount != 0 || session.ApprovalCount != 0 {
+		t.Fatalf("one tool event counted in multiple activity categories: %#v", session)
+	}
+}
+
+func TestHandlerSessionDetailReturnsRawEventsInTimelineOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "command.executed", "command", "repo-a"),
+		testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a"),
+		testSchemaEvent("2026-05-13T01:02:00Z", "cursor", "file.modified", "file", "repo-a"),
+	}
+	events[0].Session = &schema.SessionInfo{ID: "session-a"}
+	events[0].Command = &schema.CommandInfo{Command: "go test ./..."}
+	events[1].Session = &schema.SessionInfo{ID: "session-a"}
+	events[1].Prompt = &schema.PromptInfo{Text: "Investigate the dashboard"}
+	events[2].Session = &schema.SessionInfo{ID: "session-b"}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	handler, err := Handler(Options{LogPath: path, UserMode: true})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/session?id=session-a", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var detail SessionDetail
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode session detail: %v", err)
+	}
+	if detail.Session.ID != "session-a" || len(detail.Events) != 2 {
+		t.Fatalf("detail session=%q events=%d, want session-a/2", detail.Session.ID, len(detail.Events))
+	}
+	if detail.Events[0].Event.Event.Action != "prompt.submitted" || detail.Events[1].Event.Event.Action != "command.executed" {
+		t.Fatalf("actions = %q, %q; want chronological prompt then command", detail.Events[0].Event.Event.Action, detail.Events[1].Event.Event.Action)
+	}
+	if len(detail.Events[0].RawEvent) == 0 || !json.Valid(detail.Events[0].RawEvent) {
+		t.Fatalf("raw_event missing or invalid: %s", string(detail.Events[0].RawEvent))
+	}
+}
+
 func TestReadEventsFiltersByUntil(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeTestLog(t, path,

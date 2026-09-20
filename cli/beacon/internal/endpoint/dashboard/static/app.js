@@ -3,6 +3,9 @@ const state = {
   summary: null,
   events: [],
   eventResult: null,
+  sessions: [],
+  sessionResult: null,
+  sessionDetail: null,
   inventory: null,
   loading: false,
   error: null,
@@ -18,12 +21,21 @@ const state = {
   inventoryRuntime: "",
   inventoryUser: "",
   inventorySearch: "",
+  sessionEventFilters: {
+    search: "",
+    type: "",
+    severity: "",
+    destructive: false,
+    showInternal: false,
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const navCollapsedStorageKey = "beacon.dashboard.navCollapsed";
 const isActivityPage = !document.body.dataset.page;
+const isSessionsPage = document.body.dataset.page === "sessions";
+const isSessionDetailPage = document.body.dataset.page === "session-detail";
 const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
 const isDetectionsPage = document.body.dataset.page === "detections";
@@ -176,6 +188,7 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
   const query = queryFromFilters();
   if (updateLocation) updateURL(query);
   const suffix = query ? `?${query}` : "";
+  const activityPath = isSessionsPage ? "/api/sessions" : "/api/events";
   const quiet = mode === "poll";
   state.loading = !quiet;
   state.error = null;
@@ -185,15 +198,17 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
     const [status, summary, events] = await Promise.all([
       getJSON("/api/status"),
       getJSON(`/api/summary${suffix}`),
-      getJSON(`/api/events${suffix}`),
+      getJSON(`${activityPath}${suffix}`),
     ]);
     const previousEvents = state.events;
     const previousQuery = state.currentQuery;
     state.status = status;
     state.summary = summary;
-    state.eventResult = events;
+    state.eventResult = isSessionsPage ? null : events;
+    state.sessionResult = isSessionsPage ? events : null;
     state.currentQuery = query;
-    state.events = events.events || [];
+    state.events = isSessionsPage ? [] : (events.events || []);
+    state.sessions = isSessionsPage ? (events.sessions || []) : [];
     if (quiet && previousQuery === query && canPatchEvents(previousEvents, state.events)) {
       patchEvents(previousEvents, state.events);
       renderSummaryOnly();
@@ -349,10 +364,12 @@ function renderInsights() {
 
 function renderSearchState() {
   if (!$("#result-meta")) return;
-  const result = state.eventResult || {};
-  const returned = result.returned ?? state.events.length;
-  const total = result.total_matched ?? 0;
-  $("#result-meta").textContent = state.loading ? "Loading..." : `${returned} shown of ${total} matched`;
+  const result = isSessionsPage ? (state.sessionResult || {}) : (state.eventResult || {});
+  const returned = result.returned ?? (isSessionsPage ? state.sessions.length : state.events.length);
+  const total = isSessionsPage ? (result.total_sessions ?? 0) : (result.total_matched ?? 0);
+  const unit = isSessionsPage ? "session" : "event";
+  const suffix = isSessionsPage && result.events_matched !== undefined ? ` (${result.events_matched} matching events)` : "";
+  $("#result-meta").textContent = state.loading ? "Loading..." : `${returned} shown of ${total} matched ${unit}${total === 1 ? "" : "s"}${suffix}`;
 
   const notice = $("#notice");
   if (state.error) {
@@ -360,7 +377,7 @@ function renderSearchState() {
     notice.textContent = `Failed to load dashboard: ${state.error.message}`;
   } else if (result.truncated) {
     notice.hidden = false;
-    notice.textContent = `Showing the latest ${returned} matching events. Narrow the search or raise the limit to see more.`;
+    notice.textContent = `Showing the latest ${returned} matching ${unit}${returned === 1 ? "" : "s"}. Narrow the search or raise the limit to see more.`;
   } else if (result.malformed_lines) {
     notice.hidden = false;
     notice.textContent = `${result.malformed_lines} malformed log line${result.malformed_lines === 1 ? "" : "s"} skipped.`;
@@ -391,6 +408,343 @@ function renderSummaryOnly() {
   renderActivityAnalytics();
   renderInsights();
   renderSearchState();
+}
+
+async function loadSessionPage() {
+  const params = new URLSearchParams(window.location.search);
+  const id = (params.get("id") || "").trim();
+  if (!id) {
+    state.error = new Error("session id is required");
+    renderSessionPage();
+    return;
+  }
+  const initialLoad = !state.sessionDetail;
+  state.loading = initialLoad;
+  if (initialLoad) setSessionDetailViewState("loading");
+  try {
+    const [status, detail] = await Promise.all([
+      getJSON("/api/status"),
+      getJSON(`/api/session?id=${encodeURIComponent(id)}`),
+    ]);
+    state.status = status;
+    state.sessionDetail = detail;
+    state.events = detail.events || [];
+    state.error = null;
+  } catch (err) {
+    state.error = err;
+  } finally {
+    state.loading = false;
+    renderSessionPage();
+  }
+}
+
+function renderSessionPage() {
+  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
+  const detail = state.sessionDetail || {};
+  if (state.error && !state.sessionDetail) {
+    setSessionDetailViewState("error", `Failed to load session: ${state.error.message}`);
+    return;
+  }
+  renderSessionOverview(detail);
+  renderSessionEventFilters();
+  renderSessionEventTable();
+  setSessionDetailViewState("ready");
+  if ($("#notice")) {
+    $("#notice").hidden = !state.error;
+    $("#notice").textContent = state.error ? `Unable to refresh session: ${state.error.message}` : "";
+  }
+}
+
+function setSessionDetailViewState(mode, message = "") {
+  const view = $("#session-detail-view");
+  const status = $("#session-detail-status");
+  if (view) view.hidden = mode !== "ready";
+  if (!status) return;
+  status.hidden = mode === "ready";
+  status.classList.toggle("error", mode === "error");
+  setText(
+    "#session-detail-status-message",
+    message || (mode === "loading" ? "Loading session details..." : ""),
+  );
+}
+
+const internalSessionCategories = ["inventory", "validation", "metric"];
+
+const sessionTypeOptions = [
+  ["", "All types"],
+  ["prompt", "Prompt"],
+  ["tool", "Tool"],
+  ["command", "Command"],
+  ["file", "File"],
+  ["mcp", "MCP"],
+  ["approval", "Approval"],
+  ["session", "Session"],
+  ["inventory", "Inventory"],
+  ["validation", "Validation"],
+];
+
+const sessionSeverityOptions = [
+  ["", "All severities"],
+  ["info", "Info"],
+  ["low", "Low"],
+  ["medium", "Medium"],
+  ["high", "High"],
+  ["critical", "Critical"],
+];
+
+function renderSessionEventFilters() {
+  const filters = state.sessionEventFilters;
+  const search = $("#session-event-search");
+  if (search) {
+    search.value = filters.search;
+    search.oninput = (event) => {
+      filters.search = event.target.value;
+      renderSessionEventTable();
+    };
+  }
+  renderSessionFilterButtons("#session-type-filters", sessionTypeOptions, filters.type, "session-event-type");
+  renderSessionFilterButtons("#session-severity-filters", sessionSeverityOptions, filters.severity, "session-event-severity");
+  const actionFilters = $("#session-action-filters");
+  if (actionFilters) {
+    actionFilters.innerHTML = `
+      <button type="button" class="${filters.destructive ? "" : "active"}" data-session-destructive="false">All actions</button>
+      <button type="button" class="${filters.destructive ? "active" : ""}" data-session-destructive="true">Contains destructive action</button>
+    `;
+  }
+  $$("[data-session-event-type]").forEach((button) => {
+    button.onclick = () => {
+      filters.type = button.dataset.sessionEventType;
+      renderSessionEventFilters();
+      renderSessionEventTable();
+    };
+  });
+  $$("[data-session-event-severity]").forEach((button) => {
+    button.onclick = () => {
+      filters.severity = button.dataset.sessionEventSeverity;
+      renderSessionEventFilters();
+      renderSessionEventTable();
+    };
+  });
+  $$("[data-session-destructive]").forEach((button) => {
+    button.onclick = () => {
+      filters.destructive = button.dataset.sessionDestructive === "true";
+      renderSessionEventFilters();
+      renderSessionEventTable();
+    };
+  });
+  const internal = $("#toggle-internal-events");
+  if (internal) {
+    internal.textContent = filters.showInternal ? "Hide internal events" : "Show internal events";
+    internal.classList.toggle("active", filters.showInternal);
+    internal.onclick = () => {
+      filters.showInternal = !filters.showInternal;
+      renderSessionEventFilters();
+      renderSessionEventTable();
+    };
+  }
+}
+
+function renderSessionFilterButtons(selector, options, current, dataName) {
+  const container = $(selector);
+  if (!container) return;
+  const attribute = dataName.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+  container.innerHTML = options.map(([value, label]) => `
+    <button type="button" class="${current === value ? "active" : ""}" data-${attribute}="${escapeHTML(value)}">${escapeHTML(label)}</button>
+  `).join("");
+}
+
+function renderSessionEventTable() {
+  const tbody = $("#events");
+  if (!tbody) return;
+  const records = filteredSessionEvents();
+  const filters = state.sessionEventFilters;
+  const typeLabel = sessionTypeOptions.find(([value]) => value === filters.type)?.[1] || "All types";
+  const severityLabel = sessionSeverityOptions.find(([value]) => value === filters.severity)?.[1] || "All severities";
+  const actionLabel = filters.destructive ? "Destructive" : "All";
+  const runtimeLabel = filters.showInternal || internalSessionCategories.includes(filters.type) ? "internal shown" : "internal hidden";
+  setText("#result-meta", `Type: ${typeLabel} · Severity: ${severityLabel} · Action: ${actionLabel} · Runtime: ${runtimeLabel} · ${records.length} of ${state.events.length} events`);
+  if (!records.length) {
+    tbody.innerHTML = `<tr><td colspan="11" class="muted">No events match these filters.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = records.map(({ record, index }) => sessionEventRowHTML(record, index)).join("");
+  $$("[data-session-json-index]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      showRawSessionEvent(Number(button.dataset.sessionJsonIndex));
+    };
+  });
+  $$("[data-session-value-index]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      showSessionEventValue(Number(button.dataset.sessionValueIndex));
+    };
+  });
+}
+
+function filteredSessionEvents() {
+  const filters = state.sessionEventFilters;
+  const query = filters.search.trim().toLowerCase();
+  const internalTypeSelected = internalSessionCategories.includes(filters.type);
+  return state.events.map((record, index) => ({ record, index })).filter(({ record }) => {
+    const event = record.event || {};
+    const type = sessionDisplayEventType(event);
+    if (!filters.showInternal && !internalTypeSelected && isInternalSessionEvent(event)) return false;
+    if (filters.type && type !== filters.type) return false;
+    if (filters.severity && String(event.severity || "info").toLowerCase() !== filters.severity) return false;
+    if (filters.destructive && !isDestructiveSessionEvent(record)) return false;
+    if (query) {
+      const raw = record.raw_event || event;
+      if (!JSON.stringify(raw).toLowerCase().includes(query)) return false;
+    }
+    return true;
+  });
+}
+
+function sessionEventRowHTML(record, index) {
+  const event = record.event || {};
+  const usage = event.gen_ai?.usage || {};
+  const type = sessionDisplayEventType(event);
+  const action = event.event?.action || "event";
+  const eventID = event.event?.id || record.id || "";
+  const value = sessionEventValue(event);
+  const actionDetail = event.tool?.name || event.mcp?.tool || event.model || event.harness?.name || "";
+  return `
+    <tr>
+      <td class="mono session-event-id" title="${escapeHTML(eventID)}">${escapeHTML(shortEventID(eventID))}</td>
+      <td class="col-timestamp timestamp-cell">${timestampCellHTML(event.timestamp)}</td>
+      <td>${sessionSeverityPill(event.severity || "info")}</td>
+      <td>${sessionTypePill(type)}</td>
+      <td class="session-event-action">
+        <strong>${escapeHTML(sessionActionLabel(event))}</strong>
+        ${actionDetail ? `<span>${escapeHTML(actionDetail)}</span>` : ""}
+      </td>
+      <td class="session-event-value">
+        <span>${escapeHTML(truncateMiddle(value, 180) || "-")}</span>
+        ${value ? `<button type="button" class="session-value-button" data-session-value-index="${index}">View full ${escapeHTML(sessionValueKind(event))}</button>` : ""}
+      </td>
+      <td>${sessionUsageValue(usage.input_tokens)}</td>
+      <td>${sessionUsageValue(usage.output_tokens)}</td>
+      <td>${sessionUsageValue(usage.cache_creation?.input_tokens)}</td>
+      <td>${sessionUsageValue(usage.cache_read?.input_tokens)}</td>
+      <td><button type="button" class="session-json-button" data-session-json-index="${index}" aria-label="Inspect raw JSON for ${escapeHTML(action)}">JSON</button></td>
+    </tr>
+  `;
+}
+
+function sessionDisplayEventType(event) {
+  const category = String(event.event?.category || "").toLowerCase();
+  if (category) return category;
+  return sessionEventCategory(event);
+}
+
+function isInternalSessionEvent(event) {
+  const category = sessionDisplayEventType(event);
+  const action = String(event.event?.action || "").toLowerCase();
+  return internalSessionCategories.includes(category)
+    || ["inventory.", "validation.", "metric.", "endpoint.", "telemetry."].some((prefix) => action.startsWith(prefix));
+}
+
+function isDestructiveSessionEvent(record) {
+  const event = record.event || {};
+  const text = JSON.stringify(record.raw_event || event).toLowerCase();
+  if (event.severity === "high" || event.severity === "critical") return true;
+  if (["approval.denied", "policy.blocked", "tool.failed"].includes(event.event?.action)) return true;
+  return /\b(rm\s+-rf|git\s+reset\s+--hard|git\s+clean\s+-f|drop\s+(table|database)|truncate\s+table|delete\s+from)\b/.test(text);
+}
+
+function sessionSeverityPill(severity) {
+  const normalized = String(severity || "info").toLowerCase();
+  return `<span class="session-severity-pill session-severity-${escapeHTML(normalized)}">${escapeHTML(normalized)}</span>`;
+}
+
+function sessionTypePill(type) {
+  const normalized = String(type || "other").toLowerCase();
+  return `<span class="session-type-pill session-type-${escapeHTML(normalized)}">${escapeHTML(normalized)}</span>`;
+}
+
+function sessionActionLabel(event) {
+  if (event.message && event.message !== event.event?.action) return event.message;
+  return String(event.event?.action || "event")
+    .replaceAll(".", " ")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function sessionEventValue(event) {
+  const reasoning = sessionReasoningValue(event);
+  if (reasoning) return reasoning;
+  if (event.command?.command) return event.command.command;
+  if (event.file?.path) return [event.file.operation, event.file.path].filter(Boolean).join(" ");
+  if (event.prompt?.text) return event.prompt.text;
+  if (event.mcp) return [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
+  if (event.approval) return [event.approval.decision, event.approval.reason].filter(Boolean).join(": ");
+  if (event.policy) return [event.policy.decision, event.policy.reason].filter(Boolean).join(": ");
+  if (event.tool) return [event.tool.name, event.tool.command, event.tool.path].filter(Boolean).join(" ");
+  return event.message || "";
+}
+
+function sessionReasoningValue(event) {
+  let messages = event.gen_ai?.output?.messages;
+  if (typeof messages === "string") {
+    try {
+      messages = JSON.parse(messages);
+    } catch {
+      return "";
+    }
+  }
+  if (!Array.isArray(messages)) return "";
+  return messages.flatMap((message) => Array.isArray(message?.parts) ? message.parts : [])
+    .filter((part) => part?.type === "reasoning" && typeof part.content === "string")
+    .map((part) => part.content)
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function sessionValueKind(event) {
+  if (sessionReasoningValue(event)) return "reasoning";
+  if (event.command?.command) return "command";
+  if (event.prompt?.text) return "prompt";
+  if (event.file?.path) return "file";
+  if (event.mcp) return "MCP value";
+  if (event.approval || event.policy) return "decision";
+  return "value";
+}
+
+function sessionUsageValue(value) {
+  return value === undefined || value === null ? `<span class="muted">-</span>` : escapeHTML(formatTokens(value));
+}
+
+function shortEventID(value) {
+  const id = String(value || "");
+  if (!id) return "-";
+  return id.length > 6 ? `…${id.slice(-5)}` : id;
+}
+
+function showRawSessionEvent(index) {
+  const record = state.events[index];
+  if (!record || !$("#drawer")) return;
+  setText("#drawer .drawer-head h2", "Raw Event JSON");
+  $("#event-summary").innerHTML = detailSummary(record);
+  $("#event-json").textContent = JSON.stringify(record.raw_event || record.event || {}, null, 2);
+  $("#drawer").classList.add("open");
+  $("#drawer").setAttribute("aria-hidden", "false");
+}
+
+function showSessionEventValue(index) {
+  const event = state.events[index]?.event || {};
+  const value = sessionEventValue(event);
+  const dialog = $("#session-value-dialog");
+  if (!value || !dialog) return;
+  const kind = sessionValueKind(event);
+  setText("#session-value-dialog-title", `Full ${kind}`);
+  setText("#session-value-dialog-content", value);
+  dialog.showModal();
+  const close = $("#close-session-value");
+  if (close) close.onclick = () => dialog.close();
+  dialog.onclick = (clickEvent) => {
+    if (clickEvent.target === dialog) dialog.close();
+  };
 }
 
 async function loadInventory() {
@@ -1183,6 +1537,10 @@ function configKindLabel(kind) {
 
 function renderEvents() {
   if (!$("#events")) return;
+  if (isSessionsPage) {
+    renderSessions();
+    return;
+  }
   if (state.loading) {
     renderLoading();
     return;
@@ -1199,6 +1557,66 @@ function renderEvents() {
     .map((record) => eventRowHTML(record))
     .join("");
   bindEventRows();
+}
+
+function renderSessions() {
+  if (state.loading) {
+    renderLoading();
+    return;
+  }
+  if (state.error) {
+    $("#events").innerHTML = `<tr><td colspan="9">Failed to load dashboard: ${escapeHTML(state.error.message)}</td></tr>`;
+    return;
+  }
+  if (!state.sessions.length) {
+    $("#events").innerHTML = `<tr><td colspan="9">No sessions match this search. Clear filters or broaden the query.</td></tr>`;
+    return;
+  }
+  $("#events").innerHTML = state.sessions
+    .map((session) => sessionRowHTML(session))
+    .join("");
+  bindSessionRows();
+}
+
+function sessionRowHTML(session) {
+  const review = session.review_count || 0;
+  const activity = sessionActivitySummary(session);
+  const lastDetail = session.last_artifact || session.last_message || "";
+  const models = uniqueValues([...(session.models || []), session.model]);
+  const prompt = session.original_prompt
+    ? escapeHTML(truncateMiddle(session.original_prompt, 180))
+    : `<span class="muted">No prompt captured</span>`;
+  return `
+    <tr class="row-link" data-session-id="${escapeHTML(session.id)}">
+      <td class="mono"><span class="cell-link">${escapeHTML(formatSessionID(session.id))}</span></td>
+      <td>${badge(session.max_severity || "unknown", `severity-${session.max_severity || "unknown"}`)}${review ? `<br /><span class="muted">${escapeHTML(review)} review</span>` : ""}</td>
+      <td>${sessionHarnessCell(session)}</td>
+      <td class="col-message">
+        <span class="session-list-prompt">
+          ${models.length ? `<strong class="session-list-prompt-model">${models.map(escapeHTML).join(" · ")}</strong>` : ""}
+          <span>${prompt}</span>
+        </span>
+      </td>
+      <td class="session-activity-cell">${activity}</td>
+      <td class="col-timestamp timestamp-cell">${timestampCellHTML(session.first_event_at)}</td>
+      <td class="col-timestamp timestamp-cell">${timestampCellHTML(session.last_event_at)}</td>
+      <td class="col-duration">${escapeHTML(durationLabel(session.first_event_at, session.last_event_at))}</td>
+      <td class="col-message"><strong>${escapeHTML(session.last_action || "event")}</strong>${lastDetail ? `<br /><span class="muted">${escapeHTML(truncateMiddle(lastDetail, 140))}</span>` : ""}</td>
+    </tr>
+  `;
+}
+
+function bindSessionRows(scope = document) {
+  const rows = scope.matches?.("tr[data-session-id]") ? [scope] : Array.from(scope.querySelectorAll("tr[data-session-id]"));
+  rows.forEach((row) => {
+    row.addEventListener("click", () => {
+      window.location.href = sessionPageURL(row.dataset.sessionId);
+    });
+  });
+}
+
+function sessionPageURL(id) {
+  return `/session.html?id=${encodeURIComponent(id)}`;
 }
 
 function eventRowHTML(record) {
@@ -1302,11 +1720,23 @@ function showNewEvents() {
 async function showEvent(id) {
   if (!$("#drawer")) return;
   const record = await getJSON(`/api/event?id=${encodeURIComponent(id)}`);
+  setText("#drawer .drawer-head h2", "Event Detail");
   $("#event-summary").innerHTML = detailSummary(record);
   $("#event-json").textContent = JSON.stringify(record.event, null, 2);
   $$("#event-summary [data-apply-filter]").forEach((button) => {
     button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
   });
+  $("#drawer").classList.add("open");
+  $("#drawer").setAttribute("aria-hidden", "false");
+}
+
+async function showSession(id) {
+  if (!$("#drawer")) return;
+  const detail = await getJSON(`/api/session?id=${encodeURIComponent(id)}`);
+  setText("#drawer .drawer-head h2", "Session Detail");
+  $("#event-summary").innerHTML = sessionDetailSummary(detail);
+  const rawEvents = (detail.events || []).map((record) => record.raw_event || record.event || {});
+  $("#event-json").textContent = JSON.stringify(rawEvents, null, 2);
   $("#drawer").classList.add("open");
   $("#drawer").setAttribute("aria-hidden", "false");
 }
@@ -1319,7 +1749,8 @@ function closeDrawer() {
 
 function renderLoading() {
   setText("#result-meta", "Loading...");
-  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="8">Loading events...</td></tr>`;
+  const columns = isSessionDetailPage ? 11 : (isSessionsPage ? 9 : 8);
+  if ($("#events")) $("#events").innerHTML = `<tr><td colspan="${columns}">Loading ${isSessionsPage ? "sessions" : "events"}...</td></tr>`;
 }
 
 function signalCell(record) {
@@ -1348,6 +1779,11 @@ function harnessCell(event) {
   `;
 }
 
+function sessionHarnessCell(session) {
+  if (!session.harness) return "";
+  return harnessCell({ harness: { name: session.harness } });
+}
+
 function captureMethodLabel(value) {
   const labels = {
     hook: "Hooks",
@@ -1363,6 +1799,45 @@ function signalAction(record) {
   const info = event.event || {};
   if (info.category === "metric") return metricName(event) || info.action || "metric.observed";
   return info.action || "unknown";
+}
+
+function sessionActivitySummary(session) {
+  const items = [
+    ["tool", Number(session.tool_count) || 0],
+    ["command", Number(session.command_count) || 0],
+    ["file", Number(session.file_count) || 0],
+    ["prompt", Number(session.prompt_count) || 0],
+    ["mcp", Number(session.mcp_count) || 0],
+    ["approval", Number(session.approval_count) || 0],
+  ];
+  const eventCount = Number(session.event_count) || 0;
+  const categorizedCount = items.reduce((sum, [, count]) => sum + count, 0);
+  const otherCount = Math.max(0, eventCount - categorizedCount);
+  const segments = otherCount > 0 ? [...items, ["other", otherCount]] : items;
+  const scale = Math.max(eventCount, categorizedCount, 1);
+  let segmentOffset = 0;
+  const segmentRects = segments
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => {
+      const x = (segmentOffset / scale) * 100;
+      const width = (count / scale) * 100;
+      segmentOffset += count;
+      return `<rect class="session-activity-segment session-activity-${escapeHTML(label)}" x="${x}%" width="${width}%" height="100%"></rect>`;
+    })
+    .join("");
+  const visibleItems = items.filter(([, count]) => count > 0).slice(0, 3);
+  const totalLabel = `${formatTokens(eventCount)} event${eventCount === 1 ? "" : "s"}`;
+  const detailLabel = visibleItems.length
+    ? visibleItems.map(([label, count]) => `${formatTokens(count)} ${label}`).join(" · ")
+    : "session lifecycle";
+  const ariaLabel = `${totalLabel}; ${items.filter(([, count]) => count > 0).map(([label, count]) => `${formatTokens(count)} ${label}`).join(", ") || "session lifecycle events"}`;
+  return `
+    <div class="session-activity-summary" aria-label="${escapeHTML(ariaLabel)}">
+      <div class="session-activity-total"><strong>${escapeHTML(formatTokens(eventCount))}</strong><span>event${eventCount === 1 ? "" : "s"}</span></div>
+      <svg class="session-activity-track" aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 100 1">${segmentRects}</svg>
+      <div class="session-activity-detail">${escapeHTML(detailLabel)}</div>
+    </div>
+  `;
 }
 
 function metricName(event) {
@@ -1428,8 +1903,321 @@ function detailSummary(record) {
     .join("");
 }
 
+function sessionDetailSummary(detail) {
+  const session = detail.session || {};
+  const events = detail.events || [];
+  const rows = [
+    ["Session", session.id],
+    ["Events", `${events.length || session.event_count || 0}`],
+    ["First event", session.first_event_at ? formatTime(session.first_event_at) : ""],
+    ["Last event", session.last_event_at ? formatTime(session.last_event_at) : ""],
+    ["Harness", session.harness],
+    ["Model", session.model],
+    ["Repository", sessionRepositoryLabel(session)],
+    ["Session prompt", session.original_prompt],
+    ["Working directory", session.working_directory],
+    ["Max severity", session.max_severity],
+    ["Needs review", session.review_count ? `${session.review_count} event${session.review_count === 1 ? "" : "s"}` : ""],
+  ].filter(([, value]) => value);
+  return `
+    ${rows.map(([label, value]) => `
+      <div>
+        <span class="muted">${escapeHTML(label)}</span>
+        <strong>${escapeHTML(label === "Session" ? formatSessionID(value) : value)}</strong>
+      </div>
+    `).join("")}
+    <div class="session-raw-note">
+      <span class="muted">Raw events</span>
+      <strong>Full JSON timeline shown below</strong>
+    </div>
+  `;
+}
+
+function renderSessionOverview(detail) {
+  const session = detail.session || {};
+  const records = detail.events || [];
+  const events = records.map((record) => record.event || {});
+  const firstEvent = events[0] || {};
+  const userName = firstNonEmpty(events.map((event) => event.user?.name)) || "Local user";
+  const harness = session.harness || firstNonEmpty(events.map((event) => event.harness?.name)) || "agent";
+  const start = session.first_event_at || firstEvent.timestamp;
+  const end = session.last_event_at || events[events.length - 1]?.timestamp;
+  const title = `${possessive(userName)} ${harnessLabel(harness)} session${sessionDateTitle(start, end)}`;
+  setText("#session-page-title", title);
+  setText("#session-full-id", session.id || "");
+  setText("#session-time-range", sessionTimeRange(start, end));
+  const promptText = session.original_prompt || "No prompt captured";
+  setText("#session-prompt", promptText);
+  setText("#session-prompt-dialog-content", promptText);
+
+  const badges = [
+    session.review_count
+      ? `<span class="session-badge session-badge-risk">${escapeHTML(session.review_count)} event${session.review_count === 1 ? "" : "s"} need review</span>`
+      : `<span class="session-badge session-badge-ok">No high risk events</span>`,
+    `<span class="session-badge session-badge-info">${escapeHTML(session.event_count || records.length)} events captured</span>`,
+  ];
+  $("#session-badges").innerHTML = badges.join("");
+
+  renderSessionMetadata(session, events);
+  renderSessionActivity(session, records);
+  bindSessionOverviewActions(session.id || "");
+}
+
+function renderSessionMetadata(session, events) {
+  const userName = firstNonEmpty(events.map((event) => event.user?.name)) || "Local user";
+  const device = firstNonEmpty(events.map((event) => event.endpoint?.hostname))
+    || firstNonEmpty(events.map((event) => event.endpoint?.os))
+    || "Local endpoint";
+  const harness = session.harness || firstNonEmpty(events.map((event) => event.harness?.name)) || "-";
+  const methods = uniqueValues(events.map((event) => event.harness?.collection_method)).map(captureMethodLabel);
+  const models = uniqueValues(events.map((event) => event.model));
+  const usage = sessionUsage(events);
+  const rows = [
+    {
+      label: "User",
+      value: `<span class="session-person"><i>${escapeHTML(userName.slice(0, 1).toUpperCase())}</i>${escapeHTML(userName)}</span>`,
+    },
+    { label: "Environment", value: `<span class="session-meta-pill">Endpoint</span>` },
+    { label: "Device", value: `<span class="session-device"><i aria-hidden="true"></i>${escapeHTML(device)}</span>` },
+    {
+      label: "Harness",
+      value: `${sessionHarnessCell({ harness })}${methods.length ? `<small>${escapeHTML(methods.join(", "))}</small>` : ""}`,
+      className: "session-meta-harness",
+    },
+    { label: "Model", value: models.length ? escapeHTML(models.join(", ")) : `<span class="muted">-</span>`, className: "mono" },
+    { label: "Tokens", value: usage.tokens ? escapeHTML(formatCompactTokens(usage.tokens)) : `<span class="muted">-</span>` },
+    { label: "Est. Cost", value: usage.cost ? `$${escapeHTML(usage.cost.toFixed(4))}` : `<span class="muted">-</span>` },
+    { label: "Repository", value: session.repository ? escapeHTML(repositoryOptionLabel(session.repository)) : `<span class="muted">-</span>`, className: "mono" },
+    { label: "Branch", value: session.branch ? escapeHTML(session.branch) : `<span class="muted">-</span>`, className: "mono" },
+  ];
+  $("#session-metadata").innerHTML = rows.map((row) => `
+    <div class="session-meta-item ${row.className || ""}">
+      <span>${escapeHTML(row.label)}</span>
+      <strong>${row.value}</strong>
+    </div>
+  `).join("");
+}
+
+function renderSessionActivity(session, records) {
+  const categoryConfig = [
+    ["tool", "Tools", "#0ea5b7"],
+    ["command", "Commands", "#7c3aed"],
+    ["file", "Files", "#3b82f6"],
+    ["prompt", "Prompts", "#a855f7"],
+    ["approval", "Approvals", "#10b981"],
+    ["mcp", "MCP", "#d946ef"],
+    ["other", "Other", "#cbd5e1"],
+  ];
+  const counts = Object.fromEntries(categoryConfig.map(([key]) => [key, 0]));
+  for (const record of records) counts[sessionEventCategory(record.event || {})]++;
+  const duration = durationLabel(session.first_event_at, session.last_event_at);
+  setText("#session-activity-summary", `${duration} session · ${records.length} events · peak ${peakEventsPerBucket(records)} per interval`);
+  $("#session-activity-legend").innerHTML = categoryConfig
+    .filter(([key]) => counts[key] > 0)
+    .map(([key, label, color]) => `<span><i data-session-color="${escapeHTML(color)}"></i>${escapeHTML(counts[key])} ${escapeHTML(label)}</span>`)
+    .join("");
+
+  const buckets = sessionActivityBuckets(records, 24);
+  const max = Math.max(1, ...buckets.map((bucket) => bucket.total));
+  const start = session.first_event_at;
+  const end = session.last_event_at;
+  $("#session-activity-chart").innerHTML = `
+    <div class="session-chart-y"><span>${escapeHTML(max)}</span><span>${escapeHTML(Math.ceil(max / 2))}</span><span>0</span></div>
+    <div class="session-chart-plot">
+      <div class="session-chart-grid" aria-hidden="true"></div>
+      <div class="session-chart-bars">
+        ${buckets.map((bucket) => `
+          <div class="session-chart-bar" title="${escapeHTML(bucket.total)} event${bucket.total === 1 ? "" : "s"}">
+            <div data-session-height="${(bucket.total / max) * 100}">
+              ${categoryConfig.map(([key, , color]) => bucket.counts[key] ? `<span data-session-flex="${bucket.counts[key]}" data-session-color="${escapeHTML(color)}"></span>` : "").join("")}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <div class="session-chart-axis">
+        <span>${escapeHTML(formatClockTime(start))}</span>
+        <span>${escapeHTML(formatClockTime(midpointTimestamp(start, end)))}</span>
+        <span>${escapeHTML(formatClockTime(end))}</span>
+      </div>
+    </div>
+  `;
+
+  const severityOrder = [
+    ["critical", "#be123c"],
+    ["high", "#e11d48"],
+    ["medium", "#f59e0b"],
+    ["low", "#06b6d4"],
+    ["info", "#3b82f6"],
+  ];
+  const severities = {};
+  for (const record of records) {
+    const severity = record.event?.severity || "info";
+    severities[severity] = (severities[severity] || 0) + 1;
+  }
+  const severityMax = Math.max(1, ...Object.values(severities));
+  $("#session-severity-breakdown").innerHTML = `
+    <h3>Breakdown by severity</h3>
+    ${severityOrder.filter(([key]) => severities[key]).map(([key, color]) => `
+      <div class="session-severity-row">
+        <div><strong>${escapeHTML(titleCase(key))}</strong><span>${escapeHTML(severities[key])}</span></div>
+        <i><b data-session-width="${(severities[key] / severityMax) * 100}" data-session-color="${escapeHTML(color)}"></b></i>
+      </div>
+    `).join("")}
+  `;
+  applySessionActivityStyles();
+}
+
+function applySessionActivityStyles() {
+  $$("[data-session-color]").forEach((element) => {
+    element.style.backgroundColor = element.dataset.sessionColor;
+  });
+  $$("[data-session-height]").forEach((element) => {
+    element.style.height = `${element.dataset.sessionHeight}%`;
+  });
+  $$("[data-session-width]").forEach((element) => {
+    element.style.width = `${element.dataset.sessionWidth}%`;
+  });
+  $$("[data-session-flex]").forEach((element) => {
+    element.style.flexGrow = element.dataset.sessionFlex;
+  });
+}
+
+function bindSessionOverviewActions(sessionID) {
+  const copy = $("#copy-session-id");
+  if (copy) {
+    copy.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(sessionID);
+        copy.textContent = "Copied";
+      } catch (_) {
+        copy.textContent = "Copy failed";
+      }
+      window.setTimeout(() => { copy.textContent = "Copy"; }, 1400);
+    };
+  }
+  const toggle = $("#toggle-session-prompt");
+  const dialog = $("#session-prompt-dialog");
+  const close = $("#close-session-prompt");
+  if (toggle && dialog) {
+    toggle.onclick = () => dialog.showModal();
+  }
+  if (close && dialog) {
+    close.onclick = () => dialog.close();
+    dialog.onclick = (event) => {
+      if (event.target === dialog) dialog.close();
+    };
+  }
+}
+
+function sessionActivityBuckets(records, bucketCount) {
+  const timestamps = records.map((record) => new Date(record.event?.timestamp || 0).getTime()).filter(Number.isFinite);
+  const start = Math.min(...timestamps);
+  const end = Math.max(...timestamps);
+  const span = Math.max(1, end - start);
+  const buckets = Array.from({ length: bucketCount }, () => ({
+    total: 0,
+    counts: { tool: 0, command: 0, file: 0, prompt: 0, approval: 0, mcp: 0, other: 0 },
+  }));
+  for (const record of records) {
+    const timestamp = new Date(record.event?.timestamp || 0).getTime();
+    const index = Number.isFinite(timestamp) ? Math.min(bucketCount - 1, Math.floor(((timestamp - start) / span) * bucketCount)) : 0;
+    const category = sessionEventCategory(record.event || {});
+    buckets[index].total++;
+    buckets[index].counts[category]++;
+  }
+  return buckets;
+}
+
+function peakEventsPerBucket(records) {
+  return Math.max(0, ...sessionActivityBuckets(records, 24).map((bucket) => bucket.total));
+}
+
+function sessionEventCategory(event) {
+  const category = event.event?.category;
+  if (["tool", "command", "file", "prompt", "approval", "mcp"].includes(category)) return category;
+  if (event.command) return "command";
+  if (event.file) return "file";
+  if (event.mcp) return "mcp";
+  if (event.approval || event.policy) return "approval";
+  if (event.prompt) return "prompt";
+  if (event.tool) return "tool";
+  return "other";
+}
+
+function sessionUsage(events) {
+  let tokens = 0;
+  let cost = 0;
+  for (const event of events) {
+    const usage = event.gen_ai?.usage || {};
+    tokens += Number(usage.input_tokens || 0)
+      + Number(usage.output_tokens || 0)
+      + Number(usage.cache_read?.input_tokens || 0)
+      + Number(usage.cache_creation?.input_tokens || 0)
+      + Number(usage.reasoning?.output_tokens || 0);
+    cost += Number(usage.cost_usd || 0);
+  }
+  return { tokens, cost };
+}
+
+function firstNonEmpty(values) {
+  return values.find((value) => String(value || "").trim()) || "";
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function possessive(value) {
+  return `${value}${value.endsWith("s") ? "'" : "'s"}`;
+}
+
+function sessionDateTitle(start, end) {
+  const first = new Date(start || 0);
+  const last = new Date(end || start || 0);
+  if (Number.isNaN(first.getTime())) return "";
+  const date = first.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return ` on ${date} from ${first.toLocaleTimeString()} to ${Number.isNaN(last.getTime()) ? "-" : last.toLocaleTimeString()}`;
+}
+
+function sessionTimeRange(start, end) {
+  if (!start) return "";
+  return `${formatTime(start)} → ${formatTime(end || start)} · duration ${durationLabel(start, end)}`;
+}
+
+function durationLabel(start, end) {
+  const first = new Date(start || 0).getTime();
+  const last = new Date(end || start || 0).getTime();
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return "-";
+  let seconds = Math.max(0, Math.round((last - first) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  seconds %= 3600;
+  const minutes = Math.floor(seconds / 60);
+  seconds %= 60;
+  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+}
+
+function formatClockTime(timestamp) {
+  if (!timestamp) return "";
+  const parsed = new Date(timestamp);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString();
+}
+
+function midpointTimestamp(start, end) {
+  const first = new Date(start || 0).getTime();
+  const last = new Date(end || start || 0).getTime();
+  return Number.isFinite(first) && Number.isFinite(last) ? new Date(first + ((last - first) / 2)).toISOString() : "";
+}
+
+function titleCase(value) {
+  return String(value || "").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function repositoryLabel(event) {
   return [event.repository, event.branch].filter(Boolean).join(" @ ");
+}
+
+function sessionRepositoryLabel(session) {
+  return [session.repository, session.branch].filter(Boolean).join(" @ ");
 }
 
 function repositoryShortLabel(event) {
@@ -2467,6 +3255,9 @@ if (isDetectionsPage) {
 } else if (isTokensPage) {
   loadTokens().catch(console.error);
   setInterval(() => loadTokens().catch(console.error), 15000);
+} else if (isSessionDetailPage) {
+  loadSessionPage().catch(console.error);
+  setInterval(() => loadSessionPage().catch(console.error), 15000);
 } else if (isInventoryPage) {
   hydrateInventoryStateFromURL();
   loadInventory().catch(console.error);
