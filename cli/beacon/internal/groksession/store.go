@@ -100,10 +100,11 @@ func (s *Store) Read(ref SessionRef) (SessionData, Stats, error) {
 			data.Ref.Workspace = prompt.WorkingDirectory
 		}
 	}
-	data.Chat, stats.Malformed = readJSONLines[ChatMessage](filepath.Join(ref.SourcePath, "chat_history.jsonl"))
-	lifecycle, malformed := readJSONLines[LifecycleEvent](filepath.Join(ref.SourcePath, "events.jsonl"))
+	data.Chat, data.ChatLines, stats.Malformed = readJSONLines[ChatMessage](filepath.Join(ref.SourcePath, "chat_history.jsonl"))
+	lifecycle, lifecycleLines, malformed := readJSONLines[LifecycleEvent](filepath.Join(ref.SourcePath, "events.jsonl"))
 	stats.Malformed += malformed
 	data.Lifecycle = lifecycle
+	data.LifecycleLines = lifecycleLines
 	if ref.Summary == nil {
 		if summary, err := readJSONFile[Summary](filepath.Join(ref.SourcePath, "summary.json")); err == nil {
 			data.Ref.Summary = summary
@@ -127,10 +128,17 @@ func readJSONFile[T any](path string) (*T, error) {
 	return &out, nil
 }
 
-func readJSONLines[T any](path string) ([]T, int) {
+// readJSONLines parses one of a session's JSONL files, returning the records, the number of lines
+// it scanned, and how many of them did not parse.
+//
+// The line count is reported separately from len(records) and the two are not interchangeable: a
+// blank or unparseable line advances the count without producing a record. The collector compares
+// the count against its line cursor to notice a file that was rewritten shorter, and using the
+// record count there would read a single malformed line as a rewrite.
+func readJSONLines[T any](path string) ([]T, int, int) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0
+		return nil, 0, 0
 	}
 	defer f.Close()
 	var out []T
@@ -165,7 +173,7 @@ func readJSONLines[T any](path string) ([]T, int) {
 	if err := scanner.Err(); err != nil {
 		malformed++
 	}
-	return out, malformed
+	return out, lineNo, malformed
 }
 
 func readTerminalLogs(dir string, logs map[string]string) error {

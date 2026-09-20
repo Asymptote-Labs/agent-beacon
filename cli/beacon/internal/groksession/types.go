@@ -87,11 +87,16 @@ type LifecycleEvent struct {
 }
 
 type SessionData struct {
-	Ref          SessionRef
-	Prompt       *PromptContext
-	Chat         []ChatMessage
-	Lifecycle    []LifecycleEvent
-	TerminalLogs map[string]string
+	Ref       SessionRef
+	Prompt    *PromptContext
+	Chat      []ChatMessage
+	Lifecycle []LifecycleEvent
+	// ChatLines and LifecycleLines are how many lines each JSONL file held, which is not len(Chat)
+	// or len(Lifecycle): a blank or unparseable line counts here and produces no record. They are
+	// what the collector's line cursor is comparable against.
+	ChatLines      int
+	LifecycleLines int
+	TerminalLogs   map[string]string
 }
 
 // SourceKind names where a mapped event came from, so the collector can keep one cursor per

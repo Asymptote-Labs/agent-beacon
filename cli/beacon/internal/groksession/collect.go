@@ -179,13 +179,22 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	if err != nil {
 		return false, err
 	}
+	// A file that came back shorter than the cursor was rewritten, not appended to: Grok compacts a
+	// session and can migrate its chat format, and every line of the new file then sits at or below
+	// the cursor and would be skipped forever. Reset that file's position so the rewritten content
+	// is read; the Started flag is left alone, so session.started is not written a second time.
+	//
+	// The comparison is against the number of lines the file held, not the number of records that
+	// parsed out of it. They are different numbers -- one blank or half-written line makes the
+	// record count smaller than the line count -- and comparing the record count against a line
+	// cursor would read an ordinary malformed line as a rewrite and re-emit the whole file.
 	minChat := cursor.ChatLine
 	minLifecycle := cursor.LifecycleLine
-	if len(data.Chat) < cursor.ChatLine {
+	if data.ChatLines < cursor.ChatLine {
 		minChat = 0
 		cursor.ChatLine = 0
 	}
-	if len(data.Lifecycle) < cursor.LifecycleLine {
+	if data.LifecycleLines < cursor.LifecycleLine {
 		minLifecycle = 0
 		cursor.LifecycleLine = 0
 	}

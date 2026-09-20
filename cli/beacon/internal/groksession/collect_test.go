@@ -439,6 +439,71 @@ func TestRewrittenShorterFileIsNotSkipped(t *testing.T) {
 	}
 }
 
+// A rewrite is detected by the file coming back shorter than the cursor. That test has to be made
+// against the number of lines the file held, not the number of records that parsed out of it: one
+// unparseable line in the middle makes the record count smaller than the line cursor, and reading
+// that as a rewrite would reset the cursor and append the whole session to the log a second time --
+// the duplicate this collector exists to avoid.
+func TestAMalformedLineIsNotMistakenForARewrite(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := writeFixtureSession(t, root, "/tmp/grok project", "session-1")
+	chatPath := filepath.Join(sessionDir, "chat_history.jsonl")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	// A line Beacon cannot parse, with a good line after it, so the cursor ends up past a line that
+	// produced no record and the record count is one short of it.
+	appendLine(t, chatPath, `{"type":"user","content":[{"type":"te`)
+	appendLine(t, chatPath, `{"type":"user","content":[{"type":"text","text":"after the bad line"}]}`)
+
+	opts := CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	first, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("first CollectOnce returned error: %v", err)
+	}
+	if first.MalformedLines != 1 {
+		t.Fatalf("MalformedLines = %d, want 1", first.MalformedLines)
+	}
+	state, err := LoadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := state.Sessions["session-1"]
+	if cursor == nil || cursor.ChatLine <= len(readChatRecords(t, chatPath)) {
+		t.Fatalf("fixture did not produce a cursor past the record count: %+v", cursor)
+	}
+
+	// Nothing is rewritten. The session's *other* log grows, which is what brings the sweep back to
+	// a chat file whose record count is below the chat cursor.
+	appendLine(t, filepath.Join(sessionDir, "events.jsonl"),
+		`{"ts":"2026-05-21T16:52:10.000Z","type":"turn_ended","outcome":"success","turn_number":1}`)
+	touchNewer(t, sessionDir)
+
+	before := logActions(t, logPath)
+	second, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("second CollectOnce returned error: %v", err)
+	}
+	if second.EventsEmitted != 1 {
+		t.Fatalf("second sweep emitted %d events, want only the appended lifecycle row -- a reset would re-emit the chat history", second.EventsEmitted)
+	}
+	after := logActions(t, logPath)
+	if after["prompt.submitted"] != before["prompt.submitted"] {
+		t.Fatalf("prompt.submitted went from %d to %d; the chat cursor was reset", before["prompt.submitted"], after["prompt.submitted"])
+	}
+	if after["session.started"] != 1 {
+		t.Fatalf("session.started written %d times, want 1", after["session.started"])
+	}
+}
+
+// readChatRecords reports how many chat records parse out of a file, which is the number the shrink
+// check must NOT be made against.
+func readChatRecords(t *testing.T, path string) []ChatMessage {
+	t.Helper()
+	records, _, _ := readJSONLines[ChatMessage](path)
+	return records
+}
+
 func urlPathEscape(path string) string {
 	replacer := strings.NewReplacer("/", "%2F", " ", "%20")
 	return replacer.Replace(path)
