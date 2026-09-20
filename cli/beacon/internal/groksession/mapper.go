@@ -10,9 +10,16 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-func MapSession(data SessionData) []MappedEvent {
+type MapOptions struct {
+	MinChatIndex       int
+	MinLifecycleIndex  int
+	SkipSessionStarted bool
+}
+
+func MapSession(data SessionData, opts MapOptions) []MappedEvent {
 	m := &mapper{
 		data:       data,
+		opts:       opts,
 		toolByID:   map[string]ToolCall{},
 		toolOutput: map[string]string{},
 	}
@@ -37,6 +44,7 @@ func MapSession(data SessionData) []MappedEvent {
 
 type mapper struct {
 	data       SessionData
+	opts       MapOptions
 	out        []MappedEvent
 	toolByID   map[string]ToolCall
 	toolOutput map[string]string
@@ -69,6 +77,9 @@ func (m *mapper) orderedItems() []orderedItem {
 }
 
 func (m *mapper) consumeChat(msg ChatMessage) {
+	if msg.Index <= m.opts.MinChatIndex {
+		return
+	}
 	switch msg.Type {
 	case "user":
 		text := contentText(msg.Content)
@@ -121,6 +132,9 @@ func (m *mapper) consumeChat(msg ChatMessage) {
 }
 
 func (m *mapper) consumeLifecycle(ev LifecycleEvent) {
+	if ev.Index <= m.opts.MinLifecycleIndex {
+		return
+	}
 	switch ev.Type {
 	case "permission_requested":
 		out := m.base(ev.TS, "approval.requested", "approval", schema.SeverityInfo, schema.FidelityObserved, "Grok requested tool approval")
@@ -152,15 +166,23 @@ func (m *mapper) consumeLifecycle(ev LifecycleEvent) {
 		out.Raw = map[string]interface{}{"grok": ev}
 		m.append(out, ev.Index)
 	case "turn_ended":
-		out := m.base(ev.TS, "session.ended", "session", schema.SeverityInfo, schema.FidelityObserved, "Grok session turn ended")
-		if ev.Outcome != "" || ev.CancellationCategory != "" {
-			out.Raw = map[string]interface{}{"grok": map[string]interface{}{"outcome": ev.Outcome, "cancellation_category": ev.CancellationCategory}}
+		out := m.base(ev.TS, "session.context", "session", schema.SeverityInfo, schema.FidelityObserved, "Grok session turn ended")
+		raw := map[string]interface{}{"turn_number": ev.TurnNumber}
+		if ev.Outcome != "" {
+			raw["outcome"] = ev.Outcome
 		}
+		if ev.CancellationCategory != "" {
+			raw["cancellation_category"] = ev.CancellationCategory
+		}
+		out.Raw = map[string]interface{}{"grok": raw}
 		m.append(out, ev.Index)
 	}
 }
 
 func (m *mapper) emitLifecycleStart() {
+	if m.opts.SkipSessionStarted {
+		return
+	}
 	ts := ""
 	for _, ev := range m.data.Lifecycle {
 		if ev.Type == "turn_started" {

@@ -16,8 +16,11 @@ import (
 const StateVersion = 1
 
 type Cursor struct {
-	UpdatedAtMS int64 `json:"updated_at_ms,omitempty"`
-	Events      int   `json:"events,omitempty"`
+	UpdatedAtMS        int64 `json:"updated_at_ms,omitempty"`
+	Events             int   `json:"events,omitempty"`
+	LastChatIndex      int   `json:"last_chat_index,omitempty"`
+	LastLifecycleIndex int   `json:"last_lifecycle_index,omitempty"`
+	SessionStarted     bool  `json:"session_started,omitempty"`
 }
 
 type State struct {
@@ -161,9 +164,14 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	if err != nil {
 		return false, err
 	}
-	mapped := MapSession(data)
+	mapped := MapSession(data, MapOptions{
+		MinChatIndex:       cursor.LastChatIndex,
+		MinLifecycleIndex:  cursor.LastLifecycleIndex,
+		SkipSessionStarted: cursor.SessionStarted,
+	})
 	if len(mapped) == 0 {
 		cursor.UpdatedAtMS = ref.ModTimeUnixMS
+		advanceGrokCursor(cursor, data)
 		return false, nil
 	}
 	for _, item := range mapped {
@@ -173,8 +181,19 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		summary.EventsEmitted++
 	}
 	cursor.UpdatedAtMS = ref.ModTimeUnixMS
-	cursor.Events = len(mapped)
+	cursor.Events += len(mapped)
+	advanceGrokCursor(cursor, data)
 	return true, nil
+}
+
+func advanceGrokCursor(cursor *Cursor, data SessionData) {
+	if n := len(data.Chat); n > cursor.LastChatIndex {
+		cursor.LastChatIndex = n
+	}
+	if n := len(data.Lifecycle); n > cursor.LastLifecycleIndex {
+		cursor.LastLifecycleIndex = n
+	}
+	cursor.SessionStarted = true
 }
 
 func emit(event schema.Event, opts CollectOptions) error {

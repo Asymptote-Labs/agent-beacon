@@ -39,7 +39,7 @@ func TestStoreListsAndMapsGrokSession(t *testing.T) {
 	if stats.Malformed != 0 {
 		t.Fatalf("Malformed = %d, want 0", stats.Malformed)
 	}
-	events := MapSession(data)
+	events := MapSession(data, MapOptions{})
 	if len(events) == 0 {
 		t.Fatal("MapSession returned no events")
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -77,7 +78,7 @@ func runEndpointGrokSync(cmd *cobra.Command, args []string) error {
 		UserMode:    userMode,
 	}
 	if !endpointGrokOpts.print {
-		opts.StatePath = resolveGrokStatePath(endpointGrokOpts.statePath)
+		opts.StatePath = resolveGrokStatePath(endpointGrokOpts.statePath, userMode)
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointGrokOpts.logPath).EffectiveLogPath
 	}
 
@@ -128,6 +129,7 @@ func reportGrokSweep(cmd *cobra.Command, summary groksession.SummaryResult) {
 }
 
 func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
+	userMode := endpointUserMode()
 	store, err := groksession.NewStore(endpointGrokOpts.sessionsDir)
 	if err != nil {
 		return err
@@ -136,7 +138,7 @@ func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := groksession.LoadState(resolveGrokStatePath(endpointGrokOpts.statePath))
+	state, err := groksession.LoadState(resolveGrokStatePath(endpointGrokOpts.statePath, userMode))
 	if err != nil {
 		return err
 	}
@@ -145,7 +147,7 @@ func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
 		Collected int    `json:"collected"`
 		StatePath string `json:"state_path"`
 	}
-	out := status{Sessions: len(refs), StatePath: resolveGrokStatePath(endpointGrokOpts.statePath)}
+	out := status{Sessions: len(refs), StatePath: resolveGrokStatePath(endpointGrokOpts.statePath, userMode)}
 	for _, ref := range refs {
 		cursor := state.Sessions[ref.ID]
 		if cursor != nil && cursor.UpdatedAtMS >= ref.ModTimeUnixMS && cursor.Events > 0 {
@@ -162,9 +164,14 @@ func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func resolveGrokStatePath(path string) string {
+func resolveGrokStatePath(path string, userMode bool) string {
 	if path != "" {
 		return path
+	}
+	if !userMode {
+		if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
+			return filepath.Join(dir, "grok-state.json")
+		}
 	}
 	return groksession.DefaultStatePath()
 }

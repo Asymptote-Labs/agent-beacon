@@ -5,13 +5,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 )
 
 const GrokName = groksession.Harness
 
 func DiscoverGrok() Harness {
-	h := Harness{Name: GrokName, DisplayName: "Grok Build", Capability: "hooks+session_log"}
+	h := Harness{Name: GrokName, DisplayName: "Grok Build"}
 	detectExecutable(&h, "grok")
 	home, _ := os.UserHomeDir()
 	sessionsDir := filepath.Join(home, ".grok", "sessions")
@@ -19,6 +20,13 @@ func DiscoverGrok() Harness {
 	if !h.Detected && dirExists(filepath.Join(home, ".grok")) {
 		h.Detected = true
 	}
+	if hooks.IsGrokInstalled(hooks.GrokOptions{}) {
+		h.Capability = "hooks"
+		h.TelemetryStatus = TelemetryEnabled
+		h.Message = "Beacon Grok Build hooks are configured"
+		return h
+	}
+	h.Capability = "session_log"
 	h.TelemetryStatus, h.Message = grokCollectionStatus(sessionsDir)
 	return h
 }
