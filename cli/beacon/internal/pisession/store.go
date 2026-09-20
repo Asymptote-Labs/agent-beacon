@@ -2,6 +2,7 @@ package pisession
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -189,45 +190,80 @@ func (s *Store) Read(ref SessionRef) ([]Entry, ReadStats, error) {
 	var entries []Entry
 	stats := ReadStats{}
 	for {
-		raw, err := br.ReadBytes('\n')
-		if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+		raw, status, readErr := readLine(br)
+		switch status {
+		case lineEOF:
+			return entries, stats, nil
+		case linePartial:
 			stats.PartialTail = true
 			return entries, stats, nil
-		}
-		if len(raw) == 0 && err != nil {
-			if err == io.EOF {
-				return entries, stats, nil
-			}
-			return entries, stats, err
+		case lineError:
+			return entries, stats, readErr
+		case lineOversized:
+			stats.MaxLine++
+			stats.Malformed++
+			continue
 		}
 		stats.MaxLine++
 		line := strings.TrimSpace(string(raw))
 		if line == "" {
-			if err == io.EOF {
-				return entries, stats, nil
-			}
-			continue
-		}
-		if len(raw) > maxLineBytes {
-			stats.Malformed++
-			if err == io.EOF {
-				return entries, stats, nil
-			}
 			continue
 		}
 		var item map[string]interface{}
 		if jsonErr := json.Unmarshal([]byte(line), &item); jsonErr != nil {
 			stats.Malformed++
-			if err == io.EOF {
-				return entries, stats, nil
-			}
 			continue
 		}
 		entries = append(entries, Entry{Line: stats.MaxLine, Data: item})
-		if err == io.EOF {
-			return entries, stats, nil
-		}
 	}
+}
+
+type lineStatus int
+
+const (
+	lineOK        lineStatus = iota
+	lineOversized            // consumed and discarded; too large
+	linePartial              // unterminated trailing fragment
+	lineEOF                  // clean end of stream
+	lineError                // I/O error
+)
+
+// readLine reads one JSONL line from br, handling oversized lines (consumed and
+// discarded so later lines are still reachable) and partial tails (unterminated
+// trailing fragments from a file still being written). Allocation is bounded by
+// maxLineBytes so a damaged or in-progress file cannot dictate memory use.
+func readLine(br *bufio.Reader) ([]byte, lineStatus, error) {
+	var buf []byte
+	oversized := false
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if oversized || len(buf)+len(chunk) > maxLineBytes {
+			oversized = true
+			buf = nil
+		} else {
+			buf = append(buf, chunk...)
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if oversized {
+				return nil, lineOversized, nil
+			}
+			if len(buf) > 0 {
+				return nil, linePartial, nil
+			}
+			return nil, lineEOF, nil
+		}
+		if err != nil {
+			return nil, lineError, err
+		}
+		break
+	}
+	if oversized {
+		return nil, lineOversized, nil
+	}
+	return bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r")), lineOK, nil
 }
 
 func extractSessionIDFromPath(path string) string {
