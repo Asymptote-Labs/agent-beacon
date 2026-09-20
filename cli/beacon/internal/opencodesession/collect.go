@@ -16,8 +16,9 @@ import (
 const StateVersion = 1
 
 type Cursor struct {
-	LastOrder   int   `json:"last_order"`
-	UpdatedAtMS int64 `json:"updated_at_ms,omitempty"`
+	LastOrder   int             `json:"last_order"`
+	UpdatedAtMS int64           `json:"updated_at_ms,omitempty"`
+	Emitted     map[string]bool `json:"emitted,omitempty"`
 }
 
 type State struct {
@@ -152,33 +153,48 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 
 func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions, summary *Summary) (bool, error) {
 	cursor := state.cursor(ref)
-	if ref.UpdatedAtUnixMS > 0 && ref.UpdatedAtUnixMS <= cursor.UpdatedAtMS {
+	if ref.UpdatedAtUnixMS > 0 && ref.UpdatedAtUnixMS < cursor.UpdatedAtMS {
 		return false, nil
 	}
 	records, err := store.Read(ref)
 	if err != nil {
 		return false, err
 	}
-	mapped := MapTrace(ref, records, MapOptions{MinOrder: cursor.LastOrder})
+	mapped := MapTrace(ref, records, MapOptions{})
 	if len(mapped) == 0 {
-		if len(records) > 0 && records[len(records)-1].Order > cursor.LastOrder {
-			cursor.LastOrder = records[len(records)-1].Order
-		}
 		cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
 		return false, nil
 	}
-	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
-			if i > 0 {
-				cursor.LastOrder = mapped[i-1].SourceOrder
-			}
-			return true, err
+	if cursor.Emitted == nil {
+		cursor.Emitted = make(map[string]bool, len(mapped))
+	}
+	changed := false
+	for _, item := range mapped {
+		eid := item.Event.Event.ID
+		if cursor.Emitted[eid] {
+			continue
 		}
-		cursor.LastOrder = item.SourceOrder
+		if err := emit(item.Event, opts); err != nil {
+			return changed, err
+		}
+		cursor.Emitted[eid] = true
+		if item.SourceOrder > cursor.LastOrder {
+			cursor.LastOrder = item.SourceOrder
+		}
 		summary.EventsEmitted++
+		changed = true
+	}
+	current := make(map[string]bool, len(mapped))
+	for _, item := range mapped {
+		current[item.Event.Event.ID] = true
+	}
+	for eid := range cursor.Emitted {
+		if !current[eid] {
+			delete(cursor.Emitted, eid)
+		}
 	}
 	cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
-	return true, nil
+	return changed, nil
 }
 
 func emit(event schema.Event, opts CollectOptions) error {

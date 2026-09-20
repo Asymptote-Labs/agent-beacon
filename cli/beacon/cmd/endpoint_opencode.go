@@ -217,9 +217,10 @@ func resolveOpenCodeStatePath(path string, userMode bool) string {
 	if strings.TrimSpace(path) != "" {
 		return path
 	}
-	base := filepath.Join("/var", "lib", "beacon", "endpoint", "state")
-	if userMode {
-		base = filepath.Dir(opencodesession.DefaultStatePath())
+	if !userMode {
+		if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
+			return filepath.Join(dir, "opencode-sessions.json")
+		}
 	}
-	return filepath.Join(base, "opencode-sessions.json")
+	return opencodesession.DefaultStatePath()
 }

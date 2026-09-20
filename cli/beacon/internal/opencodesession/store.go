@@ -634,7 +634,11 @@ func legacyProjectDirectory(path string) string {
 }
 
 func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	u := url.URL{Scheme: "file", Path: path}
+	uriPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	q := u.Query()
 	q.Set("mode", "ro")
 	q.Set("_pragma", "query_only(1)")
