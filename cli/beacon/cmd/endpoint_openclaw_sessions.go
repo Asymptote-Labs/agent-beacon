@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/spf13/cobra"
@@ -215,9 +216,8 @@ func resolveOpenClawSessionsStatePath(path string, userMode bool) string {
 	if strings.TrimSpace(path) != "" {
 		return path
 	}
-	base := filepath.Join("/var", "lib", "beacon", "endpoint", "state")
 	if userMode {
-		base = filepath.Dir(openclawsession.DefaultStatePath())
+		return openclawsession.DefaultStatePath()
 	}
-	return filepath.Join(base, "openclaw-sessions.json")
+	return filepath.Join(endpointconfig.BaseDir(false), "state", "openclaw-sessions.json")
 }
