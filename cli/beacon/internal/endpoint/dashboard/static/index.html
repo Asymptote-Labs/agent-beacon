@@ -160,13 +160,14 @@
             <thead>
               <tr>
                 <th>Session ID</th>
-                <th>Severity</th>
-                <th class="col-timestamp">Timestamp</th>
+                <th>Risk</th>
                 <th>Agent Harness</th>
-                <th>Repository</th>
-                <th>Signal</th>
-                <th class="col-artifact">Artifact</th>
-                <th class="col-message">Message</th>
+                <th>Session Prompt</th>
+                <th>Activity</th>
+                <th class="col-timestamp">Start</th>
+                <th class="col-timestamp">End</th>
+                <th class="col-duration">Duration</th>
+                <th class="col-message">Last Event</th>
               </tr>
             </thead>
             <tbody id="events"></tbody>
@@ -178,7 +179,7 @@
 
     <aside id="drawer" class="drawer" aria-hidden="true">
       <div class="drawer-head">
-        <h2>Event Detail</h2>
+        <h2>Session Detail</h2>
         <button id="close-drawer">Close</button>
       </div>
       <div id="event-summary" class="event-summary"></div>

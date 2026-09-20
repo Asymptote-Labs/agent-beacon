@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beacon Endpoint Session Events</title>
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="session-detail">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-only</p>
+        <h1>Agent Activity</h1>
+      </div>
+      <nav class="nav-toggle" aria-label="Dashboard navigation">
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <a href="/findings.html">Findings</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-parent">Analytics</div>
+          <a href="/tokens.html">Token Usage</a>
+          <a href="/overview.html">Agent Activity</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Observe</div>
+          <a href="/inventory.html">Agent Inventory</a>
+          <a class="active" aria-current="page" href="/">Agent Activity Sessions</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Control</div>
+          <a href="/detections.html">Detections</a>
+        </div>
+      </nav>
+    </header>
+
+    <div id="session-detail-status" class="session-detail-status" role="status" aria-live="polite">
+      <div>
+        <span class="session-detail-spinner" aria-hidden="true"></span>
+        <p id="session-detail-status-message">Loading session details...</p>
+      </div>
+    </div>
+
+    <main id="session-detail-view" class="session-detail-main" hidden>
+      <a class="session-back-link" href="/">
+        <span aria-hidden="true">&larr;</span>
+        Back to agent activity
+      </a>
+
+      <section class="session-overview-panel">
+        <div class="session-overview-head">
+          <h2 id="session-page-title">Session Events</h2>
+          <div id="session-badges" class="session-badges"></div>
+          <div id="session-time-range" class="session-time-range muted"></div>
+          <div class="session-id-line">
+            <code id="session-full-id"></code>
+            <button type="button" id="copy-session-id" class="session-copy-button">Copy</button>
+          </div>
+        </div>
+
+        <div class="session-prompt-card">
+          <div class="session-prompt-head">
+            <span>Session prompt</span>
+            <button type="button" id="toggle-session-prompt">View full prompt</button>
+          </div>
+          <p id="session-prompt">No prompt captured</p>
+        </div>
+
+        <div id="session-metadata" class="session-metadata"></div>
+      </section>
+
+      <section class="session-activity-panel">
+        <div class="session-activity-head">
+          <div>
+            <h2>Agent Activity over time</h2>
+            <p id="session-activity-summary" class="muted"></p>
+          </div>
+          <div id="session-activity-legend" class="session-activity-legend"></div>
+        </div>
+        <div class="session-activity-body">
+          <div id="session-activity-chart" class="session-activity-chart"></div>
+          <div id="session-severity-breakdown" class="session-severity-breakdown"></div>
+        </div>
+      </section>
+
+      <section class="panel search-panel session-events-panel">
+        <div class="session-event-filters">
+          <label class="session-event-search">
+            <span class="search-icon" aria-hidden="true"></span>
+            <input id="session-event-search" type="search" placeholder="Search events by keyword, file, command, or message..." autocomplete="off" />
+          </label>
+          <div id="session-type-filters" class="session-filter-row" aria-label="Filter events by type"></div>
+          <div id="session-action-filters" class="session-filter-row" aria-label="Filter events by action"></div>
+          <div id="session-severity-filters" class="session-filter-row" aria-label="Filter events by severity"></div>
+        </div>
+        <div id="notice" class="notice" hidden></div>
+        <div class="table-wrap">
+          <table class="session-raw-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th class="col-timestamp">Timestamp</th>
+                <th>Severity</th>
+                <th>Type</th>
+                <th>Agent Action</th>
+                <th>Value</th>
+                <th>Input tokens</th>
+                <th>Output tokens</th>
+                <th>Cache creation input tokens</th>
+                <th>Cache read input tokens</th>
+                <th>Inspect</th>
+              </tr>
+            </thead>
+            <tbody id="events"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="session-prompt-dialog" class="session-prompt-dialog" aria-labelledby="session-prompt-dialog-title">
+      <div class="session-prompt-dialog-head">
+        <h2 id="session-prompt-dialog-title">Full session prompt</h2>
+        <button type="button" id="close-session-prompt" aria-label="Close full prompt">Close</button>
+      </div>
+      <p id="session-prompt-dialog-content"></p>
+    </dialog>
+
+    <dialog id="session-value-dialog" class="session-prompt-dialog" aria-labelledby="session-value-dialog-title">
+      <div class="session-prompt-dialog-head">
+        <h2 id="session-value-dialog-title">Full event value</h2>
+        <button type="button" id="close-session-value" aria-label="Close full event value">Close</button>
+      </div>
+      <p id="session-value-dialog-content"></p>
+    </dialog>
+
+    <aside id="drawer" class="drawer" aria-hidden="true">
+      <div class="drawer-head">
+        <h2>Event Detail</h2>
+        <button id="close-drawer">Close</button>
+      </div>
+      <div id="event-summary" class="event-summary"></div>
+      <pre id="event-json"></pre>
+    </aside>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

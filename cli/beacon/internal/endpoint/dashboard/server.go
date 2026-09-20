@@ -145,6 +145,39 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		writeJSON(w, events)
 	})
+	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		sessions, err := ReadSessions(opts.LogPath, parseQuery(r, defaultEventLimit))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, sessions)
+	})
+	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("session id is required"))
+			return
+		}
+		detail, ok, err := ReadSessionDetail(opts.LogPath, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("session not found"))
+			return
+		}
+		writeJSON(w, detail)
+	})
 	mux.HandleFunc("/api/traces", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
