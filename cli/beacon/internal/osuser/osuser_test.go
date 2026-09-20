@@ -11,21 +11,21 @@ import (
 
 // The parser is the part that runs against output this process did not produce, so it is the part
 // worth pinning. A directory service answers in the same seven-field format as /etc/passwd.
-func TestParsePasswdLineReadsAnNSSRecord(t *testing.T) {
-	got, err := parsePasswdLine("alice:x:10001:10002::/home/alice:/bin/bash\n", "alice")
+func TestParseAccountRecordReadsAnNSSRecord(t *testing.T) {
+	got, err := parseAccountRecord("alice:x:10001:10002::/home/alice:/bin/bash\n", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := Info{Username: "alice", UID: 10001, GID: 10002, HomeDir: "/home/alice"}
 	if got != want {
-		t.Errorf("parsePasswdLine = %+v, want %+v", got, want)
+		t.Errorf("parseAccountRecord = %+v, want %+v", got, want)
 	}
 }
 
 // A record whose uid or home is unusable must not resolve to a half-populated Info: the caller
 // would chown to uid 0 or write settings into "", both of which are worse than reporting that the
 // user could not be resolved.
-func TestParsePasswdLineRejectsUnusableRecords(t *testing.T) {
+func TestParseAccountRecordRejectsUnusableRecords(t *testing.T) {
 	for name, out := range map[string]string{
 		"too few fields":  "alice:x:10001:10002:/home/alice\n",
 		"non-numeric uid": "alice:x:notanumber:10002::/home/alice:/bin/bash\n",
@@ -36,8 +36,8 @@ func TestParsePasswdLineRejectsUnusableRecords(t *testing.T) {
 		"banner only":     "getent: something went sideways\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got, err := parsePasswdLine(out, "alice"); err == nil {
-				t.Errorf("parsePasswdLine(%q) = %+v, want an error", out, got)
+			if got, err := parseAccountRecord(out, "alice"); err == nil {
+				t.Errorf("parseAccountRecord(%q) = %+v, want an error", out, got)
 			}
 		})
 	}
@@ -45,8 +45,8 @@ func TestParsePasswdLineRejectsUnusableRecords(t *testing.T) {
 
 // A directory service may answer a differently-cased query with the account's canonical name.
 // Ownership and re-execution should use what the directory says, not what the caller typed.
-func TestParsePasswdLinePrefersTheCanonicalName(t *testing.T) {
-	got, err := parsePasswdLine("alice:x:10001:10002::/home/alice:/bin/bash\n", "Alice")
+func TestParseAccountRecordPrefersTheCanonicalName(t *testing.T) {
+	got, err := parseAccountRecord("alice:x:10001:10002::/home/alice:/bin/bash\n", "Alice")
 	if err != nil {
 		t.Fatal(err)
 	}
