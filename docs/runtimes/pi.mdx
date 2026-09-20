@@ -11,11 +11,19 @@ Asymptote supports [Pi](https://pi.dev/) through a managed local extension.
 Looking for [Oh My Pi](/runtimes/oh-my-pi) (`omp`), [Prime Agent](/runtimes/prime-agent), or [Senpi](/runtimes/senpi) (`omo`, the standalone edition of oh-my-openagent)? All three are forks of Pi, supported separately and recorded under their own harness names. Unlike Pi, Oh My Pi reports operator approval decisions.
 </Note>
 
-Pi fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
+Pi fits neither of Asymptote's two usual live integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, so the live integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
 
 ```bash
 beacon endpoint hooks install --harness pi
 ```
+
+Asymptote can also read Pi's committed JSONL session store after the fact:
+
+```bash
+beacon endpoint pi sync
+```
+
+That poll path is local and offline, checkpointed by file and line number, and marks every event `harness.collection_method=poll`. It complements the extension rather than replacing it: the extension sees live events as Pi runs, while the poll path can backfill sessions that happened before the extension was installed or sessions where the extension was not loaded.
 
 ## Prerequisites
 
@@ -38,7 +46,7 @@ User level is the default. A project-level extension is subject to Pi's project-
 
 Asymptote identifies its own extension file by the marker `beacon-managed-pi-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry.
 
-Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime. The poll path reads JSONL transcripts from `~/.pi/agent/sessions`; if `PI_CODING_AGENT_DIR` is set, Asymptote reads `sessions` below that directory, matching Pi's user-level agent directory override. The cursor lives in Asymptote state, not in Pi's directory.
 
 ## Discovery and status
 
@@ -80,6 +88,7 @@ Install writes one file and refuses to touch a `beacon.ts` it did not write, so 
 | Runtime discovery | Supported through executable and `~/.pi/agent` detection, managed extension path, and telemetry status |
 | Harness attribution | Supported. `pi`, `pi.dev`, `pi_cli`, `pi-cli`, `pi_agent`, `pi-agent`, and `pi agent` all normalize to `pi_cli` |
 | Extension install, status, uninstall, and repair | Supported |
+| Session-store sync | Supported through `beacon endpoint pi sync`, with `--print`, `--watch`, and `--sessions-dir` |
 | Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped |
 | Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
 | Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
@@ -104,6 +113,7 @@ The extension itself sends nothing over the network. It spawns the local `beacon
 - **No approval telemetry.** Pi's `tool_call` event lets an extension block a call, but that is an extension deciding rather than an operator being asked. Pi exposes no operator approval decision through the extension API, so Beacon records these as tool activity and writes no approval events for Pi. Cline works the same way for the same reason. Detections in `rules/approval-abuse/` do not fire on Pi activity.
 - **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Pi. Pi's blocking `tool_call` handler makes it a viable target for that seam later.
 - **Streaming events are not collected.** The extension subscribes to seven of Pi's event types and ignores the rest, which are provider-request and TUI-rendering internals. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
+- **Poll sync is after-the-fact.** `beacon endpoint pi sync` can recover committed prompts, assistant messages and reasoning, tool calls and results, bash execution records, errors, compactions, skill-load records, and token usage from Pi's JSONL store. It cannot block or delay anything, and it does not have every live extension context field. Use it as backfill or scheduled catch-up, not as an enforcement surface.
 - **Project-level installs need Pi's trust prompt.** A `.pi/extensions/beacon.ts` is subject to Pi's project-trust prompt, so a user-level install is the one that works without further interaction.
 
 ## Deployment notes
