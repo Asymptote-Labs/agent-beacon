@@ -128,6 +128,7 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 		event[key] = value
 	}
 	normalizeEventModel(event)
+	attachDerivedTrace(event)
 	if err := writeEndpointJSON(path, event); err != nil {
 		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
 		return err
@@ -246,6 +247,44 @@ func (l *Logger) baseEndpointEvent(action, category, severity, message, fidelity
 		event["session"] = map[string]interface{}{"id": l.sessionID}
 	}
 	return event
+}
+
+func attachDerivedTrace(event map[string]interface{}) {
+	if event == nil {
+		return
+	}
+	session, _ := event["session"].(map[string]interface{})
+	sessionID, _ := session["id"].(string)
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	trace, _ := event["trace"].(map[string]interface{})
+	if trace == nil {
+		trace = map[string]interface{}{}
+	}
+	if id, _ := trace["id"].(string); strings.TrimSpace(id) == "" {
+		harness, _ := event["harness"].(map[string]interface{})
+		harnessName, _ := harness["name"].(string)
+		if traceID := asymptoteobserve.DerivedTraceIDForSession(harnessName, sessionID); traceID != "" {
+			trace["id"] = traceID
+		}
+	}
+	if spanID, _ := trace["span_id"].(string); strings.TrimSpace(spanID) == "" {
+		if callID := endpointToolCallID(event); callID != "" {
+			trace["span_id"] = callID
+		}
+	}
+	if len(trace) > 0 {
+		event["trace"] = trace
+	}
+}
+
+func endpointToolCallID(event map[string]interface{}) string {
+	genAI, _ := event["gen_ai"].(map[string]interface{})
+	tool, _ := genAI["tool"].(map[string]interface{})
+	call, _ := tool["call"].(map[string]interface{})
+	id, _ := call["id"].(string)
+	return strings.TrimSpace(id)
 }
 
 func cloudRunFields() map[string]interface{} {

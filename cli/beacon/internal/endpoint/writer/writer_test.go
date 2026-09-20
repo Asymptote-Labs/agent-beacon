@@ -339,6 +339,35 @@ func TestAppendEventStampsAStableEventID(t *testing.T) {
 	}
 }
 
+func TestAppendEventDerivesTraceFromSessionAndToolCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "command.executed",
+		Harness: schema.HarnessInfo{Name: "claude_code"},
+		Message: "Shell command executed",
+	})
+	event.Timestamp = "2026-08-21T18:00:01Z"
+	event.Session = &schema.SessionInfo{ID: "s1"}
+	event.Command = &schema.CommandInfo{Command: "echo hi"}
+	event.GenAI = &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Call: &schema.GenAIToolCallInfo{ID: "toolu_1"}}}
+
+	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+
+	line, err := LastLine(path)
+	if err != nil {
+		t.Fatalf("read last line: %v", err)
+	}
+	var written schema.Event
+	if err := json.Unmarshal([]byte(line), &written); err != nil {
+		t.Fatalf("decode written event: %v", err)
+	}
+	if written.Trace == nil || written.Trace.ID != "session:claude_code:s1" || written.Trace.SpanID != "toolu_1" {
+		t.Fatalf("trace = %#v, want derived session trace and tool span", written.Trace)
+	}
+}
+
 // The regression the call ID exists to fix: after harness normalization both
 // capture paths report claude_code, and the collector's batch lands seconds
 // after the hook's write. Nothing but a shared call ID can collapse that pair.

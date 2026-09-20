@@ -532,6 +532,49 @@ func TestEndpointEventDoesNotOverwriteAReportedProvider(t *testing.T) {
 	}
 }
 
+func TestEndpointEventDerivesTraceFromSessionAndToolCall(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "claude")
+	if err := logger.EndpointEvent("command.executed", "command", "info", "done", map[string]interface{}{
+		"session": map[string]interface{}{"id": "s1"},
+		"gen_ai": map[string]interface{}{
+			"tool": map[string]interface{}{"call": map[string]interface{}{"id": "toolu_1"}},
+		},
+	}); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	trace, _ := event["trace"].(map[string]interface{})
+	if trace["id"] != "session:claude_code:s1" || trace["span_id"] != "toolu_1" {
+		t.Fatalf("trace = %#v, want session trace id and tool span id", trace)
+	}
+}
+
+func TestEndpointEventKeepsReportedTrace(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	logger := NewLoggerForPlatform("post-tool", "claude")
+	if err := logger.EndpointEvent("command.executed", "command", "info", "done", map[string]interface{}{
+		"session": map[string]interface{}{"id": "s1"},
+		"trace":   map[string]interface{}{"id": "trace-1", "span_id": "span-1"},
+		"gen_ai": map[string]interface{}{
+			"tool": map[string]interface{}{"call": map[string]interface{}{"id": "toolu_1"}},
+		},
+	}); err != nil {
+		t.Fatalf("EndpointEvent returned error: %v", err)
+	}
+
+	event := decodeSingleEndpointEvent(t, logPath)
+	trace, _ := event["trace"].(map[string]interface{})
+	if trace["id"] != "trace-1" || trace["span_id"] != "span-1" {
+		t.Fatalf("trace = %#v, want reported trace preserved", trace)
+	}
+}
+
 // An event with no model must not gain an empty one, and must not gain a gen_ai block it had no
 // reason to have.
 func TestEndpointEventWithoutAModelIsUntouched(t *testing.T) {

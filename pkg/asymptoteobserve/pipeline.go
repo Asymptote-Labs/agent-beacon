@@ -142,6 +142,7 @@ func copyEvent(event Event) Event {
 	out := event
 	out.Run = cloneRun(event.Run)
 	out.Session = cloneSession(event.Session)
+	out.Trace = cloneTrace(event.Trace)
 	if event.Tool != nil {
 		tool := *event.Tool
 		out.Tool = &tool
@@ -189,6 +190,14 @@ func copyEvent(event Event) Event {
 		out.Raw = copyMap(event.Raw)
 	}
 	return out
+}
+
+func cloneTrace(trace *TraceInfo) *TraceInfo {
+	if trace == nil {
+		return nil
+	}
+	out := *trace
+	return &out
 }
 
 func cloneTyped[T any](input *T) *T {

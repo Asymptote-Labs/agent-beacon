@@ -124,6 +124,62 @@ func eventUUID(kind, name string) string {
 	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
 }
 
+// DerivedTraceIDForSession is the trace identity used by non-OTLP collection paths.
+//
+// OTLP spans already arrive with a provider trace id. Hook, plugin and poll paths usually do not,
+// but they do carry the runtime session id that the dashboard already uses as the trace grouping
+// key. Writing that grouping key into event.trace makes the event self-describing for consumers
+// that do not know Beacon's dashboard fallback rules.
+func DerivedTraceIDForSession(harnessName, sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	harness := NormalizeHarnessName(harnessName)
+	if harness == "" {
+		harness = strings.TrimSpace(harnessName)
+	}
+	if harness == "" {
+		return "session:" + sessionID
+	}
+	return "session:" + harness + ":" + sessionID
+}
+
+// AttachDerivedTrace fills event.trace from the stable identities Beacon already promotes.
+// Existing trace fields, such as OTLP trace/span ids, always win.
+func AttachDerivedTrace(event *Event) {
+	if event == nil || event.Session == nil {
+		return
+	}
+	traceID := ""
+	if event.Trace != nil {
+		traceID = strings.TrimSpace(event.Trace.ID)
+	}
+	if traceID == "" {
+		traceID = DerivedTraceIDForSession(event.Harness.Name, event.Session.ID)
+	}
+	if traceID == "" {
+		return
+	}
+	if event.Trace == nil {
+		event.Trace = &TraceInfo{}
+	}
+	if strings.TrimSpace(event.Trace.ID) == "" {
+		event.Trace.ID = traceID
+	}
+	if strings.TrimSpace(event.Trace.SpanID) == "" {
+		event.Trace.SpanID = ToolCallID(event)
+	}
+}
+
+// ToolCallID returns the promoted runtime identifier for one tool invocation.
+func ToolCallID(event *Event) string {
+	if event == nil || event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Call == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.GenAI.Tool.Call.ID)
+}
+
 // ContextUsedKeys and ContextLimitKeys are the names a runtime uses for how full the model's
 // context was on a call, and for the window it was measured against.
 //
