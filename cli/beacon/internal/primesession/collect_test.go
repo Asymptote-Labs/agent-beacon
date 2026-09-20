@@ -14,6 +14,7 @@ func TestCollectOncePrintsAndAdvancesCursor(t *testing.T) {
 	if err := os.MkdirAll(sessions, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	artifacts := filepath.Join(dir, "session-artifacts")
 	sessionPath := filepath.Join(sessions, "session-1.jsonl")
 	writePrimeJSONL(t, sessionPath, []string{
 		`{"type":"session","id":"session-1","cwd":"/work/project"}`,
@@ -22,10 +23,11 @@ func TestCollectOncePrintsAndAdvancesCursor(t *testing.T) {
 	statePath := filepath.Join(dir, "state.json")
 	var out bytes.Buffer
 	summary, err := CollectOnce(CollectOptions{
-		SessionsDir: sessions,
-		StatePath:   statePath,
-		Print:       true,
-		Out:         &out,
+		SessionsDir:  sessions,
+		ArtifactsDir: artifacts,
+		StatePath:    statePath,
+		Print:        true,
+		Out:          &out,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,10 +41,11 @@ func TestCollectOncePrintsAndAdvancesCursor(t *testing.T) {
 
 	out.Reset()
 	summary, err = CollectOnce(CollectOptions{
-		SessionsDir: sessions,
-		StatePath:   statePath,
-		Print:       true,
-		Out:         &out,
+		SessionsDir:  sessions,
+		ArtifactsDir: artifacts,
+		StatePath:    statePath,
+		Print:        true,
+		Out:          &out,
 	})
 	if err != nil {
 		t.Fatal(err)
