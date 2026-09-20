@@ -402,6 +402,9 @@ func TestTraceStoreIndexesAndRefreshesRuntimeLog(t *testing.T) {
 	if status.Traces != 1 || status.Events != 2 || status.IndexRows != 3 {
 		t.Fatalf("status = %#v, want 1 trace, 2 events, 3 index rows", status)
 	}
+	if status.SizeBytes == 0 {
+		t.Fatalf("status size = %#v, want a non-empty trace store", status)
+	}
 
 	results, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "dashboard"}, ResultLevel: "event", Limit: 10})
 	if err != nil {
@@ -423,6 +426,43 @@ func TestTraceStoreIndexesAndRefreshesRuntimeLog(t *testing.T) {
 	}
 	if status.Events != 3 || status.IndexRows != 4 {
 		t.Fatalf("refreshed status = %#v, want 3 events and 4 index rows", status)
+	}
+}
+
+func TestTraceStoreTruncatesSearchRowsAndFallsBackForExactSearch(t *testing.T) {
+	needle := "needle-after-index-cap"
+	prompt := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	prompt.Event.ID = "evt-prompt"
+	prompt.Session = &schema.SessionInfo{ID: "s1"}
+	prompt.Prompt = &schema.PromptInfo{Text: strings.Repeat("a", maxTraceStoreSearchBodyBytes+1024) + needle}
+	path := traceStoreIndexedLog(t, marshalEvents(t, prompt))
+	if _, err := TraceStoreStatus(path); err != nil {
+		t.Fatalf("TraceStoreStatus returned error: %v", err)
+	}
+
+	db, err := openTraceStore(path).db()
+	if err != nil {
+		t.Fatalf("open trace store: %v", err)
+	}
+	defer db.Close()
+	var maxBodyLen int
+	var truncatedRows int
+	if err := db.QueryRow(`SELECT MAX(length(body)), SUM(body_truncated) FROM trace_search WHERE source_key = ?`, traceSourceKey(path)).Scan(&maxBodyLen, &truncatedRows); err != nil {
+		t.Fatalf("query trace search rows: %v", err)
+	}
+	if maxBodyLen > maxTraceStoreSearchBodyBytes {
+		t.Fatalf("indexed search body length = %d, want <= %d", maxBodyLen, maxTraceStoreSearchBodyBytes)
+	}
+	if truncatedRows == 0 {
+		t.Fatalf("truncated rows = 0, want at least one capped search row")
+	}
+
+	list, err := ReadTraceList(path, TraceQuery{EventQuery: EventQuery{Q: needle}, Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadTraceList returned error: %v", err)
+	}
+	if list.TotalMatched != 1 {
+		t.Fatalf("ReadTraceList matched %d traces, want fallback to find the truncated term", list.TotalMatched)
 	}
 }
 
@@ -594,6 +634,47 @@ func TestTraceStoreScopesTracesBySourceLog(t *testing.T) {
 		if result.TotalMatched != 1 {
 			t.Fatalf("searching %s for %q matched %d events, want 1", tc.path, tc.want, result.TotalMatched)
 		}
+	}
+}
+
+func TestTraceStorePurgesMissingSourceLogs(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "logs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	first := filepath.Join(dir, "runtime.jsonl")
+	second := filepath.Join(dir, "old-runtime.jsonl")
+	event := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	event.Event.ID = "evt-prompt"
+	event.Session = &schema.SessionInfo{ID: "s1"}
+	event.Prompt = &schema.PromptInfo{Text: "purge stale source"}
+	writeTestLog(t, first, marshalEvents(t, event)...)
+	writeTestLog(t, second, marshalEvents(t, event)...)
+
+	if _, err := TraceStoreStatus(first); err != nil {
+		t.Fatalf("index first source: %v", err)
+	}
+	if _, err := TraceStoreStatus(second); err != nil {
+		t.Fatalf("index second source: %v", err)
+	}
+	if err := os.Remove(second); err != nil {
+		t.Fatalf("remove second source: %v", err)
+	}
+	if err := ReindexTraceStore(first); err != nil {
+		t.Fatalf("reindex first source: %v", err)
+	}
+
+	db, err := openTraceStore(first).db()
+	if err != nil {
+		t.Fatalf("open trace store: %v", err)
+	}
+	defer db.Close()
+	var sources int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM trace_index_state`).Scan(&sources); err != nil {
+		t.Fatalf("count sources: %v", err)
+	}
+	if sources != 1 {
+		t.Fatalf("indexed sources = %d, want stale source purged", sources)
 	}
 }
 

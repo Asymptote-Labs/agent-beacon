@@ -47,6 +47,11 @@ var endpointTracesStatusCmd = &cobra.Command{
 		fmt.Printf("Trace store: %s\n", status.Path)
 		fmt.Printf("Runtime log: %s\n", logPath)
 		fmt.Printf("Traces: %d\nEvents: %d\nIndex rows: %d\n", status.Traces, status.Events, status.IndexRows)
+		fmt.Printf("Size: %d bytes", status.SizeBytes)
+		if status.WALBytes > 0 {
+			fmt.Printf(" (+%d bytes WAL)", status.WALBytes)
+		}
+		fmt.Println()
 		if status.IndexedAt != "" {
 			fmt.Printf("Indexed at: %s\n", status.IndexedAt)
 		}

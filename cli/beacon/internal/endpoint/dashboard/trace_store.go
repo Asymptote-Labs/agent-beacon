@@ -18,7 +18,12 @@ const traceStoreFile = "traces.db"
 // traceStoreSchemaVersion is written to the database's user_version. The store
 // is a rebuildable index over the runtime log, never a source of truth, so a
 // version bump drops the tables and reindexes rather than migrating them.
-const traceStoreSchemaVersion = 2
+const traceStoreSchemaVersion = 3
+
+// Search rows are an acceleration structure, not retained evidence. Keep them
+// small and fall back to the JSONL scan for free-text queries when truncation
+// could hide a match.
+const maxTraceStoreSearchBodyBytes = 16 * 1024
 
 type traceStore struct {
 	dbPath string
@@ -34,6 +39,8 @@ type traceStoreStatus struct {
 	Traces    int    `json:"traces"`
 	Events    int    `json:"events"`
 	IndexRows int    `json:"index_rows"`
+	SizeBytes int64  `json:"size_bytes"`
+	WALBytes  int64  `json:"wal_bytes,omitempty"`
 	IndexedAt string `json:"indexed_at,omitempty"`
 }
 
@@ -163,7 +170,8 @@ func ensureTraceStoreSchema(db *sql.DB) error {
 			event_type TEXT,
 			tool_name TEXT,
 			event_number INTEGER,
-			body TEXT NOT NULL
+			body TEXT NOT NULL,
+			body_truncated INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS trace_search_by_source_trace ON trace_search (source_key, source, trace_id)`,
 	}
@@ -217,6 +225,9 @@ func (s *traceStore) reindexDB(db *sql.DB, fingerprint string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := purgeMissingTraceSources(tx); err != nil {
+		return err
+	}
 	for _, stmt := range []string{
 		`DELETE FROM trace_search WHERE source_key = ?`,
 		`DELETE FROM trace_events WHERE source_key = ?`,
@@ -237,7 +248,10 @@ func (s *traceStore) reindexDB(db *sql.DB, fingerprint string) error {
 		s.sourceKey, fingerprint, now); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return checkpointTraceStore(db)
 }
 
 func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now string) error {
@@ -249,8 +263,7 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 		sourceKey, agg.summary.ID, string(summaryJSON), agg.summary.UpdatedAt, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, source, body) VALUES (?, ?, 'trace', ?)`,
-		sourceKey, agg.summary.ID, traceSummaryHaystack(agg.summary)); err != nil {
+	if err := insertTraceSearchRow(tx, sourceKey, agg.summary.ID, "", "trace", "", "", 0, traceSummaryHaystack(agg.summary)); err != nil {
 		return err
 	}
 	for _, event := range agg.events {
@@ -270,13 +283,23 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 			sourceKey, agg.summary.ID, event.Number, event.ID, event.Type, toolName, string(eventJSON), now); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, event_id, source, event_type, tool_name, event_number, body)
-			VALUES (?, ?, ?, 'event', ?, ?, ?, ?)`,
-			sourceKey, agg.summary.ID, event.ID, event.Type, toolName, event.Number, traceEventHaystack(event)); err != nil {
+		if err := insertTraceSearchRow(tx, sourceKey, agg.summary.ID, event.ID, "event", event.Type, toolName, event.Number, traceEventHaystack(event)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func insertTraceSearchRow(tx *sql.Tx, sourceKey, traceID, eventID, source, eventType, toolName string, eventNumber int, body string) error {
+	body, truncated := truncateTraceSearchBody(body)
+	truncatedInt := 0
+	if truncated {
+		truncatedInt = 1
+	}
+	_, err := tx.Exec(`INSERT INTO trace_search (source_key, trace_id, event_id, source, event_type, tool_name, event_number, body, body_truncated)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sourceKey, traceID, eventID, source, eventType, toolName, eventNumber, body, truncatedInt)
+	return err
 }
 
 func (s *traceStore) Status() (traceStoreStatus, error) {
@@ -288,7 +311,7 @@ func (s *traceStore) Status() (traceStoreStatus, error) {
 		return traceStoreStatus{}, err
 	}
 	defer db.Close()
-	status := traceStoreStatus{Path: s.dbPath}
+	status := traceStoreStatus{Path: s.dbPath, SizeBytes: fileSize(s.dbPath), WALBytes: fileSize(s.dbPath + "-wal")}
 	_ = db.QueryRow(`SELECT COUNT(*) FROM traces WHERE source_key = ?`, s.sourceKey).Scan(&status.Traces)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_events WHERE source_key = ?`, s.sourceKey).Scan(&status.Events)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM trace_search WHERE source_key = ?`, s.sourceKey).Scan(&status.IndexRows)
@@ -522,6 +545,11 @@ func (s *traceStore) matchingTraceIDs(q string, kinds ...string) (map[string]boo
 		return nil, err
 	}
 	defer db.Close()
+	if truncated, err := s.hasTruncatedSearchRows(db, kinds...); err != nil {
+		return nil, err
+	} else if truncated {
+		return nil, errTraceStoreUnsupported
+	}
 	args := []any{s.sourceKey}
 	for _, kind := range kinds {
 		args = append(args, kind)
@@ -648,6 +676,84 @@ func traceLogFingerprint(logPath string) string {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "|")
+}
+
+func purgeMissingTraceSources(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT source_key FROM trace_index_state`)
+	if err != nil {
+		return err
+	}
+	var missing []string
+	for rows.Next() {
+		var source string
+		if err := rows.Scan(&source); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, err := os.Stat(source); os.IsNotExist(err) {
+			missing = append(missing, source)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, source := range missing {
+		for _, stmt := range []string{
+			`DELETE FROM trace_search WHERE source_key = ?`,
+			`DELETE FROM trace_events WHERE source_key = ?`,
+			`DELETE FROM traces WHERE source_key = ?`,
+			`DELETE FROM trace_index_state WHERE source_key = ?`,
+		} {
+			if _, err := tx.Exec(stmt, source); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func checkpointTraceStore(db *sql.DB) error {
+	_, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+func truncateTraceSearchBody(body string) (string, bool) {
+	if len(body) <= maxTraceStoreSearchBodyBytes {
+		return body, false
+	}
+	used := 0
+	for i, r := range body {
+		next := used + len(string(r))
+		if next > maxTraceStoreSearchBodyBytes {
+			return body[:i], true
+		}
+		used = next
+	}
+	return body, false
+}
+
+func (s *traceStore) hasTruncatedSearchRows(db *sql.DB, kinds ...string) (bool, error) {
+	if len(kinds) == 0 {
+		return false, nil
+	}
+	args := []any{s.sourceKey}
+	for _, kind := range kinds {
+		args = append(args, kind)
+	}
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM trace_search WHERE source_key = ? AND source IN (`+placeholders(len(kinds))+`) AND body_truncated = 1`, args...).Scan(&count)
+	return count > 0, err
 }
 
 // placeholders builds an n-wide SQL "?,?,..." list.
