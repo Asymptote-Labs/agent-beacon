@@ -30,6 +30,8 @@ Asymptote checks for its managed Grok hook file at `~/.grok/hooks/beacon-endpoin
 
 Use `beacon endpoint hooks status --harness grok` to inspect Grok Build hook status. Use `beacon endpoint grok status` to inspect committed local sessions and whether Beacon has synced them.
 
+`beacon endpoint discover` reports both paths together: installed hooks are enough to report Grok telemetry as enabled, and the session cursor is what it falls back to when the hooks are not installed.
+
 ## Install or configuration support
 
 `beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Grok Build hooks separately:
@@ -63,6 +65,7 @@ beacon endpoint grok sync --print
 | Prompt telemetry | Supported through `UserPromptSubmit` hooks and session sync |
 | Command, tool, and file telemetry | Supported for live hook payloads and committed session records. Session sync reads `chat_history.jsonl`, `events.jsonl`, `summary.json`, `prompt_context.json`, and terminal logs where present |
 | Approval telemetry | Live hooks can observe and enforce at pre-tool time; session sync can report committed Grok permission request/resolution records after the fact |
+| Session lifecycle | `session.started` only. Grok's `turn_ended` record ends a turn, not a session — the next prompt appends to the same session — so session sync records it as `session.context` carrying the turn number and outcome. Grok exposes no session-end record, so Asymptote writes no `session.ended` for this runtime rather than inventing one |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Grok hooks are installed separately in the logged-in user's context or project context |
 
@@ -71,6 +74,8 @@ beacon endpoint grok sync --print
 Project-level Grok Build hooks require `/hooks-trust` in Grok before they execute. Grok tool failures normalize to `tool.failed` with high severity.
 
 Session sync keeps its cursor in Beacon endpoint state rather than in `~/.grok`, and `--print` is a dry run: it prints mapped events without writing the runtime log or consuming the cursor. Because it reads committed records, every synced event is marked `harness.collection_method=poll`.
+
+The cursor is a line position in each of a session's two append-only logs, so a session that is still being written is collected incrementally: a later sweep, including each `--watch` tick, emits only the records added since the last one. `--user` and `--system` keep separate cursors beside the runtime log each one writes to, so the two modes never claim each other's progress.
 
 Restart Grok after installing or removing hooks so new sessions pick up the updated hook configuration.
 

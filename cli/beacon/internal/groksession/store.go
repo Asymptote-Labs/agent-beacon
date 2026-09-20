@@ -135,9 +135,16 @@ func readJSONLines[T any](path string) ([]T, int) {
 	defer f.Close()
 	var out []T
 	malformed := 0
+	lineNo := 0
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
+		// Index is the physical line number rather than the position among the lines that parsed.
+		// Grok appends to these files while a session runs, so a sweep can catch a line that is only
+		// half written; it is counted as malformed now and parses on the next sweep. Numbering by
+		// parse position would renumber every line after it once it parsed, and the collector's
+		// cursor -- which is a line number -- would skip or repeat records it had already read.
+		lineNo++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
@@ -149,9 +156,9 @@ func readJSONLines[T any](path string) ([]T, int) {
 		}
 		switch v := any(&item).(type) {
 		case *ChatMessage:
-			v.Index = len(out) + 1
+			v.Index = lineNo
 		case *LifecycleEvent:
-			v.Index = len(out) + 1
+			v.Index = lineNo
 		}
 		out = append(out, item)
 	}

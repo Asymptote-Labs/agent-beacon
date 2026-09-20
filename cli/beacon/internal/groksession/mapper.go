@@ -10,9 +10,17 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-func MapSession(data SessionData) []MappedEvent {
+// MapSession converts one Grok session directory into endpoint events.
+//
+// It always walks the whole session, because a record only makes sense next to the ones around it:
+// a tool_result line carries the result but names its call by id, and the arguments live on an
+// assistant line that may already have been collected on an earlier sweep. What opts controls is
+// what gets *emitted* -- everything at or below the cursor is rebuilt for context and dropped -- so
+// a session that grew since the last sweep yields only the records that grew.
+func MapSession(data SessionData, opts MapOptions) []MappedEvent {
 	m := &mapper{
 		data:       data,
+		opts:       opts,
 		toolByID:   map[string]ToolCall{},
 		toolOutput: map[string]string{},
 	}
@@ -37,6 +45,7 @@ func MapSession(data SessionData) []MappedEvent {
 
 type mapper struct {
 	data       SessionData
+	opts       MapOptions
 	out        []MappedEvent
 	toolByID   map[string]ToolCall
 	toolOutput map[string]string
@@ -78,7 +87,7 @@ func (m *mapper) consumeChat(msg ChatMessage) {
 		ev := m.base("", "prompt.submitted", "prompt", schema.SeverityInfo, schema.FidelityObserved, "Grok prompt submitted")
 		ev.Prompt = &schema.PromptInfo{Text: text}
 		ev.Content = contentMarker(text)
-		m.append(ev, msg.Index)
+		m.append(ev, SourceChat, msg.Index)
 	case "assistant":
 		model := firstNonEmpty(msg.ModelID, m.summary().CurrentModelID)
 		if msg.Reasoning != nil && msg.Reasoning.Text != "" {
@@ -94,19 +103,19 @@ func (m *mapper) consumeChat(msg ChatMessage) {
 				}}},
 			}
 			ev.Content = contentMarker(msg.Reasoning.Text)
-			m.append(ev, msg.Index)
+			m.append(ev, SourceChat, msg.Index)
 		}
 		if text := contentText(msg.Content); text != "" {
 			ev := m.base("", "agent.message", "agent", schema.SeverityInfo, schema.FidelityObserved, "Grok assistant message")
 			ev.Model = model
 			ev.GenAI = &schema.GenAIInfo{Output: &schema.GenAIOutputInfo{Messages: []map[string]interface{}{{"role": "assistant", "content": text}}}}
 			ev.Content = contentMarker(text)
-			m.append(ev, msg.Index)
+			m.append(ev, SourceChat, msg.Index)
 		}
 		for _, call := range msg.ToolCalls {
 			ev := m.toolCallEvent(call, msg.Index)
 			ev.Model = model
-			m.append(ev, msg.Index)
+			m.append(ev, SourceChat, msg.Index)
 		}
 	case "tool_result":
 		call := m.toolByID[msg.ToolCallID]
@@ -116,7 +125,7 @@ func (m *mapper) consumeChat(msg ChatMessage) {
 		}
 		m.toolOutput[msg.ToolCallID] = output
 		ev := m.toolResultEvent(call, msg.ToolCallID, output)
-		m.append(ev, msg.Index)
+		m.append(ev, SourceChat, msg.Index)
 	}
 }
 
@@ -126,7 +135,7 @@ func (m *mapper) consumeLifecycle(ev LifecycleEvent) {
 		out := m.base(ev.TS, "approval.requested", "approval", schema.SeverityInfo, schema.FidelityObserved, "Grok requested tool approval")
 		out.Tool = &schema.ToolInfo{Name: ev.ToolName}
 		out.Approval = &schema.ApprovalInfo{Required: true}
-		m.append(out, ev.Index)
+		m.append(out, SourceLifecycle, ev.Index)
 	case "permission_resolved":
 		out := m.base(ev.TS, "approval."+normalizeDecision(ev.Decision), "approval", schema.SeverityInfo, schema.FidelityObserved, "Grok resolved tool approval")
 		out.Tool = &schema.ToolInfo{Name: ev.ToolName}
@@ -134,7 +143,7 @@ func (m *mapper) consumeLifecycle(ev LifecycleEvent) {
 		if ev.WaitMS > 0 {
 			out.Raw = map[string]interface{}{"grok": map[string]interface{}{"approval_wait_ms": ev.WaitMS}}
 		}
-		m.append(out, ev.Index)
+		m.append(out, SourceLifecycle, ev.Index)
 	case "tool_completed":
 		// chat_history carries the call arguments and result. The lifecycle row is kept only when
 		// it adds failure/status detail that a tool_result row cannot express by itself.
@@ -146,17 +155,33 @@ func (m *mapper) consumeLifecycle(ev LifecycleEvent) {
 		if ev.DurationMS > 0 {
 			out.Raw = map[string]interface{}{"grok": map[string]interface{}{"duration_ms": ev.DurationMS, "outcome": ev.Outcome}}
 		}
-		m.append(out, ev.Index)
+		m.append(out, SourceLifecycle, ev.Index)
 	case "yolo_toggled":
 		out := m.base(ev.TS, "session.context", "session", schema.SeverityInfo, schema.FidelityObserved, "Grok YOLO mode changed")
 		out.Raw = map[string]interface{}{"grok": ev}
-		m.append(out, ev.Index)
+		m.append(out, SourceLifecycle, ev.Index)
 	case "turn_ended":
-		out := m.base(ev.TS, "session.ended", "session", schema.SeverityInfo, schema.FidelityObserved, "Grok session turn ended")
-		if ev.Outcome != "" || ev.CancellationCategory != "" {
-			out.Raw = map[string]interface{}{"grok": map[string]interface{}{"outcome": ev.Outcome, "cancellation_category": ev.CancellationCategory}}
+		// A turn is not a session. Grok writes turn_ended once per assistant turn and keeps the
+		// session open -- the next prompt appends to the same chat_history.jsonl -- so mapping it
+		// to session.ended would close a session repeatedly while only one session.started was
+		// ever written, and every duration and still-open count computed from the log would be
+		// wrong. session.context is the action the Codex and fx integrations already use for
+		// session metadata that is not a lifecycle boundary. Grok exposes no session-end record at
+		// all, so Beacon writes no session.ended for this runtime rather than inventing one, the
+		// same posture fx and Kiro take.
+		out := m.base(ev.TS, "session.context", "session", schema.SeverityInfo, schema.FidelityObserved, "Grok turn ended")
+		detail := map[string]interface{}{"lifecycle": "turn_ended"}
+		if ev.Outcome != "" {
+			detail["outcome"] = ev.Outcome
 		}
-		m.append(out, ev.Index)
+		if ev.CancellationCategory != "" {
+			detail["cancellation_category"] = ev.CancellationCategory
+		}
+		if ev.TurnNumber > 0 {
+			detail["turn_number"] = ev.TurnNumber
+		}
+		out.Raw = map[string]interface{}{"grok": detail}
+		m.append(out, SourceLifecycle, ev.Index)
 	}
 }
 
@@ -175,7 +200,7 @@ func (m *mapper) emitLifecycleStart() {
 	if title := firstNonEmpty(m.summary().GeneratedTitle, m.summary().SessionSummary); title != "" {
 		ev.Raw = map[string]interface{}{"grok": map[string]interface{}{"title": title}}
 	}
-	m.append(ev, 0)
+	m.append(ev, SourceSession, 0)
 }
 
 func (m *mapper) toolCallEvent(call ToolCall, seq int) schema.Event {
@@ -245,8 +270,28 @@ func (m *mapper) base(ts, action, category string, severity schema.Severity, fid
 	return ev
 }
 
-func (m *mapper) append(ev schema.Event, sourceSeq int) {
-	m.out = append(m.out, MappedEvent{Event: ev, SourceSeq: sourceSeq})
+// append records an event unless the collector has already written it.
+//
+// The cursor is per source file and holds the last line written, so a line is skipped at or below
+// it. session.started has no line of its own and is gated by its own flag.
+func (m *mapper) append(ev schema.Event, kind SourceKind, line int) {
+	if m.collected(kind, line) {
+		return
+	}
+	m.out = append(m.out, MappedEvent{Event: ev, SourceKind: kind, SourceLine: line})
+}
+
+func (m *mapper) collected(kind SourceKind, line int) bool {
+	switch kind {
+	case SourceChat:
+		return line <= m.opts.MinChatLine
+	case SourceLifecycle:
+		return line <= m.opts.MinLifecycleLine
+	case SourceSession:
+		return m.opts.SkipStarted
+	default:
+		return false
+	}
 }
 
 func (m *mapper) summary() Summary {

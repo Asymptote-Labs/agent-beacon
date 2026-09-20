@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStoreListsAndMapsGrokSession(t *testing.T) {
@@ -39,7 +40,7 @@ func TestStoreListsAndMapsGrokSession(t *testing.T) {
 	if stats.Malformed != 0 {
 		t.Fatalf("Malformed = %d, want 0", stats.Malformed)
 	}
-	events := MapSession(data)
+	events := MapSession(data, MapOptions{})
 	if len(events) == 0 {
 		t.Fatal("MapSession returned no events")
 	}
@@ -63,6 +64,111 @@ func TestStoreListsAndMapsGrokSession(t *testing.T) {
 	}
 	if byAction["approval.allowed"].Approval.Decision != "allowed" {
 		t.Fatalf("approval event = %#v", byAction["approval.allowed"].Approval)
+	}
+	// A turn is not a session. Grok keeps writing to the same session after turn_ended, so the
+	// only session-lifecycle boundary this store can honestly report is the start.
+	if _, ok := byAction["session.ended"]; ok {
+		t.Fatal("turn_ended produced a session.ended event")
+	}
+	if _, ok := byAction["session.started"]; !ok {
+		t.Fatal("no session.started event")
+	}
+}
+
+// A Grok session directory is appended to while the session runs, so the same session is read
+// again on the next sweep. Only the records that were added may be emitted: re-mapping the whole
+// session would append a duplicate copy of everything already in the runtime log.
+func TestCollectOnceEmitsOnlyNewRecordsWhenSessionGrows(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := writeFixtureSession(t, root, "/tmp/grok project", "session-1")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	opts := CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	first, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("first CollectOnce returned error: %v", err)
+	}
+	if first.EventsEmitted == 0 {
+		t.Fatal("first CollectOnce emitted no events")
+	}
+
+	appendLine(t, filepath.Join(sessionDir, "chat_history.jsonl"),
+		`{"type":"user","content":[{"type":"text","text":"second turn"}]}`)
+	appendLine(t, filepath.Join(sessionDir, "events.jsonl"),
+		`{"ts":"2026-05-21T16:52:10.000Z","type":"turn_ended","outcome":"success","turn_number":1}`)
+	touchNewer(t, sessionDir)
+
+	second, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("second CollectOnce returned error: %v", err)
+	}
+	if second.EventsEmitted != 2 {
+		t.Fatalf("second sweep emitted %d events, want the 2 appended records", second.EventsEmitted)
+	}
+	if lines := countLines(t, logPath); lines != first.EventsEmitted+2 {
+		t.Fatalf("runtime lines = %d, want %d", lines, first.EventsEmitted+2)
+	}
+	actions := logActions(t, logPath)
+	if actions["session.started"] != 1 {
+		t.Fatalf("session.started written %d times, want 1", actions["session.started"])
+	}
+	if actions["prompt.submitted"] != 2 {
+		t.Fatalf("prompt.submitted written %d times, want 2", actions["prompt.submitted"])
+	}
+	if actions["command.executed"] != 1 {
+		t.Fatalf("command.executed written %d times, want 1 (the first sweep's only command)", actions["command.executed"])
+	}
+
+	third, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("third CollectOnce returned error: %v", err)
+	}
+	if third.EventsEmitted != 0 {
+		t.Fatalf("third sweep emitted %d events, want none", third.EventsEmitted)
+	}
+}
+
+// A sweep can catch the tail of a live session mid-write: the last line is half flushed, counts as
+// malformed, and completes before the next sweep. Numbering records by their position among the
+// lines that parsed would renumber every later line once it landed and the cursor would start
+// skipping records it had never read, so records are numbered by physical line instead.
+func TestCollectOnceCollectsALineThatWasTornOnTheFirstSweep(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := writeFixtureSession(t, root, "/tmp/grok project", "session-1")
+	chatPath := filepath.Join(sessionDir, "chat_history.jsonl")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	// Grok is midway through flushing the next chat line when the sweep reads the file.
+	appendLine(t, chatPath, `{"type":"user","content":[{"type":"te`)
+
+	opts := CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	first, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("first CollectOnce returned error: %v", err)
+	}
+	if first.MalformedLines != 1 {
+		t.Fatalf("MalformedLines = %d, want 1", first.MalformedLines)
+	}
+
+	// The write lands, and the session continues past it.
+	rewriteLine(t, chatPath, 5, `{"type":"user","content":[{"type":"text","text":"the completed line"}]}`)
+	appendLine(t, chatPath, `{"type":"user","content":[{"type":"text","text":"and the next one"}]}`)
+	touchNewer(t, sessionDir)
+
+	second, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("second CollectOnce returned error: %v", err)
+	}
+	if second.MalformedLines != 0 {
+		t.Fatalf("MalformedLines = %d on the second sweep, want 0", second.MalformedLines)
+	}
+	if second.EventsEmitted != 2 {
+		t.Fatalf("second sweep emitted %d events, want the completed line and the one after it", second.EventsEmitted)
+	}
+	if actions := logActions(t, logPath); actions["prompt.submitted"] != 3 {
+		t.Fatalf("prompt.submitted written %d times, want 3", actions["prompt.submitted"])
 	}
 }
 
@@ -131,6 +237,71 @@ func writeFixtureSession(t *testing.T, root, workspace, sessionID string) string
 			`{"type":"assistant","content":"done","model_id":"grok-build"}`+"\n")
 	writeFile(t, filepath.Join(sessionDir, "terminal", "call-abc-1.log"), "total 0\n")
 	return sessionDir
+}
+
+func appendLine(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open %s for append: %v", path, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatalf("append to %s: %v", path, err)
+	}
+}
+
+func rewriteLine(t *testing.T, path string, lineNo int, content string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if lineNo < 1 || lineNo > len(lines) {
+		t.Fatalf("line %d out of range for %s (%d lines)", lineNo, path, len(lines))
+	}
+	lines[lineNo-1] = content
+	writeFile(t, path, strings.Join(lines, "\n")+"\n")
+}
+
+// touchNewer moves the session directory's modification time forward. The collector uses it as a
+// cheap "could this have changed" filter, and a test that writes twice inside one filesystem
+// timestamp tick would otherwise be skipped for reasons that have nothing to do with the cursor.
+func touchNewer(t *testing.T, dir string) {
+	t.Helper()
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", dir, err)
+	}
+	next := info.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(dir, next, next); err != nil {
+		t.Fatalf("chtimes %s: %v", dir, err)
+	}
+}
+
+func logActions(t *testing.T, path string) map[string]int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	counts := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var record struct {
+			Event struct {
+				Action string `json:"action"`
+			} `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("unmarshal runtime line: %v", err)
+		}
+		counts[record.Event.Action]++
+	}
+	return counts
 }
 
 func writeFile(t *testing.T, path, content string) {

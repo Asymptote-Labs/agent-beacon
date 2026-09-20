@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 	"github.com/spf13/cobra"
@@ -77,7 +80,7 @@ func runEndpointGrokSync(cmd *cobra.Command, args []string) error {
 		UserMode:    userMode,
 	}
 	if !endpointGrokOpts.print {
-		opts.StatePath = resolveGrokStatePath(endpointGrokOpts.statePath)
+		opts.StatePath = resolveGrokStatePath(endpointGrokOpts.statePath, userMode)
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointGrokOpts.logPath).EffectiveLogPath
 	}
 
@@ -136,7 +139,8 @@ func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := groksession.LoadState(resolveGrokStatePath(endpointGrokOpts.statePath))
+	statePath := resolveGrokStatePath(endpointGrokOpts.statePath, endpointUserMode())
+	state, err := groksession.LoadState(statePath)
 	if err != nil {
 		return err
 	}
@@ -145,7 +149,7 @@ func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
 		Collected int    `json:"collected"`
 		StatePath string `json:"state_path"`
 	}
-	out := status{Sessions: len(refs), StatePath: resolveGrokStatePath(endpointGrokOpts.statePath)}
+	out := status{Sessions: len(refs), StatePath: statePath}
 	for _, ref := range refs {
 		cursor := state.Sessions[ref.ID]
 		if cursor != nil && cursor.UpdatedAtMS >= ref.ModTimeUnixMS && cursor.Events > 0 {
@@ -162,9 +166,20 @@ func runEndpointGrokStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func resolveGrokStatePath(path string) string {
-	if path != "" {
+// resolveGrokStatePath picks the cursor file for the mode the sweep is running in.
+//
+// --user and --system already choose which runtime log the events are written to, so the cursor has
+// to follow. A system sweep that advanced the per-user cursor would record, in one operator's home
+// directory, that sessions had been collected into the machine's log -- and the two modes would
+// then each skip records the other wrote. A system sweep collects on behalf of the machine, so its
+// cursor belongs beside the system state, the same split resolveClineStatePath and
+// resolveFxStatePath make.
+func resolveGrokStatePath(path string, userMode bool) string {
+	if strings.TrimSpace(path) != "" {
 		return path
 	}
-	return groksession.DefaultStatePath()
+	if userMode {
+		return groksession.DefaultStatePath()
+	}
+	return filepath.Join(endpointconfig.BaseDir(false), "state", "grok-sessions.json")
 }

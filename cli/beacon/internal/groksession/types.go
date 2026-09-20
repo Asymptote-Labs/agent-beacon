@@ -91,9 +91,42 @@ type SessionData struct {
 	TerminalLogs map[string]string
 }
 
+// SourceKind names where a mapped event came from, so the collector can keep one cursor per
+// append-only source file instead of re-reading a session whole. A Grok session directory has two
+// of them -- chat_history.jsonl and events.jsonl -- and they grow independently, so a single
+// "how far did we get" number cannot describe both.
+type SourceKind string
+
+const (
+	// SourceSession marks an event derived from the session as a whole (summary.json plus the
+	// first turn_started row) rather than from a numbered line of either log. There is exactly
+	// one, session.started, and the cursor records it as a flag rather than a position.
+	SourceSession SourceKind = "session"
+	// SourceChat marks an event mapped from a chat_history.jsonl line.
+	SourceChat SourceKind = "chat"
+	// SourceLifecycle marks an event mapped from an events.jsonl line.
+	SourceLifecycle SourceKind = "lifecycle"
+)
+
+// MapOptions carries the collector's cursor into the mapper. The mapper always reads the whole
+// session -- a tool_result line names a tool call recorded in an earlier assistant line, so the
+// context has to be rebuilt every sweep -- but emits only what lies past the cursor.
+type MapOptions struct {
+	// MinChatLine is the last chat_history.jsonl line already written; lines at or below it are
+	// skipped.
+	MinChatLine int
+	// MinLifecycleLine is the last events.jsonl line already written.
+	MinLifecycleLine int
+	// SkipStarted suppresses session.started once it has been written for this session.
+	SkipStarted bool
+}
+
 type MappedEvent struct {
-	Event     schema.Event
-	SourceSeq int
+	Event schema.Event
+	// SourceKind and SourceLine locate the record this event was mapped from, which is what the
+	// collector advances its cursor over.
+	SourceKind SourceKind
+	SourceLine int
 }
 
 type Stats struct {
