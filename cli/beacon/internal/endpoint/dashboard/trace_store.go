@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -100,11 +99,12 @@ func ensureTraceStoreSchema(db *sql.DB) error {
 			indexed_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS traces (
-			id TEXT PRIMARY KEY,
+			id TEXT NOT NULL,
 			source_key TEXT NOT NULL,
 			summary_json TEXT NOT NULL,
 			updated_at TEXT,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (source_key, id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS traces_by_source_updated ON traces (source_key, updated_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS trace_events (
@@ -223,7 +223,7 @@ func insertTraceAggregate(tx *sql.Tx, sourceKey string, agg *traceAggregate, now
 		if event.Command != nil && toolName == "" {
 			toolName = "command"
 		}
-		if _, err := tx.Exec(`INSERT INTO trace_events (trace_id, event_id, event_number, event_type, tool_name, event_json, created_at)
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO trace_events (trace_id, event_id, event_number, event_type, tool_name, event_json, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			agg.summary.ID, event.ID, event.Number, event.Type, toolName, string(eventJSON), now); err != nil {
 			return err
@@ -682,18 +682,21 @@ func textMatches(body, pattern string, literal, caseSensitive bool) bool {
 		}
 		return strings.Contains(strings.ToLower(body), strings.ToLower(pattern))
 	}
-	expr := pattern
-	if !caseSensitive {
-		expr = "(?i)" + expr
-	}
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		if caseSensitive {
-			return strings.Contains(body, pattern)
+	if caseSensitive {
+		for _, term := range strings.Fields(pattern) {
+			if !strings.Contains(body, term) {
+				return false
+			}
 		}
-		return strings.Contains(strings.ToLower(body), strings.ToLower(pattern))
+		return true
 	}
-	return re.MatchString(body)
+	lowerBody := strings.ToLower(body)
+	for _, term := range strings.Fields(strings.ToLower(pattern)) {
+		if !strings.Contains(lowerBody, term) {
+			return false
+		}
+	}
+	return true
 }
 
 func sourcePlaceholders(sources []string) string {
