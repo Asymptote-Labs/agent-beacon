@@ -188,13 +188,19 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	// parsed out of it. They are different numbers -- one blank or half-written line makes the
 	// record count smaller than the line count -- and comparing the record count against a line
 	// cursor would read an ordinary malformed line as a rewrite and re-emit the whole file.
+	//
+	// A file that yielded no lines at all never resets anything. Zero is what an absent file reads
+	// as, and it is also what a file truncated to nothing reads as; treating that as a rewrite
+	// would throw away a good cursor over a log that has nothing in it to re-collect. Compaction
+	// is not missed by waiting: the check runs every sweep, so the first one that sees the
+	// rewritten file with content in it resets then.
 	minChat := cursor.ChatLine
 	minLifecycle := cursor.LifecycleLine
-	if data.ChatLines < cursor.ChatLine {
+	if data.ChatLines > 0 && data.ChatLines < cursor.ChatLine {
 		minChat = 0
 		cursor.ChatLine = 0
 	}
-	if data.LifecycleLines < cursor.LifecycleLine {
+	if data.LifecycleLines > 0 && data.LifecycleLines < cursor.LifecycleLine {
 		minLifecycle = 0
 		cursor.LifecycleLine = 0
 	}

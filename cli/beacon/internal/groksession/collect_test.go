@@ -500,8 +500,121 @@ func TestAMalformedLineIsNotMistakenForARewrite(t *testing.T) {
 // check must NOT be made against.
 func readChatRecords(t *testing.T, path string) []ChatMessage {
 	t.Helper()
-	records, _, _ := readJSONLines[ChatMessage](path)
+	records, _, _, err := readJSONLines[ChatMessage](path)
+	if err != nil {
+		t.Fatalf("readJSONLines(%s): %v", path, err)
+	}
 	return records
+}
+
+// A sweep that cannot read one of a session's logs must not be mistaken for a sweep that read a
+// short one.
+//
+// A line past the scanner's buffer limit -- Grok writes command output and file contents into the
+// chat history, so it happens -- stops the scan partway. Counting that as one malformed line would
+// drop the rest of the file and report a line count below the cursor, which the shrink check reads
+// as a compacted rewrite: it would clear the cursor and append the whole session to the runtime log
+// again on the next sweep that could read it.
+func TestAnUnreadableLogDoesNotResetTheCursor(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := writeFixtureSession(t, root, "/tmp/grok project", "session-1")
+	chatPath := filepath.Join(sessionDir, "chat_history.jsonl")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	opts := CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	first, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("first CollectOnce returned error: %v", err)
+	}
+	if first.EventsEmitted == 0 {
+		t.Fatal("first CollectOnce emitted no events")
+	}
+	collected := countLines(t, logPath)
+
+	// A line the scanner cannot hold, with an ordinary record after it.
+	appendLine(t, chatPath, `{"type":"user","content":"`+strings.Repeat("x", 2*1024*1024)+`"}`)
+	appendLine(t, chatPath, `{"type":"user","content":[{"type":"text","text":"after the huge line"}]}`)
+	touchNewer(t, sessionDir)
+
+	// The sweep says it failed rather than reporting a successful read of a file it could not
+	// finish, and writes nothing.
+	if _, err := CollectOnce(opts); err == nil {
+		t.Fatal("CollectOnce reported success for a session whose chat log could not be read through")
+	}
+	if lines := countLines(t, logPath); lines != collected {
+		t.Fatalf("runtime lines = %d, want %d -- nothing should have been written", lines, collected)
+	}
+
+	// Grok replaces the oversized line with an ordinary one, in place, so the lines after it keep
+	// their numbers.
+	rewriteLine(t, chatPath, 5, `{"type":"user","content":[{"type":"text","text":"the replaced line"}]}`)
+	touchNewer(t, sessionDir)
+
+	third, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("CollectOnce after the log became readable: %v", err)
+	}
+	if third.EventsEmitted != 2 {
+		t.Fatalf("sweep after the read failure emitted %d events, want the 2 new lines -- a reset cursor would re-emit the session", third.EventsEmitted)
+	}
+	if actions := logActions(t, logPath); actions["session.started"] != 1 {
+		t.Fatalf("session.started written %d times, want 1 -- the cursor was reset", actions["session.started"])
+	}
+}
+
+// A log that reads as zero lines must not clear the cursor either. Zero is what an absent file
+// reads as, what a file truncated to nothing reads as, and what a sweep sees for a moment while
+// Grok replaces one. Treating it as a compacted rewrite would throw away a good cursor over a log
+// with nothing in it to re-collect, and the session would be appended to the runtime log a second
+// time once its content came back.
+func TestAnEmptyLogDoesNotResetTheCursor(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := writeFixtureSession(t, root, "/tmp/grok project", "session-1")
+	chatPath := filepath.Join(sessionDir, "chat_history.jsonl")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	opts := CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
+	first, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("first CollectOnce returned error: %v", err)
+	}
+	if first.EventsEmitted == 0 {
+		t.Fatal("first CollectOnce emitted no events")
+	}
+	saved, err := os.ReadFile(chatPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collected := countLines(t, logPath)
+
+	// The chat log is momentarily empty.
+	writeFile(t, chatPath, "")
+	touchNewer(t, sessionDir)
+
+	second, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("sweep over the empty log returned error: %v", err)
+	}
+	if second.EventsEmitted != 0 {
+		t.Fatalf("sweep over the empty log emitted %d events, want none", second.EventsEmitted)
+	}
+
+	// Its content comes back unchanged.
+	writeFile(t, chatPath, string(saved))
+	touchNewer(t, sessionDir)
+
+	third, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("sweep after the log came back returned error: %v", err)
+	}
+	if third.EventsEmitted != 0 {
+		t.Fatalf("sweep after the log came back emitted %d events, want none -- the cursor was reset", third.EventsEmitted)
+	}
+	if lines := countLines(t, logPath); lines != collected {
+		t.Fatalf("runtime lines = %d, want %d -- the session was collected twice", lines, collected)
+	}
 }
 
 func urlPathEscape(path string) string {

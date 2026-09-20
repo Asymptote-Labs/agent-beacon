@@ -100,9 +100,17 @@ func (s *Store) Read(ref SessionRef) (SessionData, Stats, error) {
 			data.Ref.Workspace = prompt.WorkingDirectory
 		}
 	}
-	data.Chat, data.ChatLines, stats.Malformed = readJSONLines[ChatMessage](filepath.Join(ref.SourcePath, "chat_history.jsonl"))
-	lifecycle, lifecycleLines, malformed := readJSONLines[LifecycleEvent](filepath.Join(ref.SourcePath, "events.jsonl"))
+	chat, chatLines, malformed, err := readJSONLines[ChatMessage](filepath.Join(ref.SourcePath, "chat_history.jsonl"))
+	stats.Malformed = malformed
+	if err != nil {
+		return data, stats, err
+	}
+	data.Chat, data.ChatLines = chat, chatLines
+	lifecycle, lifecycleLines, malformed, err := readJSONLines[LifecycleEvent](filepath.Join(ref.SourcePath, "events.jsonl"))
 	stats.Malformed += malformed
+	if err != nil {
+		return data, stats, err
+	}
 	data.Lifecycle = lifecycle
 	data.LifecycleLines = lifecycleLines
 	if ref.Summary == nil {
@@ -129,16 +137,25 @@ func readJSONFile[T any](path string) (*T, error) {
 }
 
 // readJSONLines parses one of a session's JSONL files, returning the records, the number of lines
-// it scanned, and how many of them did not parse.
+// it scanned, how many of them did not parse, and whether the file could be read at all.
 //
 // The line count is reported separately from len(records) and the two are not interchangeable: a
 // blank or unparseable line advances the count without producing a record. The collector compares
 // the count against its line cursor to notice a file that was rewritten shorter, and using the
 // record count there would read a single malformed line as a rewrite.
-func readJSONLines[T any](path string) ([]T, int, int) {
+//
+// A file that is simply not there is not an error -- events.jsonl is optional, and a session with
+// no lifecycle log is an ordinary session, not a broken one. Any other open failure is returned, so
+// a sweep that could not read a log says so instead of reporting a successful read of nothing: the
+// collector decides what to do with its cursor from the number of lines a file holds, and a read
+// failure that looks like an empty file is a read failure that looks like a rewrite.
+func readJSONLines[T any](path string) ([]T, int, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, 0
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, 0, 0, nil
+		}
+		return nil, 0, 0, fmt.Errorf("read %s: %w", path, err)
 	}
 	defer f.Close()
 	var out []T
@@ -170,10 +187,15 @@ func readJSONLines[T any](path string) ([]T, int, int) {
 		}
 		out = append(out, item)
 	}
+	// A scan that stops on an error is a read failure, not a malformed line. It leaves lineNo short
+	// of the file's real length -- a line over the buffer limit, an I/O error partway through --
+	// and a short line count is exactly what the collector reads as a compacted rewrite. Counting
+	// it as one bad line would drop the rest of the file silently and invite that reset, so the
+	// sweep fails for this session instead and its cursor is left untouched.
 	if err := scanner.Err(); err != nil {
-		malformed++
+		return out, lineNo, malformed, fmt.Errorf("read %s: %w", path, err)
 	}
-	return out, lineNo, malformed
+	return out, lineNo, malformed, nil
 }
 
 func readTerminalLogs(dir string, logs map[string]string) error {
