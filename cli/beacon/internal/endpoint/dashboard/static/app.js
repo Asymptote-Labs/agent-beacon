@@ -1746,7 +1746,7 @@ function closeDrawer() {
 
 function renderLoading() {
   setText("#result-meta", "Loading...");
-  const columns = isSessionDetailPage ? 11 : (isSessionsPage ? 7 : 8);
+  const columns = isSessionDetailPage ? 11 : (isSessionsPage ? 9 : 8);
   if ($("#events")) $("#events").innerHTML = `<tr><td colspan="${columns}">Loading ${isSessionsPage ? "sessions" : "events"}...</td></tr>`;
 }
 
