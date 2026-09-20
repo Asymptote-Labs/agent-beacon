@@ -151,8 +151,23 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	return summary, nil
 }
 
+// collectTrace writes whatever this trace still owes the runtime log.
+//
+// What Beacon has already seen is tracked by event id rather than by how far it read, because
+// OpenCode's store is not an append-only file. A tool part is rewritten in place when the call
+// returns, and a record's position is recomputed on every read -- a part that only becomes mappable
+// later, such as an assistant text part still streaming in, renumbers every record after it. A
+// high-water mark over those positions both skips the completion of a tool call, which is the event
+// carrying its output, exit code and diff, and re-emits whatever the renumbering shifted.
+//
+// Event ids are derived from the record's own identity (see mapper.append), so the same action maps
+// to the same id on every sweep and the set below is all the collector needs to tell a new action
+// from one already written.
 func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions, summary *Summary) (bool, error) {
 	cursor := state.cursor(ref)
+	// Only a trace whose store timestamp moved backwards is skipped outright. An unchanged
+	// timestamp is not evidence that nothing changed: OpenCode finishing a tool call rewrites the
+	// part without necessarily touching the session's time_updated.
 	if ref.UpdatedAtUnixMS > 0 && ref.UpdatedAtUnixMS < cursor.UpdatedAtMS {
 		return false, nil
 	}
@@ -161,36 +176,35 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 		return false, err
 	}
 	mapped := MapTrace(ref, records, MapOptions{})
-	if len(mapped) == 0 {
-		cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
-		return false, nil
-	}
 	if cursor.Emitted == nil {
 		cursor.Emitted = make(map[string]bool, len(mapped))
 	}
 	changed := false
+	live := make(map[string]bool, len(mapped))
 	for _, item := range mapped {
-		eid := item.Event.Event.ID
-		if cursor.Emitted[eid] {
+		id := item.Event.Event.ID
+		live[id] = true
+		if cursor.Emitted[id] {
 			continue
 		}
 		if err := emit(item.Event, opts); err != nil {
+			// The ids already written stay recorded, so a retry resumes rather than doubling the
+			// log. The trace's timestamp is left alone so the next sweep comes back for the rest.
 			return changed, err
 		}
-		cursor.Emitted[eid] = true
+		cursor.Emitted[id] = true
 		if item.SourceOrder > cursor.LastOrder {
 			cursor.LastOrder = item.SourceOrder
 		}
 		summary.EventsEmitted++
 		changed = true
 	}
-	current := make(map[string]bool, len(mapped))
-	for _, item := range mapped {
-		current[item.Event.Event.ID] = true
-	}
-	for eid := range cursor.Emitted {
-		if !current[eid] {
-			delete(cursor.Emitted, eid)
+	// Ids the trace no longer produces are dropped, so the cursor stays proportional to the session
+	// OpenCode is actually holding rather than to everything it has ever held. Compaction, which
+	// removes messages outright, is the case that makes this matter.
+	for id := range cursor.Emitted {
+		if !live[id] {
+			delete(cursor.Emitted, id)
 		}
 	}
 	cursor.UpdatedAtMS = ref.UpdatedAtUnixMS

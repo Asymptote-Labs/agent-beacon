@@ -3,7 +3,10 @@ package opencodesession
 import (
 	"database/sql"
 	"encoding/json"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -103,4 +106,57 @@ func insertJSON(t *testing.T, db *sql.DB, query string, args ...interface{}) {
 	}
 	args[last] = string(data)
 	mustExec(t, db, query, args...)
+}
+
+func TestFileURLKeepsAWindowsDriveLetterOutOfTheAuthority(t *testing.T) {
+	// The inputs are already slash-separated, which is what filepath.ToSlash hands fileURL, so the
+	// Windows shapes are exercised on every platform rather than only on the Windows runner.
+	for _, tc := range []struct {
+		name, slashed, want string
+	}{
+		{"windows drive", "C:/Users/me/AppData/Roaming/opencode/opencode.db", "file:///C:/Users/me/AppData/Roaming/opencode/opencode.db"},
+		{"posix", "/home/me/.config/opencode/opencode.db", "file:///home/me/.config/opencode/opencode.db"},
+		{"unc share", "//server/share/opencode/opencode.db", "file://server/share/opencode/opencode.db"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := fileURL(tc.slashed)
+			if got := u.String(); got != tc.want {
+				t.Fatalf("fileURL(%q) = %q, want %q", tc.slashed, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSQLiteFileURIAsksForReadOnly(t *testing.T) {
+	uri := sqliteFileURI(filepath.Join(t.TempDir(), "opencode.db"))
+	if !strings.HasPrefix(uri, "file:///") {
+		// Without the file: prefix modernc.org/sqlite drops the query, and the driver's own flags
+		// would open the store READWRITE|CREATE.
+		t.Fatalf("uri = %q, want a file:// URI", uri)
+	}
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "" {
+		t.Fatalf("uri host = %q, want none", parsed.Host)
+	}
+	if mode := parsed.Query().Get("mode"); mode != "ro" {
+		t.Fatalf("mode = %q, want ro", mode)
+	}
+}
+
+func TestOpenSQLiteReadOnlyDoesNotCreateTheDatabase(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "opencode.db")
+	db, err := openSQLiteReadOnly(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Ping(); err == nil {
+		t.Fatal("ping on a missing database succeeded; mode=ro is not reaching sqlite")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("read-only open created %s", missing)
+	}
 }

@@ -22,9 +22,10 @@ type MappedEvent struct {
 	Event       schema.Event
 }
 
-type MapOptions struct {
-	MinOrder int
-}
+// MapOptions is deliberately empty: a trace is mapped whole on every read and the collector decides
+// what is new by event id. Filtering here by how far the last sweep read would reintroduce exactly
+// what that dedup exists to avoid -- see collectTrace.
+type MapOptions struct{}
 
 func MapTrace(ref TraceRef, records []Record, opts MapOptions) []MappedEvent {
 	m := &mapper{ref: ref, opts: opts}
@@ -41,9 +42,6 @@ type mapper struct {
 }
 
 func (m *mapper) consume(record Record) {
-	if record.Order <= m.opts.MinOrder {
-		return
-	}
 	switch record.Type {
 	case "user_message":
 		m.emitPrompt(record)
@@ -261,9 +259,8 @@ func applyCommand(ev *schema.Event, record Record) {
 	}
 	if metadata := mapFromAny(record.Output); len(metadata) > 0 {
 		if inner := mapFromAny(metadata["metadata"]); len(inner) > 0 {
-			if code := intFromAny(firstMapValue(inner, "exit", "exit_code", "exitCode", "status")); code != 0 || hasAnyKey(inner, "exit", "exit_code", "exitCode", "status") {
-				v := int(code)
-				info.ExitCode = &v
+			if code, ok := exitCodeFromAny(firstMapValue(inner, "exit", "exit_code", "exitCode", "status")); ok {
+				info.ExitCode = &code
 			}
 		}
 	}
@@ -326,6 +323,12 @@ func classifyFileOperation(name string) string {
 	}
 }
 
+// append names the event by the record's own identity rather than by where the record happened to
+// sit in this read. Order is recomputed on every sweep and is only assigned to records that map, so
+// a part that becomes mappable later -- an assistant text part still streaming in, say -- renumbers
+// every record after it. With the position in the id, that renumbering renamed events the log had
+// already seen, and the collector's dedup could neither recognise them nor place the completion of
+// a tool call beside its invocation.
 func (m *mapper) append(record Record, suffix string, ev schema.Event) {
 	dedupID := fmt.Sprintf("%s:%s:%s:%s", m.ref.Kind, m.ref.ID, record.NativeID, suffix)
 	ev.Event.ID = opencodeEventID(dedupID)

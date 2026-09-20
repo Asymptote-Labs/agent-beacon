@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -58,6 +59,46 @@ func intFromAny(value interface{}) int64 {
 	}
 }
 
+// exitCodeFromAny narrows a runtime-reported exit status to the int the event schema carries.
+//
+// The value arrives as untyped JSON, so it is neither known to be a number nor known to fit an int:
+// OpenCode's tool metadata reuses these keys for string statuses too, and a 32-bit build cannot hold
+// every int64. Both of those would otherwise land in the log as a real exit code -- a truncated one,
+// or a 0 that reads as success for a tool that failed -- so anything that is not an exit code a
+// process could actually report is returned as absent instead.
+func exitCodeFromAny(value interface{}) (int, bool) {
+	var code int64
+	switch v := value.(type) {
+	case int:
+		code = int64(v)
+	case int64:
+		code = v
+	case float64:
+		if v != math.Trunc(v) {
+			return 0, false
+		}
+		code = int64(v)
+	case json.Number:
+		parsed, err := strconv.ParseInt(v.String(), 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		return int(parsed), true
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(v), 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		return int(parsed), true
+	default:
+		return 0, false
+	}
+	if code < math.MinInt32 || code > math.MaxInt32 {
+		return 0, false
+	}
+	return int(code), true
+}
+
 func floatFromAny(value interface{}) float64 {
 	switch v := value.(type) {
 	case float64:
@@ -95,15 +136,6 @@ func firstMapValue(m map[string]interface{}, keys ...string) interface{} {
 		}
 	}
 	return nil
-}
-
-func hasAnyKey(m map[string]interface{}, keys ...string) bool {
-	for _, key := range keys {
-		if _, ok := m[key]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func tokenUsageFromAny(value interface{}) TokenUsage {

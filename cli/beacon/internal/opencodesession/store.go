@@ -634,16 +634,49 @@ func legacyProjectDirectory(path string) string {
 }
 
 func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	uriPath := filepath.ToSlash(path)
-	if !strings.HasPrefix(uriPath, "/") {
-		uriPath = "/" + uriPath
+	return sql.Open("sqlite", sqliteFileURI(path))
+}
+
+// sqliteFileURI renders an OS path as the file: URI the driver needs to honour mode=ro.
+//
+// The URI form is not optional: modernc.org/sqlite only forwards query parameters to SQLite when
+// the DSN starts with "file:", and it opens every database with READWRITE|CREATE flags, so mode=ro
+// is the one thing keeping a read of OpenCode's store from writing to it.
+//
+// Handing url.URL a raw OS path does not produce that URI on Windows. A path like
+// C:\Users\me\opencode.db has no leading slash, so URL.String emits "file://C:%5CUsers%5C..." and
+// SQLite reads "C:" as the URI's authority -- every list and read then fails, and OpenCode sync
+// collects nothing. The path is made absolute, switched to forward slashes, and split into the host
+// and path a file: URI actually has.
+func sqliteFileURI(path string) string {
+	abs := path
+	if resolved, err := filepath.Abs(path); err == nil {
+		abs = resolved
 	}
-	u := url.URL{Scheme: "file", Path: uriPath}
+	u := fileURL(filepath.ToSlash(abs))
 	q := u.Query()
 	q.Set("mode", "ro")
 	q.Set("_pragma", "query_only(1)")
 	u.RawQuery = q.Encode()
-	return sql.Open("sqlite", u.String())
+	return u.String()
+}
+
+// fileURL splits an already slash-separated path into the host and path of a file: URL.
+//
+// A UNC path (\\server\share\opencode.db, slashed to //server/share/opencode.db) names a host, and
+// is the one case where a file: URI has one. Everything else is a plain local path and gets the
+// leading slash that keeps a Windows drive letter inside the path instead of in the authority.
+func fileURL(slashed string) url.URL {
+	if rest, ok := strings.CutPrefix(slashed, "//"); ok {
+		host, remainder, _ := strings.Cut(rest, "/")
+		if host != "" {
+			return url.URL{Scheme: "file", Host: host, Path: "/" + remainder}
+		}
+	}
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return url.URL{Scheme: "file", Path: slashed}
 }
 
 func sqliteTableExists(db *sql.DB, table string) bool {

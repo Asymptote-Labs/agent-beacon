@@ -31,7 +31,7 @@ Both subcommands accept:
 | Flag | Description |
 |------|-------------|
 | `--data-dir <path>` | OpenCode data directory or `opencode.db` path. Defaults to `~/.config/opencode` |
-| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/opencode-sessions.json` |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/opencode-sessions.json`, or a file beside the system runtime log with `--system` |
 | `--json` | Print the result as JSON |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths |
@@ -62,6 +62,8 @@ beacon endpoint opencode sync --watch --interval 5m
 ```
 
 Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the user context that owns OpenCode's data directory.
+
+A tool call that OpenCode has started but not finished is written twice: once as the invocation, and again with its output, exit code, and diff when it returns. Beacon emits both. The invocation arrives as `tool.invoked` on the sweep that first sees it, and the completion arrives on a later sweep as `command.executed`, `file.modified`, or whichever action the finished call turns out to be. OpenCode rewrites the record in place for the second one, so the cursor tracks the events it has already written by id rather than how far it read: a repeated sweep over an unchanged session writes nothing, and one over a session whose call has since returned writes only the completion.
 
 ## Status
 
