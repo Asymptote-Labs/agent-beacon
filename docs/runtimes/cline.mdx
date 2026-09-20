@@ -18,7 +18,7 @@ Before enabling Cline telemetry, make sure:
 - Asymptote's Cline plugin is installed with `beacon endpoint hooks install --harness cline`.
 - Cline is restarted after plugin install or removal so new sessions load the updated plugin. In the IDE hosts this means reloading the window.
 
-## Collection path
+## Collection paths
 
 Asymptote installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required. That is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
 
@@ -26,11 +26,21 @@ The plugin forwards `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` hook 
 
 The integration is plugin-based. Cline's own OpenTelemetry export is neither configured nor required by Beacon, and Cline's hosted prompt-storage feature is not used.
 
+Beacon can also recover Cline activity from Cline's committed local session stores:
+
+```bash title="Sync historical Cline sessions"
+beacon endpoint cline sync
+```
+
+The sync path reads `~/.cline/data/tasks`, `~/.cline/tasks`, Cline's VS Code global-storage task directory, `~/.cline/data/sessions`, and `~/.cline/kanban/workspaces`. It is local and offline, emits events with `harness.collection_method=poll`, and is useful for historical sessions or sessions that ran before the Beacon plugin was installed. Use `--print` to inspect mapped events without writing the runtime log or advancing the cursor.
+
 ## Discovery and status
 
 Asymptote detects Cline through the `~/.cline` directory, treating a `cline` executable on `PATH` as an additional signal rather than the deciding one. A binary check alone would report "not detected" for the IDE hosts, which are the majority of installs.
 
 Use `beacon endpoint hooks status --harness cline` to inspect Cline plugin status. Status reports installed only when the plugin references the hook binary that is actually present, so a plugin left behind by a removed or relocated install is reported as not installed rather than as working telemetry.
+
+Use `beacon endpoint cline status` to inspect Cline session stores and how much of each discovered trace Beacon has already synced.
 
 ## Install or configuration support
 
@@ -53,6 +63,7 @@ beacon endpoint hooks install --harness cline
 | Model and usage | Model and provider (recorded as `model` and `gen_ai.provider.name`), token counts, cache reads, and runtime-reported cost, recorded once per task |
 | Approval telemetry | Not supported. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
+| Historical session sync | Supported through `beacon endpoint cline sync`; marked as poll collection |
 | MDM deployment | Supported for the endpoint agent. Cline plugins are installed separately in the logged-in user's context |
 
 Cline addresses files relative to the workspace root. Beacon resolves those paths against the workspace before writing them, so a Cline file event is comparable with the same file seen through another runtime and matches threat rules written against absolute paths. A path that is already absolute is left alone, and a relative path with no resolvable workspace root stays relative rather than being joined to a guessed root.
@@ -62,6 +73,8 @@ A cancelled task ends rather than fails. Cline fires its cancel hook for the cle
 Cancels and failures reach Beacon two ways: the file-based hooks name them in the hook itself, and the plugin reports them as a status on its run-completion handler. Both are read, so the distinction holds on the surface Beacon installs. A run that reports no recognized outcome is recorded as a completion.
 
 Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary would double every Cline task's totals. Cost is recorded only as Cline reports it. Beacon never derives cost from a local price table.
+
+The session sync path reads what Cline has already committed to disk. It can recover prompts, assistant messages, agent reasoning, tool calls/results, command/file/MCP-shaped tool activity, model ids, and token counts where the stored history carries them. It cannot hold or deny tool calls, and it does not imply that Beacon observed the event at runtime.
 
 ## Data handling
 
