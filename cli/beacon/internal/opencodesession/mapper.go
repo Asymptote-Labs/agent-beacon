@@ -327,7 +327,7 @@ func classifyFileOperation(name string) string {
 }
 
 func (m *mapper) append(record Record, suffix string, ev schema.Event) {
-	dedupID := fmt.Sprintf("%s:%s:%d:%s:%s", m.ref.Kind, m.ref.ID, record.Order, record.NativeID, suffix)
+	dedupID := fmt.Sprintf("%s:%s:%s:%s", m.ref.Kind, m.ref.ID, record.NativeID, suffix)
 	ev.Event.ID = opencodeEventID(dedupID)
 	m.out = append(m.out, MappedEvent{DedupID: dedupID, SourceOrder: record.Order, Event: ev})
 }
