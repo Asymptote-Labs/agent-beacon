@@ -366,6 +366,7 @@ func init() {
 	endpointCmd.AddCommand(endpointRepairCmd)
 	endpointCmd.AddCommand(endpointDashboardCmd)
 	endpointCmd.AddCommand(endpointOnboardingCmd)
+	endpointCmd.AddCommand(endpointTracesCmd)
 	for _, c := range buildDestinationCommands() {
 		endpointCmd.AddCommand(c)
 	}
@@ -386,6 +387,11 @@ func init() {
 	endpointHooksCmd.AddCommand(endpointHooksStatusCmd)
 	endpointHooksCmd.AddCommand(endpointHooksRepairInstalledCmd)
 	endpointUserConfigCmd.AddCommand(endpointUserConfigRepairInstalledCmd)
+	endpointTracesCmd.AddCommand(endpointTracesStatusCmd)
+	endpointTracesCmd.AddCommand(endpointTracesReindexCmd)
+	endpointTracesCmd.AddCommand(endpointTracesListCmd)
+	endpointTracesCmd.AddCommand(endpointTracesSearchCmd)
+	endpointTracesCmd.AddCommand(endpointTracesShowCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkPrintConfigCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkSetupCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkStatusCmd)
@@ -398,7 +404,7 @@ func init() {
 	endpointVSCodeCmd.AddCommand(endpointVSCodeStatusCmd)
 	endpointVSCodeCmd.AddCommand(endpointVSCodeValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointInventoryInstallDaemonCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointInventoryInstallDaemonCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, endpointTracesStatusCmd, endpointTracesReindexCmd, endpointTracesListCmd, endpointTracesSearchCmd, endpointTracesShowCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -443,6 +449,23 @@ func init() {
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.dashboardAddr, "addr", dashboard.DefaultAddr, "Local dashboard listen address")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.dashboardOpen, "open", false, "Open the dashboard in a browser")
+
+	for _, c := range []*cobra.Command{endpointTracesStatusCmd, endpointTracesReindexCmd, endpointTracesListCmd, endpointTracesSearchCmd, endpointTracesShowCmd} {
+		c.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print machine-readable JSON")
+	}
+	for _, c := range []*cobra.Command{endpointTracesListCmd, endpointTracesSearchCmd, endpointTracesShowCmd} {
+		c.Flags().IntVar(&endpointTraceOpts.limit, "limit", 100, "Limit returned traces or events")
+		c.Flags().StringVar(&endpointTraceOpts.eventTypes, "event-type", "", "Filter trace events by comma-separated type")
+	}
+	endpointTracesListCmd.Flags().StringVarP(&endpointTraceOpts.query, "query", "q", "", "Filter traces by text")
+	endpointTracesListCmd.Flags().IntVar(&endpointTraceOpts.page, "page", 1, "Page number for trace listing")
+	endpointTracesListCmd.Flags().StringVar(&endpointTraceOpts.state, "state", "", "Filter by sharing state")
+	endpointTracesListCmd.Flags().StringVar(&endpointTraceOpts.visibility, "visibility", "", "Filter by sharing visibility")
+	endpointTracesSearchCmd.Flags().StringVar(&endpointTraceOpts.resultLevel, "result-level", "trace", "Return trace or event results")
+	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.offset, "offset", 1, "Start at this event number")
+	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.aroundEvent, "around-event", 0, "Center output on this event number")
+	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.before, "before", 3, "Events before --around-event")
+	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.after, "after", 3, "Events after --around-event")
 
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print discovery as JSON")
 	endpointDiscoverCmd.Flags().BoolVar(&endpointOpts.allTargets, "all", false, "Discover all supported runtime targets")
