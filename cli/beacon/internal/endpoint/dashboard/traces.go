@@ -67,6 +67,9 @@ type traceAggregate struct {
 }
 
 func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
+	if result, err := openTraceStore(path).List(query); err == nil {
+		return result, nil
+	}
 	traces, err := readTraceAggregates(path, withoutFreeText(query.EventQuery))
 	if err != nil {
 		return TraceListResultV1{}, err
@@ -107,6 +110,9 @@ func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
 }
 
 func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
+	if result, err := openTraceStore(path).Search(query, traceSearchOptions{}); err == nil {
+		return result, nil
+	}
 	if query.ResultLevel == "" {
 		query.ResultLevel = "trace"
 	}
@@ -164,6 +170,9 @@ func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
 }
 
 func ShowTrace(path, id string, query TraceQuery) (TraceShowResultV1, bool, error) {
+	if result, ok, err := openTraceStore(path).Show(id, query); err == nil {
+		return result, ok, nil
+	}
 	traces, err := readTraceAggregates(path, withoutFreeText(query.EventQuery))
 	if err != nil {
 		return TraceShowResultV1{}, false, err
@@ -786,13 +795,10 @@ func filterTraceEvents(events []TraceEventV1, eventTypes []string) []TraceEventV
 	if len(eventTypes) == 0 {
 		return events
 	}
-	allowed := map[string]bool{}
-	for _, eventType := range eventTypes {
-		allowed[strings.ToLower(strings.TrimSpace(eventType))] = true
-	}
+	allowed := traceEventTypeSet(eventTypes)
 	out := make([]TraceEventV1, 0, len(events))
 	for _, event := range events {
-		if allowed[strings.ToLower(event.Type)] {
+		if allowed[strings.ToLower(event.Type)] || allowed[traceEventTypeAlias(event.Type)] {
 			out = append(out, event)
 		}
 	}

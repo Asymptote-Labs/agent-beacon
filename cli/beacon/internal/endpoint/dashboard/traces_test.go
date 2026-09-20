@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -373,6 +374,55 @@ func TestFreeTextSelectsTracesWithoutDroppingTheirEvents(t *testing.T) {
 	}
 	if show.Range.TotalEvents != 3 || len(show.Events) != 3 {
 		t.Fatalf("show = range %#v events %d, want the full 3-event timeline", show.Range, len(show.Events))
+	}
+}
+
+func TestTraceStoreIndexesAndRefreshesRuntimeLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	prompt := testSchemaEvent("2026-06-11T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	prompt.Event.ID = "evt-prompt"
+	prompt.Session = &schema.SessionInfo{ID: "s1", WorkingDirectory: "/repo/a"}
+	prompt.Prompt = &schema.PromptInfo{Text: "Index local traces"}
+	command := testSchemaEvent("2026-06-11T10:01:00Z", "cursor", "command.executed", "command", "repo-a")
+	command.Event.ID = "evt-command"
+	command.Session = prompt.Session
+	command.Command = &schema.CommandInfo{Command: "go test ./internal/endpoint/dashboard"}
+	writeTestLog(t, path, marshalEvents(t, prompt, command)...)
+
+	status, err := TraceStoreStatus(path)
+	if err != nil {
+		t.Fatalf("TraceStoreStatus returned error: %v", err)
+	}
+	if status.Path != filepath.Join(filepath.Dir(filepath.Dir(path)), "traces.db") {
+		t.Fatalf("trace store path = %q", status.Path)
+	}
+	if status.Traces != 1 || status.Events != 2 || status.IndexRows != 3 {
+		t.Fatalf("status = %#v, want 1 trace, 2 events, 3 index rows", status)
+	}
+
+	results, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "dashboard"}, ResultLevel: "event", Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchTraces returned error: %v", err)
+	}
+	if results.TotalMatched != 1 || len(results.Events) != 1 || results.Events[0].Event.ID != "evt-command" {
+		t.Fatalf("indexed search results = %#v", results)
+	}
+
+	later := testSchemaEvent("2026-06-11T10:02:00Z", "cursor", "file.modified", "file", "repo-a")
+	later.Event.ID = "evt-file"
+	later.Session = prompt.Session
+	later.File = &schema.FileInfo{Path: "trace_store.go", Operation: "modify"}
+	writeTestLog(t, path, marshalEvents(t, prompt, command, later)...)
+
+	status, err = TraceStoreStatus(path)
+	if err != nil {
+		t.Fatalf("TraceStoreStatus after refresh returned error: %v", err)
+	}
+	if status.Events != 3 || status.IndexRows != 4 {
+		t.Fatalf("refreshed status = %#v, want 3 events and 4 index rows", status)
 	}
 }
 
