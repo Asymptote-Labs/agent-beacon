@@ -11,7 +11,15 @@ Asymptote supports [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agen
 Prime Agent is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono), as [Oh My Pi](/runtimes/oh-my-pi) and [Senpi](/runtimes/senpi) are. All four are supported separately and recorded under their own harness names, because they are separately installed products that one machine can run side by side.
 </Note>
 
-Prime Agent fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/cli/supported-runtimes-opencode) and [Cline](/cli/supported-runtimes-cline) integrations.
+Prime Agent fits neither of Asymptote's two usual live integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the live integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/cli/supported-runtimes-opencode) and [Cline](/cli/supported-runtimes-cline) integrations.
+
+Asymptote can also read Prime Agent's committed JSONL session store after the fact:
+
+```bash
+beacon endpoint prime sync
+```
+
+That poll path is local and offline, checkpointed by file and line number, and marks every event `harness.collection_method=poll`. It complements the extension rather than replacing it: the extension sees live tool details as Prime runs, while the poll path can backfill sessions that happened before the extension was installed or sessions where the extension was not loaded.
 
 ```bash
 beacon endpoint hooks install --harness prime
@@ -52,7 +60,7 @@ The project path keeps the `agent` segment. Prime Agent's config directory name 
 
 Asymptote identifies its own extension file by the marker `beacon-managed-prime-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry. The marker is distinct from Pi's and Oh My Pi's, so a file found at any of the three paths is attributed to the runtime that actually loads it.
 
-Prime Agent has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+Prime Agent has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime. The poll path reads JSONL transcripts from `~/.prime/agent/sessions` and subagent artifacts from `~/.prime/agent/session-artifacts`; if `PRIME_AGENT_CODING_AGENT_DIR` is set, Asymptote reads `sessions` and `session-artifacts` below that directory, matching the runtime's user-level agent directory override. The cursor lives in Asymptote state, not in Prime Agent's directory.
 
 ## Discovery and status
 
@@ -98,6 +106,7 @@ Install writes one file and refuses to touch a `beacon.ts` it did not write, so 
 | Runtime discovery | Supported through executable and `~/.prime/agent` detection, managed extension path, and telemetry status |
 | Harness attribution | Supported. `prime`, `prime_agent`, `prime-agent`, `primeagent`, `prime_cli`, `prime-cli`, `prime_intellect`, and `prime-intellect` all normalize to `prime_agent` |
 | Extension install, status, uninstall, and repair | Supported |
+| Session-store sync | Supported through `beacon endpoint prime sync`, with `--print`, `--watch`, `--sessions-dir`, and `--artifacts-dir` |
 | Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped — a fork and a resume both produce a session with history behind it |
 | Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
 | Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
@@ -125,6 +134,7 @@ The extension itself sends nothing over the network. It spawns the local `beacon
 - **No per-cell exit code.** A Python cell does not have one. The runtime reports a `status` of `ok`, `error`, or `aborted`, which Beacon records verbatim; deriving a `0`/`1` from it would put a shell's vocabulary on something that is not a shell. An interrupted cell is recorded as aborted rather than failed, so a Ctrl+C does not read as an agent error.
 - **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Prime Agent. Its blocking `tool_call` handler makes it a viable target for that seam later.
 - **Streaming events are not collected.** The extension subscribes to seven of Prime Agent's event types and ignores the rest — provider request and response internals, streaming message updates, compaction, refinement and tree-navigation signals, and TUI plumbing. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
+- **Poll sync is after-the-fact.** `beacon endpoint prime sync` can recover committed prompts, assistant messages and reasoning, tool calls and results, context attachments, errors, compactions, refinement state updates, and subagent artifact files from Prime Agent's JSONL store. It cannot block or delay anything, and it does not have every live extension context field. Use it as backfill or scheduled catch-up, not as an enforcement surface.
 - **`.agents` and other hosts.** Prime Agent's extension directory is its own (`.prime/agent/extensions`), not a shared one, so unlike [goose](/runtimes/goose) there is no ambiguity about which runtime ran the extension.
 
 ## Deployment notes
