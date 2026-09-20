@@ -1407,6 +1407,12 @@ func harnessAction(h harness.Harness, effectiveUserMode bool) string {
 	// succeed for this harness.
 	case "session_log":
 		return "beacon endpoint fx sync"
+	// Grok has both paths. This check only runs when neither is carrying telemetry, and the hooks
+	// are the remedy worth naming: they capture live and cover sessions still open, where a sync
+	// sweep can only read what Grok has already committed. The check's message names the sweep for
+	// the cases where that is what is behind.
+	case "hooks+session_log":
+		return "beacon endpoint hooks install --harness " + h.Name
 	}
 	return ""
 }
