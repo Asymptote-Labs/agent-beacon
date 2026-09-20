@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,8 +41,9 @@ type Entry struct {
 }
 
 type ReadStats struct {
-	Malformed int
-	MaxLine   int
+	Malformed   int
+	MaxLine     int
+	PartialTail bool
 }
 
 func NewStore(sessionsDir string) (*Store, error) {
@@ -181,27 +183,49 @@ func (s *Store) Read(ref SessionRef) ([]Entry, ReadStats, error) {
 		return nil, ReadStats{}, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	br := bufio.NewReaderSize(file, 64*1024)
 	var entries []Entry
 	stats := ReadStats{}
-	for scanner.Scan() {
+	for {
+		raw, err := br.ReadBytes('\n')
+		if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+			stats.PartialTail = true
+			return entries, stats, nil
+		}
+		if len(raw) == 0 && err != nil {
+			if err == io.EOF {
+				return entries, stats, nil
+			}
+			return entries, stats, err
+		}
 		stats.MaxLine++
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.TrimSpace(string(raw))
 		if line == "" {
+			if err == io.EOF {
+				return entries, stats, nil
+			}
+			continue
+		}
+		if len(raw) > maxLineBytes {
+			stats.Malformed++
+			if err == io.EOF {
+				return entries, stats, nil
+			}
 			continue
 		}
 		var item map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &item); err != nil {
+		if jsonErr := json.Unmarshal([]byte(line), &item); jsonErr != nil {
 			stats.Malformed++
+			if err == io.EOF {
+				return entries, stats, nil
+			}
 			continue
 		}
 		entries = append(entries, Entry{Line: stats.MaxLine, Data: item})
+		if err == io.EOF {
+			return entries, stats, nil
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return entries, stats, err
-	}
-	return entries, stats, nil
 }
 
 func extractSessionIDFromPath(path string) string {
