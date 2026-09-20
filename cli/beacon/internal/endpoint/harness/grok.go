@@ -47,7 +47,7 @@ func DiscoverGrok() Harness {
 	// resolving it here would read whatever repository the command happened to run from and report
 	// it as the machine's state. DiscoverQwen, DiscoverCline and DiscoverPi guard the same way.
 	hookStatus := hooks.GrokHookStatus(hooks.GrokOptions{Level: hooks.LevelUser})
-	if hookStatus.HooksPath != "" {
+	if hookStatus.Installed {
 		h.ConfigPath = hookStatus.HooksPath
 	} else {
 		h.ConfigPath = sessionsDir
