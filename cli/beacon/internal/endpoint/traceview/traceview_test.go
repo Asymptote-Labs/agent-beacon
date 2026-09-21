@@ -263,6 +263,58 @@ func TestLocalStorePagesThroughAllTracesAndEvents(t *testing.T) {
 	}
 }
 
+func TestListResultAppliedWhileInDetailMode(t *testing.T) {
+	store := fixtureStore()
+	model := NewModel(store)
+	model.width, model.height = 100, 30
+	model = runCmd(t, model, model.Init())
+
+	next, _ := model.Update(key("/"))
+	model = next.(Model)
+	for _, r := range "test" {
+		next, _ = model.Update(key(string(r)))
+		model = next.(Model)
+	}
+	next, pendingList := model.Update(key("enter"))
+	model = next.(Model)
+	if !model.loading || model.query != "test" {
+		t.Fatalf("expected loading search, got loading=%t query=%q", model.loading, model.query)
+	}
+
+	// enter should be blocked while the list is loading.
+	next, cmd := model.Update(key("enter"))
+	model = next.(Model)
+	if model.mode != listMode || cmd != nil {
+		t.Fatalf("enter while loading should be a no-op, got mode=%v cmd=%v", model.mode, cmd)
+	}
+
+	// Simulate the list load completing after the user opened a trace through
+	// some other path (e.g. the load finishes, user quickly opens a trace,
+	// then a second search fires).  The important invariant is that a list
+	// result delivered in detail mode is still applied.
+	model.mode = detailMode
+	model.loading = true
+	pendingMsg := pendingList()
+	next, _ = model.Update(pendingMsg)
+	model = next.(Model)
+
+	// The traces should be updated even though we were in detail mode.
+	if len(model.traces) != len(store.traces) {
+		t.Fatalf("expected traces to be updated, got %d", len(model.traces))
+	}
+	// loading should remain true because the detail load is still in progress.
+	if !model.loading {
+		t.Fatalf("expected loading to remain true in detail mode")
+	}
+
+	// Returning to list mode should show the search results, not stale data.
+	model.mode = listMode
+	model.loading = false
+	if model.query != "test" || model.totalMatched != len(store.traces) {
+		t.Fatalf("list state inconsistent: query=%q totalMatched=%d", model.query, model.totalMatched)
+	}
+}
+
 func TestEventDetailsIncludesStructuredData(t *testing.T) {
 	event := dashboard.TraceEventV1{
 		Number: 7,

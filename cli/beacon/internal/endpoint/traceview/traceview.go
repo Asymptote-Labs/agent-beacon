@@ -187,11 +187,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureVisible()
 		return m, nil
 	case listLoaded:
-		if m.mode != listMode || msg.request != m.listRequest {
+		if msg.request != m.listRequest {
 			return m, nil
 		}
-		m.loading = false
-		m.err = msg.err
+		if m.mode == listMode {
+			m.loading = false
+			m.err = msg.err
+		}
 		if msg.err == nil {
 			m.traces = msg.result.Traces
 			m.totalMatched = msg.result.TotalMatched
@@ -287,7 +289,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.ensureVisible()
 	case "enter":
-		if len(m.traces) > 0 {
+		if len(m.traces) > 0 && !m.loading {
 			m.mode = detailMode
 			m.loading = true
 			m.err = nil
