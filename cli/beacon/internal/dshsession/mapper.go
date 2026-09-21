@@ -259,9 +259,6 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 		ev.Timestamp = schema.FormatTimestamp(time.UnixMilli(ts))
 	}
 	ev.Session = &schema.SessionInfo{ID: firstNonEmpty(m.session.ID, m.ref.ID), WorkingDirectory: m.session.CWD}
-	if m.session.ParentSessionID != "" {
-		ev.Raw = mergeRaw(ev.Raw, map[string]interface{}{"parent_session": m.session.ParentSessionID})
-	}
 	if model := firstNonEmpty(m.model, m.session.Model); model != "" {
 		ev.Model = model
 	}
@@ -271,6 +268,9 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 func (m *mapper) append(record Record, suffix string, ev schema.Event) {
 	dedupID := fmt.Sprintf("%s:%s:%d:%s", m.ref.Path, firstNonEmpty(m.session.ID, m.ref.ID), record.Line, suffix)
 	ev.Event.ID = dshEventID(dedupID)
+	if m.session.ParentSessionID != "" {
+		ev.Raw = mergeRaw(ev.Raw, map[string]interface{}{"parent_session": m.session.ParentSessionID})
+	}
 	m.out = append(m.out, MappedEvent{SourceLine: record.Line, DedupID: dedupID, Event: ev})
 }
 
@@ -379,27 +379,27 @@ func diffFromCall(call toolCall) string {
 	path := firstString(call.Arguments, "file_path", "path")
 	switch name {
 	case "write":
-		content := firstRawString(call.Arguments, "content", "file_text")
+		content := firstStringRaw(call.Arguments, "content", "file_text")
 		if path != "" && content != "" {
 			return "--- /dev/null\n+++ " + path + "\n+" + strings.ReplaceAll(content, "\n", "\n+") + "\n"
 		}
 	case "edit":
-		oldText := firstRawString(call.Arguments, "old_string", "old_str")
-		newText := firstRawString(call.Arguments, "new_string", "new_str")
+		oldText := firstStringRaw(call.Arguments, "old_string", "old_str")
+		newText := firstStringRaw(call.Arguments, "new_string", "new_str")
 		if oldText != "" || newText != "" {
 			return "-" + strings.ReplaceAll(oldText, "\n", "\n-") + "\n+" + strings.ReplaceAll(newText, "\n", "\n+") + "\n"
 		}
 	case "str_replace_editor":
 		op := dshEditorOperation(call.Name, call.Arguments)
 		if op == "create" {
-			content := firstRawString(call.Arguments, "file_text")
+			content := firstStringRaw(call.Arguments, "file_text")
 			if content != "" {
 				return "--- /dev/null\n+++ " + path + "\n+" + strings.ReplaceAll(content, "\n", "\n+") + "\n"
 			}
 		}
 		if op == "str_replace" || op == "insert" {
-			oldText := firstRawString(call.Arguments, "old_str")
-			newText := firstRawString(call.Arguments, "new_str", "insert")
+			oldText := firstStringRaw(call.Arguments, "old_str")
+			newText := firstStringRaw(call.Arguments, "new_str", "insert")
 			if oldText != "" || newText != "" {
 				return "-" + strings.ReplaceAll(oldText, "\n", "\n-") + "\n+" + strings.ReplaceAll(newText, "\n", "\n+") + "\n"
 			}
@@ -621,14 +621,11 @@ func firstString(data map[string]interface{}, keys ...string) string {
 	return ""
 }
 
-func firstRawString(data map[string]interface{}, keys ...string) string {
+func firstStringRaw(data map[string]interface{}, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := data[key]; ok {
-			if text, ok := value.(string); ok {
+			if text := textValue(value); text != "" {
 				return text
-			}
-			if value != nil {
-				return fmt.Sprint(value)
 			}
 		}
 	}

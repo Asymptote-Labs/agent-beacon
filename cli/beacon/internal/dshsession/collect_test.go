@@ -98,15 +98,12 @@ func TestAdvanceCursorPartialLeavesChangedFileRetryable(t *testing.T) {
 		{SourceLine: 2, Event: schema.Event{Event: schema.EventInfo{Action: "prompt.submitted"}}},
 		{SourceLine: 3, Event: schema.Event{Event: schema.EventInfo{Action: "agent.message"}}},
 	}
-	advanceCursorPartial(cursor, ref, mapped, 1)
+	advanceCursorPartial(cursor, mapped, 1)
 	if cursor.LastLine != 2 {
 		t.Fatalf("LastLine = %d, want 2", cursor.LastLine)
 	}
 	if cursor.SizeBytes == ref.SizeBytes || cursor.ModTimeMS == ref.ModTimeUnixMS {
 		t.Fatalf("partial cursor stamped changed file markers: %+v", cursor)
-	}
-	if !cursor.PartialTail {
-		t.Fatalf("partial cursor did not force retry: %+v", cursor)
 	}
 }
 

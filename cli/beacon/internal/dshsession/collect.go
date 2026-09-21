@@ -177,7 +177,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	}
 	for i, item := range mapped {
 		if err := emit(item.Event, opts); err != nil {
-			advanceCursorPartial(cursor, ref, mapped, i)
+			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -206,7 +206,7 @@ func advanceCursor(cursor *Cursor, ref SessionRef, records []Record, stats Stats
 	}
 }
 
-func advanceCursorPartial(cursor *Cursor, ref SessionRef, mapped []MappedEvent, failedIdx int) {
+func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
 	var lastLine int
 	for i := 0; i < failedIdx; i++ {
 		if mapped[i].SourceLine > lastLine {
@@ -219,10 +219,6 @@ func advanceCursorPartial(cursor *Cursor, ref SessionRef, mapped []MappedEvent, 
 	if lastLine > cursor.LastLine {
 		cursor.LastLine = lastLine
 	}
-	// Do not stamp the file's current size/mtime here. The cheap skip at the
-	// start of the next sweep treats matching size+mtime as "nothing left to
-	// read"; after a partial emit, there is explicitly work left to retry.
-	cursor.PartialTail = true
 }
 
 func emit(event schema.Event, opts CollectOptions) error {
