@@ -7,6 +7,16 @@ description: "Index and search local endpoint traces from Beacon runtime logs"
 
 `beacon endpoint traces` builds and reads a local trace index over the Beacon runtime JSONL log. Use it when you want a trace-oriented view of endpoint activity without starting the dashboard.
 
+Run the top-level command on an interactive terminal to open the full-screen local trace browser:
+
+```bash title="Browse local traces"
+beacon traces
+```
+
+Use the arrow keys or `j`/`k` to move, `enter` to open a trace, `/` to search, and `1`–`4` to filter an open trace by event type. Page Up and Page Down scroll long event details. The browser reads only local Beacon state and does not contact the network.
+
+When stdout or stdin is redirected, `beacon traces` falls back to a bounded tab-separated trace list instead of emitting terminal control sequences. The `beacon endpoint traces` commands below remain the stable JSON and scripting interface.
+
 ```bash title="Command syntax"
 beacon endpoint traces [command]
 ```

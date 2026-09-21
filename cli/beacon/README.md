@@ -17,6 +17,7 @@ make build
 ./beacon endpoint disconnect
 ./beacon endpoint discover --json
 ./beacon endpoint repair
+./beacon traces
 ./beacon endpoint dashboard
 ./beacon endpoint uninstall --keep-logs
 ```
@@ -129,6 +130,18 @@ with organization or system multi-repository ingest tokens; repository-scoped
 ingest tokens already select the target repository.
 
 ## Dashboard
+
+Use the full-screen terminal browser for a local trace list, search, event filters,
+and event details:
+
+```bash
+./beacon traces
+```
+
+The browser reads the same local runtime JSONL and trace index as the commands
+under `beacon endpoint traces`. With redirected input or output it falls back to
+a bounded tab-separated list, while `endpoint traces list`, `search`, and `show`
+remain available for scripting and JSON output.
 
 ```bash
 ./beacon endpoint dashboard

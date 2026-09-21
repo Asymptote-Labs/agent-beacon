@@ -105,6 +105,12 @@ Beacon continuously captures your session history in the background.
 ### 3. Explore your history
 
 ```bash
+beacon traces
+```
+
+This opens a local terminal browser for traces, event timelines, token usage, and retained content. Nothing is sent anywhere. To use the local web view instead:
+
+```bash
 beacon endpoint dashboard
 ```
 
