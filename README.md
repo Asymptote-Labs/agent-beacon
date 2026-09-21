@@ -27,6 +27,10 @@
   <a href="https://docs.beacon.sh/cli">Commands</a>
 </p>
 
+Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
+
+**A problem solved by one agent shouldn't need to be learned from scratch by another.**
+
 ---
 
 ## Beacon Overview
