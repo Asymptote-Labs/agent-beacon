@@ -957,10 +957,14 @@ var userScopeOnlyHookTargets = map[string]bool{
 	"hermes": true,
 	"muse":   true,
 	"dsh":    true,
+	// Kimi Code reads one user-level config.toml and has no project-level config mechanism at
+	// all: its project-local .kimi-code directory holds a workspace override and an MCP server
+	// list, neither of which can register a hook.
+	"kimi": true,
 }
 
 func allHookTargetsForLevel() []string {
-	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "openhands", "kiro", "dsh", "cline", "pi", "omp", "prime", "omo", "openclaw", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "openhands", "kiro", "kimi", "dsh", "cline", "pi", "omp", "prime", "omo", "openclaw", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 	if endpointOpts.hookLevel != "project" {
 		return all
 	}
@@ -1037,6 +1041,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 			// Path is the hooks file, which is the one a person would open. The patch file that
 			// mounts the bridge at it rides along in Raw, where the JSON output keeps it -- this
 			// struct carries one path and the install has two.
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
+		case "kimi":
+			status := endpointhooks.KimiHookStatus(endpointhooks.KimiOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
 		case "kiro":
 			status := endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
