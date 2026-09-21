@@ -286,8 +286,22 @@ func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
-	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
+	opened := false
+	opts := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))
+	opts.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
+	if _, err := Connect(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
 		t.Fatalf("expected validate failure, got %v", err)
+	}
+	// The config is validated before enrollment, so a Vector that rejects it never opens
+	// the browser and no key is minted or stored.
+	if opened {
+		t.Fatal("browser must not open when Vector rejects the forwarder config")
+	}
+	if _, err := os.Stat(SecretsPath(true)); !os.IsNotExist(err) {
+		t.Fatal("no secrets file may exist when validation fails before enrollment")
+	}
+	if entries, _ := os.ReadDir(Dir(true)); len(entries) != 0 {
+		t.Fatalf("preflight must clean up after itself, found %v", entries)
 	}
 	if len(fwd.written) != 0 || fwd.loads != 0 {
 		t.Fatal("no unit may be written or loaded when validation fails")
@@ -449,10 +463,12 @@ func TestConnectPinsInstallIDBeforeEnrollmentSoRetriesReuseIt(t *testing.T) {
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
 
-	// First attempt fails after approval (vector validate rejects the config).
-	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 1))); err == nil {
-		t.Fatal("expected validate failure")
+	// First attempt fails after approval (the service manager cannot start the forwarder).
+	fwd.loadErr = errors.New("bootstrap failed")
+	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0))); err == nil || !strings.Contains(err.Error(), "could not be started") {
+		t.Fatalf("expected a load failure, got %v", err)
 	}
+	fwd.loadErr = nil
 	fd.mu.Lock()
 	firstID := fd.init["device"].(map[string]any)["install_id"].(string)
 	fd.mu.Unlock()
@@ -560,7 +576,7 @@ func TestConnectClearsBufferOnPrivacyModeChange(t *testing.T) {
 	}
 }
 
-func TestConnectValidateFailureOnPrivacyChangeDoesNotStopForwarder(t *testing.T) {
+func TestConnectRejectedConfigOnPrivacyChangeRotatesNoKeyAndKeepsForwarderRunning(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	isolateVectorDiscovery(t)
@@ -575,16 +591,49 @@ func TestConnectValidateFailureOnPrivacyChangeDoesNotStopForwarder(t *testing.T)
 	if fwd.loads != 1 || fwd.unloads != 0 {
 		t.Fatalf("after first connect: loads=%d unloads=%d", fwd.loads, fwd.unloads)
 	}
+	before, err := LoadEnrollment(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretsBefore, err := os.ReadFile(SecretsPath(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configBefore, err := os.ReadFile(VectorConfigPath(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd.mu.Lock()
+	fd.init, fd.exchange = nil, nil
+	fd.mu.Unlock()
 
-	// Second connect changes privacy mode but vector validate fails (exit 78).
-	// The forwarder must NOT be unloaded.
+	// Second connect changes privacy mode but vector validate fails (exit 78). Enrollment
+	// would rotate the server-side key, so it must not be reached: the running forwarder
+	// keeps its key and config and nothing on disk changes.
+	opened := false
 	opts2 := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))
 	opts2.PrivacyMode = "metadata-only"
+	opts2.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
 	if _, err := Connect(context.Background(), opts2); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
 		t.Fatalf("expected validate failure, got %v", err)
 	}
-	if fwd.unloads != 0 {
-		t.Fatalf("a validate failure during a privacy-mode change must not stop the running forwarder, unloads=%d", fwd.unloads)
+	fd.mu.Lock()
+	reached := fd.init != nil || fd.exchange != nil
+	fd.mu.Unlock()
+	if opened || reached {
+		t.Fatalf("a rejected config must fail before enrollment: opened=%t reached dashboard=%t", opened, reached)
+	}
+	if fwd.unloads != 0 || fwd.loads != 1 {
+		t.Fatalf("a rejected config must leave the running forwarder alone: loads=%d unloads=%d", fwd.loads, fwd.unloads)
+	}
+	secretsAfter, _ := os.ReadFile(SecretsPath(true))
+	configAfter, _ := os.ReadFile(VectorConfigPath(true))
+	after, _ := LoadEnrollment(true)
+	if string(secretsAfter) != string(secretsBefore) || string(configAfter) != string(configBefore) || after == nil || *after != *before {
+		t.Fatal("secrets, config and enrollment must be untouched by a rejected reconnect")
+	}
+	if after.PrivacyMode != "standard" {
+		t.Fatalf("enrollment privacy mode = %q, want the original standard", after.PrivacyMode)
 	}
 }
 
@@ -642,5 +691,33 @@ func TestDisconnectIgnoresALeftoverInstallIDFromACancelledConnect(t *testing.T) 
 	}
 	if fwd.unloads != 1 {
 		t.Fatalf("an installed unit must be unloaded, unloads=%d", fwd.unloads)
+	}
+}
+
+// TestConnectWithRealVectorOnAFreshMachine runs the whole connect sequence against a real
+// Vector binary, including the mode switch, so the validate steps are exercised with Vector's
+// actual rules (it refuses a data_dir that does not exist yet) rather than the fake's.
+func TestConnectWithRealVectorOnAFreshMachine(t *testing.T) {
+	vector := os.Getenv("BEACON_TEST_VECTOR_BIN")
+	if vector == "" {
+		t.Skip("set BEACON_TEST_VECTOR_BIN to run connect against a real Vector")
+	}
+	t.Setenv("HOME", t.TempDir())
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+
+	opts := connectOptions(t, fd, fwd, vector)
+	opts.PrivacyMode = "standard"
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatalf("first connect on a fresh machine: %v", err)
+	}
+	opts = connectOptions(t, fd, fwd, vector)
+	opts.PrivacyMode = "metadata-only"
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatalf("switch to metadata-only: %v", err)
+	}
+	if fwd.loads != 2 || fwd.unloads != 1 {
+		t.Fatalf("loads=%d unloads=%d", fwd.loads, fwd.unloads)
 	}
 }

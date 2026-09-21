@@ -194,6 +194,43 @@ func ValidateVectorConfig(vectorBin, configPath string) error {
 	return nil
 }
 
+// preflightIngestURL stands in for the ingest URL on a first enrollment's preflight. The
+// `.invalid` TLD is reserved (RFC 2606) and validate never connects, so it can resolve to
+// nothing and still prove the config.
+const preflightIngestURL = "https://ingest.invalid"
+
+// preflightVectorConfig proves Vector accepts the forwarder config for the requested
+// privacy mode before anything irreversible happens. Enrollment rotates the device key on
+// the server, so a config Vector rejected only afterwards would leave a running forwarder
+// holding a key the server no longer accepts. Everything the render points at lives in a
+// scratch directory under stateDir: a data dir, because Vector refuses one that does not
+// exist, and a placeholder secrets file, so the check reads no real credential and works
+// before one exists.
+func preflightVectorConfig(vectorBin, stateDir string, opts RenderOptions) error {
+	scratch, err := os.MkdirTemp(stateDir, ".vector-preflight-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(scratch)
+	opts.DataDir = filepath.Join(scratch, DataDirName)
+	if err := os.Mkdir(opts.DataDir, 0o700); err != nil {
+		return err
+	}
+	opts.SecretsFile = filepath.Join(scratch, SecretsFileName)
+	if err := os.WriteFile(opts.SecretsFile, []byte(SecretsFileContent("bcn_device_preflight")), 0o600); err != nil {
+		return err
+	}
+	rendered, err := RenderVectorConfig(opts)
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(scratch, VectorConfigName)
+	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+		return err
+	}
+	return ValidateVectorConfig(vectorBin, configPath)
+}
+
 // preValidateVectorConfig writes data to a temporary file next to configPath,
 // validates it, and removes the temp file. This lets Connect verify a new config
 // before stopping a running forwarder.

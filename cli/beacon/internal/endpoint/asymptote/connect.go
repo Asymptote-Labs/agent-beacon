@@ -67,12 +67,15 @@ type ConnectResult struct {
 
 // Connect enrolls this machine and starts the forwarder.
 //
-// Failure ordering is deliberate: Vector is located before the browser opens, so a machine
-// without Vector never mints a key it cannot use; the key is written to the 0600 secrets file
-// before the config that references it; the config is validated before a service unit points at
-// it; and the enrollment record is saved last, so status never claims a connection that did not
-// finish. A re-run on an enrolled machine reuses its install id, which rotates the key in place
-// on the server rather than creating a second device.
+// Failure ordering is deliberate: Vector is located and the forwarder config is validated
+// before enrollment, so a machine whose Vector is missing or rejects the config never mints a
+// key it cannot use; the key is written to the 0600 secrets file before the config that
+// references it; the written config is validated before a service unit points at it; and the
+// enrollment record is saved last, so status never claims a connection that did not finish.
+// A re-run on an enrolled machine reuses its install id, which rotates the key in place on the
+// server rather than creating a second device. That rotation is why validation comes first:
+// once the server has rotated the key, a forwarder still running with the old one is failing
+// every upload, so nothing that can be checked locally may fail after that point.
 func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	out := opts.Out
 	if out == nil {
@@ -116,6 +119,29 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 			return nil, err
 		}
 	}
+	logPath := opts.LogPath
+	if logPath == "" {
+		logPath = endpointconfig.Default(opts.UserMode, "").LogPath
+	}
+
+	// Prove Vector accepts this privacy mode's config before enrollment rotates the key.
+	// The ingest URL is the previous enrollment's when there is one; validate never
+	// connects, so a placeholder serves a first enrollment.
+	preflightURL := preflightIngestURL
+	if previous != nil {
+		preflightURL = previous.IngestURL
+	}
+	if err := ensureDir(opts.UserMode); err != nil {
+		return nil, err
+	}
+	if err := preflightVectorConfig(vector.Path, Dir(opts.UserMode), RenderOptions{
+		LogPath:     logPath,
+		IngestURL:   preflightURL,
+		PrivacyMode: privacyMode,
+	}); err != nil {
+		return nil, err
+	}
+
 	// Pin the id before the dashboard learns it, so a failure after approval retries as
 	// the same device.
 	if err := WriteInstallID(opts.UserMode, installID); err != nil {
@@ -153,14 +179,12 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	}
 	result.DeviceKey = ""
 	dataDir := DataDir(opts.UserMode)
-	logPath := opts.LogPath
-	if logPath == "" {
-		logPath = endpointconfig.Default(opts.UserMode, "").LogPath
-	}
 
-	// Render and pre-validate before touching the service manager. A privacy-mode
-	// change unloads the forwarder below; validating first ensures a bad config
-	// (unsupported VRL, permissions, etc.) never stops a working forwarder.
+	// Validate the exact bytes the service will run before touching the service manager,
+	// so the privacy-mode change below never stops a working forwarder for a config Vector
+	// would refuse. The preflight already proved the template; what is new here is the
+	// server's ingest URL and the secrets file just written. Vector refuses a data_dir that
+	// does not exist, so create it first; a mode change clears and recreates it below.
 	rendered, err := RenderVectorConfig(RenderOptions{
 		LogPath:     logPath,
 		IngestURL:   result.IngestURL,
@@ -169,6 +193,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		PrivacyMode: privacyMode,
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
 	configPath := VectorConfigPath(opts.UserMode)
@@ -185,10 +212,10 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 			if err := os.RemoveAll(dataDir); err != nil && !os.IsNotExist(err) {
 				return nil, fmt.Errorf("could not clear the buffer after a privacy mode change: %w", err)
 			}
+			if err := os.MkdirAll(dataDir, 0o700); err != nil {
+				return nil, err
+			}
 		}
-	}
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return nil, err
 	}
 	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
 		return nil, err
