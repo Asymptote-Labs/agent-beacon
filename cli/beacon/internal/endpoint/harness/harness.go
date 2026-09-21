@@ -64,6 +64,7 @@ func DiscoverAll() []Harness {
 		DiscoverPrime(),
 		DiscoverOmo(),
 		DiscoverFx(),
+		DiscoverDsh(),
 		DiscoverQwen(),
 		DiscoverHermes(),
 		DiscoverFactory(),

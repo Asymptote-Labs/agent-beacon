@@ -573,6 +573,8 @@ contract, what leaves the machine, and revocation.
 
 ./beacon endpoint hooks install --harness dsh
 ./beacon endpoint hooks status --harness dsh
+./beacon endpoint dsh status
+./beacon endpoint dsh sync
 
 ./beacon endpoint hooks install --harness hermes
 ./beacon endpoint hooks status --harness hermes
@@ -673,6 +675,14 @@ surfaces; there is no project scope, because the bridge's `configPath` is
 process-level and a repository has nowhere to mount from, so `--level project` is
 refused with that explanation rather than silently becoming a machine-wide
 install.
+
+Beacon also reads DeepSeek Harness' native committed session records from
+`$DSH_HOME/sessions` with `beacon endpoint dsh sync`. That poll path is local
+and offline; it backfills assistant text/reasoning, structured failed-tool
+status, and token usage that the hook bridge does not expose. Hook install also
+writes a Beacon-owned local skill at `$DSH_HOME/skills/beacon-endpoint/SKILL.md`
+so `dsh` can check `beacon endpoint dsh status` and run a workspace-scoped sync
+when asked.
 
 The patch file is the user's own, and is edited as a document rather than
 rewritten: parsed into a YAML node tree, one self-contained element appended or

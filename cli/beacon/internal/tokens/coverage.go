@@ -83,6 +83,7 @@ var usageExpectation = map[string]struct {
 	// `beacon endpoint hooks status --harness openclaw` is where that gap is surfaced.
 	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
+	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 
 	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
@@ -113,11 +114,6 @@ var usageExpectation = map[string]struct {
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
 	"kiro":          {ExpectNone, "hook payloads carry no token counts"},
-	// The bridge builds each hook payload from a fixed base plus per-event fields, and no usage
-	// count is among them on any of the seven events it supports. dsh does record usage -- in its
-	// own session log -- but nothing in the hook surface exposes it, so a DeepSeek Harness session
-	// reporting no tokens is correct rather than silent.
-	"deepseek_harness": {ExpectNone, "the hook bridge's payloads carry no token counts"},
 }
 
 // InstalledConfig is the part of a config-scanner row that install detection reads.
