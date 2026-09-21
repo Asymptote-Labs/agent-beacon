@@ -975,6 +975,7 @@ func setupHookConfigDirs(t *testing.T) {
 		"factory":     &hookconfig.FactoryDir,
 		"grok":        &hookconfig.GrokDir,
 		"hermes":      &hookconfig.HermesDir,
+		"kimi":        &hookconfig.KimiDir,
 		"muse":        &hookconfig.MuseDir,
 		"openhands":   &hookconfig.OpenHandsDir,
 		"opencode":    &hookconfig.OpenCodeDir,

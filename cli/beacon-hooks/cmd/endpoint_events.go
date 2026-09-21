@@ -73,6 +73,28 @@ var rawPayloadKeys = map[string]string{
 	// thing dropped when an event exceeds the 64 KiB ceiling, so the duplication is bounded and the
 	// diff is what survives. Qwen Code and Muse Code already pay the same cost for the same reason.
 	"dsh": "dsh",
+	// Kimi Code carries several things with no endpoint-schema field, and two of them are the
+	// reason this entry exists rather than being a habit.
+	//
+	// The first is the approval pair. A PermissionResult's `scope` says whether the operator
+	// approved this one call or every call like it for the rest of the session, and `feedback` is
+	// the reason they typed when they refused. The approval block has a `decision` and a `reason`
+	// and nowhere to put a standing grant, so without the payload the difference between "yes,
+	// once" and "yes, and stop asking" is lost -- which is the single most load-bearing fact about
+	// any approval row, the same one the Pi family records as approval_mode.
+	//
+	// The second is tool arguments. gen_ai.tool.call.arguments is written for MCP calls only, so
+	// on this runtime the payload is also where a Grep pattern, a Glob pattern, an Agent's prompt,
+	// a CronCreate schedule and a Bash `run_in_background` flag survive. `session_title`,
+	// `client_type`, `is_steer` on a prompt, `source` and `profile` on SessionStart and `reason`
+	// on SessionEnd are the ordinary rawPayloadKeys cases on top of that.
+	//
+	// The cost is stated rather than hidden: on a Write the payload repeats the file content the
+	// diff already carries. raw goes through SanitizeMap like every other field and is the first
+	// thing dropped when an event exceeds the 64 KiB ceiling, so the duplication is bounded and
+	// the diff is what survives. Qwen Code, Muse Code and DeepSeek Harness already pay the same
+	// cost for the same reason.
+	"kimi": "kimi",
 }
 
 func rawPayloadKey(platform string) string {
@@ -792,6 +814,18 @@ func fileOperation(toolName string, toolInput map[string]interface{}) string {
 			return ""
 		}
 	}
+	// Kimi Code needs the arguments for the reason this function takes them at all: its `Write`
+	// is a create or a modify depending on a `mode` argument. The known-name short circuit below
+	// it is what keeps `CronCreate`, `CronList`, `TaskList` and `TodoList` away from the substring
+	// rules, which would answer "create" and "read" for tools that touch no file.
+	if platformFlag == kimiPlatform {
+		if operation := kimiFileOperation(toolName, toolInput); operation != "" {
+			return operation
+		}
+		if _, known := kimiToolKindFor(toolName); known {
+			return ""
+		}
+	}
 	lower := strings.ToLower(toolName)
 	switch {
 	case strings.Contains(lower, "read") || strings.Contains(lower, "view") || strings.Contains(lower, "list") || strings.Contains(lower, "grep") || strings.Contains(lower, "search"):
@@ -835,6 +869,14 @@ func actionForTool(hookEvent, toolName string, toolInput, toolResponse map[strin
 		// a different event -- the DeepSeek Harness bridge sends no failure signal at all. See the
 		// note on parseDshEdit.
 		if action := dshToolAction(toolName, toolInput); action != "" {
+			return action
+		}
+	}
+	if platformFlag == kimiPlatform {
+		// No failure check of its own, and unlike grok and qwen below that is not an omission:
+		// Kimi Code reports a failure as a different event, and emitPostToolObserved has already
+		// classified that as tool.failed and returned before reaching this function.
+		if action := kimiToolAction(toolName, toolInput); action != "" {
 			return action
 		}
 	}
