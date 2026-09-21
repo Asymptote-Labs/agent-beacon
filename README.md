@@ -39,13 +39,15 @@ Beacon is an open-source memory layer for AI coding agents that learns from your
 - **Knowledge that compounds** - workflows, corrections, debugging patterns, and repo conventions that survive beyond a single session
 - **Shared agent memory** - reviewed knowledge future agents can retrieve through MCP or Agent Skills
 - **Exact session replay** - prompts, responses, tools, commands, edits, approvals, MCP activity, and tokens in one trace
-- **Local-first portability** - durable JSONL, no account, and no harness lock-in
+- **Local-first portability** - durable JSONL, explicit destinations, and no harness lock-in
 
 ---
 
 ## 🚀 Quick Start
 
-Beacon is open source, local-first, and requires no account.
+Beacon is open source and local-first. Interactive endpoint setup signs in through
+beacon.sh, then defaults to keeping telemetry on the machine. System, package, MDM,
+and CI installation paths remain noninteractive and account-free.
 
 ### 1. Install Beacon
 
@@ -121,12 +123,11 @@ Or inspect the raw event stream:
 ```
 
 > [!NOTE]
-> Local by default: no account, no API key, and nothing leaves your machine unless you configure it to.
+> Local by default: signing in does not enable forwarding, and nothing leaves your machine unless you configure it to.
 
-Account sign-in is a separate, optional step and does not enable telemetry forwarding:
+Inspect the account used during interactive setup:
 
 ```bash
-beacon login
 beacon whoami
 ```
 
