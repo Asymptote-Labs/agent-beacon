@@ -512,7 +512,7 @@ and a `BeaconRuntime_CL` custom Log Analytics table. Store Azure workspace,
 DCR, endpoint, and credential details in Azure or customer-managed deployment
 tooling, not in Beacon endpoint configuration.
 
-## Asymptote Managed
+## Beacon Managed
 
 ```bash
 ./beacon endpoint connect
@@ -520,14 +520,16 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint disconnect
 ```
 
-Asymptote Managed is the one destination that forwards telemetry to an
-Asymptote-run service, and it is opt-in. `beacon endpoint connect` opens the
-Asymptote dashboard so a member of your organization can approve this device,
-stores the per-device key in a `0600` secrets file, and runs Vector as the
+Beacon Managed is the Beacon-hosted forwarding destination. User-mode connect
+uses the signed-in account to authorize a separate device key; system mode keeps
+browser approval. The account token is never given to Vector. Connect stores the
+device key in a `0600` secrets file and runs Vector as the
 `com.beacon.endpoint.asymptote-forwarder` (launchd) or
 `beacon-asymptote-forwarder.service` (systemd) service. Beacon stays the local
-JSONL producer and Vector does the network. Only lines written after approval
-are shipped, and revoking the device from the dashboard stops ingestion within
+JSONL producer and Vector does the network. Standard privacy forwards locally
+sanitized retained content; `--privacy-mode metadata-only` strips retained text,
+raw fields, diffs, inventory content, and MCP definitions locally before upload.
+Only lines written after connection are shipped, and revoking the device stops ingestion within
 about a minute. Vector 0.50 or newer is required: `/opt/beacon/bin/vector` from
 the signed package, the `beacon-vector` keg that `brew install beacon` pulls in on
 macOS, any other Vector 0.50+ already on the machine, or the Linux package from

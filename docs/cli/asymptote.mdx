@@ -7,6 +7,10 @@ description: "Generate the Vector forwarding pack that sends Beacon endpoint eve
 
 Use `beacon endpoint asymptote` to generate the content pack that forwards Beacon endpoint events to Beacon's managed ingest service. The pack keeps Beacon as a local JSONL producer: Vector tails the runtime and inventory logs and POSTs gzip-compressed NDJSON batches over HTTPS with a per-device key.
 
+The hand-run pack uses Standard privacy and forwards locally sanitized lines
+unchanged. Use [`beacon endpoint connect --privacy-mode metadata-only`](/cli/endpoint-connect#privacy-modes)
+when Beacon should render the local metadata-only transforms for you.
+
 This is the one destination that sends telemetry to a Beacon-run endpoint. It is opt-in and revocable: nothing is forwarded until a member of your Beacon organization has approved the device in the browser and Vector has been started with the resulting key. `beacon endpoint connect` performs that enrollment and runs the forwarder as a service; the commands on this page generate the same files for running or inspecting the forwarder by hand.
 
 Beacon does not store the device key in its own configuration. The key lives in a `0600` JSON secrets file that Vector reads through its secret backend, so it appears in neither `vector.toml` nor the process environment.

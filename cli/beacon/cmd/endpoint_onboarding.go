@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/spf13/cobra"
@@ -130,6 +131,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		OfferManaged:      managedIngestEnabledByEnv(),
 		DestinationOnly:   destinationOnly,
 		PresetDestination: preset,
+		PresetPrivacyMode: profile.Onboarding.PrivacyMode,
 	}
 	result, err := onboardingRunWizard(onboardingStdin, cmd.OutOrStdout(), options)
 	if err != nil {
@@ -161,6 +163,13 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 
 	recordedDestination := result.Destination
+	privacyMode := ""
+	if result.Destination == onboarding.DestinationAsymptote {
+		privacyMode, err = managedprivacy.Normalize(result.PrivacyMode)
+		if err != nil {
+			return false, err
+		}
+	}
 	connectAfterInstall := endpointOpts.connect && result.Destination == onboarding.DestinationAsymptote
 	if connectAfterInstall {
 		// Explicit --connect still records managed only after device enrollment
@@ -174,10 +183,12 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 			Email:         status.User.Email,
 			BeaconVersion: version.GetVersion(),
 			Destination:   recordedDestination,
+			PrivacyMode:   privacyMode,
 		}
 		profile.Pending = nil
 	} else {
 		profile.Onboarding.Destination = recordedDestination
+		profile.Onboarding.PrivacyMode = privacyMode
 	}
 	if _, err := onboarding.EnsureInstallID(profile); err != nil {
 		return false, fmt.Errorf("create onboarding install id: %w", err)
@@ -187,7 +198,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 
 	if result.Destination == onboarding.DestinationAsymptote && !connectAfterInstall {
-		fmt.Fprintln(cmd.OutOrStdout(), "Beacon Managed selected. After installation, run `beacon endpoint connect`.")
+		fmt.Fprintf(cmd.OutOrStdout(), "Beacon Managed selected with %s privacy. After installation, run `beacon endpoint connect`.\n", managedprivacy.Label(privacyMode))
 	} else if result.Destination == onboarding.DestinationLocal {
 		fmt.Fprintln(cmd.OutOrStdout(), "Local-only telemetry selected. Open it with `beacon traces`.")
 	}
@@ -432,6 +443,7 @@ type endpointOnboardingStatus struct {
 	InstallID     string `json:"install_id,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
 	Destination   string `json:"destination,omitempty"`
+	PrivacyMode   string `json:"privacy_mode,omitempty"`
 	Pending       bool   `json:"pending_submission"`
 	SkipReason    string `json:"skip_reason,omitempty"`
 	ProfilePath   string `json:"profile_path"`
@@ -471,6 +483,7 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 		InstallID:     profile.InstallID,
 		BeaconVersion: profile.Onboarding.BeaconVersion,
 		Destination:   profile.Onboarding.Destination,
+		PrivacyMode:   profile.Onboarding.PrivacyMode,
 		Pending:       profile.Pending != nil,
 		SkipReason:    reason,
 		ProfilePath:   onboarding.Path(),
@@ -497,6 +510,9 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 	}
 	if status.Destination != "" {
 		fmt.Fprintf(out, "Telemetry destination: %s\n", destinationLabel(status.Destination))
+	}
+	if status.PrivacyMode != "" {
+		fmt.Fprintf(out, "Managed privacy: %s\n", managedprivacy.Label(status.PrivacyMode))
 	}
 	fmt.Fprintf(out, "Install ID: %s\n", status.InstallID)
 	fmt.Fprintf(out, "Profile: %s\n", status.ProfilePath)

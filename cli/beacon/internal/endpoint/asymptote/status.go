@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 )
 
 var randRead = rand.Read
@@ -27,6 +28,7 @@ type ManagedIngestStatus struct {
 	Email            string         `json:"email,omitempty"`
 	EnrolledAt       string         `json:"enrolled_at,omitempty"`
 	VectorBin        string         `json:"vector_bin,omitempty"`
+	PrivacyMode      string         `json:"privacy_mode,omitempty"`
 	Forwarder        service.Status `json:"forwarder"`
 	// Credential is "valid", "revoked", "unknown" (network unavailable) or "" when not
 	// enabled. Revoked covers every 401 cause: revoked or expired key, or the approving
@@ -56,6 +58,7 @@ func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
 		return status
 	}
 	if !Connected(userMode) {
+		privacyMode, _ := managedprivacy.Normalize(enrollment.PrivacyMode)
 		// disconnect --keep-credentials leaves the record and key for a later connect.
 		return ManagedIngestStatus{
 			Enabled:          false,
@@ -63,9 +66,11 @@ func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
 			KeyPrefix:        enrollment.KeyPrefix,
 			OrganizationID:   enrollment.OrganizationID,
 			OrganizationName: enrollment.OrganizationName,
+			PrivacyMode:      privacyMode,
 			Message:          fmt.Sprintf("disconnected; credentials for device %s kept, run `beacon endpoint connect` to reuse them", enrollment.DeviceID),
 		}
 	}
+	privacyMode, _ := managedprivacy.Normalize(enrollment.PrivacyMode)
 	status := ManagedIngestStatus{
 		Enabled:          true,
 		IngestURL:        enrollment.IngestURL,
@@ -76,6 +81,7 @@ func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
 		Email:            enrollment.Email,
 		EnrolledAt:       enrollment.EnrolledAt.UTC().Format(time.RFC3339),
 		VectorBin:        enrollment.VectorBin,
+		PrivacyMode:      privacyMode,
 		Forwarder:        ForwarderStatus(userMode),
 		BufferBytes:      BufferBytes(userMode),
 	}

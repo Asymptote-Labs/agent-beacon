@@ -64,13 +64,15 @@ Send your Beacon telemetry to the hosted service for:
 - analytics
 - access from anywhere
 
-[Sign up for Beacon Managed](https://beacon.sh/sign-up), then connect your endpoint:
+Interactive installation signs in and preselects Managed. Connect the endpoint
+after reviewing the privacy choice:
 
 ```bash
-beacon endpoint connect --dashboard-url https://beacon.sh
+beacon endpoint connect
 ```
 
-Your browser will open so you can sign in and approve the device.
+The existing CLI account authorizes a separate device ingest key; there is no
+second browser approval. Use `--privacy-mode metadata-only` to override Standard.
 
 ## 3. Run an agent
 
@@ -102,7 +104,7 @@ This shows which harnesses are connected, whether the collector is running, and 
 | --- | --- |
 | Check status | `beacon endpoint status` |
 | Open local dashboard | `beacon endpoint dashboard --open` |
-| Connect to Beacon Managed | `beacon endpoint connect --dashboard-url https://beacon.sh` |
+| Connect to Beacon Managed | `beacon endpoint connect` |
 | Disconnect from Managed | `beacon endpoint disconnect` |
 | Upgrade | `brew upgrade beacon` |
 | Uninstall | `beacon endpoint uninstall --keep-logs` |

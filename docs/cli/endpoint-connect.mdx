@@ -5,9 +5,9 @@ description: "Connect a Beacon endpoint to Beacon managed ingest, or disconnect 
 
 ## Command overview
 
-`beacon endpoint connect` forwards this endpoint's telemetry to Beacon so it appears on the Beacon dashboard. It opens the dashboard in your browser, where a member of your organization approves this specific device; the CLI then receives a key for this device, stores it in a private secrets file, and starts a Vector forwarder that ships the runtime and inventory JSONL over HTTPS.
+`beacon endpoint connect` forwards this endpoint's telemetry to Beacon so it appears on the Beacon dashboard. For a user endpoint, the signed-in CLI account authorizes a device-specific ingest key without another browser approval. The account token is never copied into endpoint state or given to Vector. System mode retains browser approval because unattended/system installs are account-free.
 
-Forwarding is opt-in and revocable. Beacon's default stays local-only, nothing recorded before the approval is sent, and revoking the device from the dashboard stops ingestion within about a minute. `beacon endpoint disconnect` stops the forwarder and removes the local credentials.
+Forwarding is opt-in and revocable. Nothing recorded before connection is sent, and revoking the device from the dashboard stops ingestion within about a minute. `beacon endpoint disconnect` stops the forwarder and removes the local credentials.
 
 ```bash title="Command syntax"
 beacon endpoint connect [flags]
@@ -17,20 +17,38 @@ beacon endpoint disconnect [flags]
 ## Prerequisites
 
 - Beacon endpoint installed (`beacon endpoint install`) and writing local JSONL.
-- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; on macOS Homebrew installs it with Beacon, as the tap's `beacon-vector` keg (named that rather than `vector` so it coexists with a Vector from `vectordotdev/brew`, and kept in `libexec` so it stays off your PATH); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found.
-- A browser where you can sign in to the Beacon dashboard as a member of an organization that has managed ingest enabled.
+- A current `beacon login` session with `device:enroll` scope for user mode.
+- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; on macOS Homebrew installs it with Beacon, as the tap's `beacon-vector` keg (named that rather than `vector` so it coexists with a Vector from `vectordotdev/brew`, and kept in `libexec` so it stays off your PATH); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found or if Vector rejects the forwarder config.
+- System mode only: a browser where an organization member can approve the device.
 
 ## What connect does
 
 1. Locates Vector: `--vector-bin`, then `BEACON_VECTOR_BIN`, then `/opt/beacon/bin/vector`, the `beacon-vector` keg in each Homebrew prefix, a linked `vector` in each Homebrew prefix, then `PATH`. The `beacon-vector` keg is tried ahead of any other Homebrew Vector because it is the copy the tap pins at a supported version.
-2. Registers this machine's hostname, operating system, architecture, Beacon version and install mode with the dashboard, and opens `/cli/enroll` in your browser. The approval page shows those details; nothing is minted until someone clicks **Approve this device**.
-3. Receives the device key through a loopback callback and a PKCE exchange. The key is written once to `asymptote/vector-secrets.json` with mode `0600` and is never printed.
-4. Renders `asymptote/vector.toml` from the [Beacon pack](/cli/asymptote) template with the ingest URL returned by enrollment, runs `vector validate`, installs a service unit and starts it.
-5. Records the non-secret enrollment (device id, organization, ingest URL) in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
+2. Renders the forwarder config for the selected privacy mode into a scratch directory, with a placeholder key, and runs `vector validate` on it. A config Vector rejects stops `connect` here, before anything is sent to the server.
+3. Uses the signed-in account's `device:enroll` scope to register this machine's hostname, operating system, architecture, Beacon version, install id, and install mode. The server returns a separate `bcn_device_*` ingest key. System mode uses the existing browser PKCE device approval instead.
+4. Writes the device key once to `asymptote/vector-secrets.json` with mode `0600`. The account token is not persisted by the endpoint flow.
+5. Renders `asymptote/vector.toml` with the selected privacy mode, runs `vector validate` on the file the service will run, installs a service unit, and starts it.
+6. Records the non-secret enrollment, including privacy mode, in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
 
-A connect that fails at `vector validate` or at loading the service saves no enrollment record, so the endpoint is not connected: `beacon endpoint status` says so, the next interactive install offers the destination question again, and `beacon endpoint disconnect` cleans up what was written. After `disconnect --keep-credentials`, status reports not connected and names the kept device id.
+A connect that fails at `vector validate` or at loading the service saves no enrollment record, so the endpoint is not connected and `beacon endpoint disconnect` cleans up what was written. After `disconnect --keep-credentials`, status reports not connected and names the kept device id.
 
-Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device. Under launchd the new forwarder is loaded only after the old one has exited (Vector drains in-flight requests first), and if the new instance has not started within the wait, `connect` fails and points at `launchctl print` for the job (v1.3.2).
+Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device. Because that rotation invalidates the key the running forwarder holds, the new config is validated before enrollment: a re-run whose config Vector rejects leaves the forwarder, its key, and its buffer untouched. Under launchd the new forwarder is loaded only after the old one has exited (Vector drains in-flight requests first), and if the new instance has not started within the wait, `connect` fails and points at `launchctl print` for the job (v1.3.2).
+
+## Privacy modes
+
+The onboarding wizard records one of two modes. `connect` uses that choice unless
+`--privacy-mode` overrides it:
+
+| Mode | Forwarded data |
+|------|----------------|
+| `standard` | The complete locally sanitized event, including retained prompts, responses, reasoning, tool arguments/results, command output, and diffs. Existing local redaction and size limits still apply. |
+| `metadata-only` | Omits prompts, responses, reasoning, tool arguments/results, command output, raw event fields, diffs, inventory file contents, and MCP definitions. Stable ids, hashes, byte counts, actions, timestamps, harness/session/trace identity, token usage, commands, file paths, and other structured metadata remain. |
+
+The transform runs locally in Vector before batching, buffering, or HTTPS upload.
+Changing modes requires rerunning `beacon endpoint connect`; the rendered config and
+status output record the active choice. A mode change stops the forwarder and clears its
+disk buffer before the new config is installed, so events queued under the previous mode
+are not uploaded under the new one.
 
 ## Files and services
 
@@ -49,9 +67,10 @@ The directory is `0700`. The device key appears only in the secrets file, which 
 
 | Flag | Description |
 |------|-------------|
-| `--dashboard-url <url>` | Beacon dashboard URL. Use `https://beacon.sh` for Beacon Managed. Defaults to `https://asymptotelabs.ai` or `BEACON_DASHBOARD_URL`. Must be `https://` |
-| `--no-browser` | Print the approval URL instead of opening a browser |
+| `--dashboard-url <url>` | Beacon service URL. Defaults to `https://beacon.sh` or `BEACON_DASHBOARD_URL`. In user mode it must match the signed-in account service |
+| `--no-browser` | System mode only: print the approval URL instead of opening a browser |
 | `--vector-bin <path>` | Vector binary to run |
+| `--privacy-mode <mode>` | Override the onboarding choice with `standard` or `metadata-only` |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and a LaunchDaemon or system unit. Requires root; the browser opens as the active console user |
 | `--log-path <path>` | Runtime JSONL log path |
@@ -69,9 +88,13 @@ beacon endpoint connect --dashboard-url https://beacon.sh
 sudo /opt/beacon/bin/beacon endpoint connect --system --dashboard-url https://beacon.sh
 ```
 
-```bash title="Connect from a machine without a browser"
-beacon endpoint connect --no-browser --dashboard-url https://beacon.sh
+```bash title="Connect a system endpoint from a machine without a browser"
+sudo beacon endpoint connect --system --no-browser --dashboard-url https://beacon.sh
 # open the printed URL in a browser where you are signed in
+```
+
+```bash title="Connect with metadata-only forwarding"
+beacon endpoint connect --privacy-mode metadata-only
 ```
 
 ```bash title="Stop forwarding and remove the local credentials"
@@ -80,10 +103,10 @@ beacon endpoint disconnect
 
 ## Checking the connection
 
-`beacon endpoint status` prints one line for managed ingest: whether this endpoint is connected, to which organization, the device id, whether the forwarder service is loaded and running, whether the credential is still valid (it asks the ingest service, with a 3-second timeout), and the size of the disk buffer. `--json` exposes the same under `managed_ingest`.
+`beacon endpoint status` prints one line for managed ingest: whether this endpoint is connected, organization and device identity, active privacy mode, forwarder state, credential validity, and disk-buffer size. `--json` exposes the same under `managed_ingest`.
 
 ```text
-Beacon managed ingest: connected to Beacon Test as device 807c6a11-…; forwarder loaded=true running=true; credential valid
+Beacon Managed: connected to Beacon Test as device 807c6a11-…; forwarder loaded=true running=true; privacy Metadata only; credential valid
 ```
 
 `credential revoked` means the key was revoked or expired, or the approving user is no longer a member of the organization; Vector is logging 401s and dropping batches. Run `beacon endpoint connect --dashboard-url https://beacon.sh` again to re-enroll.

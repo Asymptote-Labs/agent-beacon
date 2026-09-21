@@ -1,0 +1,52 @@
+[transforms.beacon_runtime_metadata]
+type = "remap"
+inputs = ["beacon_runtime"]
+drop_on_abort = true
+source = '''
+event = parse_json!(string!(.message))
+del(event.prompt)
+del(event.message)
+del(event.raw)
+del(event.command.output)
+del(event.file.diff)
+del(event.gen_ai.input)
+del(event.gen_ai.output)
+del(event.gen_ai.tool.call.arguments)
+del(event.gen_ai.tool.call.result)
+if is_object(event.content) {
+  event.content.retention = "metadata"
+  event.content.included = false
+  event.content.redacted = true
+}
+.message = encode_json(event)
+'''
+
+[transforms.beacon_inventory_metadata]
+type = "remap"
+inputs = ["beacon_inventory"]
+drop_on_abort = true
+source = '''
+event = parse_json!(string!(.message))
+if is_array(event.raw.inventory.configs) {
+  event.raw.inventory.configs = map_values(array!(event.raw.inventory.configs)) -> |value| {
+    item = object!(value)
+    del(item.content)
+    item
+  }
+}
+if is_array(event.raw.inventory.mcp_servers) {
+  event.raw.inventory.mcp_servers = map_values(array!(event.raw.inventory.mcp_servers)) -> |value| {
+    item = object!(value)
+    del(item.definition)
+    item
+  }
+}
+if is_array(event.raw.inventory.skills) {
+  event.raw.inventory.skills = map_values(array!(event.raw.inventory.skills)) -> |value| {
+    item = object!(value)
+    del(item.content)
+    item
+  }
+}
+.message = encode_json(event)
+'''

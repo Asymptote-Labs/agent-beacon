@@ -95,8 +95,10 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
 	vector := fakeVector(t, "0.56.0", 0)
+	opts := connectOptions(t, fd, fwd, vector)
+	opts.PrivacyMode = "metadata-only"
 
-	result, err := Connect(context.Background(), connectOptions(t, fd, fwd, vector))
+	result, err := Connect(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
@@ -130,6 +132,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 		`uri = "https://ingest.example.test/v1/ingest/runtime"`,
 		`path = "` + SecretsPath(true) + `"`,
 		`data_dir = "` + DataDir(true) + `"`,
+		`inputs = ["beacon_runtime_metadata"]`,
 	} {
 		if !strings.Contains(string(toml), want) {
 			t.Fatalf("vector.toml missing %q:\n%s", want, toml)
@@ -143,7 +146,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if enrollment.DeviceID != "dev-1" || enrollment.OrganizationName != "Asymptote Test" || enrollment.InstallID == "" || enrollment.VectorVersion != "0.56.0" {
+	if enrollment.DeviceID != "dev-1" || enrollment.OrganizationName != "Asymptote Test" || enrollment.InstallID == "" || enrollment.VectorVersion != "0.56.0" || enrollment.PrivacyMode != "metadata_only" {
 		t.Fatalf("enrollment = %+v", enrollment)
 	}
 	if result.ReEnrolled || result.Enrollment.DeviceID != "dev-1" || result.SecretsFile != SecretsPath(true) {
@@ -153,7 +156,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ManagedIngest == nil || !cfg.ManagedIngest.Enabled || cfg.ManagedIngest.DeviceID != "dev-1" || cfg.ManagedIngest.IngestURL != "https://ingest.example.test" {
+	if cfg.ManagedIngest == nil || !cfg.ManagedIngest.Enabled || cfg.ManagedIngest.DeviceID != "dev-1" || cfg.ManagedIngest.IngestURL != "https://ingest.example.test" || cfg.ManagedIngest.PrivacyMode != "metadata_only" {
 		t.Fatalf("config managed_ingest = %+v", cfg.ManagedIngest)
 	}
 	raw, _ := os.ReadFile(endpointconfig.ConfigPath(true))
@@ -191,6 +194,49 @@ func TestConnectReusesInstallIDOnReEnrollment(t *testing.T) {
 	}
 	if fwd.loads != 2 {
 		t.Fatalf("forwarder should be (re)loaded on each connect, loads=%d", fwd.loads)
+	}
+}
+
+func TestConnectUsesAccountEnrollmentWithoutOpeningBrowser(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	isolateVectorDiscovery(t)
+	var authorization string
+	accountServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_id":         "dev-account",
+			"device_key":        "bcn_device_abcdefgh_" + strings.Repeat("k", 43),
+			"key_prefix":        "bcn_device_abcdefgh",
+			"ingest_url":        "https://ingest.example.test",
+			"organization_id":   "org-1",
+			"organization_name": "Beacon Test",
+			"email":             "person@example.com",
+			"scopes":            []string{"ingest:write"},
+		})
+	}))
+	defer accountServer.Close()
+
+	fd := newFakeDashboard(t)
+	opened := false
+	opts := connectOptions(t, fd, &fakeForwarder{supported: true}, fakeVector(t, "0.56.0", 0))
+	opts.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
+	opts.AccountEnroll = &AccountEnrollOptions{
+		BaseURL:     accountServer.URL,
+		AccessToken: "bcn_cli_account_token",
+		HTTPClient:  accountServer.Client(),
+	}
+	result, err := Connect(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened {
+		t.Fatal("account enrollment opened the browser")
+	}
+	if authorization != "Bearer bcn_cli_account_token" || result.Enrollment.DeviceID != "dev-account" {
+		t.Fatalf("authorization=%q result=%#v", authorization, result.Enrollment)
+	}
+	if result.Enrollment.DashboardURL != accountServer.URL {
+		t.Fatalf("dashboard URL = %q", result.Enrollment.DashboardURL)
 	}
 }
 
@@ -240,8 +286,22 @@ func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
-	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
+	opened := false
+	opts := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))
+	opts.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
+	if _, err := Connect(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
 		t.Fatalf("expected validate failure, got %v", err)
+	}
+	// The config is validated before enrollment, so a Vector that rejects it never opens
+	// the browser and no key is minted or stored.
+	if opened {
+		t.Fatal("browser must not open when Vector rejects the forwarder config")
+	}
+	if _, err := os.Stat(SecretsPath(true)); !os.IsNotExist(err) {
+		t.Fatal("no secrets file may exist when validation fails before enrollment")
+	}
+	if entries, _ := os.ReadDir(Dir(true)); len(entries) != 0 {
+		t.Fatalf("preflight must clean up after itself, found %v", entries)
 	}
 	if len(fwd.written) != 0 || fwd.loads != 0 {
 		t.Fatal("no unit may be written or loaded when validation fails")
@@ -249,19 +309,13 @@ func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 	if _, err := LoadEnrollment(true); !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("enrollment must not be recorded after a failed connect, got %v", err)
 	}
-	// The rendered config is left behind for inspection, but the machine is not connected:
-	// status says so, the onboarding offer is made again, and disconnect can clean it up.
+	// Pre-validation uses a temp file, so the rendered config is not left behind and the
+	// machine is not connected. Disconnect can still clean up the secrets directory.
 	if Connected(true) {
 		t.Fatal("a connect that failed at validate must not count as connected")
 	}
-	if !forwarderInstalled(true, fwd) {
-		t.Fatal("disconnect must see the config a failed connect left behind")
-	}
 	if err := Disconnect(DisconnectOptions{UserMode: true, Forwarder: fwd}); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := os.Stat(Dir(true)); !os.IsNotExist(err) {
-		t.Fatal("disconnect should remove the state a failed connect left behind")
 	}
 }
 
@@ -409,10 +463,12 @@ func TestConnectPinsInstallIDBeforeEnrollmentSoRetriesReuseIt(t *testing.T) {
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
 
-	// First attempt fails after approval (vector validate rejects the config).
-	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 1))); err == nil {
-		t.Fatal("expected validate failure")
+	// First attempt fails after approval (the service manager cannot start the forwarder).
+	fwd.loadErr = errors.New("bootstrap failed")
+	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0))); err == nil || !strings.Contains(err.Error(), "could not be started") {
+		t.Fatalf("expected a load failure, got %v", err)
 	}
+	fwd.loadErr = nil
 	fd.mu.Lock()
 	firstID := fd.init["device"].(map[string]any)["install_id"].(string)
 	fd.mu.Unlock()
@@ -490,6 +546,123 @@ func TestLoopbackIngestURLIsAcceptedEndToEnd(t *testing.T) {
 	}
 }
 
+func TestConnectClearsBufferOnPrivacyModeChange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+	vector := fakeVector(t, "0.56.0", 0)
+
+	opts := connectOptions(t, fd, fwd, vector)
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(DataDir(true), "buffered-event")
+	if err := os.WriteFile(sentinel, []byte("old-standard-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts2 := connectOptions(t, fd, fwd, vector)
+	opts2.PrivacyMode = "metadata-only"
+	if _, err := Connect(context.Background(), opts2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatal("switching to metadata-only must clear the buffer directory")
+	}
+	if _, err := os.Stat(DataDir(true)); os.IsNotExist(err) {
+		t.Fatal("data directory must be recreated after clearing")
+	}
+}
+
+func TestConnectRejectedConfigOnPrivacyChangeRotatesNoKeyAndKeepsForwarderRunning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+
+	// First connect succeeds with the default (standard) privacy mode.
+	opts := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0))
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if fwd.loads != 1 || fwd.unloads != 0 {
+		t.Fatalf("after first connect: loads=%d unloads=%d", fwd.loads, fwd.unloads)
+	}
+	before, err := LoadEnrollment(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretsBefore, err := os.ReadFile(SecretsPath(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configBefore, err := os.ReadFile(VectorConfigPath(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd.mu.Lock()
+	fd.init, fd.exchange = nil, nil
+	fd.mu.Unlock()
+
+	// Second connect changes privacy mode but vector validate fails (exit 78). Enrollment
+	// would rotate the server-side key, so it must not be reached: the running forwarder
+	// keeps its key and config and nothing on disk changes.
+	opened := false
+	opts2 := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))
+	opts2.PrivacyMode = "metadata-only"
+	opts2.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
+	if _, err := Connect(context.Background(), opts2); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
+		t.Fatalf("expected validate failure, got %v", err)
+	}
+	fd.mu.Lock()
+	reached := fd.init != nil || fd.exchange != nil
+	fd.mu.Unlock()
+	if opened || reached {
+		t.Fatalf("a rejected config must fail before enrollment: opened=%t reached dashboard=%t", opened, reached)
+	}
+	if fwd.unloads != 0 || fwd.loads != 1 {
+		t.Fatalf("a rejected config must leave the running forwarder alone: loads=%d unloads=%d", fwd.loads, fwd.unloads)
+	}
+	secretsAfter, _ := os.ReadFile(SecretsPath(true))
+	configAfter, _ := os.ReadFile(VectorConfigPath(true))
+	after, _ := LoadEnrollment(true)
+	if string(secretsAfter) != string(secretsBefore) || string(configAfter) != string(configBefore) || after == nil || *after != *before {
+		t.Fatal("secrets, config and enrollment must be untouched by a rejected reconnect")
+	}
+	if after.PrivacyMode != "standard" {
+		t.Fatalf("enrollment privacy mode = %q, want the original standard", after.PrivacyMode)
+	}
+}
+
+func TestConnectPreservesBufferWhenPrivacyModeUnchanged(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+	vector := fakeVector(t, "0.56.0", 0)
+
+	opts := connectOptions(t, fd, fwd, vector)
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(DataDir(true), "buffered-event")
+	if err := os.WriteFile(sentinel, []byte("in-flight-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts2 := connectOptions(t, fd, fwd, vector)
+	if _, err := Connect(context.Background(), opts2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatal("re-connect with the same privacy mode must not clear the buffer")
+	}
+}
+
 func TestDisconnectIgnoresALeftoverInstallIDFromACancelledConnect(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -518,5 +691,33 @@ func TestDisconnectIgnoresALeftoverInstallIDFromACancelledConnect(t *testing.T) 
 	}
 	if fwd.unloads != 1 {
 		t.Fatalf("an installed unit must be unloaded, unloads=%d", fwd.unloads)
+	}
+}
+
+// TestConnectWithRealVectorOnAFreshMachine runs the whole connect sequence against a real
+// Vector binary, including the mode switch, so the validate steps are exercised with Vector's
+// actual rules (it refuses a data_dir that does not exist yet) rather than the fake's.
+func TestConnectWithRealVectorOnAFreshMachine(t *testing.T) {
+	vector := os.Getenv("BEACON_TEST_VECTOR_BIN")
+	if vector == "" {
+		t.Skip("set BEACON_TEST_VECTOR_BIN to run connect against a real Vector")
+	}
+	t.Setenv("HOME", t.TempDir())
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+
+	opts := connectOptions(t, fd, fwd, vector)
+	opts.PrivacyMode = "standard"
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatalf("first connect on a fresh machine: %v", err)
+	}
+	opts = connectOptions(t, fd, fwd, vector)
+	opts.PrivacyMode = "metadata-only"
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatalf("switch to metadata-only: %v", err)
+	}
+	if fwd.loads != 2 || fwd.unloads != 1 {
+		t.Fatalf("loads=%d unloads=%d", fwd.loads, fwd.unloads)
 	}
 }

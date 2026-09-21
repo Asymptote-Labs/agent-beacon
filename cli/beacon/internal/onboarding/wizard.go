@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 )
 
 var ErrWizardCancelled = errors.New("onboarding cancelled")
@@ -17,12 +19,14 @@ type WizardOptions struct {
 	OfferManaged      bool
 	DestinationOnly   bool
 	PresetDestination string
+	PresetPrivacyMode string
 }
 
 type WizardResult struct {
 	NeedLogin   bool
 	Completed   bool
 	Destination string
+	PrivacyMode string
 }
 
 type wizardScreen int
@@ -32,6 +36,7 @@ const (
 	signInScreen
 	destinationScreen
 	managedDisclosureScreen
+	privacyScreen
 	confirmScreen
 )
 
@@ -53,7 +58,7 @@ var (
 
 func newWizardModel(options WizardOptions) wizardModel {
 	screen := welcomeScreen
-	result := WizardResult{Destination: options.PresetDestination}
+	result := WizardResult{Destination: options.PresetDestination, PrivacyMode: options.PresetPrivacyMode}
 	if options.DestinationOnly {
 		switch {
 		case !options.SignedIn:
@@ -96,12 +101,12 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "up", "k":
-			if m.screen == destinationScreen {
-				m.selected = (m.selected - 1 + len(m.destinations())) % len(m.destinations())
+			if m.screen == destinationScreen || m.screen == privacyScreen {
+				m.selected = (m.selected - 1 + m.choiceCount()) % m.choiceCount()
 			}
 		case "down", "j":
-			if m.screen == destinationScreen {
-				m.selected = (m.selected + 1) % len(m.destinations())
+			if m.screen == destinationScreen || m.screen == privacyScreen {
+				m.selected = (m.selected + 1) % m.choiceCount()
 			}
 		case "enter":
 			return m.advance()
@@ -134,6 +139,10 @@ func (m wizardModel) advance() (tea.Model, tea.Cmd) {
 			m.screen = confirmScreen
 		}
 	case managedDisclosureScreen:
+		m.selected = privacyIndex(m.result.PrivacyMode)
+		m.screen = privacyScreen
+	case privacyScreen:
+		m.result.PrivacyMode = managedprivacy.Modes[m.selected]
 		m.screen = confirmScreen
 	case confirmScreen:
 		m.result.Completed = true
@@ -147,6 +156,13 @@ func (m wizardModel) destinations() []string {
 		return []string{DestinationAsymptote, DestinationLocal}
 	}
 	return []string{DestinationLocal}
+}
+
+func (m wizardModel) choiceCount() int {
+	if m.screen == privacyScreen {
+		return len(managedprivacy.Modes)
+	}
+	return len(m.destinations())
 }
 
 func (m wizardModel) View() string {
@@ -182,12 +198,25 @@ func (m wizardModel) View() string {
 		title = "Beacon Managed sends new telemetry to beacon.sh"
 		body = wizardWarn.Render("Nothing is forwarded by signing in or completing this wizard.") +
 			"\n\nAfter installation, run `beacon endpoint connect`. Once connected, Vector sends new runtime and inventory events to beacon.sh over HTTPS. Existing local history is not uploaded."
+	case privacyScreen:
+		title = "Choose what Beacon Managed receives"
+		var rows []string
+		for index, mode := range managedprivacy.Modes {
+			label, detail := privacyCopy(mode)
+			line := "    " + label
+			if index == m.selected {
+				line = wizardChoice.Render("  ❯ " + label)
+			}
+			rows = append(rows, line, wizardDim.Render("      "+detail))
+		}
+		body = strings.Join(rows, "\n")
 	case confirmScreen:
 		title = "Ready to install"
 		label, _ := destinationCopy(m.result.Destination)
 		body = "Account: " + m.options.Email + "\nDestination: " + label
 		if m.result.Destination == DestinationAsymptote {
-			body += "\n\nNext step after install: beacon endpoint connect"
+			body += "\nPrivacy: " + managedprivacy.Label(m.result.PrivacyMode) +
+				"\n\nNext step after install: beacon endpoint connect"
 		} else {
 			body += "\n\nYour telemetry stays on this machine."
 		}
@@ -210,9 +239,27 @@ func destinationCopy(destination string) (string, string) {
 	}
 }
 
+func privacyCopy(mode string) (string, string) {
+	if mode == managedprivacy.MetadataOnly {
+		return "Metadata only", "Omit prompts, responses, reasoning, tool arguments/results, command output, raw fields, and diffs."
+	}
+	return "Standard (recommended)", "Send locally sanitized retained content, including prompts and tool activity."
+}
+
+func privacyIndex(mode string) int {
+	for index, candidate := range managedprivacy.Modes {
+		if candidate == mode {
+			return index
+		}
+	}
+	return 0
+}
+
 func wizardHint(screen wizardScreen) string {
 	switch screen {
 	case destinationScreen:
+		return "↑/↓ choose · enter continue · esc cancel"
+	case privacyScreen:
 		return "↑/↓ choose · enter continue · esc cancel"
 	case signInScreen:
 		return "enter open beacon.sh · esc cancel"

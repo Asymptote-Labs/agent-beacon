@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 )
 
 // Forwarder is the service-manager surface Connect and Disconnect need. service.ForwarderManager
@@ -39,10 +41,15 @@ type ConnectOptions struct {
 	Forwarder Forwarder
 	// Enroll is the browser flow; the CLI fills Device, DashboardURL, browser opener.
 	Enroll EnrollOptions
+	// AccountEnroll replaces the browser approval with the signed-in CLI account.
+	// Connect fills Device after pinning the install id.
+	AccountEnroll *AccountEnrollOptions
 	// InstallID identifies this machine across re-enrollments. Empty reuses the stored
 	// enrollment's id or mints a new one.
 	InstallID string
-	Out       io.Writer
+	// PrivacyMode controls the Vector-side transform before managed upload.
+	PrivacyMode string
+	Out         io.Writer
 	// Now is injectable for tests.
 	Now func() time.Time
 }
@@ -60,12 +67,15 @@ type ConnectResult struct {
 
 // Connect enrolls this machine and starts the forwarder.
 //
-// Failure ordering is deliberate: Vector is located before the browser opens, so a machine
-// without Vector never mints a key it cannot use; the key is written to the 0600 secrets file
-// before the config that references it; the config is validated before a service unit points at
-// it; and the enrollment record is saved last, so status never claims a connection that did not
-// finish. A re-run on an enrolled machine reuses its install id, which rotates the key in place
-// on the server rather than creating a second device.
+// Failure ordering is deliberate: Vector is located and the forwarder config is validated
+// before enrollment, so a machine whose Vector is missing or rejects the config never mints a
+// key it cannot use; the key is written to the 0600 secrets file before the config that
+// references it; the written config is validated before a service unit points at it; and the
+// enrollment record is saved last, so status never claims a connection that did not finish.
+// A re-run on an enrolled machine reuses its install id, which rotates the key in place on the
+// server rather than creating a second device. That rotation is why validation comes first:
+// once the server has rotated the key, a forwarder still running with the old one is failing
+// every upload, so nothing that can be checked locally may fail after that point.
 func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	out := opts.Out
 	if out == nil {
@@ -74,6 +84,10 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	now := opts.Now
 	if now == nil {
 		now = time.Now
+	}
+	privacyMode, err := managedprivacy.Normalize(opts.PrivacyMode)
+	if err != nil {
+		return nil, err
 	}
 	manager := opts.Forwarder
 	if manager == nil {
@@ -105,6 +119,29 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 			return nil, err
 		}
 	}
+	logPath := opts.LogPath
+	if logPath == "" {
+		logPath = endpointconfig.Default(opts.UserMode, "").LogPath
+	}
+
+	// Prove Vector accepts this privacy mode's config before enrollment rotates the key.
+	// The ingest URL is the previous enrollment's when there is one; validate never
+	// connects, so a placeholder serves a first enrollment or a record missing its URL.
+	preflightURL := preflightIngestURL
+	if previous != nil && IsSecureURL(previous.IngestURL) {
+		preflightURL = previous.IngestURL
+	}
+	if err := ensureDir(opts.UserMode); err != nil {
+		return nil, err
+	}
+	if err := preflightVectorConfig(vector.Path, Dir(opts.UserMode), RenderOptions{
+		LogPath:     logPath,
+		IngestURL:   preflightURL,
+		PrivacyMode: privacyMode,
+	}); err != nil {
+		return nil, err
+	}
+
 	// Pin the id before the dashboard learns it, so a failure after approval retries as
 	// the same device.
 	if err := WriteInstallID(opts.UserMode, installID); err != nil {
@@ -119,11 +156,22 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		enrollOpts.Out = out
 	}
 
-	result, err := Enroll(ctx, enrollOpts)
+	var result *EnrollResult
+	if opts.AccountEnroll != nil {
+		accountEnroll := *opts.AccountEnroll
+		accountEnroll.Device = enrollOpts.Device
+		result, err = EnrollAccount(ctx, accountEnroll)
+	} else {
+		result, err = Enroll(ctx, enrollOpts)
+	}
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(out, "Approved for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+	if opts.AccountEnroll != nil {
+		fmt.Fprintf(out, "Account authorized device enrollment for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+	} else {
+		fmt.Fprintf(out, "Approved for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+	}
 
 	// Secrets first, then the config that references them, then the unit that runs it.
 	if err := WriteSecrets(opts.UserMode, result.DeviceKey); err != nil {
@@ -131,27 +179,45 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	}
 	result.DeviceKey = ""
 	dataDir := DataDir(opts.UserMode)
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return nil, err
-	}
-	logPath := opts.LogPath
-	if logPath == "" {
-		logPath = endpointconfig.Default(opts.UserMode, "").LogPath
-	}
+
+	// Validate the exact bytes the service will run before touching the service manager,
+	// so the privacy-mode change below never stops a working forwarder for a config Vector
+	// would refuse. The preflight already proved the template; what is new here is the
+	// server's ingest URL and the secrets file just written. Vector refuses a data_dir that
+	// does not exist, so create it first; a mode change clears and recreates it below.
 	rendered, err := RenderVectorConfig(RenderOptions{
 		LogPath:     logPath,
 		IngestURL:   result.IngestURL,
 		SecretsFile: SecretsPath(opts.UserMode),
 		DataDir:     dataDir,
+		PrivacyMode: privacyMode,
 	})
 	if err != nil {
 		return nil, err
 	}
-	configPath := VectorConfigPath(opts.UserMode)
-	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
-	if err := ValidateVectorConfig(vector.Path, configPath); err != nil {
+	configPath := VectorConfigPath(opts.UserMode)
+	if err := preValidateVectorConfig(vector.Path, configPath, []byte(rendered)); err != nil {
+		return nil, err
+	}
+
+	if previous != nil {
+		previousMode, _ := managedprivacy.Normalize(previous.PrivacyMode)
+		if previousMode != privacyMode {
+			// Stop the forwarder before clearing its buffer so a running Vector
+			// cannot keep sending or recreate old-mode buffer files.
+			_ = manager.Unload()
+			if err := os.RemoveAll(dataDir); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("could not clear the buffer after a privacy mode change: %w", err)
+			}
+			if err := os.MkdirAll(dataDir, 0o700); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
 		return nil, err
 	}
 	unitPath, err := manager.WriteUnit(vector.Path, configPath)
@@ -162,10 +228,14 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		return nil, fmt.Errorf("forwarder installed at %s but could not be started: %w", unitPath, err)
 	}
 
+	dashboardURL := auth.ResolveDashboardURL(enrollOpts.DashboardURL)
+	if opts.AccountEnroll != nil {
+		dashboardURL = strings.TrimRight(opts.AccountEnroll.BaseURL, "/")
+	}
 	enrollment := Enrollment{
 		InstallID:        installID,
 		IngestURL:        result.IngestURL,
-		DashboardURL:     auth.ResolveDashboardURL(enrollOpts.DashboardURL),
+		DashboardURL:     dashboardURL,
 		DeviceID:         result.DeviceID,
 		KeyPrefix:        result.KeyPrefix,
 		OrganizationID:   result.OrganizationID,
@@ -174,6 +244,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		EnrolledAt:       now().UTC(),
 		VectorBin:        vector.Path,
 		VectorVersion:    vector.Version,
+		PrivacyMode:      privacyMode,
 	}
 	if result.ExpiresAt != nil {
 		enrollment.ExpiresAt = *result.ExpiresAt
@@ -186,6 +257,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		IngestURL:      result.IngestURL,
 		DeviceID:       result.DeviceID,
 		OrganizationID: result.OrganizationID,
+		PrivacyMode:    privacyMode,
 	}); err != nil {
 		return nil, err
 	}
