@@ -249,6 +249,7 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | goose | Adapter only; manual hooks/OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | Grok Build | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | Hermes Agent | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
+| Kimi Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
 | Kiro | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
 | Muse Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | Oh My Pi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
