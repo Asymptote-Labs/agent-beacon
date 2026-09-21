@@ -1,12 +1,31 @@
-# Beacon
+<p align="center">
+  <img src="images/beacon-hero.png" alt="Beacon" width="860">
+</p>
 
-### The open-source cross-harness memory layer for AI agents.
+<h1 align="center">Beacon</h1>
 
-Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
+<p align="center">
+  <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
+  <a href="https://github.com/asymptote-labs/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-beacon-fbb040?logo=homebrew" alt="Homebrew"></a>
+  <a href="https://github.com/asymptote-labs/agent-beacon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/asymptote-labs/agent-beacon/ci.yml" alt="GitHub Workflow Status"></a>
+  <a href="https://github.com/asymptote-labs/agent-beacon/blob/main/LICENSE"><img src="https://img.shields.io/github/license/asymptote-labs/agent-beacon" alt="MIT license"></a>
+  <a href="https://docs.beacon.sh"><img src="https://img.shields.io/badge/docs-beacon.sh-0369a1" alt="Docs"></a>
+  <a href="https://discord.gg/zdNChS2fBu"><img src="https://img.shields.io/badge/discord-community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+</p>
 
-**A problem solved by one agent shouldn't need to be learned from scratch by another.**
+<p align="center">
+  <strong>The cross-harness self-improving memory layer for AI agents.</strong>
+</p>
 
-[Docs](https://docs.beacon.sh) · [Discord](https://discord.gg/zdNChS2fBu) · [Install](#quick-start) · [Commands](https://docs.beacon.sh/cli)
+<p align="center">
+  <a href="https://docs.beacon.sh">Docs</a>
+  ·
+  <a href="https://discord.gg/zdNChS2fBu">Discord</a>
+  ·
+  <a href="https://docs.beacon.sh/cli/install">Install</a>
+  ·
+  <a href="https://docs.beacon.sh/cli">Commands</a>
+</p>
 
 ---
 
