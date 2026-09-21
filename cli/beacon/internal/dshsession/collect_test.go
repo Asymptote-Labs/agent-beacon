@@ -16,7 +16,7 @@ func TestStoreReadsPlainAndMapsDeepSeekSession(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "sessions", "s1")
 	writeSession(t, sessionDir, SessionFileJSON,
-		record("session", map[string]interface{}{"id": "s1", "cwd": "/repo"}),
+		record("session", map[string]interface{}{"id": "s1", "cwd": "/repo", "parentSession": "parent-1"}),
 		record("request/header", map[string]interface{}{"header": map[string]interface{}{"config": map[string]interface{}{"model": "deepseek-chat"}}}),
 		record("user/message", map[string]interface{}{"message": map[string]interface{}{"content": "fix tests"}}),
 		record("assistant/message", map[string]interface{}{"message": map[string]interface{}{
@@ -69,9 +69,44 @@ func TestStoreReadsPlainAndMapsDeepSeekSession(t *testing.T) {
 	if usage.GenAI == nil || usage.GenAI.Usage == nil || usage.GenAI.Usage.InputTokens == nil || *usage.GenAI.Usage.InputTokens != 11 {
 		t.Fatalf("usage = %+v", usage.GenAI)
 	}
+	if got := usage.Raw["dsh"].(map[string]interface{})["parent_session"]; got != "parent-1" {
+		t.Fatalf("raw.dsh.parent_session = %v, want parent-1", got)
+	}
 	failed := findAction(t, mapped, "tool.failed")
 	if failed.File != nil && failed.File.Diff != "" {
 		t.Fatalf("failed write carried a diff: %+v", failed.File)
+	}
+}
+
+func TestMapSessionPreservesDiffWhitespace(t *testing.T) {
+	ref := SessionRef{ID: "s-diff", Path: "/tmp/session.jsonl", ModTimeUnixMS: 1}
+	records := []Record{
+		mustRecord(t, 1, record("session", map[string]interface{}{"id": "s-diff", "cwd": "/repo"})),
+		mustRecord(t, 2, record("tool/call", map[string]interface{}{"callId": "call_1", "name": "write", "arguments": map[string]interface{}{"file_path": "/repo/a.txt", "content": "line with trailing spaces  \n"}})),
+		mustRecord(t, 3, record("tool/result", map[string]interface{}{"callId": "call_1", "toolName": "write", "content": "ok"})),
+	}
+	event := findAction(t, MapSession(ref, records, MapOptions{}), "file.modified")
+	if event.File == nil || !strings.Contains(event.File.Diff, "+line with trailing spaces  \n+\n") {
+		t.Fatalf("diff = %q, want trailing spaces and newline preserved", event.File.Diff)
+	}
+}
+
+func TestAdvanceCursorPartialLeavesChangedFileRetryable(t *testing.T) {
+	cursor := &Cursor{LastLine: 1, SizeBytes: 100, ModTimeMS: 10}
+	ref := SessionRef{SizeBytes: 200, ModTimeUnixMS: 20}
+	mapped := []MappedEvent{
+		{SourceLine: 2, Event: schema.Event{Event: schema.EventInfo{Action: "prompt.submitted"}}},
+		{SourceLine: 3, Event: schema.Event{Event: schema.EventInfo{Action: "agent.message"}}},
+	}
+	advanceCursorPartial(cursor, ref, mapped, 1)
+	if cursor.LastLine != 2 {
+		t.Fatalf("LastLine = %d, want 2", cursor.LastLine)
+	}
+	if cursor.SizeBytes == ref.SizeBytes || cursor.ModTimeMS == ref.ModTimeUnixMS {
+		t.Fatalf("partial cursor stamped changed file markers: %+v", cursor)
+	}
+	if !cursor.PartialTail {
+		t.Fatalf("partial cursor did not force retry: %+v", cursor)
 	}
 }
 
@@ -128,6 +163,15 @@ func TestCollectPrintDoesNotAdvanceState(t *testing.T) {
 func record(kind string, data map[string]interface{}) string {
 	line, _ := json.Marshal(map[string]interface{}{"type": kind, "time": "2026-09-21T10:00:00Z", "data": data})
 	return string(line)
+}
+
+func mustRecord(t *testing.T, line int, text string) Record {
+	t.Helper()
+	record, err := decodeRecord([]byte(text), line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *record
 }
 
 func writeSession(t *testing.T, dir, name string, lines ...string) {

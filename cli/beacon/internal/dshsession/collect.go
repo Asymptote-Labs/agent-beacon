@@ -219,8 +219,10 @@ func advanceCursorPartial(cursor *Cursor, ref SessionRef, mapped []MappedEvent, 
 	if lastLine > cursor.LastLine {
 		cursor.LastLine = lastLine
 	}
-	cursor.SizeBytes = ref.SizeBytes
-	cursor.ModTimeMS = ref.ModTimeUnixMS
+	// Do not stamp the file's current size/mtime here. The cheap skip at the
+	// start of the next sweep treats matching size+mtime as "nothing left to
+	// read"; after a partial emit, there is explicitly work left to retry.
+	cursor.PartialTail = true
 }
 
 func emit(event schema.Event, opts CollectOptions) error {

@@ -116,7 +116,7 @@ func (m *mapper) consume(record Record) {
 
 func (m *mapper) emitSessionStarted(record Record) {
 	ev := m.base(record, "session.started", "session", schema.SeverityInfo, "DeepSeek Harness session started")
-	ev.Raw = rawDsh(record, map[string]interface{}{"source_path": m.ref.Path})
+	ev.Raw = m.rawDsh(record, map[string]interface{}{"source_path": m.ref.Path})
 	m.append(record, "session.started", ev)
 }
 
@@ -131,7 +131,7 @@ func (m *mapper) emitPrompt(record Record) {
 	ev.GenAI = withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) {
 		genAI.Input = &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}
 	})
-	ev.Raw = rawDsh(record, nil)
+	ev.Raw = m.rawDsh(record, nil)
 	m.append(record, "prompt.submitted", ev)
 }
 
@@ -149,7 +149,7 @@ func (m *mapper) emitAssistant(record Record) {
 				}}}
 			})
 			ev.Content = asymptoteobserve.RetainedContent(part.text, asymptoteobserve.DefaultRawStringLimit)
-			ev.Raw = rawDsh(record, nil)
+			ev.Raw = m.rawDsh(record, nil)
 			m.append(record, fmt.Sprintf("assistant.reasoning.%d", i), ev)
 		case "text":
 			ev := m.base(record, "agent.message", "agent", schema.SeverityInfo, "DeepSeek assistant message")
@@ -158,7 +158,7 @@ func (m *mapper) emitAssistant(record Record) {
 				genAI.Output = &schema.GenAIOutputInfo{Messages: asymptoteobserve.TextOutputMessages(part.text)}
 			})
 			ev.Content = asymptoteobserve.RetainedContent(part.text, asymptoteobserve.DefaultRawStringLimit)
-			ev.Raw = rawDsh(record, nil)
+			ev.Raw = m.rawDsh(record, nil)
 			m.append(record, fmt.Sprintf("assistant.text.%d", i), ev)
 		}
 	}
@@ -176,7 +176,7 @@ func (m *mapper) emitToolCall(record Record) {
 	ev := m.base(record, "tool.invoked", "tool", schema.SeverityInfo, "DeepSeek tool invoked")
 	ev.Tool = &schema.ToolInfo{Name: call.Name}
 	applyCall(&ev, call)
-	ev.Raw = rawDsh(record, nil)
+	ev.Raw = m.rawDsh(record, nil)
 	m.append(record, "tool.call", ev)
 }
 
@@ -207,7 +207,7 @@ func (m *mapper) emitToolResult(record Record) {
 	if result.IsError {
 		ev.Error = &schema.ErrorInfo{Type: "tool_execution_failed"}
 	}
-	ev.Raw = rawDsh(record, map[string]interface{}{"tool_result": result.Raw})
+	ev.Raw = m.rawDsh(record, map[string]interface{}{"tool_result": result.Raw})
 	m.append(record, "tool.result", ev)
 }
 
@@ -219,7 +219,7 @@ func (m *mapper) emitTurnEnd(record Record) {
 	}
 	ev := m.base(record, "agent.error", "session", schema.SeverityHigh, "DeepSeek turn ended with error")
 	ev.Error = &schema.ErrorInfo{Type: kind}
-	ev.Raw = rawDsh(record, nil)
+	ev.Raw = m.rawDsh(record, nil)
 	m.append(record, "turn.end."+kind, ev)
 }
 
@@ -231,7 +231,7 @@ func (m *mapper) emitUsage(record Record) {
 	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, "DeepSeek token usage")
 	ev.GenAI = withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) { genAI.Usage = usage })
 	ev.Model = firstNonEmpty(assistantModel(record.Data), m.model, m.session.Model)
-	ev.Raw = rawDsh(record, map[string]interface{}{"token_source": "assistant_message"})
+	ev.Raw = m.rawDsh(record, map[string]interface{}{"token_source": "assistant_message"})
 	m.append(record, "usage", ev)
 }
 
@@ -379,27 +379,27 @@ func diffFromCall(call toolCall) string {
 	path := firstString(call.Arguments, "file_path", "path")
 	switch name {
 	case "write":
-		content := firstString(call.Arguments, "content", "file_text")
+		content := firstRawString(call.Arguments, "content", "file_text")
 		if path != "" && content != "" {
 			return "--- /dev/null\n+++ " + path + "\n+" + strings.ReplaceAll(content, "\n", "\n+") + "\n"
 		}
 	case "edit":
-		oldText := firstString(call.Arguments, "old_string", "old_str")
-		newText := firstString(call.Arguments, "new_string", "new_str")
+		oldText := firstRawString(call.Arguments, "old_string", "old_str")
+		newText := firstRawString(call.Arguments, "new_string", "new_str")
 		if oldText != "" || newText != "" {
 			return "-" + strings.ReplaceAll(oldText, "\n", "\n-") + "\n+" + strings.ReplaceAll(newText, "\n", "\n+") + "\n"
 		}
 	case "str_replace_editor":
 		op := dshEditorOperation(call.Name, call.Arguments)
 		if op == "create" {
-			content := firstString(call.Arguments, "file_text")
+			content := firstRawString(call.Arguments, "file_text")
 			if content != "" {
 				return "--- /dev/null\n+++ " + path + "\n+" + strings.ReplaceAll(content, "\n", "\n+") + "\n"
 			}
 		}
 		if op == "str_replace" || op == "insert" {
-			oldText := firstString(call.Arguments, "old_str")
-			newText := firstString(call.Arguments, "new_str", "insert")
+			oldText := firstRawString(call.Arguments, "old_str")
+			newText := firstRawString(call.Arguments, "new_str", "insert")
 			if oldText != "" || newText != "" {
 				return "-" + strings.ReplaceAll(oldText, "\n", "\n-") + "\n+" + strings.ReplaceAll(newText, "\n", "\n+") + "\n"
 			}
@@ -493,13 +493,16 @@ func assistantModel(data map[string]interface{}) string {
 	return firstNonEmpty(firstString(source, "model"), firstString(msg, "model"))
 }
 
-func rawDsh(record Record, extra map[string]interface{}) map[string]interface{} {
+func (m *mapper) rawDsh(record Record, extra map[string]interface{}) map[string]interface{} {
 	raw := map[string]interface{}{}
 	if len(record.Raw) > 0 {
 		var decoded map[string]interface{}
 		if json.Unmarshal(record.Raw, &decoded) == nil {
 			raw["record"] = decoded
 		}
+	}
+	if m.session.ParentSessionID != "" {
+		raw["parent_session"] = m.session.ParentSessionID
 	}
 	for k, v := range extra {
 		raw[k] = v
@@ -612,6 +615,20 @@ func firstString(data map[string]interface{}, keys ...string) string {
 		if value, ok := data[key]; ok {
 			if text := strings.TrimSpace(textValue(value)); text != "" {
 				return text
+			}
+		}
+	}
+	return ""
+}
+
+func firstRawString(data map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := data[key]; ok {
+			if text, ok := value.(string); ok {
+				return text
+			}
+			if value != nil {
+				return fmt.Sprint(value)
 			}
 		}
 	}
