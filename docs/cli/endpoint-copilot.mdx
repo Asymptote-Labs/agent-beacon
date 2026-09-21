@@ -1,0 +1,102 @@
+---
+title: "beacon endpoint copilot"
+description: "Collect endpoint telemetry from GitHub Copilot CLI session records"
+---
+
+## Command overview
+
+`beacon endpoint copilot` collects telemetry from [GitHub Copilot CLI](/runtimes/github-copilot-cli) by reading the session records Copilot commits under `~/.copilot/session-state` and converting them into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint copilot [command]
+```
+
+This complements Copilot's live OTLP export. OTLP carries live spans and approval-like permission activity; polling backfills assistant text, complete tool results, commands, file activity, and token usage from records already committed to disk.
+
+Every event from this command is marked `harness.collection_method=poll`. Beacon sees what Copilot wrote after the fact, so this path cannot hold, approve, deny, or delay a tool call, and it does not synthesize approval events.
+
+Reading is local and offline. Nothing this command does reaches the network.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint copilot sync` | Read new GitHub Copilot CLI session records into the runtime log |
+| `beacon endpoint copilot status` | Show Copilot CLI sessions on this machine and how much of each has been collected |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--copilot-dir <path>` | GitHub Copilot CLI directory. Defaults to `~/.copilot` |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/copilot.json` |
+| `--workspace <path>` | Only include sessions whose recorded cwd matches this workspace |
+| `--session-id <id>` | Only include one Copilot CLI session id |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths. The cursor moves beside the system runtime log |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them or advancing the cursor |
+| `--watch` | Sweep continuously on `--interval` instead of sweeping once and exiting |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint copilot sync
+```
+
+```bash title="Preview without writing anything"
+beacon endpoint copilot sync --print
+```
+
+`--print` is a dry run in both directions: it neither writes the runtime log nor advances the cursor, so running it twice shows the same events and running it does not quietly consume the work a later real sweep would do.
+
+```bash title="Sweep continuously"
+beacon endpoint copilot sync --watch --interval 5m
+```
+
+Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the account that owns `~/.copilot`.
+
+## Status
+
+```bash title="Show Copilot CLI sessions and collection progress"
+beacon endpoint copilot status
+```
+
+```text
+GitHub Copilot CLI sessions: 2 in /Users/you/.copilot/session-state
+  caab1e17-...  collected  line 42/42  /Users/you/src/app
+  edbb2d48-...  pending    line 0/18   /Users/you/src/api
+```
+
+`collected` means the cursor is level with the complete records Beacon decoded from that session's `events.jsonl`. A partly written trailing record is left for the next sweep and reported as pending rather than treated as corruption.
+
+## Cursor behavior
+
+The cursor is what keeps a scheduled sweep from re-appending every session's whole history. It stores the last decoded line per `events.jsonl` file, plus file size and modification time for cheap no-op sweeps.
+
+| Mode | Default cursor path |
+|------|--------------------|
+| User | `~/.beacon/endpoint/state/copilot.json` |
+| System | `copilot-state.json` beside the system runtime log |
+
+Re-reading is safe: each event's id comes from the source file, session id, line number, and mapped event suffix, so the same Copilot record maps to the same event every time.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="GitHub Copilot CLI" icon="code" href="/runtimes/github-copilot-cli">
+    Telemetry coverage, discovery, and known gaps for the runtime.
+  </Card>
+  <Card title="beacon endpoint discover" icon="magnifying-glass" href="/cli/endpoint-discover">
+    Check whether Copilot CLI is detected and whether live OTLP is configured.
+  </Card>
+</Columns>
