@@ -238,7 +238,10 @@ func (s *Store) ProjectIDForPath(path string) (string, error) {
 	if trimmed == "" {
 		return "", nil
 	}
-	cleaned := filepath.Clean(trimmed)
+	cleaned, err := filepath.Abs(trimmed)
+	if err != nil {
+		return "", err
+	}
 	projects, err := s.KnownProjects()
 	if err != nil {
 		return "", err
