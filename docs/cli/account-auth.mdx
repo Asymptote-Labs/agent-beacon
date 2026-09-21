@@ -5,6 +5,10 @@ description: "Sign the Beacon CLI in through beacon.sh without enabling managed 
 
 Beacon account authentication is separate from endpoint forwarding. Signing in establishes your CLI identity, but it does not start Vector, register a managed endpoint, or send local telemetry anywhere.
 
+The interactive `beacon endpoint install` wizard requires this sign-in and launches
+the same flow when needed. System, package, MDM, CI, dry-run, and redirected-input
+installs skip the wizard and remain account-free.
+
 ```bash
 beacon login
 beacon whoami

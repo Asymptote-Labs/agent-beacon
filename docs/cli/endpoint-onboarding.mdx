@@ -13,59 +13,60 @@ beacon endpoint onboarding [flags]
 ```
 
 The record lives in `~/.beacon/profile.json`. It survives uninstall, so reinstalling
-Beacon never asks the email and usage questions again. The destination question is
-asked again on the next interactive install until a destination is recorded; an
-Beacon answer is recorded only once the connect succeeds.
+Beacon does not repeat completed setup.
 
 ## First-run onboarding
 
-The first interactive `beacon endpoint install` asks two questions, how you are using Beacon and your email, then sends the answers to Beacon once. This is how we decide
-which agent runtimes and integrations to build next. It then asks a third question, where this machine's telemetry should go: keep it on the machine, forward it to your own infrastructure (a SIEM, observability platform, or an S3/GCS bucket you own, with a pointer to the [log forwarding docs](/log-forwarding)), or forward it to Beacon Managed, which runs [`beacon endpoint connect`](/cli/endpoint-connect) after the install. That answer stays local and is never sent.
+The first interactive `beacon endpoint install` opens a full-screen terminal wizard:
 
-What is sent, and nothing else:
+1. Sign in through beacon.sh using the same browser PKCE flow as [`beacon login`](/cli/account-auth).
+2. Choose **Local only** or **Beacon Managed**.
+3. Review the destination and confirm installation.
 
-| Field | Example |
-|-------|---------|
-| Email you enter | `you@company.com` |
-| Work, personal, or evaluating | `work` |
-| OS, architecture, OS version | `darwin`, `arm64`, `15.5` |
-| Beacon version and install method | `v0.0.31`, `homebrew` |
-| Names of agent runtimes on this machine | `claude_code`, `cursor` |
-| A random install ID | `64871b2b…` |
+Signing in establishes account identity only. It does not register a managed endpoint,
+start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
+to opt out of managed forwarding.
 
-Prompts, file contents, commands, telemetry events, and repository names are never
-sent. The endpoint agent itself stays local-only; this is one request at install time,
-not an ongoing channel.
+Choosing Beacon Managed shows a separate disclosure that new runtime and inventory
+events will be sent to beacon.sh only after you run:
 
-The prompt never appears non-interactively. Package postinstall scripts, MDM
+```bash
+beacon endpoint connect
+```
+
+Completing the wizard records managed intent and prints that next step; it does not
+connect automatically. Existing local history is not uploaded. The explicit
+`beacon endpoint install --connect` flag remains the exception: it presets Managed
+and runs device enrollment after installation.
+
+The wizard never appears non-interactively. Package postinstall scripts, MDM
 deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
-skip it silently. The destination question is also skipped on an endpoint already
-connected to Beacon. A machine onboarded before the question existed is asked it
-once, on its next interactive install.
+skip it silently. These paths remain account-free.
 
 ## Flags
 
 | Flag | Description |
 |------|-------------|
 | `--reset` | Clear the onboarding record so the question is asked again |
-| `--resend` | Retry a signup that could not be delivered |
+| `--resend` | Retry a signup queued by a pre-account onboarding version |
 | `--json` | Print the onboarding record as JSON |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths |
 
 ## Unattended installs
 
-Set `BEACON_ONBOARDING=0` to suppress the prompt on an install that would otherwise be
+Set `BEACON_ONBOARDING=0` to suppress the wizard on an install that would otherwise be
 interactive. There is no CLI flag for this: it exists for unattended CI and MDM
-workflows. `BEACON_MANAGED_INGEST=0` hides only the Beacon Managed answer from the
-destination question; `beacon endpoint install --connect` still connects when asked explicitly.
+workflows. `BEACON_MANAGED_INGEST=0` hides the Beacon Managed answer; explicit
+`beacon endpoint install --connect` remains unaffected.
 
 ```bash title="Suppress the prompt"
 BEACON_ONBOARDING=0 beacon endpoint install
 ```
 
-For a fleet rollout where you do want attribution but have no terminal, supply both
-answers up front and Beacon records them without prompting:
+The legacy `BEACON_ONBOARDING_EMAIL` and `BEACON_ONBOARDING_USAGE` variables remain
+accepted for existing fleet automation. They use the previous one-time attribution
+submission and do not create an account session:
 
 ```bash title="Headless attribution for MDM"
 BEACON_ONBOARDING_EMAIL=it@company.com BEACON_ONBOARDING_USAGE=work \
@@ -77,23 +78,23 @@ is reported on stderr and ignored rather than failing the install.
 
 ## Examples
 
-Show what was recorded, including the answer to the destination question
-(`Telemetry destination: local only …`, `own infrastructure …` or `Beacon Managed`; absent
-when it has not been asked, or when a Beacon answer has not yet been carried through to a
-connected machine):
+Show what was recorded, including the signed-in email and destination:
 
 ```bash title="Show the onboarding record"
 beacon endpoint onboarding
 ```
 
-The answer is stored as `onboarding.destination` in `~/.beacon/profile.json` and takes
-one of three values; `--json` exposes it as `destination`:
+The answer is stored as `onboarding.destination` in `~/.beacon/profile.json`;
+`--json` exposes it as `destination`:
 
 | Value | Printed as |
 |-------|------------|
 | `local` | local only (nothing forwarded) |
-| `own_infra` | own infrastructure (forwarding pack) |
 | `asymptote` | Beacon Managed |
+
+`own_infra` remains readable for profiles created by older Beacon versions. New
+interactive installs choose Local and can configure a customer-managed
+[forwarding pack](/log-forwarding) afterward.
 
 Clear it so the next install asks again:
 
@@ -101,8 +102,7 @@ Clear it so the next install asks again:
 beacon endpoint onboarding --reset
 ```
 
-Retry a submission that could not reach Beacon. A failed submission never fails an
-install; the payload is kept and retried automatically on the next install or repair.
+Retry a legacy attribution submission that could not reach Beacon:
 
 ```bash title="Resend a queued signup"
 beacon endpoint onboarding --resend

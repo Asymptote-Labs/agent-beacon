@@ -47,17 +47,21 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
 | `--connect` | After a successful install, connect this endpoint to Beacon managed ingest: opens the dashboard to approve the device and starts the Vector forwarder. Same as running [`beacon endpoint connect`](/cli/endpoint-connect) afterwards |
 
-## Telemetry destination question
+## Interactive onboarding wizard
 
-On a first interactive install the [onboarding prompt](/cli/endpoint-onboarding) ends with one more question, where this machine's agent telemetry should go, as an arrow-key menu with three answers:
+On a first interactive install the [onboarding wizard](/cli/endpoint-onboarding)
+signs in through beacon.sh, then asks where this machine's telemetry should go:
 
 | Answer | What happens |
 |--------|--------------|
-| Keep it on this machine (default) | Nothing is forwarded. Enter picks this, so forwarding is never a side effect. |
-| Forward to your own infrastructure | A SIEM, observability platform, or an S3/GCS bucket you own. The prompt prints the [log forwarding docs](/log-forwarding) and the pack commands; the install stays local until you set one up. |
-| Forward to Beacon Managed | Runs the [connect flow](/cli/endpoint-connect) after the install completes. A failed connect is reported with the retry command and never fails the install. |
+| Beacon Managed (default) | Shows what will be sent, records the choice, and prints `beacon endpoint connect` as a separate next step. Nothing is forwarded during the wizard. |
+| Local only | Explicitly opts out of managed forwarding. Nothing is sent anywhere. |
 
-`--connect` is already the answer, so it skips the question. `BEACON_MANAGED_INGEST=0` hides the Beacon answer; the question is never shown non-interactively. The answer is stored in the local onboarding profile and never sent. Local and own-infrastructure answers are recorded at once and the question is not asked again. The Beacon answer is recorded only once the machine is connected, so if the install or the connection fails, the next interactive install asks again.
+`--connect` presets Beacon Managed and runs the connect flow after installation.
+`BEACON_MANAGED_INGEST=0` hides the managed answer. The wizard is never shown
+for system/root, package, MDM, CI, dry-run, or redirected-input installs.
+Customer-managed destinations remain available through the
+[log forwarding packs](/log-forwarding) after choosing Local.
 
 ## Examples
 

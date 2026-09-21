@@ -104,13 +104,13 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
-	chooseAsymptote, err := maybeRunOnboarding(cmd)
+	connectFromOnboarding, err := maybeRunOnboarding(cmd)
 	if err != nil {
 		return err
 	}
-	// --connect skips the destination question inside maybeRunOnboarding; either way the
-	// Asymptote answer is recorded in the profile only after the connect below succeeds.
-	connectAfterInstall := chooseAsymptote || endpointOpts.connect
+	// A normal Managed selection records intent and prints the separate connect command.
+	// Explicit --connect keeps its existing behavior and runs enrollment after install.
+	connectAfterInstall := connectFromOnboarding || endpointOpts.connect
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,

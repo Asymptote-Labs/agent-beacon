@@ -1,6 +1,5 @@
-// Package onboarding implements Beacon's one-time, install-time account signal:
-// a prompt for the operator's email and how they are using Beacon, submitted once
-// to an Asymptote-run endpoint.
+// Package onboarding implements Beacon's one-time interactive install wizard and
+// retains the legacy attribution record used by unattended deployments.
 //
 // Everything here is best-effort. Onboarding never fails an install, never runs
 // outside an interactive terminal, and never runs twice on the same machine.
@@ -40,6 +39,9 @@ const (
 	OutcomeRejected = "rejected"
 	// OutcomeSkipped means the user opted out through a documented escape hatch.
 	OutcomeSkipped = "skipped"
+	// OutcomeAuthenticated means the interactive wizard used the signed-in Beacon
+	// account instead of the legacy email/usage submission.
+	OutcomeAuthenticated = "authenticated"
 )
 
 // Profile is the persisted per-machine Beacon profile.
@@ -57,10 +59,9 @@ type Onboarding struct {
 	Email         string `json:"email,omitempty"`
 	Usage         string `json:"usage,omitempty"`
 	BeaconVersion string `json:"beacon_version,omitempty"`
-	// Destination records where the user chose to send this machine's telemetry:
-	// local, own_infra or asymptote. Empty means the question has not been answered on
-	// this machine, so a later interactive install may ask once. asymptote is written
-	// only after the connect succeeds, so a failed connect is asked again.
+	// Destination records where the user chose to send this machine's telemetry.
+	// New interactive installs choose local or asymptote; own_infra remains valid for
+	// profiles written by older versions and unattended/admin-managed deployments.
 	Destination string `json:"destination,omitempty"`
 }
 
