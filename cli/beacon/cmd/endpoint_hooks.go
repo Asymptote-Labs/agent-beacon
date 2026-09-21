@@ -265,6 +265,20 @@ func installEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 		// profile enabled HMR -- and the symptom otherwise is a successful install collecting
 		// nothing until the next restart, which reads as a broken install.
 		fmt.Println("Restart dsh (or rely on its config watcher, if your profile enables HMR) for the hooks to take effect.")
+	case "kimi":
+		status, err := endpointhooks.InstallKimi(endpointhooks.KimiOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Kimi Code hooks installed: %s\n", status.HooksPath)
+		// Said on every install, because Kimi Code reads config.toml once at startup: a running
+		// session will not pick these up, and the symptom is a successful install collecting
+		// nothing until the next `kimi`, which reads as a broken install.
+		fmt.Println("Start a new Kimi Code session (or run /reload) for the hooks to take effect.")
 	case "kiro":
 		status, err := endpointhooks.InstallKiro(endpointhooks.KiroOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -532,6 +546,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "kimi":
+		status, err := endpointhooks.UninstallKimi(endpointhooks.KimiOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "kiro":
 		status, err := endpointhooks.UninstallKiro(endpointhooks.KiroOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -704,6 +728,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "kimi":
+			statuses["kimi"] = endpointhooks.KimiHookStatus(endpointhooks.KimiOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "kiro":
 			statuses["kiro"] = endpointhooks.KiroHookStatus(endpointhooks.KiroOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -819,6 +849,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			// know which one to look at.
 			fmt.Printf("DeepSeek Harness hooks: installed=%t path=%s patch=%s\n",
 				status.Installed, status.HooksPath, status.PatchPath)
+			fmt.Println(status.Message)
+		case "kimi":
+			status := statuses["kimi"].(endpointhooks.KimiStatus)
+			fmt.Printf("Kimi Code hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)
 			fmt.Println(status.Message)
 		case "kiro":
 			status := statuses["kiro"].(endpointhooks.KiroStatus)

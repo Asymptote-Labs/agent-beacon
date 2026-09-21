@@ -736,6 +736,16 @@ func writeKimiConfig(path, text string) error {
 	return os.WriteFile(path, []byte(text), mode)
 }
 
+// KimiConfigPath is where Beacon registers Kimi Code's hooks.
+//
+// Exported because `harness` reports on the same file and must not rebuild the path itself. Two
+// copies of "where the config lives" is how discovery comes to report on a file the installer does
+// not write -- and here that would be worse than usual, because the value it reports on is the one
+// holding the user's API keys.
+func KimiConfigPath(level Level) (string, error) {
+	return kimiConfigPath(level)
+}
+
 func kimiConfigPath(level Level) (string, error) {
 	dir, err := kimiHomeDir(level)
 	if err != nil {
