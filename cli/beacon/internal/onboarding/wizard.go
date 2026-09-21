@@ -143,11 +143,10 @@ func (m wizardModel) advance() (tea.Model, tea.Cmd) {
 }
 
 func (m wizardModel) destinations() []string {
-	destinations := []string{DestinationLocal}
 	if m.options.OfferManaged {
-		destinations = append(destinations, DestinationAsymptote)
+		return []string{DestinationAsymptote, DestinationLocal}
 	}
-	return destinations
+	return []string{DestinationLocal}
 }
 
 func (m wizardModel) View() string {
@@ -205,9 +204,9 @@ func (m wizardModel) View() string {
 func destinationCopy(destination string) (string, string) {
 	switch destination {
 	case DestinationAsymptote:
-		return "Beacon Managed", "Keep local JSONL and optionally forward new events to beacon.sh."
+		return "Beacon Managed (recommended)", "Keep local JSONL and forward new events after you connect."
 	default:
-		return "Local only", "Nothing is sent anywhere. Browse with `beacon traces` or the local dashboard."
+		return "Local only", "Opt out of managed forwarding. Nothing is sent anywhere."
 	}
 }
 

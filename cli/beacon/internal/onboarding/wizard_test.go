@@ -40,7 +40,7 @@ func TestWizardRequestsLoginBeforeDestination(t *testing.T) {
 	}
 }
 
-func TestSignedInWizardDefaultsToLocalAndCompletes(t *testing.T) {
+func TestSignedInWizardCanOptOutToLocal(t *testing.T) {
 	model := newWizardModel(WizardOptions{
 		SignedIn:     true,
 		Email:        "person@example.com",
@@ -51,6 +51,10 @@ func TestSignedInWizardDefaultsToLocalAndCompletes(t *testing.T) {
 	if model.screen != destinationScreen {
 		t.Fatalf("screen = %v, want destination", model.screen)
 	}
+	if got := model.destinations(); len(got) != 2 || got[0] != DestinationAsymptote || got[1] != DestinationLocal {
+		t.Fatalf("destination order = %#v", got)
+	}
+	model, _ = advanceWizard(t, model, "j")
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != confirmScreen || model.result.Destination != DestinationLocal {
 		t.Fatalf("local selection = screen %v result %#v", model.screen, model.result)
@@ -72,7 +76,6 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 		DestinationOnly: true,
 	})
 	model.width, model.height = 100, 30
-	model, _ = advanceWizard(t, model, "j")
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != managedDisclosureScreen || model.result.Destination != DestinationAsymptote {
 		t.Fatalf("managed selection = screen %v result %#v", model.screen, model.result)

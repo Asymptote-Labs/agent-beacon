@@ -118,6 +118,9 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 		}
 		if destination == "" {
 			destination = onboarding.DestinationLocal
+			if opts.OfferManaged {
+				destination = onboarding.DestinationAsymptote
+			}
 		}
 		return onboarding.WizardResult{Completed: true, Destination: destination}, nil
 	}
@@ -170,8 +173,11 @@ func TestMaybeRunOnboardingPromptsOnInteractiveInstall(t *testing.T) {
 	}
 	if h.saved[0].Onboarding.Outcome != onboarding.OutcomeAuthenticated ||
 		h.saved[0].Onboarding.Email != "shukan@asymptotelabs.ai" ||
-		h.saved[0].Onboarding.Destination != onboarding.DestinationLocal {
+		h.saved[0].Onboarding.Destination != onboarding.DestinationAsymptote {
 		t.Fatalf("saved account onboarding = %+v", h.saved[0].Onboarding)
+	}
+	if !strings.Contains(h.stdout.String(), "beacon endpoint connect") {
+		t.Fatalf("managed next step missing: %s", h.stdout.String())
 	}
 	if h.saved[0].InstallID == "" {
 		t.Fatalf("saved profile has no install ID")
