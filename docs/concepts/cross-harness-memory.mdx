@@ -1,0 +1,79 @@
+---
+title: "Cross-Harness Memory"
+description: "Turn reviewed Beacon traces into project memory that future agents can reuse"
+---
+
+## Overview
+
+Beacon memory is an opt-in, local-first learning loop built on Beacon's existing
+cross-harness trace capture.
+
+Beacon already records normalized agent activity across Claude Code, Cursor, Codex,
+OpenCode, and other supported harnesses. The memory workflow lets you explicitly
+evaluate selected traces, review high-signal candidates, approve them into project
+memory, and expose approved knowledge back to future agents through MCP or Agent
+Skills.
+
+Nothing in this workflow runs from hooks. Normal endpoint capture stays local and
+does not call Jev or any other external evaluator.
+
+## Workflow
+
+The loop is:
+
+1. Capture traces from local agent harnesses.
+2. Run `beacon memory evaluations run` on selected traces.
+3. Review generated candidates with `beacon memory candidates`.
+4. Approve candidates into project memory.
+5. Reuse approved memory through Beacon MCP or install it as an Agent Skill.
+
+This is deliberately review-gated. Jev probabilities help rank and classify traces;
+they do not automatically rewrite instructions, install skills, or execute actions.
+
+## Jev evaluation
+
+`beacon memory evaluations run` can call TypeSafe Jev's System One API with a
+bounded, redacted trace projection. Beacon sends typed yes/no questions such as:
+
+- Did the trace complete the engineering task successfully?
+- Does the trace contain a reusable correction or debugging pattern?
+- Is the reusable lesson supported by concrete trace evidence?
+
+Jev returns probabilities. Beacon stores those probabilities with the trace
+provenance, evaluator model, and usage metadata when the API reports it.
+
+Use `--dry-run` first to preview selected traces and estimated calls without making
+a network request.
+
+## Local storage and scope
+
+Learning artifacts are stored in `memory.db` next to the endpoint runtime log base
+directory. The database is durable local state, unlike the rebuildable trace index.
+
+Approved memory is scoped to the resolved project. Cross-project or user-global
+memory is not automatic. If you install a skill, Beacon writes it under the current
+project's `.agents/skills/<slug>/SKILL.md`.
+
+## Reuse surfaces
+
+Beacon exposes approved memory in two local ways:
+
+- `beacon mcp serve` provides `search_memory`, `get_memory`, and `get_memory_context`
+  as read-only MCP tools.
+- `beacon memory skills preview|install` renders an approved candidate as an Agent
+  Skill with Beacon provenance in the frontmatter.
+
+This is what makes the memory portable across harnesses: one agent's reviewed trace
+can become project knowledge that another MCP-capable or skill-capable agent can
+retrieve later.
+
+## Privacy boundary
+
+- Hooks never call Jev.
+- Dry runs do not call Jev.
+- Jev calls are made only by the explicit `beacon memory evaluations run` command.
+- Trace projections are bounded and redacted before being sent.
+- Candidate approval and skill installation are explicit CLI actions.
+
+If your organization forbids external evaluation, skip `beacon memory evaluations run`
+or point it at an internal compatible evaluator.
