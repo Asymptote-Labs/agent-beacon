@@ -354,6 +354,7 @@ func init() {
 	rootCmd.AddCommand(topLevelDoctorCmd)
 	rootCmd.AddCommand(topLevelStatusCmd)
 	rootCmd.AddCommand(topLevelInventoryCmd)
+	rootCmd.AddCommand(topLevelTracesCmd)
 
 	endpointCmd.AddCommand(endpointInstallCmd)
 	endpointCmd.AddCommand(endpointStatusCmd)
@@ -409,6 +410,9 @@ func init() {
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 	}
+	topLevelTracesCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
+	topLevelTracesCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
+	topLevelTracesCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
 
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", "claude,codex", "Comma-separated harnesses to configure")
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")

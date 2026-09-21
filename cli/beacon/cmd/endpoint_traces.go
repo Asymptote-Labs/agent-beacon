@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/traceview"
 )
 
 var endpointTraceOpts struct {
@@ -29,6 +31,38 @@ var endpointTraceOpts struct {
 var endpointTracesCmd = &cobra.Command{
 	Use:   "traces",
 	Short: "Index and search local endpoint traces",
+}
+
+var topLevelTracesCmd = &cobra.Command{
+	Use:          "traces",
+	Short:        "Browse local endpoint traces in the terminal",
+	SilenceUsage: true,
+	RunE:         runTopLevelTraces,
+}
+
+var runTraceView = traceview.Run
+
+func runTopLevelTraces(cmd *cobra.Command, args []string) error {
+	logPath := endpointTraceLogPath()
+	if !isCharDevice(os.Stdin) || !isCharDevice(os.Stdout) || strings.EqualFold(os.Getenv("TERM"), "dumb") {
+		result, err := dashboard.ReadTraceList(logPath, dashboard.TraceQuery{Limit: 100})
+		if err != nil {
+			return err
+		}
+		printPlainTraceList(cmd.OutOrStdout(), result)
+		return nil
+	}
+	return runTraceView(logPath, os.Stdin, cmd.OutOrStdout())
+}
+
+func printPlainTraceList(out io.Writer, result dashboard.TraceListResultV1) {
+	for _, trace := range result.Traces {
+		title := strings.Join(strings.Fields(trace.Title), " ")
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", trace.ID, trace.Harness.Name, trace.UpdatedAt, title)
+	}
+	if result.Truncated {
+		fmt.Fprintf(out, "Showing %d of %d traces; use `beacon endpoint traces list --page` to continue.\n", result.Returned, result.TotalMatched)
+	}
 }
 
 var endpointTracesStatusCmd = &cobra.Command{
@@ -92,12 +126,7 @@ var endpointTracesListCmd = &cobra.Command{
 		if endpointOpts.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(result)
 		}
-		for _, trace := range result.Traces {
-			fmt.Printf("%s\t%s\t%s\t%s\n", trace.ID, trace.Harness.Name, trace.UpdatedAt, trace.Title)
-		}
-		if result.Truncated {
-			fmt.Printf("Showing %d of %d traces; use --page or --limit to continue.\n", result.Returned, result.TotalMatched)
-		}
+		printPlainTraceList(cmd.OutOrStdout(), result)
 		return nil
 	},
 }
