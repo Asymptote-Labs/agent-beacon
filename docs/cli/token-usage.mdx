@@ -91,6 +91,7 @@ A runtime that reports occupancy and no spend still shows as `not_instrumented` 
 | Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
 | OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
 | Kiro | No Kiro hook payload carries token counts. See [Kiro](/runtimes/kiro) |
+| Kimi Code | No hook payload carries a token count on any of the twenty events. Kimi Code does count tokens -- the TUI shows context occupancy and `PreCompact` carries a `token_count` -- but neither is per-call spend. See [Kimi Code](/runtimes/kimi-code) |
 | Claude.ai | The adapter parses counts, but no recorded claude.ai stream has carried a usage object. See [Claude.ai](/runtimes/claude-web#limits) |
 | ChatGPT | The chat stream reports no token counts |
 | Devin Cloud | Devin bills ACUs rather than tokens. The count is preserved in the Devin raw block; there is no token or USD equivalent to normalize it into |

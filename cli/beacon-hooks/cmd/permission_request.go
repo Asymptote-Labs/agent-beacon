@@ -50,6 +50,16 @@ func runPermissionRequest(cmd *cobra.Command, args []string) {
 		outputJSON(emptyResponse)
 		return
 	}
+	// Kimi Code sends two events through this one subcommand -- PermissionRequest before it blocks
+	// on a person and PermissionResult once they have answered -- so unlike every runtime above it
+	// records an outcome and not only a question. The same shape hermes uses just above, and for
+	// the same reason: the pair is one conversation, and splitting it across two subcommands would
+	// mean two readers that have to agree about what a decision is.
+	if platformFlag == kimiPlatform {
+		emitKimiApproval(logger, input, sessionID)
+		outputJSON(emptyResponse)
+		return
+	}
 
 	emitPreToolDecision(logger, input, sessionID, "approval.requested", "requested", "Permission request observed", asymptoteobserve.FidelityObserved)
 	outputJSON(emptyResponse)

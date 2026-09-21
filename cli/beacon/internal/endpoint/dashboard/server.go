@@ -479,6 +479,8 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	// `beacon endpoint hooks status` reports both.
 	dsh := endpointhooks.DshHookStatus(endpointhooks.DshOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("dsh", dsh.Installed, dsh.HooksPath, dsh.BinaryPath, dsh.Message)
+	kimi := endpointhooks.KimiHookStatus(endpointhooks.KimiOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("kimi", kimi.Installed, kimi.HooksPath, kimi.BinaryPath, kimi.Message)
 	muse := endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("muse", muse.Installed, muse.HooksPath, muse.BinaryPath, muse.Message)
 	qwen := endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{Level: level, LogPath: logPath, UserMode: userMode})

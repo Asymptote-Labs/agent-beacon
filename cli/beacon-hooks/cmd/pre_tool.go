@@ -54,7 +54,7 @@ func runPreTool(cmd *cobra.Command, args []string) {
 	} else if platformFlag == "antigravity" {
 		emitAntigravityPromptFromTranscript(logger, input, sessionID)
 		emitPreToolObserved(logger, input, sessionID)
-	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == goosePlatform || platformFlag == dshPlatform {
+	} else if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "grok" || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == goosePlatform || platformFlag == dshPlatform || platformFlag == kimiPlatform {
 		// Muse Code belongs on the observing side rather than with the runtimes whose pre-tool
 		// notification gets turned into a synthesized approval, and the reason is that it has a
 		// real one. Its PermissionRequest event is a separate hook Beacon also subscribes to, so
@@ -92,6 +92,14 @@ func runPreTool(cmd *cobra.Command, args []string) {
 		// is no approval decision anywhere on this runtime's hook surface. PreToolUse announces a
 		// call the agent is about to make. Synthesizing approval.allowed from it would put an
 		// operator decision in the log that no operator made.
+		//
+		// Kimi Code is here for the Muse Code reason -- the strongest form of it. It exposes not
+		// one approval event but two, a PermissionRequest and a PermissionResult carrying the
+		// operator's actual answer, and Beacon subscribes to both. Deriving an approval.allowed
+		// from PreToolUse as well would record two approvals for one tool call, one of them
+		// invented, and put it next to a reported decision for the same call -- and it would be
+		// wrong even more often than on Muse, because PreToolUse on Kimi Code fires *before* the
+		// permission check runs, so at that moment nobody has been asked anything yet.
 		emitPreToolObserved(logger, input, sessionID)
 	} else {
 		emitPreToolDecision(logger, input, sessionID, "approval.allowed", "allow", "Pre-tool observed", asymptoteobserve.FidelityInferred)
@@ -191,7 +199,12 @@ func preToolResponse() map[string]interface{} {
 	// observing hook answering "allow" would not be observing, it would be disarming the
 	// deployment's own permission gate for every tool call. An empty object carries no decision,
 	// and the bridge's decoder treats stdout that parses to nothing as exactly that: no opinion.
-	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == dshPlatform {
+	// Kimi Code reaches this branch and never uses what it returns, the way Kiro does:
+	// hookStdoutIsConsumedAsAgentContext suppresses the write, because on UserPromptSubmit this
+	// runtime appends a hook's stdout to the model's context. The empty object is still the right
+	// value to hand back -- Kimi Code's decoder reads an object with no `permissionDecision` as no
+	// opinion, so it is what the suppression would fall back to if that ever changed.
+	if platformFlag == "claude" || platformFlag == "qwen" || isDevinLikePlatform(platformFlag) || platformFlag == "hermes" || platformFlag == "vscode" || platformFlag == "muse" || platformFlag == openHandsPlatform || platformFlag == kiroPlatform || platformFlag == dshPlatform || platformFlag == kimiPlatform {
 		return emptyResponse
 	}
 	return allowResponse

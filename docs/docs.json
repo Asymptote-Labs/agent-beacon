@@ -136,6 +136,7 @@
                       "runtimes/github-copilot-cli",
                       "runtimes/goose",
                       "runtimes/grok-build",
+                      "runtimes/kimi-code",
                       "runtimes/kiro",
                       "runtimes/muse-code",
                       "runtimes/oh-my-pi",
