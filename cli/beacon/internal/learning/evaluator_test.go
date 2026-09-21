@@ -23,9 +23,12 @@ func TestEvaluateDryRunDoesNotNeedEndpoint(t *testing.T) {
 	if eval.ID == "" || eval.RubricHash == "" || eval.CostEstimateUSD == 0 {
 		t.Fatalf("dry-run missing identifiers/cost: %#v", eval)
 	}
+	if eval.EvaluatorModel != DefaultJevModel {
+		t.Fatalf("model = %q", eval.EvaluatorModel)
+	}
 }
 
-func TestEvaluatePostsProjectionToMockableEndpoint(t *testing.T) {
+func TestEvaluatePostsSystemOneRequestToMockableEndpoint(t *testing.T) {
 	var sawAuth bool
 	var sawTrace bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,18 +39,24 @@ func TestEvaluatePostsProjectionToMockableEndpoint(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		sawTrace = req.Trace.TraceID == "trace-1" && len(req.Trace.Questions) == len(RubricQuestions)
+		trace, _ := req.State["trace"].(map[string]interface{})
+		sawTrace = req.Model == "jev-test" && trace["trace_id"] == "trace-1" && len(req.Questions) == len(RubricQuestions)
+		nine := 0.9
+		seven := 0.7
+		eight := 0.8
 		_ = json.NewEncoder(w).Encode(jevResponse{
-			Questions: []asymptoteobserve.LearningEvaluationQuestionV1{
-				{ID: "task_success", Probability: 0.9, Confidence: 0.8},
-				{ID: "reusable_correction", Probability: 0.7, Confidence: 0.6},
-				{ID: "evidence_supported", Probability: 0.8, Confidence: 0.9},
+			Model: "jev-test-resolved",
+			Answers: map[string]jevAnswer{
+				"task_success":        {Type: "noul", Noul: &nine},
+				"reusable_correction": {Type: "noul", Noul: &seven},
+				"evidence_supported":  {Type: "noul", Noul: &eight},
 			},
+			Usage: &asymptoteobserve.LearningEvaluationUsageV1{InputTokens: 100, CostUSD: 0.0001},
 		})
 	}))
 	defer server.Close()
 
-	eval, err := Evaluate(t.Context(), EvaluatorOptions{Endpoint: server.URL, APIKey: "secret"}, EvaluationInput{
+	eval, err := Evaluate(t.Context(), EvaluatorOptions{Endpoint: server.URL, APIKey: "secret", Model: "jev-test"}, EvaluationInput{
 		Project: asymptoteobserve.LearningProjectV1{ID: "project-1"},
 		Trace:   testTraceShow(),
 	})
@@ -62,6 +71,9 @@ func TestEvaluatePostsProjectionToMockableEndpoint(t *testing.T) {
 	}
 	if eval.Score <= 0.79 || eval.Score >= 0.81 {
 		t.Fatalf("score = %f", eval.Score)
+	}
+	if eval.EvaluatorModel != "jev-test-resolved" || eval.Usage == nil || eval.CostEstimateUSD != 0.0001 {
+		t.Fatalf("model/usage not retained: %#v", eval)
 	}
 }
 
@@ -81,9 +93,13 @@ func TestProjectionRedactsAndBoundsContent(t *testing.T) {
 	}
 }
 
-func TestEvaluateRequiresEndpointOutsideDryRun(t *testing.T) {
-	_, err := Evaluate(t.Context(), EvaluatorOptions{}, EvaluationInput{Project: asymptoteobserve.LearningProjectV1{ID: "p"}, Trace: testTraceShow()})
-	if err == nil || !strings.Contains(err.Error(), "Jev endpoint is required") {
+func TestEvaluateRequiresAnswersOutsideDryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"answers":{}}`))
+	}))
+	defer server.Close()
+	_, err := Evaluate(t.Context(), EvaluatorOptions{Endpoint: server.URL}, EvaluationInput{Project: asymptoteobserve.LearningProjectV1{ID: "p"}, Trace: testTraceShow()})
+	if err == nil || !strings.Contains(err.Error(), "answers") {
 		t.Fatalf("error = %v", err)
 	}
 }

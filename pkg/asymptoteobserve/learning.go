@@ -57,12 +57,21 @@ type LearningEvaluationV1 struct {
 	RubricVersion   string                         `json:"rubric_version"`
 	RubricHash      string                         `json:"rubric_hash"`
 	Evaluator       string                         `json:"evaluator"`
+	EvaluatorModel  string                         `json:"evaluator_model,omitempty"`
 	DryRun          bool                           `json:"dry_run,omitempty"`
 	Trace           LearningTraceRefV1             `json:"trace"`
 	Questions       []LearningEvaluationQuestionV1 `json:"questions,omitempty"`
 	Score           float64                        `json:"score,omitempty"`
 	CostEstimateUSD float64                        `json:"cost_estimate_usd,omitempty"`
+	Usage           *LearningEvaluationUsageV1     `json:"usage,omitempty"`
 	Error           string                         `json:"error,omitempty"`
+}
+
+type LearningEvaluationUsageV1 struct {
+	InputTokens         int64   `json:"input_tokens,omitempty"`
+	OutputTokens        int64   `json:"output_tokens,omitempty"`
+	CostUSD             float64 `json:"cost_usd,omitempty"`
+	CreditsRemainingUSD float64 `json:"credits_remaining_usd,omitempty"`
 }
 
 type LearningEvidenceV1 struct {
