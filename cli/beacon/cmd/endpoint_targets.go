@@ -104,6 +104,20 @@ var harnessTargets = []harnessTarget{
 	// people say it; Kiro's own documentation does not, which is why it is an alias and not the
 	// name.
 	{name: "kiro", endpointKind: endpointTargetHook, endpointAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}, hookAliases: []string{"kiro", "kiro-ide", "kiro-cli", "kiro-code"}},
+	// Kimi Code. One row for every surface, because the terminal CLI, the desktop app, the VS
+	// Code extension and the ACP server are front ends over one agent core that reads one
+	// user-level config.toml -- so one install covers all of them, and "kimi-code-cli" is an alias
+	// of that install rather than a target of its own. "kimi" is the binary and the --platform
+	// value; "kimi-code" and "kimi_code" are what the product is called and the canonical harness
+	// name events are written under, so a row read out of the runtime log and passed back to
+	// --harness resolves to the runtime it names.
+	//
+	// Bare "moonshot" and every "kimi-k2"/"kimi-k3" spelling are deliberately not aliases. The
+	// first is the vendor and the rest are the model family, and accepting either would let
+	// someone ask to install hooks for a model -- the same reason NormalizeHarnessName leaves them
+	// unmapped. Bare "kimi" is accepted here and not there for the same reason it is accepted in
+	// the harness normalizer: it is the name of the thing the operator runs.
+	{name: "kimi", endpointKind: endpointTargetHook, endpointAliases: []string{"kimi", "kimi-code", "kimi-code-cli"}, hookAliases: []string{"kimi", "kimi-code", "kimi-code-cli"}},
 	// OpenClaw Gateway. One row, and it is the plugin row: `--harness openclaw` installs the
 	// Beacon-managed plugin, which is the path that collects the agent's work. The gateway's other
 	// surface, its own diagnostics-otel plugin, is configured inside OpenClaw rather than by
