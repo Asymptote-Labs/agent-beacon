@@ -450,6 +450,13 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// than on a Beacon marker.
 		{runtime: "deepseek_harness", path: filepath.Join(dshUserDir(home), "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "deepseek_harness", path: filepath.Join(dshUserDir(home), "cordis.patch.yml"), scope: ScopeUser, format: formatYAML, kind: KindHookConfig},
+		// Kimi Code is one file and no project entry, and the file is not Beacon's: config.toml
+		// is where the runtime keeps its provider credentials, its model catalog and its
+		// permission rules, and Beacon's hooks are a minority of it. That is why it is listed as
+		// KindNativeConfig rather than KindHookConfig, and why the tell is the hook command
+		// rather than the file existing. The project scope is absent because Kimi Code reads one
+		// user-level config file and has no project-level config mechanism at all.
+		{runtime: "kimi_code", path: filepath.Join(kimiUserDir(home), "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.

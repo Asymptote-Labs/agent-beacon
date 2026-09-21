@@ -212,7 +212,8 @@ func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
 	scanned := []string{
 		"antigravity_cli", "claude_code", "cline", "codex_cli", "copilot_cli", "cursor",
 		"devin-cli", "devin-desktop", "factory", "gemini_cli", "grok", "hermes",
-		"kiro", "muse_code", "omp", "opencode", "openhands", "pi_cli", "qwen_code", "vscode",
+		"kimi_code", "kiro", "muse_code", "omp", "opencode", "openhands", "pi_cli", "qwen_code",
+		"vscode",
 	}
 	for _, runtime := range scanned {
 		harness := normalizedHarnessForTest(runtime)
@@ -256,6 +257,15 @@ func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
 	kiro := lineFor(t, Coverage([]schema.Event{plainEvent("kiro")}, []string{"kiro"}), "kiro")
 	if kiro.Status != CoverageNotInstrumented || kiro.Expectation != ExpectNone {
 		t.Errorf("kiro = %+v, want not_instrumented/none -- no Kiro hook payload carries token counts", kiro)
+	}
+
+	// Kimi Code is the case where the runtime does count tokens and still expects none here. It
+	// reports context occupancy in its TUI and a `token_count` on PreCompact, but neither is
+	// per-call spend and no hook payload carries any -- so the row has to say expected-none, and
+	// promoting either number into gen_ai.usage would make a level look like an additive total.
+	kimi := lineFor(t, Coverage([]schema.Event{plainEvent("kimi_code")}, []string{"kimi_code"}), "kimi_code")
+	if kimi.Status != CoverageNotInstrumented || kimi.Expectation != ExpectNone {
+		t.Errorf("kimi_code = %+v, want not_instrumented/none -- no Kimi Code hook payload carries token counts", kimi)
 	}
 
 	grokBot := lineFor(t, Coverage([]schema.Event{plainEvent("grok_bot")}, nil), "grok_bot")
