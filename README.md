@@ -43,9 +43,9 @@ future agents.
 **Key Capabilities:**
 
 - **Cross-harness history** - sessions from Claude Code, Cursor, Codex, OpenCode, Cline, and 20+ harnesses in one place
-- **Knowledge that compounds** - explicitly evaluated and approved workflows, corrections, debugging patterns, and repo conventions that survive beyond a single session
+- **Knowledge that compounds** - workflows, corrections, debugging patterns, and repo conventions that survive beyond a single session
 - **Shared agent memory** - reviewed knowledge future agents can retrieve through MCP or Agent Skills
-- **Runtime-aware trace review** - prompts, responses, tools, commands, edits, approvals, MCP activity, and tokens where the configured runtime surface exposes them
+- **Exact session replay** - prompts, responses, tools, commands, edits, approvals, MCP activity, and tokens in one trace
 - **Local-first portability** - durable JSONL, explicit destinations, and no harness lock-in
 
 ---
