@@ -1,6 +1,7 @@
 package learning
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,6 +123,42 @@ func TestStorePersistsLearningArtifacts(t *testing.T) {
 	}
 	if status.Evaluations != 1 || status.Candidates != 1 || status.ApprovedMemories != 1 {
 		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestListMemoriesSearchesAllRows(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	project := asymptoteobserve.LearningProjectV1{ID: "proj"}
+	for i := 0; i < 10; i++ {
+		if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+			ID:          fmt.Sprintf("memory-%d", i),
+			CandidateID: fmt.Sprintf("candidate-%d", i),
+			Kind:        asymptoteobserve.LearningMemoryKindConvention,
+			Title:       fmt.Sprintf("Convention %d", i),
+			Body:        "Generic body text.",
+			Project:     project,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-target",
+		CandidateID: "candidate-target",
+		Kind:        asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:       "Unique needle title",
+		Body:        "Special body for matching.",
+		Project:     project,
+		CreatedAt:   "2020-01-01T00:00:00Z",
+		UpdatedAt:   "2020-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	memories, err := store.ListMemories(Query{ProjectID: "proj", Q: "needle", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memories) != 1 || memories[0].ID != "memory-target" {
+		t.Fatalf("expected to find older matching memory, got %d results", len(memories))
 	}
 }
 
