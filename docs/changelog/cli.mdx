@@ -62,6 +62,11 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   previously recorded thinner Claude sessions than every other supported runtime. Package
   installs already refreshed these hooks for the console user; this brings Homebrew and
   tarball installs in line. `beacon endpoint hooks uninstall --harness claude` removes them.
+- **Hook install failures no longer fail the install** · When `endpoint install` or
+  `endpoint repair` cannot write a runtime's hooks, it prints a warning and the
+  `beacon endpoint hooks install --harness …` command to retry, and still attempts every
+  other hook target. The collector, config, service, and OTLP settings are already in place
+  at that point, so the endpoint is installed rather than reported broken.
 
 ### v1.3.17 · September 21, 2026
 

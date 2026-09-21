@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2314,5 +2315,43 @@ func TestSystemHeartbeatScopeIgnoresServiceAccountsAtTheConsole(t *testing.T) {
 		if got := systemHeartbeatScope().NoConsoleUser; got != tc.want {
 			t.Errorf("%s: NoConsoleUser = %t, want %t", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A hook that cannot be written must not turn a complete install into an error: the
+// collector, config, service, and OTLP settings are already in place, and the retry is one
+// command. Every other target is still attempted.
+func TestEndpointInstallHookFailureIsAWarningAndOtherHooksStillInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.userMode = true
+	endpointOpts.logPath = filepath.Join(home, "runtime.jsonl")
+	endpointOpts.hookLevel = ""
+
+	// A settings file whose hooks key is not an object cannot be merged into.
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"hooks": "not-an-object"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	installHookTargetsFromEndpointInstall(&out, []string{"claude", "codex"})
+
+	if !strings.Contains(out.String(), "Warning: claude hooks were not installed") {
+		t.Fatalf("expected a claude warning, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Retry with: beacon endpoint hooks install --harness claude") {
+		t.Fatalf("expected a retry command naming only the failed target, got:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); err != nil {
+		t.Fatalf("codex hooks must still be installed after the claude failure: %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(claudeDir, "settings.json")); string(data) != `{"hooks": "not-an-object"}` {
+		t.Fatalf("a settings file the merge cannot read must be left untouched, got %s", data)
 	}
 }
