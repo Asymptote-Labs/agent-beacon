@@ -153,6 +153,29 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	}
 	result.DeviceKey = ""
 	dataDir := DataDir(opts.UserMode)
+	logPath := opts.LogPath
+	if logPath == "" {
+		logPath = endpointconfig.Default(opts.UserMode, "").LogPath
+	}
+
+	// Render and pre-validate before touching the service manager. A privacy-mode
+	// change unloads the forwarder below; validating first ensures a bad config
+	// (unsupported VRL, permissions, etc.) never stops a working forwarder.
+	rendered, err := RenderVectorConfig(RenderOptions{
+		LogPath:     logPath,
+		IngestURL:   result.IngestURL,
+		SecretsFile: SecretsPath(opts.UserMode),
+		DataDir:     dataDir,
+		PrivacyMode: privacyMode,
+	})
+	if err != nil {
+		return nil, err
+	}
+	configPath := VectorConfigPath(opts.UserMode)
+	if err := preValidateVectorConfig(vector.Path, configPath, []byte(rendered)); err != nil {
+		return nil, err
+	}
+
 	if previous != nil {
 		previousMode, _ := managedprivacy.Normalize(previous.PrivacyMode)
 		if previousMode != privacyMode {
@@ -167,25 +190,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
-	logPath := opts.LogPath
-	if logPath == "" {
-		logPath = endpointconfig.Default(opts.UserMode, "").LogPath
-	}
-	rendered, err := RenderVectorConfig(RenderOptions{
-		LogPath:     logPath,
-		IngestURL:   result.IngestURL,
-		SecretsFile: SecretsPath(opts.UserMode),
-		DataDir:     dataDir,
-		PrivacyMode: privacyMode,
-	})
-	if err != nil {
-		return nil, err
-	}
-	configPath := VectorConfigPath(opts.UserMode)
 	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
-		return nil, err
-	}
-	if err := ValidateVectorConfig(vector.Path, configPath); err != nil {
 		return nil, err
 	}
 	unitPath, err := manager.WriteUnit(vector.Path, configPath)

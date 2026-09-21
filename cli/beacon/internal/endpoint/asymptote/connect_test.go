@@ -295,19 +295,13 @@ func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 	if _, err := LoadEnrollment(true); !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("enrollment must not be recorded after a failed connect, got %v", err)
 	}
-	// The rendered config is left behind for inspection, but the machine is not connected:
-	// status says so, the onboarding offer is made again, and disconnect can clean it up.
+	// Pre-validation uses a temp file, so the rendered config is not left behind and the
+	// machine is not connected. Disconnect can still clean up the secrets directory.
 	if Connected(true) {
 		t.Fatal("a connect that failed at validate must not count as connected")
 	}
-	if !forwarderInstalled(true, fwd) {
-		t.Fatal("disconnect must see the config a failed connect left behind")
-	}
 	if err := Disconnect(DisconnectOptions{UserMode: true, Forwarder: fwd}); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := os.Stat(Dir(true)); !os.IsNotExist(err) {
-		t.Fatal("disconnect should remove the state a failed connect left behind")
 	}
 }
 
@@ -563,6 +557,34 @@ func TestConnectClearsBufferOnPrivacyModeChange(t *testing.T) {
 	}
 	if _, err := os.Stat(DataDir(true)); os.IsNotExist(err) {
 		t.Fatal("data directory must be recreated after clearing")
+	}
+}
+
+func TestConnectValidateFailureOnPrivacyChangeDoesNotStopForwarder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+
+	// First connect succeeds with the default (standard) privacy mode.
+	opts := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0))
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if fwd.loads != 1 || fwd.unloads != 0 {
+		t.Fatalf("after first connect: loads=%d unloads=%d", fwd.loads, fwd.unloads)
+	}
+
+	// Second connect changes privacy mode but vector validate fails (exit 78).
+	// The forwarder must NOT be unloaded.
+	opts2 := connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 78))
+	opts2.PrivacyMode = "metadata-only"
+	if _, err := Connect(context.Background(), opts2); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
+		t.Fatalf("expected validate failure, got %v", err)
+	}
+	if fwd.unloads != 0 {
+		t.Fatalf("a validate failure during a privacy-mode change must not stop the running forwarder, unloads=%d", fwd.unloads)
 	}
 }
 

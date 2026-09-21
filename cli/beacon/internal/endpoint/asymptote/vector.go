@@ -194,6 +194,26 @@ func ValidateVectorConfig(vectorBin, configPath string) error {
 	return nil
 }
 
+// preValidateVectorConfig writes data to a temporary file next to configPath,
+// validates it, and removes the temp file. This lets Connect verify a new config
+// before stopping a running forwarder.
+func preValidateVectorConfig(vectorBin, configPath string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".vector-validate-*.toml")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return ValidateVectorConfig(vectorBin, tmpName)
+}
+
 // dirSize sums regular files under root; used to report the disk buffer size.
 func dirSize(root string) int64 {
 	var total int64
