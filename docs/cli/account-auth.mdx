@@ -1,0 +1,60 @@
+---
+title: "Beacon account authentication"
+description: "Sign the Beacon CLI in through beacon.sh without enabling managed telemetry forwarding"
+---
+
+Beacon account authentication is separate from endpoint forwarding. Signing in establishes your CLI identity, but it does not start Vector, register a managed endpoint, or send local telemetry anywhere.
+
+```bash
+beacon login
+beacon whoami
+beacon logout
+```
+
+## Sign in
+
+`beacon login` starts a PKCE exchange and opens `https://beacon.sh/cli/auth`. After authentication, beacon.sh redirects a one-time exchange code to a temporary loopback listener. The PKCE verifier never leaves the CLI except during the HTTPS exchange.
+
+```bash
+beacon login
+```
+
+For SSH sessions or terminals that cannot open a browser:
+
+```bash
+beacon login --no-browser
+```
+
+The session is stored at `~/.beacon/auth/session.json` in a `0700` directory with file mode `0600`. Human and JSON command output never includes the access token. Tokens expire rather than refreshing indefinitely; run `beacon login` again after expiry.
+
+Use `--auth-url` or `BEACON_AUTH_URL` only for a self-hosted or development authentication service. Non-loopback authentication URLs must use HTTPS.
+
+## Inspect the account
+
+`beacon whoami` reads the local session and displays the user, organization, expiry, authentication service, and session path. It does not contact beacon.sh.
+
+```bash
+beacon whoami
+beacon whoami --json
+```
+
+## Sign out
+
+`beacon logout` asks beacon.sh to revoke the CLI token and always removes the local session. If beacon.sh is unavailable, logout succeeds locally and warns that server revocation could not be confirmed.
+
+```bash
+beacon logout
+```
+
+Signing out does not stop an already configured managed forwarder. Use `beacon endpoint disconnect` for that separate device credential and service.
+
+## beacon.sh server contract
+
+The CLI uses the versioned `2026-09-01` grant contract:
+
+- `POST /api/cli/auth/init` registers the PKCE challenge, state, loopback port, CLI version, operating system, and architecture.
+- `GET /cli/auth?state=...&port=...` authenticates the person and redirects to the loopback callback with `state` and a one-time `exchange_code`.
+- `POST /api/cli/auth/exchange` accepts the exchange code, state, and PKCE verifier. It returns a scoped access token, expiry, user identity, organization memberships, and optional active organization.
+- `POST /api/cli/auth/revoke` accepts the access token as a Bearer credential and revokes it.
+
+The intended initial scopes are `profile:read` and `device:enroll`. A later `beacon endpoint connect` can use `device:enroll` to mint a device-specific ingest key without treating the account token as an ingest credential.

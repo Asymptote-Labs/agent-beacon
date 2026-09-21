@@ -123,6 +123,13 @@ Or inspect the raw event stream:
 > [!NOTE]
 > Local by default: no account, no API key, and nothing leaves your machine unless you configure it to.
 
+Account sign-in is a separate, optional step and does not enable telemetry forwarding:
+
+```bash
+beacon login
+beacon whoami
+```
+
 ---
 
 ## 🧠 Turn Session History Into Memory
