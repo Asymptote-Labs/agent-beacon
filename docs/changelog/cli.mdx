@@ -55,6 +55,14 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   and persisted token usage. Poll events remain offline, deterministic, and
   cannot approve, deny, or delay tools.
 
+- **Claude Code hooks install by default** · `beacon endpoint install` and `beacon endpoint repair`
+  now write Claude Code's user-level hooks together with its OpenTelemetry settings whenever
+  the `claude` harness is selected, which the default harness list does. Claude's OTLP export
+  has no session start or end, file reads or diffs, or subagent lifecycle, so a default install
+  previously recorded thinner Claude sessions than every other supported runtime. Package
+  installs already refreshed these hooks for the console user; this brings Homebrew and
+  tarball installs in line. `beacon endpoint hooks uninstall --harness claude` removes them.
+
 ### v1.3.17 · September 21, 2026
 
 - **Reviewed cross-harness memory** · Beacon now has an explicit local learning

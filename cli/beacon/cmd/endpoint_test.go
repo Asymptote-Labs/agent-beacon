@@ -57,8 +57,33 @@ func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
 	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
 		t.Fatalf("otlp targets = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(hooks, ","), "codex,devin-cli,devin-desktop,hermes"; got != want {
+	if got, want := strings.Join(hooks, ","), "claude,codex,devin-cli,devin-desktop,hermes"; got != want {
 		t.Fatalf("hook targets = %q, want %q", got, want)
+	}
+}
+
+// The default install list must carry the Claude Code and Codex hooks with their OTLP
+// settings: a fresh `beacon endpoint install` otherwise records Claude sessions with no
+// start, end, file activity, or subagent lifecycle, since Claude's OTLP export has none.
+func TestDefaultInstallHarnessesCarryClaudeAndCodexHooks(t *testing.T) {
+	defaultList := endpointInstallCmd.Flags().Lookup("harness").DefValue
+	otlp, hooks, err := splitEndpointTargets(splitHarnessCSV(defaultList))
+	if err != nil {
+		t.Fatalf("splitEndpointTargets(%q) returned error: %v", defaultList, err)
+	}
+	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
+		t.Fatalf("default otlp targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(hooks, ","), "claude,codex"; got != want {
+		t.Fatalf("default hook targets = %q, want %q", got, want)
+	}
+	// Listing the explicit hook alias as well must not install Claude hooks twice.
+	_, hooks, err = splitEndpointTargets([]string{"claude", "claude-hooks", "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(hooks, ","), "claude,codex"; got != want {
+		t.Fatalf("hook targets with explicit alias = %q, want %q", got, want)
 	}
 }
 
@@ -83,13 +108,19 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 
 	actions := plannedInstallActions(false, service.KindAuto)
 	counts := map[string]int{}
+	hookRows := map[string]int{}
 	for _, action := range actions {
 		if action.Action == "configure_harness" {
 			counts[action.Target]++
+			if action.Message != "" {
+				hookRows[action.Target]++
+			}
 		}
 	}
-	if counts["claude"] != 1 || counts["devin-cli"] != 1 || counts["devin-desktop"] != 1 {
-		t.Fatalf("configure_harness counts = %#v, want claude/devin-cli/devin-desktop once", counts)
+	// claude is planned twice on purpose: its OTLP settings and its hooks are two
+	// separate writes, and the plan names each of them.
+	if counts["claude"] != 2 || hookRows["claude"] != 1 || counts["devin-cli"] != 1 || counts["devin-desktop"] != 1 {
+		t.Fatalf("configure_harness counts = %#v (hook rows %#v), want claude OTLP+hook, devin-cli/devin-desktop once", counts, hookRows)
 	}
 	if counts["devin"] != 0 {
 		t.Fatalf("legacy devin alias should be deduped, counts=%#v", counts)

@@ -199,6 +199,15 @@ func normalizeHookTarget(name string) (string, bool) {
 	return target, ok
 }
 
+// otlpTargetCarriesHook names the OTLP harnesses whose hook integration is installed
+// alongside their OpenTelemetry settings by `endpoint install` and `endpoint repair`.
+// `beacon endpoint hooks install` still installs the same hooks on their own, and
+// `beacon endpoint hooks uninstall` removes them.
+var otlpTargetCarriesHook = map[string]bool{
+	"claude": true,
+	"codex":  true,
+}
+
 func splitEndpointTargets(values []string) (otlp []string, hooks []string, err error) {
 	seenOTLP := map[string]bool{}
 	seenHooks := map[string]bool{}
@@ -216,13 +225,20 @@ func splitEndpointTargets(values []string) (otlp []string, hooks []string, err e
 				otlp = append(otlp, target.Name)
 				seenOTLP[target.Name] = true
 			}
-			// Codex usage comes from OTLP turn spans, but those spans do not
-			// identify the local OS account. Its SessionStart context hook is
-			// therefore part of the token integration rather than an optional
-			// duplicate activity path.
-			if target.Name == "codex" && !seenHooks["codex"] {
-				hooks = append(hooks, "codex")
-				seenHooks["codex"] = true
+			// Some OTLP harnesses carry their hook integration with them, so the
+			// default install list configures both without a second command:
+			//
+			//   - Codex usage comes from OTLP turn spans, but those spans do not
+			//     identify the local OS account. Its SessionStart context hook is
+			//     therefore part of the token integration rather than an optional
+			//     duplicate activity path.
+			//   - Claude Code's OTLP export has no session start or end, no file
+			//     reads or diffs, and no subagent lifecycle; those come only from
+			//     its hooks. Without them a default install records a thinner
+			//     session than every other supported runtime.
+			if otlpTargetCarriesHook[target.Name] && !seenHooks[target.Name] {
+				hooks = append(hooks, target.Name)
+				seenHooks[target.Name] = true
 			}
 		case endpointTargetHook:
 			if !seenHooks[target.Name] {
