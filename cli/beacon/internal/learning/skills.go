@@ -44,13 +44,11 @@ func RenderSkill(candidate asymptoteobserve.LearningCandidateV1, memory asymptot
 	b.WriteString("---\n")
 	b.WriteString("name: " + slug + "\n")
 	b.WriteString("description: " + yamlQuote(firstSentence(memory.Title)) + "\n")
-	b.WriteString("beacon_memory_id: " + yamlQuote(memory.ID) + "\n")
-	b.WriteString("beacon_candidate_id: " + yamlQuote(candidate.ID) + "\n")
+	b.WriteString("metadata:\n")
+	b.WriteString("  beacon_memory_id: " + yamlQuote(memory.ID) + "\n")
+	b.WriteString("  beacon_candidate_id: " + yamlQuote(candidate.ID) + "\n")
 	if len(memory.Tags) > 0 {
-		b.WriteString("tags:\n")
-		for _, tag := range memory.Tags {
-			b.WriteString("  - " + yamlQuote(tag) + "\n")
-		}
+		b.WriteString("  beacon_tags: " + yamlQuote(strings.Join(memory.Tags, ",")) + "\n")
 	}
 	b.WriteString("---\n\n")
 	b.WriteString("# " + memory.Title + "\n\n")

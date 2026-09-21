@@ -14,8 +14,8 @@ func TestRenderSkillIncludesProvenance(t *testing.T) {
 	content := RenderSkill(candidate, memory)
 	for _, want := range []string{
 		`name: beacon-debugging-pattern-retry-package-smoke`,
-		`beacon_memory_id: "memory-1"`,
-		`beacon_candidate_id: "candidate-1"`,
+		"metadata:\n  beacon_memory_id: \"memory-1\"\n  beacon_candidate_id: \"candidate-1\"",
+		`beacon_tags: "beacon,debugging_pattern"`,
 		"# Debugging pattern: Retry package smoke",
 		"Trace `trace-1`",
 	} {
