@@ -153,9 +153,15 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	}
 	result.DeviceKey = ""
 	dataDir := DataDir(opts.UserMode)
-	if previous != nil && previous.PrivacyMode != privacyMode {
-		if err := os.RemoveAll(dataDir); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("could not clear the buffer after a privacy mode change: %w", err)
+	if previous != nil {
+		previousMode, _ := managedprivacy.Normalize(previous.PrivacyMode)
+		if previousMode != privacyMode {
+			// Stop the forwarder before clearing its buffer so a running Vector
+			// cannot keep sending or recreate old-mode buffer files.
+			_ = manager.Unload()
+			if err := os.RemoveAll(dataDir); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("could not clear the buffer after a privacy mode change: %w", err)
+			}
 		}
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
