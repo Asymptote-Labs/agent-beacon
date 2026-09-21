@@ -87,12 +87,38 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 		}
 	}
 	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != privacyScreen {
+		t.Fatalf("screen = %v, want privacy", model.screen)
+	}
+	if view := model.View(); !strings.Contains(view, "Standard (recommended)") || !strings.Contains(view, "Metadata only") {
+		t.Fatalf("privacy choices missing:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != confirmScreen {
 		t.Fatalf("screen = %v, want confirmation", model.screen)
+	}
+	if model.result.PrivacyMode != "standard" {
+		t.Fatalf("privacy mode = %q", model.result.PrivacyMode)
 	}
 	model, _ = advanceWizard(t, model, "enter")
 	if !model.result.Completed {
 		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+func TestWizardSelectsMetadataOnlyPrivacy(t *testing.T) {
+	model := newWizardModel(WizardOptions{
+		SignedIn:        true,
+		Email:           "person@example.com",
+		OfferManaged:    true,
+		DestinationOnly: true,
+	})
+	model, _ = advanceWizard(t, model, "enter")
+	model, _ = advanceWizard(t, model, "enter")
+	model, _ = advanceWizard(t, model, "j")
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != confirmScreen || model.result.PrivacyMode != "metadata_only" {
+		t.Fatalf("metadata selection = screen %v result %#v", model.screen, model.result)
 	}
 }
 

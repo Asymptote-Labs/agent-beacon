@@ -95,8 +95,10 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
 	vector := fakeVector(t, "0.56.0", 0)
+	opts := connectOptions(t, fd, fwd, vector)
+	opts.PrivacyMode = "metadata-only"
 
-	result, err := Connect(context.Background(), connectOptions(t, fd, fwd, vector))
+	result, err := Connect(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
@@ -130,6 +132,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 		`uri = "https://ingest.example.test/v1/ingest/runtime"`,
 		`path = "` + SecretsPath(true) + `"`,
 		`data_dir = "` + DataDir(true) + `"`,
+		`inputs = ["beacon_runtime_metadata"]`,
 	} {
 		if !strings.Contains(string(toml), want) {
 			t.Fatalf("vector.toml missing %q:\n%s", want, toml)
@@ -143,7 +146,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if enrollment.DeviceID != "dev-1" || enrollment.OrganizationName != "Asymptote Test" || enrollment.InstallID == "" || enrollment.VectorVersion != "0.56.0" {
+	if enrollment.DeviceID != "dev-1" || enrollment.OrganizationName != "Asymptote Test" || enrollment.InstallID == "" || enrollment.VectorVersion != "0.56.0" || enrollment.PrivacyMode != "metadata_only" {
 		t.Fatalf("enrollment = %+v", enrollment)
 	}
 	if result.ReEnrolled || result.Enrollment.DeviceID != "dev-1" || result.SecretsFile != SecretsPath(true) {
@@ -153,7 +156,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ManagedIngest == nil || !cfg.ManagedIngest.Enabled || cfg.ManagedIngest.DeviceID != "dev-1" || cfg.ManagedIngest.IngestURL != "https://ingest.example.test" {
+	if cfg.ManagedIngest == nil || !cfg.ManagedIngest.Enabled || cfg.ManagedIngest.DeviceID != "dev-1" || cfg.ManagedIngest.IngestURL != "https://ingest.example.test" || cfg.ManagedIngest.PrivacyMode != "metadata_only" {
 		t.Fatalf("config managed_ingest = %+v", cfg.ManagedIngest)
 	}
 	raw, _ := os.ReadFile(endpointconfig.ConfigPath(true))
@@ -191,6 +194,49 @@ func TestConnectReusesInstallIDOnReEnrollment(t *testing.T) {
 	}
 	if fwd.loads != 2 {
 		t.Fatalf("forwarder should be (re)loaded on each connect, loads=%d", fwd.loads)
+	}
+}
+
+func TestConnectUsesAccountEnrollmentWithoutOpeningBrowser(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	isolateVectorDiscovery(t)
+	var authorization string
+	accountServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_id":         "dev-account",
+			"device_key":        "bcn_device_abcdefgh_" + strings.Repeat("k", 43),
+			"key_prefix":        "bcn_device_abcdefgh",
+			"ingest_url":        "https://ingest.example.test",
+			"organization_id":   "org-1",
+			"organization_name": "Beacon Test",
+			"email":             "person@example.com",
+			"scopes":            []string{"ingest:write"},
+		})
+	}))
+	defer accountServer.Close()
+
+	fd := newFakeDashboard(t)
+	opened := false
+	opts := connectOptions(t, fd, &fakeForwarder{supported: true}, fakeVector(t, "0.56.0", 0))
+	opts.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
+	opts.AccountEnroll = &AccountEnrollOptions{
+		BaseURL:     accountServer.URL,
+		AccessToken: "bcn_cli_account_token",
+		HTTPClient:  accountServer.Client(),
+	}
+	result, err := Connect(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened {
+		t.Fatal("account enrollment opened the browser")
+	}
+	if authorization != "Bearer bcn_cli_account_token" || result.Enrollment.DeviceID != "dev-account" {
+		t.Fatalf("authorization=%q result=%#v", authorization, result.Enrollment)
+	}
+	if result.Enrollment.DashboardURL != accountServer.URL {
+		t.Fatalf("dashboard URL = %q", result.Enrollment.DashboardURL)
 	}
 }
 

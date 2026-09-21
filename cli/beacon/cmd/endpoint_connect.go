@@ -3,17 +3,22 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
@@ -22,18 +27,23 @@ var connectOpts struct {
 	noBrowser       bool
 	vectorBin       string
 	keepCredentials bool
+	privacyMode     string
 }
+
+var (
+	connectAccountLoad     = account.Load
+	connectManagedEndpoint = asymptote.Connect
+)
 
 var endpointConnectCmd = &cobra.Command{
 	Use:   "connect",
-	Short: "Forward this endpoint's telemetry to Asymptote managed ingest",
-	Long: `Connect this endpoint to Asymptote managed ingest.
+	Short: "Forward this endpoint's telemetry to Beacon Managed",
+	Long: `Connect this endpoint to Beacon Managed.
 
-Opens the Asymptote dashboard so a member of your organization can approve this
-device, then stores the per-device key it receives in a private secrets file
-and starts a Vector forwarder that ships the runtime and inventory JSONL to
-Asymptote. Nothing recorded before approval is sent. Re-running on a connected
-machine rotates its key in place.
+For a user endpoint, uses the signed-in Beacon account to mint a device-specific
+ingest key, stores that key in a private secrets file, and starts a Vector
+forwarder. The account token is never given to Vector or copied into endpoint
+configuration. System mode retains browser device approval.
 
 Requires Vector 0.50 or newer: the signed macOS package installs it at
 /opt/beacon/bin/vector, Homebrew provides it as "vector", and Linux packages are
@@ -60,9 +70,10 @@ func init() {
 		addEndpointPathFlags(c)
 		c.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print output as JSON")
 	}
-	endpointConnectCmd.Flags().StringVar(&connectOpts.dashboardURL, "dashboard-url", "", "Asymptote dashboard URL (defaults to "+auth.DefaultDashboardURL+", or "+auth.DashboardURLEnv+")")
-	endpointConnectCmd.Flags().BoolVar(&connectOpts.noBrowser, "no-browser", false, "Print the approval URL instead of opening a browser")
+	endpointConnectCmd.Flags().StringVar(&connectOpts.dashboardURL, "dashboard-url", "", "Beacon service URL (defaults to "+auth.DefaultDashboardURL+", or "+auth.DashboardURLEnv+")")
+	endpointConnectCmd.Flags().BoolVar(&connectOpts.noBrowser, "no-browser", false, "System mode: print the device approval URL instead of opening a browser")
 	endpointConnectCmd.Flags().StringVar(&connectOpts.vectorBin, "vector-bin", "", "Vector binary to run (defaults to "+asymptote.VectorBinEnv+", "+asymptote.PackagedVectorPath+", Homebrew, then PATH)")
+	endpointConnectCmd.Flags().StringVar(&connectOpts.privacyMode, "privacy-mode", "", "Managed forwarding privacy: standard or metadata-only (defaults to onboarding choice)")
 	endpointDisconnectCmd.Flags().BoolVar(&connectOpts.keepCredentials, "keep-credentials", false, "Keep the enrollment record and device key so a later connect can reuse this device")
 	endpointCmd.AddCommand(endpointConnectCmd)
 	endpointCmd.AddCommand(endpointDisconnectCmd)
@@ -85,11 +96,16 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	if endpointOpts.jsonOutput {
 		out = cmd.ErrOrStderr()
 	}
-	result, err := asymptote.Connect(context.Background(), asymptote.ConnectOptions{
-		UserMode:  userMode,
-		LogPath:   logPath,
-		VectorBin: connectOpts.vectorBin,
-		Out:       out,
+	privacyMode, err := selectedManagedPrivacyMode(userMode)
+	if err != nil {
+		return err
+	}
+	options := asymptote.ConnectOptions{
+		UserMode:    userMode,
+		LogPath:     logPath,
+		VectorBin:   connectOpts.vectorBin,
+		PrivacyMode: privacyMode,
+		Out:         out,
 		Enroll: asymptote.EnrollOptions{
 			DashboardURL: connectOpts.dashboardURL,
 			NoBrowser:    connectOpts.noBrowser,
@@ -101,24 +117,75 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 				BeaconVersion: version.GetVersion(),
 			},
 		},
-	})
+	}
+	if userMode {
+		session, err := connectAccountLoad()
+		if err != nil {
+			return fmt.Errorf("Beacon account sign-in is required: run `beacon login` first: %w", err)
+		}
+		if session.Expired(time.Now()) {
+			return errors.New("Beacon account session expired: run `beacon login` again")
+		}
+		if !hasAccountScope(session.Scopes, account.ScopeDeviceEnroll) {
+			return fmt.Errorf("Beacon account session lacks %s: run `beacon login` again", account.ScopeDeviceEnroll)
+		}
+		requestedDashboard := connectOpts.dashboardURL
+		if requestedDashboard == "" {
+			requestedDashboard = os.Getenv(auth.DashboardURLEnv)
+		}
+		if requestedDashboard != "" && auth.NormalizeDashboardURL(requestedDashboard) != auth.NormalizeDashboardURL(session.BaseURL) {
+			return errors.New("--dashboard-url must match the signed-in Beacon account service")
+		}
+		options.Enroll.DashboardURL = session.BaseURL
+		options.AccountEnroll = &asymptote.AccountEnrollOptions{
+			BaseURL:     session.BaseURL,
+			AccessToken: session.AccessToken,
+		}
+	}
+	result, err := connectManagedEndpoint(context.Background(), options)
 	if err != nil {
 		return err
 	}
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}
-	fmt.Fprintf(out, "Connected to Asymptote as device %s", result.Enrollment.DeviceID)
+	fmt.Fprintf(out, "Connected to Beacon Managed as device %s", result.Enrollment.DeviceID)
 	if result.Enrollment.OrganizationName != "" {
 		fmt.Fprintf(out, " for %s", result.Enrollment.OrganizationName)
 	}
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Forwarder: %s (loaded=%t running=%t)\n", result.Forwarder, result.ForwarderState.Loaded, result.ForwarderState.Running)
+	fmt.Fprintf(out, "Managed privacy: %s\n", managedprivacy.Label(result.Enrollment.PrivacyMode))
 	fmt.Fprintf(out, "Vector config: %s\n", result.VectorConfig)
 	fmt.Fprintf(out, "Device key: %s (never printed; the Vector forwarder reads it)\n", result.SecretsFile)
 	fmt.Fprintf(out, "Events recorded from now on appear on %s/dashboard/telemetry. Revoke this device from %s/dashboard/endpoints.\n",
 		result.Enrollment.DashboardURL, result.Enrollment.DashboardURL)
 	return nil
+}
+
+func selectedManagedPrivacyMode(userMode bool) (string, error) {
+	if connectOpts.privacyMode != "" {
+		return managedprivacy.Normalize(connectOpts.privacyMode)
+	}
+	if enrollment, err := asymptote.LoadEnrollment(userMode); err == nil && enrollment.PrivacyMode != "" {
+		return managedprivacy.Normalize(enrollment.PrivacyMode)
+	}
+	if userMode {
+		profile := onboarding.Load()
+		if profile.Onboarding.PrivacyMode != "" {
+			return managedprivacy.Normalize(profile.Onboarding.PrivacyMode)
+		}
+	}
+	return managedprivacy.Standard, nil
+}
+
+func hasAccountScope(scopes []string, target string) bool {
+	for _, scope := range scopes {
+		if scope == target {
+			return true
+		}
+	}
+	return false
 }
 
 func runEndpointDisconnect(cmd *cobra.Command, args []string) error {
@@ -196,17 +263,20 @@ func connectBrowserOpener(userMode bool) func(string) error {
 func managedIngestStatusLine(status asymptote.ManagedIngestStatus) string {
 	if !status.Enabled {
 		if status.Message != "" {
-			return "Asymptote managed ingest: not connected (" + status.Message + ")"
+			return "Beacon Managed: not connected (" + status.Message + ")"
 		}
-		return "Asymptote managed ingest: not connected (run `beacon endpoint connect`)"
+		return "Beacon Managed: not connected (run `beacon endpoint connect`)"
 	}
 	var b strings.Builder
-	b.WriteString("Asymptote managed ingest: connected")
+	b.WriteString("Beacon Managed: connected")
 	if status.OrganizationName != "" {
 		fmt.Fprintf(&b, " to %s", status.OrganizationName)
 	}
 	fmt.Fprintf(&b, " as device %s", status.DeviceID)
 	fmt.Fprintf(&b, "; forwarder loaded=%t running=%t", status.Forwarder.Loaded, status.Forwarder.Running)
+	if status.PrivacyMode != "" {
+		fmt.Fprintf(&b, "; privacy %s", managedprivacy.Label(status.PrivacyMode))
+	}
 	switch status.Credential {
 	case "valid":
 		b.WriteString("; credential valid")

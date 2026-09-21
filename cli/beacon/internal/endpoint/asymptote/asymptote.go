@@ -17,6 +17,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 )
 
 //go:embed pack/*
@@ -51,8 +52,10 @@ const (
 var DefaultLogPath = endpointconfig.SystemLogPath()
 
 const (
-	vectorAsset    = "pack/vector.toml.tmpl"
-	smokeTestAsset = "pack/asymptote-ingest-smoke-test.sh.tmpl"
+	vectorAsset            = "pack/vector.toml.tmpl"
+	smokeTestAsset         = "pack/asymptote-ingest-smoke-test.sh.tmpl"
+	privacyTransformAsset  = "pack/metadata-transforms.toml"
+	privacyTransformMarker = "# BEACON_PRIVACY_TRANSFORMS"
 )
 
 // File is the installable pack-file type, shared with siempack.
@@ -99,6 +102,7 @@ type RenderOptions struct {
 	IngestURL   string
 	SecretsFile string
 	DataDir     string
+	PrivacyMode string
 }
 
 // RenderVectorConfig returns vector.toml with every environment reference replaced
@@ -111,6 +115,10 @@ func RenderVectorConfig(opts RenderOptions) (string, error) {
 	}
 	if opts.SecretsFile == "" || opts.DataDir == "" {
 		return "", ErrIncompleteRender
+	}
+	privacyMode, err := managedprivacy.Normalize(opts.PrivacyMode)
+	if err != nil {
+		return "", err
 	}
 	content, err := VectorConfig(opts.LogPath)
 	if err != nil {
@@ -127,7 +135,27 @@ func RenderVectorConfig(opts RenderOptions) (string, error) {
 	for _, r := range replacements {
 		content = strings.ReplaceAll(content, r.from, r.to)
 	}
-	if strings.Contains(content, "${"+EnvIngestURL) || strings.Contains(content, "${"+EnvSecretsFile) || strings.Contains(content, "${"+EnvDataDir) {
+	if privacyMode == managedprivacy.MetadataOnly {
+		transforms, err := fs.ReadFile(packFS, privacyTransformAsset)
+		if err != nil {
+			return "", err
+		}
+		content = strings.Replace(content, privacyTransformMarker, strings.TrimSpace(string(transforms)), 1)
+		content = strings.Replace(content,
+			"[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime\"]",
+			"[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime_metadata\"]", 1)
+		content = strings.Replace(content,
+			"[sinks.asymptote_inventory]\ntype = \"http\"\ninputs = [\"beacon_inventory\"]",
+			"[sinks.asymptote_inventory]\ntype = \"http\"\ninputs = [\"beacon_inventory_metadata\"]", 1)
+		if !strings.Contains(content, `inputs = ["beacon_runtime_metadata"]`) ||
+			!strings.Contains(content, `inputs = ["beacon_inventory_metadata"]`) {
+			return "", ErrIncompleteRender
+		}
+	} else {
+		content = strings.Replace(content, privacyTransformMarker, "# Privacy mode: standard (byte-for-byte forwarding)", 1)
+	}
+	if strings.Contains(content, privacyTransformMarker) ||
+		strings.Contains(content, "${"+EnvIngestURL) || strings.Contains(content, "${"+EnvSecretsFile) || strings.Contains(content, "${"+EnvDataDir) {
 		return "", ErrIncompleteRender
 	}
 	return content, nil

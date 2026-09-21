@@ -62,3 +62,10 @@ The CLI uses the versioned `2026-09-01` grant contract:
 - `POST /api/cli/auth/revoke` accepts the access token as a Bearer credential and revokes it.
 
 The intended initial scopes are `profile:read` and `device:enroll`. A later `beacon endpoint connect` can use `device:enroll` to mint a device-specific ingest key without treating the account token as an ingest credential.
+
+For that enrollment, `beacon endpoint connect` sends the machine description to
+`POST /api/cli/enroll/account` with the CLI access token. The response uses the
+existing device-enrollment shape (`device_id`, `device_key`, `key_prefix`,
+`ingest_url`, organization identity, email, and `ingest:write` scope). The account
+token is used only for this request; the returned device key remains Vector's sole
+credential.

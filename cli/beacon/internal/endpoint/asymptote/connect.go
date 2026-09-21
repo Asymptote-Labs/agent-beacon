@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 )
 
 // Forwarder is the service-manager surface Connect and Disconnect need. service.ForwarderManager
@@ -39,10 +41,15 @@ type ConnectOptions struct {
 	Forwarder Forwarder
 	// Enroll is the browser flow; the CLI fills Device, DashboardURL, browser opener.
 	Enroll EnrollOptions
+	// AccountEnroll replaces the browser approval with the signed-in CLI account.
+	// Connect fills Device after pinning the install id.
+	AccountEnroll *AccountEnrollOptions
 	// InstallID identifies this machine across re-enrollments. Empty reuses the stored
 	// enrollment's id or mints a new one.
 	InstallID string
-	Out       io.Writer
+	// PrivacyMode controls the Vector-side transform before managed upload.
+	PrivacyMode string
+	Out         io.Writer
 	// Now is injectable for tests.
 	Now func() time.Time
 }
@@ -74,6 +81,10 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	now := opts.Now
 	if now == nil {
 		now = time.Now
+	}
+	privacyMode, err := managedprivacy.Normalize(opts.PrivacyMode)
+	if err != nil {
+		return nil, err
 	}
 	manager := opts.Forwarder
 	if manager == nil {
@@ -119,11 +130,22 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		enrollOpts.Out = out
 	}
 
-	result, err := Enroll(ctx, enrollOpts)
+	var result *EnrollResult
+	if opts.AccountEnroll != nil {
+		accountEnroll := *opts.AccountEnroll
+		accountEnroll.Device = enrollOpts.Device
+		result, err = EnrollAccount(ctx, accountEnroll)
+	} else {
+		result, err = Enroll(ctx, enrollOpts)
+	}
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(out, "Approved for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+	if opts.AccountEnroll != nil {
+		fmt.Fprintf(out, "Account authorized device enrollment for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+	} else {
+		fmt.Fprintf(out, "Approved for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+	}
 
 	// Secrets first, then the config that references them, then the unit that runs it.
 	if err := WriteSecrets(opts.UserMode, result.DeviceKey); err != nil {
@@ -143,6 +165,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		IngestURL:   result.IngestURL,
 		SecretsFile: SecretsPath(opts.UserMode),
 		DataDir:     dataDir,
+		PrivacyMode: privacyMode,
 	})
 	if err != nil {
 		return nil, err
@@ -162,10 +185,14 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		return nil, fmt.Errorf("forwarder installed at %s but could not be started: %w", unitPath, err)
 	}
 
+	dashboardURL := auth.ResolveDashboardURL(enrollOpts.DashboardURL)
+	if opts.AccountEnroll != nil {
+		dashboardURL = strings.TrimRight(opts.AccountEnroll.BaseURL, "/")
+	}
 	enrollment := Enrollment{
 		InstallID:        installID,
 		IngestURL:        result.IngestURL,
-		DashboardURL:     auth.ResolveDashboardURL(enrollOpts.DashboardURL),
+		DashboardURL:     dashboardURL,
 		DeviceID:         result.DeviceID,
 		KeyPrefix:        result.KeyPrefix,
 		OrganizationID:   result.OrganizationID,
@@ -174,6 +201,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		EnrolledAt:       now().UTC(),
 		VectorBin:        vector.Path,
 		VectorVersion:    vector.Version,
+		PrivacyMode:      privacyMode,
 	}
 	if result.ExpiresAt != nil {
 		enrollment.ExpiresAt = *result.ExpiresAt
@@ -186,6 +214,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		IngestURL:      result.IngestURL,
 		DeviceID:       result.DeviceID,
 		OrganizationID: result.OrganizationID,
+		PrivacyMode:    privacyMode,
 	}); err != nil {
 		return nil, err
 	}

@@ -200,6 +200,63 @@ func TestRenderVectorConfigRefusesInsecureOrIncompleteInput(t *testing.T) {
 	}
 }
 
+func TestRenderVectorConfigSelectsMetadataOnlyTransforms(t *testing.T) {
+	got, err := RenderVectorConfig(RenderOptions{
+		LogPath:     "/tmp/runtime.jsonl",
+		IngestURL:   "https://ingest.example.test",
+		SecretsFile: "/tmp/secrets.json",
+		DataDir:     "/tmp/vector-data",
+		PrivacyMode: "metadata-only",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`inputs = ["beacon_runtime_metadata"]`,
+		`inputs = ["beacon_inventory_metadata"]`,
+		`del(event.prompt)`,
+		`del(event.command.output)`,
+		`del(event.file.diff)`,
+		`del(event.gen_ai.tool.call.arguments)`,
+		`del(item.definition)`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("metadata config missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime\"]") {
+		t.Fatal("runtime sink bypasses metadata transform")
+	}
+}
+
+func TestRenderedPrivacyConfigsValidateWithVector(t *testing.T) {
+	vector := os.Getenv("BEACON_TEST_VECTOR_BIN")
+	if vector == "" {
+		t.Skip("set BEACON_TEST_VECTOR_BIN to validate rendered configs with Vector")
+	}
+	for _, mode := range []string{"standard", "metadata_only"} {
+		t.Run(mode, func(t *testing.T) {
+			rendered, err := RenderVectorConfig(RenderOptions{
+				LogPath:     filepath.Join(t.TempDir(), "runtime.jsonl"),
+				IngestURL:   "https://ingest.example.test",
+				SecretsFile: filepath.Join(t.TempDir(), "secrets.json"),
+				DataDir:     t.TempDir(),
+				PrivacyMode: mode,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "vector.toml")
+			if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateVectorConfig(vector, path); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestSecretsFileContentIsTheShapeTheTemplateReads(t *testing.T) {
 	content := SecretsFileContent(`bcn_device_abcdefgh_` + strings.Repeat("x", 43))
 	var parsed map[string]string

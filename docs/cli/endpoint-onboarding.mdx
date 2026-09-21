@@ -21,7 +21,8 @@ The first interactive `beacon endpoint install` opens a full-screen terminal wiz
 
 1. Sign in through beacon.sh using the same browser PKCE flow as [`beacon login`](/cli/account-auth).
 2. Choose **Local only** or **Beacon Managed**.
-3. Review the destination and confirm installation.
+3. For Managed, choose **Standard** or **Metadata only** forwarding.
+4. Review the destination and privacy mode, then confirm installation.
 
 Signing in establishes account identity only. It does not register a managed endpoint,
 start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
@@ -33,6 +34,11 @@ events will be sent to beacon.sh only after you run:
 ```bash
 beacon endpoint connect
 ```
+
+Standard forwards the complete locally sanitized event. Metadata only strips retained
+prompts, responses, reasoning, tool arguments/results, command output, raw fields,
+diffs, and optional inventory content locally before upload. See
+[`beacon endpoint connect`](/cli/endpoint-connect#privacy-modes) for the exact contract.
 
 Completing the wizard records managed intent and prints that next step; it does not
 connect automatically. Existing local history is not uploaded. The explicit
@@ -85,7 +91,7 @@ beacon endpoint onboarding
 ```
 
 The answer is stored as `onboarding.destination` in `~/.beacon/profile.json`;
-`--json` exposes it as `destination`:
+managed selections also store `onboarding.privacy_mode`. `--json` exposes both:
 
 | Value | Printed as |
 |-------|------------|

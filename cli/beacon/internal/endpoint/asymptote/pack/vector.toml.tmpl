@@ -31,9 +31,7 @@ type = "file"
 include = ["{{INVENTORY_LOG_PATH}}"]
 read_from = "beginning"
 
-# Each JSONL line is forwarded byte-for-byte as one NDJSON record (codec "text"
-# sends the file source's message field); the ingest service validates and
-# stamps tenant identity server-side, so no remap runs here.
+# BEACON_PRIVACY_TRANSFORMS
 
 [sinks.asymptote_runtime]
 type = "http"
