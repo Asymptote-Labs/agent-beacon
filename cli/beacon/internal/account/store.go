@@ -115,7 +115,12 @@ func Save(session Session) error {
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			os.Remove(tmpPath)
+		}
+	}()
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err
@@ -134,6 +139,7 @@ func Save(session Session) error {
 	if err := replaceFile(tmpPath, path); err != nil {
 		return err
 	}
+	removeTmp = false
 	if runtime.GOOS != "windows" {
 		return os.Chmod(path, 0o600)
 	}
