@@ -101,11 +101,9 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn
 
 ### 2. Use your agents normally
 
-Open a configured runtime. The default endpoint install configures Claude Code
-and Codex CLI; Cursor and other supported harnesses may require their documented
-hook, plugin, OTLP, or session-sync setup.
+Open Claude Code, Cursor, Codex, or any other supported harness.
 
-Beacon captures the telemetry that runtime exposes through its configured surface.
+Beacon continuously captures your session history in the background
 
 ### 3. Explore your history
 
