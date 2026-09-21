@@ -2,7 +2,7 @@
   <img src="images/beacon-hero.png" alt="Beacon" width="860">
 </p>
 
-<h1 align="center">Turn every agent session into compounding knowledge</h1>
+<h1 align="center">The cross-harness self-improving memory layer for AI agents</h1>
 
 <p align="center">
   <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
