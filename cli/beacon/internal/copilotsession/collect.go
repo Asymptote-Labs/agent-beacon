@@ -208,11 +208,12 @@ func advanceCursor(cursor *Cursor, ref SessionRef, records []Record, stats Stats
 
 func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
 	var lastLine int
+	failedLine := mapped[failedIdx].SourceLine
 	for i := 0; i < failedIdx; i++ {
-		if mapped[i].SourceLine > lastLine {
+		if mapped[i].SourceLine < failedLine && mapped[i].SourceLine > lastLine {
 			lastLine = mapped[i].SourceLine
 		}
-		if mapped[i].Event.Event.Action == "session.started" {
+		if mapped[i].SourceLine < failedLine && mapped[i].Event.Event.Action == "session.started" {
 			cursor.Started = true
 		}
 	}

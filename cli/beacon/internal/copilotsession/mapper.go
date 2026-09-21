@@ -122,12 +122,15 @@ func (m *mapper) consumeContext(record Record) {
 func (m *mapper) consume(record Record) {
 	switch record.Type {
 	case "session.start":
+		m.consumeContext(record)
 		if !m.opts.SkipSessionStarted {
 			m.emitSessionStarted(record)
 		}
 	case "session.resume":
+		m.consumeContext(record)
 		m.emitSessionContext(record, "resume", "GitHub Copilot CLI session resumed")
 	case "session.model_change":
+		m.consumeContext(record)
 		m.emitSessionContext(record, "model_change", "GitHub Copilot CLI model changed")
 	case "user.message":
 		m.emitPrompt(record)

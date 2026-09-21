@@ -222,6 +222,68 @@ func TestEventIDsAreDeterministic(t *testing.T) {
 	}
 }
 
+func TestAdvanceCursorPartialDoesNotSkipSiblingEventsFromFailedLine(t *testing.T) {
+	root := t.TempDir()
+	_, _ = writeCopilotFixture(t, root)
+	store, _ := NewStore(root)
+	refs, _ := store.List()
+	records, _, _ := store.Read(refs[0])
+	mapped := MapSession(refs[0], records, MapOptions{})
+
+	failedIdx := -1
+	for i := 1; i < len(mapped); i++ {
+		if mapped[i].SourceLine == mapped[i-1].SourceLine {
+			failedIdx = i
+			break
+		}
+	}
+	if failedIdx < 0 {
+		t.Fatal("fixture did not produce sibling events from one source line")
+	}
+
+	cursor := &Cursor{}
+	advanceCursorPartial(cursor, mapped, failedIdx)
+	if cursor.LastLine >= mapped[failedIdx].SourceLine {
+		t.Fatalf("cursor advanced to line %d after failing sibling on line %d", cursor.LastLine, mapped[failedIdx].SourceLine)
+	}
+}
+
+func TestMapSessionAppliesLiveContextChangesToLaterEvents(t *testing.T) {
+	ref := SessionRef{ID: "session-1", Path: "/tmp/copilot/events.jsonl", ModTimeUnixMS: 1770000000000}
+	records := []Record{
+		{Line: 1, Type: "session.start", Time: float64(1770000000000), Data: map[string]interface{}{
+			"sessionId":      "session-1",
+			"copilotVersion": "1.0.0",
+			"selectedModel":  "old-model",
+			"context":        map[string]interface{}{"cwd": "/old"},
+		}},
+		{Line: 2, Type: "session.resume", Time: float64(1770000000100), Data: map[string]interface{}{
+			"selectedModel": "new-model",
+			"context":       map[string]interface{}{"cwd": "/new", "repository": "owner/repo", "branch": "feature"},
+		}},
+		{Line: 3, Type: "session.model_change", Time: float64(1770000000200), Data: map[string]interface{}{
+			"newModel": "newer-model",
+		}},
+		{Line: 4, Type: "user.message", Time: float64(1770000000300), Data: map[string]interface{}{
+			"content": "what changed?",
+		}},
+	}
+	events := MapSession(ref, records, MapOptions{})
+	var prompt schema.Event
+	for _, item := range events {
+		if item.Event.Event.Action == "prompt.submitted" {
+			prompt = item.Event
+			break
+		}
+	}
+	if prompt.Session == nil || prompt.Session.WorkingDirectory != "/new" {
+		t.Fatalf("prompt session context = %+v, want cwd /new", prompt.Session)
+	}
+	if prompt.Model != "newer-model" {
+		t.Fatalf("prompt model = %q, want newer-model", prompt.Model)
+	}
+}
+
 func TestStatusStateRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	_, path := writeCopilotFixture(t, root)
