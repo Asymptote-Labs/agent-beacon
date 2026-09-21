@@ -1,11 +1,11 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Asymptote",
+  "name": "Beacon",
   "colors": {
-    "primary": "#3080FF",
-    "light": "#54A2FF",
-    "dark": "#155DFC"
+    "primary": "#F35B2A",
+    "light": "#F35B2A",
+    "dark": "#F35B2A"
   },
   "fonts": {
     "family": "Familjen Grotesk"
@@ -633,9 +633,9 @@
     ]
   },
   "logo": {
-    "light": "/logo/logo_with_text.png",
-    "dark": "/logo/logo_with_text_dark.png",
-    "href": "https://asymptotelabs.ai/",
+    "light": "/logo/beacon-lockup-light.svg",
+    "dark": "/logo/beacon-lockup-dark.svg",
+    "href": "https://beacon.sh/",
     "height": 100
   },
   "navbar": {
@@ -656,7 +656,7 @@
     "primary": {
       "type": "button",
       "label": "Sign In",
-      "href": "https://asymptotelabs.ai/login"
+      "href": "https://beacon.sh/signin"
     }
   },
   "contextual": {

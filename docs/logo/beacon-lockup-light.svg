@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-label="Beacon logo">
+  <g transform="translate(22 43) scale(.55)">
+    <path fill="#FF6A00" d="M256 52C210 91 122 157 82 212c-26 36-39 74-34 111 8 62 49 103 111 125 31 11 57 30 79 56V288h-29v-85a48 48 0 1 1 94 0v85h-29v216c22-26 48-45 79-56 62-22 103-63 111-125 5-37-8-75-34-111-40-55-128-121-174-160Z"/>
+    <circle cx="256" cy="191" r="39" fill="#FFFFFF"/>
+    <rect x="238" y="225" width="36" height="239" fill="#FFFFFF"/>
+  </g>
+  <text x="320" y="292" font-family="Inter, Arial, sans-serif" font-size="260" font-weight="700" letter-spacing="-11" fill="#2B1007">Beacon</text>
+</svg>
