@@ -13,6 +13,19 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Choosing Beacon Managed now connects the endpoint** · Confirming Managed in the
+  install wizard installs Beacon and then enrolls the device and starts the
+  forwarder, instead of printing `beacon endpoint connect` for you to run yourself.
+  The confirm screen states that forwarding starts and names what the selected
+  privacy mode sends. An endpoint that is already enrolled is never re-enrolled,
+  since enrollment rotates its device key. A failed enrollment leaves a working local
+  install, prints the retry command, and re-offers the question on the next install.
+- **A failed install no longer marks the machine onboarded** · The onboarding record
+  was written before `lifecycle.Install` ran, so an install that then failed left a
+  profile saying setup was complete: the retry skipped the wizard silently and never
+  offered the destination again. The record is now written only after the install
+  succeeds.
+
 - **Clearer first-run onboarding** · The destination screen now says what Beacon
   Managed gives you rather than how it works: one searchable history across every
   agent, unlimited retention, token and usage analytics, and no backend to run. The

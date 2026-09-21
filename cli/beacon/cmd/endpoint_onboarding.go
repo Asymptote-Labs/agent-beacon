@@ -84,13 +84,33 @@ func defaultOnboardingIsTTY() bool {
 	return isTerminal(os.Stdin) && isTerminal(os.Stdout)
 }
 
+// onboardingOutcome is what interactive onboarding decided, for the installer to
+// act on once the local install has actually succeeded.
+//
+// Every field is the zero value on a gated path, so a package postinstall, an MDM
+// run, CI, a dry run and a redirected stdin all return an outcome that asks the
+// installer for nothing.
+type onboardingOutcome struct {
+	// Connect is true when the wizard confirmed Beacon Managed on an endpoint that
+	// is not already enrolled, so the installer should connect it after installing.
+	// An already-connected endpoint is deliberately excluded: enrollment rotates the
+	// device key, and rotating a working forwarder's key to re-learn a destination
+	// Beacon already knows would be a regression, not an improvement.
+	Connect bool
+	// Persist records the wizard's answers, and runs only after lifecycle.Install
+	// returns. Writing the profile first meant a failed install still left the
+	// machine marked onboarded, so the retry took the already-completed branch, said
+	// nothing, and never offered the destination again.
+	Persist func() error
+}
+
 // maybeRunOnboarding runs the one-time account and destination wizard when this
-// install is interactive. It returns true only for explicit install --connect.
+// install is interactive.
 //
 // It is called from `endpoint install` after the --dry-run early return, so a dry run
 // never prompts. An error returned here does stop the install: the prompt is a
 // required step on an interactive terminal, and every refusal path names the opt-out.
-func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
+func maybeRunOnboarding(cmd *cobra.Command) (onboardingOutcome, error) {
 	profile := onboardingLoad()
 
 	// Legacy pending attribution remains retryable, but new interactive installs use
@@ -98,13 +118,13 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 	if profile.Prompted() {
 		resendPendingOnboarding(&profile)
 		if profile.Onboarding.Destination != "" {
-			return false, nil
+			return onboardingOutcome{}, nil
 		}
 		if !onboardingEnabledByEnv() {
-			return false, nil
+			return onboardingOutcome{}, nil
 		}
 		if _, skipped := destinationSkipReason(profile); skipped {
-			return false, nil
+			return onboardingOutcome{}, nil
 		}
 		return runAccountOnboarding(cmd, &profile, true)
 	}
@@ -113,16 +133,16 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 	// the only path that still uses the legacy submission endpoint.
 	if email, usage, ok := onboardingAnswersFromEnv(cmd.ErrOrStderr()); ok {
 		completeOnboarding(cmd, &profile, email, usage, nil, "")
-		return false, nil
+		return onboardingOutcome{}, nil
 	}
 
 	if _, skipped := onboardingSkipReason(profile); skipped {
-		return false, nil
+		return onboardingOutcome{}, nil
 	}
 	return runAccountOnboarding(cmd, &profile, false)
 }
 
-func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, destinationOnly bool) (bool, error) {
+func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, destinationOnly bool) (onboardingOutcome, error) {
 	now := onboardingClock()
 	status := onboardingAccountInspect(now)
 	preset := ""
@@ -144,7 +164,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 	result, err := onboardingRunWizard(onboardingStdin, cmd.OutOrStdout(), options)
 	if err != nil {
-		return false, err
+		return onboardingOutcome{}, err
 	}
 	if result.NeedLogin {
 		session, err := onboardingAccountLogin(commandContext(cmd), account.LoginOptions{
@@ -153,10 +173,10 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 			Now:     onboardingClock,
 		})
 		if err != nil {
-			return false, fmt.Errorf("Beacon sign-in is required for interactive setup: %w", err)
+			return onboardingOutcome{}, fmt.Errorf("Beacon sign-in is required for interactive setup: %w", err)
 		}
 		if err := onboardingAccountSave(*session); err != nil {
-			return false, fmt.Errorf("store Beacon session: %w", err)
+			return onboardingOutcome{}, fmt.Errorf("store Beacon session: %w", err)
 		}
 		status = account.Status{SignedIn: true, User: session.User}
 		options.SignedIn = true
@@ -164,54 +184,71 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		options.DestinationOnly = true
 		result, err = onboardingRunWizard(onboardingStdin, cmd.OutOrStdout(), options)
 		if err != nil {
-			return false, err
+			return onboardingOutcome{}, err
 		}
 	}
 	if !result.Completed {
-		return false, onboarding.ErrWizardCancelled
+		return onboardingOutcome{}, onboarding.ErrWizardCancelled
 	}
 
-	recordedDestination := result.Destination
 	privacyMode := ""
 	if result.Destination == onboarding.DestinationAsymptote {
 		privacyMode, err = managedprivacy.Normalize(result.PrivacyMode)
 		if err != nil {
-			return false, err
+			return onboardingOutcome{}, err
 		}
-	}
-	connectAfterInstall := endpointOpts.connect && result.Destination == onboarding.DestinationAsymptote
-	if connectAfterInstall {
-		// Explicit --connect still records managed only after device enrollment
-		// succeeds, preserving the existing retry behavior.
-		recordedDestination = ""
-	}
-	if profile.Onboarding.CompletedAt == "" {
-		profile.Onboarding = onboarding.Onboarding{
-			CompletedAt:   onboardingClock().UTC().Format(time.RFC3339),
-			Outcome:       onboarding.OutcomeAuthenticated,
-			Email:         status.User.Email,
-			BeaconVersion: version.GetVersion(),
-			Destination:   recordedDestination,
-			PrivacyMode:   privacyMode,
-		}
-		profile.Pending = nil
-	} else {
-		profile.Onboarding.Destination = recordedDestination
-		profile.Onboarding.PrivacyMode = privacyMode
-	}
-	if _, err := onboarding.EnsureInstallID(profile); err != nil {
-		return false, fmt.Errorf("create onboarding install id: %w", err)
-	}
-	if err := onboardingSave(*profile); err != nil {
-		return false, fmt.Errorf("record onboarding: %w", err)
 	}
 
-	if result.Destination == onboarding.DestinationAsymptote && !connectAfterInstall {
-		fmt.Fprintf(cmd.OutOrStdout(), "Beacon Managed selected with %s privacy. After installation, run `beacon endpoint connect`.\n", managedprivacy.Label(privacyMode))
-	} else if result.Destination == onboarding.DestinationLocal {
+	// Confirming Managed connects this endpoint, unless it already is one. An
+	// endpoint that is already enrolled keeps its device key and simply records the
+	// destination it has been using.
+	alreadyConnected := result.Destination == onboarding.DestinationAsymptote && !destinationAskable()
+	connectAfterInstall := result.Destination == onboarding.DestinationAsymptote && !alreadyConnected
+
+	recordedDestination := result.Destination
+	if connectAfterInstall {
+		// Managed is recorded only once device enrollment succeeds, so a failed
+		// connect leaves the question open and the next install re-offers it. That
+		// is the mechanism `--connect` has always used; auto-connect inherits it.
+		recordedDestination = ""
+	}
+
+	outcome := onboardingOutcome{Connect: connectAfterInstall}
+	email := status.User.Email
+	outcome.Persist = func() error {
+		if profile.Onboarding.CompletedAt == "" {
+			profile.Onboarding = onboarding.Onboarding{
+				CompletedAt:   onboardingClock().UTC().Format(time.RFC3339),
+				Outcome:       onboarding.OutcomeAuthenticated,
+				Email:         email,
+				BeaconVersion: version.GetVersion(),
+				Destination:   recordedDestination,
+				PrivacyMode:   privacyMode,
+			}
+			profile.Pending = nil
+		} else {
+			profile.Onboarding.Destination = recordedDestination
+			profile.Onboarding.PrivacyMode = privacyMode
+		}
+		if _, err := onboarding.EnsureInstallID(profile); err != nil {
+			return fmt.Errorf("create onboarding install id: %w", err)
+		}
+		if err := onboardingSave(*profile); err != nil {
+			return fmt.Errorf("record onboarding: %w", err)
+		}
+		return nil
+	}
+
+	switch {
+	case connectAfterInstall:
+		// The connect output that follows says where events now go; anticipating it
+		// here would only be wrong if enrollment then failed.
+	case result.Destination == onboarding.DestinationAsymptote:
+		fmt.Fprintf(cmd.OutOrStdout(), "Beacon Managed with %s privacy. This endpoint is already connected.\n", managedprivacy.Label(privacyMode))
+	case result.Destination == onboarding.DestinationLocal:
 		fmt.Fprintln(cmd.OutOrStdout(), "Local-only telemetry selected. Open it with `beacon traces`.")
 	}
-	return connectAfterInstall, nil
+	return outcome, nil
 }
 
 // recordDestinationAsymptote stores the managed answer after explicit

@@ -37,26 +37,33 @@ to opt out of managed forwarding.
 Choosing Beacon Managed shows a separate disclosure naming exactly what leaves the
 machine: runtime events recorded before you connect stay local, while the inventory
 snapshot of which agent runtimes, skills, and MCP servers are installed uploads once
-so the dashboard has a baseline for the endpoint. Forwarding starts only after you
-run:
-
-```bash
-beacon endpoint connect
-```
+so the dashboard has a baseline for the endpoint.
 
 Standard forwards the complete locally sanitized event. Metadata only strips retained
 prompts, responses, reasoning, tool arguments/results, command output, raw fields,
 diffs, and optional inventory content locally before upload. See
 [`beacon endpoint connect`](/cli/endpoint-connect#privacy-modes) for the exact contract.
 
-Completing the wizard records managed intent and prints that next step; it does not
-connect automatically. Pre-connect runtime history is not uploaded. On the first
-connection, inventory is read from the beginning of `inventory_state.jsonl` so the
-hosted dashboard receives the endpoint's current inventory baseline. The explicit
-`beacon endpoint install --connect` flag remains the exception: it presets Managed
-and attempts device enrollment after installation. If that enrollment fails, the
+Confirming Beacon Managed connects this endpoint in the same command, after the
+local install succeeds. The confirm screen says so before you press enter, and names
+what the selected privacy mode sends, so it is the point at which forwarding is
+authorized. An endpoint that is already enrolled is not re-enrolled: enrollment
+rotates the device key, so a connected machine keeps the key it has and simply
+records the destination.
+
+Pre-connect runtime history is not uploaded. On the first connection, inventory is
+read from the beginning of `inventory_state.jsonl` so the hosted dashboard receives
+the endpoint's current inventory baseline.
+
+The managed destination is recorded only once enrollment succeeds. If it fails, the
 local install still succeeds and prints `beacon endpoint connect` as the retry
-command; verify forwarding with `beacon endpoint status --json`.
+command, and the next `beacon endpoint install` offers the question again rather than
+treating the machine as settled. Verify forwarding with `beacon endpoint status
+--json`. The onboarding record itself is written only after the install succeeds, so
+a failed install leaves nothing behind and asks again next time.
+
+The explicit `beacon endpoint install --connect` flag is unchanged: it presets Managed
+and skips the destination question.
 
 The wizard never appears non-interactively. Package postinstall scripts, MDM
 deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin

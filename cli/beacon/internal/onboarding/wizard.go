@@ -200,8 +200,8 @@ func (m wizardModel) View() string {
 		body = strings.Join(rows, "\n")
 	case managedDisclosureScreen:
 		title = "Beacon Managed sends new telemetry to beacon.sh"
-		body = wizardWarn.Render("Nothing is forwarded by signing in or completing this wizard.") +
-			"\n\nAfter installation, run `beacon endpoint connect`. Once connected, a local Vector forwarder sends new events to beacon.sh over HTTPS." +
+		body = wizardWarn.Render("Nothing is forwarded by signing in.") +
+			"\n\nBeacon installs, then connects this machine: a device key is minted and a local Vector forwarder starts sending new events to beacon.sh over HTTPS." +
 			"\n\nRuntime events recorded before you connect stay on this machine. The inventory snapshot -- which agent runtimes, skills, and MCP servers are installed here -- uploads once so the dashboard has this endpoint's baseline." +
 			"\n\nStop any time with `beacon endpoint disconnect`."
 	case privacyScreen:
@@ -217,12 +217,13 @@ func (m wizardModel) View() string {
 		}
 		body = strings.Join(rows, "\n")
 	case confirmScreen:
-		title = "Ready to install"
+		title = "Ready to set up Beacon"
 		label, _ := destinationCopy(m.result.Destination)
 		body = "Account: " + m.options.Email + "\nDestination: " + label
 		if m.result.Destination == DestinationAsymptote {
 			body += "\nPrivacy: " + managedprivacy.Label(m.result.PrivacyMode) +
-				"\n\nNext step after install: beacon endpoint connect"
+				"\n\n" + wizardWarn.Render("Confirming installs Beacon and starts forwarding new events to beacon.sh.") +
+				"\n\n" + privacySends(m.result.PrivacyMode)
 		} else {
 			body += "\n\nYour telemetry stays on this machine."
 		}
@@ -231,7 +232,7 @@ func (m wizardModel) View() string {
 	card := wizardAccent.Render("B E A C O N") + "\n\n" +
 		wizardAccent.Render(title) + "\n\n" +
 		lipgloss.NewStyle().Width(contentWidth).Render(body) + "\n\n" +
-		wizardDim.Render(wizardHint(m.screen))
+		wizardDim.Render(m.hint())
 	return lipgloss.NewStyle().Padding(1, 3).Render(card)
 }
 
@@ -279,6 +280,23 @@ func privacyIndex(mode string) int {
 		}
 	}
 	return 0
+}
+
+// privacySends states, in the present tense, what the selected mode puts on the
+// wire. The confirm screen is where forwarding is authorized, so it has to name what
+// leaves this machine rather than point at a command to run later.
+func privacySends(mode string) string {
+	if mode == managedprivacy.MetadataOnly {
+		return "Metadata only: prompts, responses, reasoning, tool arguments and results, command output and diffs stay on this machine."
+	}
+	return "Standard: the locally sanitized event, including prompts and tool activity."
+}
+
+func (m wizardModel) hint() string {
+	if m.screen == confirmScreen && m.result.Destination == DestinationAsymptote {
+		return "enter install and connect · esc cancel"
+	}
+	return wizardHint(m.screen)
 }
 
 func wizardHint(screen wizardScreen) string {

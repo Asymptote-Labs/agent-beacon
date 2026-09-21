@@ -105,13 +105,13 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
-	connectFromOnboarding, err := maybeRunOnboarding(cmd)
+	onboarded, err := maybeRunOnboarding(cmd)
 	if err != nil {
 		return err
 	}
-	// A normal Managed selection records intent and prints the separate connect command.
-	// Explicit --connect keeps its existing behavior and runs enrollment after install.
-	connectAfterInstall := connectFromOnboarding || endpointOpts.connect
+	// Confirming Beacon Managed connects this endpoint; --connect does the same for
+	// the paths the wizard did not own.
+	connectAfterInstall := onboarded.Connect || endpointOpts.connect
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
@@ -128,6 +128,14 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	// Only now is the machine actually installed, so only now is it onboarded. The
+	// record used to be written before this call, which meant a failed install left
+	// a profile claiming otherwise and the retry silently skipped the wizard.
+	if onboarded.Persist != nil {
+		if err := onboarded.Persist(); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: %v\n", err)
+		}
 	}
 	fmt.Printf("Endpoint config written to %s\n", result.ConfigPath)
 	fmt.Printf("Collector config written to %s\n", result.CollectorConfigPath)

@@ -83,8 +83,11 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 	view := strings.Join(strings.Fields(model.View()), " ")
 	for _, want := range []string{
 		"sends new telemetry to beacon.sh",
-		"Nothing is forwarded",
-		"beacon endpoint connect",
+		"Nothing is forwarded by signing in",
+		// Confirming now connects, so the disclosure describes that rather than
+		// naming a command the user is expected to run afterwards.
+		"Beacon installs, then connects this machine",
+		"beacon endpoint disconnect",
 		// The disclosure has to describe what actually ships. The runtime source is
 		// read_from = "end", so pre-connect runtime events stay local -- but the
 		// inventory source is read_from = "beginning", so the existing snapshot does
@@ -238,5 +241,55 @@ func TestWizardHasNoGlobalQuitKey(t *testing.T) {
 	model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true})
 	if _, command := advanceWizard(t, model, "esc"); command == nil {
 		t.Fatal("esc must still cancel the wizard")
+	}
+}
+
+// The confirm screen is where forwarding is authorized, so it has to name the
+// action. It used to say "Next step after install: beacon endpoint connect", which
+// stopped being true once confirming did the connecting.
+func TestConfirmScreenNamesWhatConfirmingStarts(t *testing.T) {
+	for mode, wantSends := range map[string]string{
+		"standard":      "including prompts and tool activity",
+		"metadata_only": "stay on this machine",
+	} {
+		model := newWizardModel(WizardOptions{
+			SignedIn:          true,
+			Email:             "person@example.com",
+			OfferManaged:      true,
+			DestinationOnly:   true,
+			PresetDestination: DestinationAsymptote,
+			PresetPrivacyMode: mode,
+		})
+		model.width, model.height = 100, 30
+		model.screen = confirmScreen
+		model.result.Destination = DestinationAsymptote
+		model.result.PrivacyMode = mode
+
+		view := strings.Join(strings.Fields(model.View()), " ")
+		for _, want := range []string{
+			"Confirming installs Beacon and starts forwarding new events to beacon.sh.",
+			wantSends,
+			"enter install and connect",
+		} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("confirm screen for %s missing %q:\n%s", mode, want, view)
+			}
+		}
+		if strings.Contains(view, "Next step after install") {
+			t.Fatalf("confirm screen still defers connect to a later command:\n%s", view)
+		}
+	}
+
+	// Local says the opposite, and its hint stays plain.
+	local := newWizardModel(WizardOptions{SignedIn: true, Email: "person@example.com", OfferManaged: true})
+	local.width, local.height = 100, 30
+	local.screen = confirmScreen
+	local.result.Destination = DestinationLocal
+	view := strings.Join(strings.Fields(local.View()), " ")
+	if !strings.Contains(view, "Your telemetry stays on this machine.") {
+		t.Fatalf("local confirm screen = %s", view)
+	}
+	if strings.Contains(view, "install and connect") {
+		t.Fatalf("local confirm screen must not offer to connect: %s", view)
 	}
 }

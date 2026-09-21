@@ -64,15 +64,18 @@ Send your Beacon telemetry to the hosted service for:
 - analytics
 - access from anywhere
 
-Interactive installation signs in and preselects Managed. Connect the endpoint
-after reviewing the privacy choice:
+Interactive installation signs in, preselects Managed, and asks you to review the
+privacy choice. Confirming installs Beacon and connects this endpoint in the same
+command, using the signed-in CLI account to authorize a separate device ingest key
+with no second browser approval.
+
+If you chose Local during setup, or enrollment did not succeed, connect later with:
 
 ```bash
 beacon endpoint connect
 ```
 
-The existing CLI account authorizes a separate device ingest key; there is no
-second browser approval. Use `--privacy-mode metadata-only` to override Standard.
+Use `--privacy-mode metadata-only` to override Standard.
 
 ## 3. Run an agent
 

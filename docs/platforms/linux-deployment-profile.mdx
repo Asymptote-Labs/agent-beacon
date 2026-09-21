@@ -94,6 +94,8 @@ The only outbound connections Beacon ever makes, for an egress allowlist:
 | Host | When | Suppress with |
 |---|---|---|
 | `auth.asymptotelabs.ai` | Once per machine, interactive install only | `BEACON_ONBOARDING=0` (already skipped for `--system` and package installs) |
+| `beacon.sh` | Interactive install only: browser sign-in, and the device enrollment that follows when Beacon Managed is confirmed | `BEACON_MANAGED_INGEST=0` hides the managed answer; `BEACON_ONBOARDING=0` skips the wizard entirely |
+| Your ingest host | Continuously, only on an endpoint connected to Beacon Managed | `beacon endpoint disconnect`, or never connecting |
 | `api.github.com`, `github.com` | Version check and self-update | Off by default; leave it off and deploy through your config management |
 
 ```bash
