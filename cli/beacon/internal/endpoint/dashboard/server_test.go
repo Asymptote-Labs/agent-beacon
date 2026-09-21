@@ -658,3 +658,29 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		})
 	}
 }
+
+func TestRequireLoopbackHostRejectsRebindingHosts(t *testing.T) {
+	handler := RequireLoopbackHost(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for host, want := range map[string]int{
+		"127.0.0.1:8765":             http.StatusOK,
+		"127.0.0.1":                  http.StatusOK,
+		"localhost:8765":             http.StatusOK,
+		"LOCALHOST:8765":             http.StatusOK,
+		"[::1]:8766":                 http.StatusOK,
+		"[::1]":                      http.StatusOK,
+		"attacker.example:8765":      http.StatusForbidden,
+		"localhost.attacker.example": http.StatusForbidden,
+		"192.168.1.20:8765":          http.StatusForbidden,
+		"":                           http.StatusForbidden,
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("Host %q: status = %d, want %d", host, rec.Code, want)
+		}
+	}
+}

@@ -78,7 +78,7 @@ func runMCPServe(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		httpServer := &http.Server{
 			Addr:              mcpOpts.addr,
-			Handler:           server.HTTPHandler(),
+			Handler:           dashboard.RequireLoopbackHost(server.HTTPHandler()),
 			ReadHeaderTimeout: 5 * time.Second,
 			BaseContext:       func(_ net.Listener) context.Context { return ctx },
 		}
