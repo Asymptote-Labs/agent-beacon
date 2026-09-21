@@ -17,6 +17,11 @@ import (
 
 const loadLimit = 2000
 
+var (
+	readTraceList = dashboard.ReadTraceList
+	showTrace     = dashboard.ShowTrace
+)
+
 type Store interface {
 	List(query string) (dashboard.TraceListResultV1, error)
 	Show(id string, eventTypes []string) (dashboard.TraceShowResultV1, bool, error)
@@ -27,17 +32,62 @@ type localStore struct {
 }
 
 func (s localStore) List(query string) (dashboard.TraceListResultV1, error) {
-	return dashboard.ReadTraceList(s.logPath, dashboard.TraceQuery{
-		EventQuery: dashboard.EventQuery{Q: query},
-		Limit:      loadLimit,
-	})
+	var combined dashboard.TraceListResultV1
+	complete := false
+	for page := 1; ; page++ {
+		result, err := readTraceList(s.logPath, dashboard.TraceQuery{
+			EventQuery: dashboard.EventQuery{Q: query},
+			Limit:      loadLimit,
+			Page:       page,
+		})
+		if err != nil {
+			return dashboard.TraceListResultV1{}, err
+		}
+		if page == 1 {
+			combined = result
+			combined.Traces = nil
+		}
+		combined.Traces = append(combined.Traces, result.Traces...)
+		if !result.Truncated || len(combined.Traces) >= result.TotalMatched {
+			complete = true
+			break
+		}
+		if len(result.Traces) == 0 {
+			break
+		}
+	}
+	combined.Returned = len(combined.Traces)
+	combined.Limit = len(combined.Traces)
+	combined.Page = 1
+	combined.Truncated = !complete
+	return combined, nil
 }
 
 func (s localStore) Show(id string, eventTypes []string) (dashboard.TraceShowResultV1, bool, error) {
-	return dashboard.ShowTrace(s.logPath, id, dashboard.TraceQuery{
-		Limit:      loadLimit,
-		EventTypes: eventTypes,
-	})
+	var combined dashboard.TraceShowResultV1
+	for offset := 1; ; {
+		result, ok, err := showTrace(s.logPath, id, dashboard.TraceQuery{
+			Limit:      loadLimit,
+			Offset:     offset,
+			EventTypes: eventTypes,
+		})
+		if err != nil || !ok {
+			return dashboard.TraceShowResultV1{}, ok, err
+		}
+		if offset == 1 {
+			combined = result
+			combined.Events = nil
+		}
+		combined.Events = append(combined.Events, result.Events...)
+		if len(result.Events) == 0 || len(combined.Events) >= result.Range.TotalEvents {
+			break
+		}
+		offset += len(result.Events)
+	}
+	combined.Range.Offset = 1
+	combined.Range.Limit = len(combined.Events)
+	combined.Range.ReturnedEvents = len(combined.Events)
+	return combined, true, nil
 }
 
 type viewMode int
@@ -48,14 +98,16 @@ const (
 )
 
 type listLoaded struct {
-	result dashboard.TraceListResultV1
-	err    error
+	request uint64
+	result  dashboard.TraceListResultV1
+	err     error
 }
 
 type detailLoaded struct {
-	result dashboard.TraceShowResultV1
-	ok     bool
-	err    error
+	request uint64
+	result  dashboard.TraceShowResultV1
+	ok      bool
+	err     error
 }
 
 type Model struct {
@@ -65,6 +117,8 @@ type Model struct {
 	mode          viewMode
 	loading       bool
 	err           error
+	listRequest   uint64
+	detailRequest uint64
 
 	query        string
 	searchInput  string
@@ -90,7 +144,7 @@ var (
 )
 
 func NewModel(store Store) Model {
-	return Model{store: store, loading: true, filterLabel: "all"}
+	return Model{store: store, loading: true, filterLabel: "all", listRequest: 1}
 }
 
 func Run(logPath string, in io.Reader, out io.Writer) error {
@@ -106,9 +160,10 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) loadList() tea.Cmd {
 	query := m.query
+	request := m.listRequest
 	return func() tea.Msg {
 		result, err := m.store.List(query)
-		return listLoaded{result: result, err: err}
+		return listLoaded{request: request, result: result, err: err}
 	}
 }
 
@@ -118,9 +173,10 @@ func (m Model) loadDetail() tea.Cmd {
 	}
 	id := m.traces[m.selected].ID
 	eventTypes := append([]string(nil), m.eventTypes...)
+	request := m.detailRequest
 	return func() tea.Msg {
 		result, ok, err := m.store.Show(id, eventTypes)
-		return detailLoaded{result: result, ok: ok, err: err}
+		return detailLoaded{request: request, result: result, ok: ok, err: err}
 	}
 }
 
@@ -131,6 +187,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureVisible()
 		return m, nil
 	case listLoaded:
+		if m.mode != listMode || msg.request != m.listRequest {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.err
 		if msg.err == nil {
@@ -140,6 +199,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case detailLoaded:
+		if m.mode != detailMode || msg.request != m.detailRequest {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.err
 		if msg.err == nil && !msg.ok {
@@ -175,6 +237,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.query = strings.TrimSpace(m.searchInput)
 		m.loading = true
 		m.err = nil
+		m.listRequest++
 		return m, m.loadList()
 	case "backspace":
 		if len(m.searchInput) > 0 {
@@ -218,6 +281,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = detailMode
 			m.loading = true
 			m.err = nil
+			m.detailRequest++
 			return m, m.loadDetail()
 		}
 	case "/":
@@ -228,11 +292,13 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = ""
 			m.searchInput = ""
 			m.loading = true
+			m.listRequest++
 			return m, m.loadList()
 		}
 	case "r":
 		m.loading = true
 		m.err = nil
+		m.listRequest++
 		return m, m.loadList()
 	}
 	return m, nil
@@ -242,7 +308,9 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
 		m.mode = listMode
+		m.loading = false
 		m.err = nil
+		m.detailRequest++
 	case "up", "k":
 		if m.eventIndex > 0 {
 			m.eventIndex--
@@ -272,6 +340,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.loading = true
 		m.err = nil
+		m.detailRequest++
 		return m, m.loadDetail()
 	}
 	return m, nil
@@ -282,6 +351,7 @@ func (m Model) setFilter(label string, eventTypes []string) (tea.Model, tea.Cmd)
 	m.eventTypes = eventTypes
 	m.loading = true
 	m.err = nil
+	m.detailRequest++
 	return m, m.loadDetail()
 }
 
@@ -383,7 +453,11 @@ func (m Model) listView() string {
 			b.WriteString(dimStyle.Render(fit("    "+meta, m.width)) + "\n")
 		}
 	}
-	b.WriteString("\n  " + dimStyle.Render(fmt.Sprintf("%d traces · ↑/↓ move · enter open · / search · r refresh · q quit", m.totalMatched)) + "\n")
+	countLabel := fmt.Sprintf("%d traces", m.totalMatched)
+	if len(m.traces) < m.totalMatched {
+		countLabel = fmt.Sprintf("%d of %d traces loaded", len(m.traces), m.totalMatched)
+	}
+	b.WriteString("\n  " + dimStyle.Render(countLabel+" · ↑/↓ move · enter open · / search · r refresh · q quit") + "\n")
 	return b.String()
 }
 
@@ -428,6 +502,9 @@ func (m Model) detailView() string {
 		for _, line := range lines[m.detailScroll:end] {
 			b.WriteString("  " + line + "\n")
 		}
+	}
+	if m.detail.Range.ReturnedEvents < m.detail.Range.TotalEvents {
+		b.WriteString("\n  " + errorStyle.Render(fmt.Sprintf("Showing %d of %d events", m.detail.Range.ReturnedEvents, m.detail.Range.TotalEvents)) + "\n")
 	}
 	b.WriteString("\n  " + dimStyle.Render("esc back · ↑/↓ event · pgup/pgdn details · 1 all · 2 messages · 3 tools · 4 errors · q quit") + "\n")
 	return b.String()

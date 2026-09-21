@@ -146,6 +146,89 @@ func TestDetailFilterReloadsTrace(t *testing.T) {
 	}
 }
 
+func TestLeavingDetailIgnoresInFlightLoad(t *testing.T) {
+	store := fixtureStore()
+	model := NewModel(store)
+	model.width, model.height = 100, 30
+	model = runCmd(t, model, model.Init())
+
+	next, pending := model.Update(key("enter"))
+	model = next.(Model)
+	if !model.loading || model.mode != detailMode {
+		t.Fatalf("expected pending detail load, got loading=%t mode=%v", model.loading, model.mode)
+	}
+	next, _ = model.Update(key("esc"))
+	model = next.(Model)
+	if model.loading || model.mode != listMode {
+		t.Fatalf("leaving detail = loading %t mode %v", model.loading, model.mode)
+	}
+
+	next, _ = model.Update(pending())
+	model = next.(Model)
+	if model.loading || model.mode != listMode || len(model.detail.Events) != 0 || model.err != nil {
+		t.Fatalf("stale detail load changed list state: %#v", model)
+	}
+}
+
+func TestLocalStorePagesThroughAllTracesAndEvents(t *testing.T) {
+	originalList, originalShow := readTraceList, showTrace
+	t.Cleanup(func() {
+		readTraceList, showTrace = originalList, originalShow
+	})
+
+	var pages []int
+	readTraceList = func(_ string, query dashboard.TraceQuery) (dashboard.TraceListResultV1, error) {
+		pages = append(pages, query.Page)
+		trace := dashboard.TraceSummaryV1{ID: string(rune('a' + query.Page - 1))}
+		return dashboard.TraceListResultV1{
+			Traces:       []dashboard.TraceSummaryV1{trace},
+			TotalMatched: 2,
+			Returned:     1,
+			Limit:        loadLimit,
+			Page:         query.Page,
+			Truncated:    query.Page == 1,
+		}, nil
+	}
+
+	var offsets []int
+	showTrace = func(_ string, _ string, query dashboard.TraceQuery) (dashboard.TraceShowResultV1, bool, error) {
+		offsets = append(offsets, query.Offset)
+		return dashboard.TraceShowResultV1{
+			Trace:  dashboard.TraceSummaryV1{ID: "a"},
+			Events: []dashboard.TraceEventV1{{Number: query.Offset}},
+			Range: dashboard.TraceRangeV1{
+				TotalEvents:    2,
+				ReturnedEvents: 1,
+				Offset:         query.Offset,
+				Limit:          loadLimit,
+			},
+		}, true, nil
+	}
+
+	store := localStore{logPath: "ignored"}
+	list, err := store.List("")
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if got := strings.Trim(strings.Join([]string{list.Traces[0].ID, list.Traces[1].ID}, ""), " "); got != "ab" {
+		t.Fatalf("trace IDs = %q", got)
+	}
+	if len(pages) != 2 || pages[0] != 1 || pages[1] != 2 || list.Truncated {
+		t.Fatalf("pages = %#v result = %#v", pages, list)
+	}
+
+	show, ok, err := store.Show("a", nil)
+	if err != nil || !ok {
+		t.Fatalf("Show = ok %t err %v", ok, err)
+	}
+	if len(show.Events) != 2 || show.Events[0].Number != 1 || show.Events[1].Number != 2 {
+		t.Fatalf("events = %#v", show.Events)
+	}
+	if len(offsets) != 2 || offsets[0] != 1 || offsets[1] != 2 || show.Range.ReturnedEvents != 2 {
+		t.Fatalf("offsets = %#v range = %#v", offsets, show.Range)
+	}
+}
+
 func TestEventDetailsIncludesStructuredData(t *testing.T) {
 	event := dashboard.TraceEventV1{
 		Number: 7,
