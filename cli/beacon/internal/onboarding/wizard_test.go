@@ -345,7 +345,7 @@ func TestSignInWaitShowsAnUnwrappedURLAndAClock(t *testing.T) {
 	t.Cleanup(func() { model.stopSignIn() })
 
 	url := "https://beacon.sh/cli/auth?port=54123&state=" + strings.Repeat("a", 43)
-	next, _ := model.Update(signInPromptMsg{URL: url, WillOpen: true})
+	next, _ := model.Update(signInPromptMsg{attempt: 1, prompt: SignInPrompt{URL: url, WillOpen: true}})
 	model = next.(wizardModel)
 
 	// Seven seconds later.
@@ -403,9 +403,9 @@ func TestSignInFailureOffersRecoveryAndALocalFinish(t *testing.T) {
 	model := signInWizard(t, neverReturns)
 	model.screen = signInScreen
 	model, _ = advanceWizard(t, model, "enter")
-	next, _ := model.Update(signInPromptMsg{URL: "https://beacon.sh/cli/auth?port=1&state=x", WillOpen: true})
+	next, _ := model.Update(signInPromptMsg{attempt: 1, prompt: SignInPrompt{URL: "https://beacon.sh/cli/auth?port=1&state=x", WillOpen: true}})
 	model = next.(wizardModel)
-	next, _ = model.Update(signInDoneMsg{err: errors.New("connection refused")})
+	next, _ = model.Update(signInDoneMsg{attempt: 1, err: errors.New("connection refused")})
 	model = next.(wizardModel)
 
 	if model.screen != signInFailedScreen {
@@ -477,7 +477,7 @@ func TestSignInSuccessContinuesToTheDestinationQuestion(t *testing.T) {
 	model := signInWizard(t, neverReturns)
 	model.screen = signInScreen
 	model, _ = advanceWizard(t, model, "enter")
-	next, _ := model.Update(signInDoneMsg{account: Account{Email: "person@example.com"}})
+	next, _ := model.Update(signInDoneMsg{attempt: 1, account: Account{Email: "person@example.com"}})
 	model = next.(wizardModel)
 
 	if model.screen != destinationScreen {
@@ -522,9 +522,9 @@ func TestWholeFirstRunHappensInOneScreenSession(t *testing.T) {
 	}
 	_ = quitCmd
 
-	next, _ := model.Update(signInPromptMsg{URL: "https://beacon.sh/cli/auth?port=1&state=x", WillOpen: true})
+	next, _ := model.Update(signInPromptMsg{attempt: 1, prompt: SignInPrompt{URL: "https://beacon.sh/cli/auth?port=1&state=x", WillOpen: true}})
 	model = next.(wizardModel)
-	next, _ = model.Update(signInDoneMsg{account: Account{Email: "newuser@example.com"}})
+	next, _ = model.Update(signInDoneMsg{attempt: 1, account: Account{Email: "newuser@example.com"}})
 	model = next.(wizardModel)
 	if model.screen != destinationScreen {
 		t.Fatalf("after sign-in completed: screen = %v", model.screen)
@@ -540,5 +540,37 @@ func TestWholeFirstRunHappensInOneScreenSession(t *testing.T) {
 	}
 	if model.result.SignedInEmail != "newuser@example.com" {
 		t.Fatalf("the signed-in account should reach the caller: %#v", model.result)
+	}
+}
+
+// esc then enter: the cancelled attempt's completion must not be shown as a
+// failure of the new one.
+func TestStaleSignInDoesNotPoisonRetry(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+	model, _ = advanceWizard(t, model, "enter") // attempt A
+	model, _ = advanceWizard(t, model, "esc")   // cancel A, back to sign-in
+	model, _ = advanceWizard(t, model, "enter") // attempt B
+	t.Cleanup(func() { model.stopSignIn() })
+
+	// A's goroutine now notices the cancellation and reports it, late.
+	next, _ := model.Update(signInDoneMsg{attempt: 1, err: context.Canceled})
+	model = next.(wizardModel)
+
+	if model.screen == signInFailedScreen {
+		t.Fatalf("a cancelled attempt was shown as a failure of the retry: err=%v", model.signInErr)
+	}
+	if model.screen != signInWaitScreen {
+		t.Fatalf("screen = %v, want still waiting on the retry", model.screen)
+	}
+	if model.signInErr != nil {
+		t.Fatalf("signInErr = %v, want none", model.signInErr)
+	}
+
+	// And B's own result, attempt 2, still lands.
+	next, _ = model.Update(signInDoneMsg{attempt: 2, err: errors.New("connection refused")})
+	model = next.(wizardModel)
+	if model.screen != signInFailedScreen {
+		t.Fatalf("the current attempt's failure was dropped: screen = %v", model.screen)
 	}
 }

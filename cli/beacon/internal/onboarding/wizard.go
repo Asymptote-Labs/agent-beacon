@@ -112,9 +112,12 @@ type wizardModel struct {
 	cancelSignIn context.CancelFunc
 	prompt       SignInPrompt
 	signInErr    error
-	startedAt    time.Time
-	now          time.Time
-	frame        int
+	// attempt counts sign-in attempts, so a report from an abandoned one can be
+	// told apart from the current one's.
+	attempt   int
+	startedAt time.Time
+	now       time.Time
+	frame     int
 }
 
 // spinnerFrames animate the wait. Braille is what every terminal capable of the
@@ -123,18 +126,31 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 type tickMsg time.Time
 
-type signInPromptMsg SignInPrompt
+// Sign-in events carry the attempt that produced them.
+//
+// Cancelling an attempt does not unschedule its goroutine: a sign-in abandoned
+// with esc still reports, eventually, with context.Canceled. If the user has
+// already started a retry by then, that stale report would otherwise be applied to
+// the new attempt and shown as its failure.
+type signInPromptMsg struct {
+	attempt int
+	prompt  SignInPrompt
+}
 
 type signInDoneMsg struct {
+	attempt int
 	account Account
 	err     error
 }
 
-type chanReporter struct{ events chan<- tea.Msg }
+type chanReporter struct {
+	events  chan<- tea.Msg
+	attempt int
+}
 
 func (r chanReporter) Prompt(p SignInPrompt) {
 	select {
-	case r.events <- signInPromptMsg(p):
+	case r.events <- signInPromptMsg{attempt: r.attempt, prompt: p}:
 	default:
 	}
 }
@@ -211,7 +227,11 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 		return m, tickCmd()
 	case signInPromptMsg:
-		m.prompt = SignInPrompt(msg)
+		// Re-arm either way: exactly one reader stays live for the whole program,
+		// so ignoring a stale event must not leave the channel unread.
+		if msg.attempt == m.attempt {
+			m.prompt = msg.prompt
+		}
 		return m, waitForEvent(m.events)
 	case signInDoneMsg:
 		return m.signInFinished(msg)
@@ -275,34 +295,49 @@ func (m wizardModel) startSignIn() (tea.Model, tea.Cmd) {
 	m.frame = 0
 	m.screen = signInWaitScreen
 
+	// The first attempt arms the single channel reader. Every handler re-arms it,
+	// so retries must not arm a second one: two readers would split the stream and
+	// each would need its own re-arm bookkeeping.
+	first := m.attempt == 0
+	m.attempt++
+	attempt := m.attempt
+
 	events, signIn := m.events, m.options.SignIn
 	req := SignInRequest{NoBrowser: m.options.NoBrowser}
 	go func() {
-		account, err := signIn(ctx, req, chanReporter{events: events})
-		events <- signInDoneMsg{account: account, err: err}
+		account, err := signIn(ctx, req, chanReporter{events: events, attempt: attempt})
+		events <- signInDoneMsg{attempt: attempt, account: account, err: err}
 	}()
-	return m, tea.Batch(waitForEvent(m.events), tickCmd())
+	if first {
+		return m, tea.Batch(waitForEvent(m.events), tickCmd())
+	}
+	return m, tickCmd()
 }
 
 func (m wizardModel) signInFinished(msg signInDoneMsg) (tea.Model, tea.Cmd) {
+	// An abandoned attempt reporting late says nothing about the current one, and
+	// must not cancel it or be shown as its outcome.
+	if msg.attempt != m.attempt {
+		return m, waitForEvent(m.events)
+	}
 	m.stopSignIn()
 	if msg.err != nil {
 		// A cancel the user asked for has already moved the screen; do not overwrite
 		// it with a failure they did not cause.
 		if m.screen != signInWaitScreen {
-			return m, nil
+			return m, waitForEvent(m.events)
 		}
 		m.signInErr = msg.err
 		m.selected = 0
 		m.screen = signInFailedScreen
-		return m, nil
+		return m, waitForEvent(m.events)
 	}
 	m.options.SignedIn = true
 	m.options.Email = msg.account.Email
 	m.result.SignedInEmail = msg.account.Email
 	m.selected = 0
 	m.screen = m.afterSignIn()
-	return m, nil
+	return m, waitForEvent(m.events)
 }
 
 // afterSignIn is where the wizard resumes once an account exists.
