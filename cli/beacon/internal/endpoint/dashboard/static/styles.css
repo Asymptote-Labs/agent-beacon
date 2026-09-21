@@ -1148,9 +1148,7 @@ body.nav-collapsed .nav-toggle a.active::before {
   transition: background-color 140ms ease-out, color 140ms ease-out;
 }
 
-.nav-parent + a,
-.nav-parent + a + a,
-.nav-parent + a + a + a {
+.nav-parent ~ a {
   min-height: 1.8rem;
   margin-left: 2.05rem;
   padding: 0.36rem 0.5rem;
@@ -1158,9 +1156,7 @@ body.nav-collapsed .nav-toggle a.active::before {
   font-weight: 600;
 }
 
-.nav-parent + a .nav-icon,
-.nav-parent + a + a .nav-icon,
-.nav-parent + a + a + a .nav-icon {
+.nav-parent ~ a .nav-icon {
   width: 0.98rem;
   height: 0.98rem;
 }
