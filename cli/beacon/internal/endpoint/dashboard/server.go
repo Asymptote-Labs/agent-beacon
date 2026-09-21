@@ -17,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const DefaultAddr = "127.0.0.1:8765"
@@ -62,6 +63,13 @@ type HookStatus struct {
 	Path       string `json:"path,omitempty"`
 	BinaryPath string `json:"binary_path,omitempty"`
 	Message    string `json:"message,omitempty"`
+}
+
+type MemoryResponse struct {
+	Status      asymptoteobserve.LearningStatusV1       `json:"status"`
+	Evaluations []asymptoteobserve.LearningEvaluationV1 `json:"evaluations"`
+	Candidates  []asymptoteobserve.LearningCandidateV1  `json:"candidates"`
+	Memories    []asymptoteobserve.LearningMemoryV1     `json:"memories"`
 }
 
 var (
@@ -222,6 +230,18 @@ func Handler(opts Options) (http.Handler, error) {
 			return
 		}
 		writeJSON(w, trace)
+	})
+	mux.HandleFunc("/api/memory", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		resp, err := ReadMemory(opts.LogPath, parseMemoryQuery(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, resp)
 	})
 	mux.HandleFunc("/api/tokens", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
