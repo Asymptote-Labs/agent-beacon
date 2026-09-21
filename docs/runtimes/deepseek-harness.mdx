@@ -5,7 +5,7 @@ description: "Beacon support details for DeepSeek Harness (dsh) endpoint telemet
 
 ## Runtime overview
 
-Beacon supports DeepSeek Harness — DeepSeek's open agent harness, run as `dsh` — through the Claude Code hook bridge DeepSeek ships in the CLI, sent to `beacon-hooks`.
+Beacon supports DeepSeek Harness — DeepSeek's open agent harness, run as `dsh` — through the Claude Code hook bridge DeepSeek ships in the CLI, sent to `beacon-hooks`, plus a local poll of DeepSeek's native session files.
 
 ```bash
 beacon endpoint hooks install --harness dsh
@@ -53,6 +53,15 @@ The row Beacon adds looks like this:
 
 The home-level patch layer is applied over **every** profile and outranks each profile's own, so one install covers `dsh`, `dsh web`, the ACP server, and the SDK. `configPath` is absolute because the bridge resolves a relative path against the directory the process was launched from, which for an agent runtime is wherever you happened to be standing.
 
+Beacon also reads committed native session records from `$DSH_HOME/sessions` through:
+
+```bash
+beacon endpoint dsh sync
+beacon endpoint dsh status
+```
+
+The poll path is local and offline. It complements hooks by backfilling persisted assistant text, reasoning, structured tool failures, and token usage that the hook bridge does not expose. Poll events are marked `harness.collection_method=poll`, so they are historical observation only: they cannot approve, deny, hold, or delay a tool call.
+
 <Warning>
 **There is no project scope.** The bridge's `configPath` is process-level — read once at startup — and per-session discovery of a project-local hooks file is unimplemented in the bridge itself. A repository has nowhere to mount a hook bridge from, so `--level project` is **refused with that explanation** rather than quietly becoming a machine-wide install. DeepSeek Harness is also left out of the project-level `--all` sweep for the same reason.
 </Warning>
@@ -99,7 +108,7 @@ beacon endpoint hooks status --harness dsh
 
 Status reports **both** paths, because `installed` is the conjunction of the two files: a hooks file with nothing mounted at it is a file nothing reads, and a mount pointing at a missing hooks file is a bridge that logs a warning and registers nothing. `beacon endpoint inventory` lists both for the same reason, so a half-install is visible as a half-install.
 
-DeepSeek Harness reports as the `deepseek_harness` harness with capability `hooks`, and every event carries `harness.collection_method=hook`. The bridge is a plugin, but it is DeepSeek's plugin, shipped and versioned with the CLI; what Beacon contributes is command hooks, and the thing that runs on each event is the same `beacon-hooks` binary every other hook runtime runs.
+DeepSeek Harness reports as the `deepseek_harness` harness with capability `hooks+session_log`. Live hook events carry `harness.collection_method=hook`; backfilled native session events carry `harness.collection_method=poll`. The bridge is a plugin, but it is DeepSeek's plugin, shipped and versioned with the CLI; what Beacon contributes is command hooks, and the thing that runs on each hook event is the same `beacon-hooks` binary every other hook runtime runs.
 
 ## Install or configuration support
 
@@ -107,29 +116,32 @@ DeepSeek Harness reports as the `deepseek_harness` harness with capability `hook
 beacon endpoint hooks install --harness dsh
 beacon endpoint hooks status --harness dsh
 beacon endpoint hooks uninstall --harness dsh
+beacon endpoint dsh sync
+beacon endpoint dsh status
 ```
 
-Re-running the install rewrites the hooks file wholesale and **repoints** the mount in place rather than adding a second one — so a reinstall after `$DSH_HOME` moved updates the path the bridge reads, and a repair does not end with each event registered twice.
+Re-running the install rewrites the hooks file wholesale, **repoints** the mount in place rather than adding a second one, and installs a Beacon-owned local skill at `$DSH_HOME/skills/beacon-endpoint/SKILL.md`. The skill only teaches `dsh` how to run `beacon endpoint dsh status` and workspace-scoped `beacon endpoint dsh sync`; it does not publish or upload anything.
 
-Uninstall removes Beacon's hooks file and its one patch element, and leaves your rows and comments alone.
+Uninstall removes Beacon's hooks file, its one patch element, and the Beacon-owned skill when its marker is still present. It leaves your rows, comments, and non-Beacon skills alone.
 
 ## Telemetry coverage
 
 | Area | Support |
 |------|---------|
-| Runtime discovery | Supported through both files in the Harness home |
+| Runtime discovery | Supported through hook files and native session-store progress in the Harness home |
 | Harness attribution | Supported. `dsh`, `dsh_cli`, `dsh-cli`, `dshcli`, `deepseek_harness`, `deepseek-harness`, `deepseekharness`, `deepseek-ai/dsh`, and `@deepseek-ai/dsh` normalize to `deepseek_harness` |
 | Hook install, status, uninstall, and repair | Supported at user scope |
-| Session lifecycle | Supported. `session.started` from `SessionStart`, and `tool.completed` from `Stop` |
-| Prompts | Supported. `prompt.submitted` from `UserPromptSubmit` |
-| Tool use | Supported for pre-tool and post-tool activity, with `gen_ai.tool.call.id` from `tool_use_id` |
-| Commands | Supported. `command.executed` with the command, its output, and its exit code |
-| File activity | Supported. `file.read` and `file.modified` with paths, operations, and diffs |
+| Session lifecycle | Supported. Hooks record `session.started` from `SessionStart`, and poll backfill records persisted session starts |
+| Prompts | Supported. Hooks record `prompt.submitted` from `UserPromptSubmit`; poll backfill reads persisted user messages |
+| Assistant text and reasoning | Supported through native session poll |
+| Tool use | Supported for hook pre-tool/post-tool activity and persisted poll tool calls/results, with native call ids promoted to `gen_ai.tool.call.id` |
+| Commands | Supported. Hooks and poll both record `command.executed` with the command, output, and exit code when exposed |
+| File activity | Supported. Hooks and poll record `file.read` and `file.modified` with paths, operations, and diffs where available |
 | MCP activity | Supported. Recognized from `mcp__<server>__<tool>`, with the server and tool split out |
 | Subagents | Supported. `subagent.started` and `subagent.stopped` |
 | Approval decisions | Not collected. See [Known gaps](#known-gaps) |
-| Token usage and cost | Not collected. See [Known gaps](#known-gaps) |
-| Failed tools | Not collected. See [Known gaps](#known-gaps) |
+| Token usage and cost | Token usage is collected from native session poll when persisted. Runtime-reported cost is not currently exposed |
+| Failed tools | Collected from native session poll. Not exposed on the hook bridge |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Hooks are installed in the logged-in user's Harness home |
 
@@ -198,17 +210,17 @@ Enforcement stays behind the optional, off-by-default policy provider seam (`BEA
 
 ## Data handling
 
-DeepSeek Harness content is handled like every other runtime. Prompts, tool arguments, commands, command output, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+DeepSeek Harness content is handled like every other runtime. Prompts, assistant text/reasoning from poll, tool arguments, commands, command output, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
 Unlike [Kiro](/runtimes/kiro) and [OpenHands](/runtimes/openhands), Beacon **does** preserve the verbatim payload under `raw.dsh`, as it does for [Qwen Code](/runtimes/qwen-code) and [Muse Code](/runtimes/muse-code). Non-MCP tool arguments reach no endpoint-schema field on any runtime, so on `dsh` this is where `run_code`'s program, a `glob` or `grep` pattern, a `terminal_send` `submit` flag, and `SessionStart`'s `source` survive. The cost is stated rather than hidden: on a `write` the payload repeats the file content the diff already carries. `raw` is the first thing dropped at the size ceiling, so the duplication is bounded and the diff is what survives.
 
 ## Known gaps
 
-- **No approval decisions.** The bridge exposes no `PermissionRequest` event, and Beacon does not synthesize one from `PreToolUse`. Approval rules and dashboards will show nothing for this runtime.
-- **No token usage or cost.** The bridge builds each payload from a fixed base plus per-event fields, and no usage count is among them on any of the seven events. `dsh` does record usage in its own session log; nothing on the hook surface exposes it. DeepSeek Harness activity therefore does not appear in `beacon token-usage` reports or the dashboard token view.
-- **No failed-tool events.** The bridge hands a hook the result's flattened text and nothing else, so a tool that threw is indistinguishable at the hook from one that returned. `tool.failed` is never recorded, and a diff is built from a write's arguments whether or not the write landed. A non-zero shell exit is *not* a tool failure and is recorded as such.
+- **No approval decisions.** The bridge exposes no `PermissionRequest` event, native session records do not represent operator decisions, and Beacon does not synthesize one from `PreToolUse`. Approval rules and dashboards will show nothing for this runtime.
+- **Token usage is poll-only.** The bridge builds each hook payload from a fixed base plus per-event fields, and no usage count is among them on any of the seven events. `beacon endpoint dsh sync` reads usage from native session records when DeepSeek persisted it.
+- **Failed tools are poll-only.** The bridge hands a hook the result's flattened text and nothing else, so a tool that threw is indistinguishable at the hook from one that returned. Native session poll records failed tool results when the session store marks them. A non-zero shell exit is *not* a tool failure and is recorded as a command exit code.
 - **No session-end event.** `dsh` has no `SessionEnd`. `Stop` fires when a turn finishes, not when a session ends, so it is recorded as `tool.completed`.
-- **No transcript path.** The bridge always sends `transcript_path` as the empty string: the persistence seam exposes no artifact path, and the default session log is Zstandard-compressed and not readable by a hook script.
+- **No transcript path on hooks.** The bridge always sends `transcript_path` as the empty string. Use `beacon endpoint dsh sync` for the native session-store path.
 - **No compaction events.** `PreCompact` and `PostCompact` are among the events the bridge does not support.
 - **Subagent detail is thin.** The bridge reports a constant `agent_type` of `general-purpose` and uses the child's session id where Claude Code reports the parent's, so a subagent event cannot be joined to the session that spawned it.
 - **No project scope.** See the warning under [Collection path](#collection-path).
@@ -222,6 +234,8 @@ Confirm status, then generate one event and check the log:
 
 ```bash
 beacon endpoint hooks status --harness dsh
+beacon endpoint dsh status
+beacon endpoint dsh sync
 beacon endpoint doctor --system
 grep '"name":"deepseek_harness"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
 ```
@@ -235,6 +249,7 @@ If DeepSeek Harness telemetry is missing:
 - Preview the composed configuration with `dsh --dump-config` to confirm the bridge row is in the tree the profile mounts.
 - Check the startup log under `$DSH_HOME/logs/` for a `hooks-claude-code` warning. A config the bridge cannot read registers **no** hooks and says so only there.
 - Restart `dsh` so the updated plugin tree is loaded.
+- Run `beacon endpoint dsh status` to see whether native session records are pending backfill.
 
 ## Related
 
