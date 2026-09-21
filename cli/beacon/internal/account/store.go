@@ -115,7 +115,12 @@ func Save(session Session) error {
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			os.Remove(tmpPath)
+		}
+	}()
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err
@@ -136,10 +141,14 @@ func Save(session Session) error {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		// Old session is gone; keep the temp file if rename fails so the
+		// new credential is not lost.
+		removeTmp = false
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
+	removeTmp = false
 	if runtime.GOOS != "windows" {
 		return os.Chmod(path, 0o600)
 	}
