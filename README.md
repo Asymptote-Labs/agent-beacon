@@ -35,15 +35,7 @@ Beacon captures **agent session history** across Claude Code, Cursor, Codex, Ope
 
 ## Beacon Overview
 
-AI agents learn useful things every time you work with them. But that knowledge is usually trapped inside individual sessions and harnesses.
-
-**Beacon gives your agents a shared history.**
-
-It continuously captures sessions across your coding agents, normalizes them into one common format, and turns the highest-signal work into reviewed memory that future agents can reuse.
-
-Your Claude Code sessions can teach Codex.  
-Your Cursor debugging can improve OpenCode.  
-**Solve something once. Let every agent learn from it.**
+Beacon is an open-source memory layer for AI coding agents that learns from your work across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses. It captures full session history, identifies useful workflows, corrections, and debugging patterns, and makes that knowledge reusable by future agents. Built for developers who want agent knowledge to compound across tools instead of disappearing when a session ends.
 
 ## Why Beacon
 
