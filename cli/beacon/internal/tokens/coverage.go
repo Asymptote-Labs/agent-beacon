@@ -84,10 +84,10 @@ var usageExpectation = map[string]struct {
 	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
 	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
+	"copilot_cli":       {ExpectReported, "session store carries output tokens and cumulative model usage"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 
 	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"copilot_cli":    {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"factory":        {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"factory_droid":  {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
