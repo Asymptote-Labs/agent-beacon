@@ -18,6 +18,8 @@
 </p>
 
 <p align="center">
+  <a href="https://beacon.sh">Website</a>
+  ·
   <a href="https://docs.beacon.sh">Docs</a>
   ·
   <a href="https://discord.gg/zdNChS2fBu">Discord</a>
