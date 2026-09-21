@@ -632,8 +632,10 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		want string
 	}{
 		{path: "/", want: "Beacon Endpoint Agent Activity"},
+		{path: "/session.html", want: "Beacon Endpoint Session Events"},
 		{path: "/overview.html", want: "Beacon Endpoint Agent Activity"},
 		{path: "/tokens.html", want: "Beacon Endpoint Token Usage"},
+		{path: "/memory.html", want: "Beacon Memory"},
 		{path: "/detections.html", want: "Beacon Endpoint Detections"},
 		{path: "/findings.html", want: "Beacon Endpoint Findings"},
 		{path: "/inventory.html", want: "Beacon Endpoint Agent Inventory"},
@@ -649,6 +651,9 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 			}
 			if !strings.Contains(rec.Body.String(), tc.want) {
 				t.Fatalf("body did not contain %q", tc.want)
+			}
+			if count := strings.Count(rec.Body.String(), `href="/memory.html"`); count != 1 {
+				t.Fatalf("memory nav link count = %d, want 1", count)
 			}
 		})
 	}
