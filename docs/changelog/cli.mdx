@@ -11,7 +11,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
-### Unreleased
+### v1.3.18 · September 21, 2026
 
 - **Kimi Code telemetry** · Kimi Code (Moonshot AI) now has managed hook install,
   status, uninstall, repair, discovery, inventory and dashboard coverage under the
@@ -23,6 +23,33 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   with diffs, MCP calls, subagents, context compaction, and real operator approval
   decisions from the `PermissionRequest`/`PermissionResult` pair. Token usage is
   not collected, because no Kimi Code hook payload carries one.
+- **Interactive local trace browser** · `beacon traces` opens a full-screen,
+  read-only browser over the local trace index, with trace search, event-type
+  filters, paging, and event detail. Redirected input or output falls back to a
+  bounded tab-separated list, while `beacon endpoint traces` remains the stable
+  JSON and scripting interface.
+- **Account sign-in and safer first-run onboarding** · `beacon login`, `whoami`,
+  and `logout` add browser PKCE account authentication without enabling forwarding.
+  Interactive user installs now use a full-screen wizard that requires sign-in,
+  preselects Beacon Managed, offers Standard or Metadata-only privacy, and records
+  intent without moving telemetry. System, package, MDM, CI, dry-run, and
+  redirected-input installs remain noninteractive and account-free.
+- **Beacon Managed privacy modes** · Managed forwarding can now use `standard` or
+  `metadata-only`. Metadata-only removes retained prompts, responses, reasoning,
+  tool arguments and results, command output, raw fields, diffs, inventory
+  content, and MCP definitions locally before buffering or upload. Connect now
+  validates the rendered Vector configuration before enrollment can rotate a
+  device key, and privacy-mode changes clear data buffered under the old mode.
+- **DeepSeek Harness session backfill** · `beacon endpoint dsh sync` and `status`
+  read committed native sessions from `$DSH_HOME/sessions`, adding assistant text
+  and reasoning, failed tools, persisted command/file/MCP detail, and token usage
+  that DeepSeek's live hook bridge does not expose. Backfilled events are marked
+  `harness.collection_method=poll` and do not synthesize approvals.
+- **GitHub Copilot CLI session backfill** · `beacon endpoint copilot sync` and
+  `status` read committed records under `~/.copilot/session-state`, complementing
+  live OTLP with assistant text, complete tool results, commands, file activity,
+  and persisted token usage. Poll events remain offline, deterministic, and
+  cannot approve, deny, or delay tools.
 
 ### v1.3.17 · September 21, 2026
 

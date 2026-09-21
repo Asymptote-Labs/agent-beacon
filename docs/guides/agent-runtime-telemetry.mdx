@@ -89,6 +89,17 @@ In Agent Activity Sessions and Agent Activity, start with:
 - MCP-like activity
 - Repository or working directory
 
+For a terminal-only investigation, open the local trace browser:
+
+```bash title="Browse local traces"
+beacon traces
+```
+
+Use `/` to search traces, `enter` to inspect one, and `1`–`4` to filter its
+events by type. The browser is read-only and local; see
+[`beacon endpoint traces`](/cli/endpoint-traces) for the JSON and scripting
+interface.
+
 ## 5. Scan locally
 
 Run the active threat-detection rules over the runtime log:
