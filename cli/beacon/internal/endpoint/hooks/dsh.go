@@ -77,6 +77,9 @@ const (
 
 	// dshHomeDirName is the default Harness home under the user's home directory.
 	dshHomeDirName = ".dsh"
+
+	dshSkillRelPath = "skills/beacon-endpoint/SKILL.md"
+	dshSkillMarker  = "beacon-managed-dsh-skill:v1"
 )
 
 // dsh hook timeouts are seconds -- the bridge reads a hook's `timeout` as `timeoutSec`, matching
@@ -180,13 +183,24 @@ func InstallDsh(opts DshOptions) (DshStatus, error) {
 	if err != nil {
 		return DshStatus{}, err
 	}
+	if status.ConfigPath != "" {
+		if err := installDshSkill(filepath.Dir(status.ConfigPath)); err != nil {
+			return DshStatus{}, err
+		}
+	}
 	return dshStatusFromRuntime(status), nil
 }
 
 func UninstallDsh(opts DshOptions) (DshStatus, error) {
+	home, _ := dshHomeDir(Level(opts.Level))
 	status, err := uninstallRuntimeHooks(dshRuntime, RuntimeOptions(opts))
 	if err != nil {
 		return DshStatus{}, err
+	}
+	if home != "" {
+		if err := removeDshSkill(home); err != nil {
+			return DshStatus{}, err
+		}
 	}
 	return dshStatusFromRuntime(status), nil
 }
@@ -411,4 +425,77 @@ func dshHomeDir(level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
+}
+
+func installDshSkill(home string) error {
+	path := filepath.Join(home, dshSkillRelPath)
+	if data, err := os.ReadFile(path); err == nil {
+		if !strings.Contains(string(data), dshSkillMarker) {
+			return fmt.Errorf("%s already exists and is not Beacon-managed; remove it or choose a different skill name before reinstalling", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(dshSkillContent()), 0644)
+}
+
+func removeDshSkill(home string) error {
+	path := filepath.Join(home, dshSkillRelPath)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !strings.Contains(string(data), dshSkillMarker) {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	_ = os.Remove(filepath.Dir(path))
+	return nil
+}
+
+func dshSkillContent() string {
+	return `---
+name: beacon-endpoint
+description: Keep Beacon's local DeepSeek Harness backfill current for the active session.
+---
+
+# Beacon Endpoint
+
+<!-- ` + dshSkillMarker + ` -->
+
+Use this skill when the user asks about Beacon, endpoint telemetry, local traces, telemetry gaps,
+or whether the current DeepSeek Harness session has been collected by Beacon.
+
+Beacon is local-only endpoint telemetry. This skill does not publish or upload anything.
+
+## Check Status
+
+Run this first:
+
+` + "```bash" + `
+beacon endpoint dsh status --workspace "$PWD" --json
+` + "```" + `
+
+Summarize whether the current workspace has pending DeepSeek session records.
+
+## Sync Current Workspace
+
+When the user asks to collect, backfill, update, or refresh Beacon telemetry for the current
+DeepSeek Harness session, run:
+
+` + "```bash" + `
+beacon endpoint dsh sync --workspace "$PWD"
+` + "```" + `
+
+Use ` + "`--print`" + ` only when the user wants to preview mapped events without writing Beacon's
+runtime log.
+`
 }

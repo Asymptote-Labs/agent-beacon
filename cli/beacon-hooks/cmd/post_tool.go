@@ -312,18 +312,21 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 	// twice -- once here, once from OTLP -- and this is the field that lets the
 	// writer tell that the two are one edit.
 	applyToolCallID(fields, input)
-	// The same gap costs Qwen its raw payload: emitHookEvent is what attaches it, and it lands on
-	// exactly the events this runtime's taxonomy exists to produce, since a successful `write_file`
-	// or `edit` is classified `file.modified` and routed here. `permission_mode` has no schema field
-	// at all and `tool_use_id` keeps its verbatim spelling only here, so both would survive on
-	// failed and non-edit tools and vanish on the successful edits.
+	// The same gap costs runtimes with raw payload retention their raw payload: emitHookEvent is
+	// what attaches it, and it lands on exactly the events these runtimes' taxonomies exist to
+	// produce. Successful Qwen and dsh edits are classified `file.modified` and routed here, so
+	// runtime-native context would survive on failed and non-edit tools and vanish on successful
+	// edits unless this path restores it.
 	//
-	// Scoped to qwen rather than applied to every runtime with a raw convention. grok, hermes and
-	// vscode have the same gap on this path, and closing it would change their recorded event shape
-	// with no fixture here to say what it should become; that is a stated limit rather than a
-	// silent one. TestQwenRawPayloadSurvivesTheFileEditPath is what holds the Qwen half.
+	// Scoped to runtimes with pinned raw payload fixtures rather than applied to every runtime with
+	// a raw convention. grok, hermes and vscode have the same gap on this path, and closing it would
+	// change their recorded event shape with no fixture here to say what it should become; that is
+	// a stated limit rather than a silent one.
 	if platformFlag == "qwen" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"qwen": input})
+	}
+	if platformFlag == "dsh" {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"dsh": input})
 	}
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }

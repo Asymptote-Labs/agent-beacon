@@ -57,6 +57,8 @@ func TestSaveRoundTrip(t *testing.T) {
 			Email:         "shukan@asymptotelabs.ai",
 			Usage:         UsageWork,
 			BeaconVersion: "v0.0.31",
+			Destination:   DestinationAsymptote,
+			PrivacyMode:   "metadata_only",
 		},
 	}
 	if err := Save(in); err != nil {
@@ -72,6 +74,9 @@ func TestSaveRoundTrip(t *testing.T) {
 	}
 	if got.Onboarding.Outcome != OutcomeSubmitted {
 		t.Fatalf("Outcome = %q, want %q", got.Onboarding.Outcome, OutcomeSubmitted)
+	}
+	if got.Onboarding.Destination != DestinationAsymptote || got.Onboarding.PrivacyMode != "metadata_only" {
+		t.Fatalf("managed settings = %#v", got.Onboarding)
 	}
 	if got.SchemaVersion != SchemaVersion {
 		t.Fatalf("SchemaVersion = %d, want %d", got.SchemaVersion, SchemaVersion)

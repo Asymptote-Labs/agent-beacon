@@ -512,7 +512,7 @@ and a `BeaconRuntime_CL` custom Log Analytics table. Store Azure workspace,
 DCR, endpoint, and credential details in Azure or customer-managed deployment
 tooling, not in Beacon endpoint configuration.
 
-## Asymptote Managed
+## Beacon Managed
 
 ```bash
 ./beacon endpoint connect
@@ -520,14 +520,16 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint disconnect
 ```
 
-Asymptote Managed is the one destination that forwards telemetry to an
-Asymptote-run service, and it is opt-in. `beacon endpoint connect` opens the
-Asymptote dashboard so a member of your organization can approve this device,
-stores the per-device key in a `0600` secrets file, and runs Vector as the
+Beacon Managed is the Beacon-hosted forwarding destination. User-mode connect
+uses the signed-in account to authorize a separate device key; system mode keeps
+browser approval. The account token is never given to Vector. Connect stores the
+device key in a `0600` secrets file and runs Vector as the
 `com.beacon.endpoint.asymptote-forwarder` (launchd) or
 `beacon-asymptote-forwarder.service` (systemd) service. Beacon stays the local
-JSONL producer and Vector does the network. Only lines written after approval
-are shipped, and revoking the device from the dashboard stops ingestion within
+JSONL producer and Vector does the network. Standard privacy forwards locally
+sanitized retained content; `--privacy-mode metadata-only` strips retained text,
+raw fields, diffs, inventory content, and MCP definitions locally before upload.
+Only lines written after connection are shipped, and revoking the device stops ingestion within
 about a minute. Vector 0.50 or newer is required: `/opt/beacon/bin/vector` from
 the signed package, the `beacon-vector` keg that `brew install beacon` pulls in on
 macOS, any other Vector 0.50+ already on the machine, or the Linux package from
@@ -573,6 +575,8 @@ contract, what leaves the machine, and revocation.
 
 ./beacon endpoint hooks install --harness dsh
 ./beacon endpoint hooks status --harness dsh
+./beacon endpoint dsh status
+./beacon endpoint dsh sync
 
 ./beacon endpoint hooks install --harness hermes
 ./beacon endpoint hooks status --harness hermes
@@ -673,6 +677,14 @@ surfaces; there is no project scope, because the bridge's `configPath` is
 process-level and a repository has nowhere to mount from, so `--level project` is
 refused with that explanation rather than silently becoming a machine-wide
 install.
+
+Beacon also reads DeepSeek Harness' native committed session records from
+`$DSH_HOME/sessions` with `beacon endpoint dsh sync`. That poll path is local
+and offline; it backfills assistant text/reasoning, structured failed-tool
+status, and token usage that the hook bridge does not expose. Hook install also
+writes a Beacon-owned local skill at `$DSH_HOME/skills/beacon-endpoint/SKILL.md`
+so `dsh` can check `beacon endpoint dsh status` and run a workspace-scoped sync
+when asked.
 
 The patch file is the user's own, and is edited as a document rather than
 rewritten: parsed into a YAML node tree, one self-contained element appended or

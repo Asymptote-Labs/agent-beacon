@@ -114,6 +114,7 @@ type ManagedIngest struct {
 	IngestURL      string `json:"ingest_url,omitempty"`
 	DeviceID       string `json:"device_id,omitempty"`
 	OrganizationID string `json:"organization_id,omitempty"`
+	PrivacyMode    string `json:"privacy_mode,omitempty"`
 }
 
 // AutoUpdate controls Beacon's endpoint update checker. Phase 1 supports

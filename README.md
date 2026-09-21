@@ -124,7 +124,7 @@ Or inspect the raw event stream:
 ```
 
 > [!NOTE]
-> Local by default: signing in does not enable forwarding, and nothing leaves your machine unless you configure it to.
+> Local until connected: signing in or accepting the preselected Managed option does not enable forwarding. The separate connect step offers Standard or Metadata-only upload privacy.
 
 Inspect the account used during interactive setup:
 
@@ -239,13 +239,13 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | Codex CLI | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
 | Codex Desktop | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
 | Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| DeepSeek Harness | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| DeepSeek Harness | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
 | Devin Desktop | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
 | Factory Droid | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – |
 | fx (Vercel Labs) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | Gemini CLI | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – |
-| GitHub Copilot CLI | OTLP | ✅ | ✅ | ✅ | – | – | ✅ | – | – |
+| GitHub Copilot CLI | OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ |
 | goose | Adapter only; manual hooks/OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | Grok Build | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
 | Hermes Agent | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
@@ -300,6 +300,7 @@ You can also forward the same normalized session history into infrastructure you
 | Destination | Category | Support Path |
 | --- | --- | --- |
 | Local JSONL | Local | Default endpoint log and local dashboard source |
+| Beacon Managed | Hosted forwarding | Signed-in device enrollment with Standard or Metadata-only privacy |
 | CrowdStrike Falcon LogScale HEC | SIEM | Endpoint forwarding with LogScale ingest tokens |
 | Microsoft Sentinel | SIEM | Azure Monitor Agent and Data Collection Rule content pack |
 | Rapid7 InsightIDR | SIEM | Custom Logs webhook content pack |

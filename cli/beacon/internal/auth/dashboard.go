@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	DefaultDashboardURL = "https://asymptotelabs.ai"
+	DefaultDashboardURL = "https://beacon.sh"
 	DashboardURLEnv     = "BEACON_DASHBOARD_URL"
 	// AuthTimeout bounds how long a command waits for the browser step.
 	AuthTimeout = 5 * time.Minute

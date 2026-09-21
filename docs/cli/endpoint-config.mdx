@@ -90,8 +90,9 @@ When the endpoint is connected to Beacon managed ingest, `config.json` carries a
 | `ingest_url` | The `https://` ingest URL returned by enrollment |
 | `device_id` | This device's id in the Beacon dashboard |
 | `organization_id` | The organization that approved the device |
+| `privacy_mode` | `standard` or `metadata_only`, rendered into the local Vector pipeline |
 
-[`beacon endpoint connect`](/cli/endpoint-connect) writes the block and `beacon endpoint disconnect` clears it. It never holds the device key, which lives only in `asymptote/vector-secrets.json`, and it survives re-running `beacon endpoint install`.
+[`beacon endpoint connect`](/cli/endpoint-connect) writes the block and `beacon endpoint disconnect` clears it. It never holds the account token or device key; the device key lives only in `asymptote/vector-secrets.json`. The block survives re-running `beacon endpoint install`.
 
 ## Related
 

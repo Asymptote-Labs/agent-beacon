@@ -83,10 +83,11 @@ var usageExpectation = map[string]struct {
 	// `beacon endpoint hooks status --harness openclaw` is where that gap is surfaced.
 	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
+	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
+	"copilot_cli":       {ExpectReported, "session store carries output tokens and cumulative model usage"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 
 	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"copilot_cli":    {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"factory":        {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"factory_droid":  {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
@@ -113,17 +114,16 @@ var usageExpectation = map[string]struct {
 	"chatgpt_web":   {ExpectNone, "the chat stream reports no token counts"},
 	"openhands":     {ExpectNone, "hook payloads carry no token counts"},
 	"kiro":          {ExpectNone, "hook payloads carry no token counts"},
-	// The bridge builds each hook payload from a fixed base plus per-event fields, and no usage
-	// count is among them on any of the seven events it supports. dsh does record usage -- in its
-	// own session log -- but nothing in the hook surface exposes it, so a DeepSeek Harness session
-	// reporting no tokens is correct rather than silent.
-	"deepseek_harness": {ExpectNone, "the hook bridge's payloads carry no token counts"},
 	// Kimi Code assembles each hook payload from a fixed envelope plus per-event fields, and no
 	// usage count is among them on any of the twenty events it exposes. The runtime does count
 	// tokens -- the TUI shows context occupancy, and PreCompact carries a `token_count` for the
 	// history it is about to summarize -- but neither is per-call spend, so promoting either into
 	// gen_ai.usage would make a level look like an additive total. A Kimi Code session reporting
 	// no tokens is therefore correct rather than silent.
+	//
+	// Unlike DeepSeek Harness above, which moved to ExpectReported once it gained a session
+	// backfill, there is no poll path here to read usage from: Beacon collects Kimi Code through
+	// hooks only, and the runtime's own session store is not read.
 	"kimi_code": {ExpectNone, "hook payloads carry no token counts; PreCompact reports context only"},
 }
 

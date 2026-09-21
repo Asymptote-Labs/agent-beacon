@@ -40,6 +40,7 @@ type onboardingHarness struct {
 	accountStatus     account.Status
 	loginRuns         int
 	loginErr          error
+	wizardPrivacyMode string
 }
 
 func newOnboardingHarness(t *testing.T) *onboardingHarness {
@@ -122,7 +123,7 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 				destination = onboarding.DestinationAsymptote
 			}
 		}
-		return onboarding.WizardResult{Completed: true, Destination: destination}, nil
+		return onboarding.WizardResult{Completed: true, Destination: destination, PrivacyMode: h.wizardPrivacyMode}, nil
 	}
 	onboardingAccountInspect = func(time.Time) account.Status { return h.accountStatus }
 	onboardingAccountLogin = func(context.Context, account.LoginOptions) (*account.Session, error) {
@@ -623,6 +624,7 @@ func TestMaybeRunOnboardingRecordsLocalOrManagedIntent(t *testing.T) {
 	h.askable = true
 	h.answers.DestinationAsked = true
 	h.answers.Destination = onboarding.DestinationAsymptote
+	h.wizardPrivacyMode = "metadata-only"
 	connect, err := maybeRunOnboarding(h.cmd)
 	if err != nil || connect {
 		t.Fatalf("managed intent should leave connect as a separate step: connect=%t err=%v", connect, err)
@@ -742,12 +744,16 @@ func TestManagedDestinationIsRecordedAsIntent(t *testing.T) {
 	h.askable = true
 	h.answers.DestinationAsked = true
 	h.answers.Destination = onboarding.DestinationAsymptote
+	h.wizardPrivacyMode = "metadata-only"
 	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
 		t.Fatalf("connect=%t err=%v", connect, err)
 	}
 	afterPrompt := h.saved[len(h.saved)-1]
 	if afterPrompt.Onboarding.Destination != onboarding.DestinationAsymptote {
 		t.Fatalf("managed intent = %q", afterPrompt.Onboarding.Destination)
+	}
+	if afterPrompt.Onboarding.PrivacyMode != "metadata_only" {
+		t.Fatalf("managed privacy = %q", afterPrompt.Onboarding.PrivacyMode)
 	}
 	if !strings.Contains(h.stdout.String(), "beacon endpoint connect") {
 		t.Fatalf("managed next step missing: %s", h.stdout.String())
@@ -819,5 +825,19 @@ func TestEndpointOnboardingShowsDestination(t *testing.T) {
 	}
 	if strings.Contains(h.stdout.String(), "Telemetry destination") {
 		t.Fatalf("no destination line before the question is answered:\n%s", h.stdout.String())
+	}
+
+	h = newOnboardingHarness(t)
+	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{
+		CompletedAt: "2026-09-21T08:00:00Z",
+		Outcome:     onboarding.OutcomeAuthenticated,
+		Destination: onboarding.DestinationAsymptote,
+		PrivacyMode: "metadata_only",
+	}}
+	if err := runEndpointOnboarding(h.cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stdout.String(), "Managed privacy: Metadata only") {
+		t.Fatalf("privacy missing:\n%s", h.stdout.String())
 	}
 }

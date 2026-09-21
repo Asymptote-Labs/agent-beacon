@@ -81,6 +81,7 @@ type Enrollment struct {
 	ExpiresAt        string    `json:"expires_at,omitempty"`
 	VectorBin        string    `json:"vector_bin,omitempty"`
 	VectorVersion    string    `json:"vector_version,omitempty"`
+	PrivacyMode      string    `json:"privacy_mode,omitempty"`
 }
 
 // ErrNotEnrolled is returned when no enrollment record exists.

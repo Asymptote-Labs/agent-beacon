@@ -297,6 +297,7 @@
                   "cli/endpoint-onboarding",
                   "cli/endpoint-opencode",
                   "cli/endpoint-pi",
+                  "cli/endpoint-copilot",
                   "cli/endpoint-fx",
                   "cli/endpoint-traces",
                   "cli/dashboard",

@@ -1,14 +1,13 @@
-# Beacon Endpoint Agent Asymptote Managed Forwarding Pack
+# Beacon Endpoint Agent Managed Forwarding Pack
 
-This pack forwards Beacon endpoint JSONL events to Asymptote's managed ingest
-service so they appear on the Asymptote dashboard. Beacon writes runtime
+This pack forwards Beacon endpoint JSONL events to Beacon Managed so they appear
+on the Beacon dashboard. Beacon writes runtime
 activity to `runtime.jsonl` and configuration inventory to
 `inventory_state.jsonl`; Vector tails both files and POSTs gzip-compressed
 NDJSON batches over HTTPS with a per-device key.
 
-Forwarding is opt-in and revocable. Beacon's default posture is local-only;
-nothing in this pack runs until a device has been approved by a member of your
-Asymptote organization and Vector has been started with the resulting key.
+Forwarding is revocable, and nothing in this pack runs until a device key exists
+and Vector has been started.
 
 ## What leaves the machine
 
@@ -20,6 +19,11 @@ apply to what is forwarded. The ingest service adds a `tenant` block
 any tenant fields sent by the client. Nothing else is sent: no prompts or files
 beyond what the events already contain, no environment variables, no shell
 history.
+
+This hand-run pack uses Standard privacy. `beacon endpoint connect
+--privacy-mode metadata-only` renders an endpoint-specific config that removes
+retained text, raw fields, diffs, inventory content, and MCP definitions before
+buffering or upload.
 
 ## Prerequisites
 
