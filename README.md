@@ -239,7 +239,7 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | Codex CLI | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
 | Codex Desktop | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
 | Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| DeepSeek Harness | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
+| DeepSeek Harness | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
 | Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
 | Devin Desktop | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
 | Factory Droid | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – |

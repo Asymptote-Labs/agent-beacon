@@ -575,6 +575,9 @@ func TestDshWriteProducesADiff(t *testing.T) {
 	if !containsLine(diff, "+package main") {
 		t.Fatalf("file.diff = %q, want the written content", diff)
 	}
+	if got := leaf(event, "raw", "dsh", "tool_input", "content"); got != "package main\n\nfunc main() {}\n" {
+		t.Fatalf("raw.dsh.tool_input.content = %q, want the original write payload", got)
+	}
 }
 
 func TestDshEditProducesADiff(t *testing.T) {
