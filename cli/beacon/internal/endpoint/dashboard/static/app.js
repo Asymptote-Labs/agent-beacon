@@ -3163,6 +3163,7 @@ const navIcons = {
   "Agent Activity": `<svg viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
   "Agent Inventory": `<svg viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>`,
   "Agent Activity Sessions": `<svg viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>`,
+  "Memory": `<svg viewBox="0 0 24 24"><path d="M15.5 2H8.6c-.4 0-.8.2-.9.5L4.4 9.1a1 1 0 0 0 .9 1.5h13.4a1 1 0 0 0 .9-1.5L16.4 2.5c-.2-.3-.5-.5-.9-.5Z"/><path d="m12 10.6 0 11.4"/><path d="M8 14h8"/><path d="M9 18h6"/></svg>`,
   "Detections": `<svg viewBox="0 0 24 24"><path d="M19.07 4.93A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></svg>`,
 };
 

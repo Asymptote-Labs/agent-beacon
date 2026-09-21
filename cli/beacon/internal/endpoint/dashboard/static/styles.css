@@ -1149,7 +1149,8 @@ body.nav-collapsed .nav-toggle a.active::before {
 }
 
 .nav-parent + a,
-.nav-parent + a + a {
+.nav-parent + a + a,
+.nav-parent + a + a + a {
   min-height: 1.8rem;
   margin-left: 2.05rem;
   padding: 0.36rem 0.5rem;
@@ -1158,7 +1159,8 @@ body.nav-collapsed .nav-toggle a.active::before {
 }
 
 .nav-parent + a .nav-icon,
-.nav-parent + a + a .nav-icon {
+.nav-parent + a + a .nav-icon,
+.nav-parent + a + a + a .nav-icon {
   width: 0.98rem;
   height: 0.98rem;
 }
