@@ -2,7 +2,9 @@ package mcpserver
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -115,6 +117,67 @@ func TestMCPMemoryToolsSearchGetAndContext(t *testing.T) {
 	}
 	if !strings.Contains(context.Content[0].Text, "memory-1") {
 		t.Fatalf("get_memory_context missing memory: %s", context.Content[0].Text)
+	}
+}
+
+func TestMCPMemoryToolsSearchOlderMatchesBeforeLimit(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "endpoint", "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	store := learning.Open(learning.PathForRuntimeLog(logPath))
+	project := asymptoteobserve.LearningProjectV1{ID: "project-1"}
+	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-older-match",
+		CandidateID: "candidate-older-match",
+		Kind:        asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:       "Older matching memory",
+		Body:        "Use the unique-needle recovery step when package smoke flakes.",
+		Project:     project,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setStoredMemoryUpdatedAt(t, store.Path(), "memory-older-match", "2026-01-01T00:00:00Z")
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("memory-newer-%d", i)
+		if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+			ID:          id,
+			CandidateID: "candidate-" + id,
+			Kind:        asymptoteobserve.LearningMemoryKindConvention,
+			Title:       "Newer unrelated memory",
+			Body:        "Use the ordinary local workflow.",
+			Project:     project,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		setStoredMemoryUpdatedAt(t, store.Path(), id, fmt.Sprintf("2026-01-02T00:00:0%dZ", i))
+	}
+	server := New(Options{LogPath: logPath})
+	search, err := server.callTool(t.Context(), callToolParams{Name: "search_memory", Arguments: map[string]interface{}{"project_id": "project-1", "q": "unique-needle", "limit": 5}})
+	if err != nil {
+		t.Fatalf("search_memory: %v", err)
+	}
+	if !strings.Contains(search.Content[0].Text, "memory-older-match") {
+		t.Fatalf("search_memory missing older match: %s", search.Content[0].Text)
+	}
+	context, err := server.callTool(t.Context(), callToolParams{Name: "get_memory_context", Arguments: map[string]interface{}{"project_id": "project-1", "task": "unique-needle"}})
+	if err != nil {
+		t.Fatalf("get_memory_context: %v", err)
+	}
+	if !strings.Contains(context.Content[0].Text, "memory-older-match") {
+		t.Fatalf("get_memory_context missing older match: %s", context.Content[0].Text)
+	}
+}
+
+func setStoredMemoryUpdatedAt(t *testing.T, dbPath, id, updatedAt string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE memories SET updated_at = ? WHERE id = ?`, updatedAt, id); err != nil {
+		t.Fatal(err)
 	}
 }
 

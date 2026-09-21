@@ -184,3 +184,52 @@ func TestStoreScopesByProject(t *testing.T) {
 		t.Fatalf("project scoped memories = %#v", memories)
 	}
 }
+
+func TestListMemoriesAppliesTextMatchBeforeLimit(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	project := asymptoteobserve.LearningProjectV1{ID: "project-1"}
+	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-older-match",
+		CandidateID: "candidate-older-match",
+		Kind:        asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:       "Older matching memory",
+		Body:        "Remember the rare unique-needle recovery step.",
+		Project:     project,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setMemoryUpdatedAt(t, store, "memory-older-match", "2026-01-01T00:00:00Z")
+	for i := 0; i < 5; i++ {
+		id := "memory-newer-" + string(rune('a'+i))
+		if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+			ID:          id,
+			CandidateID: "candidate-" + id,
+			Kind:        asymptoteobserve.LearningMemoryKindConvention,
+			Title:       "Newer unrelated memory",
+			Body:        "Use the ordinary local workflow.",
+			Project:     project,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		setMemoryUpdatedAt(t, store, id, "2026-01-02T00:00:0"+string(rune('0'+i))+"Z")
+	}
+	memories, err := store.ListMemories(Query{ProjectID: "project-1", Q: "unique-needle", Limit: 5})
+	if err != nil {
+		t.Fatalf("ListMemories: %v", err)
+	}
+	if len(memories) != 1 || memories[0].ID != "memory-older-match" {
+		t.Fatalf("memories = %#v", memories)
+	}
+}
+
+func setMemoryUpdatedAt(t *testing.T, store *Store, id, updatedAt string) {
+	t.Helper()
+	db, err := store.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE memories SET updated_at = ? WHERE id = ?`, updatedAt, id); err != nil {
+		t.Fatal(err)
+	}
+}
