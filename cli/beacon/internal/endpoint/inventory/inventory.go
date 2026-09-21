@@ -248,6 +248,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, openHandsCandidates(home, wd)...)
 	items = append(items, kiroCandidates(home, wd)...)
 	items = append(items, dshCandidates(home)...)
+	items = append(items, kimiCandidates(home)...)
 	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
@@ -578,6 +579,36 @@ func dshCandidates(home string) []candidate {
 		{runtime: "deepseek_harness", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "deepseek_harness", path: filepath.Join(dir, "cordis.patch.yml"), scope: ScopeUser, format: formatYAML, kind: KindHookConfig},
 	}
+}
+
+// kimiCandidates covers the one file a Kimi Code install touches.
+//
+// One file, and it is the runtime's own `config.toml` -- the same file that holds
+// `[providers.<name>].api_key`, the model catalog and the permission rules. That is worth
+// noticing here rather than only in the installer: this row points the inventory at a document
+// where Beacon's hooks are a minority of the content, so detection keys on the hook command and
+// nothing about the file existing counts as an install.
+//
+// No project scope, because Kimi Code has none: it reads one user-level config file, and the
+// project-local `.kimi-code` directory holds only a workspace override and an MCP server list,
+// neither of which can register a hook. A `wd` parameter is therefore not taken at all rather
+// than taken and ignored -- the same shape as dsh above.
+func kimiCandidates(home string) []candidate {
+	return []candidate{
+		{runtime: "kimi_code", path: filepath.Join(kimiUserDir(home), "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
+	}
+}
+
+// kimiUserDir resolves the Kimi Code data root, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set
+// KIMI_CODE_HOME.
+func kimiUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".kimi-code")
 }
 
 // dshUserDir resolves the Harness home, mirroring the installer.
@@ -1046,6 +1077,14 @@ func beaconManaged(item candidate, data []byte) bool {
 	case "deepseek_harness":
 		return strings.Contains(text, "--platform dsh") || strings.Contains(text, "--platform=dsh") ||
 			strings.Contains(text, "@deepseek-ai/dsh-hooks-claude-code")
+	// Matched on the hook command rather than on the comment Beacon writes above its block, and
+	// here that is not a preference between two working options: Kimi Code's legacy migration
+	// from `kimi-cli` rewrites this file by serializing the merged config, which keeps the
+	// `[[hooks]]` entries and drops every comment in the document. A marker-based tell would
+	// report "not managed" on any machine that had been through that upgrade, for an install that
+	// is still running.
+	case "kimi_code":
+		return strings.Contains(text, "--platform kimi") || strings.Contains(text, "--platform=kimi")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {
