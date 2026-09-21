@@ -233,3 +233,121 @@ func setMemoryUpdatedAt(t *testing.T, store *Store, id, updatedAt string) {
 		t.Fatal(err)
 	}
 }
+
+func TestProjectIDForPathMatchesTheMostSpecificKnownProject(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	outer := asymptoteobserve.LearningProjectV1{ID: "project-outer", Path: "/work"}
+	inner := asymptoteobserve.LearningProjectV1{ID: "project-inner", Path: "/work/repo"}
+	for _, project := range []asymptoteobserve.LearningProjectV1{outer, inner} {
+		memory := asymptoteobserve.LearningMemoryV1{
+			ID:          "memory-" + project.ID,
+			CandidateID: "candidate-" + project.ID,
+			Kind:        asymptoteobserve.LearningMemoryKindConvention,
+			Title:       "Title for " + project.ID,
+			Project:     project,
+		}
+		if err := store.PutMemory(memory); err != nil {
+			t.Fatalf("PutMemory: %v", err)
+		}
+	}
+
+	got, err := store.ProjectIDForPath("/work/repo/cli/beacon")
+	if err != nil {
+		t.Fatalf("ProjectIDForPath: %v", err)
+	}
+	if got != inner.ID {
+		t.Fatalf("project ID = %q, want %q", got, inner.ID)
+	}
+
+	unknown, err := store.ProjectIDForPath("/elsewhere")
+	if err != nil {
+		t.Fatalf("ProjectIDForPath: %v", err)
+	}
+	if want := ProjectID(asymptoteobserve.LearningProjectV1{Path: "/elsewhere"}); unknown != want {
+		t.Fatalf("unknown project ID = %q, want the path-derived ID %q", unknown, want)
+	}
+}
+
+func TestListMemoriesScopesARelayedProjectPathToOneProject(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	for _, project := range []asymptoteobserve.LearningProjectV1{
+		{ID: "project-a", Path: "/work/a"},
+		{ID: "project-b", Path: "/work/b"},
+	} {
+		memory := asymptoteobserve.LearningMemoryV1{
+			ID:          "memory-" + project.ID,
+			CandidateID: "candidate-" + project.ID,
+			Kind:        asymptoteobserve.LearningMemoryKindConvention,
+			Title:       "Title for " + project.ID,
+			Project:     project,
+		}
+		if err := store.PutMemory(memory); err != nil {
+			t.Fatalf("PutMemory: %v", err)
+		}
+	}
+
+	memories, err := store.ListMemories(Query{ProjectPath: "/work/a/sub"})
+	if err != nil {
+		t.Fatalf("ListMemories: %v", err)
+	}
+	if len(memories) != 1 || memories[0].Project.ID != "project-a" {
+		t.Fatalf("memories = %#v, want only project-a", memories)
+	}
+
+	none, err := store.ListMemories(Query{ProjectPath: "/work/c"})
+	if err != nil {
+		t.Fatalf("ListMemories: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("unknown project path returned %d memories, want none", len(none))
+	}
+}
+
+// A relayed ProjectPath arrives in a request, so resolving it must not read
+// the filesystem. The store holds the project under the ID its origin URL
+// produces; if the query still resolved the path through .git, it would find
+// that same ID and return the row.
+func TestRelayedProjectPathDoesNotReadGitMetadata(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/acme/repo.git\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := asymptoteobserve.LearningProjectV1{ID: resolved.ID, RemoteURL: resolved.RemoteURL}
+
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-1",
+		CandidateID: "candidate-1",
+		Kind:        asymptoteobserve.LearningMemoryKindConvention,
+		Title:       "Recorded against the origin URL",
+		Project:     project,
+	}); err != nil {
+		t.Fatalf("PutMemory: %v", err)
+	}
+
+	memories, err := store.ListMemories(Query{ProjectPath: root})
+	if err != nil {
+		t.Fatalf("ListMemories: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("relayed project path resolved through git metadata: %#v", memories)
+	}
+
+	byID, err := store.ListMemories(Query{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemories: %v", err)
+	}
+	if len(byID) != 1 {
+		t.Fatalf("memories by project ID = %d, want 1", len(byID))
+	}
+}
