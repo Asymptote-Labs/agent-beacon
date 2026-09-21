@@ -91,7 +91,13 @@ Beacon writes one JSON object per line to the [runtime JSONL log](/concepts/core
 
 Events from every surface share session, run, tool-call, and event identifiers, so one agent session reconstructs as an ordered timeline instead of disconnected records. `gen_ai.tool.call.id` carries the runtime's own name for a tool invocation, and `event.id` is derived from the event itself, so a hook and an OTLP capture of the same action agree on identity.
 
-The local [dashboard](/concepts/core-concepts#dashboard) reads recent runtime logs over a loopback-only service for rollout validation and investigation, with Log Search, Detections and Findings, and a Security Overview. Token attribution rolls up through the dashboard token view and [`beacon token-usage`](/cli/token-usage). The dashboard is read-only: it inspects local state and never mutates endpoint configuration or telemetry.
+The local [dashboard](/concepts/core-concepts#dashboard) reads recent runtime logs
+over a loopback-only service for rollout validation and investigation, with
+session timelines, activity summaries, Detections and Findings, Token Usage,
+Agent Inventory, and read-only Memory. Token attribution rolls up through the
+dashboard token view and [`beacon token-usage`](/cli/token-usage). The dashboard
+is read-only: it inspects local state and never mutates endpoint configuration,
+telemetry, or memory review state.
 
 ### Detect
 

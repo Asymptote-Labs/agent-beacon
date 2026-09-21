@@ -1,20 +1,30 @@
 ---
 title: "goose"
-description: "Beacon support details for goose endpoint telemetry"
+description: "Manual Beacon adapter details for goose endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Beacon supports goose — the open-source agent from Block — through **two** collection paths, and both are wanted on the same machine:
+Beacon currently has a goose payload adapter, but not automatic goose installer
+wiring. There are no goose-specific endpoint install, hooks install, or discovery
+status paths yet.
 
-```bash
-beacon endpoint hooks install --harness goose    # plugin hooks
-beacon endpoint install --harness goose          # OTLP export
-```
+Manual goose coverage can combine two collection paths:
 
-`--harness codename-goose` and `--harness block-goose` are also accepted, and install the same thing.
+- A manually written goose hooks file that invokes `beacon-hooks --platform goose`
+  subcommands.
+- goose's own OTLP HTTP export pointed at the local Beacon collector.
 
-The two are not alternatives. goose's hooks report prompts, tool calls, command lines and file edits; goose's OpenTelemetry export reports token usage, the model and provider, response ids and the agent's reasoning. **Neither path carries the other's data**, so an endpoint with only one installed is half instrumented.
+The two paths are not alternatives. goose's hooks report prompts, tool calls,
+command lines and file edits; goose's OpenTelemetry export reports token usage,
+the model and provider, response ids and the agent's reasoning. **Neither path
+carries the other's data**, so an endpoint with only one configured is partial.
+
+<Warning>
+This page documents the current manual adapter contract. Until installer and
+discovery support are added, use it as implementation guidance rather than a
+turnkey `beacon endpoint install` workflow.
+</Warning>
 
 <Note>
 **One integration covers the CLI and the desktop app.** goose runs one agent core behind both, they discover plugins from the same directory, and both export under the same `service.name`. There is one harness name — `goose` — rather than one per surface.
@@ -26,15 +36,17 @@ The two are not alternatives. goose's hooks report prompts, tool calls, command 
 
 ## Prerequisites
 
-Before enabling goose telemetry, make sure:
+Before manually enabling goose telemetry, make sure:
 
 - goose is installed, either the CLI or the desktop app.
-- `beacon endpoint install` has run so shared endpoint config, the collector, and runtime log paths exist. The OTLP path needs the collector actually listening; the hook path does not.
+- `beacon endpoint install` has run for the endpoint generally so shared endpoint
+  config, the collector, and runtime log paths exist. The OTLP path needs the
+  collector actually listening; the hook path does not.
 - goose is restarted, or a new session started, after installing or removing hooks — plugins are discovered when a session begins.
 
 ## Collection path 1: plugin hooks
 
-goose discovers plugins as the **immediate subdirectories** of its plugins directory, names each plugin after its directory, and loads `<plugin-root>/hooks/hooks.json` from every plugin that is enabled. So Beacon owns a **directory** rather than a file, and never reads or writes any other plugin beside it.
+goose discovers plugins as the **immediate subdirectories** of its plugins directory, names each plugin after its directory, and loads `<plugin-root>/hooks/hooks.json` from every plugin that is enabled. A future Beacon installer should own a **directory** rather than a file, and should not read or write any other plugin beside it.
 
 | Scope | Directory | Covers |
 |-------|-----------|--------|
@@ -49,7 +61,8 @@ goose discovers plugins as the **immediate subdirectories** of its plugins direc
 This is the opposite of [Kiro](/runtimes/kiro), where hook files merge across scopes, and it matches [OpenHands](/runtimes/openhands), where a project file shadows the user one.
 </Warning>
 
-`beacon endpoint inventory` reports both scopes, so an install at either is visible.
+Today, manually configured goose hooks are not reported as a first-class installed
+harness by `beacon endpoint discover` or `beacon endpoint hooks status`.
 
 <Note>
 **`.agents/plugins` is a shared directory, not goose's namespace.** It is the [Open Plugins](https://open-plugins.com) convention, so another agent implementing that specification would also discover this plugin and run its hooks — and those events would be attributed to goose, because nothing in a hook payload says which host invoked it. goose sets no distinguishing variable and the event schema has no field for the question.
@@ -91,17 +104,21 @@ The no-op `{}` that every other runtime reads as "no opinion" lands there, and s
 **That allow approves nothing.** goose's hook chain is a plugin-policy layer inside `ToolExecutionOperation`, and the pipeline runs `ToolApprovalOperation` *before* it — so the operator's decision has already been made by the time a hook is consulted. It means "this policy hook does not object", and reaches no permission judge. This is the opposite of [Qwen Code](/runtimes/qwen-code), where answering "allow" would disarm the user's own prompts and Beacon therefore answers with an empty object.
 </Warning>
 
-### Beacon owns one plugin directory and nothing else
+### Manual plugin directory
 
-Because goose loads every plugin it discovers, an install is additive by construction: your own plugins keep working, untouched, and Beacon never parses them.
+Because goose loads every plugin it discovers, adding a Beacon-shaped plugin
+directory is additive by construction: your own plugins keep working, untouched.
 
-The one thing Beacon claims is the directory name `beacon-endpoint`. If its `hooks/hooks.json` already holds a hook Beacon did not write, both install and uninstall **refuse** with an error naming the hook rather than overwriting or deleting it — move that hook into a plugin of its own and run the install again. A file goose itself could not parse is overwritten, since there are no live hooks in it to protect.
-
-Re-running the install rewrites the file rather than appending to it, so a repair does not end with each event registered twice. Uninstall removes the file **and the plugin directory Beacon created**, because a plugin directory with no hooks file is still a plugin goose discovers and records in `config.yaml`. A directory you put something else into is left alone.
+If you create the conventional `beacon-endpoint` directory by hand, keep it
+dedicated to Beacon hook commands and avoid mixing unrelated hooks into the same
+`hooks/hooks.json`. This mirrors the ownership boundary the eventual installer
+should enforce.
 
 ## Collection path 2: OpenTelemetry export
 
-goose ships a real OpenTelemetry exporter emitting OTel GenAI semantic-convention spans, and `beacon endpoint install --harness goose` points it at the local collector by writing two keys into goose's own `config.yaml`:
+goose ships a real OpenTelemetry exporter emitting OTel GenAI semantic-convention
+spans. Configure it manually by pointing goose's own `config.yaml` at the local
+collector HTTP port:
 
 ```yaml
 otel_exporter_otlp_endpoint: http://127.0.0.1:4318
@@ -114,11 +131,12 @@ otel_exporter_otlp_timeout: 10000
 
 This path is what carries `gen_ai.usage.*` — including cache reads and writes — along with `gen_ai.request.model`, `gen_ai.provider.name`, `gen_ai.response.id`, `gen_ai.response.finish_reasons` and the agent's reasoning, on `chat` and `execute_tool` spans. None of that appears on any hook.
 
-### Your config.yaml is edited, not rewritten
+### Your config.yaml stays yours
 
-`config.yaml` is a file you write by hand — your provider, your model, your extensions, your permissions. Beacon changes two keys and **preserves comments, key order, values, nesting and two-space indentation**, and backs the file up before writing. A config Beacon cannot parse is refused rather than overwritten.
-
-The one thing not preserved is **blank lines between top-level keys**, which the YAML library cannot retain. That is the reason for the backup.
+`config.yaml` is a file you write by hand — your provider, your model, your
+extensions, your permissions. Beacon does not currently rewrite this file for
+goose; add or update the OTLP keys yourself and keep whatever backup practice you
+use for manual goose configuration.
 
 ### The file is not the whole answer
 
@@ -134,37 +152,38 @@ Reporting "enabled" from the file alone would say a runtime is covered when it i
 
 ## Discovery and status
 
-```bash title="Show goose status on both paths"
-beacon endpoint hooks status --harness goose
-beacon endpoint status --json | jq '.harnesses[] | select(.name == "goose")'
-```
-
-goose reports as the `goose` harness. Hook events carry `harness.collection_method=hook` — the events, the payload shapes and the hooks schema are all goose's, and Beacon ships no plugin source goose loads and executes — while OTLP events carry `harness.collection_method=otlp`.
+goose events normalize to the `goose` harness when the manual paths are
+configured. Hook events carry `harness.collection_method=hook` because the events,
+payload shapes, and hooks schema are goose's. OTLP events carry
+`harness.collection_method=otlp`.
 
 <Note>
-**A hooks file on disk is a registration, not a guarantee.** goose lets you disable a plugin from the `plugins` map in `config.yaml` or from `disabledPlugins` in a `settings.json` at any of three scopes, and a disabled plugin keeps its hooks file. `beacon endpoint hooks status` reports the registration, which is the narrower claim it can actually make — answering the rest would mean reimplementing goose's precedence across four files it does not version. Run one session and check the log to confirm events are arriving.
+**A hooks file on disk is a registration, not a guarantee.** goose lets you
+disable a plugin from the `plugins` map in `config.yaml` or from
+`disabledPlugins` in a `settings.json` at any of three scopes, and a disabled
+plugin keeps its hooks file. Run one session and check the log to confirm events
+are arriving.
 </Note>
 
-## Install or configuration support
+## Manual configuration support
 
-```bash
-beacon endpoint hooks install --harness goose                    # ~/.agents/plugins/beacon-endpoint/
-beacon endpoint hooks install --harness goose --level project    # <repo>/.agents/plugins/beacon-endpoint/
-beacon endpoint install --harness goose                          # OTLP export in goose's config.yaml
-beacon endpoint hooks status --harness goose
-beacon endpoint hooks uninstall --harness goose
-```
+Beacon does not yet create, status-check, or uninstall goose hook files. To test
+the adapter, write a goose `hooks.json` manually and point hook commands at the
+installed `beacon-hooks` binary with `--platform goose`. Use goose's own
+configuration to enable OTLP HTTP export to `http://127.0.0.1:4318`.
 
-Commit `.agents/plugins/beacon-endpoint/` if you want the hooks to apply to everyone working in the repository — remembering that it then **replaces** any user-scope install for sessions in that repository.
+Commit `.agents/plugins/beacon-endpoint/` only if you intentionally want the hooks
+to apply to everyone working in the repository, remembering that project scope
+replaces any user-scope plugin with the same name for sessions in that repository.
 
 ## Telemetry coverage
 
 | Area | Support |
 |------|---------|
-| Runtime discovery | Supported through the plugin directory at both scopes, and through `config.yaml` for the export |
+| Runtime discovery | Not first-class yet. Manual hooks and OTLP export can write `goose` events, but `beacon endpoint discover` does not install or report goose as a managed target |
 | Harness attribution | Supported. `goose`, `goose_cli`, `goose-cli`, `goose cli`, `goosecli`, `goose_agent`, `goose-agent`, `goose agent`, `codename_goose`, `codename-goose`, `codename goose`, `block_goose`, `block-goose`, and `block goose` normalize to `goose` |
-| Hook install, status, uninstall, and repair | Supported |
-| OTLP export configuration | Supported. Written into goose's own `config.yaml`, preserving the rest of the file |
+| Hook install, status, uninstall, and repair | Not yet supported by `beacon endpoint hooks` |
+| OTLP export configuration | Manual. Write goose's own `config.yaml` to use the collector HTTP port |
 | Session lifecycle | Supported. `session.started` from `SessionStart`, `session.ended` from `SessionEnd`, `tool.completed` from `Stop` |
 | Prompts | Supported. `prompt.submitted` from `UserPromptSubmit`, read from the payload's `message` field |
 | Tool use | Supported for pre-tool and post-tool activity, correlated by `gen_ai.tool.call.id` |
@@ -176,8 +195,8 @@ Commit `.agents/plugins/beacon-endpoint/` if you want the hooks to apply to ever
 | Model, provider, and reasoning | Supported through OTLP only |
 | Approval decisions | Not collected. See [Known gaps](#known-gaps) |
 | Reported cost | Not collected. goose reports tokens, not a price |
-| Local JSONL and dashboard | Supported |
-| MDM deployment | Supported for the endpoint agent. goose hooks are installed per repository or in the logged-in user's context |
+| Local JSONL and dashboard | Supported when manual hook or OTLP telemetry reaches Beacon |
+| MDM deployment | Supported for the endpoint agent. goose hook and OTLP configuration remain manual until installer support lands |
 
 ### Tool taxonomy
 
@@ -250,12 +269,11 @@ The OTLP path carries message content only when `OTEL_INSTRUMENTATION_GENAI_CAPT
 
 Plugins are discovered when a session starts, so an install taken while goose is running takes effect on the next session. Restart goose, or start a new session, after installing or removing hooks.
 
-Confirm status, then generate one goose event and check the log:
+Generate one goose event and check the log:
 
 ```bash
-beacon endpoint hooks status --harness goose
 beacon endpoint doctor --system
-grep '"name":"goose"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+rg '"name":"goose"' ~/.beacon/endpoint/logs/runtime.jsonl
 ```
 
 If goose hook telemetry is missing:

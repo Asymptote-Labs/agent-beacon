@@ -1,13 +1,18 @@
 ---
 title: "Test the Local Dashboard"
-description: "Use the local Beacon dashboard to validate endpoint events and security summaries"
+description: "Use the local Beacon dashboard to validate endpoint events, sessions, memory, and findings"
 ---
 
 ## Overview
 
-The Beacon endpoint dashboard is a local-only, read-only UI for inspecting the runtime JSONL log. Use it after health checks and validation events to confirm that local events are visible to an analyst.
+The Beacon endpoint dashboard is a local-only, read-only UI for inspecting the
+runtime JSONL log, active threat rules, runtime inventory, token usage, and
+approved-memory state. Use it after health checks and validation events to confirm
+that local telemetry is visible to an analyst.
 
-This guide shows how to open the dashboard, write a known event, verify Log Search, and review Security Overview.
+This guide shows how to open the dashboard, write a known event, verify activity
+views, inspect session detail when session metadata is present, and review Memory,
+Findings, Detections, Inventory, and Token Usage.
 
 ## Setup
 
@@ -50,36 +55,56 @@ To inspect a specific runtime log:
 beacon endpoint dashboard --log-path /path/to/runtime.jsonl
 ```
 
-## 2. Test log search
+## 2. Test activity visibility
 
-Write a validation event, then open Log Search and confirm the event appears in the table.
+Write a validation event, then open the dashboard and confirm the event is visible
+in the local activity views.
 
-```bash title="Create data for Log Search"
+```bash title="Create data for dashboard activity views"
 beacon endpoint test-event
 beacon endpoint dashboard --open
 ```
 
-Use filters and quick filters to narrow the view by harness, model, severity, category, failures, approvals, MCP activity, file changes, commands, or events that may need review. Event details should open for rows from either the active log or a rotated archive.
+The root page groups events with a session ID into **Agent Activity Sessions**.
+Synthetic validation events may not have enough session metadata to become a rich
+session row, so use **Agent Activity** and event details to validate a controlled
+single event.
 
-<Frame caption="Log Search helps investigate Beacon endpoint events by harness, model, severity, category, quick filter, and free-text query.">
-  <img src="/images/dashboard-log-search.png" alt="Beacon endpoint Log Search view showing investigation filters, quick filters, event rows, and model-aware search controls." />
-</Frame>
+Use filters to narrow activity by harness, model, severity, category, failures,
+approvals, MCP activity, file changes, commands, session, or events that may need
+review. Event details should open for rows from either the active log or a rotated
+archive.
 
-## 3. Test security overview
+## 3. Review sessions and summaries
 
-Open Security Overview after writing test events or generating local agent activity. Confirm the summary cards and inventory panels reflect the local runtime log you are testing.
+Generate local agent activity with a supported runtime, then use **Agent Activity
+Sessions** to open a session detail page. Confirm the prompt, harness, model,
+repository, activity counts, severity summary, event timeline, and raw JSON drawer
+reflect the same runtime log you are testing.
 
-<Frame caption="Security Overview summarizes local AI agent activity, risk signals, harnesses, models, repositories, MCP servers, and runtime inventory.">
-  <img src="/images/dashboard-overview.png" alt="Beacon endpoint Security Overview showing security posture metrics, top harnesses, top models, top repositories, MCP servers, and runtime inventory." />
-</Frame>
+Open **Agent Activity** to review aggregate event totals, needs-review counts,
+high or critical activity, denied or blocked activity, failed tools, sessions,
+top harnesses, top models, top repositories, and MCP servers.
 
-Security Overview is useful for confirming event totals, needs-review counts, high or critical activity, denied or blocked activity, failed tools, sessions, top harnesses, top models, top repositories, MCP servers, and runtime inventory.
+## 4. Review Memory, Findings, and Inventory
+
+Use the remaining local views to check adjacent state:
+
+- **Memory:** read-only evaluation, candidate, and approved-memory counts from
+  `memory.db`.
+- **Detections:** the active threat-rule set from the local rules store or built-in
+  baseline.
+- **Findings:** on-demand rule matches over the configured runtime log.
+- **Agent Inventory:** detected runtimes, MCP servers, Agent Skills, hooks, and
+  telemetry status.
+- **Token Usage:** runtime-reported token counts and cost where supported.
 
 ## Key features demonstrated
 
 - Dashboard startup against the expected runtime log.
-- Log Search visibility for a controlled validation event.
-- Security Overview summaries for local runtime activity.
+- Activity visibility for a controlled validation event.
+- Session browsing and detail views for real agent runs.
+- Memory, findings, detections, token, and inventory views.
 - Loopback-only inspection without a hosted Beacon account.
 
 ## Troubleshooting

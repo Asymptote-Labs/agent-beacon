@@ -11,7 +11,21 @@ description: "Run the local Beacon MCP server"
 beacon mcp serve
 ```
 
-The server reads the configured Beacon runtime JSONL log and exposes compact activity tools to MCP clients. Use stdio for clients that launch Beacon as a subprocess. Use HTTP only for local loopback testing or local tools that connect to a running server.
+The server reads the configured Beacon runtime JSONL log and the approved-memory
+store next to the endpoint log base directory. It exposes compact activity tools
+plus read-only approved-memory tools to MCP clients. Use stdio for clients that
+launch Beacon as a subprocess. Use HTTP only for local loopback testing or local
+tools that connect to a running server.
+
+Registered tools:
+
+- `search_activity`
+- `summarize_activity`
+- `get_activity_event`
+- `list_activity_filters`
+- `search_memory`
+- `get_memory`
+- `get_memory_context`
 
 ## Flags
 

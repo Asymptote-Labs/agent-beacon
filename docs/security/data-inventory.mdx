@@ -62,6 +62,30 @@ Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state
 
 By default, snapshots include config-file metadata, MCP server metadata, skill metadata, and hook config metadata across supported local runtimes. They do not include skill instruction bodies, MCP secret values, full environment values, full command arguments, or unrelated config content. When `include_contents` is enabled, snapshots additionally carry redacted, size-limited `content` and `definition` blocks as described above.
 
+## Local memory metadata
+
+`beacon memory` writes a local SQLite store, `memory.db`, next to the endpoint log
+base directory. The store is separate from `runtime.jsonl` and keeps reviewed
+learning artifacts scoped to the resolved project:
+
+| Memory area | Data retained |
+|-------------|---------------|
+| Evaluations | Trace identity, project identity, bounded trace summary, Jev question results, evaluator model, usage metadata when returned, and evaluation timestamps |
+| Candidates | Candidate title, body, kind, state, evidence pointers, source evaluation, project identity, and review transition metadata |
+| Approved memories | Approved title, body, kind, project identity, provenance, and review metadata |
+
+Approved memory can be read through local MCP tools (`search_memory`,
+`get_memory`, and `get_memory_context`) and can be rendered into an Agent Skill
+with `beacon memory skills install`. That skill write is an explicit CLI action
+to `.agents/skills/<slug>/SKILL.md`; Beacon hooks and the dashboard never install
+skills or mutate memory review state.
+
+`beacon memory evaluations run` is the only command in this workflow that can call
+Jev. Dry runs do not make a network request. When evaluation is enabled, Beacon
+sends a bounded, redacted trace projection to the configured TypeSafe System One
+endpoint or a compatible internal endpoint. Normal endpoint capture, MCP reads,
+dashboard views, candidate review, and skill preview/install do not call Jev.
+
 ## Required fields
 
 | Field | Meaning |
