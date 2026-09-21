@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/activity"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -75,6 +77,27 @@ type textContent struct {
 	Text string `json:"text"`
 }
 
+type memorySearchResult struct {
+	Memories []memorySummary `json:"memories"`
+	Returned int             `json:"returned"`
+	Limit    int             `json:"limit"`
+}
+
+type memoryContextResult struct {
+	Context  []memorySummary `json:"context"`
+	Returned int             `json:"returned"`
+	Limit    int             `json:"limit"`
+}
+
+type memorySummary struct {
+	ID            string   `json:"id"`
+	Kind          string   `json:"kind"`
+	Title         string   `json:"title"`
+	Applicability string   `json:"applicability,omitempty"`
+	Body          string   `json:"body,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+}
+
 func New(opts Options) *Server {
 	server := &Server{
 		logPath: opts.LogPath,
@@ -100,7 +123,7 @@ func (s *Server) ToolNames() []string {
 }
 
 func (s *Server) HasExpectedTools() error {
-	expected := []string{"search_activity", "summarize_activity", "get_activity_event", "list_activity_filters"}
+	expected := []string{"search_activity", "summarize_activity", "get_activity_event", "list_activity_filters", "search_memory", "get_memory", "get_memory_context"}
 	for _, name := range expected {
 		if _, ok := s.tools[name]; !ok {
 			return fmt.Errorf("missing MCP tool %q", name)
@@ -291,6 +314,131 @@ func (s *Server) registerTools() {
 			return activity.ListFilters(query)
 		},
 	})
+	s.register(Tool{
+		Name:        "search_memory",
+		Description: "Search approved Beacon project memory and return compact summaries.",
+		InputSchema: memoryQuerySchema("Search filters for approved project memory."),
+		handler: func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			query, err := s.parseMemoryQuery(args)
+			if err != nil {
+				return nil, err
+			}
+			memories, err := s.memoryStore().ListMemories(query)
+			if err != nil {
+				return nil, err
+			}
+			limit := normalizeMemoryLimit(query.Limit)
+			if len(memories) > limit {
+				memories = memories[:limit]
+			}
+			return memorySearchResult{Memories: memorySummaries(memories), Returned: len(memories), Limit: limit}, nil
+		},
+	})
+	s.register(Tool{
+		Name:        "get_memory",
+		Description: "Fetch one approved Beacon memory item by ID.",
+		InputSchema: objectSchema(map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "description": "Approved memory ID."},
+		}, []string{"id"}),
+		handler: func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			id := stringArg(args, "id")
+			if id == "" {
+				return nil, errors.New("id is required")
+			}
+			memory, ok, err := s.memoryStore().GetMemory(id)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || memory.SupersededBy != "" {
+				return nil, fmt.Errorf("memory not found: %s", id)
+			}
+			return memory, nil
+		},
+	})
+	s.register(Tool{
+		Name:        "get_memory_context",
+		Description: "Return a small approved-memory context set for the current task.",
+		InputSchema: memoryQuerySchema("Task and project filters for approved memory context."),
+		handler: func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			query, err := s.parseMemoryQuery(args)
+			if err != nil {
+				return nil, err
+			}
+			if query.Limit <= 0 || query.Limit > 5 {
+				query.Limit = 5
+			}
+			memories, err := s.memoryStore().ListMemories(query)
+			if err != nil {
+				return nil, err
+			}
+			if len(memories) > query.Limit {
+				memories = memories[:query.Limit]
+			}
+			return memoryContextResult{Context: memorySummaries(memories), Returned: len(memories), Limit: query.Limit}, nil
+		},
+	})
+}
+
+func (s *Server) memoryStore() *learning.Store {
+	return learning.Open(learning.PathForRuntimeLog(s.logPath))
+}
+
+func (s *Server) parseMemoryQuery(args map[string]interface{}) (learning.Query, error) {
+	limit := intArg(args, "limit")
+	if limit <= 0 {
+		limit = 5
+	}
+	query := learning.Query{
+		ProjectID:   stringArg(args, "project_id"),
+		ProjectPath: stringArg(args, "project"),
+		Q:           firstNonEmpty(stringArg(args, "q"), stringArg(args, "task")),
+		Kind:        stringArg(args, "kind"),
+		Limit:       normalizeMemoryLimit(limit),
+	}
+	if query.ProjectID == "" && query.ProjectPath == "" {
+		project, err := learning.ResolveProject("")
+		if err != nil {
+			return learning.Query{}, err
+		}
+		query.ProjectID = project.ID
+	}
+	return query, nil
+}
+
+func memoryQuerySchema(description string) map[string]interface{} {
+	return objectSchema(map[string]interface{}{
+		"limit":      map[string]interface{}{"type": "integer", "description": "Maximum number of memories to return."},
+		"q":          map[string]interface{}{"type": "string", "description": "Free-text query across approved memory."},
+		"task":       map[string]interface{}{"type": "string", "description": "Current task text used to select relevant memory."},
+		"kind":       map[string]interface{}{"type": "string", "description": "Memory kind, such as workflow, correction, debugging_pattern, gotcha, or convention."},
+		"project":    map[string]interface{}{"type": "string", "description": "Project path for memory scoping."},
+		"project_id": map[string]interface{}{"type": "string", "description": "Resolved Beacon project ID for memory scoping."},
+	}, nil, description)
+}
+
+func memorySummaries(memories []asymptoteobserve.LearningMemoryV1) []memorySummary {
+	out := make([]memorySummary, 0, len(memories))
+	for _, memory := range memories {
+		out = append(out, memorySummary{
+			ID:            memory.ID,
+			Kind:          memory.Kind,
+			Title:         memory.Title,
+			Applicability: memory.Applicability,
+			Body:          asymptoteobserve.CleanString(memory.Body, 1200, true),
+			Tags:          append([]string(nil), memory.Tags...),
+		})
+	}
+	return out
+}
+
+func normalizeMemoryLimit(limit int) int {
+	if limit <= 0 {
+		return 5
+	}
+	if limit > 20 {
+		return 20
+	}
+	return limit
 }
 
 func parseQuery(logPath string, args map[string]interface{}) (activity.Query, error) {
@@ -378,6 +526,15 @@ func errorResponse(id interface{}, code int, message string) rpcResponse {
 func stringArg(args map[string]interface{}, key string) string {
 	value, _ := args[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func intArg(args map[string]interface{}, key string) int {

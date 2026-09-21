@@ -190,9 +190,21 @@ func digestConfigs(configs []Config) []Config {
 	out := make([]Config, len(configs))
 	for i, config := range configs {
 		if config.Volatile {
-			config.FileSHA256 = ""
-			config.ModifiedAt = ""
-			config.Content = nil
+			config = Config{
+				Runtime:        config.Runtime,
+				Path:           config.Path,
+				PathHash:       config.PathHash,
+				Scope:          config.Scope,
+				ConfigKind:     config.ConfigKind,
+				ParserMode:     config.ParserMode,
+				Exists:         config.Exists,
+				Readable:       config.Readable,
+				ParserStatus:   config.ParserStatus,
+				Volatile:       config.Volatile,
+				MCPServerCount: config.MCPServerCount,
+				BeaconManaged:  config.BeaconManaged,
+				Redaction:      config.Redaction,
+			}
 		}
 		out[i] = config
 	}

@@ -429,11 +429,20 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 	} else {
 		where += ` AND (superseded_by IS NULL OR superseded_by = '')`
 	}
-	rows, err := db.Query(`SELECT memory_json FROM memories`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
+	hasTextFilter := strings.TrimSpace(query.Q) != ""
+	sqlQuery := `SELECT memory_json FROM memories` + where + ` ORDER BY updated_at DESC`
+	if !hasTextFilter {
+		args = append(args, normalizeLimit(query.Limit), offset(query))
+		sqlQuery += ` LIMIT ? OFFSET ?`
+	}
+	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	limit := normalizeLimit(query.Limit)
+	skip := offset(query)
+	matches := 0
 	var out []asymptoteobserve.LearningMemoryV1
 	for rows.Next() {
 		var raw string
@@ -444,11 +453,26 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind) {
+		if hasTextFilter {
+			if !matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind) {
+				continue
+			}
+			matches++
+			if matches <= skip {
+				continue
+			}
+			out = append(out, value)
+			if len(out) >= limit {
+				break
+			}
+		} else {
 			out = append(out, value)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) GetMemory(id string) (asymptoteobserve.LearningMemoryV1, bool, error) {

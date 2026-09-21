@@ -2,7 +2,9 @@ package mcpserver
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestServeStdioListsAndCallsTools(t *testing.T) {
@@ -69,8 +73,111 @@ func TestExpectedToolsRegistered(t *testing.T) {
 	if err := server.HasExpectedTools(); err != nil {
 		t.Fatalf("HasExpectedTools returned error: %v", err)
 	}
-	if got := strings.Join(server.ToolNames(), ","); got != "search_activity,summarize_activity,get_activity_event,list_activity_filters" {
+	if got := strings.Join(server.ToolNames(), ","); got != "search_activity,summarize_activity,get_activity_event,list_activity_filters,search_memory,get_memory,get_memory_context" {
 		t.Fatalf("ToolNames = %s", got)
+	}
+}
+
+func TestMCPMemoryToolsSearchGetAndContext(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "endpoint", "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	store := learning.Open(learning.PathForRuntimeLog(logPath))
+	memory := asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-1",
+		CandidateID: "candidate-1",
+		Kind:        asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:       "Retry package smoke after transient network failure",
+		Body:        "If package smoke fails with ECONNRESET, inspect the error and rerun once before changing code.",
+		Project:     asymptoteobserve.LearningProjectV1{ID: "project-1"},
+		Tags:        []string{"beacon", "cursor"},
+	}
+	if err := store.PutMemory(memory); err != nil {
+		t.Fatal(err)
+	}
+	server := New(Options{LogPath: logPath})
+	search, err := server.callTool(t.Context(), callToolParams{Name: "search_memory", Arguments: map[string]interface{}{"project_id": "project-1", "q": "ECONNRESET"}})
+	if err != nil {
+		t.Fatalf("search_memory: %v", err)
+	}
+	if !strings.Contains(search.Content[0].Text, "memory-1") {
+		t.Fatalf("search_memory missing memory: %s", search.Content[0].Text)
+	}
+	get, err := server.callTool(t.Context(), callToolParams{Name: "get_memory", Arguments: map[string]interface{}{"id": "memory-1"}})
+	if err != nil {
+		t.Fatalf("get_memory: %v", err)
+	}
+	if !strings.Contains(get.Content[0].Text, "Retry package smoke") {
+		t.Fatalf("get_memory missing body: %s", get.Content[0].Text)
+	}
+	context, err := server.callTool(t.Context(), callToolParams{Name: "get_memory_context", Arguments: map[string]interface{}{"project_id": "project-1", "task": "package smoke retry"}})
+	if err != nil {
+		t.Fatalf("get_memory_context: %v", err)
+	}
+	if !strings.Contains(context.Content[0].Text, "memory-1") {
+		t.Fatalf("get_memory_context missing memory: %s", context.Content[0].Text)
+	}
+}
+
+func TestMCPMemoryToolsSearchOlderMatchesBeforeLimit(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "endpoint", "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	store := learning.Open(learning.PathForRuntimeLog(logPath))
+	project := asymptoteobserve.LearningProjectV1{ID: "project-1"}
+	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-older-match",
+		CandidateID: "candidate-older-match",
+		Kind:        asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:       "Older matching memory",
+		Body:        "Use the unique-needle recovery step when package smoke flakes.",
+		Project:     project,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setStoredMemoryUpdatedAt(t, store.Path(), "memory-older-match", "2026-01-01T00:00:00Z")
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("memory-newer-%d", i)
+		if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+			ID:          id,
+			CandidateID: "candidate-" + id,
+			Kind:        asymptoteobserve.LearningMemoryKindConvention,
+			Title:       "Newer unrelated memory",
+			Body:        "Use the ordinary local workflow.",
+			Project:     project,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		setStoredMemoryUpdatedAt(t, store.Path(), id, fmt.Sprintf("2026-01-02T00:00:0%dZ", i))
+	}
+	server := New(Options{LogPath: logPath})
+	search, err := server.callTool(t.Context(), callToolParams{Name: "search_memory", Arguments: map[string]interface{}{"project_id": "project-1", "q": "unique-needle", "limit": 5}})
+	if err != nil {
+		t.Fatalf("search_memory: %v", err)
+	}
+	if !strings.Contains(search.Content[0].Text, "memory-older-match") {
+		t.Fatalf("search_memory missing older match: %s", search.Content[0].Text)
+	}
+	context, err := server.callTool(t.Context(), callToolParams{Name: "get_memory_context", Arguments: map[string]interface{}{"project_id": "project-1", "task": "unique-needle"}})
+	if err != nil {
+		t.Fatalf("get_memory_context: %v", err)
+	}
+	if !strings.Contains(context.Content[0].Text, "memory-older-match") {
+		t.Fatalf("get_memory_context missing older match: %s", context.Content[0].Text)
+	}
+}
+
+func setStoredMemoryUpdatedAt(t *testing.T, dbPath, id, updatedAt string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE memories SET updated_at = ? WHERE id = ?`, updatedAt, id); err != nil {
+		t.Fatal(err)
 	}
 }
 
