@@ -35,35 +35,37 @@ Beacon captures **agent session history** across Claude Code, Cursor, Codex, Ope
 
 ## Beacon Overview
 
-AI agents learn useful things every time you work with them. But that knowledge is usually trapped inside individual sessions and individual harnesses.
+AI agents learn useful things every time you work with them. But that knowledge is usually trapped inside individual sessions and harnesses.
 
-Beacon gives your agents a shared history.
+**Beacon gives your agents a shared history.**
 
-It continuously captures agent session history across your coding agents, normalizes those traces into one common format, and helps turn the highest-signal work into reviewed memory that other agents can reuse.
+It continuously captures sessions across your coding agents, normalizes them into one common format, and turns the highest-signal work into reviewed memory that future agents can reuse.
 
 Your Claude Code sessions can teach Codex.  
 Your Cursor debugging can improve OpenCode.  
-A workflow solved once can become reusable everywhere.
+**Solve something once. Let every agent learn from it.**
 
-### Key Capabilities
+## Why Beacon
 
-- **Cross-harness session history** — one record across Claude Code, Cursor, Codex, OpenCode, Cline, and 20+ more
-- **Compounding knowledge** — surface successful workflows, repeated corrections, debugging patterns, and repo conventions from real agent work
-- **Reviewed agent memory** — promote useful knowledge into memory future agents can retrieve through MCP or Agent Skills
-- **Unified traces** — prompts, responses, tool calls, commands, file edits, approvals, MCP activity, and tokens in one event model
-- **Local-first** — durable JSONL and a local dashboard with no account or network dependency
-- **Open and portable** — your session history is independent of whichever agent harness you use
+### 🔀 One history across every agent
 
----
+Capture sessions from Claude Code, Cursor, Codex, OpenCode, Cline, and 20+ other harnesses in one place.
 
-## Use Cases
+### 🧠 Knowledge that compounds
 
-- **Cross-harness memory** — let knowledge discovered in one coding agent benefit every other agent you use
-- **Repository knowledge** — capture conventions, workflows, and context agents repeatedly have to rediscover
-- **Debugging memory** — preserve successful approaches to difficult bugs instead of losing them in old sessions
-- **Repeated corrections** — identify things developers keep teaching agents and make them reusable
-- **Session replay** — reconstruct what an agent actually did across commands, tools, files, and prompts
-- **Portable history** — switch harnesses without throwing away everything your previous agents learned
+Turn successful workflows, repeated corrections, debugging patterns, and repo conventions into knowledge that survives beyond a single session.
+
+### ✨ Memory every agent can use
+
+Review and promote useful knowledge into memory that future agents can retrieve through MCP or Agent Skills.
+
+### 🔎 Replay exactly what happened
+
+Prompts, responses, tool calls, commands, file edits, approvals, MCP activity, and tokens are normalized into one trace.
+
+### 💻 Local-first and portable
+
+Your history lives in durable JSONL, works without an account, and isn't tied to any particular harness.
 
 ---
 
@@ -71,7 +73,10 @@ A workflow solved once can become reusable everywhere.
 
 Beacon is open source, local-first, and requires no account.
 
-### macOS
+### 1. Install Beacon
+
+<details open>
+<summary><strong>macOS</strong></summary>
 
 ```bash
 brew trust asymptote-labs/tap
@@ -81,25 +86,12 @@ brew install beacon
 beacon endpoint install
 ```
 
-Then use Claude Code, Cursor, Codex, or another supported agent normally.
+</details>
 
-Open your local session history:
+<details>
+<summary><strong>Linux</strong></summary>
 
-```bash
-beacon endpoint dashboard
-```
-
-Events are also written directly to:
-
-```text
-~/.beacon/endpoint/logs/runtime.jsonl
-```
-
-**No account. No API key. Nothing leaves your machine unless you configure it to.**
-
-### Linux
-
-Install the `.deb` or `.rpm` from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest):
+Download the `.deb` or `.rpm` from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest).
 
 ```bash
 sudo apt install ./beacon_<version>_linux_amd64.deb
@@ -111,9 +103,12 @@ or:
 sudo dnf install ./beacon_<version>_linux_amd64.rpm
 ```
 
-### Windows
+</details>
 
-Install the x64 MSI from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest):
+<details>
+<summary><strong>Windows</strong></summary>
+
+Download the x64 MSI from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest).
 
 ```bash
 msiexec /i BeaconEndpointAgent-<version>-x64.msi
@@ -124,6 +119,29 @@ For silent installation:
 ```bash
 msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn
 ```
+
+</details>
+
+### 2. Use your agents normally
+
+Open Claude Code, Cursor, Codex, or any other supported harness.
+
+Beacon continuously captures your session history in the background.
+
+### 3. Explore your history
+
+```bash
+beacon endpoint dashboard
+```
+
+Or inspect the raw event stream:
+
+```text
+~/.beacon/endpoint/logs/runtime.jsonl
+```
+
+> [!NOTE]
+> Local by default: no account, no API key, and nothing leaves your machine unless you configure it to.
 
 ---
 
@@ -220,12 +238,6 @@ The underlying JSONL remains directly accessible, so you're never dependent on t
 ## Supported Agents
 
 Beacon supports local agents, browser agents, cloud agents, CI workflows, and agent SDKs.
-
-Popular supported runtimes include:
-
-**Claude Code · Cursor · Codex CLI · Codex Desktop · OpenCode · Cline · Gemini CLI · GitHub Copilot CLI · Devin · Factory Droid · Pi · OpenHands · Kiro · goose · Hermes**
-
-And 20+ more.
 
 ### Local Agent Coverage
 
