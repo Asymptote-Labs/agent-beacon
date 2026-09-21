@@ -25,6 +25,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"muse":        "muse_code",
 		"goose":       "goose",
 		"dsh":         "deepseek_harness",
+		"kimi":        "kimi_code",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -44,7 +45,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "omo_senpi", "vercel_fx",
-		"muse_code", "grok_bot", "goose",
+		"muse_code", "grok_bot", "goose", "deepseek_harness", "kimi_code",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -826,6 +827,98 @@ func TestNamesMerelyContainingDshAreNotTheDeepSeekHarness(t *testing.T) {
 // A name that has been through the function once must not change meaning going through again.
 func TestDeepSeekHarnessIsStableUnderRenormalization(t *testing.T) {
 	once := NormalizeHarnessName("dsh")
+	if twice := NormalizeHarnessName(once); twice != once {
+		t.Fatalf("NormalizeHarnessName(%q) = %q; the canonical name must be stable", once, twice)
+	}
+}
+
+func TestKimiCodeSpellingsConvergeOnKimiCode(t *testing.T) {
+	for _, in := range []string{
+		"kimi", "Kimi", " kimi ", "KIMI",
+		"kimi_code", "kimi-code", "Kimi Code", "kimicode",
+		"kimi_cli", "kimi-cli", "Kimi CLI",
+		"kimi_code_cli", "kimi-code-cli", "Kimi Code CLI",
+		"kimi_code_acp", "kimi-code-acp",
+		"moonshot_kimi_code", "moonshot-kimi-code",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "kimi_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "kimi_code")
+			}
+		})
+	}
+}
+
+// `kimi_code_cli` is the literal `client_type` Kimi Code stamps on every hook payload, from the
+// terminal CLI, the desktop app, the VS Code extension and the ACP server alike. It has to land on
+// the same harness as the `--platform kimi` flag Beacon's installer writes, or one session is
+// recorded under two names depending on which field a future reader picks up.
+func TestKimiClientTypeAndInstallerFlagAgree(t *testing.T) {
+	fromFlag := NormalizeHarnessName("kimi")
+	fromClientType := NormalizeHarnessName("kimi_code_cli")
+	if fromFlag != fromClientType {
+		t.Fatalf("NormalizeHarnessName(\"kimi\") = %q but NormalizeHarnessName(\"kimi_code_cli\") = %q; "+
+			"the installer flag and the runtime's own client identity must resolve to one harness",
+			fromFlag, fromClientType)
+	}
+}
+
+// The first reason the Kimi Code case is an equality match rather than a Contains rule. Moonshot
+// ships the agent and a large, growing model family under one name, so every Kimi model id begins
+// with the letters the harness does. A substring rule would report any event whose harness
+// attribute happened to carry one of those model strings as a Kimi Code session, and a reader
+// could not tell the misattribution from the real thing because both start with the same word.
+func TestKimiModelSpellingsAreNotTheKimiCodeHarness(t *testing.T) {
+	for _, name := range []string{
+		"kimi-k2", "kimi-k3", "kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code",
+		"kimi-k2-thinking", "kimi-k2-0905-preview", "kimi-k3-fast", "kimi-latest",
+		"kimi-thinking", "kimi-for-coding", "moonshotai/kimi-k2.5", "moonshot-kimi-k2-instruct",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "kimi_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a Kimi model id must not be reported as "+
+					"the Kimi Code runtime", name, got)
+			}
+		})
+	}
+}
+
+// The second and third reasons. `kimi` is also a provider type inside Kimi Code's own config.toml
+// -- one that Claude Code, Codex and other runtimes point at too -- and `kimi.com` is the consumer
+// chat product Beacon does not observe at all. A name that merely mentions either must not be
+// filed as an endpoint install of the coding agent.
+func TestNamesMerelyMentioningKimiAreNotTheKimiCodeHarness(t *testing.T) {
+	for _, name := range []string{
+		"kimi.com", "KIMI_API_KEY", "providers.kimi", "kimi_provider", "kimi-webbridge",
+		"~/.kimi-code", "KIMI_CODE_HOME", "kimikaze", "akimi",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "kimi_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely mentioning \"kimi\" must not "+
+					"be reported as the Kimi Code runtime", name, got)
+			}
+		})
+	}
+}
+
+// Kimi Code is not Claude Code, and the generic `strings.Contains(lower, "claude")` rule sits well
+// above this case. Kimi Code can be configured with an `anthropic` provider and can be driven
+// through Anthropic-shaped endpoints, so a name that mentions both vendors is a real possibility;
+// what must never happen is a bare Kimi spelling resolving to claude_code.
+func TestKimiCodeIsNotAttributedToClaudeCode(t *testing.T) {
+	for _, name := range []string{"kimi", "kimi_code", "kimi-code-cli"} {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeHarnessName(name); got == "claude_code" {
+				t.Errorf("NormalizeHarnessName(%q) = %q; Kimi Code is a separate runtime from "+
+					"Claude Code", name, got)
+			}
+		})
+	}
+}
+
+// A name that has been through the function once must not change meaning going through again.
+func TestKimiCodeIsStableUnderRenormalization(t *testing.T) {
+	once := NormalizeHarnessName("kimi")
 	if twice := NormalizeHarnessName(once); twice != once {
 		t.Fatalf("NormalizeHarnessName(%q) = %q; the canonical name must be stable", once, twice)
 	}
