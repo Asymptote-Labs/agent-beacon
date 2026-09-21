@@ -127,6 +127,40 @@ func TestModelSearchesAndOpensTrace(t *testing.T) {
 	}
 }
 
+func TestSearchBlocksOpeningStaleRowsUntilResultsLoad(t *testing.T) {
+	store := fixtureStore()
+	model := NewModel(store)
+	model.width, model.height = 100, 30
+	model = runCmd(t, model, model.Init())
+
+	next, _ := model.Update(key("/"))
+	model = next.(Model)
+	for _, r := range "filtered" {
+		next, _ = model.Update(key(string(r)))
+		model = next.(Model)
+	}
+	next, pending := model.Update(key("enter"))
+	model = next.(Model)
+	if !model.loading || model.mode != listMode {
+		t.Fatalf("search state = loading %t mode %v", model.loading, model.mode)
+	}
+
+	next, command := model.Update(key("enter"))
+	model = next.(Model)
+	if command != nil || model.mode != listMode {
+		t.Fatalf("enter during search load opened stale trace: command=%v mode=%v", command != nil, model.mode)
+	}
+
+	next, _ = model.Update(pending())
+	model = next.(Model)
+	if model.loading || model.mode != listMode || model.query != "filtered" {
+		t.Fatalf("loaded search state = loading %t mode %v query %q", model.loading, model.mode, model.query)
+	}
+	if got := store.listQueries[len(store.listQueries)-1]; got != "filtered" {
+		t.Fatalf("search query = %q", got)
+	}
+}
+
 func TestDetailFilterReloadsTrace(t *testing.T) {
 	store := fixtureStore()
 	model := NewModel(store)

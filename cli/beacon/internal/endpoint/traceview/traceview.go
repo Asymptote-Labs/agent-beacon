@@ -219,6 +219,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			return m, tea.Quit
 		}
+		if m.loading {
+			// A list refresh changes the meaning of every selected row, so do
+			// not allow stale rows to be opened while it is in flight. Detail
+			// loads still allow back/escape so a slow local read cannot trap
+			// the user in that view.
+			if m.mode == detailMode && (msg.String() == "esc" || msg.String() == "backspace") {
+				return m.updateDetail(msg)
+			}
+			return m, nil
+		}
 		if m.mode == detailMode {
 			return m.updateDetail(msg)
 		}
