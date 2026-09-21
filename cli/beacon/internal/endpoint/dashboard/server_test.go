@@ -12,7 +12,9 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestStatusUsesExplicitRuntimeLogPath(t *testing.T) {
@@ -160,6 +162,68 @@ func TestSummaryEndpointAggregatesAllMatchedEvents(t *testing.T) {
 	}
 	if len(summary.TopHarnesses) != 1 || summary.TopHarnesses[0].Count != 12 {
 		t.Fatalf("top_harnesses = %#v, want cursor with 12 events", summary.TopHarnesses)
+	}
+}
+
+func TestMemoryEndpointServesReadOnlyLearningState(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "endpoint", "logs", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	store := learning.Open(learning.PathForRuntimeLog(logPath))
+	project := asymptoteobserve.LearningProjectV1{ID: "project-1"}
+	eval := asymptoteobserve.LearningEvaluationV1{
+		ID:            "eval-1",
+		Status:        asymptoteobserve.LearningEvaluationStatusCompleted,
+		Project:       project,
+		RubricVersion: "rubric",
+		RubricHash:    "sha256:rubric",
+		Evaluator:     "jev",
+		Trace:         asymptoteobserve.LearningTraceRefV1{ID: "trace-1", Title: "Fix package smoke"},
+		Score:         0.9,
+	}
+	if err := store.PutEvaluation(eval); err != nil {
+		t.Fatal(err)
+	}
+	candidate := asymptoteobserve.LearningCandidateV1{
+		ID:                 "candidate-1",
+		State:              asymptoteobserve.LearningCandidateStateApproved,
+		Kind:               asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:              "Fix package smoke",
+		Body:               "Rerun once after a transient failure.",
+		Project:            project,
+		SourceEvaluationID: "eval-1",
+		MemoryID:           "memory-1",
+	}
+	if err := store.PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
+		ID:          "memory-1",
+		CandidateID: candidate.ID,
+		Kind:        candidate.Kind,
+		Title:       candidate.Title,
+		Body:        candidate.Body,
+		Project:     project,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/memory", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("memory status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp MemoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status.Evaluations != 1 || len(resp.Evaluations) != 1 || len(resp.Candidates) != 1 || len(resp.Memories) != 1 {
+		t.Fatalf("memory response = %#v", resp)
 	}
 }
 

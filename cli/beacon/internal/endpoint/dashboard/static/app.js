@@ -40,6 +40,7 @@ const isOverviewPage = document.body.dataset.page === "overview";
 const isTokensPage = document.body.dataset.page === "tokens";
 const isDetectionsPage = document.body.dataset.page === "detections";
 const isFindingsPage = document.body.dataset.page === "findings";
+const isMemoryPage = document.body.dataset.page === "memory";
 // Both inventory pages share loadInventory(); each renderer targets its own
 // page's elements and no-ops when they are absent.
 const isInventoryPage = document.body.dataset.page === "inventory" || document.body.dataset.page === "inventory-hooks";
@@ -3203,6 +3204,85 @@ function setupNavCollapse() {
   });
 }
 
+async function loadMemory() {
+  if (!isMemoryPage) return;
+  state.loading = true;
+  state.error = null;
+  renderMemoryLoading();
+  try {
+    state.memory = await getJSON("/api/memory?limit=50");
+  } catch (err) {
+    state.error = err;
+  } finally {
+    state.loading = false;
+    renderMemory();
+  }
+}
+
+function renderMemoryLoading() {
+  setText("#memory-status", "Loading Beacon memory...");
+}
+
+function renderMemory() {
+  if (!isMemoryPage) return;
+  if (state.error) {
+    setText("#memory-status", state.error.message || String(state.error));
+    return;
+  }
+  const data = state.memory || {};
+  const status = data.status || {};
+  setText("#memory-status", `${status.evaluations || 0} evaluations, ${status.candidates || 0} candidates, ${status.approved_memories || 0} approved memories`);
+  renderMemoryTable("#memory-evaluations", data.evaluations || [], (item) => [
+    item.id || "",
+    item.trace?.id || "",
+    item.status || "",
+    formatScore(item.score),
+    item.trace?.title || "",
+  ]);
+  renderMemoryTable("#memory-candidates", data.candidates || [], (item) => [
+    item.id || "",
+    item.state || "",
+    item.kind || "",
+    item.title || "",
+  ]);
+  renderMemoryTable("#memory-approved", data.memories || [], (item) => [
+    item.id || "",
+    item.kind || "",
+    item.title || "",
+    item.applicability || "",
+  ]);
+}
+
+function renderMemoryTable(selector, items, rowFn) {
+  const tbody = $(selector);
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!items.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.className = "muted";
+    cell.textContent = "No records yet.";
+    row.append(cell);
+    tbody.append(row);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("tr");
+    for (const value of rowFn(item)) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    tbody.append(row);
+  }
+}
+
+function formatScore(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "";
+  return value.toFixed(2);
+}
+
 decorateDashboardNav();
 setupNavCollapse();
 
@@ -3262,6 +3342,9 @@ if (isDetectionsPage) {
   hydrateInventoryStateFromURL();
   loadInventory().catch(console.error);
   setInterval(() => loadInventory().catch(console.error), 15000);
+} else if (isMemoryPage) {
+  loadMemory().catch(console.error);
+  setInterval(() => loadMemory().catch(console.error), 15000);
 } else {
   hydrateFiltersFromURL();
   setupSessionFilters();
