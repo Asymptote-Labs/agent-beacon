@@ -77,6 +77,7 @@ func TestMemoryEvaluationsRunPersistsMockedJevResult(t *testing.T) {
 	memoryOpts.jsonOutput = true
 	memoryOpts.jevEndpoint = server.URL
 	memoryOpts.jevAPIKey = "test-key"
+	memoryOpts.jevModel = "jev-test"
 	memoryOpts.jevCost = learning.DefaultCostPerTrace
 
 	var out bytes.Buffer
@@ -160,8 +161,9 @@ func resetMemoryOpts(t *testing.T) {
 		dryRun      bool
 		jevEndpoint string
 		jevAPIKey   string
+		jevModel    string
 		jevCost     float64
 		timeout     time.Duration
-	}{userMode: true, limit: 25, page: 1, jevCost: learning.DefaultCostPerTrace}
+	}{userMode: true, limit: 25, page: 1, jevEndpoint: learning.DefaultJevEndpoint, jevModel: learning.DefaultJevModel, jevCost: learning.DefaultCostPerTrace}
 	t.Cleanup(func() { memoryOpts = previous })
 }

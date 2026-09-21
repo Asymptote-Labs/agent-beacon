@@ -17,6 +17,8 @@ import (
 
 const (
 	RubricVersion       = "beacon.learning.rubric.v1"
+	DefaultJevEndpoint  = "https://api.typesafe.ai/v1/systemone"
+	DefaultJevModel     = "jev-latest"
 	DefaultCostPerTrace = 0.00035
 	maxProjectionEvents = 80
 	maxProjectionText   = 1200
@@ -31,6 +33,7 @@ var RubricQuestions = []asymptoteobserve.LearningEvaluationQuestionV1{
 type EvaluatorOptions struct {
 	Endpoint     string
 	APIKey       string
+	Model        string
 	HTTPClient   *http.Client
 	CostPerTrace float64
 	Timeout      time.Duration
@@ -57,7 +60,7 @@ type Projection struct {
 	Harness    string              `json:"harness,omitempty"`
 	Repository string              `json:"repository,omitempty"`
 	Events     []ProjectedEvent    `json:"events"`
-	Questions  []ProjectedQuestion `json:"questions"`
+	Questions  []ProjectedQuestion `json:"-"`
 }
 
 type ProjectedEvent struct {
@@ -75,16 +78,36 @@ type ProjectedQuestion struct {
 }
 
 type jevRequest struct {
-	RubricVersion string     `json:"rubric_version"`
-	RubricHash    string     `json:"rubric_hash"`
-	Trace         Projection `json:"trace"`
+	Model     string                 `json:"model,omitempty"`
+	State     map[string]interface{} `json:"state"`
+	Questions map[string]jevQuestion `json:"questions"`
 }
 
 type jevResponse struct {
-	Questions       []asymptoteobserve.LearningEvaluationQuestionV1 `json:"questions"`
-	Results         []asymptoteobserve.LearningEvaluationQuestionV1 `json:"results"`
+	Model   string                                      `json:"model,omitempty"`
+	Answers map[string]jevAnswer                        `json:"answers"`
+	Usage   *asymptoteobserve.LearningEvaluationUsageV1 `json:"usage,omitempty"`
+	// Compatibility with tests or local shims that still return the earlier internal shape.
+	Questions       []asymptoteobserve.LearningEvaluationQuestionV1 `json:"questions,omitempty"`
+	Results         []asymptoteobserve.LearningEvaluationQuestionV1 `json:"results,omitempty"`
 	Score           *float64                                        `json:"score,omitempty"`
 	CostEstimateUSD *float64                                        `json:"cost_estimate_usd,omitempty"`
+}
+
+type jevQuestion struct {
+	Type         string            `json:"type"`
+	Instructions string            `json:"instructions"`
+	Criteria     map[string]string `json:"criteria,omitempty"`
+}
+
+type jevAnswer struct {
+	Type          string             `json:"type,omitempty"`
+	Noul          *float64           `json:"noul,omitempty"`
+	Probability   *float64           `json:"probability,omitempty"`
+	Choice        string             `json:"choice,omitempty"`
+	Score         *float64           `json:"score,omitempty"`
+	Confidence    float64            `json:"confidence,omitempty"`
+	Probabilities map[string]float64 `json:"probabilities,omitempty"`
 }
 
 func Evaluate(ctx context.Context, opts EvaluatorOptions, input EvaluationInput) (asymptoteobserve.LearningEvaluationV1, error) {
@@ -97,7 +120,7 @@ func Evaluate(ctx context.Context, opts EvaluatorOptions, input EvaluationInput)
 		return evaluation, nil
 	}
 	if strings.TrimSpace(opts.Endpoint) == "" {
-		return asymptoteobserve.LearningEvaluationV1{}, fmt.Errorf("Jev endpoint is required; pass --jev-endpoint or set BEACON_JEV_ENDPOINT")
+		opts.Endpoint = DefaultJevEndpoint
 	}
 	resp, err := callEvaluator(ctx, opts, projection)
 	if err != nil {
@@ -106,21 +129,33 @@ func Evaluate(ctx context.Context, opts EvaluatorOptions, input EvaluationInput)
 		evaluation.ID = EvaluationID(evaluation)
 		return evaluation, err
 	}
-	questions := resp.Questions
+	questions := questionsFromJevAnswers(resp.Answers)
+	if len(questions) == 0 {
+		questions = resp.Questions
+	}
 	if len(questions) == 0 {
 		questions = resp.Results
 	}
 	if len(questions) == 0 {
-		return asymptoteobserve.LearningEvaluationV1{}, fmt.Errorf("Jev response did not include questions or results")
+		return asymptoteobserve.LearningEvaluationV1{}, fmt.Errorf("Jev response did not include answers, questions, or results")
 	}
 	evaluation.Questions = normalizeQuestionResults(questions)
 	evaluation.Score = evaluationScore(evaluation.Questions)
 	if resp.Score != nil {
 		evaluation.Score = *resp.Score
 	}
+	if resp.Model != "" {
+		evaluation.EvaluatorModel = resp.Model
+	}
+	if resp.Usage != nil {
+		evaluation.Usage = resp.Usage
+		if resp.Usage.CostUSD > 0 {
+			evaluation.CostEstimateUSD = resp.Usage.CostUSD
+		}
+	}
 	if resp.CostEstimateUSD != nil {
 		evaluation.CostEstimateUSD = *resp.CostEstimateUSD
-	} else {
+	} else if evaluation.CostEstimateUSD == 0 {
 		evaluation.CostEstimateUSD = costPerTrace(opts)
 	}
 	evaluation.Status = asymptoteobserve.LearningEvaluationStatusCompleted
@@ -183,6 +218,7 @@ func RubricHash() string {
 
 func baseEvaluation(opts EvaluatorOptions, input EvaluationInput, projection Projection) asymptoteobserve.LearningEvaluationV1 {
 	trace := input.Trace.Trace
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	ref := asymptoteobserve.LearningTraceRefV1{
 		ID:      trace.ID,
 		Title:   trace.Title,
@@ -196,10 +232,13 @@ func baseEvaluation(opts EvaluatorOptions, input EvaluationInput, projection Pro
 	return asymptoteobserve.LearningEvaluationV1{
 		SchemaVersion:   asymptoteobserve.LearningSchemaVersion,
 		Status:          asymptoteobserve.LearningEvaluationStatusCompleted,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 		Project:         input.Project,
 		RubricVersion:   RubricVersion,
 		RubricHash:      RubricHash(),
 		Evaluator:       evaluatorName(opts),
+		EvaluatorModel:  modelName(opts),
 		DryRun:          input.DryRun,
 		Trace:           ref,
 		CostEstimateUSD: costPerTrace(opts),
@@ -218,7 +257,15 @@ func callEvaluator(ctx context.Context, opts EvaluatorOptions, projection Projec
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	body, err := json.Marshal(jevRequest{RubricVersion: RubricVersion, RubricHash: RubricHash(), Trace: projection})
+	body, err := json.Marshal(jevRequest{
+		Model: modelName(opts),
+		State: map[string]interface{}{
+			"trace":          projection,
+			"rubric_version": RubricVersion,
+			"rubric_hash":    RubricHash(),
+		},
+		Questions: jevQuestions(),
+	})
 	if err != nil {
 		return jevResponse{}, err
 	}
@@ -274,6 +321,51 @@ func normalizeQuestionResults(results []asymptoteobserve.LearningEvaluationQuest
 	return out
 }
 
+func jevQuestions() map[string]jevQuestion {
+	out := make(map[string]jevQuestion, len(RubricQuestions))
+	for _, question := range RubricQuestions {
+		out[question.ID] = jevQuestion{
+			Type:         "noul",
+			Instructions: question.Prompt,
+			Criteria: map[string]string{
+				"true":  "The trace satisfies this criterion.",
+				"false": "The trace does not satisfy this criterion.",
+			},
+		}
+	}
+	return out
+}
+
+func questionsFromJevAnswers(answers map[string]jevAnswer) []asymptoteobserve.LearningEvaluationQuestionV1 {
+	if len(answers) == 0 {
+		return nil
+	}
+	out := make([]asymptoteobserve.LearningEvaluationQuestionV1, 0, len(RubricQuestions))
+	for _, question := range RubricQuestions {
+		answer, ok := answers[question.ID]
+		if !ok {
+			continue
+		}
+		probability := 0.0
+		switch {
+		case answer.Noul != nil:
+			probability = *answer.Noul
+		case answer.Probability != nil:
+			probability = *answer.Probability
+		case answer.Score != nil:
+			probability = *answer.Score
+		}
+		out = append(out, asymptoteobserve.LearningEvaluationQuestionV1{
+			ID:          question.ID,
+			Prompt:      question.Prompt,
+			Probability: probability,
+			Confidence:  answer.Confidence,
+			Reason:      answer.Type,
+		})
+	}
+	return out
+}
+
 func projectionQuestionDefaults(projection Projection) []asymptoteobserve.LearningEvaluationQuestionV1 {
 	out := make([]asymptoteobserve.LearningEvaluationQuestionV1, 0, len(projection.Questions))
 	for _, question := range projection.Questions {
@@ -295,9 +387,16 @@ func evaluationScore(results []asymptoteobserve.LearningEvaluationQuestionV1) fl
 
 func evaluatorName(opts EvaluatorOptions) string {
 	if opts.Endpoint == "" {
-		return "jev"
+		return "jev:" + DefaultJevEndpoint
 	}
 	return "jev:" + opts.Endpoint
+}
+
+func modelName(opts EvaluatorOptions) string {
+	if strings.TrimSpace(opts.Model) != "" {
+		return strings.TrimSpace(opts.Model)
+	}
+	return DefaultJevModel
 }
 
 func costPerTrace(opts EvaluatorOptions) float64 {
