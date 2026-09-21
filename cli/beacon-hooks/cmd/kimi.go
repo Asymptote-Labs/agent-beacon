@@ -413,8 +413,10 @@ func applyKimiToolResult(fields map[string]interface{}, toolName string, toolInp
 	}
 	command := mutableChild(fields["command"])
 	command["output"] = output
-	if code, ok := kimiExitCode(output); ok {
-		command["exit_code"] = code
+	if kimiToolFailed(input) {
+		if code, ok := kimiExitCode(output); ok {
+			command["exit_code"] = code
+		}
 	}
 	fields["command"] = command
 	// The retention marker describes the command output specifically, so it is not overwritten: a

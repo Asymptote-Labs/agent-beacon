@@ -523,6 +523,29 @@ func TestKimiExitCodeReading(t *testing.T) {
 	}
 }
 
+// A successful Bash command whose own output contains the exit-code marker sentence must not have
+// it promoted into command.exit_code. The marker is only meaningful on failure, where the runtime
+// appends it; on success any match is from the command itself.
+func TestKimiSuccessfulCommandWithMarkerInOutputDoesNotGetFalseExitCode(t *testing.T) {
+	logPath := kimiTestSetup(t)
+
+	runHookWithInput(t, runPostTool, kimiEvent("PostToolUse", "k-bash-marker", map[string]interface{}{
+		"tool_name":    "Bash",
+		"tool_input":   map[string]interface{}{"command": "go test ./..."},
+		"tool_call_id": "call_fp",
+		"tool_output":  "expected: Command failed with exit code: 1.\nPASS",
+	}))
+
+	event := lastEndpointEvent(t, logPath)
+	if got := leaf(event, "event", "action"); got != "command.executed" {
+		t.Fatalf("event.action = %q, want command.executed", got)
+	}
+	if _, present := event["command"].(map[string]interface{})["exit_code"]; present {
+		t.Fatalf("command.exit_code was written for a successful command whose output merely "+
+			"contained the marker sentence: %#v", event["command"])
+	}
+}
+
 // The result reader is scoped to the shell tool. A `Read` whose output happens to contain the
 // runtime's exit sentence -- a log file, a test fixture, this very source file -- must not have it
 // promoted into a command block on a file event.
