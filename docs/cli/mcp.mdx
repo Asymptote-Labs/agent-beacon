@@ -52,7 +52,10 @@ Search and summary tools accept filters such as `since`, `until`, `limit`, `q`, 
 Memory tools read approved project memory only. They do not run Jev, approve
 candidates, install Agent Skills, or expose pending/rejected candidates. Use
 `project_id` or the MCP client's project context when a client needs memory for a
-specific repository.
+specific repository. A `project` path sent by a client is matched against the
+projects the memory store already holds records for; Beacon does not read git
+metadata from a path a client supplies, so an unrecognized path returns nothing
+rather than widening the search.
 
 ## Flags
 

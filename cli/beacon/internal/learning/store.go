@@ -25,6 +25,14 @@ type Store struct {
 	dbPath string
 }
 
+// Query selects stored learning records.
+//
+// ProjectPath is the trust boundary of this package. The CLI resolves an
+// operator-supplied path itself and only ever sets ProjectID; ProjectPath is
+// set solely by relayed callers such as the local dashboard and the MCP
+// server, whose value arrives in a request. It is therefore matched against
+// the projects the store already holds (Store.ProjectIDForPath) rather than
+// resolved against the filesystem.
 type Query struct {
 	ProjectPath string
 	ProjectID   string
@@ -147,6 +155,10 @@ func ensureSchema(db *sql.DB) error {
 	return nil
 }
 
+// ResolveProject reads git metadata to describe the project at path. It is for
+// operator-supplied paths only: the CLI's --project flag and the process
+// working directory. A path that arrives in a request is resolved by
+// Store.ProjectIDForPath instead, which does not touch the filesystem.
 func ResolveProject(path string) (asymptoteobserve.LearningProjectV1, error) {
 	if strings.TrimSpace(path) == "" {
 		var err error
@@ -179,6 +191,101 @@ func ProjectID(project asymptoteobserve.LearningProjectV1) string {
 	}
 	sum := sha256.Sum256([]byte(strings.ToLower(filepath.ToSlash(key))))
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// KnownProjects returns the distinct projects this store holds records for.
+func (s *Store) KnownProjects() ([]asymptoteobserve.LearningProjectV1, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.Query(`
+		SELECT project_id, json_extract(evaluation_json, '$.project.path') FROM evaluations
+		UNION
+		SELECT project_id, json_extract(candidate_json, '$.project.path') FROM candidates
+		UNION
+		SELECT project_id, json_extract(memory_json, '$.project.path') FROM memories`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []asymptoteobserve.LearningProjectV1
+	for rows.Next() {
+		var id string
+		var path sql.NullString
+		if err := rows.Scan(&id, &path); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		out = append(out, asymptoteobserve.LearningProjectV1{ID: id, Path: strings.TrimSpace(path.String)})
+	}
+	return out, rows.Err()
+}
+
+// ProjectIDForPath maps a project path supplied by a relayed caller onto the
+// ID of a project this store already holds records for, choosing the most
+// specific known project that contains the path. It deliberately never touches
+// the filesystem: the dashboard and the MCP server pass a value that arrives in
+// a request, and such a value must not reach a path expression. A path no
+// stored project covers resolves to the same deterministic ID a plain
+// directory would get, which matches no rows, so an unknown project keeps
+// scoping the query to nothing rather than widening it to every project.
+func (s *Store) ProjectIDForPath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", nil
+	}
+	cleaned := filepath.Clean(trimmed)
+	projects, err := s.KnownProjects()
+	if err != nil {
+		return "", err
+	}
+	var best asymptoteobserve.LearningProjectV1
+	for _, project := range projects {
+		if project.Path == "" || !pathWithin(cleaned, project.Path) {
+			continue
+		}
+		if len(project.Path) > len(best.Path) {
+			best = project
+		}
+	}
+	if best.ID != "" {
+		return best.ID, nil
+	}
+	return ProjectID(asymptoteobserve.LearningProjectV1{Path: cleaned}), nil
+}
+
+// scopeQuery resolves a relayed ProjectPath into a project ID once, before any
+// statement runs. A caller that already knows the ID keeps it.
+func (s *Store) scopeQuery(query Query) (Query, error) {
+	if strings.TrimSpace(query.ProjectID) != "" || strings.TrimSpace(query.ProjectPath) == "" {
+		query.ProjectPath = ""
+		return query, nil
+	}
+	id, err := s.ProjectIDForPath(query.ProjectPath)
+	if err != nil {
+		return Query{}, err
+	}
+	query.ProjectID = id
+	query.ProjectPath = ""
+	return query, nil
+}
+
+// pathWithin reports whether path is root or sits under it. Comparison is
+// case-insensitive to match how ProjectID folds case when it hashes a path.
+func pathWithin(path, root string) bool {
+	path = filepath.ToSlash(filepath.Clean(path))
+	root = filepath.ToSlash(filepath.Clean(root))
+	if strings.EqualFold(path, root) {
+		return true
+	}
+	if !strings.HasSuffix(root, "/") {
+		root += "/"
+	}
+	return strings.HasPrefix(strings.ToLower(path), strings.ToLower(root))
 }
 
 func findGitRoot(path string) string {
@@ -281,6 +388,10 @@ func (s *Store) PutEvaluation(e asymptoteobserve.LearningEvaluationV1) error {
 }
 
 func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluationV1, error) {
+	query, err := s.scopeQuery(query)
+	if err != nil {
+		return nil, err
+	}
 	db, err := s.db()
 	if err != nil {
 		return nil, err
@@ -351,6 +462,10 @@ func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
 }
 
 func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidateV1, error) {
+	query, err := s.scopeQuery(query)
+	if err != nil {
+		return nil, err
+	}
 	db, err := s.db()
 	if err != nil {
 		return nil, err
@@ -418,6 +533,10 @@ func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
 }
 
 func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, error) {
+	query, err := s.scopeQuery(query)
+	if err != nil {
+		return nil, err
+	}
 	db, err := s.db()
 	if err != nil {
 		return nil, err
@@ -523,11 +642,6 @@ func queryWhere(query Query, projectColumn, stateColumn, kindColumn string) (str
 	var clauses []string
 	var args []interface{}
 	projectID := strings.TrimSpace(query.ProjectID)
-	if projectID == "" && query.ProjectPath != "" {
-		if project, err := ResolveProject(query.ProjectPath); err == nil {
-			projectID = project.ID
-		}
-	}
 	if projectID != "" && projectColumn != "" {
 		clauses = append(clauses, projectColumn+" = ?")
 		args = append(args, projectID)
