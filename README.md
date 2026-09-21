@@ -34,11 +34,7 @@ debugging patterns into reusable knowledge for future agents.
 
 ## Beacon Overview
 
-Beacon is an open-source memory layer for AI coding agents that collects available
-session telemetry across Claude Code, Cursor, Codex, OpenCode, and 20+ other
-harnesses. Developers can evaluate selected traces, review candidate workflows,
-corrections, and debugging patterns, and approve useful knowledge for reuse by
-future agents.
+Beacon is an open-source memory layer for AI coding agents that learns from your work across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses. It captures full session history, identifies useful workflows, corrections, and debugging patterns, and makes that knowledge reusable by future agents. Built for developers who want agent knowledge to compound across tools instead of disappearing when a session ends.
 
 **Key Capabilities:**
 
