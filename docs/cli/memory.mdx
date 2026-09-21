@@ -1,0 +1,106 @@
+---
+title: "beacon memory"
+description: "Evaluate traces, review project memory, and install approved Agent Skills"
+---
+
+## Overview
+
+`beacon memory` is the local review workflow for turning selected Beacon traces into
+approved project memory.
+
+The commands are grouped by resource:
+
+- `beacon memory evaluations run|list|show`
+- `beacon memory candidates list|show|approve|reject|supersede`
+- `beacon memory skills preview|install`
+
+## Evaluate traces
+
+Preview selected traces and estimated Jev calls without a network request:
+
+```bash
+beacon memory evaluations run --dry-run --limit 10
+```
+
+Evaluate one trace with TypeSafe Jev:
+
+```bash
+TYPESAFE_API_KEY=... beacon memory evaluations run \
+  --trace session:cursor:s1 \
+  --jev-model jev-latest
+```
+
+Useful flags:
+
+- `--trace <id>` evaluates one trace ID.
+- `--harness <name>` filters traces by harness.
+- `--since <rfc3339>` and `--until <rfc3339>` bound the trace window.
+- `--jev-model <model>` selects the Jev model, such as `jev-latest` or a pinned version.
+- `--jev-endpoint <url>` overrides the TypeSafe System One endpoint.
+- `--json` prints machine-readable output.
+
+## Review candidates
+
+List generated candidates:
+
+```bash
+beacon memory candidates list
+```
+
+Inspect one candidate:
+
+```bash
+beacon memory candidates show <candidate-id>
+```
+
+Approve a candidate into project memory:
+
+```bash
+beacon memory candidates approve <candidate-id> --reason "reviewed"
+```
+
+Reject or supersede candidates:
+
+```bash
+beacon memory candidates reject <candidate-id> --reason "too specific"
+beacon memory candidates supersede <candidate-id> --replacement <memory-id>
+```
+
+## Install Agent Skills
+
+Preview the skill content without writing:
+
+```bash
+beacon memory skills preview <candidate-id>
+```
+
+Install the skill into the project:
+
+```bash
+beacon memory skills install <candidate-id>
+```
+
+Beacon writes:
+
+```text
+.agents/skills/<slug>/SKILL.md
+```
+
+Existing files are not overwritten unless you pass `--force`.
+
+## MCP retrieval
+
+`beacon mcp serve` exposes approved memory as read-only MCP tools:
+
+- `search_memory`
+- `get_memory`
+- `get_memory_context`
+
+These tools let future agents retrieve approved project knowledge regardless of which
+harness originally produced the trace.
+
+## Network boundary
+
+`beacon memory evaluations run` is the only command in this workflow that can call
+Jev, and only when it is not run with `--dry-run`. Beacon hooks and normal endpoint
+capture remain local-only and do not call Jev.

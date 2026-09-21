@@ -73,6 +73,7 @@
                   "concepts/vector-forwarding"
                 ]
               },
+              "concepts/cross-harness-memory",
               {
                 "group": "Unified Telemetry Schema",
                 "root": "telemetry-schema/event-schema",
@@ -326,6 +327,7 @@
                   "cli/mcp-doctor"
                 ]
               },
+              "cli/memory",
               {
                 "group": "beacon rules",
                 "root": "cli/rules",

@@ -49,6 +49,7 @@ activity into a [single, unified schema](https://docs.asymptotelabs.ai/cli/event
 | **Broad runtime coverage** | [Local agent runtimes](#local-agents), plus [browser chat, CI, cloud agents, and SDKs](#supported-surfaces) |
 | **One unified schema** | Every session, prompt, tool, command, edit, approval, and token in one event model |
 | **Local-first by default** | Data stays on the machine: durable JSONL and a read-only [dashboard](https://docs.asymptotelabs.ai/cli/dashboard), no account |
+| **Reviewed cross-harness memory** | Opt-in trace evaluation and human-approved project memory that future agents can retrieve through MCP or Agent Skills |
 | **Offline threat detection** | `beacon scan` runs open [Threat Rules](spec/threat-rules/SPEC.md) over your logs, with no network |
 | **Forwards where you already work** | Stream the same log to [your SIEM, observability, or object storage](#output-destinations) |
 | **Deploys in one command or fleet-wide** | [One command](https://docs.asymptotelabs.ai/cli/installation) on a laptop, [MDM](#mdm-deployment) across a fleet |
