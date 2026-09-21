@@ -39,6 +39,7 @@ var memoryOpts struct {
 	kind        string
 	reason      string
 	replacement string
+	force       bool
 }
 
 var memoryCmd = &cobra.Command{
@@ -117,6 +118,27 @@ var memoryCandidatesSupersedeCmd = &cobra.Command{
 	RunE:         runMemoryCandidatesSupersede,
 }
 
+var memorySkillsCmd = &cobra.Command{
+	Use:   "skills",
+	Short: "Preview and install approved memory as Agent Skills",
+}
+
+var memorySkillsPreviewCmd = &cobra.Command{
+	Use:          "preview <candidate-id>",
+	Short:        "Preview the Agent Skill for an approved candidate",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemorySkillsPreview,
+}
+
+var memorySkillsInstallCmd = &cobra.Command{
+	Use:          "install <candidate-id>",
+	Short:        "Install the Agent Skill for an approved candidate",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemorySkillsInstall,
+}
+
 type evaluationRunResult struct {
 	DryRun           bool                                    `json:"dry_run"`
 	Project          asymptoteobserve.LearningProjectV1      `json:"project"`
@@ -133,6 +155,7 @@ func init() {
 	rootCmd.AddCommand(memoryCmd)
 	memoryCmd.AddCommand(memoryEvaluationsCmd)
 	memoryCmd.AddCommand(memoryCandidatesCmd)
+	memoryCmd.AddCommand(memorySkillsCmd)
 	memoryEvaluationsCmd.AddCommand(memoryEvaluationsRunCmd)
 	memoryEvaluationsCmd.AddCommand(memoryEvaluationsListCmd)
 	memoryEvaluationsCmd.AddCommand(memoryEvaluationsShowCmd)
@@ -141,8 +164,10 @@ func init() {
 	memoryCandidatesCmd.AddCommand(memoryCandidatesApproveCmd)
 	memoryCandidatesCmd.AddCommand(memoryCandidatesRejectCmd)
 	memoryCandidatesCmd.AddCommand(memoryCandidatesSupersedeCmd)
+	memorySkillsCmd.AddCommand(memorySkillsPreviewCmd)
+	memorySkillsCmd.AddCommand(memorySkillsInstallCmd)
 
-	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryEvaluationsShowCmd, memoryCandidatesListCmd, memoryCandidatesShowCmd, memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd} {
+	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryEvaluationsShowCmd, memoryCandidatesListCmd, memoryCandidatesShowCmd, memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd, memorySkillsPreviewCmd, memorySkillsInstallCmd} {
 		c.Flags().BoolVar(&memoryOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&memoryOpts.systemMode, "system", false, "Use system endpoint paths")
 		c.Flags().StringVar(&memoryOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -160,6 +185,7 @@ func init() {
 		c.Flags().StringVar(&memoryOpts.reason, "reason", "", "Review reason recorded with the candidate")
 	}
 	memoryCandidatesSupersedeCmd.Flags().StringVar(&memoryOpts.replacement, "replacement", "", "Approved memory ID that supersedes this candidate")
+	memorySkillsInstallCmd.Flags().BoolVar(&memoryOpts.force, "force", false, "Overwrite an existing generated skill")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.harness, "harness", "", "Filter traces by harness")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.traceID, "trace", "", "Evaluate a single trace ID")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.since, "since", "", "RFC3339 lower time bound, inclusive")
@@ -344,6 +370,40 @@ func runMemoryCandidatesSupersede(cmd *cobra.Command, args []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(candidate)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Superseded %s with %s\n", candidate.ID, candidate.SupersededBy)
+	return nil
+}
+
+func runMemorySkillsPreview(cmd *cobra.Command, args []string) error {
+	candidate, memory, err := learning.CandidateMemoryForSkill(memoryStore(), args[0])
+	if err != nil {
+		return err
+	}
+	content := learning.RenderSkill(candidate, memory)
+	result := learning.SkillInstallResult{Slug: learning.SkillSlug(memory), Content: content}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}
+	fmt.Fprint(cmd.OutOrStdout(), content)
+	return nil
+}
+
+func runMemorySkillsInstall(cmd *cobra.Command, args []string) error {
+	candidate, memory, err := learning.CandidateMemoryForSkill(memoryStore(), args[0])
+	if err != nil {
+		return err
+	}
+	projectPath := memoryOpts.projectPath
+	if projectPath == "" {
+		projectPath = firstNonEmpty(memory.Project.Path, candidate.Project.Path)
+	}
+	result, err := learning.InstallSkill(projectPath, candidate, memory, memoryOpts.force)
+	if err != nil {
+		return err
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s\n", result.Path)
 	return nil
 }
 

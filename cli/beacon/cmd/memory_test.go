@@ -28,6 +28,8 @@ func TestMemoryEvaluationCommandsRegistered(t *testing.T) {
 		{"memory", "candidates", "approve"},
 		{"memory", "candidates", "reject"},
 		{"memory", "candidates", "supersede"},
+		{"memory", "skills", "preview"},
+		{"memory", "skills", "install"},
 	} {
 		cmd, _, err := rootCmd.Find(path)
 		if err != nil || cmd == nil {
@@ -136,6 +138,44 @@ func TestMemoryCandidatesApproveCommand(t *testing.T) {
 	}
 }
 
+func TestMemorySkillsPreviewAndInstallCommands(t *testing.T) {
+	logPath, project := writeMemoryCommandFixture(t)
+	resetMemoryOpts(t)
+	memoryOpts.userMode = true
+	memoryOpts.logPath = logPath
+	memoryOpts.projectPath = project
+	candidate, memory := testApprovedCommandMemory()
+	store := memoryStore()
+	if err := store.PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutMemory(memory); err != nil {
+		t.Fatal(err)
+	}
+
+	var preview bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&preview)
+	if err := runMemorySkillsPreview(cmd, []string{candidate.ID}); err != nil {
+		t.Fatalf("runMemorySkillsPreview returned error: %v", err)
+	}
+	if !strings.Contains(preview.String(), "beacon_memory_id") || !strings.Contains(preview.String(), "Retry package smoke") {
+		t.Fatalf("preview output = %s", preview.String())
+	}
+
+	var install bytes.Buffer
+	cmd.SetOut(&install)
+	if err := runMemorySkillsInstall(cmd, []string{candidate.ID}); err != nil {
+		t.Fatalf("runMemorySkillsInstall returned error: %v", err)
+	}
+	if !strings.Contains(install.String(), ".agents") {
+		t.Fatalf("install output = %s", install.String())
+	}
+	if _, err := os.Stat(filepath.Join(project, ".agents", "skills", "beacon-debugging-pattern-retry-package-smoke", "SKILL.md")); err != nil {
+		t.Fatalf("installed skill missing: %v", err)
+	}
+}
+
 func writeMemoryCommandFixture(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -200,6 +240,7 @@ func resetMemoryOpts(t *testing.T) {
 		kind        string
 		reason      string
 		replacement string
+		force       bool
 	}{userMode: true, limit: 25, page: 1, jevEndpoint: learning.DefaultJevEndpoint, jevModel: learning.DefaultJevModel, jevCost: learning.DefaultCostPerTrace}
 	t.Cleanup(func() { memoryOpts = previous })
 }
@@ -228,4 +269,31 @@ func testCommandCandidate(t *testing.T) asymptoteobserve.LearningCandidateV1 {
 		t.Fatal("candidate not created")
 	}
 	return candidate
+}
+
+func testApprovedCommandMemory() (asymptoteobserve.LearningCandidateV1, asymptoteobserve.LearningMemoryV1) {
+	project := asymptoteobserve.LearningProjectV1{ID: "project-1"}
+	evidence := []asymptoteobserve.LearningEvidenceV1{{TraceID: "trace-1", Summary: "Retry fixed a transient failure"}}
+	candidate := asymptoteobserve.LearningCandidateV1{
+		ID:       "candidate-approved",
+		MemoryID: "memory-approved",
+		State:    asymptoteobserve.LearningCandidateStateApproved,
+		Kind:     asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title:    "Debugging pattern: Retry package smoke",
+		Body:     "Rerun package smoke once after confirming the error is transient.",
+		Project:  project,
+		Evidence: evidence,
+	}
+	memory := asymptoteobserve.LearningMemoryV1{
+		ID:            candidate.MemoryID,
+		CandidateID:   candidate.ID,
+		Kind:          candidate.Kind,
+		Title:         candidate.Title,
+		Body:          candidate.Body,
+		Applicability: "when package smoke fails transiently",
+		Tags:          []string{"beacon", "debugging_pattern"},
+		Project:       project,
+		Evidence:      evidence,
+	}
+	return candidate, memory
 }
