@@ -2,7 +2,7 @@
   <img src="images/beacon-hero.png" alt="Beacon" width="860">
 </p>
 
-<h1 align="center">Beacon</h1>
+<h1 align="center">Turn every agent session into compounding knowledge</h1>
 
 <p align="center">
   <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
@@ -11,10 +11,6 @@
   <a href="https://github.com/asymptote-labs/agent-beacon/blob/main/LICENSE"><img src="https://img.shields.io/github/license/asymptote-labs/agent-beacon" alt="MIT license"></a>
   <a href="https://docs.beacon.sh"><img src="https://img.shields.io/badge/docs-beacon.sh-0369a1" alt="Docs"></a>
   <a href="https://discord.gg/zdNChS2fBu"><img src="https://img.shields.io/badge/discord-community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <strong>The cross-harness self-improving memory layer for AI agents.</strong>
 </p>
 
 <p align="center">
