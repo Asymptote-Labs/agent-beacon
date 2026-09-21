@@ -125,6 +125,93 @@ func TestStorePersistsLearningArtifacts(t *testing.T) {
 	}
 }
 
+func TestGetCandidateBySourceEvaluation(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	eval := asymptoteobserve.LearningEvaluationV1{
+		ID:      "eval-src-lookup",
+		Status:  asymptoteobserve.LearningEvaluationStatusCompleted,
+		Score:   0.9,
+		Project: asymptoteobserve.LearningProjectV1{ID: "project-1", Path: "/repo"},
+		Trace: asymptoteobserve.LearningTraceRefV1{
+			ID:       "trace-src-lookup",
+			Title:    "Fix flaky package smoke",
+			EventIDs: []string{"event-1"},
+		},
+		Questions: []asymptoteobserve.LearningEvaluationQuestionV1{
+			{ID: "task_success", Probability: 0.95},
+		},
+	}
+	candidate := asymptoteobserve.LearningCandidateV1{
+		ID:                 "candidate-src-lookup",
+		State:              asymptoteobserve.LearningCandidateStateCandidate,
+		Kind:               asymptoteobserve.LearningMemoryKindCorrection,
+		Title:              "correction: Fix flaky package smoke",
+		Project:            eval.Project,
+		SourceEvaluationID: eval.ID,
+	}
+	if _, found, err := store.GetCandidateBySourceEvaluation(eval.ID); err != nil || found {
+		t.Fatalf("expected not found before insert, found=%v err=%v", found, err)
+	}
+	if err := store.PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := store.GetCandidateBySourceEvaluation(eval.ID)
+	if err != nil || !found {
+		t.Fatalf("expected found after insert, found=%v err=%v", found, err)
+	}
+	if got.ID != candidate.ID {
+		t.Fatalf("got candidate ID %s, want %s", got.ID, candidate.ID)
+	}
+}
+
+func TestRerunDoesNotClobberReviewedCandidate(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	eval := asymptoteobserve.LearningEvaluationV1{
+		ID:      "eval-rerun",
+		Status:  asymptoteobserve.LearningEvaluationStatusCompleted,
+		Score:   0.9,
+		Project: asymptoteobserve.LearningProjectV1{ID: "project-1", Path: "/repo"},
+		Trace: asymptoteobserve.LearningTraceRefV1{
+			ID:       "trace-rerun",
+			Title:    "Fix flaky package smoke",
+			EventIDs: []string{"event-1"},
+		},
+		Questions: []asymptoteobserve.LearningEvaluationQuestionV1{
+			{ID: "task_success", Probability: 0.95},
+		},
+	}
+
+	candidate := asymptoteobserve.LearningCandidateV1{
+		ID:                 "candidate-rerun",
+		State:              asymptoteobserve.LearningCandidateStateCandidate,
+		Kind:               asymptoteobserve.LearningMemoryKindCorrection,
+		Title:              "correction: Fix flaky package smoke",
+		Project:            eval.Project,
+		SourceEvaluationID: eval.ID,
+	}
+	if err := store.PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate.State = asymptoteobserve.LearningCandidateStateApproved
+	candidate.MemoryID = "memory-rerun"
+	candidate.ApprovedAt = "2025-01-01T00:00:00Z"
+	if err := store.PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+
+	existing, found, err := store.GetCandidateBySourceEvaluation(eval.ID)
+	if err != nil || !found {
+		t.Fatalf("expected existing candidate, found=%v err=%v", found, err)
+	}
+	if existing.State != asymptoteobserve.LearningCandidateStateApproved {
+		t.Fatalf("expected approved state, got %s", existing.State)
+	}
+	if existing.MemoryID != "memory-rerun" {
+		t.Fatalf("expected memory ID preserved, got %s", existing.MemoryID)
+	}
+}
+
 func TestStoreScopesByProject(t *testing.T) {
 	store := Open(filepath.Join(t.TempDir(), "memory.db"))
 	for _, projectID := range []string{"p1", "p2"} {

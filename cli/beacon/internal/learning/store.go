@@ -389,6 +389,16 @@ func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, b
 	return value, true, json.Unmarshal([]byte(raw), &value)
 }
 
+func (s *Store) GetCandidateBySourceEvaluation(sourceEvalID string) (asymptoteobserve.LearningCandidateV1, bool, error) {
+	var raw string
+	ok, err := s.getJSON(`SELECT candidate_json FROM candidates WHERE source_evaluation_id = ? LIMIT 1`, sourceEvalID, &raw)
+	if err != nil || !ok {
+		return asymptoteobserve.LearningCandidateV1{}, ok, err
+	}
+	var value asymptoteobserve.LearningCandidateV1
+	return value, true, json.Unmarshal([]byte(raw), &value)
+}
+
 func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
 	if m.SchemaVersion == "" {
 		m.SchemaVersion = asymptoteobserve.LearningSchemaVersion

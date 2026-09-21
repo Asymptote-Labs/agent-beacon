@@ -216,6 +216,16 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 		}
 		result.Evaluations = append(result.Evaluations, eval)
 		if candidate, ok := learning.CandidateFromEvaluation(eval); ok {
+			existing, found, err := store.GetCandidateBySourceEvaluation(eval.ID)
+			if err != nil {
+				return err
+			}
+			if found && existing.State != asymptoteobserve.LearningCandidateStateCandidate {
+				continue
+			}
+			if found {
+				candidate.ID = existing.ID
+			}
 			if err := store.PutCandidate(candidate); err != nil {
 				return err
 			}
