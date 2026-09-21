@@ -90,7 +90,10 @@ func maybeRunOnboarding(cmd *cobra.Command) (connect bool, err error) {
 		if profile.Onboarding.Destination != "" {
 			return false, nil
 		}
-		if reason, skipped := destinationSkipReason(profile); skipped && reason != "already_connected" {
+		if !onboardingEnabledByEnv() {
+			return false, nil
+		}
+		if _, skipped := destinationSkipReason(profile); skipped {
 			return false, nil
 		}
 		return runAccountOnboarding(cmd, &profile, true)

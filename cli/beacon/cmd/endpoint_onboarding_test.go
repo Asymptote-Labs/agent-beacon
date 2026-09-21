@@ -407,6 +407,22 @@ func TestMaybeRunOnboardingEnvironmentAnswersRespectOptOut(t *testing.T) {
 	}
 }
 
+func TestPreviouslyOnboardedDestinationUpgradeRespectsOptOut(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.loaded = onboarding.Profile{
+		InstallID:  "legacy",
+		Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted},
+	}
+	t.Setenv(onboardingEnvEnabled, "0")
+
+	if connect, err := maybeRunOnboarding(h.cmd); err != nil || connect {
+		t.Fatalf("connect=%t err=%v", connect, err)
+	}
+	if h.asked || h.standaloneAsked || h.loginRuns != 0 || len(h.saved) != 0 {
+		t.Fatalf("opted-out upgrade prompted or persisted: asked=%t standalone=%t login=%d saved=%+v", h.asked, h.standaloneAsked, h.loginRuns, h.saved)
+	}
+}
+
 // The opt-out is an environment variable only. Shipping a CLI flag would make
 // declining a single keystroke, which is not what this prompt is for.
 func TestInstallHasNoOnboardingOptOutFlag(t *testing.T) {
@@ -711,16 +727,13 @@ func TestDestinationAskedOnceToPreviouslyOnboardedMachine(t *testing.T) {
 	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked {
 		t.Fatal("CI never sees the question")
 	}
-	// An upgraded connected endpoint signs in and records managed without asking
-	// the operator to choose a conflicting destination.
+	// An upgraded endpoint that is already connected keeps the legacy skip
+	// guarantee; reinstall must not introduce a new account dependency.
 	h = newOnboardingHarness(t)
 	h.askable = false
 	h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z"}}
-	if connect, _ := maybeRunOnboarding(h.cmd); connect || !h.standaloneAsked {
-		t.Fatal("a connected endpoint should complete the account migration")
-	}
-	if got := h.saved[len(h.saved)-1].Onboarding.Destination; got != onboarding.DestinationAsymptote {
-		t.Fatalf("connected endpoint destination = %q", got)
+	if connect, _ := maybeRunOnboarding(h.cmd); connect || h.standaloneAsked || h.loginRuns != 0 || len(h.saved) != 0 {
+		t.Fatalf("connected reinstall prompted or persisted: connect=%t asked=%t login=%d saved=%+v", connect, h.standaloneAsked, h.loginRuns, h.saved)
 	}
 }
 
