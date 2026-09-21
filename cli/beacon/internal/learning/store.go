@@ -199,8 +199,47 @@ func findGitRoot(path string) string {
 	}
 }
 
+func resolveGitDirs(root string) (perWorktree, common string) {
+	dotGit := filepath.Join(root, ".git")
+	info, err := os.Stat(dotGit)
+	if err != nil {
+		return "", ""
+	}
+	if info.IsDir() {
+		return dotGit, dotGit
+	}
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return "", ""
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
+	if !ok || gitdir == "" {
+		return "", ""
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(root, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+	commondirData, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	if err != nil {
+		return gitdir, gitdir
+	}
+	commondir := strings.TrimSpace(string(commondirData))
+	if commondir == "" {
+		return gitdir, gitdir
+	}
+	if !filepath.IsAbs(commondir) {
+		commondir = filepath.Join(gitdir, commondir)
+	}
+	return gitdir, filepath.Clean(commondir)
+}
+
 func readGitHeadBranch(root string) string {
-	data, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))
+	perWorktree, _ := resolveGitDirs(root)
+	if perWorktree == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(perWorktree, "HEAD"))
 	if err != nil {
 		return ""
 	}
@@ -213,7 +252,11 @@ func readGitHeadBranch(root string) string {
 }
 
 func readGitConfigValue(root, section, key string) string {
-	data, err := os.ReadFile(filepath.Join(root, ".git", "config"))
+	_, common := resolveGitDirs(root)
+	if common == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(common, "config"))
 	if err != nil {
 		return ""
 	}
@@ -264,15 +307,19 @@ func (s *Store) PutEvaluation(e asymptoteobserve.LearningEvaluationV1) error {
 	if e.ID == "" {
 		e.ID = EvaluationID(e)
 	}
-	data, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
 	db, err := s.db()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	var existingCreatedAt string
+	if db.QueryRow(`SELECT created_at FROM evaluations WHERE id = ?`, e.ID).Scan(&existingCreatedAt) == nil && existingCreatedAt != "" {
+		e.CreatedAt = existingCreatedAt
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
 	_, err = db.Exec(`INSERT INTO evaluations (id, project_id, trace_id, status, created_at, updated_at, rubric_hash, evaluator, evaluation_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, evaluator = excluded.evaluator, evaluation_json = excluded.evaluation_json`,
@@ -287,7 +334,13 @@ func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluat
 	}
 	defer db.Close()
 	where, args := queryWhere(query, "project_id", "status", "")
-	rows, err := db.Query(`SELECT evaluation_json FROM evaluations`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
+	hasSearch := strings.TrimSpace(query.Q) != ""
+	q := `SELECT evaluation_json FROM evaluations` + where + ` ORDER BY updated_at DESC`
+	if !hasSearch {
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, normalizeLimit(query.Limit), offset(query))
+	}
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -302,11 +355,17 @@ func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluat
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Trace.ID, value.Trace.Title, value.Evaluator, value.Status) {
+		if !hasSearch || matchesText(query.Q, value.ID, value.Trace.ID, value.Trace.Title, value.Evaluator, value.Status) {
 			out = append(out, value)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if hasSearch {
+		out = paginateSlice(out, query)
+	}
+	return out, nil
 }
 
 func (s *Store) GetEvaluation(id string) (asymptoteobserve.LearningEvaluationV1, bool, error) {
@@ -334,15 +393,19 @@ func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
 	if c.ID == "" {
 		c.ID = CandidateID(c)
 	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
 	db, err := s.db()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	var existingCreatedAt string
+	if db.QueryRow(`SELECT created_at FROM candidates WHERE id = ?`, c.ID).Scan(&existingCreatedAt) == nil && existingCreatedAt != "" {
+		c.CreatedAt = existingCreatedAt
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
 	_, err = db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET state = excluded.state, kind = excluded.kind, title = excluded.title, memory_id = excluded.memory_id, updated_at = excluded.updated_at, candidate_json = excluded.candidate_json`,
@@ -357,7 +420,13 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 	}
 	defer db.Close()
 	where, args := queryWhere(query, "project_id", "state", "kind")
-	rows, err := db.Query(`SELECT candidate_json FROM candidates`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
+	hasSearch := strings.TrimSpace(query.Q) != ""
+	q := `SELECT candidate_json FROM candidates` + where + ` ORDER BY updated_at DESC`
+	if !hasSearch {
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, normalizeLimit(query.Limit), offset(query))
+	}
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -372,11 +441,17 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind, value.State) {
+		if !hasSearch || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind, value.State) {
 			out = append(out, value)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if hasSearch {
+		out = paginateSlice(out, query)
+	}
+	return out, nil
 }
 
 func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
@@ -401,20 +476,33 @@ func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
 	if m.ID == "" {
 		m.ID = MemoryID(m)
 	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
 	db, err := s.db()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	_, err = db.Exec(`INSERT INTO memories (id, candidate_id, project_id, kind, title, created_at, updated_at, superseded_by, memory_json)
+	var existingCreatedAt string
+	if db.QueryRow(`SELECT created_at FROM memories WHERE id = ? OR candidate_id = ?`, m.ID, m.CandidateID).Scan(&existingCreatedAt) == nil && existingCreatedAt != "" {
+		m.CreatedAt = existingCreatedAt
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, _ = tx.Exec(`DELETE FROM memories WHERE candidate_id = ? AND id != ?`, m.CandidateID, m.ID)
+	_, err = tx.Exec(`INSERT INTO memories (id, candidate_id, project_id, kind, title, created_at, updated_at, superseded_by, memory_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at, superseded_by = excluded.superseded_by, memory_json = excluded.memory_json`,
 		m.ID, m.CandidateID, m.Project.ID, m.Kind, m.Title, m.CreatedAt, m.UpdatedAt, m.SupersededBy, string(data))
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, error) {
@@ -429,7 +517,13 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 	} else {
 		where += ` AND (superseded_by IS NULL OR superseded_by = '')`
 	}
-	rows, err := db.Query(`SELECT memory_json FROM memories`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
+	hasSearch := strings.TrimSpace(query.Q) != ""
+	q := `SELECT memory_json FROM memories` + where + ` ORDER BY updated_at DESC`
+	if !hasSearch {
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, normalizeLimit(query.Limit), offset(query))
+	}
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -444,11 +538,17 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind) {
+		if !hasSearch || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind) {
 			out = append(out, value)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if hasSearch {
+		out = paginateSlice(out, query)
+	}
+	return out, nil
 }
 
 func (s *Store) GetMemory(id string) (asymptoteobserve.LearningMemoryV1, bool, error) {
@@ -538,6 +638,18 @@ func offset(query Query) int {
 		return 0
 	}
 	return (page - 1) * normalizeLimit(query.Limit)
+}
+
+func paginateSlice[T any](items []T, query Query) []T {
+	start := offset(query)
+	if start >= len(items) {
+		return nil
+	}
+	end := start + normalizeLimit(query.Limit)
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
 }
 
 func matchesText(q string, values ...string) bool {
