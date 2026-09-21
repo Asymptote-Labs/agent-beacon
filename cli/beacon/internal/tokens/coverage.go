@@ -118,6 +118,13 @@ var usageExpectation = map[string]struct {
 	// own session log -- but nothing in the hook surface exposes it, so a DeepSeek Harness session
 	// reporting no tokens is correct rather than silent.
 	"deepseek_harness": {ExpectNone, "the hook bridge's payloads carry no token counts"},
+	// Kimi Code assembles each hook payload from a fixed envelope plus per-event fields, and no
+	// usage count is among them on any of the twenty events it exposes. The runtime does count
+	// tokens -- the TUI shows context occupancy, and PreCompact carries a `token_count` for the
+	// history it is about to summarize -- but neither is per-call spend, so promoting either into
+	// gen_ai.usage would make a level look like an additive total. A Kimi Code session reporting
+	// no tokens is therefore correct rather than silent.
+	"kimi_code": {ExpectNone, "hook payloads carry no token counts; PreCompact reports context only"},
 }
 
 // InstalledConfig is the part of a config-scanner row that install detection reads.
