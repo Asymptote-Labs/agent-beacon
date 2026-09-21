@@ -98,7 +98,10 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		// esc and ctrl+c cancel; "q" deliberately does not. It used to, on every
+		// screen, so a user typing q at the destination list killed the install --
+		// and no screen could ever take free text while a bare letter meant quit.
+		case "ctrl+c", "esc":
 			return m, tea.Quit
 		case "up", "k":
 			if m.screen == destinationScreen || m.screen == privacyScreen {
@@ -170,6 +173,7 @@ func (m wizardModel) View() string {
 	if width <= 0 {
 		width = 80
 	}
+	contentWidth := min(76, max(30, width-8))
 	var title, body string
 	switch m.screen {
 	case welcomeScreen:
@@ -191,13 +195,15 @@ func (m wizardModel) View() string {
 			if index == m.selected {
 				line = wizardChoice.Render("  ❯ " + label)
 			}
-			rows = append(rows, line, wizardDim.Render("      "+detail))
+			rows = append(rows, line, choiceDetail(detail, contentWidth))
 		}
 		body = strings.Join(rows, "\n")
 	case managedDisclosureScreen:
 		title = "Beacon Managed sends new telemetry to beacon.sh"
 		body = wizardWarn.Render("Nothing is forwarded by signing in or completing this wizard.") +
-			"\n\nAfter installation, run `beacon endpoint connect`. Once connected, Vector sends new runtime and inventory events to beacon.sh over HTTPS. Existing local history is not uploaded."
+			"\n\nAfter installation, run `beacon endpoint connect`. Once connected, a local Vector forwarder sends new events to beacon.sh over HTTPS." +
+			"\n\nRuntime events recorded before you connect stay on this machine. The inventory snapshot -- which agent runtimes, skills, and MCP servers are installed here -- uploads once so the dashboard has this endpoint's baseline." +
+			"\n\nStop any time with `beacon endpoint disconnect`."
 	case privacyScreen:
 		title = "Choose what Beacon Managed receives"
 		var rows []string
@@ -207,7 +213,7 @@ func (m wizardModel) View() string {
 			if index == m.selected {
 				line = wizardChoice.Render("  ❯ " + label)
 			}
-			rows = append(rows, line, wizardDim.Render("      "+detail))
+			rows = append(rows, line, choiceDetail(detail, contentWidth))
 		}
 		body = strings.Join(rows, "\n")
 	case confirmScreen:
@@ -222,7 +228,6 @@ func (m wizardModel) View() string {
 		}
 	}
 
-	contentWidth := min(76, max(30, width-8))
 	card := wizardAccent.Render("B E A C O N") + "\n\n" +
 		wizardAccent.Render(title) + "\n\n" +
 		lipgloss.NewStyle().Width(contentWidth).Render(body) + "\n\n" +
@@ -233,10 +238,31 @@ func (m wizardModel) View() string {
 func destinationCopy(destination string) (string, string) {
 	switch destination {
 	case DestinationAsymptote:
-		return "Beacon Managed (recommended)", "Keep local JSONL and forward new events after you connect."
+		return "Beacon Managed (recommended)",
+			"One searchable history across Claude Code, Cursor, Codex and more. " +
+				"Unlimited retention, token and usage analytics. No backend to run."
 	default:
-		return "Local only", "Opt out of managed forwarding. Nothing is sent anywhere."
+		return "Local only",
+			"Everything stays in ~/.beacon on this machine. You manage retention, " +
+				"and history is limited to this device."
 	}
+}
+
+// choiceDetail renders the dim explanation under a choice, wrapped to the card and
+// indented on every line.
+//
+// The detail used to be emitted as one pre-indented string and wrapped later with
+// the rest of the body, which indented the first line and left every continuation
+// flush against the margin. That was invisible while the captions were one-liners
+// and became wrong the moment they were not.
+func choiceDetail(detail string, width int) string {
+	const indent = "      "
+	inner := max(20, width-len(indent))
+	var lines []string
+	for _, line := range strings.Split(lipgloss.NewStyle().Width(inner).Render(detail), "\n") {
+		lines = append(lines, wizardDim.Render(indent+strings.TrimRight(line, " ")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func privacyCopy(mode string) (string, string) {

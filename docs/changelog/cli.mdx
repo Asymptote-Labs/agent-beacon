@@ -11,6 +11,23 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### Unreleased
+
+- **Clearer first-run onboarding** · The destination screen now says what Beacon
+  Managed gives you rather than how it works: one searchable history across every
+  agent, unlimited retention, token and usage analytics, and no backend to run. The
+  managed disclosure names what actually leaves the machine, since the previous
+  wording claimed no existing history was uploaded at all, which was not true of the
+  inventory snapshot.
+- **A redirected install no longer launches the wizard** · Terminal detection used a
+  character-device test, which `/dev/null` satisfies, so `beacon endpoint install <
+  /dev/null` started the full-screen wizard against an input already at end of file
+  and failed the install with "onboarding cancelled". It now uses a real terminal
+  check, and `TERM=dumb` takes the same silent skip the trace browser already used.
+- **`q` no longer quits the onboarding wizard** · It was bound to quit on every
+  screen, so one stray keystroke on a choice list ended the install. Cancel with
+  `esc`.
+
 ### v1.3.18 · September 21, 2026
 
 - **Kimi Code telemetry** · Kimi Code (Moonshot AI) now has managed hook install,
