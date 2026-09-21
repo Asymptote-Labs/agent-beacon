@@ -536,6 +536,62 @@ func TestLoopbackIngestURLIsAcceptedEndToEnd(t *testing.T) {
 	}
 }
 
+func TestConnectClearsBufferOnPrivacyModeChange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+	vector := fakeVector(t, "0.56.0", 0)
+
+	opts := connectOptions(t, fd, fwd, vector)
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(DataDir(true), "buffered-event")
+	if err := os.WriteFile(sentinel, []byte("old-standard-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts2 := connectOptions(t, fd, fwd, vector)
+	opts2.PrivacyMode = "metadata-only"
+	if _, err := Connect(context.Background(), opts2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatal("switching to metadata-only must clear the buffer directory")
+	}
+	if _, err := os.Stat(DataDir(true)); os.IsNotExist(err) {
+		t.Fatal("data directory must be recreated after clearing")
+	}
+}
+
+func TestConnectPreservesBufferWhenPrivacyModeUnchanged(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+	vector := fakeVector(t, "0.56.0", 0)
+
+	opts := connectOptions(t, fd, fwd, vector)
+	if _, err := Connect(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(DataDir(true), "buffered-event")
+	if err := os.WriteFile(sentinel, []byte("in-flight-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts2 := connectOptions(t, fd, fwd, vector)
+	if _, err := Connect(context.Background(), opts2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatal("re-connect with the same privacy mode must not clear the buffer")
+	}
+}
+
 func TestDisconnectIgnoresALeftoverInstallIDFromACancelledConnect(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -214,6 +214,7 @@ func TestRenderVectorConfigSelectsMetadataOnlyTransforms(t *testing.T) {
 	for _, want := range []string{
 		`inputs = ["beacon_runtime_metadata"]`,
 		`inputs = ["beacon_inventory_metadata"]`,
+		`drop_on_abort = true`,
 		`del(event.prompt)`,
 		`del(event.command.output)`,
 		`del(event.file.diff)`,
@@ -223,6 +224,9 @@ func TestRenderVectorConfigSelectsMetadataOnlyTransforms(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("metadata config missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Count(got, "drop_on_abort = true") != 2 {
+		t.Fatalf("both metadata transforms must set drop_on_abort = true:\n%s", got)
 	}
 	if strings.Contains(got, "[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime\"]") {
 		t.Fatal("runtime sink bypasses metadata transform")

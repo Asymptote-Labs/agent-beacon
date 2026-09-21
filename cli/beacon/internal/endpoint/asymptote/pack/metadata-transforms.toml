@@ -1,6 +1,7 @@
 [transforms.beacon_runtime_metadata]
 type = "remap"
 inputs = ["beacon_runtime"]
+drop_on_abort = true
 source = '''
 event = parse_json!(string!(.message))
 del(event.prompt)
@@ -23,6 +24,7 @@ if is_object(event.content) {
 [transforms.beacon_inventory_metadata]
 type = "remap"
 inputs = ["beacon_inventory"]
+drop_on_abort = true
 source = '''
 event = parse_json!(string!(.message))
 if is_array(event.raw.inventory.configs) {
