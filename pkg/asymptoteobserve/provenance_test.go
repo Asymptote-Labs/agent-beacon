@@ -134,6 +134,14 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		// runtime loads (opencode, Cline, Pi, Oh My Pi), and claiming it here would send someone to
 		// fix Beacon for a field the bridge never sent.
 		"dsh": CollectionMethodHook,
+		// Kimi Code is hook-shaped. The `[[hooks]]` array, the event names and the payload shapes
+		// are all Moonshot's, and Beacon only appends command entries to a config file the runtime
+		// already reads -- it ships no source the runtime loads. Kimi Code also has a plugin system
+		// that can declare hooks, which is the thing that makes this worth stating: Beacon
+		// deliberately does not use it, because a plugin install needs an interactive step and a
+		// `/reload`, and choosing it would have changed this field as a side effect of an install
+		// mechanic rather than of what runs on each event.
+		"kimi": CollectionMethodHook,
 		// vscode is the case that justifies keying on --platform rather than on the normalized
 		// harness name: its hook and OTLP telemetry both normalize to vscode_copilot, so the
 		// harness name cannot distinguish them and only the flag can.

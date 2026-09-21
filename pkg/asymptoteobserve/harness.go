@@ -347,6 +347,47 @@ func NormalizeHarnessName(name string) string {
 		lower == "deepseek_ai/dsh" || lower == "deepseek-ai/dsh" ||
 		lower == "@deepseek-ai/dsh" || lower == "deepseek_dsh" || lower == "deepseek-dsh":
 		return "deepseek_harness"
+	// Kimi Code (Moonshot AI) is one agent core behind several front ends -- the terminal CLI, the
+	// desktop app, the VS Code extension and the ACP server -- and all of them report the same
+	// client identity to a hook (`client_type: "kimi_code_cli"`), because the identity names the
+	// core rather than the window it is drawn in. So there is one runtime to name, not four, and
+	// the canonical spelling is `kimi_code`: it is the product's name and follows claude_code,
+	// qwen_code and muse_code rather than a CLI suffix that would describe only one surface.
+	//
+	// Equality against a closed set rather than Contains(lower, "kimi"), and this runtime needs it
+	// for three separate reasons at once -- more than any other case in this function:
+	//
+	//   - The model family. Every Kimi model id begins with the letters the harness does:
+	//     kimi-k2, kimi-k3, kimi-k2.7-code, kimi-latest, kimi-thinking, kimi-for-coding. That is
+	//     the Qwen, Muse Spark and OpenHands LM hazard, and here the catalog is large and still
+	//     growing.
+	//   - The provider. `kimi` is a provider *type* in the runtime's own config.toml
+	//     (`[providers.kimi]`, `type = "kimi"`, `KIMI_API_KEY`), so the string names an API route
+	//     that other runtimes use too -- a Claude Code session pointed at Moonshot is not a Kimi
+	//     Code session.
+	//   - The vendor's other surfaces. `kimi.com` is the consumer chat product, which Beacon does
+	//     not observe at all; reporting it as the coding agent would invent an endpoint install.
+	//
+	// Bare `kimi` is nonetheless IN the set, unlike bare `deepseek` above, and the difference is
+	// worth stating because the two cases look identical from a distance. It is the `--platform`
+	// value Beacon's own installer writes -- the binary is `kimi`, and the flag follows the binary
+	// the way `muse`, `qwen` and `kiro` do -- so leaving it out would mean every hook Beacon
+	// installs reports a name this function refuses to canonicalize. The three hazards above are
+	// all handled by equality rather than by exclusion: no model id is exactly "kimi", and the
+	// provider type and the chat product reach harness.name by no path that exists today, because
+	// Kimi Code exports no OpenTelemetry and the only writer is the flag Beacon wrote itself.
+	// `deepseek` is out of its set for the opposite reason -- `dsh`, not `deepseek`, is that
+	// runtime's flag, so excluding the vendor word costs nothing there and costs the whole
+	// integration here.
+	//
+	// Model spellings are deliberately absent, so they fall to the passthrough case and show up as
+	// themselves -- a visible anomaly a person can act on rather than a silent misattribution.
+	case lower == "kimi" || lower == "kimi_code" || lower == "kimi-code" || lower == "kimi code" ||
+		lower == "kimicode" || lower == "kimi_cli" || lower == "kimi-cli" || lower == "kimi cli" ||
+		lower == "kimi_code_cli" || lower == "kimi-code-cli" || lower == "kimi code cli" ||
+		lower == "kimi_code_acp" || lower == "kimi-code-acp" ||
+		lower == "moonshot_kimi_code" || lower == "moonshot-kimi-code":
+		return "kimi_code"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
