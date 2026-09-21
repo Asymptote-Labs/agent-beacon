@@ -12,6 +12,8 @@ make build
 
 ```bash
 ./beacon endpoint install
+./beacon login
+./beacon whoami
 ./beacon endpoint status --json
 ./beacon endpoint connect
 ./beacon endpoint disconnect
@@ -20,6 +22,7 @@ make build
 ./beacon traces
 ./beacon endpoint dashboard
 ./beacon endpoint uninstall --keep-logs
+./beacon logout
 ```
 
 Endpoint commands use per-user paths by default so hook and OTLP telemetry share

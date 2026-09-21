@@ -30,7 +30,7 @@ func TestEndpointConnectAndDisconnectCommandsRegistered(t *testing.T) {
 	if disconnect.Flags().Lookup("keep-credentials") == nil {
 		t.Fatal("disconnect missing --keep-credentials")
 	}
-	for _, removed := range []string{"login", "ingest"} {
+	for _, removed := range []string{"ingest"} {
 		if cmd, _, err := rootCmd.Find([]string{removed}); err == nil && cmd != nil && cmd.Use == removed {
 			t.Fatalf("removed command %q is still registered", removed)
 		}

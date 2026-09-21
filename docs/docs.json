@@ -255,6 +255,7 @@
             "icon": "terminal",
             "pages": [
               "cli/index",
+              "cli/account-auth",
               {
                 "group": "beacon ci",
                 "root": "cli/ci",

@@ -221,7 +221,7 @@ jobs:
           ./beacon scan --help > /tmp/beacon-scan-help.txt
           ./beacon rules --help > /tmp/beacon-rules-help.txt
           ./beacon rules lint --help > /tmp/beacon-rules-lint-help.txt
-          for forbidden in init update claude cursor dep-scan config whoami; do
+          for forbidden in init update claude cursor dep-scan config; do
             if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
               echo "forbidden command exposed: $forbidden"
               exit 1
