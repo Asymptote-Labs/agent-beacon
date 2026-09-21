@@ -2,6 +2,7 @@ package learning
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,6 +91,30 @@ func TestProjectionRedactsAndBoundsContent(t *testing.T) {
 	}
 	if len(content) > maxProjectionText+32 {
 		t.Fatalf("projection content not bounded: %d", len(content))
+	}
+}
+
+func TestProjectionKeepsHeadAndTailOfLongTraces(t *testing.T) {
+	show := testTraceShow()
+	show.Events = nil
+	total := maxProjectionEvents * 3
+	for i := 1; i <= total; i++ {
+		show.Events = append(show.Events, asymptoteobserve.TraceEventV1{
+			Number:  i,
+			Type:    "tool",
+			Action:  "tool.invoked",
+			Summary: fmt.Sprintf("event %d", i),
+		})
+	}
+	projection := BuildProjection(show)
+	if len(projection.Events) != maxProjectionEvents+1 {
+		t.Fatalf("projected events = %d, want %d", len(projection.Events), maxProjectionEvents+1)
+	}
+	if first := projection.Events[0].Summary; first != "event 1" {
+		t.Fatalf("head dropped: first = %q", first)
+	}
+	if last := projection.Events[len(projection.Events)-1].Summary; last != fmt.Sprintf("event %d", total) {
+		t.Fatalf("tail dropped: last = %q", last)
 	}
 }
 
