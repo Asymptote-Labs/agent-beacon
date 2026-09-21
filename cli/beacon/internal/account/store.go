@@ -131,13 +131,7 @@ func Save(session Session) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	// Windows does not replace an existing destination with os.Rename.
-	if runtime.GOOS == "windows" {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := replaceFile(tmpPath, path); err != nil {
 		return err
 	}
 	if runtime.GOOS != "windows" {
