@@ -23,10 +23,7 @@
   <a href="https://docs.beacon.sh/cli">Commands</a>
 </p>
 
-Beacon captures the **session telemetry each configured runtime exposes** across
-Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses. Its explicit,
-review-gated memory workflow can turn selected workflows, corrections, and
-debugging patterns into reusable knowledge for future agents.
+Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
 
 **A problem solved by one agent shouldn't need to be learned from scratch by another.**
 
