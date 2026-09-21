@@ -164,6 +164,6 @@ func resetMemoryOpts(t *testing.T) {
 		jevModel    string
 		jevCost     float64
 		timeout     time.Duration
-	}{userMode: true, limit: 25, page: 1, jevEndpoint: learning.DefaultJevEndpoint, jevModel: learning.DefaultJevModel, jevCost: learning.DefaultCostPerTrace}
+	}{userMode: true, limit: 25, page: 1, jevCost: learning.DefaultCostPerTrace}
 	t.Cleanup(func() { memoryOpts = previous })
 }
