@@ -53,8 +53,9 @@ func (s *Store) Exists() bool {
 
 func (s *Store) List() ([]SessionRef, error) {
 	type candidate struct {
-		dir  string
-		path string
+		dir        string
+		path       string
+		compressed bool
 	}
 	byDir := map[string]candidate{}
 	dirs := 0
@@ -74,14 +75,16 @@ func (s *Store) List() ([]SessionRef, error) {
 		if files > MaxFiles {
 			return filepath.SkipAll
 		}
-		name := d.Name()
-		if name != SessionFileZstd && name != SessionFileJSON {
+		compressed, ok := classifySessionFile(d.Name())
+		if !ok {
 			return nil
 		}
 		dir := filepath.Dir(path)
-		prior, ok := byDir[dir]
-		if !ok || filepath.Base(path) == SessionFileZstd || filepath.Base(prior.path) != SessionFileZstd {
-			byDir[dir] = candidate{dir: dir, path: path}
+		prior, exists := byDir[dir]
+		// One directory can hold both spellings; the compressed frame is the one DSH
+		// writes, and it wins whichever order the walk visits them in.
+		if !exists || compressed || !prior.compressed {
+			byDir[dir] = candidate{dir: dir, path: path, compressed: compressed}
 		}
 		return nil
 	})
@@ -104,7 +107,7 @@ func (s *Store) List() ([]SessionRef, error) {
 			DSHHome:       s.DSHHome,
 			ModTimeUnixMS: info.ModTime().UnixMilli(),
 			SizeBytes:     info.Size(),
-			Compressed:    filepath.Base(item.path) == SessionFileZstd,
+			Compressed:    item.compressed,
 		}
 		if meta := s.readMeta(ref); meta != nil {
 			ref.Meta = meta
