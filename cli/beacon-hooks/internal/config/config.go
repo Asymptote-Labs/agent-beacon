@@ -26,6 +26,7 @@ var (
 	OpenHandsDir   = filepath.Join(BeaconDir, "openhands")
 	KiroDir        = filepath.Join(BeaconDir, "kiro")
 	DshDir         = filepath.Join(BeaconDir, "dsh")
+	KimiDir        = filepath.Join(BeaconDir, "kimi")
 	ClineDir       = filepath.Join(BeaconDir, "cline")
 )
 
@@ -115,6 +116,8 @@ func GetStateDir(platform string) string {
 		return KiroDir
 	case "dsh":
 		return DshDir
+	case "kimi":
+		return KimiDir
 	case "cline":
 		return ClineDir
 	default:

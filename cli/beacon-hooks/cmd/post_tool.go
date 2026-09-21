@@ -112,6 +112,16 @@ func runPostTool(cmd *cobra.Command, args []string) {
 		// means this payload is a read, a shell command, an MCP call or an editor `view` -- and it
 		// falls through to the observing path below, which still records the call.
 		params = parseDshEdit(input, logger)
+	} else if platformFlag == kimiPlatform {
+		// Kimi Code gets its own reader even though parseClaudeCopilotInput already knows its two
+		// write tools by name and every argument spelling they use, because that is exactly the
+		// danger: the shared reader would build a correct diff for a write that never landed.
+		// PostToolUseFailure carries the same tool_name and tool_input as a success and differs
+		// only in the event name and in where the output lives, so the failure guard has to be
+		// asked before the diff is built. A nil result is not a failure -- it means this payload
+		// is a read, a shell command, an MCP call or a rejected write -- and it falls through to
+		// the observing path below, which still records the call.
+		params = parseKimiEdit(input, logger)
 	} else if platformFlag == goosePlatform {
 		// goose gets its own reader rather than riding parseClaudeCopilotInput for two reasons the
 		// shared reader cannot be told about: its edit tool names the replaced span `before` and
@@ -419,6 +429,18 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	for key, value := range toolFieldsWithResponse(toolName, toolInput, toolResponse) {
 		fields[key] = value
 	}
+	// Kimi Code's result is read before the shared failure branch below, unlike every other
+	// runtime's, and the ordering is the whole point. Kimi Code reports a failure by sending
+	// `PostToolUseFailure` -- the exact spelling that branch matches -- so it is the branch that
+	// fires, and a reader placed after it would never run on the events that carry the most
+	// worthwhile output: a failing command's own stderr and the exit code inside it.
+	//
+	// The result is neither an object nor under a key resolveToolResponse reads: a successful call
+	// carries `tool_output` and a failed one carries an `error` object, both as siblings of
+	// `tool_name`. So this is passed the whole payload rather than a tool response.
+	if platformFlag == kimiPlatform {
+		applyKimiToolResult(fields, toolName, toolInput, input)
+	}
 	if hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != "" {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
@@ -464,6 +486,17 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	// shell command's output and, when it is non-zero, its exit code.
 	if platformFlag == dshPlatform {
 		applyDshToolResult(fields, toolName, toolInput, toolResponse)
+	}
+	// The shared branch above catches almost every Kimi Code failure, because Beacon binds
+	// `PostToolUseFailure` to this subcommand and the event name is right there. This is the
+	// remainder: a payload that reached this build without its event name -- a replay, a future
+	// runner that fires one event for both outcomes -- still says which it was by carrying an
+	// error object, and `error` is an object here so the shared `getFirstStr` check above finds
+	// nothing in it. Same predicate the diff path uses, called rather than restated, so the two
+	// cannot drift the way the Qwen pair once did.
+	if platformFlag == kimiPlatform && kimiToolFailed(input) {
+		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
+		return
 	}
 	action := actionForTool(hookEvent, toolName, toolInput, toolResponse)
 	category := "tool"
@@ -595,6 +628,19 @@ func isFileEditTool(platform, toolName string) bool {
 	// diff.
 	if platform == dshPlatform {
 		return isDshFileEditTool(toolName, nil)
+	}
+	// Kimi Code's `Write` and `Edit` would in fact be caught by the Claude Code fallback at the
+	// end of this function -- they are the same two PascalCase names -- but the taxonomy answers
+	// from the same table the action classifier reads, so the two cannot disagree about what a
+	// write is, and the fallback would also miss that `Write` is not always one.
+	//
+	// nil arguments, deliberately, for the reason the Kiro and DeepSeek branches above give. The
+	// one Kimi Code case that needs them is an appending `Write`, and that is still an edit -- it
+	// is reclassified from create to modify, not out of the set -- so the answer here is the same
+	// either way and threading the arguments through this shared signature would document a
+	// difference that does not exist.
+	if platform == kimiPlatform {
+		return isKimiFileEditTool(toolName, nil)
 	}
 	// Muse Code's tool names are not published, and the fallback below is Claude Code's PascalCase
 	// set, which a snake_case runtime never matches -- so without a branch here a Muse file edit
