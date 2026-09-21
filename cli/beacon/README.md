@@ -686,6 +686,36 @@ both files, because installed is the conjunction of the two -- a hooks file with
 nothing mounted at it is a file nothing reads, and a mount pointing at a missing
 hooks file registers nothing.
 
+The Kimi Code integration registers in the `[[hooks]]` array of the runtime's
+own `$KIMI_CODE_HOME/config.toml` (default `~/.kimi-code`), which is the same
+file that holds `[providers.<name>].api_key` in plain text. Beacon is a guest in
+it, so it appends its entries to the end of the document and never re-serializes:
+every byte above the block is left exactly as it was found, which is what keeps a
+secret from being rewritten, re-quoted or reordered by a round trip. Appending is
+sound rather than convenient -- an array-of-tables header at the end of a TOML
+document opens a new table and cannot change what precedes it -- and every write
+is parsed back and compared against the intended result before it replaces the
+file, so a scanning or quoting mistake fails the install instead of damaging a
+config. Beacon refuses a config.toml it cannot parse, because Kimi Code will not
+start on one, and refuses one whose `hooks` key is an inline array, because TOML
+forbids appending `[[hooks]]` after that; `endpoint discover` reports the second
+case before an install meets it. There is no project scope: Kimi Code reads one
+user-level config file, so `--level project` is refused with that explanation
+rather than becoming a machine-wide install.
+
+Detection and removal go by the hook command rather than by the comment Beacon
+writes above its block, and that is a reachable case rather than caution: Kimi
+Code's legacy migration from `kimi-cli` rewrites config.toml by serializing the
+merged config, keeping the `[[hooks]]` entries and dropping every comment. Beacon
+writes nothing to a Kimi Code hook's stdout, because on `UserPromptSubmit` a
+hook's stdout is appended to the model's context -- the optional policy seam
+denies with exit code 2 and the reason on stderr, which the runtime checks before
+it parses stdout at all. Kimi Code is one of the few runtimes that reports real
+operator approval decisions, over a `PermissionRequest`/`PermissionResult` pair;
+a deny raised while answering the second cannot take effect, because that event
+is observation-only, so the seam declines to raise one there rather than writing
+denial telemetry for a call that was not denied.
+
 The Hermes Agent integration writes shell-hook entries into
 `~/.hermes/config.yaml`. Hermes prompts for first-use consent for each
 `(event, command)` pair; for non-interactive gateway, cron, or CI runs, set

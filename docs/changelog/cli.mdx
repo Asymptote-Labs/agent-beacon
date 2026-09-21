@@ -13,6 +13,17 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Kimi Code telemetry** · Kimi Code (Moonshot AI) now has managed hook install,
+  status, uninstall, repair, discovery, inventory and dashboard coverage under the
+  `kimi_code` canonical name. Beacon registers thirteen of the runtime's twenty
+  lifecycle events in the `[[hooks]]` array of `$KIMI_CODE_HOME/config.toml`,
+  appending its block and leaving the rest of the file -- including the provider
+  API keys it holds -- byte for byte. Coverage includes sessions, prompts, tool
+  activity, failed tools, commands with output and exit code, file reads and edits
+  with diffs, MCP calls, subagents, context compaction, and real operator approval
+  decisions from the `PermissionRequest`/`PermissionResult` pair. Token usage is
+  not collected, because no Kimi Code hook payload carries one.
+
 ### v1.3.17 · September 21, 2026
 
 - **Reviewed cross-harness memory** · Beacon now has an explicit local learning
