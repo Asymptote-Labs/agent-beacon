@@ -529,8 +529,10 @@ device key in a `0600` secrets file and runs Vector as the
 JSONL producer and Vector does the network. Standard privacy forwards locally
 sanitized retained content; `--privacy-mode metadata-only` strips retained text,
 raw fields, diffs, inventory content, and MCP definitions locally before upload.
-Only lines written after connection are shipped, and revoking the device stops ingestion within
-about a minute. Vector 0.50 or newer is required: `/opt/beacon/bin/vector` from
+Runtime forwarding starts at the end of the existing runtime log, while inventory
+starts at the beginning of `inventory_state.jsonl` to send the endpoint's current
+inventory baseline. Revoking the device stops ingestion within about a minute.
+Vector 0.50 or newer is required: `/opt/beacon/bin/vector` from
 the signed package, the `beacon-vector` keg that `brew install beacon` pulls in on
 macOS, any other Vector 0.50+ already on the machine, or the Linux package from
 vector.dev. The Homebrew mirror is named `beacon-vector` rather than `vector`, and

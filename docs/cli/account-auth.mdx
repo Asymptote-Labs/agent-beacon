@@ -23,11 +23,17 @@ beacon logout
 beacon login
 ```
 
-For SSH sessions or terminals that cannot open a browser:
+For a terminal that cannot open a browser automatically:
 
 ```bash
 beacon login --no-browser
 ```
+
+This is still a loopback-callback PKCE flow, not a device-code flow. Open the URL
+in a browser that can reach the same machine's callback listener. For a remote SSH
+session, use a browser on the remote host or forward the callback port shown in
+the printed URL; opening it on an unrelated workstation without port forwarding
+redirects to that workstation's localhost and cannot complete the remote login.
 
 The session is stored at `~/.beacon/auth/session.json` in a `0700` directory with file mode `0600`. Human and JSON command output never includes the access token. Tokens expire rather than refreshing indefinitely; run `beacon login` again after expiry.
 

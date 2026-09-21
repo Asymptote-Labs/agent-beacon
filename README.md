@@ -103,7 +103,7 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn
 
 Open Claude Code, Cursor, Codex, or any other supported harness.
 
-Beacon continuously captures your session history in the background.
+Beacon continuously captures your session history in the background
 
 ### 3. Explore your history
 
@@ -124,7 +124,10 @@ Or inspect the raw event stream:
 ```
 
 > [!NOTE]
-> Local until connected: signing in or accepting the preselected Managed option does not enable forwarding. The separate connect step offers Standard or Metadata-only upload privacy.
+> Local until connected: signing in or accepting the preselected Managed option
+> does not enable forwarding. The onboarding wizard records Standard or
+> Metadata-only privacy; `beacon endpoint connect` uses that choice, or
+> `--privacy-mode` overrides it.
 
 Inspect the account used during interactive setup:
 

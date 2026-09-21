@@ -28,6 +28,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   filters, paging, and event detail. Redirected input or output falls back to a
   bounded tab-separated list, while `beacon endpoint traces` remains the stable
   JSON and scripting interface.
+- **Safer relayed memory project resolution** · Dashboard and MCP memory lookups
+  resolve relayed paths only against projects already stored in local memory,
+  choose the most-specific matching project, avoid filesystem and Git reads, and
+  fail closed when no known project matches.
 - **Account sign-in and safer first-run onboarding** · `beacon login`, `whoami`,
   and `logout` add browser PKCE account authentication without enabling forwarding.
   Interactive user installs now use a full-screen wizard that requires sign-in,

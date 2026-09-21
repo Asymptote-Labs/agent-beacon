@@ -55,11 +55,26 @@ beacon mcp doctor
 ```bash title="Sample output"
 $ beacon mcp doctor
 
-runtime log: readable
-transport: stdio
-tools: search_activity, summarize_activity, get_activity_event, list_activity_filters
-       search_memory, get_memory, get_memory_context
-sample events: found
+Beacon MCP doctor
+
+Transport: stdio
+Runtime log: /Users/you/.beacon/endpoint/logs/runtime.jsonl
+Runtime log source: user endpoint log
+Runtime log check: ok
+Sampled events: 1
+Malformed lines: 0
+Readable archives: 0
+MCP tools: search_activity, summarize_activity, get_activity_event, list_activity_filters, search_memory, get_memory, get_memory_context
+
+MCP client config:
+{
+  "mcpServers": {
+    "beacon": {
+      "command": "beacon",
+      "args": ["mcp", "serve", "--transport", "stdio"]
+    }
+  }
+}
 ```
 </Accordion>
 

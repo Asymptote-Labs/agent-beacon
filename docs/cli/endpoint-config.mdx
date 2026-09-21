@@ -1,17 +1,19 @@
 ---
 title: "beacon endpoint config"
-description: "Inspect, validate, and update Beacon endpoint configuration"
+description: "Inspect Beacon endpoint configuration and validate destination settings"
 ---
 
 ## Command overview
 
-`beacon endpoint config` inspects and safely updates the local Beacon endpoint configuration.
+`beacon endpoint config` inspects the local Beacon endpoint configuration and
+validates its destination settings. It does not edit the configuration.
 
 ```bash title="Command syntax"
 beacon endpoint config [command]
 ```
 
-Use this command group when you need to review the effective endpoint configuration or validate config file contents without reinstalling the endpoint agent.
+Use this command group when you need to review the effective endpoint configuration
+or validate configured destinations without reinstalling the endpoint agent.
 
 ## Commands
 
@@ -58,13 +60,19 @@ sudo beacon endpoint config show --system
 
 ## beacon endpoint config validate
 
-`beacon endpoint config validate` validates the endpoint configuration file.
+`beacon endpoint config validate` loads the effective endpoint configuration and
+validates its destination settings.
 
 ```bash title="Run the validation check"
 beacon endpoint config validate
 ```
 
-Validation checks endpoint and destination configuration. For example, Splunk HEC and Falcon LogScale HEC forwarding require both an endpoint URL and token when configured.
+Validation checks destination configuration. For example, Splunk HEC and Falcon
+LogScale HEC forwarding require both an endpoint URL and token when configured.
+If the endpoint config file is missing, unreadable, or malformed, Beacon currently
+falls back to the default effective configuration; this command does not prove that
+the file itself parsed successfully. Use `beacon endpoint doctor` when checking an
+installed endpoint's overall health.
 
 ### Examples
 

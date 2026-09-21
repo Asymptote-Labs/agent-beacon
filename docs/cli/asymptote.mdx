@@ -11,7 +11,13 @@ The hand-run pack uses Standard privacy and forwards locally sanitized lines
 unchanged. Use [`beacon endpoint connect --privacy-mode metadata-only`](/cli/endpoint-connect#privacy-modes)
 when Beacon should render the local metadata-only transforms for you.
 
-This is the one destination that sends telemetry to a Beacon-run endpoint. It is opt-in and revocable: nothing is forwarded until a member of your Beacon organization has approved the device in the browser and Vector has been started with the resulting key. `beacon endpoint connect` performs that enrollment and runs the forwarder as a service; the commands on this page generate the same files for running or inspecting the forwarder by hand.
+This is the one destination that sends telemetry to a Beacon-run endpoint. It is
+opt-in and revocable: nothing is forwarded until enrollment has issued a device
+key and Vector has started. In user mode, `beacon endpoint connect` uses the
+signed-in CLI account to authorize that key without another browser approval;
+system mode uses browser approval. `beacon endpoint connect` performs enrollment
+and runs the forwarder as a service; the commands on this page generate the same
+files for running or inspecting the forwarder by hand.
 
 Beacon does not store the device key in its own configuration. The key lives in a `0600` JSON secrets file that Vector reads through its secret backend, so it appears in neither `vector.toml` nor the process environment.
 

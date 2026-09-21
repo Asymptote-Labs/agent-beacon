@@ -30,7 +30,9 @@ A few rules shape how the numbers read:
 
 ### Per-runtime coverage
 
-Token coverage is not uniform, and the reason is almost always the runtime rather tha Beacon: most agent runtimes do not report usage on the surface Beacon collects from. A turn with no token attribution is a turn whose runtime never reported any.
+Token coverage is not uniform, and the reason is almost always the runtime rather
+than Beacon: most agent runtimes do not report usage on the surface Beacon collects
+from. A turn with no token attribution is a turn whose runtime never reported any.
 
 **Collected and verified against captured payloads:**
 
@@ -45,6 +47,7 @@ Token coverage is not uniform, and the reason is almost always the runtime rathe
 | Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | Oh My Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | Prime Agent | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| DeepSeek Harness | input, output, cache read, cache creation | Not reported | Yes, from committed session records | Yes |
 | fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 | GitHub Copilot CLI | input, output, cache read, cache creation, reasoning | Not reported | Yes | Yes |
 | OpenClaw Gateway | input, output, cache read, cache creation | Not reported on the hook | Yes, per model response | Yes |

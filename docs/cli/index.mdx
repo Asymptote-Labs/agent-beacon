@@ -46,6 +46,7 @@ Top-level Agent Beacon CLI commands.
 | [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
 | [`beacon status`](/cli/endpoint-status) | Alias for `beacon endpoint status`. |
 | [`beacon token-usage`](/cli/token-usage) | Report token usage and attribution from Beacon runtime logs. |
+| [`beacon traces`](/cli/endpoint-traces) | Open the interactive local trace browser; redirected I/O falls back to a bounded trace list. |
 | [`beacon version`](/cli/version) | Display the installed Agent Beacon CLI version. |
 | [`beacon whoami`](/cli/account-auth#inspect-the-account) | Show the current Beacon account and session expiry. |
 
@@ -149,7 +150,7 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 |---------|-------------|
 | [`beacon endpoint install`](/cli/endpoint-install) | Install or update the local endpoint collector, runtime telemetry configuration, and optional Splunk HEC or Falcon LogScale HEC forwarding. |
 | [`beacon endpoint status`](/cli/endpoint-status) | Inspect collector health, runtime log state, configured harnesses, diagnostics, forwarding readiness, and the Beacon managed-ingest connection. |
-| [`beacon endpoint connect`](/cli/endpoint-connect) | Approve this device in the Beacon dashboard and start the Vector forwarder to managed ingest. |
+| [`beacon endpoint connect`](/cli/endpoint-connect) | Enroll this device with the signed-in CLI account and start the Vector forwarder; system mode uses browser approval. |
 | [`beacon endpoint disconnect`](/cli/endpoint-connect) | Stop the Beacon forwarder and remove the local device key. |
 | [`beacon endpoint doctor`](/cli/endpoint-doctor) | Run local endpoint health checks with pass/fail exit behavior and optional safe remediation. |
 | [`beacon endpoint inventory`](/cli/endpoint-inventory) | Show configured, detected, hook, and observed endpoint inventory. |
@@ -159,7 +160,7 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint repair`](/cli/endpoint-repair) | Repair Beacon endpoint service files, telemetry configuration, and optional collector forwarding destinations. |
 | [`beacon endpoint uninstall`](/cli/endpoint-uninstall) | Remove Beacon endpoint service files, with an option to keep local logs. |
 | [`beacon endpoint update`](/cli/upgrade#self-updating-endpoint-packages) | Check for, enable, or apply signed endpoint package updates. |
-| [`beacon endpoint config`](/cli/endpoint-config) | Inspect, validate, and update endpoint configuration. |
+| [`beacon endpoint config`](/cli/endpoint-config) | Inspect endpoint configuration and validate destination settings. |
 | [`beacon endpoint onboarding`](/cli/endpoint-onboarding) | Show, reset, or resend the one-time onboarding record. |
 | [`beacon endpoint dashboard`](/cli/dashboard#beacon-endpoint-dashboard) | Run the local dashboard over Beacon runtime logs for endpoint inspection. |
 | [`beacon endpoint traces`](/cli/endpoint-traces) | Index, list, search, and show local traces from Beacon runtime logs. |
@@ -176,6 +177,8 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint hooks`](/cli/hooks) | Manage supported hook-based endpoint telemetry. |
 | [`beacon endpoint opencode`](/cli/endpoint-opencode) | Collect endpoint telemetry from OpenCode session records on this machine. |
 | [`beacon endpoint pi`](/cli/endpoint-pi) | Collect endpoint telemetry from Pi session records on this machine. |
+| [`beacon endpoint copilot`](/cli/endpoint-copilot) | Collect endpoint telemetry from GitHub Copilot CLI session records on this machine. |
+| [`beacon endpoint dsh`](/cli/endpoint-dsh) | Collect endpoint telemetry from DeepSeek Harness session records on this machine. |
 | [`beacon endpoint fx`](/cli/endpoint-fx) | Collect endpoint telemetry from fx session records on this machine. |
 | [`beacon endpoint integrations openclaw`](/cli/openclaw) | Set up and validate OpenClaw Gateway OTLP export. |
 | [`beacon endpoint integrations claude-cowork`](/cli/claude-cowork) | Set up and validate Claude Cowork OTLP export. |
@@ -186,7 +189,7 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 beacon endpoint config [command]
 ```
 
-Inspect, validate, and update endpoint configuration.
+Inspect endpoint configuration and validate destination settings.
 
 | Command | Description |
 |---------|-------------|

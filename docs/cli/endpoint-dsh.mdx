@@ -1,0 +1,94 @@
+---
+title: "beacon endpoint dsh"
+description: "Collect endpoint telemetry from DeepSeek Harness session records"
+---
+
+## Command overview
+
+`beacon endpoint dsh` reads the native session records DeepSeek Harness commits
+under `$DSH_HOME/sessions` (default `~/.dsh/sessions`) and maps them into Beacon
+[endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint dsh [command]
+```
+
+This complements the live [DeepSeek Harness hooks](/runtimes/deepseek-harness).
+Hooks observe current tool activity and optional policy decisions. Session sync
+backfills assistant text and reasoning, tool failure status, persisted
+command/file/MCP detail, and token usage that the hook bridge does not expose.
+
+Every event from this command is marked
+`harness.collection_method=poll`. Beacon reads committed records after the fact,
+so this path cannot hold, approve, deny, or delay a tool call and does not
+synthesize approval events. Reading is local and offline.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint dsh sync` | Read new DeepSeek Harness session records into the runtime log |
+| `beacon endpoint dsh status` | Show DeepSeek Harness sessions and collection progress |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--dsh-home <path>` | DeepSeek Harness home. Defaults to `$DSH_HOME` or `~/.dsh` |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/dsh.json` |
+| `--workspace <path>` | Only include sessions whose recorded cwd matches this workspace |
+| `--session-id <id>` | Only include one DeepSeek Harness session id |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events without writing them or advancing the cursor |
+| `--watch` | Sweep continuously on `--interval` |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint dsh sync
+```
+
+```bash title="Preview without writing or advancing the cursor"
+beacon endpoint dsh sync --print
+```
+
+```bash title="Sweep continuously"
+beacon endpoint dsh sync --watch --interval 5m
+```
+
+Nothing schedules a sweep automatically. Run `sync` from the scheduler used on
+the endpoint, or leave `--watch` running in the account that owns `$DSH_HOME`.
+A partly written trailing record is left for the next sweep rather than treated
+as corruption.
+
+## Status
+
+```bash title="Show sessions and collection progress"
+beacon endpoint dsh status
+```
+
+The cursor prevents scheduled sweeps from re-appending a session's complete
+history. Re-reading is safe: the same source record maps to the same deterministic
+event id.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="DeepSeek Harness" icon="code" href="/runtimes/deepseek-harness">
+    Hook installation, telemetry coverage, and known limitations.
+  </Card>
+  <Card title="beacon endpoint hooks" icon="plug" href="/cli/hooks">
+    Install and inspect the live DeepSeek Harness hook integration.
+  </Card>
+</Columns>
