@@ -1,0 +1,270 @@
+---
+title: "Kimi Code"
+description: "Beacon support details for Kimi Code (Moonshot AI) endpoint telemetry"
+---
+
+## Runtime overview
+
+Beacon supports Kimi Code — Moonshot AI's coding agent, run as `kimi` — through the runtime's own lifecycle hooks, sent to `beacon-hooks`.
+
+```bash
+beacon endpoint hooks install --harness kimi
+```
+
+`--harness kimi-code` and `--harness kimi-code-cli` are also accepted, and all three install the same thing.
+
+Kimi Code runs one agent core behind several front ends — the terminal CLI, the desktop app, the VS Code extension, and the ACP server — and every one of them reports the same client identity to a hook (`client_type: "kimi_code_cli"`). So there is one integration rather than one per surface, and one harness name, `kimi_code`, rather than a name per surface.
+
+<Note>
+**Kimi Code ships no OpenTelemetry export.** Its only telemetry switch is `KIMI_DISABLE_TELEMETRY`, which governs Moonshot's own anonymous product reporting and has nothing to do with Beacon. The hook system is the whole integration surface, so there is no endpoint to point at the local collector.
+</Note>
+
+## Prerequisites
+
+Before enabling Kimi Code telemetry, make sure:
+
+- `kimi` is installed. It does not need to have been run — Beacon will create `config.toml` if it is missing.
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- A new Kimi Code session is started after hook install or removal. `config.toml` is read once at startup, so a running session will not pick the change up; `/reload` also works.
+
+## Collection path
+
+Beacon registers its hooks in the `[[hooks]]` array of one file:
+
+| File | Owner | Purpose |
+|------|-------|---------|
+| `$KIMI_CODE_HOME/config.toml` | **You** | Kimi Code's whole configuration. Beacon appends its `[[hooks]]` entries and touches nothing else |
+
+`$KIMI_CODE_HOME` defaults to `~/.kimi-code`, and replaces it when set — matching how Kimi Code resolves its data root itself.
+
+<Warning>
+**This file holds your API keys.** `config.toml` is where Kimi Code keeps `[providers.<name>].api_key` in plain text, alongside your model catalog, permission rules, and whatever comments you wrote around them. Everything below follows from Beacon being a guest in it.
+</Warning>
+
+### Beacon appends and never re-serializes
+
+Beacon **appends** its `[[hooks]]` entries to the end of the document and leaves every byte above them exactly as it found them. Nothing is parsed and written back, so a secret cannot be rewritten, re-quoted, reordered, or dropped by a round trip — and a comment next to one cannot be lost.
+
+Appending is sound rather than merely convenient: an array-of-tables header at the end of a TOML document opens a new table and cannot change the meaning of anything before it. That was verified against `smol-toml`, the exact parser Kimi Code uses, not just against TOML 1.0 in principle.
+
+Every write is then **parsed back and compared** before it replaces the file: every top-level key other than `hooks` must be deeply equal to what was there, and `hooks` must be exactly the intended entries. A scanning or quoting mistake fails the install with an explanation instead of damaging the file. This is the same check Kimi Code's own config writer performs before replacing it.
+
+Beacon **refuses** rather than writing:
+
+- a `config.toml` it cannot parse. Kimi Code refuses to start on a config it cannot load, so writing into one would replace a problem you can see with one Beacon caused;
+- a `config.toml` whose `hooks` key is an **inline array** (`hooks = [{ ... }]`). TOML does not allow `[[hooks]]` entries after one, so appending would leave a config Kimi Code will not start with. Rewrite those hooks as `[[hooks]]` blocks and install again.
+
+`beacon endpoint discover` reports that second case as `misconfigured` before you hit it.
+
+<Warning>
+**There is no project scope.** Kimi Code reads one user-level config file and has no project-level config mechanism; the project-local `.kimi-code/` directory holds only a workspace override and an MCP server list, neither of which can register a hook. `--level project` is **refused with that explanation** rather than quietly becoming a machine-wide install, and Kimi Code is left out of the project-level `--all` sweep for the same reason. To scope telemetry per project, point `KIMI_CODE_HOME` at a per-project data root and install under it.
+</Warning>
+
+### Beacon's block
+
+```toml
+# Beacon endpoint telemetry. Managed by `beacon endpoint hooks install --harness kimi`.
+[[hooks]]
+event = 'SessionStart'
+command = "'/opt/beacon/bin/beacon-hooks' --platform kimi --log '/var/log/beacon/runtime.jsonl' session-start"
+timeout = 10
+
+[[hooks]]
+event = 'UserPromptSubmit'
+command = "'/opt/beacon/bin/beacon-hooks' --platform kimi --log '/var/log/beacon/runtime.jsonl' prompt-submit"
+timeout = 30
+```
+
+The comment is a label for a person reading the file. It is deliberately **not** what uninstall and status match on — the hook command is. That is not caution for its own sake: Kimi Code's legacy migration from `kimi-cli` rewrites `config.toml` by serializing the merged config, which keeps the `[[hooks]]` entries and drops every comment in the document. A marker-based uninstall would silently fail to find its own block on any machine that had been through that upgrade.
+
+### Registered events
+
+Kimi Code exposes twenty hook events. Beacon registers thirteen:
+
+| Event | Adapter subcommand | Timeout |
+|-------|--------------------|---------|
+| `SessionStart` | `session-start` | 10 s |
+| `UserPromptSubmit` | `prompt-submit` | 30 s |
+| `PreToolUse` | `pre-tool` | 10 s |
+| `PostToolUse` | `post-tool` | 10 s |
+| `PostToolUseFailure` | `post-tool` | 10 s |
+| `PermissionRequest` | `permission-request` | 10 s |
+| `PermissionResult` | `permission-request` | 10 s |
+| `Stop` | `stop` | 45 s |
+| `SessionEnd` | `session-end` | 45 s |
+| `SubagentStart` | `subagent-start` | 10 s |
+| `SubagentStop` | `subagent-stop` | 10 s |
+| `PreCompact` | `pre-compact` | 10 s |
+| `PostCompact` | `post-compact` | 10 s |
+
+Timeouts are **seconds**, and Kimi Code validates the field as an integer in 1–600 and refuses to load the **whole config file** outside that range. Its own default is 30 seconds; Beacon writes explicit values as ceilings on a hang, not budgets.
+
+Beacon's hooks carry no `matcher`. An absent matcher is the match-all form, which is what a telemetry hook wants on every event — and a matcher that is present is compiled as a regular expression, where one Kimi Code cannot compile matches nothing at all, silently.
+
+The seven events Beacon does not register:
+
+- **`SessionHeartbeat`** is the one where subscribing would *create* the behavior rather than observe it. Kimi Code starts its sixty-second timer only when a hook is configured for it, so Beacon would be spawning a process a minute in every session to write an event saying nothing happened.
+- **`UserPromptQueued`** fires when a message is typed while a turn is still running; the prompt is recorded when it is submitted, and recording the queueing too would count one prompt twice.
+- **`TurnStarted`** carries a turn id the endpoint schema has no field for, and its `prompt` is the text `UserPromptSubmit` already carried.
+- **`TaskStarted`** and **`Notification`** report background tasks, and the tool that started one — a `Bash` with `run_in_background`, an `Agent`, an `AskUserQuestion` — is already recorded as itself.
+- **`StopFailure`** reports a turn that failed on an API or runtime error rather than anything the agent did.
+- **`Interrupt`** fires in place of `Stop` when you cancel a turn. Beacon's closing action is `tool.completed`, which states the agent finished; a cancelled turn did not, and there is no action in the endpoint schema that says so. The session is still closed by `SessionEnd`.
+
+## Discovery and status
+
+```bash title="Show Kimi Code hook status"
+beacon endpoint hooks status --harness kimi
+beacon endpoint discover
+```
+
+Kimi Code reports as the `kimi_code` harness with capability `hooks`, and every event carries `harness.collection_method=hook`. Kimi Code has a plugin system that can declare hooks, and Beacon deliberately does not use it — a plugin install needs an interactive step and a `/reload`, and choosing it would have changed that field as a side effect of an install mechanic rather than of what runs on each event.
+
+`beacon endpoint inventory` lists `config.toml` as a **native** config rather than a hook config, and reports `beacon_managed` only when the hook command is present. On this runtime "the file exists" says nothing: it exists on every machine with Kimi Code installed.
+
+## Install or configuration support
+
+```bash
+beacon endpoint hooks install --harness kimi
+beacon endpoint hooks status --harness kimi
+beacon endpoint hooks uninstall --harness kimi
+```
+
+Re-running the install replaces Beacon's entries rather than stacking a second copy of them, so a repair after the log path changed does not end with every event firing two hooks.
+
+Uninstall removes Beacon's entries and leaves your own hooks, settings, and comments alone — including on a config that Kimi Code has since re-serialized.
+
+## Telemetry coverage
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through `$KIMI_CODE_HOME/config.toml` |
+| Harness attribution | Supported. `kimi`, `kimi_code`, `kimi-code`, `kimicode`, `kimi_cli`, `kimi_code_cli`, and `kimi_code_acp` normalize to `kimi_code` |
+| Hook install, status, uninstall, and repair | Supported at user scope |
+| Session lifecycle | Supported. `session.started` from `SessionStart`, `tool.completed` from `Stop`, and `session.ended` from `SessionEnd` |
+| Prompts | Supported. `prompt.submitted` from `UserPromptSubmit` |
+| Tool use | Supported for pre-tool and post-tool activity, with `gen_ai.tool.call.id` from `tool_call_id` |
+| Commands | Supported. `command.executed` with the command and its output, plus `command.exit_code` on a failure |
+| File activity | Supported. `file.read` and `file.modified` with paths, operations, and diffs |
+| MCP activity | Supported. Recognized from `mcp__<server>__<tool>`, with the server and tool split out |
+| Subagents | Supported. `subagent.started` and `subagent.stopped` |
+| Context compaction | Supported. `session.compacting` and `session.compacted` |
+| Failed tools | Supported. `tool.failed` from `PostToolUseFailure` |
+| Approval decisions | **Supported.** See [Approvals and enforcement](#approvals-and-enforcement) |
+| Token usage and cost | Not collected. See [Known gaps](#known-gaps) |
+| Local JSONL and dashboard | Supported |
+| MDM deployment | Supported for the endpoint agent. Hooks are installed in the logged-in user's Kimi Code data root |
+
+### Tool taxonomy
+
+Kimi Code publishes its built-in tools, so classification is exhaustive over the reference rather than inferred from names:
+
+| Tool | Recorded as |
+|------|-------------|
+| `Read`, `ReadMediaFile`, `Glob`, `Grep` | `file.read` |
+| `Write` | `file.modified`, operation `create` |
+| `Write` with `mode = "append"` | `file.modified`, operation `modify` |
+| `Edit` | `file.modified`, operation `modify` |
+| `Bash` | `command.executed`, with `command.output` |
+| `mcp__<server>__<tool>` | `mcp.tool_invoked`, with `mcp.server` and `mcp.tool` |
+| `Agent`, `AgentSwarm`, `Skill`, `TodoList`, `Task*`, `Cron*`, `Tower*`, and the rest | `tool.invoked` |
+
+`Glob` and `Grep` are in that table because the generic classifier every runtime shares gets them wrong, and inconsistently: "grep" is in its read list and "glob" is in none of them, so one search would record a file operation and its sibling would record nothing. Both take the path they searched, and both are recorded as reads of it.
+
+`CronCreate`, `CronList`, `TaskList`, and `TodoList` are entered for the opposite reason — they contain "create" and "list", which the substring rule answers for, and they touch no file.
+
+### `Write` is a create or a modification, depending on `mode`
+
+`Write` takes an optional `mode` of `overwrite` (the default) or `append`. Beacon reads it, because the difference is not cosmetic: a create-shaped diff over an append's `content` emits `@@ -0,0 +1,N @@`, which asserts that the file's **entire contents** are the fragment that was just added to the end of it.
+
+An appending `Write` is recorded as `file.modified` with operation `modify`, and its diff states the true thing instead — these lines were added, and nothing is said about what was there before.
+
+### Tool output, and where the exit code lives
+
+Kimi Code sends no tool-response object. A successful call carries `tool_output` as a plain string, and a **failed** one carries no `tool_output` at all — its output is flattened into an `error` object, under `error.message`. Beacon reads both, so a failing command's own stderr reaches the log rather than being dropped.
+
+`Bash` reports a non-zero exit by appending `Command failed with exit code: N.` to that text, and that sentence is the only place an exit code reaches a hook. Beacon reads the **last** one: everything above it is the command's own output, and a command that prints something looking like the sentence — a test asserting on one, a log line quoting one — would otherwise decide the event's exit code.
+
+A missing marker is **not** read as exit 0. On this runtime a `Bash` result with no marker is either a command that exited cleanly *or* a background command that has only just been launched and whose result is a task id, and those are different facts.
+
+<Note>
+**A failed write is not recorded as an edit.** `PostToolUseFailure` carries the same `tool_name` and `tool_input` as a success — Kimi Code rejects a write whose file changed on disk since the session last read it, and an `Edit` whose `old_string` matches more than once — so without a guard Beacon would build a diff from the content of a write that never landed and assert the file changed. Those arrive as `tool.failed` with no diff.
+</Note>
+
+## Approvals and enforcement
+
+**Beacon records real operator approval decisions for Kimi Code.** This is one of the few supported runtimes where it can.
+
+Kimi Code fires `PermissionRequest` just before it blocks on a person and `PermissionResult` once they have answered. The second carries the whole request back plus the answer, so these events are `observed` rather than `inferred` — unlike the approvals Beacon synthesizes on runtimes that expose only a pre-tool notification, and unlike [Cline](/runtimes/cline), [Pi](/runtimes/pi), [fx](/runtimes/vercel-fx), [Kiro](/runtimes/kiro), and [goose](/runtimes/goose), where Beacon refuses to synthesize one at all.
+
+| `decision` | Recorded as | `approval.decision` |
+|------------|-------------|---------------------|
+| `approved` | `approval.allowed` | `approve` |
+| `rejected` | `approval.denied` | `deny` |
+| `cancelled` | `approval.denied` | `cancelled` |
+| `error` | `approval.denied` | `error` |
+
+Cancelled and error are recorded as denials because that is what happened to the call: it did not run, and a reader counting blocked tool calls should see them. Their `approval.decision` distinguishes them from a person saying no.
+
+The decided call's own arguments ride along, so an approval for a shell command records the command line and one for a write records the path. Every approval rule Beacon ships matches on `command.command` or `file.path` rather than on a tool name, so an approval that said only "the operator denied `Bash`" would be telemetry no rule could act on.
+
+Two details with no schema field of their own survive under `raw.kimi`: `scope`, which is `session` when you approved every future call like this one rather than just this one, and `feedback`, the reason you typed when refusing.
+
+`PreToolUse` does **not** also become an approval. On this runtime it fires *before* the permission check runs, so at that moment nobody has been asked anything.
+
+### Enforcement
+
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. On Kimi Code a provider deny is **exit code 2 with the reason on stderr**, which the runtime checks before it parses stdout at all.
+
+<Warning>
+**A deny raised while answering `PermissionRequest` has no effect.** Only three Kimi Code events are blockable — `PreToolUse`, `Stop`, and `UserPromptSubmit` — and `PermissionRequest` is observation-only: its return value is discarded. Beacon does not pretend otherwise; the seam returns no denial in that phase, so no denial telemetry is written for a call that was not in fact denied. A provider that denies at the pre-tool phase, which runs on every tool call whether or not an approval follows, takes effect normally.
+</Warning>
+
+## Data handling
+
+Kimi Code content is handled like every other runtime. Prompts, tool arguments, commands, command output, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
+
+Beacon preserves the verbatim payload under `raw.kimi`, as it does for [Qwen Code](/runtimes/qwen-code), [Muse Code](/runtimes/muse-code), and [DeepSeek Harness](/runtimes/deepseek-harness). Non-MCP tool arguments reach no endpoint-schema field on any runtime, so on Kimi Code this is where a `Grep` pattern, an `Agent`'s prompt, a `CronCreate` schedule, and a `Bash` `run_in_background` flag survive — along with the approval `scope` and `feedback` above, `session_title`, `client_type`, `is_steer` on a prompt, `source` and `profile` on `SessionStart`, and `reason` on `SessionEnd`. The cost is stated rather than hidden: on a `Write` the payload repeats the file content the diff already carries. `raw` is the first thing dropped at the size ceiling, so the duplication is bounded and the diff is what survives.
+
+<Note>
+**Beacon writes nothing to a Kimi Code hook's stdout.** On `UserPromptSubmit`, a hook that exits 0 has its stdout appended to the model's context inside a `<hook_result>` element — so the `{}` Beacon's observing hooks otherwise finish with would be pasted in front of the model once per prompt. Suppressing it costs nothing: Kimi Code ignores hook stdout on every other event, and the one deny shape Beacon needs is an exit code.
+</Note>
+
+## Known gaps
+
+- **No token usage or cost.** No hook payload carries a usage count on any of the twenty events. Kimi Code does count tokens — the TUI shows context occupancy and `PreCompact` carries a `token_count` for the history it is about to summarize — but neither is per-call spend, and promoting either into `gen_ai.usage` would make a level look like an additive total. Kimi Code activity therefore does not appear in `beacon token-usage` reports or the dashboard token view, and coverage reports it as expected-none rather than silent.
+- **No agent message text.** Kimi Code puts no assistant response on any hook payload, so sessions are recorded with the user's half and the agent's actions but not the agent's prose.
+- **No interrupted-turn event.** `Interrupt` fires in place of `Stop` when you cancel a turn, and Beacon does not register it; recording a cancellation as `tool.completed` would state the agent finished. The session still closes through `SessionEnd`.
+- **No heartbeat.** `SessionHeartbeat` is deliberately unregistered — see [Registered events](#registered-events).
+- **No project scope.** See the warning under [Collection path](#collection-path).
+- **Hooks are fail-open in every direction.** A hook that times out, crashes, or exits non-zero other than 2 is treated as an allow, and nothing surfaces. That is Kimi Code's documented design and is why the runtime's own guidance is not to use hooks as a sole security barrier.
+
+## Deployment notes
+
+`config.toml` is read at startup, so an install taken while Kimi Code is running takes effect on the next session. The install prints that reminder.
+
+Confirm status, then generate one event and check the log:
+
+```bash
+beacon endpoint hooks status --harness kimi
+beacon endpoint doctor --system
+grep '"name":"kimi_code"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+If Kimi Code telemetry is missing:
+
+- Check `$KIMI_CODE_HOME`: if it is set, the config is under that directory, not `~/.kimi-code`.
+- Confirm `config.toml` contains `[[hooks]]` entries with `--platform kimi`.
+- Run `beacon endpoint discover` — it reports `misconfigured` for a config that is not valid TOML or that defines `hooks` as an inline array.
+- Start a new Kimi Code session, or run `/reload`.
+- Check `$KIMI_CODE_HOME/logs/` for a hook error. A hook that cannot start is fail-open and says so only there.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Beacon discovers and configures each runtime.
+  </Card>
+</Columns>
