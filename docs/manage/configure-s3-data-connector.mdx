@@ -1,19 +1,19 @@
 ---
 title: "Configure S3 Data Connector"
-description: "Configure read-only S3 access for Asymptote ingestion."
+description: "Configure read-only S3 access for Beacon ingestion."
 ---
 
 ## Overview
 
-Asymptote can ingest customer-hosted event files from a private AWS S3 bucket or prefix. Grant Asymptote's ingestion worker read-only access to the bucket that contains the event files.
+Beacon can ingest customer-hosted event files from a private AWS S3 bucket or prefix. Grant Beacon's ingestion worker read-only access to the bucket that contains the event files.
 
 Do not make the bucket public. Do not grant write or delete permissions.
 
-At the end of setup, send Asymptote the full IAM role ARN for the role you create.
+At the end of setup, send Beacon the full IAM role ARN for the role you create.
 
 ## Customer steps
 
-1. Send Asymptote the S3 location details.
+1. Send Beacon the S3 location details.
 
    Include:
 
@@ -32,7 +32,7 @@ At the end of setup, send Asymptote the full IAM role ARN for the role you creat
 
 3. Configure the role trust policy.
 
-   Use the IAM ARN Asymptote gives you as the trusted principal. Replace `ASYMPTOTE_IAM_ARN` with that ARN.
+   Use the IAM ARN Beacon gives you as the trusted principal. Replace `ASYMPTOTE_IAM_ARN` with that ARN.
 
    ```json title="IAM role trust policy"
    {
@@ -96,7 +96,7 @@ At the end of setup, send Asymptote the full IAM role ARN for the role you creat
 
    The KMS key policy must also allow this IAM role to use `kms:Decrypt`.
 
-6. Send Asymptote the final onboarding details.
+6. Send Beacon the final onboarding details.
 
    Send:
 
@@ -115,7 +115,7 @@ Share a representative sample file before production ingestion. The sample shoul
 ## Related
 
 <Columns cols={2}>
-  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
     Review managed visibility, governance, and investigation workflows.
   </Card>
   <Card title="Endpoint Event Schema" icon="code" href="/telemetry-schema/event-schema">

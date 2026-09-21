@@ -1,11 +1,11 @@
 ---
 title: "Hermes Agent"
-description: "Asymptote support details for Hermes Agent endpoint telemetry"
+description: "Beacon support details for Hermes Agent endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Hermes Agent through shell hook payloads sent to `beacon-hooks`, with local session database sync for historical backfill.
+Beacon supports Hermes Agent through shell hook payloads sent to `beacon-hooks`, with local session database sync for historical backfill.
 
 ## Prerequisites
 
@@ -13,15 +13,15 @@ Before enabling Hermes Agent hooks, make sure:
 
 - Hermes Agent is installed for the user or `~/.hermes/config.yaml` exists.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote hooks are installed with `beacon endpoint hooks install --harness hermes`.
+- Beacon hooks are installed with `beacon endpoint hooks install --harness hermes`.
 - Hermes hook consent is handled for the session, especially in non-interactive gateway, cron, or CI runs.
 - Hermes is restarted after hook install or removal so new sessions load the updated config.
 
 ## Collection path
 
-Asymptote merges shell-hook entries into `~/.hermes/config.yaml`. Hermes invokes Asymptote's hook adapter for supported lifecycle, prompt, tool, approval, and subagent events, and the adapter writes normalized endpoint events to the configured runtime JSONL log.
+Beacon merges shell-hook entries into `~/.hermes/config.yaml`. Hermes invokes Beacon's hook adapter for supported lifecycle, prompt, tool, approval, and subagent events, and the adapter writes normalized endpoint events to the configured runtime JSONL log.
 
-Asymptote can also read Hermes Agent's committed SQLite session store:
+Beacon can also read Hermes Agent's committed SQLite session store:
 
 ```bash title="Sync Hermes Agent sessions"
 beacon endpoint hermes status
@@ -32,7 +32,7 @@ The sync path reads `~/.hermes/state.db` locally and offline. It writes mapped e
 
 ## Discovery and status
 
-Asymptote detects Hermes through the `hermes` executable or a local `~/.hermes` directory, then checks `~/.hermes/config.yaml` for Asymptote-managed commands, identified by the endpoint settings flags (`--log`, `--config`, `--cli`) or a legacy `BEACON_ENDPOINT_MODE=1` prefix, together with `--platform hermes`.
+Beacon detects Hermes through the `hermes` executable or a local `~/.hermes` directory, then checks `~/.hermes/config.yaml` for Beacon-managed commands, identified by the endpoint settings flags (`--log`, `--config`, `--cli`) or a legacy `BEACON_ENDPOINT_MODE=1` prefix, together with `--platform hermes`.
 
 Use `beacon endpoint hooks status --harness hermes` to inspect Hermes Agent hook status. Use `beacon endpoint hermes status` to inspect committed local sessions and how much Beacon has synced.
 
@@ -68,7 +68,7 @@ For scheduled collection, run `beacon endpoint hermes sync --watch`, or run one-
 
 Hermes prompts for first-use consent for each `(event, command)` hook pair. For non-interactive gateway, cron, or CI runs, set `HERMES_ACCEPT_HOOKS=1`, start Hermes with `--accept-hooks`, or configure `hooks_auto_accept: true` in `~/.hermes/config.yaml`.
 
-Asymptote preserves existing Hermes settings and non-Asymptote hooks when installing or uninstalling Hermes telemetry. It replaces only Asymptote-managed Hermes hook commands.
+Beacon preserves existing Hermes settings and non-Beacon hooks when installing or uninstalling Hermes telemetry. It replaces only Beacon-managed Hermes hook commands.
 
 Restart Hermes after installing or removing hooks so new sessions pick up the updated configuration.
 

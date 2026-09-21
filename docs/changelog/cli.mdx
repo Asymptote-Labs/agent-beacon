@@ -133,7 +133,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### v1.3.9 · September 9, 2026
 
-- **Cloud agents can send telemetry to Asymptote Managed** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
+- **Cloud agents can send telemetry to Beacon Managed** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
 
 ### v1.3.8 · September 7, 2026
 
@@ -216,29 +216,29 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Onboarding asks where telemetry should go** · The first-run prompt ends with
   an arrow-key question: keep telemetry on this machine (default), forward it to
   your own infrastructure (a SIEM, observability platform, or an S3/GCS bucket you
-  own, with a pointer to the log forwarding docs), or forward it to Asymptote
+  own, with a pointer to the log forwarding docs), or forward it to Beacon
   Managed, which runs `beacon endpoint connect` after the install. Question titles
   and the selected row use the Beacon purple. `beacon endpoint install --connect`
-  skips the question and connects, `BEACON_MANAGED_INGEST=0` hides the Asymptote
+  skips the question and connects, `BEACON_MANAGED_INGEST=0` hides the Beacon
   answer, the answer stays local and is shown by `beacon endpoint onboarding`; the
-  Asymptote answer is recorded only once the machine is connected. The Homebrew
+  Beacon answer is recorded only once the machine is connected. The Homebrew
   formula now depends on `vector` so a Homebrew install can connect without a
   second step.
 - **`beacon endpoint connect` and `disconnect`** · Connect an endpoint to
-  Asymptote managed ingest from the CLI: it finds Vector (0.56+), opens the
+  Beacon managed ingest from the CLI: it finds Vector (0.56+), opens the
   dashboard's device approval page, receives a per-device key through a
   loopback PKCE exchange, stores it in a `0600` secrets file, renders and
   validates the forwarder config, and starts `com.beacon.endpoint.asymptote-forwarder`
   (launchd) or `beacon-asymptote-forwarder.service` (systemd) in user or system
-  mode. `beacon endpoint status` gains an "Asymptote managed ingest" line and a
+  mode. `beacon endpoint status` gains an "Beacon managed ingest" line and a
   `managed_ingest` JSON object with forwarder state and a live credential check;
   `config.json` gains a non-secret `managed_ingest` block; uninstall removes the
   forwarder and credentials. Re-running connect rotates the key in place.
-- **Asymptote Managed forwarding pack** · `beacon endpoint asymptote` generates a
+- **Beacon Managed forwarding pack** · `beacon endpoint asymptote` generates a
   Vector `http` forwarder that posts the runtime and inventory JSONL to
-  Asymptote's ingest service with a per-device key read from a `0600` secrets
+  Beacon's ingest service with a per-device key read from a `0600` secrets
   file, plus a credential smoke test and sample events. It is the first Beacon
-  destination that sends events to an Asymptote-run service; forwarding is
+  destination that sends events to a Beacon-run service; forwarding is
   opt-in per device, starts only after browser approval, and is revocable from
   the dashboard. `beacon endpoint connect` (coming next) runs enrollment and the
   forwarder as a service using the same template.
@@ -247,7 +247,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   to and `beacon login` saved credentials nothing consumed. `beacon endpoint
   status` no longer prints an "Endpoint ingest" line and its JSON output drops
   `managed_upload`; a `managed_upload` block in `config.json` is ignored.
-  Forwarding to Asymptote returns as an explicit, revocable Vector destination
+  Forwarding to Beacon returns as an explicit, revocable Vector destination
   set up by `beacon endpoint connect` in an upcoming release.
 
 ## August 2026
@@ -524,7 +524,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Windows install documentation** · How to install the endpoint on Windows and how
   to verify it afterwards.
 - **Verification that can actually fail** · The sandbox harness gained a Windows
-  guest lane, uninstall assertions that ask the operating system rather than Beacon
+  guest lane, uninstall assertions that ask the operating system rather tha Beacon
   whether a service is gone, and fixes to several checks that could not fail and so
   read as coverage without providing any.
 
@@ -855,19 +855,19 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### v0.0.59 · June 13, 2026
 
-- **Managed ingest commands** · Added `beacon ingest` commands for checking managed ingest status and uploading endpoint telemetry to configured Asymptote Managed destinations.
+- **Managed ingest commands** · Added `beacon ingest` commands for checking managed ingest status and uploading endpoint telemetry to configured Beacon Managed destinations.
 - **Endpoint token reporting** · Added `beacon endpoint tokens` for local token, cost, model, session, run, harness, and repository attribution from Beacon runtime logs.
 - **Token attribution fixes** · Improved token usage normalization for Claude Code telemetry, cumulative metric batches, composite run IDs, and SDK session attributes.
 
 ### v0.0.58 · June 13, 2026
 
 - **Token usage foundation** · Added token usage aggregation, dashboard token views, and trace identity fields so endpoint activity can report usage and cost consistently.
-- **Managed ingest support** · Added the endpoint ingest plumbing that lets authenticated Beacon clients upload endpoint telemetry to Asymptote Managed when configured.
+- **Managed ingest support** · Added the endpoint ingest plumbing that lets authenticated Beacon clients upload endpoint telemetry to Beacon Managed when configured.
 - **Telemetry schema updates** · Added trace identity, usage cost, and int64 token count fields while preserving local runtime log workflows.
 
 ### v0.0.57 · June 11, 2026
 
-- **Beacon dashboard login** · Added `beacon login` so the Beacon CLI can authenticate with the Asymptote dashboard through a browser-based flow.
+- **Beacon dashboard login** · Added `beacon login` so the Beacon CLI can authenticate with the Beacon dashboard through a browser-based flow.
 - **Credential replacement controls** · `beacon login --force` lets operators replace saved credentials when switching users or organizations.
 - **Dashboard URL configuration** · Login can target a custom dashboard URL with `--dashboard-url` or `BEACON_DASHBOARD_URL`, while endpoint telemetry remains local-only unless cloud features are explicitly used.
 
@@ -920,7 +920,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 ### v0.0.48 · June 8, 2026
 
 - **OpenTelemetry GenAI schema support** · Beacon now preserves standard `gen_ai` request, response, usage, tool, retrieval, evaluation, message, provider, workflow, and system-instruction metadata in endpoint events.
-- **Observe package rename** · Renamed the shared schema package from Asymptote Trace to Asymptote Observe while preserving the public Beacon event schema version.
+- **Observe package rename** · Renamed the shared schema package from Beacon Trace to Beacon Observe while preserving the public Beacon event schema version.
 - **Content handling fixes** · Improved prompt detection for empty GenAI input messages and kept `content.retention` validation backward compatible while using `content.truncated` for truncation display where available.
 
 ### v0.0.47 · June 8, 2026

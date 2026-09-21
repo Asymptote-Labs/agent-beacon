@@ -1,16 +1,16 @@
 ---
 title: "System Architecture"
-description: "Compare the open-source Agent Beacon architecture with the managed Asymptote platform architecture"
+description: "Compare the open-source Agent Beacon architecture with the managed Beacon platform architecture"
 ---
 
-Asymptote supports two architecture paths: the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) architecture, which collects local, browser, in-code, [CI](/concepts/core-concepts#ci-telemetry), and [cloud telemetry](/concepts/core-concepts#cloud-agent-telemetry) on customer-controlled infrastructure, and the [Asymptote Managed](/concepts/core-concepts#asymptote-managed) architecture for centralized visibility, governance, detections, and investigations.
+Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) architecture, which collects local, browser, in-code, [CI](/concepts/core-concepts#ci-telemetry), and [cloud telemetry](/concepts/core-concepts#cloud-agent-telemetry) on customer-controlled infrastructure, and the [Beacon Managed](/concepts/core-concepts#beacon-managed) architecture for centralized visibility, governance, detections, and investigations.
 
 <Columns cols={2}>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     See how Agent Beacon collects, normalizes, stores, correlates, and detects agent telemetry across every supported surface.
   </Card>
-  <Card title="Managed Architecture" icon="cloud" href="/architecture/managed-architecture">
-    See how Asymptote Managed centralizes telemetry, policy, detections, and investigation workflows.
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+    Review managed ingest, governance, investigations, and rollout support.
   </Card>
 </Columns>
 
@@ -18,8 +18,8 @@ Asymptote supports two architecture paths: the open-source [Agent Beacon](/conce
 
 | Architecture | Use when |
 | --- | --- |
-| Open Source Architecture | You want [open-source telemetry](/concepts/core-concepts#asymptote-open-source) for supported local, CI, and cloud agent surfaces, with customer-controlled records and forwarding. |
-| Managed Architecture | You want [managed ingest](/concepts/core-concepts#asymptote-managed), retention, search, detections, fleet visibility, policy controls, identity mapping, approvals, SSO, RBAC, audit trails, and investigation workflows. |
+| Open Source Architecture | You want [open-source telemetry](/concepts/core-concepts#beacon) for supported local, CI, and cloud agent surfaces, with customer-controlled records and forwarding. |
+| Managed Architecture | You want [managed ingest](/concepts/core-concepts#beacon-managed), retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. |
 
 ## Related
 
@@ -28,6 +28,6 @@ Asymptote supports two architecture paths: the open-source [Agent Beacon](/conce
     Choose between Open Source, Managed, and Private Deployment paths.
   </Card>
   <Card title="Core Concepts" icon="book-open" href="/concepts/core-concepts">
-    Review the concepts used across Asymptote and Agent Beacon docs.
+    Review the concepts used across Beacon and Agent Beacon docs.
   </Card>
 </Columns>

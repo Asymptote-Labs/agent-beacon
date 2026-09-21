@@ -1,11 +1,11 @@
 ---
 title: "Cursor"
-description: "Asymptote support details for Cursor endpoint telemetry"
+description: "Beacon support details for Cursor endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Cursor through native hook payloads sent to `beacon-hooks`, with local session-store sync for historical backfill.
+Beacon supports Cursor through native hook payloads sent to `beacon-hooks`, with local session-store sync for historical backfill.
 For provider-managed Cursor cloud sessions, see
 [Cursor Cloud Agents](/runtimes/cursor-cloud-agents).
 
@@ -15,15 +15,15 @@ Before enabling Cursor hooks, make sure:
 
 - Cursor is installed for the user or the `~/.cursor` directory exists.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote hooks are installed with `beacon endpoint hooks install --harness cursor`.
+- Beacon hooks are installed with `beacon endpoint hooks install --harness cursor`.
 - For project-level collection, install hooks from the target project with `--level project`.
 - Cursor is restarted after hook install or removal so new sessions load the updated hook configuration.
 
 ## Collection path
 
-Cursor invokes Asymptote's hook adapter from Cursor hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+Cursor invokes Beacon's hook adapter from Cursor hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
 
-Asymptote can also read Cursor's committed local session stores:
+Beacon can also read Cursor's committed local session stores:
 
 ```bash title="Sync Cursor local sessions"
 beacon endpoint cursor status
@@ -34,7 +34,7 @@ The sync path reads Cursor Composer conversations from the global VS Code storag
 
 ## Discovery and status
 
-Asymptote detects Cursor through the Cursor binary or `~/.cursor`, then checks Asymptote hook configuration.
+Beacon detects Cursor through the Cursor binary or `~/.cursor`, then checks Beacon hook configuration.
 
 Use `beacon endpoint hooks status --harness cursor` to inspect Cursor hook status. Use `beacon endpoint cursor status` to inspect local session stores and how much Beacon has synced.
 
@@ -76,7 +76,7 @@ Run `beacon endpoint cursor sync --watch`, or schedule one-shot sweeps, if you w
 
 Restart Cursor after installing or removing hooks so the updated hook configuration is picked up by new sessions.
 
-Hook events include metadata such as file path, operation, language, diff hash, and diff byte count. Raw diffs and reasoning text are subject to Asymptote's redaction, sanitization, truncation, and event-size limits before writing.
+Hook events include metadata such as file path, operation, language, diff hash, and diff byte count. Raw diffs and reasoning text are subject to Beacon's redaction, sanitization, truncation, and event-size limits before writing.
 
 ## Related
 

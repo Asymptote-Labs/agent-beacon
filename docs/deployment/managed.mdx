@@ -1,80 +1,40 @@
 ---
-title: "Asymptote Managed"
-description: "Managed visibility, governance, and investigations for agent activity at scale"
-tag: "Enterprise"
+title: "Beacon Managed"
+description: "Hosted storage, search, and long-term history for your agent sessions"
 ---
 
-Asymptote Managed builds on the open-source Agent Beacon foundation for teams that need centralized operations, policy controls, and investigation workflows across a fleet.
+The easiest way to use Beacon without running your own backend.
 
-Use this path when local JSONL and customer-managed forwarding are not enough on their own, or when agent adoption has moved beyond a small local pilot.
+Beacon Managed gives individual developers hosted storage, search, and long-term history for their agent sessions.
 
-## What managed adds
+Install Beacon, connect your account, and your traces are automatically available in one place across the agents you use.
 
-Asymptote Managed includes the open-source capture and forwarding paths, then adds the managed services needed to operate agent security at company scale.
+## What Beacon Managed gives you
 
-| Capability | What managed adds beyond open source |
+| Capability | Beacon Managed |
 | --- | --- |
-| Managed ingest and retention | Centralized collection, retention, search, and detections for agent activity |
-| Fleet-wide visibility | Inventory across endpoints, agent harnesses, users, and teams |
-| Policy controls | Policy enforcement workflows, identity mapping, and approval visibility |
-| Investigations | Timelines and case workflows for reviewing prompts, tools, file access, and agent actions |
-| Access control | SSO, role-based access control, and audit trails |
-| Operations support | Priority support, onboarding, and rollout guidance |
+| Hosted ingest | Send Beacon traces to a managed backend |
+| Unlimited retention | Keep your agent history over time |
+| Search | Find past sessions, prompts, commands, and tool calls |
+| Cross-harness history | See activity from Claude Code, Cursor, Codex, and more in one place |
+| Analytics | Understand usage, tokens, workflows, and runtime behavior |
+| Knowledge | Surface recurring workflows, corrections, and useful patterns |
+| No backend to run | Asymptote handles storage and infrastructure |
 
-## Core managed workflows
+## One place for all your agent history
 
-### Centralize runtime visibility
+Your agent history is usually split across different tools and local session files.
 
-Managed ingest turns endpoint and cloud-agent telemetry into searchable fleet-wide visibility. Security teams can review which agents are running, which tools they use, and what sensitive files or data are involved in agent activity.
+Beacon Managed brings those traces together into one searchable timeline, so you can quickly find past work, revisit how you solved something, and compare sessions across harnesses.
 
-Endpoints join with [`beacon endpoint connect`](/cli/endpoint-connect): the CLI opens the dashboard, a member of the organization approves the specific device, and a Vector forwarder ships the machine's runtime and inventory JSONL with a per-device key that the dashboard's Beacon Endpoints page can revoke at any time. The first interactive `beacon endpoint install` offers the same step. Enrollment is interactive per device today; headless enrollment for MDM fleets is a planned follow-up.
+## Keep what your agents learn
 
-For provider-managed cloud agents, Managed avoids proof-of-concept patterns such
-as placing storage service-account keys directly into cloud sandbox environment
-variables. Asymptote can operate the secure ingest and retention layer for you,
-or work with your team on a production-grade forwarding design in
-customer-managed infrastructure.
+The more you use agents, the more useful history you create.
 
-### Govern agent activity
+Beacon Managed keeps that history over time so successful workflows, debugging patterns, repeated corrections, and repository knowledge do not disappear when a session ends.
 
-Policy, identity mapping, and approvals help teams connect runtime actions back to users and workflows. Use this when you need governance beyond a local audit log or SIEM-forwarded event stream.
+## Start in minutes
 
-### Investigate agent behavior
+Install Beacon, connect to Beacon Managed, and keep using your existing agents.
 
-Investigation timelines and case workflows organize prompts, tool calls, file access, command execution, and related context so security teams can reconstruct what happened during an agent session.
-
-### Support enterprise rollout
-
-Managed deployments include rollout planning, onboarding, and support for teams deploying across endpoints and execution environments.
-
-## Private deployment
-
-For regulated teams that need dedicated infrastructure or stricter data boundaries, Asymptote supports private cloud or customer-controlled deployment options.
-
-Private deployment can include:
-
-- complete data isolation and residency options
-- custom retention and forwarding architecture
-- coverage across endpoints and execution environments
-- dedicated deployment engineering and rollout planning
-
-## Get access
-
-Request access or discuss deployment requirements at [asymptotelabs.ai/contact](https://asymptotelabs.ai/contact). For plan details, see [Asymptote pricing](https://asymptotelabs.ai/pricing).
-
-## Related
-
-<Columns cols={2}>
-  <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
-    Compare Open Source, Managed, and Private Deployment paths.
-  </Card>
-  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
-    Install Beacon locally and configure endpoint telemetry.
-  </Card>
-  <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
-    Plan endpoint inventory, MDM rollout, validation, retention, and forwarding.
-  </Card>
-  <Card title="Asymptote Observe SDK" icon="code" href="/sdk/quickstart">
-    Instrument cloud-hosted agent applications with Asymptote telemetry.
-  </Card>
-</Columns>
+No database, storage bucket, or indexing infrastructure required.

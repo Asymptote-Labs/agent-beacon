@@ -1,86 +1,108 @@
 ---
 title: "Quickstart"
-description: "Choose the right Asymptote path for a local, managed, or private rollout"
+description: "Install Beacon, choose where your data lives, and capture your first agent session"
 ---
 
-Start here if you are deciding how to introduce Asymptote across a team. Asymptote can begin as open-source Agent Beacon telemetry across supported local, CI, and cloud surfaces, move into managed visibility and governance, or run in a private deployment for stricter infrastructure requirements.
+## 1. Install Beacon
 
-## Choose a deployment path
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    brew trust asymptote-labs/tap
+    brew install asymptote-labs/tap/beacon
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Download `BeaconEndpointAgent-<version>-x64.msi` from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest), then run PowerShell as an administrator:
 
-| Hosting Option | Use it when | Next step |
-| -------------- | ----------- | --------- |
-| Asymptote Open Source | You want open-source telemetry across supported agent surfaces, local JSONL where applicable, and customer-managed forwarding into your SIEM or observability stack. | Start with the [Security & IT quickstart](/get-started/quickstart-security-it) or [developer quickstart](/get-started/quickstart-developers). |
-| Asymptote Managed | You need centralized ingest, fleet-wide visibility, policy controls, investigations, SSO/RBAC, audit trails, and rollout support. | Review [Asymptote Managed](/deployment/managed) or [contact us](https://asymptotelabs.ai/contact). |
-| Asymptote Private Deployment | You want managed capabilities with dedicated infrastructure, stricter data boundaries, or residency requirements. | [Contact us](https://asymptotelabs.ai/contact) to discuss deployment requirements. |
+    ```powershell
+    msiexec /i BeaconEndpointAgent-<version>-x64.msi
+    ```
 
-See [Hosting Options](/deployment/hosting-options) for the full comparison.
+    See the [Windows install guide](/platforms/windows) for more options.
+  </Tab>
+  <Tab title="Linux">
+    Install Beacon using the package for your environment:
 
-## Open source rollout strategy
+    <CodeGroup>
+      ```bash title="Debian, Ubuntu"
+      sudo apt install ./beacon_<version>_linux_amd64.deb
+      ```
 
-For most Security and IT teams, the safest open-source path is staged. Local endpoint collection is usually the first evaluation path, then teams can add CI and cloud-agent surfaces where those agents run:
+      ```bash title="Fedora, RHEL, Rocky, Alma"
+      sudo dnf install ./beacon_<version>_linux_amd64.rpm
+      ```
+    </CodeGroup>
 
-1. **Evaluate locally** with a small pilot group using supported [agent harnesses](/runtimes).
-2. **Validate health and visibility** with endpoint status, runtime log freshness, and expected event coverage.
-3. **Add CI or cloud surfaces** with the relevant Beacon setup paths when agent activity also runs in build jobs or hosted sandboxes.
-4. **Decide where events should live**: local JSONL only, Wazuh localfile, a supported SIEM/log destination, object storage, or a customer-managed pipeline.
-5. **Expand through MDM** once install coverage, collector health, and forwarding checks are stable.
+    Replace `amd64` with `arm64` on ARM systems. See the [Linux install guide](/platforms/linux) for more options.
+  </Tab>
+</Tabs>
 
-The open-source path is local-only by default. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection.
+Then configure the agents you use:
 
-## Managed or private path
+```bash
+beacon endpoint install --harness claude,codex,cursor
+```
 
-Move to Managed when a small pilot becomes an operating program: multiple teams, centralized search, governance, investigations, access control, and rollout support.
+## 2. Choose where your data lives
 
-Connecting an endpoint is one command once your organization is provisioned: `beacon endpoint connect` opens the dashboard, a member of your organization approves the device, and the machine's telemetry starts appearing on the dashboard. The first interactive `beacon endpoint install` offers the same step. See [`beacon endpoint connect`](/cli/endpoint-connect).
+Beacon supports two modes.
 
-Private Deployment is the path for regulated teams that need managed capabilities with dedicated infrastructure, stronger isolation, custom retention, or residency requirements.
+### Local
 
-[Contact us](https://asymptotelabs.ai/contact) to discuss Managed or Private Deployment.
+Keep your agent history on your machine.
 
-## Pick your quickstart
+Beacon writes telemetry locally and gives you a local dashboard. Nothing is forwarded unless you explicitly configure it.
 
-<Columns cols={2}>
-  <Card title="For Security & IT Teams" icon="building-shield" href="/get-started/quickstart-security-it">
-    Plan an open-source pilot, validate endpoint telemetry, and decide when to centralize or move to Managed.
-  </Card>
-  <Card title="For Individual Developers" icon="user" href="/get-started/quickstart-developers">
-    Install Beacon locally, confirm collection health, and inspect agent activity on your machine.
-  </Card>
-</Columns>
+### Beacon Managed
 
-### Then pick your platform
+Send your Beacon telemetry to the hosted service for:
 
-Both paths install the endpoint agent locally, and that part differs by operating system. The
-package, the service manager, and how a fleet is deployed are not the same on each:
+- unlimited retention
+- search across past sessions
+- cross-harness history
+- analytics
+- access from anywhere
 
-<Columns cols={2}>
-  <Card title="macOS" icon="apple" href="/platforms/macos">
-    Homebrew for one machine, or the signed `.pkg` with Jamf, Fleet, or Rippling for a fleet. launchd.
-  </Card>
-  <Card title="Linux" icon="linux" href="/platforms/linux">
-    A `.deb` or `.rpm` that installs and starts the endpoint for you. systemd.
-  </Card>
-  <Card title="Windows" icon="windows" href="/platforms/windows">
-    An MSI that installs and starts the endpoint for you. Windows Service Control Manager.
-  </Card>
-</Columns>
+[Sign up for Beacon Managed](https://beacon.sh/sign-up), then connect your endpoint:
 
-Capturing from CI jobs, cloud agents, or your own applications through the SDK needs none of this.
-See [agent harness integrations](/runtimes).
+```bash
+beacon endpoint connect --dashboard-url https://beacon.sh
+```
 
-## Deeper guides
+Your browser will open so you can sign in and approve the device.
 
-<Columns cols={2}>
-  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
-    Install Beacon and configure the open-source telemetry path.
-  </Card>
-  <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
-    Expand from pilot to managed endpoint rollout, validation, and forwarding.
-  </Card>
-  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
-    Review managed visibility, policy controls, investigations, and rollout support.
-  </Card>
-  <Card title="Agent harness integrations" icon="list-check" href="/runtimes">
-    See supported runtimes, deployment modes, destinations, and boundaries.
-  </Card>
-</Columns>
+## 3. Run an agent
+
+Start a new Claude Code, Codex, Cursor, or other supported agent session and use it normally.
+
+Beacon captures the session automatically.
+
+## 4. View your sessions
+
+For the local dashboard:
+
+```bash
+beacon endpoint dashboard --open
+```
+
+If you're using Beacon Managed, your sessions will also appear in the hosted dashboard.
+
+## Check your setup
+
+```bash
+beacon endpoint status
+```
+
+This shows which harnesses are connected, whether the collector is running, and whether Beacon Managed is enabled.
+
+## Useful commands
+
+| Task | Command |
+| --- | --- |
+| Check status | `beacon endpoint status` |
+| Open local dashboard | `beacon endpoint dashboard --open` |
+| Connect to Beacon Managed | `beacon endpoint connect --dashboard-url https://beacon.sh` |
+| Disconnect from Managed | `beacon endpoint disconnect` |
+| Upgrade | `brew upgrade beacon` |
+| Uninstall | `beacon endpoint uninstall --keep-logs` |

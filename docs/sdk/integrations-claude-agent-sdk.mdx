@@ -1,11 +1,11 @@
 ---
 title: "Claude Agent SDK"
-description: "Wrap Claude Agent SDK query functions with Asymptote Observe"
+description: "Wrap Claude Agent SDK query functions with Beacon Observe"
 ---
 
 ## Integration overview
 
-Use this integration when your application runs Claude Agent SDK queries through `@anthropic-ai/claude-agent-sdk`. Asymptote Observe can wrap the query function to create a Beacon-compatible root span for each agent turn.
+Use this integration when your application runs Claude Agent SDK queries through `@anthropic-ai/claude-agent-sdk`. Beacon Observe can wrap the query function to create a Beacon-compatible root span for each agent turn.
 
 ## Overview
 
@@ -13,7 +13,7 @@ Claude Agent SDK integration is currently a query wrapper, not a custom hook ada
 
 For direct Anthropic API calls through `@anthropic-ai/sdk`, use [Anthropic](/sdk/integrations-anthropic).
 
-## What Asymptote captures
+## What Beacon captures
 
 - A `claude_agent_sdk.query` span for wrapped query calls.
 - `beacon.harness.name=claude_agent_sdk`.
@@ -26,7 +26,7 @@ For direct Anthropic API calls through `@anthropic-ai/sdk`, use [Anthropic](/sdk
 - Node.js 20 or newer.
 - `@asymptote/sdk` installed.
 - `@anthropic-ai/claude-agent-sdk` installed.
-- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+- `ASYMPTOTE_API_KEY` set for Beacon Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get a Beacon Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 ```bash title="Install the SDK and Claude Agent SDK"
 npm install @asymptote/sdk @anthropic-ai/claude-agent-sdk
@@ -34,7 +34,7 @@ npm install @asymptote/sdk @anthropic-ai/claude-agent-sdk
 
 Set environment variables:
 
-```bash title="Set the Asymptote Managed API key"
+```bash title="Set the Beacon Managed API key"
 export ASYMPTOTE_API_KEY=...
 ```
 

@@ -1,11 +1,11 @@
 ---
 title: "Codex CLI and Desktop"
-description: "Asymptote support details for Codex CLI and Codex Desktop endpoint telemetry"
+description: "Beacon support details for Codex CLI and Codex Desktop endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. Codex Desktop uses the same Codex OTLP configuration path through its app-server process, and Beacon records it as `codex_desktop` instead of merging it with `codex_cli`. A lightweight SessionStart hook records the local OS user for CLI token attribution.
+Beacon supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. Codex Desktop uses the same Codex OTLP configuration path through its app-server process, and Beacon records it as `codex_desktop` instead of merging it with `codex_cli`. A lightweight SessionStart hook records the local OS user for CLI token attribution.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Before enabling Codex telemetry, make sure:
 
 ## Collection path
 
-Codex CLI exports local OpenTelemetry logs and traces to Asymptote's localhost collector. Codex Desktop exports the same Codex semantic telemetry from `codex-app-server` when user-level `~/.codex/config.toml` enables OTLP. Asymptote uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The CLI SessionStart hook writes a metadata-only `session.context` event; it never reads transcript content. Inventory is written by the scheduled inventory job, not by this hook.
+Codex CLI exports local OpenTelemetry logs and traces to Beacon's localhost collector. Codex Desktop exports the same Codex semantic telemetry from `codex-app-server` when user-level `~/.codex/config.toml` enables OTLP. Beacon uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The CLI SessionStart hook writes a metadata-only `session.context` event; it never reads transcript content. Inventory is written by the scheduled inventory job, not by this hook.
 
 Use `--include-codex-spans` during install or repair only when you need every raw Codex span for troubleshooting. It is not required for token attribution.
 
@@ -56,10 +56,10 @@ The Codex session sync reads complete JSONL lines and checkpoints by file path a
 
 ## CI support
 
-Asymptote can also capture Codex telemetry in CI with `beacon ci start` and `beacon ci finish`. In GitHub Actions, the Asymptote action creates a temporary `CODEX_HOME` with Codex OTLP settings and exposes it as `steps.<id>.outputs.codex-home` for actions such as `openai/codex-action`.
+Beacon can also capture Codex telemetry in CI with `beacon ci start` and `beacon ci finish`. In GitHub Actions, the Beacon action creates a temporary `CODEX_HOME` with Codex OTLP settings and exposes it as `steps.<id>.outputs.codex-home` for actions such as `openai/codex-action`.
 
 ```yaml
-- name: Start Asymptote telemetry
+- name: Start Beacon telemetry
   id: beacon
   uses: asymptote-labs/agent-beacon@v0.0.95
   with:
@@ -72,7 +72,7 @@ Asymptote can also capture Codex telemetry in CI with `beacon ci start` and `bea
     codex-home: ${{ steps.beacon.outputs.codex-home }}
     prompt: "Review this pull request"
 
-- name: Finish Asymptote telemetry
+- name: Finish Beacon telemetry
   if: always()
   uses: asymptote-labs/agent-beacon@v0.0.95
   with:
@@ -81,7 +81,7 @@ Asymptote can also capture Codex telemetry in CI with `beacon ci start` and `bea
 
 ## Discovery and status
 
-Asymptote detects Codex CLI through the `codex` executable and `~/.codex/config.toml`. Codex Desktop shares the same user-level configuration file, so Desktop app-server events appear once the app emits OTLP to Beacon's local collector. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex configuration is present.
+Beacon detects Codex CLI through the `codex` executable and `~/.codex/config.toml`. Codex Desktop shares the same user-level configuration file, so Desktop app-server events appear once the app emits OTLP to Beacon's local collector. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex configuration is present.
 
 ## Install or configuration support
 
@@ -127,6 +127,6 @@ If a system collector is running while the CLI is reading the default per-user l
     Return to the runtime support overview.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
-    See how Asymptote discovers and configures supported runtimes.
+    See how Beacon discovers and configures supported runtimes.
   </Card>
 </Columns>

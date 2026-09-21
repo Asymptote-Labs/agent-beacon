@@ -1,23 +1,23 @@
 ---
 title: "Pi"
-description: "Asymptote support details for Pi endpoint telemetry"
+description: "Beacon support details for Pi endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports [Pi](https://pi.dev/) through a managed local extension.
+Beacon supports [Pi](https://pi.dev/) through a managed local extension.
 
 <Note>
 Looking for [Oh My Pi](/runtimes/oh-my-pi) (`omp`), [Prime Agent](/runtimes/prime-agent), or [Senpi](/runtimes/senpi) (`omo`, the standalone edition of oh-my-openagent)? All three are forks of Pi, supported separately and recorded under their own harness names. Unlike Pi, Oh My Pi reports operator approval decisions.
 </Note>
 
-Pi fits neither of Asymptote's two usual live integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, so the live integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
+Pi fits neither of Beacon's two usual live integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its documented observation surface is the TypeScript extension API, so the live integration is extension-shaped: one Beacon-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the OpenCode and Cline plugins.
 
 ```bash
 beacon endpoint hooks install --harness pi
 ```
 
-Asymptote can also read Pi's committed JSONL session store after the fact:
+Beacon can also read Pi's committed JSONL session store after the fact:
 
 ```bash
 beacon endpoint pi sync
@@ -35,7 +35,7 @@ Before enabling Pi telemetry, make sure:
 
 ## Collection path
 
-Asymptote's managed Pi extension is a single TypeScript file at one of two documented extension locations:
+Beacon's managed Pi extension is a single TypeScript file at one of two documented extension locations:
 
 | Level | Extension path |
 |-------|----------------|
@@ -44,13 +44,13 @@ Asymptote's managed Pi extension is a single TypeScript file at one of two docum
 
 User level is the default. A project-level extension is subject to Pi's project-trust prompt, and `beacon endpoint discover` reports on the user path only, so a project-level extension does not appear in discovery output.
 
-Asymptote identifies its own extension file by the marker `beacon-managed-pi-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry.
+Beacon identifies its own extension file by the marker `beacon-managed-pi-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Beacon telemetry.
 
-Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime. The poll path reads JSONL transcripts from `~/.pi/agent/sessions`; if `PI_CODING_AGENT_DIR` is set, Asymptote reads `sessions` below that directory, matching Pi's user-level agent directory override. The cursor lives in Asymptote state, not in Pi's directory.
+Pi has no OpenTelemetry export for Beacon to configure, so there is no OTLP path for this runtime. The poll path reads JSONL transcripts from `~/.pi/agent/sessions`; if `PI_CODING_AGENT_DIR` is set, Beacon reads `sessions` below that directory, matching Pi's user-level agent directory override. The cursor lives in Beacon state, not in Pi's directory.
 
 ## Discovery and status
 
-Asymptote detects Pi through the `pi` executable, and treats the `~/.pi/agent` state directory as an additional signal. Pi installed through npm, pnpm, or bun is often missing from the `PATH` the endpoint process inherited, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The OpenCode, Cursor, and Hermes probes use the same fallback.
+Beacon detects Pi through the `pi` executable, and treats the `~/.pi/agent` state directory as an additional signal. Pi installed through npm, pnpm, or bun is often missing from the `PATH` the endpoint process inherited, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The OpenCode, Cursor, and Hermes probes use the same fallback.
 
 ```bash title="Show Pi discovery state"
 beacon endpoint discover --all --json
@@ -61,8 +61,8 @@ Pi reports as the `pi_cli` harness with capability `plugin`:
 | Telemetry status | Meaning |
 |------------------|---------|
 | `missing` | No extension file at the user-level managed path |
-| `disabled` | A `beacon.ts` exists but carries no Asymptote marker, so it is somebody else's extension sharing the filename |
-| `enabled` | Asymptote's managed extension is in place |
+| `disabled` | A `beacon.ts` exists but carries no Beacon marker, so it is somebody else's extension sharing the filename |
+| `enabled` | Beacon's managed extension is in place |
 
 An unmarked extension file reports `disabled` rather than `enabled`, because reporting it as enabled would show the runtime as covered while no events arrive.
 
@@ -136,6 +136,6 @@ grep '"name":"pi_cli"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
     Return to the runtime support overview.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
-    See how Asymptote discovers and configures each runtime.
+    See how Beacon discovers and configures each runtime.
   </Card>
 </Columns>

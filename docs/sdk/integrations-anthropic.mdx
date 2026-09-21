@@ -1,19 +1,19 @@
 ---
 title: "Anthropic"
-description: "Instrument Anthropic SDK calls with Asymptote Observe"
+description: "Instrument Anthropic SDK calls with Beacon Observe"
 ---
 
 ## Integration overview
 
-Use this integration when your application calls Anthropic's `@anthropic-ai/sdk` TypeScript package directly. Asymptote Observe uses OpenLLMetry's Anthropic instrumentation so Anthropic model calls flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
+Use this integration when your application calls Anthropic's `@anthropic-ai/sdk` TypeScript package directly. Beacon Observe uses OpenLLMetry's Anthropic instrumentation so Anthropic model calls flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
 
 ## Overview
 
-Initialize Asymptote Observe before creating the Anthropic client when possible. The instrumentation captures supported Anthropic SDK spans without changing the way you call `anthropic.messages.create()`.
+Initialize Beacon Observe before creating the Anthropic client when possible. The instrumentation captures supported Anthropic SDK spans without changing the way you call `anthropic.messages.create()`.
 
 Using Claude Agent SDK instead of the direct provider SDK? See [Claude Agent SDK](/sdk/integrations-claude-agent-sdk).
 
-## What Asymptote captures
+## What Beacon captures
 
 - Anthropic model calls emitted by the OpenLLMetry Anthropic instrumentation.
 - OpenTelemetry resource attributes such as service name, SDK version, `beacon.origin=cloud`, and export mode.
@@ -25,7 +25,7 @@ Using Claude Agent SDK instead of the direct provider SDK? See [Claude Agent SDK
 - Node.js 20 or newer.
 - `@asymptote/sdk` installed.
 - `@anthropic-ai/sdk` installed.
-- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+- `ASYMPTOTE_API_KEY` set for Beacon Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get a Beacon Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 ```bash title="Install the SDK and Anthropic client"
 npm install @asymptote/sdk @anthropic-ai/sdk
@@ -33,7 +33,7 @@ npm install @asymptote/sdk @anthropic-ai/sdk
 
 Set environment variables:
 
-```bash title="Set Asymptote Managed and Anthropic environment variables"
+```bash title="Set Beacon Managed and Anthropic environment variables"
 export ASYMPTOTE_API_KEY=...
 export ANTHROPIC_API_KEY=...
 ```
@@ -73,7 +73,7 @@ const message = await anthropic.messages.create({
 await Observe.flush();
 ```
 
-All supported Anthropic SDK calls are now traced through the configured Asymptote exporter.
+All supported Anthropic SDK calls are now traced through the configured Beacon exporter.
 
 ## Already-loaded clients
 
@@ -97,7 +97,7 @@ Observe.initialize({
 
 ## Existing OpenTelemetry providers
 
-If your application already owns OpenTelemetry setup, register only Asymptote's Anthropic instrumentation with your existing provider.
+If your application already owns OpenTelemetry setup, register only Beacon's Anthropic instrumentation with your existing provider.
 
 ```typescript title="Register Anthropic instrumentation on an existing provider" lines
 import { registerInstrumentations } from "@opentelemetry/instrumentation";

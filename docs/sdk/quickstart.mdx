@@ -1,6 +1,6 @@
 ---
 title: "SDK Quickstart"
-description: "Install and initialize the Asymptote TypeScript SDK"
+description: "Install and initialize the Beacon TypeScript SDK"
 ---
 
 ## Setup flow
@@ -17,13 +17,13 @@ The package requires Node.js 20 or newer.
 
 ## 2. Configure export
 
-Choose Asymptote Managed hosted Observe or a customer-managed OTLP endpoint.
+Choose Beacon Managed hosted Observe or a customer-managed OTLP endpoint.
 
 ### Hosted Observe
 
-Hosted Observe requires an Asymptote Managed account. To get an `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact), then initialize `Observe` as early as possible in your application startup:
+Hosted Observe requires a Beacon Managed account. To get an `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact), then initialize `Observe` as early as possible in your application startup:
 
-```bash title="Set the Asymptote Managed API key"
+```bash title="Set the Beacon Managed API key"
 export ASYMPTOTE_API_KEY=...
 ```
 
@@ -49,7 +49,7 @@ The SDK appends `/v1/observe` when the configured base URL or endpoint does not 
 
 ### Customer-managed OTLP
 
-Use an explicit OTLP endpoint when traces should go to a local or customer-managed collector instead of Asymptote Managed hosted Observe:
+Use an explicit OTLP endpoint when traces should go to a local or customer-managed collector instead of Beacon Managed hosted Observe:
 
 ```bash title="Set the OTLP endpoint"
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
@@ -63,7 +63,7 @@ Observe.initialize({
 });
 ```
 
-Explicit OTLP export does not require an Asymptote Managed API key.
+Explicit OTLP export does not require a Beacon Managed API key.
 
 ## 3. Create a first trace
 
@@ -103,7 +103,7 @@ await Observe.flush();
 | --- | --- |
 | 1 | `initialize({ otlpEndpoint })` |
 | 2 | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| 3 | Asymptote Managed hosted `baseUrl` when `apiKey` or `ASYMPTOTE_API_KEY` is present |
+| 3 | Beacon Managed hosted `baseUrl` when `apiKey` or `ASYMPTOTE_API_KEY` is present |
 
 If neither hosted credentials nor an explicit OTLP endpoint is configured, use a custom exporter or disable the default exporter.
 

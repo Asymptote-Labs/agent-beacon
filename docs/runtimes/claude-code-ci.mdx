@@ -1,20 +1,11 @@
 ---
 title: "CI Agent Telemetry"
-description: "Capture supported agent telemetry in CI with Asymptote"
+description: "Capture supported agent telemetry in CI with Beacon"
 ---
-
-<Frame>
-  <iframe
-    src="https://www.loom.com/embed/f45c536b9f37455493f7d513ce6f1866?t=0s"
-    title="CI Agent Telemetry walkthrough"
-    allowFullScreen
-    style={{ aspectRatio: "16 / 9", width: "100%", border: 0 }}
-  />
-</Frame>
 
 ## Runtime overview
 
-Asymptote can capture supported agent telemetry for a single CI job without installing a persistent endpoint service on the runner. The CI integration starts a temporary local collector, configures the selected agent harness, writes normalized CI runtime JSONL, and validates that events were captured before the job exits.
+Beacon can capture supported agent telemetry for a single CI job without installing a persistent endpoint service on the runner. The CI integration starts a temporary local collector, configures the selected agent harness, writes normalized CI runtime JSONL, and validates that events were captured before the job exits.
 
 ## How it works
 
@@ -38,7 +29,7 @@ beacon ci start --harness claude
 beacon ci finish --min-events 1
 ```
 
-During collection, Asymptote:
+During collection, Beacon:
 
 1. Starts a temporary local OpenTelemetry collector.
 2. Configures supported agent telemetry for the wrapped command or later session steps.
@@ -47,7 +38,7 @@ During collection, Asymptote:
 5. Validates that matching agent events were captured.
 6. Leaves the completed runtime log available as a CI artifact or upload target.
 
-By default, Asymptote writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNNER_TEMP` is available. Otherwise it uses the system temp directory.
+By default, Beacon writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNNER_TEMP` is available. Otherwise it uses the system temp directory.
 
 | Artifact | Default path |
 | --- | --- |
@@ -57,16 +48,16 @@ By default, Asymptote writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNN
 
 ## Telemetry coverage
 
-CI collection captures supported prompt, tool, command, file, lifecycle, and run context where the configured agent emits telemetry during the job. For example, Claude Code CI collection captures Claude Code events when the `claude` harness is configured. When `GITHUB_ACTIONS=true`, Asymptote also records GitHub Actions metadata such as workflow, run ID, commit, ref, and actor.
+CI collection captures supported prompt, tool, command, file, lifecycle, and run context where the configured agent emits telemetry during the job. For example, Claude Code CI collection captures Claude Code events when the `claude` harness is configured. When `GITHUB_ACTIONS=true`, Beacon also records GitHub Actions metadata such as workflow, run ID, commit, ref, and actor.
 
-Asymptote applies redaction, sanitization, truncation, and event-size limits before writing the CI runtime JSONL file. Artifact retention, access, object storage, and downstream forwarding remain controlled by your CI and security pipeline.
+Beacon applies redaction, sanitization, truncation, and event-size limits before writing the CI runtime JSONL file. Artifact retention, access, object storage, and downstream forwarding remain controlled by your CI and security pipeline.
 
 ## GitHub Actions
 
-Use the Asymptote GitHub Action when you want the workflow to install the CI collector and upload the runtime log artifact. Pass a command when the workflow invokes the agent directly.
+Use the Beacon GitHub Action when you want the workflow to install the CI collector and upload the runtime log artifact. Pass a command when the workflow invokes the agent directly.
 
 ```yaml
-- name: Run an agent with Asymptote telemetry
+- name: Run an agent with Beacon telemetry
   uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     command: claude --print "Review this pull request"
@@ -77,7 +68,7 @@ Use the Asymptote GitHub Action when you want the workflow to install the CI col
 To wrap a third-party action that launches an agent internally, start and finish a Beacon session around that action. Anthropic's Claude Code Security Review action is one example:
 
 ```yaml
-- name: Start Asymptote telemetry
+- name: Start Beacon telemetry
   uses: asymptote-labs/agent-beacon@v0.0.95
   with:
     mode: start
@@ -87,7 +78,7 @@ To wrap a third-party action that launches an agent internally, start and finish
   with:
     claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
 
-- name: Finish Asymptote telemetry
+- name: Finish Beacon telemetry
   if: always()
   uses: asymptote-labs/agent-beacon@v0.0.95
   with:
@@ -97,8 +88,8 @@ To wrap a third-party action that launches an agent internally, start and finish
 
 See the sample workflow:
 
-- [Claude Code telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-code-telemetry.yml)
-- [Claude Code Security Review session workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/claude-security-review-session.yml)
+- [Claude Code telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/claude-code-telemetry.yml)
+- [Claude Code Security Review session workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/claude-security-review-session.yml)
 
 ## Upload to object storage
 
@@ -112,7 +103,7 @@ Upload to Amazon S3:
     role-to-assume: ${{ secrets.BEACON_TELEMETRY_ROLE_ARN }}
     aws-region: us-east-1
 
-- name: Run an agent with Asymptote telemetry
+- name: Run an agent with Beacon telemetry
   uses: asymptote-labs/agent-beacon@v0.0.95
   env:
     BEACON_CI_S3_BUCKET: my-beacon-telemetry
@@ -130,7 +121,7 @@ Upload to Google Cloud Storage:
     workload_identity_provider: ${{ secrets.BEACON_GCP_WORKLOAD_IDENTITY_PROVIDER }}
     service_account: ${{ secrets.BEACON_GCP_SERVICE_ACCOUNT }}
 
-- name: Run an agent with Asymptote telemetry
+- name: Run an agent with Beacon telemetry
   uses: asymptote-labs/agent-beacon@v0.0.95
   env:
     BEACON_CI_GCS_BUCKET: my-beacon-telemetry
@@ -142,9 +133,9 @@ Upload to Google Cloud Storage:
 
 See the sample workflows:
 
-- [S3 upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-upload-telemetry.yml)
-- [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
-- [S3 and GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
+- [S3 upload telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/s3-upload-telemetry.yml)
+- [GCS upload telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
+- [S3 and GCS upload telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
 
 ## Validation behavior
 

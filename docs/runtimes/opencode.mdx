@@ -1,11 +1,11 @@
 ---
 title: "OpenCode"
-description: "Asymptote support details for OpenCode endpoint telemetry"
+description: "Beacon support details for OpenCode endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports OpenCode through a managed local plugin that invokes `beacon-hooks`.
+Beacon supports OpenCode through a managed local plugin that invokes `beacon-hooks`.
 
 Beacon can also read OpenCode's committed local session store with `beacon endpoint opencode sync`.
 That poll path backfills historical or uninstrumented sessions, while the managed plugin remains the
@@ -17,12 +17,12 @@ Before enabling OpenCode telemetry, make sure:
 
 - OpenCode is installed and available as the `opencode` executable or has a local config directory.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote's OpenCode plugin is installed with `beacon endpoint hooks install --harness opencode`.
+- Beacon's OpenCode plugin is installed with `beacon endpoint hooks install --harness opencode`.
 - OpenCode is restarted after plugin install or removal so new sessions load the updated plugin.
 
 ## Collection path
 
-Asymptote installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Asymptote's hook adapter.
+Beacon installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Beacon's hook adapter.
 
 The integration is plugin-based. OpenCode's native OTLP export is neither configured nor required by Beacon.
 
@@ -30,7 +30,7 @@ For backfill, `beacon endpoint opencode sync` reads OpenCode's local `opencode.d
 
 ## Discovery and status
 
-Asymptote detects OpenCode through the `opencode` executable or `~/.config/opencode`, then checks for Asymptote plugin configuration.
+Beacon detects OpenCode through the `opencode` executable or `~/.config/opencode`, then checks for Beacon plugin configuration.
 
 Use `beacon endpoint hooks status --harness opencode` to inspect OpenCode plugin status.
 Use `beacon endpoint opencode status` to inspect persisted session-store collection progress.

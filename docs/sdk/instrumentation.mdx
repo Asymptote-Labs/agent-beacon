@@ -1,6 +1,6 @@
 ---
 title: "Instrumentation"
-description: "Initialize Asymptote Observe and configure TypeScript SDK instrumentation"
+description: "Initialize Beacon Observe and configure TypeScript SDK instrumentation"
 ---
 
 ## Instrumentation model
@@ -23,8 +23,8 @@ By default, the SDK creates OpenAI and Anthropic OpenLLMetry instrumentations wh
 
 | Option | Purpose |
 | --- | --- |
-| `apiKey` | Asymptote Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
-| `baseUrl` | Asymptote Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
+| `apiKey` | Beacon Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
+| `baseUrl` | Beacon Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
 | `otlpEndpoint` | Explicit OTLP/HTTP endpoint. Defaults to `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `headers` | Additional exporter headers |
 | `serviceName` | OpenTelemetry service name. Defaults to `OTEL_SERVICE_NAME` or `asymptote-app` |

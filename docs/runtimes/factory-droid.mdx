@@ -1,11 +1,11 @@
 ---
 title: "Factory Droid"
-description: "Asymptote support details for Factory Droid endpoint telemetry"
+description: "Beacon support details for Factory Droid endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Factory Droid through an OTLP HTTP launch environment, optional hook telemetry, and a local session-store sync for historical sessions.
+Beacon supports Factory Droid through an OTLP HTTP launch environment, optional hook telemetry, and a local session-store sync for historical sessions.
 
 ## Prerequisites
 
@@ -20,11 +20,11 @@ Before enabling Factory Droid telemetry, make sure:
 
 ## Collection path
 
-Factory Droid can send OTLP HTTP telemetry to Asymptote's local collector. Factory hooks can also invoke Asymptote's hook adapter for richer runtime events where Factory exposes hook payloads. Beacon can also read committed Factory session records from `~/.factory/sessions` and convert them into endpoint events marked `harness.collection_method=poll`.
+Factory Droid can send OTLP HTTP telemetry to Beacon's local collector. Factory hooks can also invoke Beacon's hook adapter for richer runtime events where Factory exposes hook payloads. Beacon can also read committed Factory session records from `~/.factory/sessions` and convert them into endpoint events marked `harness.collection_method=poll`.
 
 ## Discovery and status
 
-Asymptote detects Factory Droid through the `droid` executable and validates `OTEL_TELEMETRY_ENDPOINT` in the effective launch environment.
+Beacon detects Factory Droid through the `droid` executable and validates `OTEL_TELEMETRY_ENDPOINT` in the effective launch environment.
 
 Use `beacon endpoint discover`, `beacon endpoint status`, or `beacon endpoint hooks status --harness factory` to inspect Factory Droid support.
 
@@ -64,7 +64,7 @@ For scheduled collection, run `beacon endpoint factory sync --watch`, or run one
 
 Factory Droid OTLP is controlled by Droid's launch environment. Set `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318` through MDM or another customer-owned launch policy.
 
-Asymptote discovers Droid and validates the endpoint, but it does not mutate shell profiles for Droid. Restart Factory Droid after installing or removing hooks so new sessions pick up the updated hook configuration.
+Beacon discovers Droid and validates the endpoint, but it does not mutate shell profiles for Droid. Restart Factory Droid after installing or removing hooks so new sessions pick up the updated hook configuration.
 
 ## Related
 

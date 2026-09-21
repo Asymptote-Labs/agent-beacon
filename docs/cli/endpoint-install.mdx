@@ -45,7 +45,7 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
-| `--connect` | After a successful install, connect this endpoint to Asymptote managed ingest: opens the dashboard to approve the device and starts the Vector forwarder. Same as running [`beacon endpoint connect`](/cli/endpoint-connect) afterwards |
+| `--connect` | After a successful install, connect this endpoint to Beacon managed ingest: opens the dashboard to approve the device and starts the Vector forwarder. Same as running [`beacon endpoint connect`](/cli/endpoint-connect) afterwards |
 
 ## Telemetry destination question
 
@@ -55,9 +55,9 @@ On a first interactive install the [onboarding prompt](/cli/endpoint-onboarding)
 |--------|--------------|
 | Keep it on this machine (default) | Nothing is forwarded. Enter picks this, so forwarding is never a side effect. |
 | Forward to your own infrastructure | A SIEM, observability platform, or an S3/GCS bucket you own. The prompt prints the [log forwarding docs](/log-forwarding) and the pack commands; the install stays local until you set one up. |
-| Forward to Asymptote Managed | Runs the [connect flow](/cli/endpoint-connect) after the install completes. A failed connect is reported with the retry command and never fails the install. |
+| Forward to Beacon Managed | Runs the [connect flow](/cli/endpoint-connect) after the install completes. A failed connect is reported with the retry command and never fails the install. |
 
-`--connect` is already the answer, so it skips the question. `BEACON_MANAGED_INGEST=0` hides the Asymptote answer; the question is never shown non-interactively. The answer is stored in the local onboarding profile and never sent. Local and own-infrastructure answers are recorded at once and the question is not asked again. The Asymptote answer is recorded only once the machine is connected, so if the install or the connection fails, the next interactive install asks again.
+`--connect` is already the answer, so it skips the question. `BEACON_MANAGED_INGEST=0` hides the Beacon answer; the question is never shown non-interactively. The answer is stored in the local onboarding profile and never sent. Local and own-infrastructure answers are recorded at once and the question is not asked again. The Beacon answer is recorded only once the machine is connected, so if the install or the connection fails, the next interactive install asks again.
 
 ## Examples
 
@@ -180,12 +180,12 @@ beacon endpoint hooks install --harness grok --level project
 ```
 
 <Note>
-  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather than Beacon-managed shell-profile edits.
+  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather tha Beacon-managed shell-profile edits.
 </Note>
 
 ## Known limitations
 
-A user-mode collector cannot run beside a system-mode one on the same machine. The collector health-check port (`127.0.0.1:13133`) is fixed, so the second collector cannot bind it; the install fails with `Collector ports are not listening` and rolls back the endpoint files it wrote. Either write the user-mode files without starting the service (`beacon endpoint install --user --no-start`) or uninstall the system endpoint first (`sudo beacon endpoint uninstall --system`). Tracked as [GitHub issue #447](https://github.com/Asymptote-Labs/agent-beacon/issues/447).
+A user-mode collector cannot run beside a system-mode one on the same machine. The collector health-check port (`127.0.0.1:13133`) is fixed, so the second collector cannot bind it; the install fails with `Collector ports are not listening` and rolls back the endpoint files it wrote. Either write the user-mode files without starting the service (`beacon endpoint install --user --no-start`) or uninstall the system endpoint first (`sudo beacon endpoint uninstall --system`). Tracked as [GitHub issue #447](https://github.com/asymptote-labs/agent-beacon/issues/447).
 
 ## Related
 

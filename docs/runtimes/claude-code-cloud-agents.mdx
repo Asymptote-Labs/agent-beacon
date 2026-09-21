@@ -1,21 +1,12 @@
 ---
 title: "Claude Code Cloud Agents"
-description: "Capture Claude Code cloud agent telemetry and send each session log to Asymptote Managed or to object storage you own"
+description: "Capture Claude Code cloud agent telemetry and send each session log to Beacon Managed or to object storage you own"
 ---
-
-<Frame>
-  <iframe
-    src="https://www.loom.com/embed/5de72ffb97d7409db292119aada1218b?t=0s"
-    title="Claude Code Cloud Agents walkthrough"
-    allowFullScreen
-    style={{ aspectRatio: "16 / 9", width: "100%", border: 0 }}
-  />
-</Frame>
 
 ## Overview
 
 Use this integration to capture Claude Code cloud-agent activity and send each
-session log to one of three places: [Asymptote Managed](/deployment/managed),
+session log to one of three places: [Beacon Managed](/deployment/managed),
 where it appears in your dashboard next to your laptops' sessions, or a Google
 Cloud Storage or Amazon S3 bucket you own.
 
@@ -30,7 +21,7 @@ Claude Code Cloud Agents run in Anthropic's cloud environment, so Beacon cannot
 use the long-running endpoint agent that local installs use. Instead, the setup
 script installs Beacon hooks inside the sandbox. During a cloud-agent session,
 those hooks write `/tmp/beacon/runtime.jsonl`. When the agent stops, Beacon
-ships that file: to Asymptote Managed it posts the new lines to the same ingest
+ships that file: to Beacon Managed it posts the new lines to the same ingest
 endpoint the laptop forwarder uses, so the session shows up in the dashboard a
 minute or two later; to a bucket it uploads the whole file as one object.
 
@@ -38,17 +29,17 @@ minute or two later; to a bucket it uploads the whole file as one object.
 flowchart LR
   ClaudeWeb["Claude Code Cloud Agents"] --> Hooks["Beacon hooks in sandbox"]
   Hooks --> RuntimeLog["/tmp/beacon/runtime.jsonl"]
-  RuntimeLog --> Managed["Asymptote Managed ingest → dashboard"]
+  RuntimeLog --> Managed["Beacon Managed ingest → dashboard"]
   RuntimeLog --> Storage["Your GCS or S3 bucket"]
 ```
 
 The setup has three parts:
 
-1. Get a device key from Asymptote, or create a GCS or S3 upload path with Beacon.
+1. Get a device key from Beacon, or create a GCS or S3 upload path with Beacon.
 2. Add Beacon cloud telemetry environment variables to the Claude Code cloud environment.
 3. Paste a Beacon-generated setup script into the Claude cloud environment.
 
-With Asymptote Managed, the sessions land in the same per-organization tables as
+With Beacon Managed, the sessions land in the same per-organization tables as
 your endpoints' telemetry, attributed to the device you created for the cloud
 environment. With a bucket, each Claude Code cloud agent session writes one
 readable JSONL object:
@@ -72,7 +63,7 @@ s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<clau
   create buckets, IAM users, inline IAM policies, and access keys.
 - Claude Code cloud agent access for the repository you want to test.
 - A Claude cloud environment with outbound access to:
-  - For Asymptote Managed: the ingest host from your device key hand-off
+  - For Beacon Managed: the ingest host from your device key hand-off
     (currently `beacon-ingest-gulcylfs4a-uw.a.run.app`)
   - For GCS: `oauth2.googleapis.com` and `storage.googleapis.com`
   - For S3: `s3.<region>.amazonaws.com`
@@ -82,6 +73,7 @@ s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<clau
 Install or upgrade Beacon before you start:
 
 ```bash
+brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 brew upgrade beacon
@@ -103,16 +95,16 @@ aws sts get-caller-identity
 
 ## 1. Create the upload path
 
-Choose Asymptote Managed, GCS, or S3 for the cloud-agent session logs.
+Choose Beacon Managed, GCS, or S3 for the cloud-agent session logs.
 
-### Asymptote Managed
+### Beacon Managed
 
 A cloud sandbox has no browser and no Vector, so it cannot run
 [`beacon endpoint connect`](/cli/endpoint-connect). Instead it authenticates with
-a device key that an Asymptote operator mints for the environment itself: one
+a device key that a Beacon operator mints for the environment itself: one
 key per cloud environment, bound to your organization, listed on
 `/dashboard/endpoints` like any laptop and revocable from there. Ask your
-Asymptote contact for a key, naming the environment (for example
+Beacon contact for a key, naming the environment (for example
 "Claude Code web, acme/frontend"). You receive three values to put in the
 environment in step 2: `BEACON_CLOUD_UPLOAD=asymptote`, the ingest URL, and the
 key itself. Self-serve headless enrollment is on the roadmap.
@@ -234,7 +226,7 @@ BEACON_RUN_EPHEMERAL=true
 BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
 ```
 
-For Asymptote Managed, add:
+For Beacon Managed, add:
 
 ```bash
 BEACON_CLOUD_UPLOAD=asymptote
@@ -303,7 +295,7 @@ Read the README, run pwd && ls, create a tiny temporary markdown note under /tmp
 
 ## 5. Verify upload
 
-For Asymptote Managed, open `/dashboard/endpoints`: the cloud environment's
+For Beacon Managed, open `/dashboard/endpoints`: the cloud environment's
 device shows a fresh **last seen** time as soon as the first batch is accepted,
 and the session appears on `/dashboard/telemetry` within a couple of minutes,
 with `run.provider=claude_code_web` and the Claude session id as the run id.
@@ -363,7 +355,7 @@ run.run_id=cse_...
 
 ## Security note
 
-The Asymptote Managed flow puts a per-device key in the Claude Code environment.
+The Beacon Managed flow puts a per-device key in the Claude Code environment.
 It can only append telemetry to your organization's ingest stream; it reads
 nothing and grants no dashboard access, and revoking the device on
 `/dashboard/endpoints` stops it within a minute. This is the one place a Beacon
@@ -426,10 +418,10 @@ sandbox-specific configuration and should stay out of commits.
   <Card title="Log forwarding" icon="database" href="/log-forwarding">
     Review local endpoint S3 forwarding for persistent endpoint deployments.
   </Card>
-  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
     Use managed secure ingest for production enterprise cloud-agent telemetry.
   </Card>
-  <Card title="Agent Beacon on GitHub" icon="github" href="https://github.com/Asymptote-Labs/agent-beacon">
+  <Card title="Agent Beacon on GitHub" icon="github" href="https://github.com/asymptote-labs/agent-beacon">
     Request new cloud-agent destinations or contribute support.
   </Card>
 </Columns>

@@ -30,7 +30,7 @@ A few rules shape how the numbers read:
 
 ### Per-runtime coverage
 
-Token coverage is not uniform, and the reason is almost always the runtime rather than Beacon: most agent runtimes do not report usage on the surface Beacon collects from. A turn with no token attribution is a turn whose runtime never reported any.
+Token coverage is not uniform, and the reason is almost always the runtime rather tha Beacon: most agent runtimes do not report usage on the surface Beacon collects from. A turn with no token attribution is a turn whose runtime never reported any.
 
 **Collected and verified against captured payloads:**
 
@@ -48,7 +48,7 @@ Token coverage is not uniform, and the reason is almost always the runtime rathe
 | fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 | OpenClaw Gateway | input, output, cache read, cache creation | Not reported on the hook | Yes, per model response | Yes |
 
-OpenClaw reports usage on its `llm_output` hook, which is a *conversation* hook -- OpenClaw withholds those from every non-bundled plugin until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set in its config. An OpenClaw endpoint collecting prompts, tools, commands and files while reporting no tokens at all is almost always that key, and `beacon endpoint hooks status --harness openclaw` says so. OpenClaw does compute a per-turn price, from an operator-configured cost table rather than from a provider report, so Asymptote does not record it as a reported cost. See [OpenClaw Gateway](/runtimes/openclaw-gateway).
+OpenClaw reports usage on its `llm_output` hook, which is a *conversation* hook -- OpenClaw withholds those from every non-bundled plugin until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set in its config. An OpenClaw endpoint collecting prompts, tools, commands and files while reporting no tokens at all is almost always that key, and `beacon endpoint hooks status --harness openclaw` says so. OpenClaw does compute a per-turn price, from an operator-configured cost table rather than from a provider report, so Beacon does not record it as a reported cost. See [OpenClaw Gateway](/runtimes/openclaw-gateway).
 
 Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason.
 
@@ -60,8 +60,8 @@ Cline reports usage once per task rather than per model call, because Beacon's r
 | GitHub Copilot CLI | As above |
 | VS Code Copilot | As above |
 | Factory Droid | As above |
-| Grok Bot | Reaches Asymptote only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
-| goose | goose's `chat` spans carry the full `gen_ai.usage.*` set, cache reads and writes included, under the exact semconv names -- that much is read out of the runtime rather than hoped for. What is conditional is whether it arrives: usage reaches Asymptote only over OTLP, so a goose endpoint with hooks installed and `beacon endpoint install --harness goose` never run is correctly silent rather than faulty. goose reports no cost. See [goose](/runtimes/goose) |
+| Grok Bot | Reaches Beacon only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
+| goose | goose's `chat` spans carry the full `gen_ai.usage.*` set, cache reads and writes included, under the exact semconv names -- that much is read out of the runtime rather than hoped for. What is conditional is whether it arrives: usage reaches Beacon only over OTLP, so a goose endpoint with hooks installed and `beacon endpoint install --harness goose` never run is correctly silent rather than faulty. goose reports no cost. See [goose](/runtimes/goose) |
 
 This table records what Beacon is built to read, not what your machine actually produced. A runtime can be listed here and still contribute nothing, because it was never run, or because its build reports no usage.
 
@@ -125,12 +125,12 @@ The status column is the report:
 |--------|---------|
 | `covered` | The runtime reported usage in the window. Nothing to do |
 | `silent` | The runtime produced events but no usage, and Beacon is built to read usage from it. **This is the one to investigate** — a stale runtime build, a hook that stopped firing, or an OTLP export that is no longer configured |
-| `inactive` | Asymptote configured this runtime, but it produced no events at all in the window. Usually means it was not used; can also mean its hooks or OTLP export stopped firing |
+| `inactive` | Beacon configured this runtime, but it produced no events at all in the window. Usually means it was not used; can also mean its hooks or OTLP export stopped firing |
 | `not_instrumented` | The runtime ran, and Beacon cannot read token usage from it. Expected, not a fault. The note column says why |
 
 The `not_instrumented` distinction is what makes the report worth reading. Without it Cursor would appear as a problem on every run, and a column that always shows a problem is a column people stop reading.
 
-The `INSTALLED` column means "Asymptote configured this runtime", not "this product is on the machine". Only configuration Asymptote wrote counts — a hook command, a managed plugin marker, or a local OTLP endpoint it set. That is the population where silence is informative: Asymptote wired it up, so it should be reporting. A runtime present but configured by hand would not be reporting through Asymptote either way, so it appears only if it actually emits events.
+The `INSTALLED` column means "Beacon configured this runtime", not "this product is on the machine". Only configuration Beacon wrote counts — a hook command, a managed plugin marker, or a local OTLP endpoint it set. That is the population where silence is informative: Beacon wired it up, so it should be reporting. A runtime present but configured by hand would not be reporting through Beacon either way, so it appears only if it actually emits events.
 
 Coverage applies the `--since`, `--until` and `--harness` scopes, and deliberately ignores `--session`, `--model`, `--repository` and `--run-id`. Those filters select usage-bearing events almost by definition — an event carries no model unless it carried a model call — so a coverage report computed over them would find every runtime covered and prove nothing.
 

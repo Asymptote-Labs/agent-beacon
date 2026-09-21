@@ -5,7 +5,7 @@ description: "How customer-managed Vector pipelines forward Beacon endpoint even
 
 ```mermaid
 flowchart LR
-  subgraph openSourcePath [Asymptote Open Source]
+  subgraph openSourcePath [Beacon]
     agentHarnesses["Agent harnesses"] -->|"OTLP or hooks"| beaconEndpoint["Beacon endpoint"]
     beaconEndpoint -->|"normalizes events"| runtimeLog["runtime.jsonl"]
     runtimeLog -->|"file source tails log"| vectorAgent["Vector host agent"]
@@ -14,8 +14,8 @@ flowchart LR
     vectorPipeline -->|"other sinks"| customerDestinations["GCS, CloudWatch, Sumo, Rapid7, Falcon"]
   end
 
-  subgraph managedPath [Asymptote Managed]
-    managedSources["Endpoint, CI, cloud, and SDK telemetry"] -->|"managed ingest"| managedIngest["Asymptote ingest"]
+  subgraph managedPath [Beacon Managed]
+    managedSources["Endpoint, CI, cloud, and SDK telemetry"] -->|"managed ingest"| managedIngest["Beacon ingest"]
     managedIngest --> managedPlatform["Hosted search, detections, governance, investigations"]
   end
 
@@ -32,7 +32,7 @@ platform.
 
 ## Open source and managed
 
-In **Asymptote Open Source**, Agent Beacon is local-first. It configures supported agent harnesses, receives OTLP or hook telemetry, normalizes events, writes local runtime and inventory JSONL, and can generate forwarding content packs. Destination credentials, bucket policies, IAM roles, lifecycle rules, retention, encryption, and remote ingestion settings stay outside Beacon endpoint configuration.
+In **Beacon**, Agent Beacon is local-first. It configures supported agent harnesses, receives OTLP or hook telemetry, normalizes events, writes local runtime and inventory JSONL, and can generate forwarding content packs. Destination credentials, bucket policies, IAM roles, lifecycle rules, retention, encryption, and remote ingestion settings stay outside Beacon endpoint configuration.
 
 That is where Vector fits. For open-source deployments, Vector is an optional customer-managed forwarder. You install and operate Vector through MDM, endpoint management, launchd, systemd, Kubernetes, or your normal host-agent tooling. Beacon can generate a destination-specific `vector.toml`, but Vector owns:
 
@@ -44,7 +44,7 @@ That is where Vector fits. For open-source deployments, Vector is an optional cu
 - Retrying transient failures.
 - Holding destination URLs, tokens, IAM roles, cloud credentials, and destination-specific settings.
 
-In **Asymptote Managed**, the main path is different. Managed deployments use Asymptote-hosted ingest, retention, search, detections, governance, identity mapping, and investigation workflows. Vector is not the required managed-ingest architecture. You might still use a customer-managed Vector pipeline for an additional archive or downstream copy, but the core managed product provides the central pipeline and operational surface.
+In **Beacon Managed**, the main path is different. Managed deployments use Beacon-hosted ingest, retention, search, detections, governance, identity mapping, and investigation workflows. Vector is not the required managed-ingest architecture. You might still use a customer-managed Vector pipeline for an additional archive or downstream copy, but the core managed product provides the central pipeline and operational surface.
 
 ## Why the handoff is local
 
@@ -300,7 +300,7 @@ Use the official Vector docs when adapting generated templates:
     See how Agent Beacon runs local-first with customer-controlled storage and forwarding.
   </Card>
   <Card title="Managed deployment" icon="cloud" href="/deployment/managed">
-    Understand the hosted Asymptote ingest, retention, search, detections, governance, and investigation model.
+    Understand the hosted Beacon ingest, retention, search, detections, governance, and investigation model.
   </Card>
   <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
     Review normalized Beacon JSONL fields and example events.

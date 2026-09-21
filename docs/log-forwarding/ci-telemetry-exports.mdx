@@ -98,8 +98,8 @@ jobs:
 
 See the sample workflows:
 
-- [Splunk forward telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/splunk-forward-telemetry.yml)
-- [Falcon forward telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/falcon-forward-telemetry.yml)
+- [Splunk forward telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/splunk-forward-telemetry.yml)
+- [Falcon forward telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/falcon-forward-telemetry.yml)
 
 For Falcon LogScale HEC, set `BEACON_CI_FALCON_HEC_TOKEN` and use `forward: falcon`.
 
@@ -125,7 +125,7 @@ Configure cloud credentials at the job level, then pass the upload destination t
 
 See the sample workflow:
 
-- [S3 upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-upload-telemetry.yml)
+- [S3 upload telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/s3-upload-telemetry.yml)
 
 For GCS, authenticate with your normal Google Cloud CI mechanism and set `BEACON_CI_GCS_BUCKET` plus optional `BEACON_CI_GCS_PREFIX`:
 
@@ -147,7 +147,7 @@ For GCS, authenticate with your normal Google Cloud CI mechanism and set `BEACON
 
 See the sample workflow:
 
-- [GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
+- [GCS upload telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/gcs-upload-telemetry.yml)
 
 `--upload` is repeatable, so a job can upload to both destinations when required. Pass `upload: s3,gcs` (or the equivalent `--upload s3 --upload gcs` CLI flags) after configuring credentials for each provider:
 
@@ -166,7 +166,7 @@ See the sample workflow:
 
 See the sample workflow:
 
-- [S3 and GCS upload telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
+- [S3 and GCS upload telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/s3-gcs-upload-telemetry.yml)
 
 ## Object layout
 
@@ -231,7 +231,7 @@ When runners should not download a Beacon release during the action step, provis
 
 See the sample workflow:
 
-- [binary-path telemetry workflow](https://github.com/Asymptote-Labs/agent-beacon/blob/main/examples/github-actions/binary-path-telemetry.yml)
+- [binary-path telemetry workflow](https://github.com/asymptote-labs/agent-beacon/blob/main/examples/github-actions/binary-path-telemetry.yml)
 
 ## Related
 

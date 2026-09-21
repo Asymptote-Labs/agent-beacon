@@ -1,13 +1,13 @@
 ---
-title: "Asymptote Managed"
-description: "Forward Beacon endpoint events to Asymptote's managed ingest service and see them on the Asymptote dashboard."
+title: "Beacon Managed"
+description: "Forward Beacon endpoint events to Beacon's managed ingest service and see them on the Beacon dashboard."
 ---
 
 ## Forwarding overview
 
-Asymptote Managed is the forwarding path that lands Beacon endpoint events on the Asymptote dashboard without any customer-run infrastructure. Beacon stays the local JSONL producer. A Vector forwarder on the endpoint tails the [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log) and the inventory log and POSTs gzip-compressed NDJSON batches over HTTPS to Asymptote's ingest service, authenticated with a key issued to that one device.
+Beacon Managed is the forwarding path that lands Beacon endpoint events on the Beacon dashboard without any customer-run infrastructure. Beacon stays the local JSONL producer. A Vector forwarder on the endpoint tails the [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log) and the inventory log and POSTs gzip-compressed NDJSON batches over HTTPS to Beacon's ingest service, authenticated with a key issued to that one device.
 
-This is the only Beacon destination that sends telemetry to an Asymptote-run endpoint, and it is opt-in. Beacon's default remains local-only; nothing is forwarded until a member of your Asymptote organization approves the device in the browser and the forwarder is started with the resulting key. Revoking the device from the dashboard's Beacon Endpoints page stops ingestion within about a minute.
+This is the only Beacon destination that sends telemetry to a Beacon-run endpoint, and it is opt-in. Beacon's default remains local-only; nothing is forwarded until a member of your Beacon organization approves the device in the browser and the forwarder is started with the resulting key. Revoking the device from the dashboard's Beacon Endpoints page stops ingestion within about a minute.
 
 Generate the pack with [`beacon endpoint asymptote`](/cli/asymptote). `beacon endpoint connect` performs enrollment and runs the forwarder as a service; the pack is for running or inspecting the same forwarder by hand.
 
@@ -37,7 +37,7 @@ Vector keeps reading into a disk buffer (512 MiB for runtime, 256 MiB for invent
 
 ## Install the pack
 
-```bash title="Generate the Asymptote pack for a system-mode deployment"
+```bash title="Generate the Beacon pack for a system-mode deployment"
 sudo /opt/beacon/bin/beacon endpoint asymptote install-pack \
   --system \
   --output ./beacon-asymptote-pack
@@ -49,7 +49,7 @@ The pack includes `README.md`, `vector.toml`, `asymptote-ingest-smoke-test.sh`, 
 
 1. Run `sh ./beacon-asymptote-pack/asymptote-ingest-smoke-test.sh` with `BEACON_ASYMPTOTE_INGEST_URL` and `BEACON_ASYMPTOTE_SECRETS_FILE` set. It checks the key (`200` valid, `401` revoked) and posts the log tail once.
 2. With Vector running, write a validation event: `beacon endpoint asymptote validate`.
-3. Within a minute or two, search the dashboard telemetry page for `Beacon endpoint Asymptote validation event`.
+3. Within a minute or two, search the dashboard telemetry page for `Beacon endpoint Beacon validation event`.
 
 ## Revocation
 

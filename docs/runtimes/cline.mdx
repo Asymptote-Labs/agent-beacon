@@ -1,13 +1,13 @@
 ---
 title: "Cline"
-description: "Asymptote support details for Cline endpoint telemetry"
+description: "Beacon support details for Cline endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports [Cline](https://cline.bot/) through a managed local plugin that invokes `beacon-hooks`.
+Beacon supports [Cline](https://cline.bot/) through a managed local plugin that invokes `beacon-hooks`.
 
-Cline is not a single runtime. The same agent core runs as a VS Code extension, a JetBrains plugin, and a CLI, and Asymptote's plugin covers all of them: it is loaded by whichever host is running, so one install collects telemetry from every surface on that machine.
+Cline is not a single runtime. The same agent core runs as a VS Code extension, a JetBrains plugin, and a CLI, and Beacon's plugin covers all of them: it is loaded by whichever host is running, so one install collects telemetry from every surface on that machine.
 
 ## Prerequisites
 
@@ -15,14 +15,14 @@ Before enabling Cline telemetry, make sure:
 
 - Cline is installed in at least one host, or has a local config directory at `~/.cline`.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote's Cline plugin is installed with `beacon endpoint hooks install --harness cline`.
+- Beacon's Cline plugin is installed with `beacon endpoint hooks install --harness cline`.
 - Cline is restarted after plugin install or removal so new sessions load the updated plugin. In the IDE hosts this means reloading the window.
 
 ## Collection paths
 
-Asymptote installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required. That is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
+Beacon installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required. That is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
 
-The plugin forwards `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` hook payloads to Asymptote's hook adapter. It spawns the adapter directly with an argument vector rather than through a shell, so the same plugin works unchanged on macOS, Linux, and Windows.
+The plugin forwards `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` hook payloads to Beacon's hook adapter. It spawns the adapter directly with an argument vector rather than through a shell, so the same plugin works unchanged on macOS, Linux, and Windows.
 
 The integration is plugin-based. Cline's own OpenTelemetry export is neither configured nor required by Beacon, and Cline's hosted prompt-storage feature is not used.
 
@@ -36,7 +36,7 @@ The sync path reads `~/.cline/data/tasks`, `~/.cline/tasks`, Cline's VS Code glo
 
 ## Discovery and status
 
-Asymptote detects Cline through the `~/.cline` directory, treating a `cline` executable on `PATH` as an additional signal rather than the deciding one. A binary check alone would report "not detected" for the IDE hosts, which are the majority of installs.
+Beacon detects Cline through the `~/.cline` directory, treating a `cline` executable on `PATH` as an additional signal rather than the deciding one. A binary check alone would report "not detected" for the IDE hosts, which are the majority of installs.
 
 Use `beacon endpoint hooks status --harness cline` to inspect Cline plugin status. Status reports installed only when the plugin references the hook binary that is actually present, so a plugin left behind by a removed or relocated install is reported as not installed rather than as working telemetry.
 

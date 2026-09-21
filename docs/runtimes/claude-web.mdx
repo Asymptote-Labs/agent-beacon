@@ -1,11 +1,11 @@
 ---
 title: "Claude.ai"
-description: "Asymptote support details for Claude.ai browser chat telemetry"
+description: "Beacon support details for Claude.ai browser chat telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote collects Claude.ai chat telemetry through the optional [browser extension](/runtimes/browser-extension). Every turn on claude.ai becomes prompt, response, and tool events in the local runtime log, attributed to the `claude_web` harness so it stays separate from Claude Code and other CLI agents.
+Beacon collects Claude.ai chat telemetry through the optional [browser extension](/runtimes/browser-extension). Every turn on claude.ai becomes prompt, response, and tool events in the local runtime log, attributed to the `claude_web` harness so it stays separate from Claude Code and other CLI agents.
 
 Support is in beta. The claude.ai chat API is private and undocumented, so a change on the site can interrupt capture until the adapter is updated.
 
@@ -18,7 +18,7 @@ Support is in beta. The claude.ai chat API is private and undocumented, so a cha
 
 The extension's main-world interceptor tees the streamed response from claude.ai's completion endpoint. The Claude adapter reads the Anthropic-style Server-Sent Event stream and rebuilds one turn from it:
 
-| Stream signal | What Asymptote takes from it |
+| Stream signal | What Beacon takes from it |
 |---------------|------------------------------|
 | The outbound request body | Prompt text and the input messages |
 | The conversation id in the request URL or body | `session.id` and `gen_ai.conversation.id` |
@@ -84,7 +84,7 @@ If nothing arrives, work through the [troubleshooting steps](/runtimes/browser-e
 - **The stream format is private.** The adapter is written defensively and degrades to a partial turn rather than failing, but a site change can still stop capture until the adapter is updated.
 - **Only the chat stream is read.** Attachments, artifacts rendered outside the stream, and project files are not captured.
 - **Prompt text comes from the request body.** A turn sent through a path the adapter does not recognize arrives with the response but without the prompt.
-- **Token counts are usually absent.** The adapter reads uncached input, cache creation, cache read, and output counts from the `message_start` and `message_delta` usage objects, but no claude.ai capture on hand has carried a `usage` object at all. Turns therefore normally reach `beacon token-usage` with no token attribution, and Asymptote does not estimate counts it was not given. If the site starts sending them, they land in `gen_ai.usage` with no extension change.
+- **Token counts are usually absent.** The adapter reads uncached input, cache creation, cache read, and output counts from the `message_start` and `message_delta` usage objects, but no claude.ai capture on hand has carried a `usage` object at all. Turns therefore normally reach `beacon token-usage` with no token attribution, and Beacon does not estimate counts it was not given. If the site starts sending them, they land in `gen_ai.usage` with no extension change.
 - **Retention defaults to `full`.** Prompt and response text is retained unless you change the mode in the extension's popup. See [retained content](/runtimes/browser-extension#retained-content).
 
 ## Related

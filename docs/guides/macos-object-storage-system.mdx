@@ -34,12 +34,12 @@ the producing harness.
 ## 1. Install Beacon
 
 Download and install the latest signed Apple Silicon endpoint package from
-[GitHub Releases](https://github.com/Asymptote-Labs/agent-beacon/releases):
+[GitHub Releases](https://github.com/asymptote-labs/agent-beacon/releases):
 
 ```bash
 tmpdir="$(mktemp -d)"
 gh release download \
-  --repo Asymptote-Labs/agent-beacon \
+  --repo asymptote-labs/agent-beacon \
   --pattern 'BeaconEndpointAgent-*-arm64.pkg' \
   --dir "$tmpdir"
 

@@ -1,27 +1,19 @@
 ---
 title: "Core Concepts"
-description: "Core concepts for Asymptote, Agent Beacon, and agent runtime telemetry"
+description: "Core concepts for Beacon, Agent Beacon, and agent runtime telemetry"
 ---
 
-Asymptote observes AI agent runtime activity across supported local endpoints, CI jobs, cloud-agent sandboxes, and SDK-instrumented applications. Agent Beacon is the open-source foundation for local-first collection and customer-controlled forwarding. Asymptote Managed builds on that foundation with hosted ingest, retention, search, detections, governance, and investigations.
+Beacon observes AI agent runtime activity across supported local endpoints, CI jobs, cloud-agent sandboxes, and SDK-instrumented applications. Agent Beacon is the open-source foundation for local-first collection and customer-controlled forwarding. Beacon Managed builds on that foundation with hosted ingest, retention, search, detections, governance, and investigations.
 
-Use this page as a quick reference for terms used across Asymptote and Agent Beacon docs.
+Use this page as a quick reference for terms used across Beacon and Agent Beacon docs.
 
-## Asymptote Open Source
+## Beacon
 
-**Asymptote Open Source** is the open-source telemetry path built on Agent Beacon. It collects supported agent activity across local endpoints, CI jobs, and cloud-agent surfaces, normalizes that activity into Beacon-compatible records, and leaves storage and forwarding under customer control. See [Open Source deployment](/deployment/open-source).
+**Beacon** is the open-source, local-first telemetry system for supported AI agent activity. It collects events from local endpoints, CI jobs, and cloud-agent surfaces, normalizes them into consistent records, writes local JSONL, serves a local dashboard, and supports customer-managed forwarding. See [Open Source deployment](/deployment/open-source).
 
-## Agent Beacon
+## Beacon Managed
 
-**Agent Beacon** is the local-first endpoint telemetry agent in the `agent-beacon` repository. Beacon configures supported agent harnesses, receives OTLP or hook telemetry, writes local JSONL, serves the local dashboard, and can generate forwarding content for customer-managed destinations.
-
-## Asymptote Managed
-
-**Asymptote Managed** is the hosted Asymptote operating model for centralized ingest, retention, search, detections, fleet visibility, policy controls, identity mapping, approvals, SSO, RBAC, audit trails, and investigation workflows. See [Managed deployment](/deployment/managed).
-
-## Private deployment
-
-**Private Deployment** applies managed capabilities with stronger infrastructure ownership, data isolation, residency, or custom retention requirements. See [Hosting Options](/deployment/hosting-options).
+**Beacon Managed** is the hosted Beacon operating model for centralized ingest, retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. See [Managed deployment](/deployment/managed).
 
 ## Endpoint agent
 
@@ -50,7 +42,7 @@ environment becomes available, so early bootstrap turns may precede telemetry.
 
 ## Observe SDK
 
-The **Observe SDK** is the `@asymptote/sdk` TypeScript package for instrumenting cloud-hosted agent applications, services, workers, serverless functions, and agent SDK integrations. It can export to Asymptote Managed hosted Observe or to a customer-managed OTLP collector. See [Asymptote Observe SDK](/sdk).
+The **Observe SDK** is the `@asymptote/sdk` TypeScript package for instrumenting cloud-hosted agent applications, services, workers, serverless functions, and agent SDK integrations. It can export to Beacon Managed hosted Observe or to a customer-managed OTLP collector. See [Beacon Observe SDK](/sdk).
 
 ## Local collector
 
@@ -156,7 +148,7 @@ The **dashboard** is a loopback-only local view over Beacon runtime logs. It inc
 
 <Columns cols={2}>
   <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
-    Compare Asymptote Open Source, Managed, and Private Deployment paths.
+    Compare Beacon, Managed, and Private Deployment paths.
   </Card>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     See how runtime telemetry flows through collection, normalization, and local outputs.
@@ -176,7 +168,7 @@ The **dashboard** is a loopback-only local view over Beacon runtime logs. It inc
   <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
     Forward Beacon events into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, Microsoft Sentinel, AWS S3, Google Cloud Storage, or customer-managed pipelines.
   </Card>
-  <Card title="Asymptote Observe SDK" icon="code" href="/sdk">
+  <Card title="Beacon Observe SDK" icon="code" href="/sdk">
     Instrument cloud-hosted agent applications with hosted or customer-managed export.
   </Card>
 </Columns>

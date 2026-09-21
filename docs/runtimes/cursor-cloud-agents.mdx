@@ -7,7 +7,7 @@ description: "Capture Cursor cloud agent telemetry and forward cloud-agent runti
 
 Use this integration to capture Cursor cloud-agent activity and upload each
 session log to your own Google Cloud Storage or Amazon S3 bucket. It is meant
-for testing cloud-agent telemetry without running a hosted Asymptote backend.
+for testing cloud-agent telemetry without running a hosted Beacon backend.
 
 This flow depends on the Beacon CLI. You run `beacon cloud` commands from your
 workstation to create the object-storage upload path, generate project hooks to
@@ -16,7 +16,7 @@ binaries in the Cursor cloud sandbox.
 
 <Info>
   If you're interested in leveraging this telemetry ingest across your
-  enterprise, [Asymptote Managed](/deployment/managed) is designed for
+  enterprise, [Beacon Managed](/deployment/managed) is designed for
   production cloud-agent telemetry ingest at scale.
 </Info>
 
@@ -80,6 +80,7 @@ that value instead.
 Install or upgrade Beacon before you start:
 
 ```bash
+brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 brew upgrade beacon
@@ -444,10 +445,10 @@ git diff -- .cursor/hooks.json
   <Card title="Log forwarding" icon="database" href="/log-forwarding">
     Compare direct cloud-agent uploads with local endpoint object-storage forwarding.
   </Card>
-  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
     Use managed secure ingest for production enterprise cloud-agent telemetry.
   </Card>
-  <Card title="Agent Beacon on GitHub" icon="github" href="https://github.com/Asymptote-Labs/agent-beacon">
+  <Card title="Agent Beacon on GitHub" icon="github" href="https://github.com/asymptote-labs/agent-beacon">
     Request new cloud-agent destinations or contribute support.
   </Card>
 </Columns>

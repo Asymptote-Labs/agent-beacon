@@ -1,20 +1,20 @@
 ---
 title: "Oh My Pi"
-description: "Asymptote support details for Oh My Pi (omp) endpoint telemetry"
+description: "Beacon support details for Oh My Pi (omp) endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports [Oh My Pi](https://github.com/can1357/oh-my-pi) through a managed local extension.
+Beacon supports [Oh My Pi](https://github.com/can1357/oh-my-pi) through a managed local extension.
 
-Oh My Pi is a fork of [pi-mono](https://github.com/badlogic/pi-mono) that ships as the `omp` binary, so it fits the same integration shape as [Pi](/runtimes/pi): no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its observation surface is the TypeScript extension API, so one Asymptote-owned extension file forwards runtime events to `beacon-hooks`.
+Oh My Pi is a fork of [pi-mono](https://github.com/badlogic/pi-mono) that ships as the `omp` binary, so it fits the same integration shape as [Pi](/runtimes/pi): no hooks configuration file to merge a managed hook block into, and no OpenTelemetry support to point at the local collector. Its observation surface is the TypeScript extension API, so one Beacon-owned extension file forwards runtime events to `beacon-hooks`.
 
 ```bash
 beacon endpoint hooks install --harness omp
 ```
 
 <Note>
-Oh My Pi and Pi are separately installed products, and Asymptote records them under separate harness names. A machine running both produces two distinct streams; nothing is merged. If you are looking for upstream Pi, see [Pi](/runtimes/pi).
+Oh My Pi and Pi are separately installed products, and Beacon records them under separate harness names. A machine running both produces two distinct streams; nothing is merged. If you are looking for upstream Pi, see [Pi](/runtimes/pi).
 </Note>
 
 ## Prerequisites
@@ -27,7 +27,7 @@ Before enabling Oh My Pi telemetry, make sure:
 
 ## Collection path
 
-Asymptote's managed extension is a single TypeScript file in one of Oh My Pi's two auto-discovered extension directories:
+Beacon's managed extension is a single TypeScript file in one of Oh My Pi's two auto-discovered extension directories:
 
 | Level | Extension path |
 |-------|----------------|
@@ -43,13 +43,13 @@ The two paths resolve asymmetrically, which matters if you set either of Oh My P
 | `PI_CODING_AGENT_DIR` | Replaces the user agent directory outright, so the extension goes to `$PI_CODING_AGENT_DIR/extensions/beacon.ts`. Oh My Pi sets this on its own process when a named profile is active, so installing from inside a profiled session lands in `~/.omp/profiles/<name>/agent/extensions/` |
 | `PI_CONFIG_DIR` | Renames the `.omp` directory under your home directory only. The project path stays `./.omp/extensions/` |
 
-Asymptote identifies its own extension by the marker `beacon-managed-omp-extension:v1`, which is distinct from Pi's. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry.
+Beacon identifies its own extension by the marker `beacon-managed-omp-extension:v1`, which is distinct from Pi's. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Beacon telemetry.
 
-Oh My Pi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+Oh My Pi has no OpenTelemetry export for Beacon to configure, so there is no OTLP path for this runtime.
 
 ## Discovery and status
 
-Asymptote detects Oh My Pi through the `omp` executable, and treats the resolved agent directory as an additional signal. Oh My Pi installed through bun, a version manager, or its own installer is often missing from the `PATH` the endpoint process inherited while its state directory is still present. The Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
+Beacon detects Oh My Pi through the `omp` executable, and treats the resolved agent directory as an additional signal. Oh My Pi installed through bun, a version manager, or its own installer is often missing from the `PATH` the endpoint process inherited while its state directory is still present. The Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
 
 ```bash title="Show Oh My Pi discovery state"
 beacon endpoint discover --all --json
@@ -60,8 +60,8 @@ Oh My Pi reports as the `omp` harness with capability `plugin`:
 | Telemetry status | Meaning |
 |------------------|---------|
 | `missing` | No extension file at the user-level managed path |
-| `disabled` | A `beacon.ts` exists but carries no Asymptote Oh My Pi marker, so it is somebody else's extension sharing the filename |
-| `enabled` | Asymptote's managed extension is in place |
+| `disabled` | A `beacon.ts` exists but carries no Beacon Oh My Pi marker, so it is somebody else's extension sharing the filename |
+| `enabled` | Beacon's managed extension is in place |
 
 A file carrying Pi's marker at this path is not an Oh My Pi install. The two runtimes read different directories, so it should not arise, but the markers are distinct so the answer does not depend on that staying true.
 
@@ -103,16 +103,16 @@ Unlike Pi, a project-level install needs no trust prompt: Oh My Pi loads `.omp` 
 
 ### Approval telemetry
 
-Asymptote never synthesizes an approval from a tool call. A `tool_call` handler that blocks is an extension deciding, not an operator being asked, and recording that as an approval would be indistinguishable from an answer a human gave — which is why [Pi](/runtimes/pi) and [Cline](/runtimes/cline) carry no approval telemetry at all.
+Beacon never synthesizes an approval from a tool call. A `tool_call` handler that blocks is an extension deciding, not an operator being asked, and recording that as an approval would be indistinguishable from an answer a human gave — which is why [Pi](/runtimes/pi) and [Cline](/runtimes/cline) carry no approval telemetry at all.
 
 Oh My Pi reports the prompt and the answer as their own events, so its approval events are real. Each one carries:
 
 - The operator's decision, and the runtime's own reason when it gave one.
-- The command or file path being decided on. Oh My Pi's approval events carry the tool name but none of its arguments, so the managed extension remembers each `tool_call`'s input by the runtime's own call id and attaches it to the approval for that call. Without this the approval would say "the operator denied `bash`" rather than "the operator denied `rm -rf /var/data`", and every approval rule Asymptote ships matches on the command or path rather than on a tool name.
+- The command or file path being decided on. Oh My Pi's approval events carry the tool name but none of its arguments, so the managed extension remembers each `tool_call`'s input by the runtime's own call id and attaches it to the approval for that call. Without this the approval would say "the operator denied `bash`" rather than "the operator denied `rm -rf /var/data`", and every approval rule Beacon ships matches on the command or path rather than on a tool name.
 - `gen_ai.tool.call.id`, joining the decision to the `tool.invoked` it decided on.
 - The session's approval mode in `raw.omp_approval_mode`: `always-ask`, `write`, or `yolo`. A `yolo` session had the prompts turned off, which is the difference between a decision someone made and a decision nobody was asked to make.
 
-A resolved approval whose outcome Asymptote cannot read is recorded as a denial. The safe reading of "no evidence the operator said yes" is not "the operator said yes". An approval for a call the extension never saw proposed still records the decision, the tool name, and the call id, without inventing a command block for it.
+A resolved approval whose outcome Beacon cannot read is recorded as a denial. The safe reading of "no evidence the operator said yes" is not "the operator said yes". An approval for a call the extension never saw proposed still records the decision, the tool name, and the call id, without inventing a command block for it.
 
 Detections in `rules/approval-abuse/` fire on Oh My Pi activity, unlike on Pi. A denied `rm -rf` followed by its execution raises `approval-denied-command-executed-anyway`; a `yolo`-mode allow of a destructive command raises `high-risk-approval-allowed-without-reason`.
 
@@ -120,14 +120,14 @@ Detections in `rules/approval-abuse/` fire on Oh My Pi activity, unlike on Pi. A
 
 Oh My Pi content is handled like every other runtime. Prompts, tool arguments, commands, Python source, paths, diffs, and reasoning text are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall Oh My Pi's agent loop, and a failure to spawn costs the event rather than the run. Every handler returns nothing, so Oh My Pi never reads a directive back from Asymptote — the extension cannot block a tool call, revise its arguments, or answer a question that was put to the operator.
+The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall Oh My Pi's agent loop, and a failure to spawn costs the event rather than the run. Every handler returns nothing, so Oh My Pi never reads a directive back from Beacon — the extension cannot block a tool call, revise its arguments, or answer a question that was put to the operator.
 
 ## Known gaps
 
 - **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Oh My Pi. Its blocking `tool_call` handler and its approval events make it a viable target for that seam later.
 - **Streaming events are not collected.** The extension subscribes to ten of Oh My Pi's event types and ignores the rest, which are provider-request internals, streaming message updates, compaction and retry signals, and TUI plumbing. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
 - **MCP notifications are not collected.** `mcp_notification` fires for every JSON-RPC notification a connected server sends, most of them routine tools and resources list refreshes. It describes MCP transport plumbing rather than an action the agent took. MCP tool calls the agent makes *are* collected.
-- **Named profiles need the environment variable.** Asymptote installs into the agent directory `PI_CODING_AGENT_DIR` names, or the default one when it is unset. It does not enumerate `~/.omp/profiles/`, so instrumenting a named profile means running the install with that variable set — which is what Oh My Pi itself does inside a profiled session.
+- **Named profiles need the environment variable.** Beacon installs into the agent directory `PI_CODING_AGENT_DIR` names, or the default one when it is unset. It does not enumerate `~/.omp/profiles/`, so instrumenting a named profile means running the install with that variable set — which is what Oh My Pi itself does inside a profiled session.
 - **Session switches are not distinguished.** Oh My Pi's `session_start` carries no reason, and its `session_switch`, `session_branch`, and `session_tree` events are not subscribed to, so a resumed or forked session is not marked as such.
 
 ## Deployment notes

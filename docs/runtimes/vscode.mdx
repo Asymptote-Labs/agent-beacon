@@ -1,11 +1,11 @@
 ---
 title: "VS Code"
-description: "Asymptote support details for VS Code Copilot and hook telemetry"
+description: "Beacon support details for VS Code Copilot and hook telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports VS Code primarily through GitHub Copilot Chat OpenTelemetry export to Asymptote's localhost collector. VS Code hooks are also supported as an optional preview path when your organization allows them.
+Beacon supports VS Code primarily through GitHub Copilot Chat OpenTelemetry export to Beacon's localhost collector. VS Code hooks are also supported as an optional preview path when your organization allows them.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ Use OpenTelemetry as the primary VS Code collection path:
 beacon endpoint install --harness vscode
 ```
 
-This configures VS Code Copilot Chat to export OTLP/HTTP to Asymptote's local collector at `http://127.0.0.1:4318`. Reload VS Code after setup so the Copilot extension reinitializes its telemetry configuration.
+This configures VS Code Copilot Chat to export OTLP/HTTP to Beacon's local collector at `http://127.0.0.1:4318`. Reload VS Code after setup so the Copilot extension reinitializes its telemetry configuration.
 
 Validate recent activity:
 
@@ -38,7 +38,7 @@ OTel-derived events use `harness.name=vscode_copilot`.
 
 VS Code hooks are currently in preview, and the `Chat: Use Hooks` setting may be disabled or managed by your organization. Use hooks only when you want extra lifecycle/tool detail or cross-agent coverage beyond Copilot's OTel stream.
 
-Before installing hooks, confirm `Chat: Use Hooks` is enabled in VS Code settings. If this setting is unchecked and marked as managed by your organization, VS Code will not execute `.github/hooks/*.json` hook files even if Asymptote installs them successfully.
+Before installing hooks, confirm `Chat: Use Hooks` is enabled in VS Code settings. If this setting is unchecked and marked as managed by your organization, VS Code will not execute `.github/hooks/*.json` hook files even if Beacon installs them successfully.
 
 <img src="/images/vscode-chat-use-hooks-setting.png" alt="VS Code settings showing Chat: Use Hooks disabled and managed by organization, while Chat: Use Claude Hooks is enabled." />
 
@@ -59,7 +59,7 @@ Hook-derived events use `harness.name=vscode`. They can capture VS Code lifecycl
 
 ## Discovery and status
 
-Asymptote detects VS Code through the `code` executable or the VS Code user settings directory. It checks whether Copilot Chat OTel is enabled, whether the exporter is `otlp-http`, and whether the endpoint points to Asymptote's local OTLP HTTP receiver.
+Beacon detects VS Code through the `code` executable or the VS Code user settings directory. It checks whether Copilot Chat OTel is enabled, whether the exporter is `otlp-http`, and whether the endpoint points to Beacon's local OTLP HTTP receiver.
 
 Use:
 
@@ -82,13 +82,13 @@ beacon endpoint hooks status --harness vscode --level project
 
 ## Deployment notes
 
-For managed endpoint deployments, include `vscode` in the endpoint harness list when you want Asymptote to manage VS Code Copilot OTel settings:
+For managed endpoint deployments, include `vscode` in the endpoint harness list when you want Beacon to manage VS Code Copilot OTel settings:
 
-```bash title="For managed endpoint deployments, include vscode in the endpoint harness list when you want Asymptote to manage VS Code Copilot OTel settings"
+```bash title="For managed endpoint deployments, include vscode in the endpoint harness list when you want Beacon to manage VS Code Copilot OTel settings"
 beacon endpoint install --system --harness claude,codex,vscode
 ```
 
-If hooks are allowed by organization policy, install them separately in the logged-in user's context or within the target project. Do not rely on hooks as the primary VS Code signal path; Copilot OTel is preferred and should provide most of the session, prompt, model, and tool visibility needed for Asymptote.
+If hooks are allowed by organization policy, install them separately in the logged-in user's context or within the target project. Do not rely on hooks as the primary VS Code signal path; Copilot OTel is preferred and should provide most of the session, prompt, model, and tool visibility needed for Beacon.
 
 ## Related
 

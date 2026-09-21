@@ -1,30 +1,14 @@
 ---
 title: "Common Issues"
-description: "Solutions for common issues when setting up and using Asymptote."
+description: "Solutions for common issues when setting up and using Beacon."
 ---
 
 <AccordionGroup>
-  <Accordion title="Scans aren't triggering on pull requests">
-    - Verify the Asymptote GitHub App is installed on the target repository.
-    - Check that webhook deliveries are succeeding under your GitHub App settings → **Recent Deliveries**.
-    - Confirm the `ASYMPTOTE_API_KEY` secret is set in your repository under **Settings → Secrets and variables → Actions**.
-  </Accordion>
-  <Accordion title="Status checks are stuck as pending">
-    - Confirm your `ASYMPTOTE_API_KEY` secret is correctly set and hasn't expired.
-    - Large pull requests may take a few extra minutes to process.
-    - Check the Actions tab in your repository to see if the workflow is running.
-  </Accordion>
-  <Accordion title="Permission errors on the GitHub App">
-    Re-install the Asymptote GitHub App and ensure the correct repositories are selected. See the [GitHub integration page](/deployment/hosting-options) for a full list of required permissions.
-  </Accordion>
   <Accordion title="My coding agent isn't being intercepted">
-    Ensure Asymptote is configured for your agent. See the [Coding Agent Integrations](/runtimes/cursor) docs for setup instructions for your specific tool.
-  </Accordion>
-  <Accordion title="How do I disconnect a repository?">
-    In GitHub: **Repository → Settings → GitHub Apps → Asymptote Security**, then suspend or uninstall the app.
+    Ensure Beacon is configured for your agent. See the [Coding Agent Integrations](/runtimes/cursor) docs for setup instructions for your specific tool.
   </Accordion>
   <Accordion title="How do I disconnect all repositories?">
-    In GitHub: **Organization → Settings → GitHub Apps → Asymptote Security**, then suspend or uninstall the app.
+    In GitHub: **Organization → Settings → GitHub Apps → Beacon Security**, then suspend or uninstall the app.
   </Accordion>
   <Accordion title="How do I remove agent hooks from my local machine?">
     Use `beacon endpoint hooks uninstall` for whichever hook harness you set up:
@@ -55,7 +39,7 @@ description: "Solutions for common issues when setting up and using Asymptote."
     After uninstalling hooks, restart the affected agent or IDE so new sessions pick up the updated hook configuration. See the [hook command docs](/cli/hooks#beacon-endpoint-hooks-uninstall) for supported harness names and flags.
   </Accordion>
   <Accordion title="beacon endpoint install fails with Collector ports are not listening">
-    A user-mode collector cannot run beside a system-mode one, because the collector health-check port `127.0.0.1:13133` is fixed, so the install rolls back; run `beacon endpoint install --user --no-start` or uninstall the system endpoint first. Tracked as [GitHub issue #447](https://github.com/Asymptote-Labs/agent-beacon/issues/447).
+    A user-mode collector cannot run beside a system-mode one, because the collector health-check port `127.0.0.1:13133` is fixed, so the install rolls back; run `beacon endpoint install --user --no-start` or uninstall the system endpoint first. Tracked as [GitHub issue #447](https://github.com/asymptote-labs/agent-beacon/issues/447).
   </Accordion>
   <Accordion title="Endpoint package self-update is not running">
     For signed macOS package installs, self-update is off by default. Check the

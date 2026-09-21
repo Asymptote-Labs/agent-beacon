@@ -144,9 +144,9 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | Command | Description |
 |---------|-------------|
 | [`beacon endpoint install`](/cli/endpoint-install) | Install or update the local endpoint collector, runtime telemetry configuration, and optional Splunk HEC or Falcon LogScale HEC forwarding. |
-| [`beacon endpoint status`](/cli/endpoint-status) | Inspect collector health, runtime log state, configured harnesses, diagnostics, forwarding readiness, and the Asymptote managed-ingest connection. |
-| [`beacon endpoint connect`](/cli/endpoint-connect) | Approve this device in the Asymptote dashboard and start the Vector forwarder to managed ingest. |
-| [`beacon endpoint disconnect`](/cli/endpoint-connect) | Stop the Asymptote forwarder and remove the local device key. |
+| [`beacon endpoint status`](/cli/endpoint-status) | Inspect collector health, runtime log state, configured harnesses, diagnostics, forwarding readiness, and the Beacon managed-ingest connection. |
+| [`beacon endpoint connect`](/cli/endpoint-connect) | Approve this device in the Beacon dashboard and start the Vector forwarder to managed ingest. |
+| [`beacon endpoint disconnect`](/cli/endpoint-connect) | Stop the Beacon forwarder and remove the local device key. |
 | [`beacon endpoint doctor`](/cli/endpoint-doctor) | Run local endpoint health checks with pass/fail exit behavior and optional safe remediation. |
 | [`beacon endpoint inventory`](/cli/endpoint-inventory) | Show configured, detected, hook, and observed endpoint inventory. |
 | [`beacon endpoint discover`](/cli/endpoint-discover) | Discover supported local [agent harnesses](/runtimes) and their telemetry configuration state. |
@@ -168,7 +168,7 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint cloudwatch`](/cli/cloudwatch) | Generate AWS CloudWatch Logs forwarding content for Beacon endpoint events. |
 | [`beacon endpoint s3`](/cli/s3) | Generate AWS S3 forwarding content for Beacon endpoint events. |
 | [`beacon endpoint gcs`](/cli/gcs) | Generate Google Cloud Storage forwarding content for Beacon endpoint events. |
-| [`beacon endpoint asymptote`](/cli/asymptote) | Generate the Vector forwarding pack for Asymptote managed ingest and write validation events. |
+| [`beacon endpoint asymptote`](/cli/asymptote) | Generate the Vector forwarding pack for Beacon managed ingest and write validation events. |
 | [`beacon endpoint hooks`](/cli/hooks) | Manage supported hook-based endpoint telemetry. |
 | [`beacon endpoint opencode`](/cli/endpoint-opencode) | Collect endpoint telemetry from OpenCode session records on this machine. |
 | [`beacon endpoint pi`](/cli/endpoint-pi) | Collect endpoint telemetry from Pi session records on this machine. |
@@ -322,13 +322,13 @@ Generate Google Cloud Storage forwarding content and validation events for Beaco
 beacon endpoint asymptote [command]
 ```
 
-Generate the Vector forwarding pack that sends Beacon endpoint events to Asymptote managed ingest, and write validation events.
+Generate the Vector forwarding pack that sends Beacon endpoint events to Beacon managed ingest, and write validation events.
 
 | Command | Description |
 |---------|-------------|
 | [`beacon endpoint asymptote print-config`](/cli/asymptote#beacon-endpoint-asymptote-print-config) | Print the Vector forwarding config for the configured runtime log. |
-| [`beacon endpoint asymptote install-pack`](/cli/asymptote#beacon-endpoint-asymptote-install-pack) | Write the Asymptote forwarding pack to a directory. |
-| [`beacon endpoint asymptote validate`](/cli/asymptote#beacon-endpoint-asymptote-validate) | Write and describe a known-good Beacon Asymptote validation event. |
+| [`beacon endpoint asymptote install-pack`](/cli/asymptote#beacon-endpoint-asymptote-install-pack) | Write the Beacon forwarding pack to a directory. |
+| [`beacon endpoint asymptote validate`](/cli/asymptote#beacon-endpoint-asymptote-validate) | Write and describe a known-good Beacon validation event. |
 
 ## beacon endpoint hooks
 

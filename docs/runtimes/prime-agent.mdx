@@ -1,19 +1,19 @@
 ---
 title: "Prime Agent"
-description: "Asymptote support details for Prime Agent (Prime Intellect) endpoint telemetry"
+description: "Beacon support details for Prime Agent (Prime Intellect) endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), Prime Intellect's coding and research harness, through a managed local extension.
+Beacon supports [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), Prime Intellect's coding and research harness, through a managed local extension.
 
 <Note>
 Prime Agent is a hard fork of [pi-mono](https://github.com/badlogic/pi-mono), as [Oh My Pi](/runtimes/oh-my-pi) and [Senpi](/runtimes/senpi) are. All four are supported separately and recorded under their own harness names, because they are separately installed products that one machine can run side by side.
 </Note>
 
-Prime Agent fits neither of Asymptote's two usual live integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the live integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/cli/supported-runtimes-opencode) and [Cline](/cli/supported-runtimes-cline) integrations.
+Prime Agent fits neither of Beacon's two usual live integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the live integration is extension-shaped: one Beacon-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/cli/supported-runtimes-opencode) and [Cline](/cli/supported-runtimes-cline) integrations.
 
-Asymptote can also read Prime Agent's committed JSONL session store after the fact:
+Beacon can also read Prime Agent's committed JSONL session store after the fact:
 
 ```bash
 beacon endpoint prime sync
@@ -43,7 +43,7 @@ Before enabling Prime Agent telemetry, make sure:
 
 ## Collection path
 
-Asymptote's managed Prime Agent extension is a single TypeScript file at one of two auto-discovered extension locations:
+Beacon's managed Prime Agent extension is a single TypeScript file at one of two auto-discovered extension locations:
 
 | Level | Extension path |
 |-------|----------------|
@@ -56,15 +56,15 @@ User level is the default, because it follows the operator rather than one check
 The project path keeps the `agent` segment. Prime Agent's config directory name is the two-segment literal `.prime/agent`, and it joins that whole string under the working directory as well as under the home directory — where [Pi](/runtimes/pi) uses `.pi/extensions` and [Oh My Pi](/runtimes/oh-my-pi) uses `.omp/extensions` at project scope. A file written to `./.prime/extensions/` is never loaded.
 </Warning>
 
-`PRIME_AGENT_CODING_AGENT_DIR` replaces the user-level agent directory outright, and Asymptote honors it — including a leading `~`, which the runtime expands before use. It does not move the project path, because Prime Agent does not consult it there. Asymptote deliberately ignores `PI_CODING_AGENT_DIR`: that is the variable the same upstream code produces for Pi and Oh My Pi, and reading it here would move this install whenever you had set it for a different product.
+`PRIME_AGENT_CODING_AGENT_DIR` replaces the user-level agent directory outright, and Beacon honors it — including a leading `~`, which the runtime expands before use. It does not move the project path, because Prime Agent does not consult it there. Beacon deliberately ignores `PI_CODING_AGENT_DIR`: that is the variable the same upstream code produces for Pi and Oh My Pi, and reading it here would move this install whenever you had set it for a different product.
 
-Asymptote identifies its own extension file by the marker `beacon-managed-prime-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry. The marker is distinct from Pi's and Oh My Pi's, so a file found at any of the three paths is attributed to the runtime that actually loads it.
+Beacon identifies its own extension file by the marker `beacon-managed-prime-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Beacon telemetry. The marker is distinct from Pi's and Oh My Pi's, so a file found at any of the three paths is attributed to the runtime that actually loads it.
 
-Prime Agent has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime. The poll path reads JSONL transcripts from `~/.prime/agent/sessions` and subagent artifacts from `~/.prime/agent/session-artifacts`; if `PRIME_AGENT_CODING_AGENT_DIR` is set, Asymptote reads `sessions` and `session-artifacts` below that directory, matching the runtime's user-level agent directory override. The cursor lives in Asymptote state, not in Prime Agent's directory.
+Prime Agent has no OpenTelemetry export for Beacon to configure, so there is no OTLP path for this runtime. The poll path reads JSONL transcripts from `~/.prime/agent/sessions` and subagent artifacts from `~/.prime/agent/session-artifacts`; if `PRIME_AGENT_CODING_AGENT_DIR` is set, Beacon reads `sessions` and `session-artifacts` below that directory, matching the runtime's user-level agent directory override. The cursor lives in Beacon state, not in Prime Agent's directory.
 
 ## Discovery and status
 
-Asymptote detects Prime Agent through the `prime-agent` executable, and treats the `~/.prime/agent` state directory as an additional signal. Prime Agent installed through npm, or through its own installer into `~/.local/share/prime-agent`, is often missing from the `PATH` the endpoint process inherited, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The Pi, Oh My Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
+Beacon detects Prime Agent through the `prime-agent` executable, and treats the `~/.prime/agent` state directory as an additional signal. Prime Agent installed through npm, or through its own installer into `~/.local/share/prime-agent`, is often missing from the `PATH` the endpoint process inherited, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The Pi, Oh My Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
 
 The bare name `prime` is deliberately not probed for. It is an ordinary word another binary or an internal script could plausibly claim, and a false positive reports a runtime the machine does not have.
 
@@ -77,8 +77,8 @@ Prime Agent reports as the `prime_agent` harness with capability `plugin`:
 | Telemetry status | Meaning |
 |------------------|---------|
 | `missing` | No extension file at the user-level managed path |
-| `disabled` | A `beacon.ts` exists but carries no Asymptote marker, so it is somebody else's extension sharing the filename |
-| `enabled` | Asymptote's managed extension is in place |
+| `disabled` | A `beacon.ts` exists but carries no Beacon marker, so it is somebody else's extension sharing the filename |
+| `enabled` | Beacon's managed extension is in place |
 
 An unmarked extension file reports `disabled` rather than `enabled`, because reporting it as enabled would show the runtime as covered while no events arrive.
 
