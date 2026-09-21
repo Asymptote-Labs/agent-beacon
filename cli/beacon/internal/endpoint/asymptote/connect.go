@@ -126,9 +126,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 
 	// Prove Vector accepts this privacy mode's config before enrollment rotates the key.
 	// The ingest URL is the previous enrollment's when there is one; validate never
-	// connects, so a placeholder serves a first enrollment.
+	// connects, so a placeholder serves a first enrollment or a record missing its URL.
 	preflightURL := preflightIngestURL
-	if previous != nil {
+	if previous != nil && IsSecureURL(previous.IngestURL) {
 		preflightURL = previous.IngestURL
 	}
 	if err := ensureDir(opts.UserMode); err != nil {
