@@ -222,8 +222,16 @@ const kiroMCPToolPrefix = "@"
 // because it is a property other runtimes have -- Claude Code's SessionStart additionalContext
 // works the same way -- and the next one belongs in this function, not in a second copy of the
 // condition next to each writer.
+//
+// Kimi Code is that next one, and it needs only one of the two halves above to qualify. Its hook
+// contract does parse stdout as a response object -- that is how a `permissionDecision` deny is
+// spelled -- but on UserPromptSubmit a hook that exits 0 also has its raw stdout appended to the
+// model's context, wrapped in a `<hook_result>` element. So the `{}` these commands finish with
+// would be pasted in front of the model once per prompt. Silence costs Beacon nothing there
+// because the deny shape it needs on Kimi Code is an exit code rather than an object, which is
+// checked before stdout is read at all; see kimiPolicyDenial.
 func hookStdoutIsConsumedAsAgentContext(platform string) bool {
-	return platform == kiroPlatform
+	return platform == kiroPlatform || platform == kimiPlatform
 }
 
 // kiroToolKindFor classifies a Kiro tool by name, and reports whether the name is known at all.

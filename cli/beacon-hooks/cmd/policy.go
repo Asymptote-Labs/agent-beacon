@@ -233,9 +233,18 @@ func emitPolicyDenied(logger *logging.Logger, input map[string]interface{}, c po
 // runs in the pre-tool and permission-request phases, and Beacon registers no
 // permission-request hook on Kiro because Kiro exposes no such event -- so the
 // only phase that can reach this on Kiro is the one where the code takes effect.
+//
+// Kimi Code is the second such runtime and the first whose answer depends on the phase. It reads
+// both shapes -- exit code 2 with the reason on stderr, checked first, and a stdout object second
+// -- but only three of its events are blockable and only one of them is a phase the seam runs in.
+// kimiPolicyDenial carries that distinction, and returns nil for the phase that cannot be refused
+// rather than emitting a denial the runtime discards.
 func policyDenyFor(reason string, phase policycontract.Phase) *policyDenial {
 	if platformFlag == kiroPlatform {
 		return &policyDenial{exitCode: kiroBlockExitCode, stderr: reason}
+	}
+	if platformFlag == kimiPlatform {
+		return kimiPolicyDenial(reason, phase)
 	}
 	if response := policyDenyResponse(reason, phase); response != nil {
 		return &policyDenial{response: response}
