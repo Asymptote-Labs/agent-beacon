@@ -14,6 +14,21 @@ The commands are grouped by resource:
 - `beacon memory candidates list|show|approve|reject|supersede`
 - `beacon memory skills preview|install`
 
+All subcommands accept the common endpoint and project-scope flags:
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--project <path>` | Project path for memory scoping. Defaults to the current directory |
+| `--json` | Print machine-readable JSON |
+
+Beacon stores learning artifacts in `memory.db` next to the resolved endpoint base
+directory for the runtime log. The store is durable local state and is scoped by
+the resolved project ID, so approved memory for one repository is not automatically
+returned for another.
+
 ## Evaluate traces
 
 Preview selected traces and estimated Jev calls without a network request:
@@ -35,9 +50,25 @@ Useful flags:
 - `--trace <id>` evaluates one trace ID.
 - `--harness <name>` filters traces by harness.
 - `--since <rfc3339>` and `--until <rfc3339>` bound the trace window.
+- `--limit <n>` and `--page <n>` page through selected traces.
+- `--query <text>` or `-q <text>` searches trace text before evaluation.
 - `--jev-model <model>` selects the Jev model, such as `jev-latest` or a pinned version.
 - `--jev-endpoint <url>` overrides the TypeSafe System One endpoint.
+- `--jev-api-key <key>` overrides API key lookup.
+- `--jev-cost-per-trace <usd>` changes the dry-run cost estimate.
+- `--timeout <duration>` sets the Jev request timeout.
 - `--json` prints machine-readable output.
+
+`--jev-api-key` defaults to `TYPESAFE_API_KEY`, then `BEACON_JEV_API_KEY`.
+`--jev-endpoint` can also come from `BEACON_JEV_ENDPOINT`, and the model can come
+from `BEACON_JEV_MODEL`.
+
+List and inspect stored evaluations:
+
+```bash
+beacon memory evaluations list --limit 25
+beacon memory evaluations show <evaluation-id>
+```
 
 ## Review candidates
 
@@ -45,6 +76,13 @@ List generated candidates:
 
 ```bash
 beacon memory candidates list
+```
+
+Filter candidate review queues:
+
+```bash
+beacon memory candidates list --state pending --kind workflow
+beacon memory candidates list -q "package smoke"
 ```
 
 Inspect one candidate:
@@ -65,6 +103,10 @@ Reject or supersede candidates:
 beacon memory candidates reject <candidate-id> --reason "too specific"
 beacon memory candidates supersede <candidate-id> --replacement <memory-id>
 ```
+
+Approving creates an approved memory record for the resolved project. Rejecting and
+superseding preserve the review transition with the optional `--reason` so later
+reviews can explain why a candidate was not installed.
 
 ## Install Agent Skills
 
@@ -88,6 +130,11 @@ Beacon writes:
 
 Existing files are not overwritten unless you pass `--force`.
 
+Skill files include Beacon provenance so future reviewers can trace the generated
+instruction back to the approved memory and source trace. Installation is a write
+to the current project or the path passed with `--project`; it is never triggered
+by endpoint hooks or MCP reads.
+
 ## MCP retrieval
 
 `beacon mcp serve` exposes approved memory as read-only MCP tools:
@@ -98,6 +145,10 @@ Existing files are not overwritten unless you pass `--force`.
 
 These tools let future agents retrieve approved project knowledge regardless of which
 harness originally produced the trace.
+
+The local dashboard also includes a read-only Memory page showing evaluation,
+candidate, and approved-memory counts. Mutating actions still live in this CLI
+workflow.
 
 ## Network boundary
 

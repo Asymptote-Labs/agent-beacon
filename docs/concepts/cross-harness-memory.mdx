@@ -45,6 +45,11 @@ provenance, evaluator model, and usage metadata when the API reports it.
 Use `--dry-run` first to preview selected traces and estimated calls without making
 a network request.
 
+The evaluator uses the hosted TypeSafe endpoint and `jev-latest` by default. Set
+`TYPESAFE_API_KEY` or `BEACON_JEV_API_KEY` for hosted evaluation, or pass
+`--jev-endpoint` / `BEACON_JEV_ENDPOINT` and `--jev-model` / `BEACON_JEV_MODEL`
+to target an internal compatible evaluator.
+
 ## Local storage and scope
 
 Learning artifacts are stored in `memory.db` next to the endpoint runtime log base
@@ -53,6 +58,10 @@ directory. The database is durable local state, unlike the rebuildable trace ind
 Approved memory is scoped to the resolved project. Cross-project or user-global
 memory is not automatic. If you install a skill, Beacon writes it under the current
 project's `.agents/skills/<slug>/SKILL.md`.
+
+Project scope is derived from the current working directory by default. Use
+`--project <path>` when reviewing a trace for a different repository or when a
+client needs to retrieve memory for a specific project.
 
 ## Reuse surfaces
 
@@ -74,6 +83,8 @@ retrieve later.
 - Jev calls are made only by the explicit `beacon memory evaluations run` command.
 - Trace projections are bounded and redacted before being sent.
 - Candidate approval and skill installation are explicit CLI actions.
+- The dashboard's Memory page is read-only; review transitions and skill writes stay
+  in the CLI.
 
 If your organization forbids external evaluation, skip `beacon memory evaluations run`
 or point it at an internal compatible evaluator.

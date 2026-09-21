@@ -11,7 +11,9 @@ description: "Validate local Beacon MCP setup"
 beacon mcp doctor
 ```
 
-Doctor resolves the effective runtime log path, checks transport settings, samples readable events and archives, and confirms that the expected MCP tools are registered.
+Doctor resolves the effective runtime log path, checks transport settings, samples
+readable events and archives, and confirms that the expected MCP tools are
+registered. Those tools cover both local activity and approved project memory.
 
 ## Checks
 
@@ -26,6 +28,10 @@ Doctor reports:
 - Malformed line count
 - Readable runtime archives
 - Registered MCP tools
+
+The expected tool set is `search_activity`, `summarize_activity`,
+`get_activity_event`, `list_activity_filters`, `search_memory`, `get_memory`, and
+`get_memory_context`.
 
 If the runtime log does not exist yet, doctor reports that Beacon MCP can still start, but activity answers will be empty until endpoint telemetry writes events.
 

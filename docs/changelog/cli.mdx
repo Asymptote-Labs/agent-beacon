@@ -13,6 +13,37 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+### v1.3.17 · September 21, 2026
+
+- **Reviewed cross-harness memory** · Beacon now has an explicit local learning
+  workflow under `beacon memory`. Evaluations select local traces, optionally call
+  TypeSafe Jev's System One API with a bounded redacted projection, and persist
+  results in a local `memory.db` beside the endpoint log base directory. Reviewers
+  can list, inspect, approve, reject, or supersede memory candidates before any
+  project memory is created.
+- **Approved memory reuse through MCP and Agent Skills** · `beacon mcp serve` now
+  exposes approved-memory tools (`search_memory`, `get_memory`, and
+  `get_memory_context`) alongside the existing local activity tools. Approved
+  memory can also be previewed or installed as deterministic Agent Skills with
+  `beacon memory skills preview|install`, writing to `.agents/skills/<slug>/SKILL.md`
+  only through an explicit CLI action.
+- **Memory dashboard and docs** · The local dashboard adds a read-only Memory page
+  for evaluations, candidates, and approved memories. The cross-harness memory
+  concept and CLI reference document the Jev boundary, project scoping, MCP reuse,
+  and Agent Skill publishing.
+
+### v1.3.16 · September 20, 2026
+
+- **Session-centric local dashboard** · The dashboard root now groups local runtime
+  activity by agent session, showing prompt, risk, harness, model, repository,
+  duration, activity counts, and last-artifact summaries. Session detail pages add
+  timelines, severity and type filters, metadata summaries, raw JSON drawers, and
+  value inspectors while staying loopback-only and read-only.
+- **Dashboard navigation refresh** · Local investigation views now separate Agent
+  Activity Sessions, Agent Activity analytics, Findings, Detections, Token Usage,
+  Agent Inventory, and Memory so rollout validation and local triage no longer
+  depend on a flat event table.
+
 ### v1.3.15 · September 19, 2026
 
 - **Local session-store sync across more runtimes** · Beacon can now backfill

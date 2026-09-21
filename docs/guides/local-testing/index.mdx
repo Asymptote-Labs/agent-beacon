@@ -38,7 +38,7 @@ Diagnostics: passing
     Use `beacon endpoint test-event` to append a known-good synthetic event to the runtime JSONL log.
   </Step>
   <Step title="Review the dashboard">
-    Start `beacon endpoint dashboard --open` and confirm the validation event appears in Log Search and summary views.
+    Start `beacon endpoint dashboard --open` and confirm the validation event appears in local activity views. For real agent runs, open an Agent Activity Sessions row and inspect the session timeline.
   </Step>
   <Step title="Validate MCP access">
     Run `beacon mcp doctor`, then test an MCP query path against the same runtime log to confirm local assistants only receive the intended compact activity summaries.
@@ -55,7 +55,7 @@ Diagnostics: passing
     Confirm endpoint health, write validation events, and inspect the runtime JSONL log.
   </Card>
   <Card title="Test the Local Dashboard" icon="chart-line" href="/guides/local-testing/dashboard">
-    Review Log Search, Security Overview, and runtime inventory from the local dashboard.
+    Review activity sessions, event details, memory, findings, detections, token usage, and runtime inventory from the local dashboard.
   </Card>
   <Card title="Test MCP Access" icon="server" href="/guides/local-testing/mcp">
     Test local MCP tools and connect Cursor or Claude Code to Beacon activity.

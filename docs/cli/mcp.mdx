@@ -5,13 +5,19 @@ description: "Expose local Beacon activity to MCP clients"
 
 ## Command overview
 
-The `beacon mcp` command group exposes local Beacon endpoint activity to MCP clients so an assistant can search, summarize, and retrieve compact event records from the local `runtime.jsonl` log.
+The `beacon mcp` command group exposes local Beacon endpoint activity and
+approved project memory to MCP clients. An assistant can search, summarize, and
+retrieve compact event records from the local `runtime.jsonl` log, then retrieve
+reviewed memory that was explicitly approved through [`beacon memory`](/cli/memory).
 
 ```bash title="Command syntax"
 beacon mcp [command]
 ```
 
-The server reads the same local runtime log used by the [dashboard](/cli/dashboard). It supports stdio for desktop MCP clients and loopback HTTP JSON-RPC for local tools that connect to a running server.
+The server reads the same local runtime log used by the [dashboard](/cli/dashboard)
+and the local `memory.db` store next to the endpoint log base directory. It
+supports stdio for desktop MCP clients and loopback HTTP JSON-RPC for local tools
+that connect to a running server.
 
 ## Commands
 
@@ -37,8 +43,16 @@ Beacon exposes these MCP tools:
 | `summarize_activity` | Summarize local Beacon activity over a time window and optional filters. |
 | `get_activity_event` | Fetch one compact event by an ID returned from `search_activity`. |
 | `list_activity_filters` | List common filter values found in local Beacon activity logs. |
+| `search_memory` | Search approved Beacon project memory and return compact summaries. |
+| `get_memory` | Fetch one approved memory item by ID. |
+| `get_memory_context` | Return a small approved-memory context set for the current task. |
 
 Search and summary tools accept filters such as `since`, `until`, `limit`, `q`, `harness`, `model`, `action`, `severity`, `category`, `repository`, `session`, `file`, `command`, `mcp`, `approval`, `decision`, `policy`, `review`, and `wazuh_level`.
+
+Memory tools read approved project memory only. They do not run Jev, approve
+candidates, install Agent Skills, or expose pending/rejected candidates. Use
+`project_id` or the MCP client's project context when a client needs memory for a
+specific repository.
 
 ## Flags
 
@@ -51,7 +65,9 @@ Search and summary tools accept filters such as `since`, `until`, `limit`, `q`, 
 | `--addr ADDR` | Loopback HTTP JSON-RPC listen address for `--transport http`. Defaults to `127.0.0.1:8766` |
 
 <Note>
-  `beacon mcp` only reads local Beacon runtime logs. It does not require a hosted Beacon account, and HTTP transport should remain bound to loopback.
+  `beacon mcp` only reads local Beacon runtime logs and approved local memory. It
+  does not require a hosted Beacon account, and HTTP transport should remain bound
+  to loopback.
 </Note>
 
 ## Related

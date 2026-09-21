@@ -5,13 +5,19 @@ description: "Understand how Beacon exposes local endpoint activity to MCP clien
 
 ## Overview
 
-Model Context Protocol (MCP) lets local assistants connect to tools and data sources through a standard interface. Beacon uses MCP to make local endpoint activity searchable from an MCP client without requiring a hosted Beacon account.
+Model Context Protocol (MCP) lets local assistants connect to tools and data
+sources through a standard interface. Beacon uses MCP to make local endpoint
+activity searchable and approved project memory retrievable from an MCP client
+without requiring a hosted Beacon account.
 
 This guide shows how to validate Beacon MCP locally, connect Cursor or Claude Code, and test that MCP query results match the same runtime log used by the dashboard.
 
 ## What Beacon MCP exposes
 
-`beacon mcp` exposes compact activity tools over MCP so an assistant can search, summarize, and fetch events from the local Beacon runtime log.
+`beacon mcp` exposes compact activity tools over MCP so an assistant can search,
+summarize, and fetch events from the local Beacon runtime log. It also exposes
+approved-memory tools so future agents can reuse human-reviewed project knowledge
+created through [`beacon memory`](/cli/memory).
 
 Beacon exposes these MCP tools:
 
@@ -21,6 +27,12 @@ Beacon exposes these MCP tools:
 | `summarize_activity` | Summarize local Beacon activity over a time window and optional filters. |
 | `get_activity_event` | Fetch one compact event by an ID returned from `search_activity`. |
 | `list_activity_filters` | List common filter values found in local Beacon activity logs. |
+| `search_memory` | Search approved Beacon project memory and return compact summaries. |
+| `get_memory` | Fetch one approved memory item by ID. |
+| `get_memory_context` | Return a small approved-memory context set for the current task. |
+
+Memory tools are read-only. They do not evaluate traces, approve candidates, or
+install Agent Skills.
 
 ## Setup
 
@@ -46,6 +58,7 @@ $ beacon mcp doctor
 runtime log: readable
 transport: stdio
 tools: search_activity, summarize_activity, get_activity_event, list_activity_filters
+       search_memory, get_memory, get_memory_context
 sample events: found
 ```
 </Accordion>
@@ -72,6 +85,8 @@ MCP is useful when an analyst wants to ask a local assistant targeted questions 
 - Summarize activity by harness, model, repository, category, or MCP server over a time window.
 - Pull one event by ID and compare it with the same event in the dashboard.
 - List available filters before narrowing an investigation to a specific command, file, session, or repository.
+- Retrieve approved project memory as context for a new task without exposing
+  pending or rejected memory candidates.
 
 ## 3. Test MCP end to end
 
@@ -91,7 +106,7 @@ MCP is useful when an analyst wants to ask a local assistant targeted questions 
     ```
   </Step>
   <Step title="Connect an MCP client">
-    Follow [Connect Cursor and Claude Code](#4-connect-cursor-and-claude-code) below, then ask the client to search recent Beacon activity or summarize activity from the last hour.
+    Follow [Connect Cursor and Claude Code](#4-connect-cursor-and-claude-code) below, then ask the client to search recent Beacon activity, summarize activity from the last hour, or retrieve approved memory for the current project.
   </Step>
   <Step title="Test loopback HTTP if needed">
     If your local tool uses HTTP JSON-RPC, validate the loopback transport before connecting.
@@ -101,7 +116,8 @@ MCP is useful when an analyst wants to ask a local assistant targeted questions 
     ```
   </Step>
   <Step title="Compare with the dashboard">
-    Open Log Search and confirm MCP query results match the same event window and event IDs shown by the dashboard.
+    Open the dashboard and confirm MCP query results match the same event window,
+    event IDs, and approved memory shown by the local views.
 
     ```bash
     beacon endpoint dashboard --open
@@ -141,7 +157,11 @@ Add `beacon` under `mcpServers`, merging it with any existing servers:
 }
 ```
 
-Restart Cursor or run **Developer: Reload Window**, then verify the server in **Cursor Settings → MCP**. Beacon should connect with four tools: `search_activity`, `summarize_activity`, `get_activity_event`, and `list_activity_filters`.
+Restart Cursor or run **Developer: Reload Window**, then verify the server in
+**Cursor Settings → MCP**. Beacon should connect with seven tools:
+`search_activity`, `summarize_activity`, `get_activity_event`,
+`list_activity_filters`, `search_memory`, `get_memory`, and
+`get_memory_context`.
 
 <Note>
   Replace `/opt/homebrew/bin/beacon` with the path from `which beacon`. Do not rely on `"command": "beacon"` because Cursor's subprocess environment may not include Homebrew or shell `PATH` entries.
@@ -197,6 +217,7 @@ Inside a Claude Code session, run `/mcp` and confirm Beacon is connected. Projec
 
 - Local MCP access to the same runtime log used by the dashboard.
 - Compact activity search, summary, event fetch, and filter discovery tools.
+- Read-only retrieval of approved project memory through MCP.
 - Cursor and Claude Code client configuration using an absolute Beacon path.
 - Loopback-only HTTP testing when stdio is not the right local transport.
 
