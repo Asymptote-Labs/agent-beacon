@@ -20,11 +20,11 @@ Before enabling Claude Code telemetry, make sure:
 
 Claude Code exports OTLP telemetry to the local Beacon collector. Beacon writes normalized [endpoint events](/concepts/core-concepts#endpoint-event) to the configured runtime JSONL log and makes them available in the local dashboard.
 
-For richer local telemetry, Beacon can also install Claude Code hooks with the same hook adapter used by other supported runtimes:
+The OTLP export carries prompts, tool calls, commands, approvals, and token usage, but no session start or end, file reads or diffs, or subagent lifecycle. Those come from Claude Code hooks, which use the same hook adapter as the other supported runtimes, so `beacon endpoint install` writes the user-level hooks together with the OTLP settings whenever the `claude` harness is selected. Check or manage them with the hooks commands:
 
-```bash title="Install Claude Code hooks"
-beacon endpoint hooks install --harness claude
+```bash title="Inspect or remove Claude Code hooks"
 beacon endpoint hooks status --harness claude
+beacon endpoint hooks uninstall --harness claude
 ```
 
 User-level hooks are written to `~/.claude/settings.json`. Project-level hooks are written to `./.claude/settings.json`:

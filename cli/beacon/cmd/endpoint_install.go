@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
@@ -140,9 +141,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
 	}
 	printLingerGap(cmd.ErrOrStderr(), result)
-	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
-		return fmt.Errorf("endpoint install completed, but hook installation failed: %w", err)
-	}
+	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), hookHarnesses)
 	if connectAfterInstall {
 		// The install is complete and stands on its own; a failed connect is reported
 		// with the retry command rather than turning a working install into an error.
@@ -294,9 +293,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
 	printLingerGap(cmd.ErrOrStderr(), result)
-	if err := installHookTargetsFromEndpointInstall(hookHarnesses); err != nil {
-		return fmt.Errorf("endpoint repair completed, but hook installation failed: %w", err)
-	}
+	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), hookHarnesses)
 	return nil
 }
 
@@ -324,18 +321,31 @@ func printLingerGap(out io.Writer, result lifecycle.InstallResult) {
 	}
 }
 
-func installHookTargetsFromEndpointInstall(targets []string) error {
+// installHookTargetsFromEndpointInstall installs the hook targets that ride an endpoint
+// install or repair, and reports the ones it could not write as warnings on out.
+//
+// By the time this runs the collector, its config, the service unit, and the OTLP settings
+// are all in place, so the endpoint works. A hook that could not be written, most often a
+// runtime settings file with a shape the merge does not understand, is one command away
+// from being retried, and it used to turn that complete install into a non-zero exit that
+// read as a broken endpoint. Every target is still attempted, so one runtime's settings
+// file cannot stop another runtime's hooks from being installed.
+func installHookTargetsFromEndpointInstall(out io.Writer, targets []string) {
 	if len(targets) == 0 {
-		return nil
+		return
 	}
 	cfg := loadOrDefaultConfig()
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
+	var failed []string
 	for _, target := range targets {
 		if err := installEndpointHookTarget(target, cfg); err != nil {
-			return err
+			failed = append(failed, target)
+			fmt.Fprintf(out, "Warning: %s hooks were not installed: %v\n", target, err)
 		}
 	}
-	return nil
+	if len(failed) > 0 {
+		fmt.Fprintf(out, "The endpoint is installed without them. Retry with: beacon endpoint hooks install --harness %s\n", strings.Join(failed, ","))
+	}
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,8 +58,33 @@ func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
 	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
 		t.Fatalf("otlp targets = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(hooks, ","), "codex,devin-cli,devin-desktop,hermes"; got != want {
+	if got, want := strings.Join(hooks, ","), "claude,codex,devin-cli,devin-desktop,hermes"; got != want {
 		t.Fatalf("hook targets = %q, want %q", got, want)
+	}
+}
+
+// The default install list must carry the Claude Code and Codex hooks with their OTLP
+// settings: a fresh `beacon endpoint install` otherwise records Claude sessions with no
+// start, end, file activity, or subagent lifecycle, since Claude's OTLP export has none.
+func TestDefaultInstallHarnessesCarryClaudeAndCodexHooks(t *testing.T) {
+	defaultList := endpointInstallCmd.Flags().Lookup("harness").DefValue
+	otlp, hooks, err := splitEndpointTargets(splitHarnessCSV(defaultList))
+	if err != nil {
+		t.Fatalf("splitEndpointTargets(%q) returned error: %v", defaultList, err)
+	}
+	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
+		t.Fatalf("default otlp targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(hooks, ","), "claude,codex"; got != want {
+		t.Fatalf("default hook targets = %q, want %q", got, want)
+	}
+	// Listing the explicit hook alias as well must not install Claude hooks twice.
+	_, hooks, err = splitEndpointTargets([]string{"claude", "claude-hooks", "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(hooks, ","), "claude,codex"; got != want {
+		t.Fatalf("hook targets with explicit alias = %q, want %q", got, want)
 	}
 }
 
@@ -83,13 +109,19 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 
 	actions := plannedInstallActions(false, service.KindAuto)
 	counts := map[string]int{}
+	hookRows := map[string]int{}
 	for _, action := range actions {
 		if action.Action == "configure_harness" {
 			counts[action.Target]++
+			if action.Message != "" {
+				hookRows[action.Target]++
+			}
 		}
 	}
-	if counts["claude"] != 1 || counts["devin-cli"] != 1 || counts["devin-desktop"] != 1 {
-		t.Fatalf("configure_harness counts = %#v, want claude/devin-cli/devin-desktop once", counts)
+	// claude is planned twice on purpose: its OTLP settings and its hooks are two
+	// separate writes, and the plan names each of them.
+	if counts["claude"] != 2 || hookRows["claude"] != 1 || counts["devin-cli"] != 1 || counts["devin-desktop"] != 1 {
+		t.Fatalf("configure_harness counts = %#v (hook rows %#v), want claude OTLP+hook, devin-cli/devin-desktop once", counts, hookRows)
 	}
 	if counts["devin"] != 0 {
 		t.Fatalf("legacy devin alias should be deduped, counts=%#v", counts)
@@ -2283,5 +2315,43 @@ func TestSystemHeartbeatScopeIgnoresServiceAccountsAtTheConsole(t *testing.T) {
 		if got := systemHeartbeatScope().NoConsoleUser; got != tc.want {
 			t.Errorf("%s: NoConsoleUser = %t, want %t", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A hook that cannot be written must not turn a complete install into an error: the
+// collector, config, service, and OTLP settings are already in place, and the retry is one
+// command. Every other target is still attempted.
+func TestEndpointInstallHookFailureIsAWarningAndOtherHooksStillInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.userMode = true
+	endpointOpts.logPath = filepath.Join(home, "runtime.jsonl")
+	endpointOpts.hookLevel = ""
+
+	// A settings file whose hooks key is not an object cannot be merged into.
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"hooks": "not-an-object"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	installHookTargetsFromEndpointInstall(&out, []string{"claude", "codex"})
+
+	if !strings.Contains(out.String(), "Warning: claude hooks were not installed") {
+		t.Fatalf("expected a claude warning, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Retry with: beacon endpoint hooks install --harness claude") {
+		t.Fatalf("expected a retry command naming only the failed target, got:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); err != nil {
+		t.Fatalf("codex hooks must still be installed after the claude failure: %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(claudeDir, "settings.json")); string(data) != `{"hooks": "not-an-object"}` {
+		t.Fatalf("a settings file the merge cannot read must be left untouched, got %s", data)
 	}
 }
