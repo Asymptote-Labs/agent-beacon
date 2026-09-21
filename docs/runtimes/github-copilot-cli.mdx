@@ -1,11 +1,11 @@
 ---
 title: "GitHub Copilot CLI"
-description: "Asymptote support details for GitHub Copilot CLI endpoint telemetry"
+description: "Beacon support details for GitHub Copilot CLI endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports GitHub Copilot CLI through MDM-managed OpenTelemetry export to the local OTLP HTTP receiver.
+Beacon supports GitHub Copilot CLI through MDM-managed OpenTelemetry export to the local OTLP HTTP receiver.
 
 ## Prerequisites
 
@@ -19,21 +19,21 @@ Before enabling GitHub Copilot CLI telemetry, make sure:
 
 ## Collection path
 
-GitHub Copilot CLI exports OTLP HTTP telemetry to Asymptote's local collector. Asymptote normalizes Copilot spans into endpoint events for prompt submission, session activity, tool invocation, and approval-like permission activity.
+GitHub Copilot CLI exports OTLP HTTP telemetry to Beacon's local collector. Beacon normalizes Copilot spans into endpoint events for prompt submission, session activity, tool invocation, and approval-like permission activity.
 
 Copilot CLI metrics are filtered from the local runtime JSONL log by default so endpoint timelines stay focused on user and agent activity. Use `--include-runtime-metrics` during install or repair only when you need low-level Copilot metrics for troubleshooting.
 
 ## Discovery and status
 
-Asymptote detects GitHub Copilot CLI through the `copilot` executable or `~/.copilot/config.json`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Copilot CLI is present and exporting to Asymptote's local OTLP HTTP receiver.
+Beacon detects GitHub Copilot CLI through the `copilot` executable or `~/.copilot/config.json`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Copilot CLI is present and exporting to Beacon's local OTLP HTTP receiver.
 
-Asymptote reports Copilot CLI telemetry as configured only when `COPILOT_OTEL_ENABLED` is truthy and the effective OTLP endpoint points to `localhost` or `127.0.0.1`. If `COPILOT_OTEL_FILE_EXPORTER_PATH` is configured, Asymptote reports Copilot as misconfigured because the file exporter bypasses the local OTLP collector.
+Beacon reports Copilot CLI telemetry as configured only when `COPILOT_OTEL_ENABLED` is truthy and the effective OTLP endpoint points to `localhost` or `127.0.0.1`. If `COPILOT_OTEL_FILE_EXPORTER_PATH` is configured, Beacon reports Copilot as misconfigured because the file exporter bypasses the local OTLP collector.
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares the collector, endpoint config, and runtime log paths. Copilot CLI telemetry is configured outside Asymptote through MDM, shell profile management, or another customer-owned launch policy.
+`beacon endpoint install` prepares the collector, endpoint config, and runtime log paths. Copilot CLI telemetry is configured outside Beacon through MDM, shell profile management, or another customer-owned launch policy.
 
-Do not add Copilot CLI to the `--harness` list. If `copilot`, `copilot_cli`, or `github_copilot` is passed to `beacon endpoint install --harness` or `beacon endpoint repair --harness`, Asymptote reports that Copilot CLI telemetry is MDM-managed instead of writing Copilot configuration directly.
+Do not add Copilot CLI to the `--harness` list. If `copilot`, `copilot_cli`, or `github_copilot` is passed to `beacon endpoint install --harness` or `beacon endpoint repair --harness`, Beacon reports that Copilot CLI telemetry is MDM-managed instead of writing Copilot configuration directly.
 
 Configure Copilot CLI's launch environment to export to the local OTLP HTTP receiver:
 
@@ -61,9 +61,9 @@ For a one-command local validation flow, see [Test GitHub Copilot CLI telemetry]
 
 ## Deployment notes
 
-Copilot CLI currently exports OTLP over HTTP, not gRPC. Point it at Asymptote's HTTP receiver, usually `http://127.0.0.1:4318`, or the custom `--otlp-http-port` used by your endpoint install.
+Copilot CLI currently exports OTLP over HTTP, not gRPC. Point it at Beacon's HTTP receiver, usually `http://127.0.0.1:4318`, or the custom `--otlp-http-port` used by your endpoint install.
 
-Asymptote validates the effective Copilot environment but does not write Copilot shell profiles or `~/.copilot/config.json`. Keep Copilot CLI outside the default Asymptote harness list, and deploy its environment settings with the same MDM or shell-management mechanism you use to launch Copilot.
+Beacon validates the effective Copilot environment but does not write Copilot shell profiles or `~/.copilot/config.json`. Keep Copilot CLI outside the default Beacon harness list, and deploy its environment settings with the same MDM or shell-management mechanism you use to launch Copilot.
 
 ## Related
 

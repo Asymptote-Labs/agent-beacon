@@ -1,13 +1,13 @@
 ---
 title: "Qwen Code"
-description: "Asymptote support details for Qwen Code endpoint telemetry"
+description: "Beacon support details for Qwen Code endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Qwen Code through native hook payloads sent to `beacon-hooks`.
+Beacon supports Qwen Code through native hook payloads sent to `beacon-hooks`.
 
-Qwen Code is a Gemini CLI fork, but it does not carry Gemini's OpenTelemetry export, so there is no OTLP path for this runtime. Hooks are the only collection path. Asymptote merges a managed hook block into Qwen's own `settings.json`, the same way the Claude Code and Factory Droid installers do.
+Qwen Code is a Gemini CLI fork, but it does not carry Gemini's OpenTelemetry export, so there is no OTLP path for this runtime. Hooks are the only collection path. Beacon merges a managed hook block into Qwen's own `settings.json`, the same way the Claude Code and Factory Droid installers do.
 
 ```bash
 beacon endpoint hooks install --harness qwen
@@ -21,7 +21,7 @@ Before enabling Qwen Code telemetry, make sure:
 
 - Qwen Code is installed and available as the `qwen` executable, or has a local config directory at `~/.qwen`.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- On Windows, `bash` is on `PATH`. Asymptote's hooks declare `shell: bash`. See [Hook shell](#hook-shell).
+- On Windows, `bash` is on `PATH`. Beacon's hooks declare `shell: bash`. See [Hook shell](#hook-shell).
 - Project-level hooks are only used in a folder Qwen Code trusts. See [Known gaps](#known-gaps).
 - Qwen Code is restarted after hook install or removal so new sessions load the updated settings.
 
@@ -36,11 +36,11 @@ Qwen Code reads settings from two locations, with project settings taking preced
 
 User level is the default. A project-level install only takes effect once Qwen trusts the folder, and `beacon endpoint discover` reports on the user path only, so a project-level install does not appear in discovery output.
 
-`settings.json` also holds the user's own configuration, such as model, theme, MCP servers, and their own hooks. Install merges into that file rather than rewriting it: unrelated top-level keys are preserved, non-Asymptote hooks in the same event group survive, and a re-install replaces Asymptote's entries instead of adding a second copy. Asymptote recognizes its own entries by the `--platform qwen` argument in the hook command.
+`settings.json` also holds the user's own configuration, such as model, theme, MCP servers, and their own hooks. Install merges into that file rather than rewriting it: unrelated top-level keys are preserved, non-Beacon hooks in the same event group survive, and a re-install replaces Beacon's entries instead of adding a second copy. Beacon recognizes its own entries by the `--platform qwen` argument in the hook command.
 
 ### Registered events
 
-Asymptote registers every Qwen event that carries endpoint signal:
+Beacon registers every Qwen event that carries endpoint signal:
 
 | Qwen event | Adapter subcommand | Matcher | Timeout |
 |------------|--------------------|---------|---------|
@@ -58,22 +58,22 @@ Asymptote registers every Qwen event that carries endpoint signal:
 A failed tool is a separate event in Qwen, so `PostToolUseFailure` is registered alongside `PostToolUse`. `PermissionRequest` is what makes an approval prompt observable. Events with no timeout listed use Qwen's own default of 60000 ms.
 
 <Warning>
-**Qwen hook timeouts are milliseconds, not seconds.** Claude Code reads `timeout` as seconds, so a Claude-style `10` means 10 ms to Qwen. That is not enough time for a hook process to start, read stdin, and append to the log, so every tool event is killed mid-write while the install still reports success. Asymptote writes millisecond values for this runtime. Keep the unit in mind if you hand-edit them.
+**Qwen hook timeouts are milliseconds, not seconds.** Claude Code reads `timeout` as seconds, so a Claude-style `10` means 10 ms to Qwen. That is not enough time for a hook process to start, read stdin, and append to the log, so every tool event is killed mid-write while the install still reports success. Beacon writes millisecond values for this runtime. Keep the unit in mind if you hand-edit them.
 </Warning>
 
 ### Hook shell
 
-Every hook Asymptote writes for Qwen carries `shell: bash`. Qwen accepts two values, `bash` and `powershell`, and only uses bash when the hook configuration asks for it. Claude Code, by contrast, runs hook commands through Git Bash on Windows regardless.
+Every hook Beacon writes for Qwen carries `shell: bash`. Qwen accepts two values, `bash` and `powershell`, and only uses bash when the hook configuration asks for it. Claude Code, by contrast, runs hook commands through Git Bash on Windows regardless.
 
-Asymptote quotes its hook command with POSIX single quotes, which is what a Windows path needs. If `shell` were left unset on Windows, a Node-hosted runtime would fall back to `cmd.exe`, where those quotes are literal characters and every hook fails to start while the install still reports success. On macOS and Linux, `bash` names the shell that would have run anyway.
+Beacon quotes its hook command with POSIX single quotes, which is what a Windows path needs. If `shell` were left unset on Windows, a Node-hosted runtime would fall back to `cmd.exe`, where those quotes are literal characters and every hook fails to start while the install still reports success. On macOS and Linux, `bash` names the shell that would have run anyway.
 
 ### Events that are not collected
 
-Asymptote does not register Qwen's fire-and-forget events: `MessageDisplay`, `StopFailure`, `PostCompact`, `SessionDelete`, and the todo pair. `MessageDisplay` alone fires roughly every 200 ms for the length of every reply, and it carries assistant text that Asymptote does not otherwise retain.
+Beacon does not register Qwen's fire-and-forget events: `MessageDisplay`, `StopFailure`, `PostCompact`, `SessionDelete`, and the todo pair. `MessageDisplay` alone fires roughly every 200 ms for the length of every reply, and it carries assistant text that Beacon does not otherwise retain.
 
 ## Discovery and status
 
-Asymptote detects Qwen Code through the `qwen` executable, and treats the `~/.qwen` config directory as an additional signal. Qwen Code installs through npm, so a version manager, a shell alias, or a per-project install can hide the binary from the endpoint process's `PATH` while `~/.qwen` is still present. The OpenCode, Cursor, Pi, and Hermes probes use the same fallback.
+Beacon detects Qwen Code through the `qwen` executable, and treats the `~/.qwen` config directory as an additional signal. Qwen Code installs through npm, so a version manager, a shell alias, or a per-project install can hide the binary from the endpoint process's `PATH` while `~/.qwen` is still present. The OpenCode, Cursor, Pi, and Hermes probes use the same fallback.
 
 ```bash title="Show Qwen Code discovery state"
 beacon endpoint discover --all --json
@@ -85,12 +85,12 @@ Qwen Code reports as the `qwen_code` harness with capability `hooks`:
 |------------------|---------|
 | `missing` | No `~/.qwen/settings.json`, or it could not be read |
 | `misconfigured` | `settings.json` exists but its JSON is invalid, so install will refuse to touch it |
-| `disabled` | Hooks are turned off by `disableAllHooks`, or the file exists with no Asymptote `--platform qwen` entry |
-| `enabled` | Asymptote's Qwen Code hooks are configured |
+| `disabled` | Hooks are turned off by `disableAllHooks`, or the file exists with no Beacon `--platform qwen` entry |
+| `enabled` | Beacon's Qwen Code hooks are configured |
 
-A settings file with hooks that are not Asymptote's reports `disabled` rather than `enabled`, because Asymptote is not collecting from them. Invalid JSON reports `misconfigured` rather than `missing`, because the file is there and install will refuse to write to it.
+A settings file with hooks that are not Beacon's reports `disabled` rather than `enabled`, because Beacon is not collecting from them. Invalid JSON reports `misconfigured` rather than `missing`, because the file is there and install will refuse to write to it.
 
-`disableAllHooks` is Qwen's own kill switch. Asymptote's hooks can be present in the file and still never run. Fix that in Qwen's settings, not by re-running the installer.
+`disableAllHooks` is Qwen's own kill switch. Beacon's hooks can be present in the file and still never run. Fix that in Qwen's settings, not by re-running the installer.
 
 ```bash title="Show Qwen Code hook status"
 beacon endpoint hooks status --harness qwen
@@ -136,7 +136,7 @@ Both `qwen` and `qwen_code` arrive in practice. The hook path installs with `--p
 
 ### Tool taxonomy
 
-Qwen sends the Claude Code payload shape but not Claude's tool names. Its built-ins are snake_case ids inherited from the Gemini CLI it forked, and Asymptote matches them against a closed set:
+Qwen sends the Claude Code payload shape but not Claude's tool names. Its built-ins are snake_case ids inherited from the Gemini CLI it forked, and Beacon matches them against a closed set:
 
 | Qwen built-in | Action | `file.operation` |
 |---------------|--------|------------------|
@@ -151,13 +151,13 @@ Without this mapping the generic classifier is wrong in both directions. `write_
 
 The set is closed rather than substring-matched so an MCP tool whose name contains `edit` or `glob` is not classified as a Qwen built-in. Qwen's non-filesystem built-ins (`web_fetch`, `web_search`, `todo_write`, `save_memory`, `task`, `skill`) stay on the shared path, where the MCP rule and the `tool.invoked` fallback already give the right answer.
 
-A failed tool is classified as a failure before its name is consulted, so a `write_file` that hit `EACCES` is recorded as `tool.failed` rather than a successful `file.modified`, and it does not go down the diff path. Asymptote reads three independent failure signals, since any of them can arrive alone: the `PostToolUseFailure` event name, a non-empty `error`, and Qwen's `is_interrupt` flag.
+A failed tool is classified as a failure before its name is consulted, so a `write_file` that hit `EACCES` is recorded as `tool.failed` rather than a successful `file.modified`, and it does not go down the diff path. Beacon reads three independent failure signals, since any of them can arrive alone: the `PostToolUseFailure` event name, a non-empty `error`, and Qwen's `is_interrupt` flag.
 
 ## Approvals and enforcement
 
-Approval telemetry comes from Qwen's `PermissionRequest` event and is recorded as observed, because an operator was actually asked. Asymptote does not synthesize an approval from a pre-tool notification for this runtime.
+Approval telemetry comes from Qwen's `PermissionRequest` event and is recorded as observed, because an operator was actually asked. Beacon does not synthesize an approval from a pre-tool notification for this runtime.
 
-Asymptote's `PreToolUse` hook answers with an empty object. Qwen's `PreToolUse` contract reads a decision from `hookSpecificOutput.permissionDecision`, where `allow` means run the tool without the usual approval prompt. A hook that answered `allow` would disarm the user's own permission prompts for every tool call. An empty object carries no decision, so Qwen's normal permission flow runs untouched.
+Beacon's `PreToolUse` hook answers with an empty object. Qwen's `PreToolUse` contract reads a decision from `hookSpecificOutput.permissionDecision`, where `allow` means run the tool without the usual approval prompt. A hook that answered `allow` would disarm the user's own permission prompts for every tool call. An empty object carries no decision, so Qwen's normal permission flow runs untouched.
 
 Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. When a provider denies a call, Qwen uses Claude Code's deny shape: `hookSpecificOutput.permissionDecision` with a `permissionDecisionReason`.
 
@@ -165,17 +165,17 @@ Enforcement stays behind the optional, off-by-default policy provider seam (`BEA
 
 Qwen Code content is handled like every other runtime. Prompts, tool arguments, commands, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-Qwen carries signal with no endpoint-schema field of its own: `permission_mode` on every tool event, `source` on `SessionStart`, and `stop_hook_active` plus the `context_usage` / `context_limit` / `input_tokens` trio on `Stop`. Asymptote preserves the verbatim payload under `raw.qwen` rather than inventing schema fields for one runtime. It travels the event's normal path through sanitization, so `raw` is secret-redacted and string-limited like every other field, and it is the first thing dropped when an event exceeds the size ceiling.
+Qwen carries signal with no endpoint-schema field of its own: `permission_mode` on every tool event, `source` on `SessionStart`, and `stop_hook_active` plus the `context_usage` / `context_limit` / `input_tokens` trio on `Stop`. Beacon preserves the verbatim payload under `raw.qwen` rather than inventing schema fields for one runtime. It travels the event's normal path through sanitization, so `raw` is secret-redacted and string-limited like every other field, and it is the first thing dropped when an event exceeds the size ceiling.
 
 ## Known gaps
 
 - **No OTLP path.** Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so there is no collector endpoint to configure. Hooks are the only collection path, and `beacon endpoint install --harness qwen` says so rather than appearing to succeed.
 - **Token spend is not collected, and cannot be.** Qwen's `Stop` payload carries no per-call token counts. Its `input_tokens` is the prompt for that turn, which in a multi-turn session already contains every prior turn, so summing it into `gen_ai.usage` would inflate a session's total by roughly the square of its length. Qwen Code therefore contributes no rows to the spend totals in `beacon token-usage`.
 - **Context utilization is collected.** The same numbers describe how full the window was, which is a level rather than an amount, so they normalize into `gen_ai.context` instead: `input_tokens` becomes `gen_ai.context.used_tokens` and `context_limit` becomes `gen_ai.context.limit_tokens`. Qwen Code appears in the context utilization section of `beacon token-usage`, measured against the window it reported rather than a static model table. `context_usage` is the ratio of the two and stays in `raw.qwen` rather than being stored a second time in different units.
-- **A policy deny is honored in one of two phases.** The seam runs in both the `pre-tool` and `permission-request` hooks, and Asymptote returns Claude Code's deny shape, which Qwen's `PreToolUse` contract honors. Qwen's `PermissionRequest` event reads a differently shaped `hookSpecificOutput.decision` object, so a deny raised from that phase is not honored. Because the seam fails open, the cost is a deny that does not take effect on one phase, never a tool call blocked for the wrong reason.
-- **Assistant text is not collected.** `MessageDisplay` is not registered, so Asymptote records no assistant output or reasoning for Qwen Code. See [Events that are not collected](#events-that-are-not-collected).
+- **A policy deny is honored in one of two phases.** The seam runs in both the `pre-tool` and `permission-request` hooks, and Beacon returns Claude Code's deny shape, which Qwen's `PreToolUse` contract honors. Qwen's `PermissionRequest` event reads a differently shaped `hookSpecificOutput.decision` object, so a deny raised from that phase is not honored. Because the seam fails open, the cost is a deny that does not take effect on one phase, never a tool call blocked for the wrong reason.
+- **Assistant text is not collected.** `MessageDisplay` is not registered, so Beacon records no assistant output or reasoning for Qwen Code. See [Events that are not collected](#events-that-are-not-collected).
 - **Project-level installs need a trusted folder.** Qwen gates project hooks behind trusted-folder status, so a user-level install is the one that works without further interaction. Grok Build has the same caveat.
-- **Payload fixtures are built from documentation.** Asymptote's Qwen fixtures are constructed from Qwen Code's published hooks documentation rather than captured from a running install. The documentation specifies the envelope and per-event fields precisely, so the shapes match the documented contract, but they are not evidence that a shipped build sends exactly this.
+- **Payload fixtures are built from documentation.** Beacon's Qwen fixtures are constructed from Qwen Code's published hooks documentation rather than captured from a running install. The documentation specifies the envelope and per-event fields precisely, so the shapes match the documented contract, but they are not evidence that a shipped build sends exactly this.
 
 ## Deployment notes
 
@@ -206,6 +206,6 @@ If Qwen telemetry is missing:
     Return to the runtime support overview.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
-    See how Asymptote discovers and configures each runtime.
+    See how Beacon discovers and configures each runtime.
   </Card>
 </Columns>

@@ -12,7 +12,7 @@ Use detections when you want to review local agent activity for risky commands, 
 The detection format is open and lives in the Agent Beacon repository. Rules are YAML documents with CEL match expressions, metadata, and embedded test fixtures. The detection engine ships with the Beacon CLI, while rule packs are external data that can be installed, updated, and linted separately from the binary.
 
 <Note>
-  Local scanning is read-only and offline. `beacon scan` does not fetch rule packs, send telemetry to Asymptote, mutate endpoint configuration, or change the runtime log.
+  Local scanning is read-only and offline. `beacon scan` does not fetch rule packs, send telemetry to Beacon, mutate endpoint configuration, or change the runtime log.
 </Note>
 
 ## Quickstart
@@ -198,7 +198,7 @@ Use the [Detection YAML Schema](/detections/yaml-schema) page for the rule docum
 
 ## Managed detections
 
-The open-source Beacon flow runs detections locally over endpoint JSONL. [Asymptote Managed](/deployment/managed) builds on the same telemetry foundation with centralized ingest, retention, search, detections, fleet-wide visibility, policy workflows, identity mapping, SSO/RBAC, and investigation workflows.
+The open-source Beacon flow runs detections locally over endpoint JSONL. [Beacon Managed](/deployment/managed) builds on the same telemetry foundation with centralized ingest, retention, search, detections, fleet-wide visibility, policy workflows, identity mapping, SSO/RBAC, and investigation workflows.
 
 Use local Beacon detections when you need offline endpoint checks or customer-controlled forwarding. Use Managed when you need centralized review across a fleet or organization.
 

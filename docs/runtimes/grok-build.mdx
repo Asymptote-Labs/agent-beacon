@@ -1,11 +1,11 @@
 ---
 title: "Grok Build"
-description: "Asymptote support details for Grok Build endpoint telemetry"
+description: "Beacon support details for Grok Build endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Grok Build through native hook payloads sent to `beacon-hooks`.
+Beacon supports Grok Build through native hook payloads sent to `beacon-hooks`.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ Before enabling Grok Build hooks, make sure:
 
 - Grok Build is installed for the user or available in the project where hooks will run.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote hooks are installed with `beacon endpoint hooks install --harness grok`.
+- Beacon hooks are installed with `beacon endpoint hooks install --harness grok`.
 - Project-level hooks are trusted with `/hooks-trust` in Grok before you expect them to execute.
 - Grok is restarted after hook install or removal so new sessions load the updated hook file.
 
@@ -21,12 +21,12 @@ Before enabling Grok Build hooks, make sure:
 
 Grok Build has two local collection paths:
 
-- Live hooks: Grok invokes Asymptote's hook adapter from Asymptote's owned hook file. The adapter writes normalized endpoint events to the configured runtime JSONL log and can participate in Beacon's external policy seam.
+- Live hooks: Grok invokes Beacon's hook adapter from Beacon's owned hook file. The adapter writes normalized endpoint events to the configured runtime JSONL log and can participate in Beacon's external policy seam.
 - Session sync: `beacon endpoint grok sync` reads committed sessions under `~/.grok/sessions/<url-escaped-working-directory>/<session-id>` and writes endpoint events marked `harness.collection_method=poll`. This backfills historical or unhooked sessions after Grok has written them, so it cannot hold, allow, or deny a tool call.
 
 ## Discovery and status
 
-Asymptote checks for its managed Grok hook file at `~/.grok/hooks/beacon-endpoint.json` for user-level installs or `./.grok/hooks/beacon-endpoint.json` for project-level installs.
+Beacon checks for its managed Grok hook file at `~/.grok/hooks/beacon-endpoint.json` for user-level installs or `./.grok/hooks/beacon-endpoint.json` for project-level installs.
 
 Use `beacon endpoint hooks status --harness grok` to inspect Grok Build hook status. Use `beacon endpoint grok status` to inspect committed local sessions and whether Beacon has synced them.
 
@@ -65,7 +65,7 @@ beacon endpoint grok sync --print
 | Prompt telemetry | Supported through `UserPromptSubmit` hooks and session sync |
 | Command, tool, and file telemetry | Supported for live hook payloads and committed session records. Session sync reads `chat_history.jsonl`, `events.jsonl`, `summary.json`, `prompt_context.json`, and terminal logs where present |
 | Approval telemetry | Live hooks can observe and enforce at pre-tool time; session sync can report committed Grok permission request/resolution records after the fact |
-| Session lifecycle | `session.started` only. Grok's `turn_ended` record ends a turn, not a session — the next prompt appends to the same session — so session sync records it as `session.context` carrying the turn number and outcome. Grok exposes no session-end record, so Asymptote writes no `session.ended` for this runtime rather than inventing one |
+| Session lifecycle | `session.started` only. Grok's `turn_ended` record ends a turn, not a session — the next prompt appends to the same session — so session sync records it as `session.context` carrying the turn number and outcome. Grok exposes no session-end record, so Beacon writes no `session.ended` for this runtime rather than inventing one |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Grok hooks are installed separately in the logged-in user's context or project context |
 

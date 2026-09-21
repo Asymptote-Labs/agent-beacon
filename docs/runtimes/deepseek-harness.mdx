@@ -1,11 +1,11 @@
 ---
 title: "DeepSeek Harness"
-description: "Asymptote support details for DeepSeek Harness (dsh) endpoint telemetry"
+description: "Beacon support details for DeepSeek Harness (dsh) endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports DeepSeek Harness — DeepSeek's open agent harness, run as `dsh` — through the Claude Code hook bridge DeepSeek ships in the CLI, sent to `beacon-hooks`.
+Beacon supports DeepSeek Harness — DeepSeek's open agent harness, run as `dsh` — through the Claude Code hook bridge DeepSeek ships in the CLI, sent to `beacon-hooks`.
 
 ```bash
 beacon endpoint hooks install --harness dsh
@@ -16,7 +16,7 @@ beacon endpoint hooks install --harness dsh
 DeepSeek Harness is composed rather than configured: every capability is a plugin, and the CLI, Web, ACP, and SDK surfaces are four compositions of one harness booting from one Harness home. There is one integration rather than one per surface, and one harness name — `deepseek_harness` — rather than a name per surface.
 
 <Note>
-**`dsh` does not read a hooks file until something mounts a reader at it.** `@deepseek-ai/dsh-hooks-claude-code` ships as a dependency of the `dsh` CLI but is not in the default plugin tree, so there is no convention that picks a hooks file up. That is why an Asymptote install here is **two files**: the hooks file, and one row mounting the bridge at it.
+**`dsh` does not read a hooks file until something mounts a reader at it.** `@deepseek-ai/dsh-hooks-claude-code` ships as a dependency of the `dsh` CLI but is not in the default plugin tree, so there is no convention that picks a hooks file up. That is why a Beacon install here is **two files**: the hooks file, and one row mounting the bridge at it.
 </Note>
 
 ## Prerequisites
@@ -29,16 +29,16 @@ Before enabling DeepSeek Harness telemetry, make sure:
 
 ## Collection path
 
-Asymptote writes two files into the Harness home:
+Beacon writes two files into the Harness home:
 
 | File | Owner | Purpose |
 |------|-------|---------|
-| `$DSH_HOME/beacon-endpoint-hooks.json` | Asymptote, outright | The Claude Code hooks file — one command hook per event |
-| `$DSH_HOME/cordis.patch.yml` | **You** | Your patch layer. Asymptote adds one row mounting the bridge at the file above |
+| `$DSH_HOME/beacon-endpoint-hooks.json` | Beacon, outright | The Claude Code hooks file — one command hook per event |
+| `$DSH_HOME/cordis.patch.yml` | **You** | Your patch layer. Beacon adds one row mounting the bridge at the file above |
 
 `$DSH_HOME` defaults to `~/.dsh`, and replaces it when set — matching how `dsh` resolves the Harness home itself.
 
-The row Asymptote adds looks like this:
+The row Beacon adds looks like this:
 
 ```yaml
 # Beacon endpoint telemetry. Mounts DeepSeek's Claude Code hook bridge at
@@ -57,17 +57,17 @@ The home-level patch layer is applied over **every** profile and outranks each p
 **There is no project scope.** The bridge's `configPath` is process-level — read once at startup — and per-session discovery of a project-local hooks file is unimplemented in the bridge itself. A repository has nowhere to mount a hook bridge from, so `--level project` is **refused with that explanation** rather than quietly becoming a machine-wide install. DeepSeek Harness is also left out of the project-level `--all` sweep for the same reason.
 </Warning>
 
-### Asymptote edits your patch file as a document
+### Beacon edits your patch file as a document
 
-`cordis.patch.yml` is yours. It carries your comments, your quoting, and `!!js` expressions the loader evaluates at boot — so Asymptote parses it into a YAML node tree, appends or removes **one self-contained element**, and re-encodes from the same tree. Comments, scalar style, and custom tags survive that round trip, and a test pins it.
+`cordis.patch.yml` is yours. It carries your comments, your quoting, and `!!js` expressions the loader evaluates at boot — so Beacon parses it into a YAML node tree, appends or removes **one self-contained element**, and re-encodes from the same tree. Comments, scalar style, and custom tags survive that round trip, and a test pins it.
 
 A self-contained element rather than a row pushed into one of your existing `insert:` lists, so an uninstall removes exactly what an install added.
 
-Asymptote **refuses** rather than rewriting:
+Beacon **refuses** rather than rewriting:
 
 - a patch file it cannot parse — unlike the hooks file, which it will replace, because this is where your whole plugin tree is tweaked and `dsh`'s parser is not Go's;
 - a patch file that is not a list of entries;
-- an `insert` element carrying Asymptote's row alongside rows it did not write.
+- an `insert` element carrying Beacon's row alongside rows it did not write.
 
 <Warning>
 **An empty patch file does not boot `dsh`.** A present-but-empty or comments-only `cordis.patch.yml` fails startup — it is not ignored and it is not a warning. So an uninstall that would leave the file empty **removes the file** instead of truncating it. An absent patch layer is skipped cleanly.
@@ -75,7 +75,7 @@ Asymptote **refuses** rather than rewriting:
 
 ### Registered events
 
-The bridge supports seven of Claude Code's hook events. Asymptote registers all seven — there is nothing to leave out, because config for the other 23 is discarded before the bridge's parser sees it.
+The bridge supports seven of Claude Code's hook events. Beacon registers all seven — there is nothing to leave out, because config for the other 23 is discarded before the bridge's parser sees it.
 
 | Event | Adapter subcommand | Timeout |
 |-------|--------------------|---------|
@@ -87,9 +87,9 @@ The bridge supports seven of Claude Code's hook events. Asymptote registers all 
 | `SubagentStart` | `subagent-start` | 10 s |
 | `SubagentStop` | `subagent-stop` | 10 s |
 
-Timeouts are **seconds**, matching Claude Code — the bridge reads `timeout` as `timeoutSec`. Its own default is 600 seconds, which is a very long time to hold an agent turn for a hook that finishes in milliseconds; Asymptote writes explicit lower values as ceilings on a hang, not budgets.
+Timeouts are **seconds**, matching Claude Code — the bridge reads `timeout` as `timeoutSec`. Its own default is 600 seconds, which is a very long time to hold an agent turn for a hook that finishes in milliseconds; Beacon writes explicit lower values as ceilings on a hang, not budgets.
 
-Asymptote's hooks carry no `matcher`. An absent matcher is the match-all form in this dialect, which is what a telemetry hook wants on all seven — and the bridge validates a written matcher at parse time and rejects the **whole config** on a bad one, so the value that needs no validating is the safer one to write.
+Beacon's hooks carry no `matcher`. An absent matcher is the match-all form in this dialect, which is what a telemetry hook wants on all seven — and the bridge validates a written matcher at parse time and rejects the **whole config** on a bad one, so the value that needs no validating is the safer one to write.
 
 ## Discovery and status
 
@@ -99,7 +99,7 @@ beacon endpoint hooks status --harness dsh
 
 Status reports **both** paths, because `installed` is the conjunction of the two files: a hooks file with nothing mounted at it is a file nothing reads, and a mount pointing at a missing hooks file is a bridge that logs a warning and registers nothing. `beacon endpoint inventory` lists both for the same reason, so a half-install is visible as a half-install.
 
-DeepSeek Harness reports as the `deepseek_harness` harness with capability `hooks`, and every event carries `harness.collection_method=hook`. The bridge is a plugin, but it is DeepSeek's plugin, shipped and versioned with the CLI; what Asymptote contributes is command hooks, and the thing that runs on each event is the same `beacon-hooks` binary every other hook runtime runs.
+DeepSeek Harness reports as the `deepseek_harness` harness with capability `hooks`, and every event carries `harness.collection_method=hook`. The bridge is a plugin, but it is DeepSeek's plugin, shipped and versioned with the CLI; what Beacon contributes is command hooks, and the thing that runs on each event is the same `beacon-hooks` binary every other hook runtime runs.
 
 ## Install or configuration support
 
@@ -111,7 +111,7 @@ beacon endpoint hooks uninstall --harness dsh
 
 Re-running the install rewrites the hooks file wholesale and **repoints** the mount in place rather than adding a second one — so a reinstall after `$DSH_HOME` moved updates the path the bridge reads, and a repair does not end with each event registered twice.
 
-Uninstall removes Asymptote's hooks file and its one patch element, and leaves your rows and comments alone.
+Uninstall removes Beacon's hooks file and its one patch element, and leaves your rows and comments alone.
 
 ## Telemetry coverage
 
@@ -152,13 +152,13 @@ Four entries in that table are there because the generic classifier every runtim
 
 ### `terminal_send` names its command line `text`
 
-`dsh` runs commands through a persistent terminal as well as through `bash`, and that tool's payload is `text`, not `command`. Asymptote reads it, so a command run through a terminal session carries a command line rather than being an empty `command.executed` invisible to every rule matching on `command.command`.
+`dsh` runs commands through a persistent terminal as well as through `bash`, and that tool's payload is `text`, not `command`. Beacon reads it, so a command run through a terminal session carries a command line rather than being an empty `command.executed` invisible to every rule matching on `command.command`.
 
-A call with `submit: false` is still read. It carries control characters or an incomplete REPL line rather than a whole command, so what is recorded is a *fragment* of shell input — worth knowing, and better than letting "send the command in two writes" be a way to run commands Asymptote does not record.
+A call with `submit: false` is still read. It carries control characters or an incomplete REPL line rather than a whole command, so what is recorded is a *fragment* of shell input — worth knowing, and better than letting "send the command in two writes" be a way to run commands Beacon does not record.
 
 ### `run_code` is a tool call, not a command
 
-`run_code` executes a TypeScript program against the other tools and is the one tool that can ask for `danger-full-access`. Asymptote records it as `tool.invoked`, for two reasons.
+`run_code` executes a TypeScript program against the other tools and is the one tool that can ask for `danger-full-access`. Beacon records it as `tool.invoked`, for two reasons.
 
 A program's nested tool calls are **not invisible**: `dsh` dispatches them back through the complete guarded tool pipeline, which is the same seam the hook bridge listens on. So `await tools.bash({command: '...'})` inside a program fires its own `PreToolUse` and `PostToolUse` and is recorded as a command execution with a real command line. Classifying the outer wrapper as a command too would double-count it.
 
@@ -170,21 +170,21 @@ The program text is not lost: it is retained under `raw.dsh.tool_input.code`, re
 
 The bridge flattens a tool result to text before a hook sees it, so `tool_response` is a plain string rather than an object. `dsh`'s `bash` and `pwsh` tools report a non-zero exit as `[exit code: N]` in that text, and that marker is the only place an exit code reaches a hook.
 
-Asymptote reads the **last** marker in the output: everything above it is the command's own, and a command that prints something looking like the marker — a test asserting on one, a log line quoting one — would otherwise decide the event's exit code.
+Beacon reads the **last** marker in the output: everything above it is the command's own, and a command that prints something looking like the marker — a test asserting on one, a log line quoting one — would otherwise decide the event's exit code.
 
 A non-zero exit is recorded as `command.executed` with `command.exit_code`, not as a tool failure. A failing test run is an ordinary outcome of a command that ran.
 
 <Note>
-**`command` on `str_replace_editor` is not a shell command.** That tool multiplexes `view`, `create`, `str_replace`, and `insert` onto a `command` argument, and `command` is also what `bash` and `pwsh` call their command line. Asymptote guards on the tool name, so an editor operation is never recorded under `command.command` and a real shell command is never dropped. `view` is the case that matters most: same tool, same arguments as the three writes, and only that word separates looking from creating.
+**`command` on `str_replace_editor` is not a shell command.** That tool multiplexes `view`, `create`, `str_replace`, and `insert` onto a `command` argument, and `command` is also what `bash` and `pwsh` call their command line. Beacon guards on the tool name, so an editor operation is never recorded under `command.command` and a real shell command is never dropped. `view` is the case that matters most: same tool, same arguments as the three writes, and only that word separates looking from creating.
 </Note>
 
 ## Approvals and enforcement
 
-**Asymptote records no approval decisions for DeepSeek Harness, and does not synthesize any.**
+**Beacon records no approval decisions for DeepSeek Harness, and does not synthesize any.**
 
 The bridge supports seven events and `PermissionRequest` is not among them, so there is no approval decision anywhere on this runtime's hook surface. `PreToolUse` announces a call the agent is about to make, not a question anybody was asked. This is the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), [OpenHands](/runtimes/openhands), [Kiro](/runtimes/kiro), and [fx](/runtimes/vercel-fx).
 
-Asymptote's observing hooks answer with an empty JSON object, which the bridge's decoder reads as no opinion. They deliberately do **not** answer `allow`: on this runtime that is a real pre-approval, so an observing hook answering it would be disarming your permission gate for every tool call rather than watching it.
+Beacon's observing hooks answer with an empty JSON object, which the bridge's decoder reads as no opinion. They deliberately do **not** answer `allow`: on this runtime that is a real pre-approval, so an observing hook answering it would be disarming your permission gate for every tool call rather than watching it.
 
 Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. DeepSeek Harness is one of the runtimes where a provider deny takes effect, using Claude Code's deny shape — which is the shape the bridge's decoder reads:
 
@@ -200,11 +200,11 @@ Enforcement stays behind the optional, off-by-default policy provider seam (`BEA
 
 DeepSeek Harness content is handled like every other runtime. Prompts, tool arguments, commands, command output, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-Unlike [Kiro](/runtimes/kiro) and [OpenHands](/runtimes/openhands), Asymptote **does** preserve the verbatim payload under `raw.dsh`, as it does for [Qwen Code](/runtimes/qwen-code) and [Muse Code](/runtimes/muse-code). Non-MCP tool arguments reach no endpoint-schema field on any runtime, so on `dsh` this is where `run_code`'s program, a `glob` or `grep` pattern, a `terminal_send` `submit` flag, and `SessionStart`'s `source` survive. The cost is stated rather than hidden: on a `write` the payload repeats the file content the diff already carries. `raw` is the first thing dropped at the size ceiling, so the duplication is bounded and the diff is what survives.
+Unlike [Kiro](/runtimes/kiro) and [OpenHands](/runtimes/openhands), Beacon **does** preserve the verbatim payload under `raw.dsh`, as it does for [Qwen Code](/runtimes/qwen-code) and [Muse Code](/runtimes/muse-code). Non-MCP tool arguments reach no endpoint-schema field on any runtime, so on `dsh` this is where `run_code`'s program, a `glob` or `grep` pattern, a `terminal_send` `submit` flag, and `SessionStart`'s `source` survive. The cost is stated rather than hidden: on a `write` the payload repeats the file content the diff already carries. `raw` is the first thing dropped at the size ceiling, so the duplication is bounded and the diff is what survives.
 
 ## Known gaps
 
-- **No approval decisions.** The bridge exposes no `PermissionRequest` event, and Asymptote does not synthesize one from `PreToolUse`. Approval rules and dashboards will show nothing for this runtime.
+- **No approval decisions.** The bridge exposes no `PermissionRequest` event, and Beacon does not synthesize one from `PreToolUse`. Approval rules and dashboards will show nothing for this runtime.
 - **No token usage or cost.** The bridge builds each payload from a fixed base plus per-event fields, and no usage count is among them on any of the seven events. `dsh` does record usage in its own session log; nothing on the hook surface exposes it. DeepSeek Harness activity therefore does not appear in `beacon token-usage` reports or the dashboard token view.
 - **No failed-tool events.** The bridge hands a hook the result's flattened text and nothing else, so a tool that threw is indistinguishable at the hook from one that returned. `tool.failed` is never recorded, and a diff is built from a write's arguments whether or not the write landed. A non-zero shell exit is *not* a tool failure and is recorded as such.
 - **No session-end event.** `dsh` has no `SessionEnd`. `Stop` fires when a turn finishes, not when a session ends, so it is recorded as `tool.completed`.
@@ -212,7 +212,7 @@ Unlike [Kiro](/runtimes/kiro) and [OpenHands](/runtimes/openhands), Asymptote **
 - **No compaction events.** `PreCompact` and `PostCompact` are among the events the bridge does not support.
 - **Subagent detail is thin.** The bridge reports a constant `agent_type` of `general-purpose` and uses the child's session id where Claude Code reports the parent's, so a subagent event cannot be joined to the session that spawned it.
 - **No project scope.** See the warning under [Collection path](#collection-path).
-- **Only command hooks run.** The bridge runs shell-form `command` handlers only, which is what Asymptote writes. It has no bearing on Asymptote's install and is noted because it bounds what else you can put in the same file.
+- **Only command hooks run.** The bridge runs shell-form `command` handlers only, which is what Beacon writes. It has no bearing on Beacon's install and is noted because it bounds what else you can put in the same file.
 
 ## Deployment notes
 
@@ -243,6 +243,6 @@ If DeepSeek Harness telemetry is missing:
     Return to the runtime support overview.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
-    See how Asymptote discovers and configures each runtime.
+    See how Beacon discovers and configures each runtime.
   </Card>
 </Columns>

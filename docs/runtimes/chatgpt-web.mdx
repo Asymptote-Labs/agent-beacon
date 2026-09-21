@@ -1,11 +1,11 @@
 ---
 title: "ChatGPT"
-description: "Asymptote support details for ChatGPT browser chat telemetry"
+description: "Beacon support details for ChatGPT browser chat telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote collects ChatGPT chat telemetry through the optional [browser extension](/runtimes/browser-extension). Every turn on chatgpt.com becomes prompt and response events in the local runtime log, attributed to the `chatgpt_web` harness so it stays separate from Codex CLI and other agents.
+Beacon collects ChatGPT chat telemetry through the optional [browser extension](/runtimes/browser-extension). Every turn on chatgpt.com becomes prompt and response events in the local runtime log, attributed to the `chatgpt_web` harness so it stays separate from Codex CLI and other agents.
 
 Both `chatgpt.com` and the older `chat.openai.com` host are covered.
 
@@ -20,7 +20,7 @@ Support is in beta. The ChatGPT chat API is private and undocumented, so a chang
 
 The extension's main-world interceptor tees the streamed response from the message-send endpoint, `POST /backend-api/f/conversation`. The ChatGPT adapter reads the site's `delta_encoding: v1` Server-Sent Event stream, where each frame patches a running document rather than carrying a finished message, and rebuilds one turn from it:
 
-| Stream signal | What Asymptote takes from it |
+| Stream signal | What Beacon takes from it |
 |---------------|------------------------------|
 | The outbound request body | Prompt text, the input messages, and the requested model |
 | `conversation_id` in the request body or the resume token | `session.id` and `gen_ai.conversation.id` |
@@ -86,7 +86,7 @@ If nothing arrives, work through the [troubleshooting steps](/runtimes/browser-e
 
 - **The stream format is private.** The adapter is written defensively and degrades to a partial turn rather than failing, but a site change can still stop capture until the adapter is updated.
 - **Handed-off streams are not captured yet.** ChatGPT sometimes moves a response to a separate resume endpoint instead of streaming it inline. Those turns are missed today; capturing them is a planned follow-up.
-- **No token usage.** Nothing in the stream carries token counts, and Asymptote does not estimate them.
+- **No token usage.** Nothing in the stream carries token counts, and Beacon does not estimate them.
 - **Only the chat stream is read.** Uploaded files, canvas documents, and content rendered outside the stream are not captured.
 - **Retention defaults to `full`.** Prompt and response text is retained unless you change the mode in the extension's popup. See [retained content](/runtimes/browser-extension#retained-content).
 

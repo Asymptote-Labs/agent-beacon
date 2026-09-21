@@ -1,11 +1,11 @@
 ---
 title: "Antigravity CLI"
-description: "Asymptote support details for Antigravity CLI endpoint telemetry"
+description: "Beacon support details for Antigravity CLI endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Antigravity CLI through native hook payloads sent to `beacon-hooks`. Antigravity support was added in the endpoint agent in `v0.0.29`.
+Beacon supports Antigravity CLI through native hook payloads sent to `beacon-hooks`. Antigravity support was added in the endpoint agent in `v0.0.29`.
 
 ## Prerequisites
 
@@ -13,17 +13,17 @@ Before enabling Antigravity hooks, make sure:
 
 - Antigravity CLI is installed as `antigravity` or `antigravity-cli`, or an Antigravity hook config directory exists.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote hooks are installed with `beacon endpoint hooks install --harness antigravity`.
+- Beacon hooks are installed with `beacon endpoint hooks install --harness antigravity`.
 - For project-level collection, install hooks from the target project with `--level project`.
 - Antigravity is restarted after hook install or removal so new sessions load the updated hook configuration.
 
 ## Collection path
 
-Antigravity invokes Asymptote's hook adapter from Antigravity hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+Antigravity invokes Beacon's hook adapter from Antigravity hook configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
 
 ## Discovery and status
 
-Asymptote detects Antigravity through the `antigravity` or `antigravity-cli` executable, `~/.gemini/config`, or `./.agents`, then checks Asymptote hook configuration.
+Beacon detects Antigravity through the `antigravity` or `antigravity-cli` executable, `~/.gemini/config`, or `./.agents`, then checks Beacon hook configuration.
 
 Use `beacon endpoint hooks status --harness antigravity` to inspect Antigravity hook status.
 
@@ -41,7 +41,7 @@ For project-level hooks, run:
 beacon endpoint hooks install --harness antigravity --level project
 ```
 
-Asymptote writes user-level Antigravity hooks to `~/.gemini/config/hooks.json` and project-level hooks to `./.agents/hooks.json`. It manages a `beacon-endpoint` hook block and preserves unrelated hook blocks.
+Beacon writes user-level Antigravity hooks to `~/.gemini/config/hooks.json` and project-level hooks to `./.agents/hooks.json`. It manages a `beacon-endpoint` hook block and preserves unrelated hook blocks.
 
 ## Telemetry coverage
 
@@ -52,7 +52,7 @@ Asymptote writes user-level Antigravity hooks to `~/.gemini/config/hooks.json` a
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Antigravity hooks are installed separately in the logged-in user's context or project context |
 
-Antigravity can invoke a pre-tool hook before its transcript file contains readable prompt text. Asymptote waits until the transcript is available before marking `prompt.submitted` as emitted, so the next hook in the same session can still record the prompt event.
+Antigravity can invoke a pre-tool hook before its transcript file contains readable prompt text. Beacon waits until the transcript is available before marking `prompt.submitted` as emitted, so the next hook in the same session can still record the prompt event.
 
 ## Deployment notes
 

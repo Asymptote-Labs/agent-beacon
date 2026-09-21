@@ -30,7 +30,7 @@ Qwen Code is the runtime that forced the split. Its `Stop` hook reports the prom
 
 Both halves are required before either is recorded. `input_tokens` is also the ecosystem's usual name for a genuine additive usage count, so a reported limit beside it is what distinguishes a payload describing window occupancy from one reporting spend. Without that pairing the rule would reclassify other runtimes' spend as context.
 
-A reported `limit_tokens` also takes precedence over Asymptote's static context-window table when computing utilization, because it reflects the tier the call actually ran under rather than the default for a model name.
+A reported `limit_tokens` also takes precedence over Beacon's static context-window table when computing utilization, because it reflects the tier the call actually ran under rather than the default for a model name.
 
 ## Source mapping
 

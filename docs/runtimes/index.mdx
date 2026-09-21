@@ -1,15 +1,15 @@
 ---
 title: "Runtime Surface Overview"
-description: "Asymptote agent harness support overview and runtime-specific pages"
+description: "Beacon agent harness support overview and runtime-specific pages"
 ---
 
 ## Overview
 
-Asymptote supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surface) because each [agent harness](/concepts/core-concepts#agent-harness) exposes telemetry differently. The runtime support model applies to both Asymptote Open Source and Asymptote Managed: Open Source collects and normalizes supported local, CI, and cloud-agent telemetry, while Managed adds hosted ingest, visibility, and governance on top of the same surfaces.
+Beacon supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surface) because each [agent harness](/concepts/core-concepts#agent-harness) exposes telemetry differently. Beacon collects and normalizes supported local, CI, and cloud-agent telemetry, while Beacon Managed adds hosted ingest, visibility, and governance on top of the same surfaces.
 
 These integrations are grouped by where the agent runs and how telemetry is collected:
 
-- **Local**: Agent harnesses running on an endpoint write telemetry to Asymptote's local collector, hook adapter, plugin, or gateway path.
+- **Local**: Agent harnesses running on an endpoint write telemetry to Beacon's local collector, hook adapter, plugin, or gateway path.
 - **Browser chat**: An optional Chrome extension reads the chat streams of supported sites in the browser and posts them to the same local collector.
 - **[CI](/concepts/core-concepts#ci-telemetry)**: Ephemeral CI jobs use a temporary collector and write normalized runtime JSONL as a build artifact or upload target instead of installing a persistent endpoint service.
 - **[Cloud](/concepts/core-concepts#cloud-agent-telemetry)**: Provider-managed cloud agents can write session telemetry from the cloud sandbox to customer-managed storage, while [SDK integrations](/concepts/core-concepts#observe-sdk) instrument agent applications that run in servers, serverless functions, workers, and hosted agent platforms.
@@ -116,15 +116,15 @@ MDM assets, meaning Jamf Pro Extension Attributes, Fleet osquery queries, and Ri
 | Cursor | Install hooks with `beacon endpoint hooks install --harness cursor`. To backfill committed local sessions, schedule `beacon endpoint cursor sync` in the logged-in user's context or leave `--watch` running. |
 | Cline | Install the managed plugin with `beacon endpoint hooks install --harness cline`. To backfill committed local tasks and sessions, schedule `beacon endpoint cline sync` in the logged-in user's context or leave `--watch` running. |
 | Codex CLI | `beacon endpoint install` configures local OTLP export. To backfill committed sessions, schedule `beacon endpoint codex sync` in the logged-in user's context or leave `--watch` running. |
-| Gemini CLI | Opt in by adding `gemini` to the endpoint harness list, for example `claude,codex,gemini`. Asymptote can then manage `~/.gemini/settings.json` for local OTLP collection. |
+| Gemini CLI | Opt in by adding `gemini` to the endpoint harness list, for example `claude,codex,gemini`. Beacon can then manage `~/.gemini/settings.json` for local OTLP collection. |
 | fx (Vercel Labs) | Nothing to configure in fx. Schedule [`beacon endpoint fx sync`](/cli/endpoint-fx) in the logged-in user's context, or leave `--watch` running, so committed sessions keep reaching the runtime log. Nothing sweeps on its own. |
 | OpenCode | Install the managed plugin for live telemetry with `beacon endpoint hooks install --harness opencode`. To backfill committed local sessions, schedule [`beacon endpoint opencode sync`](/cli/endpoint-opencode) in the logged-in user's context or leave `--watch` running. |
 | Pi | Install the managed extension for live telemetry with `beacon endpoint hooks install --harness pi`. To backfill committed local sessions, schedule [`beacon endpoint pi sync`](/cli/endpoint-pi) in the logged-in user's context or leave `--watch` running. |
-| GitHub Copilot CLI | Configure launch environment through MDM or customer policy: `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Asymptote validates the endpoint but does not edit shell profiles or launch environments. |
-| Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Asymptote discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. To backfill committed sessions, schedule `beacon endpoint factory sync` in the logged-in user's context or leave `--watch` running. |
+| GitHub Copilot CLI | Configure launch environment through MDM or customer policy: `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Beacon validates the endpoint but does not edit shell profiles or launch environments. |
+| Factory Droid | Configure launch environment with `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318`. Beacon discovers the runtime and validates the endpoint but does not edit shell profiles or launch environments. To backfill committed sessions, schedule `beacon endpoint factory sync` in the logged-in user's context or leave `--watch` running. |
 | Grok Build | Install hooks with `beacon endpoint hooks install --harness grok`. To backfill committed local sessions, schedule `beacon endpoint grok sync` in the logged-in user's context or leave `--watch` running. |
 | Hermes Agent | Install hooks with `beacon endpoint hooks install --harness hermes`. To backfill committed sessions from `~/.hermes/state.db`, schedule `beacon endpoint hermes sync` in the logged-in user's context or leave `--watch` running. |
-| OpenClaw Gateway | Install the managed plugin in the account the gateway runs as with `beacon endpoint hooks install --harness openclaw`, then grant `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` in OpenClaw's own config so token usage is collected. For the gateway's OTLP export, use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local settings and validate events; Asymptote never writes OpenClaw's config. To backfill committed session files, schedule `beacon endpoint integrations openclaw sessions sync` in the gateway account or leave `--watch` running. |
+| OpenClaw Gateway | Install the managed plugin in the account the gateway runs as with `beacon endpoint hooks install --harness openclaw`, then grant `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` in OpenClaw's own config so token usage is collected. For the gateway's OTLP export, use [`beacon endpoint integrations openclaw`](/cli/openclaw) to print local settings and validate events; Beacon never writes OpenClaw's config. To backfill committed session files, schedule `beacon endpoint integrations openclaw sessions sync` in the gateway account or leave `--watch` running. |
 | Prime Agent | Install the managed extension for live telemetry with `beacon endpoint hooks install --harness prime`. To backfill committed local sessions and subagent artifacts, schedule `beacon endpoint prime sync` in the logged-in user's context or leave `--watch` running. |
 
 Install hooks separately in the logged-in user's context when you need richer hook telemetry. This applies to Antigravity CLI, Claude Code, Cline, Codex CLI session-context hooks, Cursor, Devin CLI, Devin Desktop, Factory Droid, Grok Build, Hermes Agent, goose, Muse Code, Oh My Pi, OpenClaw Gateway, OpenCode, OpenHands, Pi, Qwen Code, and the optional VS Code hooks. Poll sync commands are also run or scheduled in the account that owns the runtime's local session store.
@@ -138,12 +138,12 @@ If a system collector is running while the CLI is reading the default per-user l
     Runtime surfaces, agent harnesses, and endpoint events.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
-    See how Asymptote discovers and configures each runtime.
+    See how Beacon discovers and configures each runtime.
   </Card>
   <Card title="Hooks" icon="plug" href="/cli/hooks">
     Install, inspect, and uninstall runtime hook integrations.
   </Card>
   <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
-    Deploy Asymptote through Jamf Pro, Fleet, or another macOS MDM.
+    Deploy Beacon through Jamf Pro, Fleet, or another macOS MDM.
   </Card>
 </Columns>

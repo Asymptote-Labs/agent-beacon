@@ -1,17 +1,17 @@
 ---
 title: "OpenAI"
-description: "Instrument OpenAI SDK calls with Asymptote Observe"
+description: "Instrument OpenAI SDK calls with Beacon Observe"
 ---
 
 ## Integration overview
 
-Use this integration when your application calls the `openai` JavaScript package directly. Asymptote Observe uses OpenLLMetry's OpenAI instrumentation so OpenAI spans flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
+Use this integration when your application calls the `openai` JavaScript package directly. Beacon Observe uses OpenLLMetry's OpenAI instrumentation so OpenAI spans flow through the same exporter and Beacon-compatible attribute path as the rest of your agent telemetry.
 
 ## Overview
 
-Initialize Asymptote Observe before creating the OpenAI client when possible. The instrumentation captures supported OpenAI SDK spans without changing the way you call `openai`.
+Initialize Beacon Observe before creating the OpenAI client when possible. The instrumentation captures supported OpenAI SDK spans without changing the way you call `openai`.
 
-## What Asymptote captures
+## What Beacon captures
 
 - OpenAI model calls emitted by the OpenLLMetry OpenAI instrumentation.
 - OpenTelemetry resource attributes such as service name, SDK version, `beacon.origin=cloud`, and export mode.
@@ -23,7 +23,7 @@ Initialize Asymptote Observe before creating the OpenAI client when possible. Th
 - Node.js 20 or newer.
 - `@asymptote/sdk` installed.
 - `openai` installed.
-- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+- `ASYMPTOTE_API_KEY` set for Beacon Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get a Beacon Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 ```bash title="Install the SDK and OpenAI client"
 npm install @asymptote/sdk openai
@@ -31,7 +31,7 @@ npm install @asymptote/sdk openai
 
 Set environment variables:
 
-```bash title="Set Asymptote Managed and OpenAI environment variables"
+```bash title="Set Beacon Managed and OpenAI environment variables"
 export ASYMPTOTE_API_KEY=...
 export OPENAI_API_KEY=...
 ```
@@ -65,7 +65,7 @@ const response = await openai.responses.create({
 await Observe.flush();
 ```
 
-All supported OpenAI SDK calls are now traced through the configured Asymptote exporter.
+All supported OpenAI SDK calls are now traced through the configured Beacon exporter.
 
 ## Already-loaded clients
 
@@ -131,7 +131,7 @@ const reviewPullRequest = Observe.observe(
 
 ## Existing OpenTelemetry providers
 
-If your application already owns OpenTelemetry setup, register Asymptote's OpenAI instrumentation with your existing provider instead of calling `Observe.initialize()` twice.
+If your application already owns OpenTelemetry setup, register Beacon's OpenAI instrumentation with your existing provider instead of calling `Observe.initialize()` twice.
 
 ```typescript title="Register OpenAI instrumentation on an existing provider" lines
 import { registerInstrumentations } from "@opentelemetry/instrumentation";

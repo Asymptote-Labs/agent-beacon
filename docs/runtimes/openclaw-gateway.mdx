@@ -1,11 +1,11 @@
 ---
 title: "OpenClaw Gateway"
-description: "Asymptote support details for OpenClaw Gateway endpoint telemetry"
+description: "Beacon support details for OpenClaw Gateway endpoint telemetry"
 ---
 
 ## Runtime overview
 
-[OpenClaw](https://docs.openclaw.ai) is a self-hosted gateway that connects chat apps — Discord, Slack, Signal, Telegram, WhatsApp, iMessage, Matrix, Microsoft Teams and more — to AI coding agents. Asymptote supports it through **three** collection paths. The first two are live collection paths and both are wanted on the same machine; the third is an offline recovery path for historical or missed sessions:
+[OpenClaw](https://docs.openclaw.ai) is a self-hosted gateway that connects chat apps — Discord, Slack, Signal, Telegram, WhatsApp, iMessage, Matrix, Microsoft Teams and more — to AI coding agents. Beacon supports it through **three** collection paths. The first two are live collection paths and both are wanted on the same machine; the third is an offline recovery path for historical or missed sessions:
 
 ```bash
 beacon endpoint hooks install --harness openclaw                 # the Beacon-managed plugin
@@ -31,7 +31,7 @@ Before enabling OpenClaw telemetry, make sure:
 
 ## Collection path 1: the Beacon-managed plugin
 
-OpenClaw discovers a plugin as a **directory**, reading each child of its extensions directories and loading the entrypoint that directory's `package.json` declares. So Asymptote owns the directory name `beacon-endpoint` and never reads or writes any other plugin beside it.
+OpenClaw discovers a plugin as a **directory**, reading each child of its extensions directories and loading the entrypoint that directory's `package.json` declares. So Beacon owns the directory name `beacon-endpoint` and never reads or writes any other plugin beside it.
 
 | Scope | Directory | Covers |
 |-------|-----------|--------|
@@ -56,7 +56,7 @@ Three files are written, and all three are required — OpenClaw skips a directo
 
 ### Registered hooks
 
-OpenClaw publishes forty-one typed plugin hooks. Asymptote registers ten, and the exclusions are covered under [What Asymptote deliberately does not register](#what-asymptote-deliberately-does-not-register).
+OpenClaw publishes forty-one typed plugin hooks. Beacon registers ten, and the exclusions are covered under [What Beacon deliberately does not register](#what-asymptote-deliberately-does-not-register).
 
 | Hook | Recorded as |
 |------|-------------|
@@ -74,18 +74,18 @@ OpenClaw publishes forty-one typed plugin hooks. Asymptote registers ten, and th
 <Warning>
 **OpenClaw registers `before_tool_call` fail-closed.** A handler that throws, or that exceeds its timeout, **blocks the tool call** — that is OpenClaw's default failure policy for this hook, not a misconfiguration.
 
-Asymptote's handler therefore dispatches its work and returns **synchronously**, with no promise for OpenClaw to wait on, so telemetry cannot stop an agent from working even if the hook binary hangs or the disk is full.
+Beacon's handler therefore dispatches its work and returns **synchronously**, with no promise for OpenClaw to wait on, so telemetry cannot stop an agent from working even if the hook binary hangs or the disk is full.
 
 The cost is ordering: a `tool.invoked` row can land in the log *after* the `tool.completed` row for the same call. That is fine, because ordering was never the join — `gen_ai.tool.call.id` is, and both halves carry it.
 </Warning>
 
 Every other handler resolves to `undefined`. OpenClaw reads a returned object on its modify-kind hooks as a request to change behaviour, so returning nothing is what keeps the plugin an observer.
 
-### Asymptote owns one directory and nothing else
+### Beacon owns one directory and nothing else
 
-If `beacon.js` in that directory was not written by Asymptote — a `beacon-endpoint` plugin installed from ClawHub, say — both install and uninstall **refuse** rather than overwriting or deleting it.
+If `beacon.js` in that directory was not written by Beacon — a `beacon-endpoint` plugin installed from ClawHub, say — both install and uninstall **refuse** rather than overwriting or deleting it.
 
-Uninstall removes the three files **and the directory**, because a directory holding manifests and no entrypoint is a plugin OpenClaw tries to load and reports as broken. A file you put in there stops the directory removal rather than being deleted with Asymptote's.
+Uninstall removes the three files **and the directory**, because a directory holding manifests and no entrypoint is a plugin OpenClaw tries to load and reports as broken. A file you put in there stops the directory removal rather than being deleted with Beacon's.
 
 ## Collection path 2: OpenClaw's OpenTelemetry export
 
@@ -99,7 +99,7 @@ beacon endpoint integrations openclaw validate        # fail if none have
 
 This path carries gateway-level traces and metrics. It does **not** replace the plugin: without `captureContent` explicitly enabled it carries no prompt, response, tool-input, tool-output or system-prompt content, and OpenClaw documents that default deliberately.
 
-By default Asymptote filters OpenClaw's operational metrics out of the runtime log as low-signal; `beacon endpoint install --include-runtime-metrics` keeps them.
+By default Beacon filters OpenClaw's operational metrics out of the runtime log as low-signal; `beacon endpoint install --include-runtime-metrics` keeps them.
 
 ## Collection path 3: committed session files
 
@@ -122,7 +122,7 @@ It does not replace the plugin. A poll reader cannot hold or deny a tool call, c
 
 ## Your gateway config is read, never written
 
-Asymptote does **not** edit `~/.openclaw/openclaw.json`. This is the one deliberate departure from how every other runtime is handled, and the reason is that OpenClaw's config is "JSON or JSON5" by its own documentation: JSON5 permits comments, trailing commas and unquoted keys, none of which survive a round trip through a JSON encoder. Rewriting it would silently strip your comments out of the file that configures every chat channel you run.
+Beacon does **not** edit `~/.openclaw/openclaw.json`. This is the one deliberate departure from how every other runtime is handled, and the reason is that OpenClaw's config is "JSON or JSON5" by its own documentation: JSON5 permits comments, trailing commas and unquoted keys, none of which survive a round trip through a JSON encoder. Rewriting it would silently strip your comments out of the file that configures every chat channel you run.
 
 Instead, the installer reads that config and tells you what is missing. Two keys can matter:
 
@@ -145,9 +145,9 @@ Instead, the installer reads that config and tells you what is missing. Two keys
 This is the failure mode that looks most like success, so `beacon endpoint hooks install` prints it and `beacon endpoint hooks status --harness openclaw` repeats it on every check.
 </Warning>
 
-If — and only if — your config already has a `plugins.allow` allowlist, `beacon-endpoint` has to be named in it or the plugin will not load at all. Asymptote says so when the key is present and stays silent when it is not: introducing an allowlist where none existed would deny every other plugin you run.
+If — and only if — your config already has a `plugins.allow` allowlist, `beacon-endpoint` has to be named in it or the plugin will not load at all. Beacon says so when the key is present and stays silent when it is not: introducing an allowlist where none existed would deny every other plugin you run.
 
-A config Asymptote cannot parse produces no advice rather than a guess, which is the common case for JSON5.
+A config Beacon cannot parse produces no advice rather than a guess, which is the common case for JSON5.
 
 ## Discovery and status
 
@@ -158,7 +158,7 @@ beacon endpoint integrations openclaw sessions status
 beacon endpoint discover --all
 ```
 
-OpenClaw reports as the `openclaw_gateway` harness on every path, so one gateway is one harness in any query that groups by `harness.name`. Plugin events carry `harness.collection_method=plugin` — Asymptote ships the plugin source OpenClaw loads, so its coverage is Asymptote's to fix rather than OpenClaw's to expose — OTLP events carry `otlp`, and session-file sync events carry `poll`.
+OpenClaw reports as the `openclaw_gateway` harness on every path, so one gateway is one harness in any query that groups by `harness.name`. Plugin events carry `harness.collection_method=plugin` — Beacon ships the plugin source OpenClaw loads, so its coverage is Beacon's to fix rather than OpenClaw's to expose — OTLP events carry `otlp`, and session-file sync events carry `poll`.
 
 Status checks the manifests as well as the plugin entry, because a directory OpenClaw skipped and a plugin that loaded and saw nothing look identical from the log alone.
 
@@ -171,7 +171,7 @@ beacon endpoint hooks status --harness openclaw
 beacon endpoint hooks uninstall --harness openclaw
 ```
 
-`beacon endpoint install --harness openclaw` is **not** the command — OpenClaw's OTLP export lives in OpenClaw's own config, so Asymptote prints the settings rather than writing them. Running it says so and names both commands.
+`beacon endpoint install --harness openclaw` is **not** the command — OpenClaw's OTLP export lives in OpenClaw's own config, so Beacon prints the settings rather than writing them. Running it says so and names both commands.
 
 ## Telemetry coverage
 
@@ -216,7 +216,7 @@ beacon endpoint hooks uninstall --harness openclaw
 The Claude-style `mcp__server__tool` form is still recognized first, because OpenClaw's own Codex and Claude harness bridges mint it.
 </Note>
 
-A backgrounded `exec` reports `status: "running"` with a partial tail and no exit code. Asymptote records the command line and **no outcome** for it, rather than presenting a partial tail as the command's output.
+A backgrounded `exec` reports `status: "running"` with a partial tail and no exit code. Beacon records the command line and **no outcome** for it, rather than presenting a partial tail as the command's output.
 
 ### apply_patch, and why it needs both halves of the call
 
@@ -226,9 +226,9 @@ Paths from a call the plugin never saw proposed are **dropped rather than guesse
 
 ## Approvals and enforcement
 
-**Asymptote records no approval decisions for OpenClaw, and does not synthesize any.**
+**Beacon records no approval decisions for OpenClaw, and does not synthesize any.**
 
-OpenClaw genuinely does ask operators to approve tool calls, and exposes no hook reporting the answer: there is no `tool_approval_*` event in its catalog, and the only approval surface a plugin has is `before_tool_call`'s `requireApproval` result — a plugin *requesting* a prompt and being told its own outcome. Asymptote does not request approvals, so it never sees one. This is the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), [goose](/runtimes/goose), [OpenHands](/runtimes/openhands) and [Kiro](/runtimes/kiro).
+OpenClaw genuinely does ask operators to approve tool calls, and exposes no hook reporting the answer: there is no `tool_approval_*` event in its catalog, and the only approval surface a plugin has is `before_tool_call`'s `requireApproval` result — a plugin *requesting* a prompt and being told its own outcome. Beacon does not request approvals, so it never sees one. This is the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), [goose](/runtimes/goose), [OpenHands](/runtimes/openhands) and [Kiro](/runtimes/kiro).
 
 <Warning>
 **`approvalReviewOutcome` is not an approval.** An `exec` result carries `details.approvalReviewOutcome` with the values `approved`, `denied` and `reviewing`, alongside `approvalReviews[]` entries with a status and a rationale. OpenClaw's own type calls these **model-backed** approval reviews: an LLM judging the command, not a person deciding about it.
@@ -238,18 +238,18 @@ Recording one as `approval.allowed` would put a machine's opinion into the field
 
 Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error.
 
-## What Asymptote deliberately does not register
+## What Beacon deliberately does not register
 
 Some exclusions are about volume, and some are about what a telemetry plugin is allowed to be.
 
-**Because registering them would give Asymptote power over your agent:**
+**Because registering them would give Beacon power over your agent:**
 
 - `before_prompt_build`, `agent_turn_prepare` and `heartbeat_prompt_contribution` are prompt **injection** hooks.
 - `inbound_claim`, `before_dispatch` and `reply_dispatch` are claim hooks that can swallow a message before the agent sees it.
 - `before_install` gates skill and plugin installation.
 - `skill_proposal_evaluate` makes its handler a **voting evaluator** on whether a skill may be created.
 
-Asymptote observes. A test asserts none of these is ever registered.
+Beacon observes. A test asserts none of these is ever registered.
 
 **Because they duplicate what is already collected, at much higher volume:**
 
@@ -274,11 +274,11 @@ The whole hook envelope is kept under `raw.openclaw`, which preserves the fields
 
 ## Known gaps
 
-- **No approval decisions.** OpenClaw exposes no approval event to a plugin, and Asymptote does not synthesize one. Approval rules and dashboards show nothing for this runtime.
-- **No reported cost.** OpenClaw computes a per-turn USD figure from an operator-configured cost table rather than from a provider report, and it is not on the `llm_output` hook. Asymptote records runtime-*reported* cost only, so `gen_ai.usage.cost_usd` stays empty rather than carrying a local estimate.
+- **No approval decisions.** OpenClaw exposes no approval event to a plugin, and Beacon does not synthesize one. Approval rules and dashboards show nothing for this runtime.
+- **No reported cost.** OpenClaw computes a per-turn USD figure from an operator-configured cost table rather than from a provider report, and it is not on the `llm_output` hook. Beacon records runtime-*reported* cost only, so `gen_ai.usage.cost_usd` stays empty rather than carrying a local estimate.
 - **Token usage needs a config key.** See [Your gateway config is read, never written](#your-gateway-config-is-read-never-written). This is the most common reason an otherwise healthy OpenClaw install reports no tokens.
 - **Tool ordering is not guaranteed.** `tool.invoked` can be written after the completion for the same call, because the `before_tool_call` handler never blocks. Correlate on `gen_ai.tool.call.id`.
-- **No working directory outside a repository.** OpenClaw sets `workspaceDir` for runs that have one and omits it otherwise — a chat turn that never touched a repository genuinely has none. Asymptote leaves the field absent rather than falling back to the gateway daemon's own directory, which would attribute the work to wherever the service manager started it.
+- **No working directory outside a repository.** OpenClaw sets `workspaceDir` for runs that have one and omits it otherwise — a chat turn that never touched a repository genuinely has none. Beacon leaves the field absent rather than falling back to the gateway daemon's own directory, which would attribute the work to wherever the service manager started it.
 - **No per-call tool result for most tools.** `after_tool_call` carries a `result`, but only `exec` publishes a documented structure inside it. Other tools' results are kept under `raw` rather than promoted to schema fields.
 - **Gateway lifecycle is not collected.** `gateway_start` and `gateway_stop` describe the service rather than agent activity, and the event schema has no action for them.
 

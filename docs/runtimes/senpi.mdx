@@ -1,19 +1,19 @@
 ---
 title: "Senpi"
-description: "Asymptote support details for the Senpi standalone edition of oh-my-openagent"
+description: "Beacon support details for the Senpi standalone edition of oh-my-openagent"
 ---
 
 ## Runtime overview
 
-Asymptote supports [Senpi](https://github.com/code-yeongyu/senpi), the standalone edition of [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (OMO), through a managed local extension.
+Beacon supports [Senpi](https://github.com/code-yeongyu/senpi), the standalone edition of [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (OMO), through a managed local extension.
 
 <Note>
-oh-my-openagent ships three editions. **Ultimate** is a plugin riding [OpenCode](/runtimes/opencode); **Light** is a plugin riding [Codex CLI](/runtimes/codex-cli); both already flow through Asymptote's existing OpenCode and Codex CLI integrations, so no separate work is needed for them. **Senpi** is the one edition with no host of its own: an [in-flight fork of pi-mono](https://github.com/badlogic/pi-mono) that OMO brands and bundles its own extension into, distributed as the `omo` command. This page covers that edition only.
+oh-my-openagent ships three editions. **Ultimate** is a plugin riding [OpenCode](/runtimes/opencode); **Light** is a plugin riding [Codex CLI](/runtimes/codex-cli); both already flow through Beacon's existing OpenCode and Codex CLI integrations, so no separate work is needed for them. **Senpi** is the one edition with no host of its own: an [in-flight fork of pi-mono](https://github.com/badlogic/pi-mono) that OMO brands and bundles its own extension into, distributed as the `omo` command. This page covers that edition only.
 </Note>
 
 Senpi is a hard fork of pi-mono, as [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), and [Prime Agent](/runtimes/prime-agent) are. All four are supported separately and recorded under their own harness names, because they are separately installed products that one machine can run side by side.
 
-Senpi fits neither of Asymptote's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the integration is extension-shaped: one Asymptote-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [Prime Agent](/runtimes/prime-agent), [OpenCode](/runtimes/opencode) and [Cline](/runtimes/cline) integrations.
+Senpi fits neither of Beacon's two usual integration shapes. It has no hooks configuration file to merge a managed hook block into, and no OpenTelemetry export to point at the local collector. Its documented observation surface is the TypeScript extension API it inherited from Pi, so the integration is extension-shaped: one Beacon-owned extension file forwards runtime events to `beacon-hooks`, the same shape as the [Pi](/runtimes/pi), [Oh My Pi](/runtimes/oh-my-pi), [Prime Agent](/runtimes/prime-agent), [OpenCode](/runtimes/opencode) and [Cline](/runtimes/cline) integrations.
 
 ```bash
 beacon endpoint hooks install --harness omo
@@ -35,7 +35,7 @@ Before enabling Senpi telemetry, make sure:
 
 ## Collection path
 
-Asymptote's managed Senpi extension is a single TypeScript file at one of two auto-discovered extension locations:
+Beacon's managed Senpi extension is a single TypeScript file at one of two auto-discovered extension locations:
 
 | Level | Extension path |
 |-------|----------------|
@@ -48,15 +48,15 @@ User level is the default, because it follows the operator rather than one check
 The project path keeps the `agent` segment, the same shape [Prime Agent](/runtimes/prime-agent) uses. Senpi's config directory name for this brand is `.omo`, and its own directory resolver joins the `agent` segment under the working directory just as it does under the home directory — where [Pi](/runtimes/pi) uses `.pi/extensions` and [Oh My Pi](/runtimes/oh-my-pi) uses `.omp/extensions` at project scope. A file written to `./.omo/extensions/` is never loaded.
 </Warning>
 
-`OMO_CODING_AGENT_DIR` replaces the user-level agent directory outright, and Asymptote honors it — including a leading `~`, which the runtime expands before use. When it is unset, Asymptote falls back to `SENPI_CODING_AGENT_DIR` and then `PI_CODING_AGENT_DIR`, the same two legacy prefixes Senpi's own brand profile keeps readable: `SENPI` is the upstream engine's own name, and `PI` is pi-mono's. None of the three moves the project path, because Senpi does not consult any of them there.
+`OMO_CODING_AGENT_DIR` replaces the user-level agent directory outright, and Beacon honors it — including a leading `~`, which the runtime expands before use. When it is unset, Beacon falls back to `SENPI_CODING_AGENT_DIR` and then `PI_CODING_AGENT_DIR`, the same two legacy prefixes Senpi's own brand profile keeps readable: `SENPI` is the upstream engine's own name, and `PI` is pi-mono's. None of the three moves the project path, because Senpi does not consult any of them there.
 
-Asymptote identifies its own extension file by the marker `beacon-managed-omo-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Asymptote telemetry. The marker is distinct from Pi's, Oh My Pi's, and Prime Agent's, so a file found at any of the four paths is attributed to the runtime that actually loads it.
+Beacon identifies its own extension file by the marker `beacon-managed-omo-extension:v1`. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Beacon telemetry. The marker is distinct from Pi's, Oh My Pi's, and Prime Agent's, so a file found at any of the four paths is attributed to the runtime that actually loads it.
 
-Senpi has no OpenTelemetry export for Asymptote to configure, so there is no OTLP path for this runtime.
+Senpi has no OpenTelemetry export for Beacon to configure, so there is no OTLP path for this runtime.
 
 ## Discovery and status
 
-Asymptote detects Senpi through the `omo` executable, and treats the `~/.omo/agent` state directory as an additional signal. Senpi installed through npm into a directory this process did not inherit on `PATH` is not visible as an executable, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The Pi, Oh My Pi, Prime Agent, OpenCode, Cursor, and Hermes probes use the same fallback.
+Beacon detects Senpi through the `omo` executable, and treats the `~/.omo/agent` state directory as an additional signal. Senpi installed through npm into a directory this process did not inherit on `PATH` is not visible as an executable, because a shell alias, a version manager, or a per-project install can all hide it while the state directory is still present. The Pi, Oh My Pi, Prime Agent, OpenCode, Cursor, and Hermes probes use the same fallback.
 
 `senpi` is deliberately not probed for. It is the upstream engine's own binary name, and a machine can have plain, un-OMO'd Senpi installed without oh-my-openagent at all — probing for it here would claim an install this integration did not verify.
 
@@ -69,8 +69,8 @@ Senpi reports as the `omo_senpi` harness with capability `plugin`:
 | Telemetry status | Meaning |
 |------------------|---------|
 | `missing` | No extension file at the user-level managed path |
-| `disabled` | A `beacon.ts` exists but carries no Asymptote marker, so it is somebody else's extension sharing the filename |
-| `enabled` | Asymptote's managed extension is in place |
+| `disabled` | A `beacon.ts` exists but carries no Beacon marker, so it is somebody else's extension sharing the filename |
+| `enabled` | Beacon's managed extension is in place |
 
 An unmarked extension file reports `disabled` rather than `enabled`, because reporting it as enabled would show the runtime as covered while no events arrive.
 
@@ -117,7 +117,7 @@ Senpi content is handled like every other runtime. Prompts, command lines, comma
 
 The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall Senpi's agent loop, and a failure to spawn costs the event rather than the run.
 
-Senpi's own telemetry — the anonymous, PostHog-backed "OmO Native" analytics pipeline documented in its `senpi-telemetry.md` — is unrelated to this integration. It reports only aggregated buckets and counters with no raw content, and Asymptote neither reads from it nor writes to it.
+Senpi's own telemetry — the anonymous, PostHog-backed "OmO Native" analytics pipeline documented in its `senpi-telemetry.md` — is unrelated to this integration. It reports only aggregated buckets and counters with no raw content, and Beacon neither reads from it nor writes to it.
 
 ## Known gaps
 

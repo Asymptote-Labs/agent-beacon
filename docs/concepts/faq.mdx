@@ -1,13 +1,13 @@
 ---
 title: "FAQ"
-description: "Clear answers about Agent Beacon open source telemetry and Asymptote Managed architecture"
+description: "Clear answers about Agent Beacon open source telemetry and Beacon Managed architecture"
 ---
 
 This FAQ answers common architecture, telemetry, and deployment questions about
-Asymptote and the open-source [Agent Beacon](https://github.com/Asymptote-Labs/agent-beacon)
+Beacon and the open-source [Agent Beacon](https://github.com/asymptote-labs/agent-beacon)
 project.
 
-## Asymptote Open Source: Agent Beacon
+## Beacon and Agent Beacon
 
 Agent Beacon is the local-first, open-source telemetry path. It collects
 supported agent runtime activity, writes normalized local JSONL, and supports
@@ -30,7 +30,7 @@ Coverage depends on the runtime surface. See the [agent harness integration
 model](/runtimes/integration-model) and [data inventory](/security/data-inventory)
 for runtime-specific details.
 
-### Can Beacon see the agent's full context window?
+### Ca Beacon see the agent's full context window?
 
 Only when the runtime exposes context-bearing telemetry. Beacon can retain
 prompt text, tool results, command output, file activity, and related content
@@ -41,7 +41,7 @@ For cloud-agent surfaces, context coverage is often narrower than local endpoint
 coverage because the cloud provider controls which hooks or telemetry events are
 available.
 
-### Can Beacon detect unexpected data entering the agent context?
+### Ca Beacon detect unexpected data entering the agent context?
 
 Beacon can help investigate this when the data appears in emitted prompts, tool
 results, command output, file activity, or retained content. That can make it
@@ -101,7 +101,7 @@ S3](/guides/fleet-s3-mdm).
 
 For provider-managed cloud-agent proof-of-concept flows, the current self-serve
 path uses Google Cloud Storage. Production cloud-agent ingest is handled through
-Asymptote Managed or a customer-approved forwarding design.
+Beacon Managed or a customer-approved forwarding design.
 
 ### Can open-source Beacon forward logs to Datadog or a SIEM?
 
@@ -139,46 +139,46 @@ For Vector-based paths, Vector owns checkpointing, batching, retries, and
 destination delivery. Beacon's responsibility is to keep writing normalized
 events to the local handoff file.
 
-### Does open-source Beacon require a hosted Asymptote backend?
+### Does open-source Beacon require a hosted Beacon backend?
 
 No. The open-source endpoint path is local-first. Normal local hook execution,
 local collection, local JSONL, the local dashboard, local scans, and
-customer-managed forwarding do not require a hosted Asymptote account.
+customer-managed forwarding do not require a hosted Beacon account.
 
-## Asymptote Managed
+## Beacon Managed
 
-Asymptote Managed adds centralized ingest, retention, search, detections,
+Beacon Managed adds centralized ingest, retention, search, detections,
 governance, identity, approvals, access control, and investigation workflows on
 top of the open-source Beacon foundation.
 
-### Does Asymptote Managed provide a central console?
+### Does Beacon Managed provide a central console?
 
-Yes. Asymptote Managed provides the centralized operating layer for fleet-wide
+Yes. Beacon Managed provides the centralized operating layer for fleet-wide
 visibility, search, detections, investigations, policy workflows, identity
 mapping, approvals, SSO, RBAC, and audit trails.
 
 Use Managed when local JSONL and customer-managed forwarding are not enough for
 company-wide operations.
 
-### Should telemetry point to Asymptote or directly to the SIEM?
+### Should telemetry point to Beacon or directly to the SIEM?
 
 Both patterns are valid.
 
 With Agent Beacon open source, telemetry can go directly from local JSONL into
-customer-controlled SIEM, log, or object-storage destinations. With Asymptote
-Managed, telemetry is sent to Asymptote for centralized search, detections,
+customer-controlled SIEM, log, or object-storage destinations. With Beacon
+Managed, telemetry is sent to Beacon for centralized search, detections,
 governance, and investigations, with downstream forwarding available as part of
 the deployment design.
 
-### Does Asymptote Managed replace the SIEM?
+### Does Beacon Managed replace the SIEM?
 
-No. Asymptote is focused on agent-specific visibility, governance, and
+No. Beacon is focused on agent-specific visibility, governance, and
 investigation workflows. SIEMs and log platforms remain important downstream
 destinations for broader security operations, retention, and correlation.
 
-### How does Asymptote capture telemetry from cloud-hosted agent apps?
+### How does Beacon capture telemetry from cloud-hosted agent apps?
 
-Cloud-hosted agent applications use the Asymptote Observe SDK and managed
+Cloud-hosted agent applications use the Beacon Observe SDK and managed
 ingest. The SDK instruments services, workers, serverless functions, and agent
 SDK integrations so agent activity can be captured from application code.
 
@@ -186,10 +186,10 @@ Provider-managed cloud agents use surface-specific setup paths where supported.
 Those paths depend on the hooks, setup scripts, storage exports, or OTLP
 surfaces the provider exposes.
 
-### How does Asymptote collect Claude Cowork telemetry?
+### How does Beacon collect Claude Cowork telemetry?
 
 Claude Cowork is configured in the Claude organization admin settings. Anthropic's
-service exports OTLP telemetry to a durable collector endpoint, and Asymptote
+service exports OTLP telemetry to a durable collector endpoint, and Beacon
 normalizes the received events through the same Claude event pipeline used for
 Claude Code. Supported source attributes become canonical prompts, assistant
 responses, approvals, commands, files, MCP activity, model usage, token counts,
@@ -204,7 +204,7 @@ identify the Beacon collector machine.
 ### Where should a cloud AI tenant send OTLP telemetry?
 
 In a Managed deployment, the cloud service or tenant can export OTLP to an
-Asymptote-managed collector endpoint when that runtime supports it.
+Beacon-managed collector endpoint when that runtime supports it.
 
 In a private or customer-managed design, the OTLP endpoint may instead point to a
 customer-controlled collector or forwarding layer. The right target depends on
@@ -212,9 +212,9 @@ the deployment model, data-boundary requirements, and destination architecture.
 
 ### Does managed require a customer-hosted management server?
 
-Not necessarily. In Asymptote Managed, Asymptote operates the managed ingest and
+Not necessarily. In Beacon Managed, Beacon operates the managed ingest and
 control-plane services. For private deployments or stricter infrastructure
-requirements, Asymptote can work with the customer on dedicated or
+requirements, Beacon can work with the customer on dedicated or
 customer-controlled deployment boundaries.
 
 Open-source Beacon does not require a management server. It can write local JSONL
@@ -228,20 +228,20 @@ investigations can then reconstruct what the agent did, which tools it used, wha
 content was retained, and which user or workflow it maps to.
 
 If a cloud or non-engineering surface does not expose the relevant context,
-Asymptote cannot infer it from outside the platform. The value comes from the
+Beacon cannot infer it from outside the platform. The value comes from the
 runtime signals the platform or instrumented application emits.
 
 ## Related
 
 <Columns cols={2}>
   <Card title="System Architecture" icon="diagram-project" href="/architecture/system-architecture">
-    Compare the open-source Agent Beacon architecture with Asymptote Managed.
+    Compare the open-source Agent Beacon architecture with Beacon Managed.
   </Card>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     Review local collection, normalization, storage, and forwarding.
   </Card>
-  <Card title="Managed Architecture" icon="cloud" href="/architecture/managed-architecture">
-    Review centralized ingest, governance, detections, and investigations.
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+    Review managed ingest, governance, investigations, and rollout support.
   </Card>
   <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
     Forward Beacon events into SIEMs, log platforms, object storage, or custom pipelines.

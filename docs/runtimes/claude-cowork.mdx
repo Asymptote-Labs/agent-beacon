@@ -1,18 +1,18 @@
 ---
 title: "Claude Cowork"
-description: "Asymptote support details for Claude Cowork endpoint telemetry"
+description: "Beacon support details for Claude Cowork endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Claude Cowork through admin-configured OpenTelemetry from Anthropic's service.
+Beacon supports Claude Cowork through admin-configured OpenTelemetry from Anthropic's service.
 
 ## Prerequisites
 
 Before enabling Claude Cowork telemetry, make sure:
 
 - You have Claude organization admin access to configure OpenTelemetry export.
-- Asymptote has a durable collector endpoint that Claude Cowork can reach; production setups should use public HTTPS.
+- Beacon has a durable collector endpoint that Claude Cowork can reach; production setups should use public HTTPS.
 - You have run `beacon endpoint integrations claude-cowork print-config` to get the exact OTLP settings for the Claude admin console.
 - You can validate arrival with `beacon endpoint integrations claude-cowork validate` after Cowork activity is generated.
 - Your content handling expectations match what Claude Cowork emits through OTLP.
@@ -32,7 +32,7 @@ collector, not the remote Cowork execution host.
 
 ## Discovery and status
 
-Asymptote treats Claude Cowork as an admin-configured source because telemetry is enabled in Claude organization settings rather than local endpoint settings.
+Beacon treats Claude Cowork as an admin-configured source because telemetry is enabled in Claude organization settings rather than local endpoint settings.
 
 Use `beacon endpoint integrations claude-cowork status` to report whether Claude Cowork is detected and whether Cowork events have been observed in the endpoint runtime log.
 

@@ -5,7 +5,7 @@ description: "Deploy Beacon endpoint telemetry and forward events into security 
 
 Beacon gives Security and IT teams local endpoint visibility into supported [agent harnesses](/runtimes). It captures supported activity, normalizes it into a stable endpoint event schema, and writes JSONL for local inspection or customer-managed forwarding.
 
-Beacon is local-only by default. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection. Use [Asymptote Managed](/deployment/managed) when you need centralized retention, search, governance, investigations, access control, or rollout support.
+Beacon is local-only by default. The endpoint agent does not require a Beacon-hosted account, remote policy fetch, or external network dependency during normal collection. Use [Beacon Managed](/deployment/managed) when you need centralized retention, search, governance, investigations, access control, or rollout support.
 
 ## Rollout path
 
@@ -34,7 +34,7 @@ Before broad rollout, document these decisions:
 | Install mode | Local evaluation, root-managed system install, or MDM package rollout. |
 | Event destination | Local JSONL only, Wazuh localfile, supported forwarding destination, object storage, or customer-managed pipeline. |
 | Access and retention | Who can read local logs, how long downstream systems retain events, and which teams own review. |
-| Managed handoff | Whether the rollout now needs centralized visibility, policy controls, investigations, SSO/RBAC, or private infrastructure. |
+| Managed handoff | Whether the rollout now needs centralized visibility, investigations, SSO/RBAC, or private infrastructure. |
 
 ## Validation signals
 
@@ -77,11 +77,11 @@ Also review [Agent harness integrations](/runtimes) to confirm supported runtime
 
 ## When to move to managed
 
-Open Source works well when your team wants local endpoint telemetry and controls the downstream destination. Consider [Asymptote Managed](/deployment/managed) when you need:
+Open Source works well when your team wants local endpoint telemetry and controls the downstream destination. Consider [Beacon Managed](/deployment/managed) when you need:
 
 - centralized ingest, retention, search, and detections
 - fleet-wide visibility across endpoints, users, and teams
-- policy controls, identity mapping, approvals, and investigation workflows
+- identity mapping, approval visibility, and investigation workflows
 - SSO, RBAC, audit trails, onboarding, and rollout support
 
 For dedicated infrastructure, stricter data boundaries, or residency requirements, ask about Private Deployment. [Contact us](https://asymptotelabs.ai/contact) to discuss Managed or Private Deployment.

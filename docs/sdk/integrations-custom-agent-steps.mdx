@@ -11,7 +11,7 @@ Use `Observe.observe()` for orchestration steps, tool execution, policy checks, 
 
 Custom agent steps are the fallback integration path for frameworks, internal tools, and orchestration code without a dedicated adapter. Wrap the function you control and add Beacon compatibility attributes that describe what happened.
 
-## What Asymptote captures
+## What Beacon captures
 
 - A span for each wrapped function call.
 - Input count and output type unless disabled.
@@ -23,7 +23,7 @@ Custom agent steps are the fallback integration path for frameworks, internal to
 - Node.js 20 or newer.
 - `@asymptote/sdk` installed.
 - The agent framework, tool client, or internal orchestration code you want to wrap.
-- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+- `ASYMPTOTE_API_KEY` set for Beacon Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get a Beacon Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 ```bash title="Install the SDK"
 npm install @asymptote/sdk
@@ -31,7 +31,7 @@ npm install @asymptote/sdk
 
 Set an export destination:
 
-```bash title="Set the Asymptote Managed API key"
+```bash title="Set the Beacon Managed API key"
 export ASYMPTOTE_API_KEY=...
 ```
 

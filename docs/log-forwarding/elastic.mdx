@@ -39,6 +39,7 @@ Use system mode for MDM deployments so every managed endpoint writes to `/var/lo
 For a local macOS trial, install Beacon, configure endpoint telemetry, and start the bundled loopback-only stack:
 
 ```bash title="Start the local Elastic validation stack"
+brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 

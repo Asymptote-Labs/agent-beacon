@@ -1,26 +1,53 @@
 ---
-title: "Asymptote Open Source"
-description: "Install Beacon, configure open-source telemetry, and keep the CLI up to date"
+title: "Local"
+description: "Install Beacon locally, configure telemetry, and keep the CLI up to date"
 ---
 
-Install Beacon with Homebrew, configure the local endpoint telemetry path, and use the repair workflow when you need to reapply configuration after an upgrade. For CI, cloud-agent, and SDK setup paths, see [Agent harness integrations](/runtimes).
-
-<Frame>
-  <iframe
-    src="https://www.loom.com/embed/b39038879dc24b10af9e603ad4e03fb6?t=0s"
-    title="Asymptote Open Source installation walkthrough"
-    allowFullScreen
-    style={{ aspectRatio: "16 / 9", width: "100%", border: 0 }}
-  />
-</Frame>
+Install Beacon on macOS, Windows, or Linux, configure the local endpoint telemetry path, and use the repair workflow when you need to reapply configuration after an upgrade. For CI, cloud-agent, and SDK setup paths, see [Agent harness integrations](/runtimes).
 
 ## Install Beacon
 
-```bash title="Install Beacon"
-brew tap asymptote-labs/tap
-brew install beacon
-beacon version
-```
+<Tabs>
+  <Tab title="macOS">
+    Install Beacon with Homebrew:
+
+    ```bash
+    brew trust asymptote-labs/tap
+    brew tap asymptote-labs/tap
+    brew install beacon
+    beacon version
+    ```
+
+    See the [macOS install guide](/platforms/macos) to configure endpoint telemetry or deploy the signed package to a fleet.
+  </Tab>
+  <Tab title="Windows">
+    Download `BeaconEndpointAgent-<version>-x64.msi` from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest), then run PowerShell as an administrator:
+
+    ```powershell
+    msiexec /i BeaconEndpointAgent-<version>-x64.msi
+    & "$env:ProgramFiles\Beacon\bin\beacon.exe" version
+    ```
+
+    See the [Windows install guide](/platforms/windows) for silent installation, checksum verification, and service management.
+  </Tab>
+  <Tab title="Linux">
+    Download the `.deb` or `.rpm` for your architecture from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest):
+
+    <CodeGroup>
+      ```bash title="Debian, Ubuntu"
+      sudo apt install ./beacon_<version>_linux_amd64.deb
+      beacon version
+      ```
+
+      ```bash title="Fedora, RHEL, Rocky, Alma"
+      sudo dnf install ./beacon_<version>_linux_amd64.rpm
+      beacon version
+      ```
+    </CodeGroup>
+
+    Replace `amd64` with `arm64` on ARM systems. See the [Linux install guide](/platforms/linux) for rootless and tarball installation.
+  </Tab>
+</Tabs>
 
 <Accordion title="Example output">
 ```bash title="beacon version output"
@@ -34,16 +61,19 @@ beacon version 0.0.48
 Setting up the endpoint differs by operating system. Start with your platform if you want the
 packages, service management, and fleet deployment for it:
 
-<Columns cols={2}>
+<Columns cols={3}>
   <Card title="macOS" icon="apple" href="/platforms/macos">
     Homebrew, or the signed `.pkg` for MDM. launchd.
+  </Card>
+  <Card title="Windows" icon="windows" href="/platforms/windows">
+    `.msi` for x64. Windows service.
   </Card>
   <Card title="Linux" icon="linux" href="/platforms/linux">
     `.deb` and `.rpm` packages. systemd.
   </Card>
 </Columns>
 
-The per-user install below works the same on both, and is the quickest way to try it on one machine:
+The Windows MSI and Linux packages configure a system endpoint during installation. For a Homebrew, tarball, or other CLI-only install, configure a per-user endpoint:
 
 ```bash title="Configure endpoint telemetry"
 beacon endpoint install
@@ -57,7 +87,7 @@ beacon endpoint install --harness claude,codex,gemini
 ```
 
 <Note>
-  System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. The default mode uses per-user paths; use `--system` as root for package or MDM deployments. On Linux, installing the `.deb` or `.rpm` does the system install for you. See [Linux](/platforms/linux).
+  System-mode install (`--system`) is supported on macOS, Linux distributions that use systemd, and Windows. The default mode uses per-user paths; package installers configure system mode for you.
 </Note>
 
 Beacon records supported prompt, tool, command, file, approval, policy, and runtime context when the source runtime emits it. Before events are written to `runtime.jsonl` or sent through configured destinations, Beacon applies redaction, sanitization, truncation, and event-size limits.
@@ -70,6 +100,7 @@ Use the standard Homebrew upgrade flow, then reapply endpoint configuration if n
 
 ```bash title="Upgrade Beacon"
 beacon version check
+brew trust asymptote-labs/tap
 brew update
 brew upgrade beacon
 beacon endpoint repair
@@ -81,7 +112,7 @@ beacon endpoint repair
 
 <Columns cols={2}>
   <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
-    Choose between Asymptote Cloud and the open-source Agent Beacon path.
+    Choose between Beacon Cloud and the open-source Agent Beacon path.
   </Card>
   <Card title="Endpoint paths and ports" icon="folder-tree" href="/cli/endpoint-paths">
     Review files, logs, collector config, ports, and hook locations.

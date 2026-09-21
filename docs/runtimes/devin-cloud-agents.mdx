@@ -15,7 +15,7 @@ hook engine. Beacon instead pulls session activity from the Devin
 
 <Info>
   If you're interested in leveraging this telemetry ingest across your
-  enterprise, [Asymptote Managed](/deployment/managed) is designed for
+  enterprise, [Beacon Managed](/deployment/managed) is designed for
   production cloud-agent telemetry ingest at scale.
 </Info>
 
@@ -73,6 +73,7 @@ Beacon uses the Devin session id as the `run_id` and the Devin user id as
 Install or upgrade Beacon:
 
 ```bash
+brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
 brew upgrade beacon
@@ -235,7 +236,7 @@ in-progress session shows `session.started`, `prompt.submitted`, and
   <Card title="Google Cloud Storage forwarding" icon="database" href="/siem-forwarding-gcs">
     Review local endpoint GCS forwarding for persistent deployments.
   </Card>
-  <Card title="Asymptote Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
     Use managed secure ingest for production enterprise cloud-agent telemetry.
   </Card>
 </Columns>

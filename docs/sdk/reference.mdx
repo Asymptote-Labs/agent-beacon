@@ -1,6 +1,6 @@
 ---
 title: "SDK Reference"
-description: "Asymptote Observe TypeScript API, options, and Beacon compatibility attributes"
+description: "Beacon Observe TypeScript API, options, and Beacon compatibility attributes"
 ---
 
 ## API surface
@@ -22,14 +22,14 @@ For guided setup, start with [SDK Quickstart](/sdk/quickstart), [Instrumentation
 | `Observe.flush()` | Force flush finished spans |
 | `Observe.shutdown()` | Disable instrumentations, shut down the provider, and allow later reinitialization |
 
-Function exports are also available for the same operations, including `initialize`, `getTracer`, `observe`, `patch`, `initializeAsymptoteInstrumentations`, `wrapClaudeAgentQuery`, `flush`, `shutdown`, `isInitialized`, and `resolveExporterConfig`.
+Function exports are also available for the same operations, including `initialize`, `getTracer`, `observe`, `patch`, `initializeBeaconInstrumentations`, `wrapClaudeAgentQuery`, `flush`, `shutdown`, `isInitialized`, and `resolveExporterConfig`.
 
 ## Initialize options
 
 | Option | Purpose |
 | --- | --- |
-| `apiKey` | Asymptote Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
-| `baseUrl` | Asymptote Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
+| `apiKey` | Beacon Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
+| `baseUrl` | Beacon Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
 | `otlpEndpoint` | Explicit OTLP/HTTP endpoint. Defaults to `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `headers` | Additional exporter headers |
 | `serviceName` | OpenTelemetry service name. Defaults to `OTEL_SERVICE_NAME` or `asymptote-app` |
@@ -60,7 +60,7 @@ Function exports are also available for the same operations, including `initiali
 
 | Mode | How it is selected |
 | --- | --- |
-| `hosted` | Asymptote Managed `apiKey` or `ASYMPTOTE_API_KEY` is present and no explicit OTLP endpoint is configured |
+| `hosted` | Beacon Managed `apiKey` or `ASYMPTOTE_API_KEY` is present and no explicit OTLP endpoint is configured |
 | `otlp` | `otlpEndpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` is present |
 | `custom` | Default exporter is disabled or a custom span exporter is provided |
 
@@ -145,6 +145,6 @@ The wire-compatible Beacon event identity remains:
     Instrument `openai` package model calls.
   </Card>
   <Card title="Vercel AI SDK" icon="bolt" href="/sdk/integrations-vercel-ai-sdk">
-    Pass the Asymptote tracer into AI SDK telemetry.
+    Pass the Beacon tracer into AI SDK telemetry.
   </Card>
 </Columns>

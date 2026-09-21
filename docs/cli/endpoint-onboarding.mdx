@@ -15,12 +15,12 @@ beacon endpoint onboarding [flags]
 The record lives in `~/.beacon/profile.json`. It survives uninstall, so reinstalling
 Beacon never asks the email and usage questions again. The destination question is
 asked again on the next interactive install until a destination is recorded; an
-Asymptote answer is recorded only once the connect succeeds.
+Beacon answer is recorded only once the connect succeeds.
 
 ## First-run onboarding
 
-The first interactive `beacon endpoint install` asks two questions, how you are using Beacon and your email, then sends the answers to Asymptote once. This is how we decide
-which agent runtimes and integrations to build next. It then asks a third question, where this machine's telemetry should go: keep it on the machine, forward it to your own infrastructure (a SIEM, observability platform, or an S3/GCS bucket you own, with a pointer to the [log forwarding docs](/log-forwarding)), or forward it to Asymptote Managed, which runs [`beacon endpoint connect`](/cli/endpoint-connect) after the install. That answer stays local and is never sent.
+The first interactive `beacon endpoint install` asks two questions, how you are using Beacon and your email, then sends the answers to Beacon once. This is how we decide
+which agent runtimes and integrations to build next. It then asks a third question, where this machine's telemetry should go: keep it on the machine, forward it to your own infrastructure (a SIEM, observability platform, or an S3/GCS bucket you own, with a pointer to the [log forwarding docs](/log-forwarding)), or forward it to Beacon Managed, which runs [`beacon endpoint connect`](/cli/endpoint-connect) after the install. That answer stays local and is never sent.
 
 What is sent, and nothing else:
 
@@ -40,7 +40,7 @@ not an ongoing channel.
 The prompt never appears non-interactively. Package postinstall scripts, MDM
 deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
 skip it silently. The destination question is also skipped on an endpoint already
-connected to Asymptote. A machine onboarded before the question existed is asked it
+connected to Beacon. A machine onboarded before the question existed is asked it
 once, on its next interactive install.
 
 ## Flags
@@ -57,7 +57,7 @@ once, on its next interactive install.
 
 Set `BEACON_ONBOARDING=0` to suppress the prompt on an install that would otherwise be
 interactive. There is no CLI flag for this: it exists for unattended CI and MDM
-workflows. `BEACON_MANAGED_INGEST=0` hides only the Asymptote Managed answer from the
+workflows. `BEACON_MANAGED_INGEST=0` hides only the Beacon Managed answer from the
 destination question; `beacon endpoint install --connect` still connects when asked explicitly.
 
 ```bash title="Suppress the prompt"
@@ -78,8 +78,8 @@ is reported on stderr and ignored rather than failing the install.
 ## Examples
 
 Show what was recorded, including the answer to the destination question
-(`Telemetry destination: local only …`, `own infrastructure …` or `Asymptote Managed`; absent
-when it has not been asked, or when an Asymptote answer has not yet been carried through to a
+(`Telemetry destination: local only …`, `own infrastructure …` or `Beacon Managed`; absent
+when it has not been asked, or when a Beacon answer has not yet been carried through to a
 connected machine):
 
 ```bash title="Show the onboarding record"
@@ -93,7 +93,7 @@ one of three values; `--json` exposes it as `destination`:
 |-------|------------|
 | `local` | local only (nothing forwarded) |
 | `own_infra` | own infrastructure (forwarding pack) |
-| `asymptote` | Asymptote Managed |
+| `asymptote` | Beacon Managed |
 
 Clear it so the next install asks again:
 
@@ -101,7 +101,7 @@ Clear it so the next install asks again:
 beacon endpoint onboarding --reset
 ```
 
-Retry a submission that could not reach Asymptote. A failed submission never fails an
+Retry a submission that could not reach Beacon. A failed submission never fails an
 install; the payload is kept and retried automatically on the next install or repair.
 
 ```bash title="Resend a queued signup"

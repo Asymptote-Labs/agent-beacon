@@ -1,11 +1,11 @@
 ---
 title: "Muse Code"
-description: "Asymptote support details for Meta Muse Code endpoint telemetry"
+description: "Beacon support details for Meta Muse Code endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Muse Code, Meta's terminal coding agent, through native hook payloads sent to `beacon-hooks`.
+Beacon supports Muse Code, Meta's terminal coding agent, through native hook payloads sent to `beacon-hooks`.
 
 ```bash
 beacon endpoint hooks install --harness muse
@@ -14,7 +14,7 @@ beacon endpoint hooks install --harness muse
 `--harness muse-code` is also accepted.
 
 <Note>
-**Muse Spark is the model; Muse Code is the agent.** Asymptote hooks the agent, so the harness name is `muse_code` and the Muse Spark model id rides on each event in the `model` field. Muse Spark spellings are deliberately **not** accepted as harness aliases: asking to install hooks for a model would otherwise produce an install for the agent under a different name.
+**Muse Spark is the model; Muse Code is the agent.** Beacon hooks the agent, so the harness name is `muse_code` and the Muse Spark model id rides on each event in the `model` field. Muse Spark spellings are deliberately **not** accepted as harness aliases: asking to install hooks for a model would otherwise produce an install for the agent under a different name.
 </Note>
 
 Muse Code ships its own OpenTelemetry export, but it cannot be pointed at a local collector. Its `telemetry.destination` setting is an enum (`legacy`, `consolidated`, `edge`, `external`), not a URL: choosing `external` with a local `OTEL_EXPORTER_OTLP_ENDPOINT` causes the binary to detect the non-baseline destination and withhold its credential, disabling export, and the other values name internal destinations unavailable in public builds. Hooks are therefore the only collection path for this runtime, not merely the chosen one.
@@ -33,12 +33,12 @@ Muse Code registers hooks through a **managed hooks file** named by the `managed
 
 | File | Owner | Purpose |
 |------|-------|---------|
-| `~/.config/muse/beacon-endpoint-hooks.json` | Asymptote, written outright | The hook registrations themselves |
-| `~/.config/muse/settings.json` | You; Asymptote edits one key | `managed_hooks_path` points Muse at the file above |
+| `~/.config/muse/beacon-endpoint-hooks.json` | Beacon, written outright | The hook registrations themselves |
+| `~/.config/muse/settings.json` | You; Beacon edits one key | `managed_hooks_path` points Muse at the file above |
 
 `$XDG_CONFIG_HOME/muse` is used instead when that variable is set, matching how Muse resolves the directory itself.
 
-Install edits `settings.json` by exactly one key. Unrelated settings — including ones Asymptote has never heard of — survive the round trip byte for byte. A `settings.json` whose JSON is invalid is reported rather than replaced; its only problem might be a trailing comma.
+Install edits `settings.json` by exactly one key. Unrelated settings — including ones Beacon has never heard of — survive the round trip byte for byte. A `settings.json` whose JSON is invalid is reported rather than replaced; its only problem might be a trailing comma.
 
 <Warning>
 **An install is only complete with both files, and Muse reports nothing when it is not.** A hooks file with no `managed_hooks_path` pointing at it is a file Muse never opens. A `managed_hooks_path` with no file behind it registers nothing. `beacon endpoint hooks status --harness muse` therefore checks both halves and prints both paths — checking one would confidently claim telemetry that is not being collected.
@@ -46,7 +46,7 @@ Install edits `settings.json` by exactly one key. Unrelated settings — includi
 
 ### Registered events
 
-Asymptote registers every Muse Code lifecycle event that carries endpoint signal:
+Beacon registers every Muse Code lifecycle event that carries endpoint signal:
 
 | Muse event | Adapter subcommand | Matcher | Timeout |
 |------------|--------------------|---------|---------|
@@ -62,7 +62,7 @@ Asymptote registers every Muse Code lifecycle event that carries endpoint signal
 | `Stop` | `stop` | `*` | 45 s |
 
 <Warning>
-**Muse hook timeouts are seconds, not milliseconds.** The same `timeout` field is milliseconds on [Qwen Code](/runtimes/qwen-code), in a settings file that looks nearly identical. Asymptote writes second values for this runtime. Keep the unit in mind if you hand-edit them.
+**Muse hook timeouts are seconds, not milliseconds.** The same `timeout` field is milliseconds on [Qwen Code](/runtimes/qwen-code), in a settings file that looks nearly identical. Beacon writes second values for this runtime. Keep the unit in mind if you hand-edit them.
 </Warning>
 
 ### Events that are not collected
@@ -73,17 +73,17 @@ Both carry the full `messages` array and the tool schemas — the entire convers
 
 ### The file format fails silently
 
-Everything about Muse's managed hooks file rejects quietly. There is no `muse hooks validate` command, and a bad file produces no warning, no exit code and no log line — so a broken registration looks exactly like a working one. Asymptote's installer is shaped around that, and each of these is covered by a test:
+Everything about Muse's managed hooks file rejects quietly. There is no `muse hooks validate` command, and a bad file produces no warning, no exit code and no log line — so a broken registration looks exactly like a working one. Beacon's installer is shaped around that, and each of these is covered by a test:
 
 - **The nesting is mandatory.** The `hooks` wrapper and the matcher-group level between the event name and the handlers are both load-bearing. Hoisting event names to the top level, or listing handlers directly under an event name, produces a file Muse ignores entirely.
-- **Unknown keys inside a group or handler are fatal.** One unrecognized key and that whole event is skipped while the rest of the file keeps working — so a typo removes monitoring from one event and leaves the install looking healthy. `env`, `shell`, and a group's `enabled` are all rejected. Asymptote emits only `type`, `command`, `timeout`, and `statusMessage`.
-- **Unknown keys at the top level are tolerated**, which is where Asymptote's `beacon` marker lives.
+- **Unknown keys inside a group or handler are fatal.** One unrecognized key and that whole event is skipped while the rest of the file keeps working — so a typo removes monitoring from one event and leaves the install looking healthy. `env`, `shell`, and a group's `enabled` are all rejected. Beacon emits only `type`, `command`, `timeout`, and `statusMessage`.
+- **Unknown keys at the top level are tolerated**, which is where Beacon's `beacon` marker lives.
 
 ### The hook environment
 
 Muse runs hook commands with the environment filtered down to a fixed allowlist. No `BEACON_*` or `OTEL_*` shell export reaches a hook, and `XDG_CONFIG_HOME` is stripped too.
 
-This costs Asymptote nothing, because the endpoint log and config locations are passed to `beacon-hooks` as `--log` and `--config` flags rather than through the environment. It is worth knowing when reading a hook command by hand, and when debugging why a hook cannot find a path you can see from your shell.
+This costs Beacon nothing, because the endpoint log and config locations are passed to `beacon-hooks` as `--log` and `--config` flags rather than through the environment. It is worth knowing when reading a hook command by hand, and when debugging why a hook cannot find a path you can see from your shell.
 
 ## Discovery and status
 
@@ -105,7 +105,7 @@ beacon endpoint hooks uninstall --harness muse
 
 **User level only.** Muse documents a project-level `.muse/hooks.json`, but the shipping build ignores it, so `--level project` is refused with an error naming the scope that works. Writing that file would report success and collect nothing.
 
-**Install refuses to take over an existing registration.** Muse reads exactly one managed hooks file, so if `managed_hooks_path` already names somebody else's, Asymptote stops and says so rather than replacing it — overwriting would look like a clean install and quietly end their monitoring. The check runs before anything is written, so a refusal leaves nothing behind. The uninstall is the same property in reverse: it clears the key only while it still names Asymptote's file, and leaves a hooks file Asymptote did not write alone.
+**Install refuses to take over an existing registration.** Muse reads exactly one managed hooks file, so if `managed_hooks_path` already names somebody else's, Beacon stops and says so rather than replacing it — overwriting would look like a clean install and quietly end their monitoring. The check runs before anything is written, so a refusal leaves nothing behind. The uninstall is the same property in reverse: it clears the key only while it still names Beacon's file, and leaves a hooks file Beacon did not write alone.
 
 ## Telemetry coverage
 
@@ -131,15 +131,15 @@ Harness names are matched against a closed set of spellings rather than by subst
 
 ### Tool taxonomy
 
-Muse Code sends the Claude Code payload shape but does not publish its tool names. The names that are confirmed are snake_case (`read_skill`, and the six `subagent_*` control tools), so Asymptote matches file-edit tools with a substring rule over `edit`, `write`, `create` and `patch` rather than a guessed literal list — a wrong literal list would capture nothing, silently.
+Muse Code sends the Claude Code payload shape but does not publish its tool names. The names that are confirmed are snake_case (`read_skill`, and the six `subagent_*` control tools), so Beacon matches file-edit tools with a substring rule over `edit`, `write`, `create` and `patch` rather than a guessed literal list — a wrong literal list would capture nothing, silently.
 
 The false-positive direction is bounded: a `file` block is only attached when the tool's own arguments carry a path, so a non-file tool whose name happens to contain `write` yields an action with no fabricated path. None of `subagent_spawn`, `subagent_status`, `subagent_send_message`, `subagent_cancel`, `subagent_wait` or `subagent_read_result` match, so the lead agent's own fan-out control loop stays out of the file-modification stream.
 
 ## Approvals and enforcement
 
-Approval telemetry comes from Muse's `PermissionRequest` event and is recorded as `observed`, because an operator was actually asked. Asymptote does not synthesize an approval from a pre-tool notification for this runtime — doing so would put an invented decision next to a reported one for the same call.
+Approval telemetry comes from Muse's `PermissionRequest` event and is recorded as `observed`, because an operator was actually asked. Beacon does not synthesize an approval from a pre-tool notification for this runtime — doing so would put an invented decision next to a reported one for the same call.
 
-Asymptote's `PreToolUse` hook answers with an empty object, for two independent reasons. Muse reads a tool decision from `hookSpecificOutput`, so answering `allow` would disarm the user's own permission prompt on a runtime the hook was installed only to watch. And Muse rejects a stdout object carrying keys it does not know, so a differently shaped permissive answer would not read as permissive — it would fail the hook run.
+Beacon's `PreToolUse` hook answers with an empty object, for two independent reasons. Muse reads a tool decision from `hookSpecificOutput`, so answering `allow` would disarm the user's own permission prompt on a runtime the hook was installed only to watch. And Muse rejects a stdout object carrying keys it does not know, so a differently shaped permissive answer would not read as permissive — it would fail the hook run.
 
 Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. See [Known gaps](#known-gaps) for the status of Muse's deny contract.
 
@@ -147,16 +147,16 @@ Enforcement stays behind the optional, off-by-default policy provider seam (`BEA
 
 Muse Code content is handled like every other runtime. Prompts, tool arguments, commands, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-Muse carries signal with no endpoint-schema field of its own — most importantly `turn_id`, which is the only per-turn boundary anything in its payload offers, plus `permission_mode` on tool events and `source` on `SessionStart`. Asymptote preserves the verbatim payload under `raw.muse` rather than inventing schema fields for one runtime. It travels the event's normal path through sanitization, so `raw` is secret-redacted and string-limited like every other field, and it is the first thing dropped when an event exceeds the size ceiling.
+Muse carries signal with no endpoint-schema field of its own — most importantly `turn_id`, which is the only per-turn boundary anything in its payload offers, plus `permission_mode` on tool events and `source` on `SessionStart`. Beacon preserves the verbatim payload under `raw.muse` rather than inventing schema fields for one runtime. It travels the event's normal path through sanitization, so `raw` is secret-redacted and string-limited like every other field, and it is the first thing dropped when an event exceeds the size ceiling.
 
 ## Known gaps
 
-- **The hook contract is reverse-engineered, not documented.** Meta publishes no hook API for Muse Code, and `muse --help` does not mention hooks. Asymptote's integration is built from observed behaviour of a shipped build (`muse 0.1.0-R708.1`) rather than from a specification. None of it is a supported interface and any of it can change without notice — which is exactly why the tests pin the payload readers and the emitted file shape: the host rejects a bad hook file silently, so a contract change would otherwise appear as telemetry quietly going missing rather than as an error.
-- **Token usage and cost are not collected.** Muse's usage counts arrive on `PostLLMCall` and in its own session log, neither of which Asymptote reads. Muse Code activity therefore does not appear in `beacon token-usage` reports or the dashboard token view.
-- **No session-end event.** Muse emits `Stop` at the end of a turn but no session-end lifecycle event, so Asymptote records no `session.ended` for this runtime.
-- **Subagents cannot be correlated to their parent.** On `SubagentStart` the payload's own `session_id` is the *child's*, and no parent id is present, so `session.id` on a subagent event identifies the subagent's session rather than the one that spawned it. Muse's on-disk session log does carry `parent_session_id`, but reading it is a poll path Asymptote does not implement; synthesizing a parent from a payload that does not name one would be a fabricated join key in a security log.
+- **The hook contract is reverse-engineered, not documented.** Meta publishes no hook API for Muse Code, and `muse --help` does not mention hooks. Beacon's integration is built from observed behaviour of a shipped build (`muse 0.1.0-R708.1`) rather than from a specification. None of it is a supported interface and any of it can change without notice — which is exactly why the tests pin the payload readers and the emitted file shape: the host rejects a bad hook file silently, so a contract change would otherwise appear as telemetry quietly going missing rather than as an error.
+- **Token usage and cost are not collected.** Muse's usage counts arrive on `PostLLMCall` and in its own session log, neither of which Beacon reads. Muse Code activity therefore does not appear in `beacon token-usage` reports or the dashboard token view.
+- **No session-end event.** Muse emits `Stop` at the end of a turn but no session-end lifecycle event, so Beacon records no `session.ended` for this runtime.
+- **Subagents cannot be correlated to their parent.** On `SubagentStart` the payload's own `session_id` is the *child's*, and no parent id is present, so `session.id` on a subagent event identifies the subagent's session rather than the one that spawned it. Muse's on-disk session log does carry `parent_session_id`, but reading it is a poll path Beacon does not implement; synthesizing a parent from a payload that does not name one would be a fabricated join key in a security log.
 - **Assistant text is not collected.** `Stop` carries `last_assistant_message`, which is preserved under `raw.muse` but not promoted to an `agent.response` event.
-- **The policy deny shape is inferred, not measured.** Muse is fail-open on everything except `{"decision":"block"}` and exit code 2. That JSON shape is confirmed to block, but only on `UserPromptSubmit`, where blocking cancels the whole turn — emitting it from a tool phase would escalate "do not run this command" into "abandon what the user asked for", so Asymptote does not use it. The tool-family shape it sends instead (`hookSpecificOutput.permissionDecision`) comes from the binary's own validation strings and has never been exercised against a live tool call. Because sending the wrong shape is ignored silently and the seam fails open, the cost of that inference being wrong is a deny that does not take effect — never a tool call blocked for the wrong reason. Exit code 2 is not used: it is a confirmed deny channel, but it would also fire on a hook crash.
+- **The policy deny shape is inferred, not measured.** Muse is fail-open on everything except `{"decision":"block"}` and exit code 2. That JSON shape is confirmed to block, but only on `UserPromptSubmit`, where blocking cancels the whole turn — emitting it from a tool phase would escalate "do not run this command" into "abandon what the user asked for", so Beacon does not use it. The tool-family shape it sends instead (`hookSpecificOutput.permissionDecision`) comes from the binary's own validation strings and has never been exercised against a live tool call. Because sending the wrong shape is ignored silently and the seam fails open, the cost of that inference being wrong is a deny that does not take effect — never a tool call blocked for the wrong reason. Exit code 2 is not used: it is a confirmed deny channel, but it would also fire on a hook crash.
 - **No Windows support.** Muse Code has no Windows build, so there is no host to hook.
 
 ## Deployment notes
@@ -173,7 +173,7 @@ grep '"name":"muse_code"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
 
 If Muse telemetry is missing:
 
-- Confirm `~/.config/muse/settings.json` has `managed_hooks_path` pointing at Asymptote's hooks file, and that the file exists. Either half alone collects nothing.
+- Confirm `~/.config/muse/settings.json` has `managed_hooks_path` pointing at Beacon's hooks file, and that the file exists. Either half alone collects nothing.
 - Check `$XDG_CONFIG_HOME`: if it is set, Muse reads `$XDG_CONFIG_HOME/muse`, not `~/.config/muse`.
 - Confirm the hooks file contains commands with `--platform muse`.
 - Confirm hook timeouts are second values, not milliseconds.
@@ -187,6 +187,6 @@ If Muse telemetry is missing:
     Return to the runtime support overview.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
-    See how Asymptote discovers and configures each runtime.
+    See how Beacon discovers and configures each runtime.
   </Card>
 </Columns>

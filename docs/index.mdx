@@ -1,23 +1,72 @@
 ---
-title: "Welcome to Asymptote"
-description: "Asymptote is the AI Detection & Response layer for every agent harness. Security teams use Asymptote to get complete agent runtime visibility and govern agent activity at scale."
+title: "Welcome to Beacon"
+description: "Beacon is the open-source self-improving memory layer for AI agents."
 ---
 
-<img src="/images/logo.png" alt="Asymptote logo" width="720" height="360" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcSet="/logo/beacon-lockup-dark.svg" />
+  <img src="/logo/beacon-lockup-light.svg" alt="Beacon logo" width="720" height="252" />
+</picture>
 
-<Info>
-  Looking for a demo? Visit [asymptotelabs.ai/contact](https://asymptotelabs.ai/contact).
-</Info>
+Beacon is the open-source self-improving memory layer for AI agents. It was designed and built by the founders of [Asymptote Labs](https://asymptotelabs.ai/).
+
+It captures agent activity across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, creating a shared history of how agents work across local, CI, and cloud environments.
+
+Use Beacon to understand agent behavior, debug workflows, and turn what your agents learn into reusable knowledge that compounds across harnesses.
+
+## Install Beacon
+
+<Tabs>
+  <Tab title="macOS">
+    Install Beacon with Homebrew:
+
+    ```bash
+    brew trust asymptote-labs/tap
+    brew tap asymptote-labs/tap
+    brew install beacon
+    beacon version
+    ```
+
+    See the [macOS install guide](/platforms/macos) to configure endpoint telemetry or deploy the signed package to a fleet.
+  </Tab>
+  <Tab title="Windows">
+    Download `BeaconEndpointAgent-<version>-x64.msi` from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest), then run PowerShell as an administrator:
+
+    ```powershell
+    msiexec /i BeaconEndpointAgent-<version>-x64.msi
+    & "$env:ProgramFiles\Beacon\bin\beacon.exe" version
+    ```
+
+    See the [Windows install guide](/platforms/windows) for silent installation, checksum verification, and service management.
+  </Tab>
+  <Tab title="Linux">
+    Download the `.deb` or `.rpm` for your architecture from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest):
+
+    <CodeGroup>
+      ```bash title="Debian, Ubuntu"
+      sudo apt install ./beacon_<version>_linux_amd64.deb
+      beacon version
+      ```
+
+      ```bash title="Fedora, RHEL, Rocky, Alma"
+      sudo dnf install ./beacon_<version>_linux_amd64.rpm
+      beacon version
+      ```
+    </CodeGroup>
+
+    Replace `amd64` with `arm64` on ARM systems. See the [Linux install guide](/platforms/linux) for rootless and tarball installation.
+  </Tab>
+</Tabs>
 
 ## Getting started
 
-Choose the open-source Agent Beacon path to start collecting agent telemetry across local, CI, and cloud surfaces, or request access to managed Asymptote for hosted visibility and governance.
+Start collecting agent traces in minutes, then use Beacon to explore sessions, understand workflows, and build shared knowledge from every agent run.
 
 <CardGroup cols={2}>
-  <Card title="Asymptote Overview" icon="rocket" href="/get-started/overview">
-    Understand the problem Asymptote solves, how Beacon fits in, and when to use managed or private deployments.
+  <Card title="Beacon Overview" icon="rocket" href="/get-started/overview">
+    Understand the problem Beacon solves and when to use open-source, managed, or private deployments.
   </Card>
-  <Card title="Managed Asymptote" icon="key" href="/deployment/managed">
+  <Card title="Managed Beacon" icon="key" href="/deployment/managed">
     Review managed platform options for hosted agent runtime visibility, governance, and enterprise rollout support.
   </Card>
 </CardGroup>

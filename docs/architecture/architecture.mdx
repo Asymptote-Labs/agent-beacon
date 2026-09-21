@@ -1,13 +1,13 @@
 ---
 title: "Open Source Architecture"
-description: "How Agent Beacon collects, normalizes, stores, correlates, and detects agent telemetry across every surface agents run on"
+description: "How Beacon collects, normalizes, stores, correlates, and detects agent telemetry across every surface agents run on"
 ---
 
 ## Overview
 
-Agent Beacon is the open-source telemetry layer for AI agents wherever they run: on laptops, in the browser, inside application code, in [CI](/concepts/core-concepts#ci-telemetry), and in [provider-managed cloud sandboxes](/concepts/core-concepts#cloud-agent-telemetry). Each surface reports activity differently, so Beacon extends OpenTelemetry where a runtime emits it and instruments custom hooks, plugins, and adapters where it does not, then normalizes what it captures into a single [event model](/telemetry-schema/event-schema).
+Beacon is the open-source telemetry layer for AI agents wherever they run: on laptops, in the browser, inside application code, in [CI](/concepts/core-concepts#ci-telemetry), and in [provider-managed cloud sandboxes](/concepts/core-concepts#cloud-agent-telemetry). Each surface reports activity differently, so Beacon extends OpenTelemetry where a runtime emits it and instruments custom hooks, plugins, and adapters where it does not, then normalizes what it captures into a single [event model](/telemetry-schema/event-schema).
 
-<img src="/images/beacon-architecture.png" alt="Agent Beacon architecture. Six source surfaces (local agents, browser, agents in code, CI pipelines, cloud agents, and third-party AI SaaS) feed a Beacon layer that collects, normalizes, stores, correlates, and detects. The resulting unified AI telemetry flows to observability, SIEM, search, data platform, object storage, and security platform destinations." />
+<img src="/images/beacon-architecture.png" alt="Beacon architecture. Six source surfaces (local agents, browser, agents in code, CI pipelines, cloud agents, and third-party AI SaaS) feed a Beacon layer that collects, normalizes, stores, correlates, and detects. The resulting unified AI telemetry flows to observability, SIEM, search, data platform, object storage, and security platform destinations." />
 
 The diagram reads top to bottom in three bands:
 
@@ -41,7 +41,7 @@ Chat activity on supported sites is collected by an optional Chrome extension th
 
 ### Agents in code
 
-Agent applications, services, workers, and serverless functions are instrumented with the [Asymptote Observe SDK](/sdk), which emits Beacon-compatible OpenTelemetry spans for model calls, tool calls, and agent steps. There is no endpoint agent in this path: the SDK exports to a customer-managed collector or to hosted Observe. See [SDK integrations](/sdk/integrations).
+Agent applications, services, workers, and serverless functions are instrumented with the [Beacon Observe SDK](/sdk), which emits Beacon-compatible OpenTelemetry spans for model calls, tool calls, and agent steps. There is no endpoint agent in this path: the SDK exports to a customer-managed collector or to hosted Observe. See [SDK integrations](/sdk/integrations).
 
 ### CI pipelines
 
@@ -158,7 +158,7 @@ Beacon collects agent runtime telemetry and local endpoint configuration context
   <Card title="Detections" icon="radar" href="/detections">
     Run threat rules over local telemetry and review findings.
   </Card>
-  <Card title="Managed architecture" icon="cloud" href="/architecture/managed-architecture">
-    See how Asymptote Managed centralizes telemetry, policy, detections, and investigations.
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+    Review managed ingest, governance, investigations, and rollout support.
   </Card>
 </Columns>

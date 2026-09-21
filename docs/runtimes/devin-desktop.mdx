@@ -1,11 +1,11 @@
 ---
 title: "Devin Desktop"
-description: "Asymptote support details for Devin Desktop endpoint telemetry"
+description: "Beacon support details for Devin Desktop endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports Devin Desktop through Cascade/Windsurf-compatible hook payloads sent to `beacon-hooks`.
+Beacon supports Devin Desktop through Cascade/Windsurf-compatible hook payloads sent to `beacon-hooks`.
 
 ## Prerequisites
 
@@ -13,17 +13,17 @@ Before enabling Devin Desktop hooks, make sure:
 
 - Devin Desktop is installed for the user or available in the workspace where hooks will run.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Asymptote hooks are installed with `beacon endpoint hooks install --harness devin-desktop`.
+- Beacon hooks are installed with `beacon endpoint hooks install --harness devin-desktop`.
 - For project-level collection, install hooks from the target workspace with `--level project`.
 - Devin Desktop is restarted after hook install or removal so new sessions load the updated hook configuration.
 
 ## Collection path
 
-Devin Desktop invokes Asymptote's hook adapter through Cascade/Windsurf hook files. The adapter writes normalized endpoint events to the configured runtime JSONL log.
+Devin Desktop invokes Beacon's hook adapter through Cascade/Windsurf hook files. The adapter writes normalized endpoint events to the configured runtime JSONL log.
 
 ## Discovery and status
 
-Asymptote detects Devin Desktop through Cascade/Windsurf hook paths such as `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json`.
+Beacon detects Devin Desktop through Cascade/Windsurf hook paths such as `~/.codeium/windsurf/hooks.json` or `./.windsurf/hooks.json`.
 
 Use `beacon endpoint hooks status --harness devin-desktop` to inspect Devin Desktop hook status.
 
@@ -58,11 +58,11 @@ beacon endpoint install --harness claude,codex,devin-desktop
 
 ## Deployment notes
 
-Asymptote writes Devin Desktop user-level hooks to `~/.codeium/windsurf/hooks.json`. Project-level Devin Desktop installs write `./.windsurf/hooks.json`, which can also affect Windsurf/Cascade in that workspace.
+Beacon writes Devin Desktop user-level hooks to `~/.codeium/windsurf/hooks.json`. Project-level Devin Desktop installs write `./.windsurf/hooks.json`, which can also affect Windsurf/Cascade in that workspace.
 
-Asymptote installs visibility-only hooks for prompt submission, file writes, command execution, MCP tool use, and file reads. The hooks do not block or enforce policy. After installation, generate a Devin Desktop event and check the Asymptote runtime log to validate that the Desktop app executed the hook file.
+Beacon installs visibility-only hooks for prompt submission, file writes, command execution, MCP tool use, and file reads. The hooks do not block or enforce policy. After installation, generate a Devin Desktop event and check the Beacon runtime log to validate that the Desktop app executed the hook file.
 
-Install and uninstall preserve unrelated settings and non-Asymptote hook commands. Restart Devin Desktop after installing or removing hooks so new sessions pick up the updated hook configuration.
+Install and uninstall preserve unrelated settings and non-Beacon hook commands. Restart Devin Desktop after installing or removing hooks so new sessions pick up the updated hook configuration.
 
 ## Related
 

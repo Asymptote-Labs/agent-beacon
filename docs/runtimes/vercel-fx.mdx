@@ -1,20 +1,20 @@
 ---
 title: "fx (Vercel Labs)"
-description: "Asymptote support details for fx (vercel-labs/fx) endpoint telemetry"
+description: "Beacon support details for fx (vercel-labs/fx) endpoint telemetry"
 ---
 
 ## Runtime overview
 
-Asymptote supports [fx](https://github.com/vercel-labs/fx), Vercel Labs' native coding agent, by reading the session records fx commits to disk.
+Beacon supports [fx](https://github.com/vercel-labs/fx), Vercel Labs' native coding agent, by reading the session records fx commits to disk.
 
-fx is the one supported runtime with no third-party observation surface at all. Its lifecycle hooks are Zig handlers compiled into the binary rather than commands a settings file can point at, it ships no OpenTelemetry export, and its plugin story is MCP — which describes the tools fx calls, not what fx did. What it does have is a durable, append-only record of every session under `~/.fx/sessions`, so Asymptote reads that.
+fx is the one supported runtime with no third-party observation surface at all. Its lifecycle hooks are Zig handlers compiled into the binary rather than commands a settings file can point at, it ships no OpenTelemetry export, and its plugin story is MCP — which describes the tools fx calls, not what fx did. What it does have is a durable, append-only record of every session under `~/.fx/sessions`, so Beacon reads that.
 
 ```bash
 beacon endpoint fx sync
 ```
 
 <Note>
-There is nothing to install into fx and nothing to configure inside it. Collection is an action you run rather than a setting Asymptote writes, which is why fx has a command instead of a `beacon endpoint hooks install --harness` target.
+There is nothing to install into fx and nothing to configure inside it. Collection is an action you run rather than a setting Beacon writes, which is why fx has a command instead of a `beacon endpoint hooks install --harness` target.
 </Note>
 
 ## Prerequisites
@@ -27,7 +27,7 @@ Before collecting fx telemetry, make sure:
 
 ## Collection path
 
-Every fx event carries `harness.collection_method=poll`. Asymptote sees what a turn did once fx committed it, rather than observing the agent as it works. Stating the consequence plainly: nothing on this path can hold or deny a tool call, and nothing appears in the runtime log until the turn is committed.
+Every fx event carries `harness.collection_method=poll`. Beacon sees what a turn did once fx committed it, rather than observing the agent as it works. Stating the consequence plainly: nothing on this path can hold or deny a tool call, and nothing appears in the runtime log until the turn is committed.
 
 | Item | Path |
 |------|------|
@@ -40,17 +40,17 @@ A sweep reads each session's log only as far as the manifest's committed waterma
 
 Re-reading is safe. Each event's dedup id comes from the record's own coordinates — session, log generation, sequence, and position within the turn — not from its content, so the same fx record maps to the same event on every sweep.
 
-fx has no OpenTelemetry export and no hook or plugin file for Asymptote to write, so there is no OTLP path and no managed file for this runtime.
+fx has no OpenTelemetry export and no hook or plugin file for Beacon to write, so there is no OTLP path and no managed file for this runtime.
 
 ## Discovery and status
 
-Asymptote detects fx through the `fx` executable, and treats `~/.fx` as an additional signal. fx installed through its setup script, a shell alias, or a per-user bin directory is often missing from the `PATH` the endpoint process inherited while its profile directory is still present. The Pi, Oh My Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
+Beacon detects fx through the `fx` executable, and treats `~/.fx` as an additional signal. fx installed through its setup script, a shell alias, or a per-user bin directory is often missing from the `PATH` the endpoint process inherited while its profile directory is still present. The Pi, Oh My Pi, OpenCode, Cursor, and Hermes probes use the same fallback.
 
 ```bash title="Show fx discovery state"
 beacon endpoint discover --all --json
 ```
 
-fx reports as the `vercel_fx` harness with capability `session_log`, which no other runtime has. The other capabilities describe something Asymptote writes into the runtime and the runtime then calls; fx offers nothing to write into, so there is no marker to check. That changes what "telemetry enabled" can honestly mean here: the only evidence telemetry is flowing is that a sweep has actually run and is level with the sessions on this machine.
+fx reports as the `vercel_fx` harness with capability `session_log`, which no other runtime has. The other capabilities describe something Beacon writes into the runtime and the runtime then calls; fx offers nothing to write into, so there is no marker to check. That changes what "telemetry enabled" can honestly mean here: the only evidence telemetry is flowing is that a sweep has actually run and is level with the sessions on this machine.
 
 | Telemetry status | Meaning |
 |------------------|---------|
@@ -105,12 +105,12 @@ The sweep is local and offline. It reads files already on this machine and write
 
 ## Known gaps
 
-- **No approvals.** fx persists permission feedback as text rather than a per-call decision, so there is nothing to record as an approval. Asymptote does not synthesize one, matching the [Cline](/runtimes/cline) and [Pi](/runtimes/pi) posture.
-- **No session end.** fx sessions are resumable, so there is no point at which fx declares one over. Asymptote does not invent a `session.ended` for a session that may be resumed tomorrow.
+- **No approvals.** fx persists permission feedback as text rather than a per-call decision, so there is nothing to record as an approval. Beacon does not synthesize one, matching the [Cline](/runtimes/cline) and [Pi](/runtimes/pi) posture.
+- **No session end.** fx sessions are resumable, so there is no point at which fx declares one over. Beacon does not invent a `session.ended` for a session that may be resumed tomorrow.
 - **No enforcement, and none possible on this path.** A poll sees a committed record. Even the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`) has nothing to attach to here, because the tool call already ran.
 - **Events land a turn late.** fx commits a turn when it finishes, so telemetry arrives at turn granularity rather than as the agent works, and no sooner than the next sweep.
 - **Nothing sweeps automatically.** `beacon endpoint fx sync` runs when you run it. Schedule it, or leave `--watch` running, or the runtime log stops at the last sweep.
-- **Unknown record kinds are skipped by name.** A kind fx adds later is skipped as unknown rather than mistaken for one Asymptote maps, so new fx behavior needs a Beacon update before it appears.
+- **Unknown record kinds are skipped by name.** A kind fx adds later is skipped as unknown rather than mistaken for one Beacon maps, so new fx behavior needs a Beacon update before it appears.
 
 ## Deployment notes
 

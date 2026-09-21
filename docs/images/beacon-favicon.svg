@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Beacon">
+  <path fill="#FF6A00" d="M256 52C210 91 122 157 82 212c-26 36-39 74-34 111 8 62 49 103 111 125 31 11 57 30 79 56V288h-29v-85a48 48 0 1 1 94 0v85h-29v216c22-26 48-45 79-56 62-22 103-63 111-125 5-37-8-75-34-111-40-55-128-121-174-160Z"/>
+  <circle cx="256" cy="191" r="39" fill="#FFFFFF"/>
+  <rect x="238" y="225" width="36" height="239" fill="#FFFFFF"/>
+</svg>

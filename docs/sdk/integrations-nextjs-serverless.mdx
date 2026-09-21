@@ -1,6 +1,6 @@
 ---
 title: "Next.js And Serverless"
-description: "Initialize Asymptote Observe in Next.js and short-lived serverless runtimes"
+description: "Initialize Beacon Observe in Next.js and short-lived serverless runtimes"
 ---
 
 ## Serverless setup
@@ -13,7 +13,7 @@ Initialize `Observe` once in the earliest Node-only entrypoint. In Next.js, use 
 - A Next.js app or another serverless Node.js runtime.
 - `@asymptote/sdk` installed.
 - Any agent SDKs used by your route handlers, such as Vercel AI SDK.
-- `ASYMPTOTE_API_KEY` set for Asymptote Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get an Asymptote Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
+- `ASYMPTOTE_API_KEY` set for Beacon Managed hosted Observe, or `OTEL_EXPORTER_OTLP_ENDPOINT` set for customer-managed OTLP export. To get a Beacon Managed API key, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 ```bash title="Install the SDK and Vercel AI SDK"
 npm install @asymptote/sdk ai @ai-sdk/openai
@@ -65,7 +65,7 @@ If the runtime owns a long-lived process, reserve `Observe.shutdown()` for grace
 
 ## Customer-managed OTLP
 
-Serverless and preview environments can send to a customer-managed collector by setting `OTEL_EXPORTER_OTLP_ENDPOINT` instead of Asymptote Managed hosted Observe credentials.
+Serverless and preview environments can send to a customer-managed collector by setting `OTEL_EXPORTER_OTLP_ENDPOINT` instead of Beacon Managed hosted Observe credentials.
 
 ```bash title="Set the OTLP endpoint"
 export OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
@@ -79,4 +79,4 @@ Observe.initialize({
 });
 ```
 
-Explicit OTLP export does not require an Asymptote Managed `ASYMPTOTE_API_KEY`.
+Explicit OTLP export does not require a Beacon Managed `ASYMPTOTE_API_KEY`.

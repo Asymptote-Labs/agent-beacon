@@ -1,78 +1,53 @@
 ---
-title: "Asymptote Overview"
-description: "Why AI agent security needs a new control layer, and how Asymptote moves teams from local visibility to enterprise control"
+title: "Beacon Overview"
+description: "Beacon is the open-source self-improving memory layer for AI agents."
 ---
 
-Asymptote helps security and IT teams understand what AI agents are doing at runtime and add controls as adoption grows.
+Beacon captures activity across agent harnesses and turns it into a shared history you can search, debug, analyze, and learn from.
 
-You can start with open-source telemetry across the agent surfaces you already run, then move into centralized visibility, policy controls, and investigations when a small pilot turns into a broader rollout.
+Run Beacon locally with full control of your data, or use Beacon Managed for hosted storage, search, analytics, and unlimited retention.
 
-## Why teams need this
+## Why Beacon
 
-AI agents create a visibility gap that most security tools do not cover well. Traditional endpoint and application logs can usually tell you that something happened, but not enough about the agent session that caused it.
+Agent history is fragmented across tools.
 
-In practice, teams usually run into a few problems:
+Prompts, tool calls, commands, file edits, and model interactions are often trapped inside individual harnesses and session formats. Beacon normalizes that activity into one consistent record across agents.
 
-### Unknown agents, unknown risk
+That shared history makes it easier to:
 
-- Teams often do not have a reliable inventory of which agent tools are in use.
-- Ownership is unclear once agents spread across individual laptops and teams.
-- It becomes hard to answer basic questions such as which harness is running, what it can access, and where activity should be monitored.
+- debug failed workflows
+- understand how agents are being used
+- analyze runtime behavior
+- compare activity across harnesses
+- surface recurring workflows and corrections
+- turn past agent runs into reusable knowledge
 
-### Runtime moves faster than review
+## From traces to shared knowledge
 
-- Agents can read files, call tools, write code, and trigger actions very quickly.
-- Manual review works for a small pilot, but it does not scale once many users or teams depend on agents.
-- Security teams need a way to observe and govern activity while it is happening, not only after the fact.
+Every agent session contains useful context: debugging paths, repository conventions, repeated corrections, commands, and tool sequences.
 
-### Logs without runtime context
+Beacon captures that history so it can be reused across future runs and across different harnesses.
 
-- Standard logs may show a process, file write, or network connection.
-- They usually do not show the prompt, tool call, file context, or session flow behind that action.
-- That makes investigations harder and weakens policy decisions.
+Every run adds to the knowledge base.
 
-## How Asymptote fits together
+| Capability | Local | Beacon Managed |
+| --- | --- | --- |
+| Cross-harness agent telemetry | ✓ | ✓ |
+| Local, CI & cloud collection | ✓ | ✓ |
+| Unified agent session history | ✓ | ✓ |
+| Store data locally | ✓ | ✓ |
+| Forward to your own data stack | ✓ | ✓ |
+| Hosted ingest & storage | — | ✓ |
+| Search & analytics | — | ✓ |
+| Identity mapping | — | ✓ |
+| **Agent Session Retention** | **You manage** | **Unlimited** |
+| SSO & RBAC | — | ✓ |
 
-Asymptote is built as a progression rather than a single all-or-nothing product.
+## Beacon
 
-- **[Asymptote Open Source](/concepts/core-concepts#asymptote-open-source)** is the open-source foundation, built on [Agent Beacon](/concepts/core-concepts#agent-beacon). It captures supported agent activity across local endpoints, CI jobs, and cloud-agent surfaces, then normalizes prompts, tool calls, file edits, commands, and related session events into records teams can inspect or forward into their own security tools.
-- **[Asymptote Managed](/concepts/core-concepts#asymptote-managed)** builds on that foundation with centralized ingest, retention, detections, fleet-wide visibility, policy controls, identity mapping, approvals, and investigation workflows.
-- **[Private Deployment](/concepts/core-concepts#private-deployment)** is for teams that need dedicated infrastructure, tighter data boundaries, or residency controls.
+Beacon is built on the [`agent-beacon`](https://github.com/asymptote-labs/agent-beacon) repository.
 
-That gives teams a practical path:
-
-- start with open-source telemetry on the surfaces you already run
-- validate what agents are doing across local, CI, and cloud paths
-- centralize and govern that activity as usage expands
-- move into private deployment when compliance or infrastructure requirements demand it
-
-## Choosing a deployment path
-
-Use these rules of thumb:
-
-- Choose **Asymptote Open Source** if you want open-source telemetry across supported local, [CI](/concepts/core-concepts#ci-telemetry), and [cloud agent](/concepts/core-concepts#cloud-agent-telemetry) surfaces, normalized records you control, and [customer-managed forwarding](/concepts/core-concepts#customer-managed-forwarding) into your SIEM or observability stack.
-- Choose **Asymptote Managed** if you need centralized operations across endpoints, users, and teams.
-- Choose **Private Deployment** if managed capabilities are right, but you need stronger infrastructure ownership or data-isolation requirements.
-
-| Capability | Asymptote Open Source | Asymptote Managed | Private Deployment |
-| --- | --- | --- | --- |
-| Open-source runtime telemetry | ✓ | ✓ | ✓ |
-| Capture from supported local agent harnesses | ✓ | ✓ | ✓ |
-| Capture from supported CI jobs and cloud-agent surfaces | ✓ | ✓ | ✓ |
-| Customer-managed SIEM forwarding | ✓ | ✓ | ✓ |
-| MDM-friendly endpoint rollout | ✓ | ✓ | ✓ |
-| Managed ingest, retention, search, and detections | - | ✓ | ✓ |
-| Fleet-wide inventory and centralized visibility | - | ✓ | ✓ |
-| Policy controls, identity mapping, and approvals | - | ✓ | ✓ |
-| Investigation timelines and case workflows | - | ✓ | ✓ |
-| SSO, RBAC, and audit trails | - | ✓ | ✓ |
-| Dedicated deployment and data isolation options | - | - | ✓ |
-
-## Asymptote Open Source
-
-Asymptote Open Source is built on the `agent-beacon` repository.
-
-<a href="https://github.com/Asymptote-Labs/agent-beacon">
+<a href="https://github.com/asymptote-labs/agent-beacon">
   <img
     src="https://api.star-history.com/svg?repos=asymptote-labs/agent-beacon&type=Date"
     alt="Agent Beacon GitHub star growth"
@@ -80,7 +55,7 @@ Asymptote Open Source is built on the `agent-beacon` repository.
   />
 </a>
 
-If you are starting with Asymptote Open Source, these pages are the most useful next steps:
+If you are starting with Beacon, these pages are the most useful next steps:
 
 <Columns cols={2}>
   <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
@@ -96,7 +71,7 @@ If you are starting with Asymptote Open Source, these pages are the most useful 
     See supported agent harnesses, deployment modes, destinations, and boundaries.
   </Card>
   <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">
-    Review Asymptote Open Source JSONL fields, normalization behavior, and example events.
+    Review Beacon JSONL fields, normalization behavior, and example events.
   </Card>
   <Card title="Security & IT Rollout Guide" icon="building-shield" href="/security">
     Plan endpoint inventory, MDM rollout, retention policy, validation, and log forwarding.
@@ -108,11 +83,11 @@ Additional references: [Core Concepts](/concepts/core-concepts), [Command refere
 ## Related
 
 <Columns cols={2}>
-  <Card title="Asymptote Open Source" icon="download" href="/deployment/open-source">
+  <Card title="Beacon" icon="download" href="/deployment/open-source">
     Install the open-source CLI and configure Agent Beacon telemetry.
   </Card>
-  <Card title="Asymptote Managed" icon="key" href="/deployment/managed">
-    Review managed visibility, policy controls, investigations, and rollout support.
+  <Card title="Beacon Managed" icon="key" href="/deployment/managed">
+    Review managed visibility, investigations, and rollout support.
   </Card>
   <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
     Compare the open-source local path with managed and enterprise deployment options.

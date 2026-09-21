@@ -10,7 +10,7 @@
   "fonts": {
     "family": "Familjen Grotesk"
   },
-  "favicon": "/images/favicon.ico",
+  "favicon": "/images/beacon-favicon.svg",
   "navigation": {
     "style": "sidebar",
     "global": {
@@ -29,7 +29,7 @@
           "anchor": "GitHub",
           "icon": "github",
           "iconType": "brands",
-          "href": "https://github.com/Asymptote-Labs/agent-beacon",
+          "href": "https://github.com/asymptote-labs/agent-beacon",
           "color": {
             "light": "#24292F",
             "dark": "#FFFFFF"
@@ -48,27 +48,20 @@
             "pages": [
               "index",
               "get-started/overview",
-              {
-                "group": "Quickstart",
-                "root": "get-started/quickstart",
-                "pages": [
-                  "get-started/quickstart-security-it",
-                  "get-started/quickstart-developers"
-                ]
-              }
+              "get-started/quickstart"
             ]
           },
           {
-            "group": "Deploy Asymptote",
+            "group": "Deploy Beacon",
             "icon": "cloud-arrow-up",
             "pages": [
               "deployment/hosting-options",
-              "deployment/managed",
-              "deployment/open-source"
+              "deployment/open-source",
+              "deployment/managed"
             ]
           },
           {
-            "group": "How Asymptote Works",
+            "group": "How Beacon Works",
             "icon": "book-open",
             "pages": [
               "concepts/core-concepts",
@@ -77,7 +70,6 @@
                 "root": "architecture/system-architecture",
                 "pages": [
                   "architecture/architecture",
-                  "architecture/managed-architecture",
                   "concepts/vector-forwarding"
                 ]
               },
@@ -94,19 +86,9 @@
             ]
           },
           {
-            "group": "Manage Asymptote",
+            "group": "Manage Beacon",
             "icon": "sliders",
             "pages": [
-              {
-                "group": "Onboarding",
-                "root": "manage/onboarding",
-                "tag": "Enterprise",
-                "pages": [
-                  "manage/configure-s3-data-connector",
-                  "manage/connect-okta",
-                  "manage/connect-slack"
-                ]
-              },
               {
                 "group": "Inventory",
                 "root": "guides/inventory",
@@ -209,97 +191,15 @@
             ]
           },
           {
-            "group": "For Security & IT Teams",
-            "icon": "building-shield",
+            "group": "Security Overview",
+            "icon": "shield-check",
+            "root": "security/review",
             "pages": [
-              "security/index",
-              {
-                "group": "Security Overview",
-                "root": "security/review",
-                "pages": [
-                  "security/data-flow-threat-model",
-                  "security/data-inventory",
-                  "security/retention-redaction",
-                  "security/endpoint-operations",
-                  "security/policy"
-                ]
-              },
-              {
-                "group": "MDM Deployment",
-                "root": "mdm/index",
-                "pages": [
-                  {
-                    "group": "Jamf",
-                    "root": "mdm/jamf",
-                    "pages": [
-                      "mdm/jamf/claude",
-                      "guides/jamf-anthropic-openai-cursor-mdm",
-                      "guides/jamf-gcs-mdm",
-                      "guides/jamf-s3-mdm",
-                      "guides/jamf-falcon-mdm"
-                    ]
-                  },
-                  {
-                    "group": "Rippling",
-                    "root": "mdm/rippling",
-                    "pages": [
-                      "guides/rippling-gcs-mdm"
-                    ]
-                  },
-                  {
-                    "group": "Fleet",
-                    "root": "mdm/fleet",
-                    "pages": [
-                      "guides/fleet-s3-mdm"
-                    ]
-                  }
-                ]
-              },
-              {
-                "group": "Log Forwarding",
-                "root": "log-forwarding/index",
-                "pages": [
-                  "log-forwarding/ci-telemetry-exports",
-                  {
-                    "group": "Asymptote Managed",
-                    "pages": [
-                      "log-forwarding/asymptote"
-                    ]
-                  },
-                  {
-                    "group": "Security Information and Event Management (SIEM)",
-                    "pages": [
-                      "log-forwarding/falcon",
-                      "log-forwarding/microsoft-sentinel",
-                      "log-forwarding/rapid7",
-                      "log-forwarding/splunk",
-                      "log-forwarding/sumo",
-                      "log-forwarding/wazuh"
-                    ]
-                  },
-                  {
-                    "group": "Log Aggregation",
-                    "pages": [
-                      "log-forwarding/cloudwatch",
-                      "log-forwarding/customer-managed",
-                      "log-forwarding/datadog",
-                      "log-forwarding/elastic"
-                    ]
-                  },
-                  {
-                    "group": "Object Storage",
-                    "pages": [
-                      "guides/macos-object-storage-system"
-                    ]
-                  },
-                  {
-                    "group": "Local",
-                    "pages": [
-                      "log-forwarding/local-jsonl"
-                    ]
-                  }
-                ]
-              }
+              "security/data-flow-threat-model",
+              "security/data-inventory",
+              "security/retention-redaction",
+              "security/endpoint-operations",
+              "security/policy"
             ]
           },
           {
@@ -457,7 +357,7 @@
         "icon": "code",
         "groups": [
           {
-            "group": "Asymptote Observe SDK",
+            "group": "Beacon Observe SDK",
             "icon": "code",
             "pages": [
               "sdk/index",
@@ -507,6 +407,7 @@
             "pages": [
               {
                 "group": "Validate Endpoint Telemetry",
+                "expanded": true,
                 "root": "guides/local-testing/endpoint-validation",
                 "pages": [
                   "guides/local-testing/health",
@@ -519,12 +420,64 @@
             ]
           },
           {
-            "group": "MDM Deployments",
+            "group": "Log Forwarding",
+            "icon": "tower-broadcast",
+            "root": "log-forwarding/index",
+            "pages": [
+              "log-forwarding/ci-telemetry-exports",
+              {
+                "group": "Beacon Managed",
+                "expanded": true,
+                "pages": [
+                  "log-forwarding/asymptote"
+                ]
+              },
+              {
+                "group": "Security Information and Event Management (SIEM)",
+                "expanded": true,
+                "pages": [
+                  "log-forwarding/falcon",
+                  "log-forwarding/microsoft-sentinel",
+                  "log-forwarding/rapid7",
+                  "log-forwarding/splunk",
+                  "log-forwarding/sumo",
+                  "log-forwarding/wazuh"
+                ]
+              },
+              {
+                "group": "Log Aggregation",
+                "expanded": true,
+                "pages": [
+                  "log-forwarding/cloudwatch",
+                  "log-forwarding/customer-managed",
+                  "log-forwarding/datadog",
+                  "log-forwarding/elastic"
+                ]
+              },
+              {
+                "group": "Object Storage",
+                "expanded": true,
+                "pages": [
+                  "guides/macos-object-storage-system"
+                ]
+              },
+              {
+                "group": "Local",
+                "expanded": true,
+                "pages": [
+                  "log-forwarding/local-jsonl"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "MDM Deployment",
             "icon": "building-shield",
             "root": "mdm/index",
             "pages": [
               {
                 "group": "Jamf",
+                "expanded": true,
                 "root": "mdm/jamf",
                 "pages": [
                   "mdm/jamf/claude",
@@ -536,6 +489,7 @@
               },
               {
                 "group": "Rippling",
+                "expanded": true,
                 "root": "mdm/rippling",
                 "pages": [
                   "guides/rippling-gcs-mdm"
@@ -543,6 +497,7 @@
               },
               {
                 "group": "Fleet",
+                "expanded": true,
                 "root": "mdm/fleet",
                 "pages": [
                   "guides/fleet-s3-mdm"
@@ -553,7 +508,7 @@
         ]
       },
       {
-        "tab": "Asymptote Blog",
+        "tab": "Beacon Blog",
         "icon": "newspaper",
         "groups": [
           {
@@ -649,8 +604,8 @@
         "href": "https://trust.asymptotelabs.ai/"
       },
       {
-        "label": "Book Demo",
-        "href": "https://asymptotelabs.ai/contact"
+        "label": "Enterprise",
+        "href": "https://asymptotelabs.ai/"
       }
     ],
     "primary": {
@@ -850,11 +805,19 @@
     },
     {
       "source": "/cli/quickstart-developers",
-      "destination": "/get-started/quickstart-developers"
+      "destination": "/get-started/quickstart"
     },
     {
       "source": "/cli/quickstart-security-it",
-      "destination": "/get-started/quickstart-security-it"
+      "destination": "/get-started/quickstart"
+    },
+    {
+      "source": "/get-started/quickstart-developers",
+      "destination": "/get-started/quickstart"
+    },
+    {
+      "source": "/get-started/quickstart-security-it",
+      "destination": "/get-started/quickstart"
     },
     {
       "source": "/cli/security-it-teams",
@@ -1250,7 +1213,11 @@
     },
     {
       "source": "/managed-architecture",
-      "destination": "/architecture/managed-architecture"
+      "destination": "/deployment/managed"
+    },
+    {
+      "source": "/architecture/managed-architecture",
+      "destination": "/deployment/managed"
     },
     {
       "source": "/mdm-deployment",
@@ -1262,11 +1229,11 @@
     },
     {
       "source": "/quickstart-developers",
-      "destination": "/get-started/quickstart-developers"
+      "destination": "/get-started/quickstart"
     },
     {
       "source": "/quickstart-security-it",
-      "destination": "/get-started/quickstart-security-it"
+      "destination": "/get-started/quickstart"
     },
     {
       "source": "/sdk-changelog",
@@ -1464,7 +1431,7 @@
   "footer": {
     "socials": {
       "x": "https://x.com/asymptotelabs",
-      "github": "https://github.com/Asymptote-Labs",
+      "github": "https://github.com/asymptote-labs",
       "linkedin": "https://www.linkedin.com/company/asymptotelabs/"
     },
     "links": [
@@ -1528,7 +1495,7 @@
         ]
       }
     ],
-    "content": "© 2025 Asymptote Labs Inc. All rights reserved."
+    "content": "© 2025 Beacon Labs Inc. All rights reserved."
   },
   "appearance": {
     "hidePoweredBy": true

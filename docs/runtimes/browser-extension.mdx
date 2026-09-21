@@ -1,11 +1,11 @@
 ---
 title: "Browser Extension"
-description: "Install and configure the Asymptote browser extension that collects Claude.ai and ChatGPT chat telemetry"
+description: "Install and configure the Beacon browser extension that collects Claude.ai and ChatGPT chat telemetry"
 ---
 
 ## Overview
 
-Asymptote collects browser chat telemetry through an optional Chrome MV3 extension. It reads the chat streams of the sites you enable and relays them into the same local pipeline as agent activity, so browser conversations land in the runtime log next to CLI agent events.
+Beacon collects browser chat telemetry through an optional Chrome MV3 extension. It reads the chat streams of the sites you enable and relays them into the same local pipeline as agent activity, so browser conversations land in the runtime log next to CLI agent events.
 
 One extension covers both supported sites:
 
@@ -50,7 +50,7 @@ Events collected this way carry `harness.collection_method` of `otlp`, and a har
 
 ## Discovery and status
 
-Asymptote treats the browser extension as a user-installed source. It is not configured by `beacon endpoint install`, has no hook or plugin file on disk, and does not appear in `beacon endpoint status`, which reports on the endpoint service rather than on browser extensions.
+Beacon treats the browser extension as a user-installed source. It is not configured by `beacon endpoint install`, has no hook or plugin file on disk, and does not appear in `beacon endpoint status`, which reports on the endpoint service rather than on browser extensions.
 
 Its presence is therefore observed rather than declared: the evidence that it is working is `claude_web` or `chatgpt_web` events arriving in the runtime log. See [Confirm it is working](#confirm-it-is-working).
 
@@ -63,7 +63,7 @@ The extension installs unpacked through Chrome's developer mode, so Chrome will 
 No prebuilt archive is published yet, so building from source is currently the only way to get the extension. It needs Node 22 or newer and takes a few seconds:
 
 ```bash
-git clone https://github.com/Asymptote-Labs/agent-beacon.git
+git clone https://github.com/asymptote-labs/agent-beacon.git
 cd agent-beacon/browser-extension
 npm ci
 npm run build
@@ -77,7 +77,7 @@ pwd -P  # then append /dist
 
 ### Use a release archive
 
-Once an `ext-v*` release is published, you will be able to skip the build and download `agent-beacon-browser-extension-<version>-chrome.zip` with its `.sha256` from the [releases page](https://github.com/Asymptote-Labs/agent-beacon/releases), then verify and unzip it:
+Once an `ext-v*` release is published, you will be able to skip the build and download `agent-beacon-browser-extension-<version>-chrome.zip` with its `.sha256` from the [releases page](https://github.com/asymptote-labs/agent-beacon/releases), then verify and unzip it:
 
 ```bash
 shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
